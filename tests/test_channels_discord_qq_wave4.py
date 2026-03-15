@@ -9,8 +9,8 @@ import pytest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels.discord import DiscordChannel, _split_message
-from nanobot.channels.qq import QQChannel
-from nanobot.config.schema import DiscordConfig, QQConfig
+from nanobot.config.schema import DiscordConfig
+from nanobot.errors import DeliverySkippedError
 
 
 class _Bus:
@@ -28,7 +28,8 @@ def test_discord_split_message_branches() -> None:
 @pytest.mark.asyncio
 async def test_discord_send_paths() -> None:
     ch = DiscordChannel(DiscordConfig(token="t"), _Bus())
-    await ch.send(OutboundMessage(channel="discord", chat_id="1", content="x"))
+    with pytest.raises(DeliverySkippedError):
+        await ch.send(OutboundMessage(channel="discord", chat_id="1", content="x"))
 
     ch._http = SimpleNamespace()
     ch._send_payload = AsyncMock(return_value=True)  # type: ignore[method-assign]
@@ -145,40 +146,3 @@ async def test_discord_handle_message_create_with_attachments(
     }
     await ch._handle_message_create(payload)
     assert ch._handle_message.await_count == 1
-
-
-@pytest.mark.asyncio
-async def test_qq_start_send_on_message_branches(monkeypatch: pytest.MonkeyPatch) -> None:
-    ch = QQChannel(QQConfig(), _Bus())
-    await ch.start()  # QQ SDK likely unavailable path
-
-    await ch.send(OutboundMessage(channel="qq", chat_id="u1", content="hello"))
-
-    sent = {"n": 0}
-
-    class _Api:
-        async def post_c2c_message(self, **_kwargs) -> None:
-            sent["n"] += 1
-
-    class _Client:
-        api = _Api()
-
-        async def close(self) -> None:
-            return None
-
-    ch._client = _Client()
-    await ch.send(OutboundMessage(channel="qq", chat_id="u1", content="hello"))
-    assert sent["n"] == 1
-
-    ch._handle_message = AsyncMock()  # type: ignore[method-assign]
-    msg = SimpleNamespace(
-        id="m1",
-        author=SimpleNamespace(id="u1", user_openid="u1o"),
-        content=" hello ",
-    )
-    await ch._on_message(msg)
-    await ch._on_message(msg)  # dedup path
-    assert ch._handle_message.await_count == 1
-
-    msg2 = SimpleNamespace(id="m2", author=SimpleNamespace(id=None, user_openid="u2"), content="")
-    await ch._on_message(msg2)

@@ -24,9 +24,14 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from nanobot.agent.observability import span as langfuse_span
-from nanobot.agent.subagent import run_tool_loop
+from nanobot.agent.tool_loop import run_tool_loop
 from nanobot.agent.tools.base import ToolResult  # noqa: F401 — re-export for tests
-from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool, _CycleError
+from nanobot.agent.tools.delegate import (
+    DelegateParallelTool,
+    DelegateTool,
+    DelegationResult,
+    _CycleError,
+)
 from nanobot.agent.tools.filesystem import (
     EditFileTool,
     ListDirTool,
@@ -42,6 +47,7 @@ if TYPE_CHECKING:
     from nanobot.agent.coordinator import Coordinator
     from nanobot.agent.scratchpad import Scratchpad
     from nanobot.agent.tool_executor import ToolExecutor
+    from nanobot.agent.tools.base import Tool
     from nanobot.config.schema import ExecToolConfig
     from nanobot.providers.base import LLMProvider
 
@@ -170,6 +176,8 @@ class DelegationDispatcher:
         self.scratchpad: Scratchpad | None = None
         self.active_messages: list[dict[str, Any]] | None = None
         self.tools: ToolExecutor | None = None  # for wire_delegate_tools
+        # MCP tools injected lazily by AgentLoop after _connect_mcp()
+        self.mcp_tools: list[Tool] = []
 
     # ------------------------------------------------------------------
     # Wiring
@@ -509,7 +517,7 @@ class DelegationDispatcher:
         target_role: str,
         task: str,
         context: str | None,
-    ) -> str:
+    ) -> DelegationResult:
         """Route a delegated sub-task through the coordinator and execute it."""
         if not self.coordinator:
             raise RuntimeError("Coordinator not available for delegation")
@@ -569,7 +577,7 @@ class DelegationDispatcher:
                 message_excerpt=task,
                 tools_used=used_tools,
             )
-            return result
+            return DelegationResult(content=result, tools_used=used_tools)
         except Exception:  # crash-barrier: delegation must record trace on any error
             latency_ms = (time.monotonic() - t0) * 1000
             self.record_route_trace(
@@ -620,6 +628,10 @@ class DelegationDispatcher:
         child_delegate = DelegateTool()
         child_delegate.set_dispatch(self.dispatch)
         tools.register(child_delegate)
+
+        # MCP tools (shared instances, injected by AgentLoop)
+        for tool in self.mcp_tools:
+            tools.register(tool)
 
         # Apply role-specific tool filters
         if role.denied_tools:
@@ -717,10 +729,12 @@ class DelegationDispatcher:
 
         # Write to scratchpad if available
         if self.scratchpad:
+            grounded = len(tools_used) > 0
             await self.scratchpad.write(
                 role=role.name,
                 label=task[:80],
                 content=summary,
+                metadata={"grounded": grounded, "tools_used": tools_used},
             )
 
         return summary, tools_used

@@ -538,7 +538,7 @@ class TestCycleDetectionInMultiAgent:
             )
 
             assert result is not None
-            assert "Research" in result or "findings" in result
+            assert "Research" in result.content or "findings" in result.content
 
             # Ancestry restored to just ("code",)
             assert _delegation_ancestry.get() == ("code",)

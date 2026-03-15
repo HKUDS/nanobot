@@ -15,6 +15,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import TelegramConfig
+from nanobot.errors import DeliverySkippedError
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -228,8 +229,7 @@ class TelegramChannel(BaseChannel):
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
         if not self._app:
-            logger.warning("Telegram bot not running")
-            return
+            raise DeliverySkippedError("Telegram bot not running")
 
         is_streaming = bool(msg.metadata.get("_streaming"))
         is_progress = bool(msg.metadata.get("_progress"))
@@ -250,8 +250,7 @@ class TelegramChannel(BaseChannel):
         try:
             chat_id = int(msg.chat_id)
         except ValueError:
-            logger.error("Invalid chat_id: {}", msg.chat_id)
-            return
+            raise DeliverySkippedError(f"Invalid Telegram chat_id: {msg.chat_id}")
 
         reply_params = None
         if self.config.reply_to_message:

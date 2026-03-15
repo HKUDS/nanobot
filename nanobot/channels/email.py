@@ -21,6 +21,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.retry import retry_send
 from nanobot.config.schema import EmailConfig
+from nanobot.errors import DeliverySkippedError
 
 
 class EmailChannel(BaseChannel):
@@ -58,6 +59,13 @@ class EmailChannel(BaseChannel):
         self._last_message_id_by_chat: dict[str, str] = {}
         self._processed_uids: set[str] = set()  # Capped to prevent unbounded growth
         self._MAX_PROCESSED_UIDS = 100000
+
+    @property
+    def known_recipients(self) -> list[str]:
+        """Return deduplicated list of allowed + known-sender email addresses."""
+        known = set(self.config.allow_to)
+        known.update(self._last_subject_by_chat)
+        return sorted(known)
 
     async def start(self) -> None:
         """Start polling IMAP for inbound emails."""
@@ -103,29 +111,59 @@ class EmailChannel(BaseChannel):
         """Stop polling loop."""
         self._running = False
 
+    # Minimal RFC 5322 email format check
+    _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send email via SMTP."""
         if not self.config.consent_granted:
-            logger.warning("Skip email send: consent_granted is false")
-            return
+            raise DeliverySkippedError("Email consent not granted")
 
         if not self.config.smtp_host:
-            logger.warning("Email channel SMTP host not configured")
-            return
+            raise DeliverySkippedError("Email SMTP host not configured")
 
         to_addr = msg.chat_id.strip()
         if not to_addr:
-            logger.warning("Email channel missing recipient address")
-            return
+            raise DeliverySkippedError("Email recipient address is empty")
+
+        # Validate email format
+        if not self._EMAIL_RE.match(to_addr):
+            raise DeliverySkippedError(f"Invalid email address format: {to_addr!r}")
+
+        # Enforce outbound allowlist
+        allow_to = self.config.allow_to
+        if allow_to and to_addr not in allow_to:
+            raise DeliverySkippedError(
+                f"Recipient {to_addr!r} is not in the allowed recipients list (allow_to)"
+            )
 
         # Determine if this is a reply (recipient has sent us an email before)
         is_reply = to_addr in self._last_subject_by_chat
         force_send = bool((msg.metadata or {}).get("force_send"))
 
+        # Enforce proactive send policy for non-reply outbound emails
+        policy = self.config.proactive_send_policy
+        if not is_reply and not force_send:
+            if policy == "allowlist" and (not allow_to or to_addr not in allow_to):
+                raise DeliverySkippedError(
+                    f"Proactive email to {to_addr!r} blocked: policy is 'allowlist' "
+                    "and address is not in allow_to"
+                )
+            if policy == "known_only":
+                is_known = to_addr in self._last_subject_by_chat or (
+                    allow_to and to_addr in allow_to
+                )
+                if not is_known:
+                    raise DeliverySkippedError(
+                        f"Proactive email to {to_addr!r} blocked: policy is 'known_only' "
+                        "and address is neither in allow_to nor a known sender"
+                    )
+
         # autoReplyEnabled only controls automatic replies, not proactive sends
         if is_reply and not self.config.auto_reply_enabled and not force_send:
-            logger.info("Skip automatic email reply to {}: auto_reply_enabled is false", to_addr)
-            return
+            raise DeliverySkippedError(
+                f"Automatic email reply to {to_addr} skipped: auto_reply_enabled is false"
+            )
 
         base_subject = self._last_subject_by_chat.get(to_addr, "nanobot reply")
         subject = self._reply_subject(base_subject)

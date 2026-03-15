@@ -7,6 +7,17 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Background missions**: `MissionManager` + `MissionStartTool` / `MissionStatusTool` / `MissionListTool` / `MissionCancelTool` for asynchronous delegated task execution with coordinator routing, structured contracts, task taxonomy, grounding verification, and direct result delivery via `OutboundMessage`
+- **Mission observability**: Langfuse spans wrapping mission execution, `score_current_trace` for grounding, `TraceContext` correlation IDs, `update_current_span` for completion metadata, `tool_span` in `run_tool_loop`
+- **MCP tool sharing**: MCP tools are now available within background missions and delegated agents (shared `MCPToolWrapper` instances, respecting role-based `denied_tools`/`allowed_tools` filters)
+- **`MissionConfig`**: configurable `max_concurrent` (default 3), `max_iterations` (default 15), `result_max_chars` (default 4000) via `config.json` under `agents.defaults.mission`
+- **`tool_loop.py`**: extracted shared lightweight think→act→observe loop from deprecated `subagent.py`, used by both `MissionManager` and `DelegationDispatcher`
+- **Honest delivery**: `DeliveryResult` dataclass + `DeliverySkippedError` for truthful send confirmation
+- **Tool retry guard**: `ToolCallTracker` with 3-level escalation (warn → inject → force-stop) to prevent infinite tool loops
+- **Email validation**: `allow_to` allowlist + `proactive_send_policy` config fields; address format validation
+- **Compression coherence**: paired-drop logic (`_paired_drop_tools`) preserves tool-call/result pairs during context truncation
+- **Delegation verification**: `DelegationResult` attestation, scratchpad grounded tags, post-delegation nudge for ungrounded results
+- **Langfuse hardening**: `atexit` shutdown safety net, `auth_check()` on startup, `sample_rate`/`debug` config fields, verification confidence scoring via `score_current_trace`, session/user/tag propagation on all traces, logging filters for benign litellm/langfuse/OTEL warnings
 - **CI enforcement**: import-boundary check, prompt-manifest integrity, coverage gate (85%)
 - **CODEOWNERS**: code review ownership for all major subsystems
 - **Contract tests**: LLMProvider, MemoryStore, and BaseChannel compliance suites
@@ -27,15 +38,21 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `_process_message()` emits request-complete audit line with duration and tool count
 - Legacy `MetricsCollector` removed — observability now via Langfuse
 - Token consumption tracked per-turn via Langfuse span metadata
+- `shutdown_langfuse()` called in all CLI `finally` blocks for reliable trace export
+- `LangfuseConfig` extended with `sample_rate` (float, default 1.0) and `debug` (bool)
 - CI test job now enforces `--cov-fail-under=85`
 - `make check` now includes prompt manifest verification
+
+### Removed
+- **Channel adapters**: DingTalk, Feishu, Mochat, QQ (unmaintained, no active users)
+- **SubagentManager / SpawnTool**: replaced by `MissionManager` + background mission tools (dead code cleanup)
 
 ## [0.1.4] - 2025-03-10
 
 Initial tracked release. Core agent framework with:
 - Plan-Act-Observe-Reflect agent loop
 - 100+ LLM model support via litellm
-- 9 channel adapters (Telegram, Discord, Slack, WhatsApp, Email, DingTalk, Feishu, Mochat, QQ)
+- 5 channel adapters (Telegram, Discord, Slack, WhatsApp, Email)
 - mem0-first memory with local JSONL fallback
 - Plugin skill system with auto-discovery
 - Multi-agent coordination with intent routing

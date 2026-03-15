@@ -10,8 +10,8 @@ Accepted
 
 ## Context
 
-Nanobot supports 9 chat platform channels (Telegram, Discord, Slack, WhatsApp,
-Email, DingTalk, Feishu, Mochat, QQ).  Each adapter follows `BaseChannel` but
+Nanobot supports 5 chat platform channels (Telegram, Discord, Slack, WhatsApp,
+Email).  Each adapter follows `BaseChannel` but
 has significant protocol-specific complexity (WebSocket reconnection, OAuth,
 message editing, reaction handling).
 

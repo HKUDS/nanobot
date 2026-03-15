@@ -24,6 +24,7 @@ channel for progressive display on platforms that support message editing.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import time
 from contextlib import AsyncExitStack
@@ -38,14 +39,14 @@ from nanobot.agent.context import (
     summarize_and_compress,
 )
 from nanobot.agent.delegation import DelegationDispatcher
+from nanobot.agent.mission import MissionManager
 from nanobot.agent.observability import trace_request, update_current_span
 from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.scratchpad import Scratchpad
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
-from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tool_executor import ToolExecutor
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool
+from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool, DelegationResult
 from nanobot.agent.tools.excel import (
     DescribeDataTool,
     ExcelFindTool,
@@ -56,15 +57,20 @@ from nanobot.agent.tools.excel import (
 from nanobot.agent.tools.feedback import FeedbackTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
+from nanobot.agent.tools.mission import (
+    MissionCancelTool,
+    MissionListTool,
+    MissionStartTool,
+    MissionStatusTool,
+)
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.result_cache import CacheGetSliceTool, ToolResultCache
 from nanobot.agent.tools.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.agent.tracing import TraceContext, bind_trace
 from nanobot.agent.verifier import AnswerVerifier
-from nanobot.bus.events import InboundMessage, OutboundMessage, ReactionEvent
+from nanobot.bus.events import DeliveryResult, InboundMessage, OutboundMessage, ReactionEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig, AgentRoleConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
@@ -91,6 +97,73 @@ def _user_friendly_error(exc: Exception) -> str:
     if "auth" in msg and ("invalid" in msg or "denied" in msg or "missing" in msg):
         return "There's a configuration issue with the AI provider. Please contact the admin."
     return "Sorry, I couldn't process that. Please try again."
+
+
+def _dynamic_preserve_recent(
+    messages: list[dict[str, Any]], *, floor: int = 6, cap: int = 30
+) -> int:
+    """Calculate how many tail messages to preserve during compression.
+
+    Ensures the last complete tool-call cycle (assistant with tool_calls →
+    all corresponding tool results → next message) is never split.
+    Falls back to *floor* when no tool calls are present.
+    """
+    n = len(messages)
+    if n <= floor:
+        return floor
+
+    # Scan backwards to find the last assistant message with tool_calls
+    for offset in range(1, n):
+        idx = n - offset
+        m = messages[idx]
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            # preserve from this assistant message to the end
+            needed = n - idx
+            return max(floor, min(needed, cap))
+    return floor
+
+
+class ToolCallTracker:
+    """Detect and break infinite identical-failure tool call loops.
+
+    Tracks ``(tool_name, args_hash)`` → failure count.  Escalation levels:
+      - 2nd identical failure → inject "stop retrying" prompt
+      - 3rd identical failure → remove the tool for the rest of the turn
+      - >8 total failures     → force the agent to produce a final answer
+    """
+
+    WARN_THRESHOLD = 2
+    REMOVE_THRESHOLD = 3
+    GLOBAL_BUDGET = 8
+
+    def __init__(self) -> None:
+        self._counts: dict[str, int] = {}  # key → failure count
+        self._total_failures: int = 0
+
+    @staticmethod
+    def _key(name: str, args: dict[str, Any]) -> str:
+        h = hashlib.sha256(json.dumps(args, sort_keys=True, default=str).encode()).hexdigest()[:16]
+        return f"{name}:{h}"
+
+    def record_failure(self, name: str, args: dict[str, Any]) -> int:
+        """Record a tool failure; returns updated count for this signature."""
+        k = self._key(name, args)
+        self._counts[k] = self._counts.get(k, 0) + 1
+        self._total_failures += 1
+        return self._counts[k]
+
+    def record_success(self, name: str, args: dict[str, Any]) -> None:
+        """Reset the count for a successful tool call signature."""
+        k = self._key(name, args)
+        self._counts.pop(k, None)
+
+    @property
+    def total_failures(self) -> int:
+        return self._total_failures
+
+    @property
+    def budget_exhausted(self) -> bool:
+        return self._total_failures > self.GLOBAL_BUDGET
 
 
 class AgentLoop:
@@ -206,13 +279,16 @@ class AgentLoop:
             provider=provider,
             summary_model=config.tool_summary_model or None,
         )
-        self.subagents = SubagentManager(
+        self.missions = MissionManager(
             provider=provider,
             workspace=self.workspace,
             bus=bus,
             model=self.model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
+            max_iterations=config.mission_max_iterations,
+            max_concurrent=config.mission_max_concurrent,
+            result_max_chars=config.mission_result_max_chars,
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=self.restrict_to_workspace,
@@ -345,7 +421,6 @@ class AgentLoop:
             WebSearchTool(api_key=self.brave_api_key),
             WebFetchTool(),
             MessageTool(send_callback=self.bus.publish_outbound),
-            SpawnTool(manager=self.subagents),
             FeedbackTool(events_file=self.workspace / "memory" / "events.jsonl"),
         ):
             if _should_register(extra_tool.name):
@@ -364,6 +439,18 @@ class AgentLoop:
             delegate_parallel_tool = DelegateParallelTool()
             if _should_register(delegate_parallel_tool.name):
                 self.tools.register(delegate_parallel_tool)
+            mission_tool = MissionStartTool(manager=self.missions)
+            if _should_register(mission_tool.name):
+                self.tools.register(mission_tool)
+            mission_status = MissionStatusTool(manager=self.missions)
+            if _should_register(mission_status.name):
+                self.tools.register(mission_status)
+            mission_list = MissionListTool(manager=self.missions)
+            if _should_register(mission_list.name):
+                self.tools.register(mission_list)
+            mission_cancel = MissionCancelTool(manager=self.missions)
+            if _should_register(mission_cancel.name):
+                self.tools.register(mission_cancel)
 
         # Scratchpad tools (scratchpad instance swapped per session in _ensure_scratchpad)
         placeholder_pad = Scratchpad(self.workspace / "sessions" / "_placeholder")
@@ -412,6 +499,15 @@ class AgentLoop:
             await self._mcp_stack.__aenter__()
             await connect_mcp_servers(self._mcp_servers, self.tools._registry, self._mcp_stack)
             self._mcp_connected = True
+            # Share MCP tools with missions and delegation
+            mcp_tools = [
+                t
+                for name in self.tools._registry.tool_names
+                if name.startswith("mcp_") and (t := self.tools._registry.get(name))
+            ]
+            if mcp_tools:
+                self.missions.mcp_tools = mcp_tools
+                self._dispatcher.mcp_tools = mcp_tools
         except (RuntimeError, ConnectionError, OSError, TimeoutError, ImportError) as e:
             logger.error("Failed to connect MCP servers (will retry next message): {}", e)
             if self._mcp_stack:
@@ -423,15 +519,37 @@ class AgentLoop:
         finally:
             self._mcp_connecting = False
 
+    def set_deliver_callback(
+        self,
+        callback: Callable[[OutboundMessage], Awaitable[DeliveryResult | None]],
+    ) -> None:
+        """Replace the MessageTool send callback with an honest delivery path."""
+        if message_tool := self.tools.get("message"):
+            if isinstance(message_tool, MessageTool):
+                message_tool.set_send_callback(callback)
+
+    def set_contacts_provider(
+        self,
+        provider: Callable[[], list[str]],
+    ) -> None:
+        """Set a callback that returns known email contacts (refreshed per-turn)."""
+        self._contacts_provider = provider
+
+    def _refresh_contacts(self) -> None:
+        """Pull latest contacts from the provider into the context builder."""
+        if hasattr(self, "_contacts_provider"):
+            self.context.set_contacts_context(self._contacts_provider())
+
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
+        self._refresh_contacts()
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.set_context(channel, chat_id, message_id)
 
-        if spawn_tool := self.tools.get("spawn"):
-            if isinstance(spawn_tool, SpawnTool):
-                spawn_tool.set_context(channel, chat_id)
+        if mission_tool := self.tools.get("mission_start"):
+            if isinstance(mission_tool, MissionStartTool):
+                mission_tool.set_context(channel, chat_id)
 
         if cron_tool := self.tools.get("cron"):
             if isinstance(cron_tool, CronTool):
@@ -454,6 +572,7 @@ class AgentLoop:
         session_dir.mkdir(parents=True, exist_ok=True)
         self._scratchpad = Scratchpad(session_dir)
         self._dispatcher.scratchpad = self._scratchpad
+        self.missions.scratchpad = self._scratchpad
 
         # Update scratchpad tool references
         write_tool = self.tools.get("write_scratchpad")
@@ -553,6 +672,7 @@ class AgentLoop:
         consecutive_errors = 0
         has_plan = False
         plan_enforced = False
+        tracker = ToolCallTracker()
 
         # Reset per-turn token accumulators
         self._turn_tokens_prompt = 0
@@ -610,13 +730,14 @@ class AgentLoop:
 
             # --- Context compression: keep messages within budget ----------
             summary_model = self.config.summary_model or self.model
+            preserve_n = _dynamic_preserve_recent(messages)
             messages = await summarize_and_compress(
                 messages,
                 context_budget,
                 provider=self.provider,
                 model=summary_model,
                 tool_token_threshold=self.config.tool_result_context_tokens,
-                preserve_recent=20,
+                preserve_recent=preserve_n,
             )
 
             tools_def = self.tools.get_definitions()
@@ -784,6 +905,7 @@ class AgentLoop:
                 tools_elapsed_ms = (time.monotonic() - t0_tools) * 1000
 
                 any_failed = False
+                tools_to_remove: list[str] = []
                 for tool_call, result in zip(response.tool_calls, tool_results):
                     turn_tool_calls += 1
                     tools_used.append(tool_call.name)
@@ -801,6 +923,51 @@ class AgentLoop:
                     )
                     if not result.success:
                         any_failed = True
+                        count = tracker.record_failure(tool_call.name, tool_call.arguments)
+                        if count >= ToolCallTracker.REMOVE_THRESHOLD:
+                            tools_to_remove.append(tool_call.name)
+                            messages.append(
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        f"TOOL REMOVED: `{tool_call.name}` has failed "
+                                        f"{count} times with identical arguments and has "
+                                        "been disabled. Use a different approach."
+                                    ),
+                                }
+                            )
+                        elif count >= ToolCallTracker.WARN_THRESHOLD:
+                            messages.append(
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        f"STOP: `{tool_call.name}` has failed {count} "
+                                        "times with the same arguments and error. Do NOT "
+                                        "call it again with the same arguments. Use a "
+                                        "different approach or provide your best answer."
+                                    ),
+                                }
+                            )
+                    else:
+                        tracker.record_success(tool_call.name, tool_call.arguments)
+
+                # Remove tools that hit the failure threshold
+                for name in tools_to_remove:
+                    self.tools.unregister(name)
+
+                # Global failure budget: force final answer
+                if tracker.budget_exhausted:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                f"You have {tracker.total_failures} failed tool calls "
+                                "this turn. Stop calling tools and produce your final "
+                                "answer NOW with whatever information you have."
+                            ),
+                        }
+                    )
+                    nudged_for_final = True
 
                 # --- REFLECT: after tool execution, evaluate progress ------
                 # Check if delegation budget is exhausted
@@ -828,18 +995,27 @@ class AgentLoop:
                     )
                 elif had_delegations:
                     # After delegation, check if all planned work is done
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": (
-                                "Delegation(s) complete. Review the results above. "
-                                "If all planned delegations are done, produce your "
-                                "final answer synthesizing the results. Do NOT start "
-                                "another round of delegations unless the results are "
-                                "clearly insufficient (e.g. empty or errored)."
-                            ),
-                        }
+                    # Detect ungrounded delegation results
+                    _ungrounded = any(
+                        "grounded=False" in (m.get("content") or "")
+                        for m in messages[-len(response.tool_calls) :]
+                        if m.get("role") == "tool"
                     )
+                    nudge = (
+                        "Delegation(s) complete. Review the results above. "
+                        "If all planned delegations are done, produce your "
+                        "final answer synthesizing the results. Do NOT start "
+                        "another round of delegations unless the results are "
+                        "clearly insufficient (e.g. empty or errored)."
+                    )
+                    if _ungrounded:
+                        nudge += (
+                            "\n\nWARNING: One or more specialists completed their "
+                            "task without using any tools. Those results may be "
+                            "unverified. Consider cross-checking critical claims "
+                            "before including them in your answer."
+                        )
+                    messages.append({"role": "system", "content": nudge})
                 elif (
                     has_plan
                     and not had_delegations
@@ -1151,6 +1327,7 @@ class AgentLoop:
             default_role=self._routing_config.default_role,
         )
         self._dispatcher.coordinator = self._coordinator
+        self.missions.coordinator = self._coordinator
         self._wire_delegate_tools()
         logger.info(
             "Multi-agent routing enabled with {} roles",
@@ -1177,7 +1354,7 @@ class AgentLoop:
         target_role: str,
         task: str,
         context: str | None,
-    ) -> str:
+    ) -> DelegationResult:
         return await self._dispatcher.dispatch(target_role, task, context)
 
     @staticmethod

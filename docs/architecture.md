@@ -1,11 +1,17 @@
 # Nanobot Architecture
 
 > Living document. Updated as the codebase evolves.
-> Last updated: 2026-06-23.
+> Last updated: 2026-03-15.
 
 ## Overview
 
-Nanobot is a single-process async Python agent framework (~4,000 lines of core code).
+Nanobot is a modular, asynchronous Python framework for building tool-augmented
+AI agents and coordinated multi-agent systems.
+
+The system runs as a single-process async runtime organized as a modular
+monolith with clearly defined subsystem boundaries for agent orchestration,
+tool execution, memory management, LLM provider abstraction, and
+multi-channel messaging.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -23,7 +29,7 @@ Nanobot is a single-process async Python agent framework (~4,000 lines of core c
              │    ToolRegistry  LLMProvider  Memory  Context
              │    (tools/)    (providers/) (memory/) (context.py)
              │
-             └──► MessageBus (bus/) ◄── 9 Channel adapters
+             └──► MessageBus (bus/) ◄── 6 Channel adapters
 ```
 
 ## Module Ownership
@@ -47,7 +53,8 @@ Each module has a clear responsibility, a public API, and boundaries it must not
 | `scratchpad.py` | Session-scoped JSONL artifact sharing | `Scratchpad.write()`, `.read()` | `channels/`, `providers/` |
 | `skills.py` | Skill discovery and YAML frontmatter loading | `SkillsLoader.load()` | `channels/`, `providers/` |
 | `subagent.py` | Subagent spawning for parallel tasks | `spawn_subagent()` | `channels/` |
-| _(removed)_ | Legacy `MetricsCollector` removed — observability now via Langfuse | — | — |
+| `observability.py` | Langfuse OTEL tracing: init, shutdown, spans, scoring | `init_langfuse()`, `shutdown()`, `trace_request()`, `tool_span()`, `span()` | `channels/`, `cli/` |
+| `tracing.py` | Correlation IDs via contextvars, structured log binding | `TraceContext`, `bind_trace()` | `channels/`, `cli/` |
 
 ### `agent/memory/` — Memory Subsystem
 
@@ -60,6 +67,11 @@ Each module has a clear responsibility, a public API, and boundaries it must not
 | `persistence.py` | File I/O: events.jsonl, profile.json, MEMORY.md | `MemoryPersistence` | `providers/`, `channels/` |
 | `mem0_adapter.py` | mem0 vector store adapter with health checks | `_Mem0Adapter` | `channels/`, `tools/` |
 | `reranker.py` | Optional cross-encoder re-ranking | `rerank()` | `providers/`, `channels/` |
+| `constants.py` | Shared constants and tool schemas for consolidation | `_SAVE_MEMORY_TOOL`, `_SAVE_EVENTS_TOOL` | `providers/`, `channels/` |
+| `graph.py` | Knowledge graph support (optional, needs neo4j) | `KnowledgeGraph` | `providers/`, `channels/` |
+| `ontology.py` | Ontology re-exports: classifier, linker, rules, types | `classify_entity_type()`, `link_entity()` | `providers/`, `channels/` |
+| `entity_classifier.py` | Multi-signal entity type classification | `classify_entity_type()` | `providers/`, `channels/` |
+| `entity_linker.py` | Entity linking and resolution | `link_entity()` | `providers/`, `channels/` |
 
 ### `agent/tools/` — Tool System
 
@@ -72,6 +84,13 @@ Each module has a clear responsibility, a public API, and boundaries it must not
 | `web.py` | Web fetch + search | `WebFetchTool`, `WebSearchTool` | `channels/`, `memory/` |
 | `mcp.py` | Model Context Protocol integration | `MCPToolWrapper`, `connect_mcp_servers()` | `channels/`, `memory/` |
 | `delegate.py` | Multi-agent delegation tools | `DelegateTool`, `DelegateParallelTool` | `channels/` |
+| `result_cache.py` | Large result caching + LLM summarization | `ToolResultCache`, `CacheGetSliceTool` | `channels/`, `memory/` |
+| `excel.py` | Spreadsheet read, query, describe, find | `ReadSpreadsheetTool`, `QueryDataTool`, etc. | `channels/`, `memory/` |
+| `cron.py` | Scheduled task creation tool | `CronTool` | `channels/`, `memory/` |
+| `feedback.py` | User feedback capture tool | `FeedbackTool` | `channels/`, `memory/` |
+| `message.py` | Outbound message tool | `MessageTool` | `memory/` |
+| `spawn.py` | Subagent spawning tool | `SpawnTool` | `channels/`, `memory/` |
+| `scratchpad.py` | Scratchpad read/write tools | `ScratchpadWriteTool`, `ScratchpadReadTool` | `channels/`, `memory/` |
 
 ### `channels/` — Chat Platform Adapters
 
@@ -80,7 +99,12 @@ Each module has a clear responsibility, a public API, and boundaries it must not
 | `base.py` | Channel ABC + health tracking | `BaseChannel`, `ChannelHealth` | `agent/`, `providers/` |
 | `retry.py` | Shared retry helpers and reconnection loop | `ChannelHealth`, `is_transient()`, `connection_loop()` | `agent/`, `providers/` |
 | `manager.py` | Multi-channel orchestration, outbound dispatch, dead-letter queue | `ChannelManager` | `agent/loop`, `agent/tools/` |
-| Platform files | Platform-specific connection + message handling | Each channel's `start()`, `stop()`, `send()` | `agent/`, `providers/` |
+| `telegram.py` | Telegram (group mention policy, media handling) | `TelegramChannel` | `agent/`, `providers/` |
+| `discord.py` | Discord | `DiscordChannel` | `agent/`, `providers/` |
+| `slack.py` | Slack | `SlackChannel` | `agent/`, `providers/` |
+| `whatsapp.py` | WhatsApp (localhost bridge) | `WhatsAppChannel` | `agent/`, `providers/` |
+| `email.py` | Email (IMAP/SMTP) | `EmailChannel` | `agent/`, `providers/` |
+| `web.py` | Web/HTTP channel | `WebChannel` | `agent/`, `providers/` |
 
 ### `providers/` — LLM Provider Abstraction
 
@@ -88,7 +112,10 @@ Each module has a clear responsibility, a public API, and boundaries it must not
 |---|---|---|---|
 | `base.py` | Provider ABC, response types | `LLMProvider`, `LLMResponse`, `StreamChunk`, `ToolCallRequest` | `agent/`, `channels/`, `tools/` |
 | `litellm_provider.py` | litellm wrapper (100+ models) | `LiteLLMProvider` | `agent/`, `channels/` |
-| `registry.py` | Provider discovery | `get_provider()` | `agent/`, `channels/` |
+| `registry.py` | Provider discovery and metadata | `get_provider()`, `PROVIDERS` | `agent/`, `channels/` |
+| `custom_provider.py` | Custom provider support | `CustomProvider` | `agent/`, `channels/` |
+| `openai_codex_provider.py` | OpenAI Codex provider (optional, needs oauth) | `OpenAICodexProvider` | `agent/`, `channels/` |
+| `transcription.py` | Voice transcription via Groq/Whisper | `TranscriptionProvider` | `agent/`, `channels/` |
 
 ### `config/` — Configuration
 
@@ -217,6 +244,16 @@ These imports **must never exist** (enforced by `scripts/check_imports.py` in CI
 
 - **Correlation IDs**: `request_id`, `session_id`, `agent_id` via `TraceContext` (contextvars)
 - **Structured logs**: `bind_trace()` prefills log events with correlation IDs
-- **Metrics**: Observability counters captured via Langfuse (legacy `MetricsCollector` removed)
+- **Langfuse tracing** (`agent/observability.py`): OTEL-based integration via Langfuse v4
+  - `trace_request()` — per-request root span with `session_id`, `user_id`, `tags` propagation
+  - `tool_span()` — wraps each tool execution (in `tools/registry.py`)
+  - `span()` — wraps context assembly, verification, coordination, delegation
+  - `score_current_trace()` — attaches verification confidence scores
+  - `update_current_span()` — enriches spans with model, channel, iteration metadata
+  - litellm auto-instrumented via `"otel"` callback → GENERATION observations
+  - `atexit.register(shutdown)` safety net + `auth_check()` on startup
+  - Logging filters suppress benign warnings from litellm, langfuse, and OTEL SDK
+- **Config**: `LangfuseConfig` — `enabled`, `public_key`, `secret_key`, `host`, `environment`, `sample_rate`, `debug`
+- **Lifecycle**: `init_langfuse()` at CLI startup, `shutdown_langfuse()` in all `finally` blocks
 - **Request audit**: Each completed request emits `request_complete` log with duration, tool count
 - **JSON log sink**: Optional via `config.log.json_file` (loguru serialize mode, 10MB rotation)

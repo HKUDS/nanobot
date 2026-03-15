@@ -10,6 +10,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.retry import connection_loop, retry_send
 from nanobot.config.schema import WhatsAppConfig
+from nanobot.errors import DeliverySkippedError
 
 
 class WhatsAppChannel(BaseChannel):
@@ -70,8 +71,7 @@ class WhatsAppChannel(BaseChannel):
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through WhatsApp."""
         if not self._ws or not self._connected:
-            logger.warning("WhatsApp bridge not connected")
-            return
+            raise DeliverySkippedError("WhatsApp bridge not connected")
 
         async def _do_send() -> None:
             payload = {"type": "send", "to": msg.chat_id, "text": msg.content}

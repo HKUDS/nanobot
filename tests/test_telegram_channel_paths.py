@@ -10,6 +10,7 @@ import pytest
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels.retry import ChannelHealth
 from nanobot.channels.telegram import TelegramChannel
+from nanobot.errors import DeliverySkippedError
 
 
 def _cfg() -> SimpleNamespace:
@@ -121,7 +122,8 @@ async def test_send_and_streaming_and_helpers(tmp_path: Path) -> None:
     bot = _Bot()
     ch._app = SimpleNamespace(bot=bot)
 
-    await ch.send(OutboundMessage(channel="telegram", chat_id="bad", content="hello"))
+    with pytest.raises(DeliverySkippedError):
+        await ch.send(OutboundMessage(channel="telegram", chat_id="bad", content="hello"))
 
     media = tmp_path / "x.jpg"
     media.write_bytes(b"data")

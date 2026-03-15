@@ -7,6 +7,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.email import EmailChannel
 from nanobot.config.schema import EmailConfig
+from nanobot.errors import DeliverySkippedError
 
 
 def _make_config() -> EmailConfig:
@@ -208,13 +209,14 @@ async def test_send_skips_reply_when_auto_reply_disabled(monkeypatch) -> None:
     channel._last_subject_by_chat["alice@example.com"] = "Previous email"
 
     # Reply should be skipped (auto_reply_enabled=False)
-    await channel.send(
-        OutboundMessage(
-            channel="email",
-            chat_id="alice@example.com",
-            content="Should not send.",
+    with pytest.raises(DeliverySkippedError):
+        await channel.send(
+            OutboundMessage(
+                channel="email",
+                chat_id="alice@example.com",
+                content="Should not send.",
+            )
         )
-    )
     assert fake_instances == []
 
     # Reply with force_send=True should be sent
@@ -264,6 +266,7 @@ async def test_send_proactive_email_when_auto_reply_disabled(monkeypatch) -> Non
 
     cfg = _make_config()
     cfg.auto_reply_enabled = False
+    cfg.proactive_send_policy = "open"
     channel = EmailChannel(cfg, MessageBus())
 
     # bob@example.com has never sent us an email (proactive send)
@@ -313,14 +316,15 @@ async def test_send_skips_when_consent_not_granted(monkeypatch) -> None:
     cfg = _make_config()
     cfg.consent_granted = False
     channel = EmailChannel(cfg, MessageBus())
-    await channel.send(
-        OutboundMessage(
-            channel="email",
-            chat_id="alice@example.com",
-            content="Should not send.",
-            metadata={"force_send": True},
+    with pytest.raises(DeliverySkippedError):
+        await channel.send(
+            OutboundMessage(
+                channel="email",
+                chat_id="alice@example.com",
+                content="Should not send.",
+                metadata={"force_send": True},
+            )
         )
-    )
     assert called["smtp"] is False
 
 

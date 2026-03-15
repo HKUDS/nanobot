@@ -82,6 +82,78 @@ def estimate_messages_tokens(messages: list[dict[str, Any]]) -> int:
     return total
 
 
+def _collect_tail_tool_call_ids(tail: list[dict[str, Any]]) -> set[str]:
+    """Return tool_call_ids referenced in *tail* messages (both assistant calls and tool results)."""
+    ids: set[str] = set()
+    for m in tail:
+        # tool results reference a tool_call_id
+        if m.get("role") == "tool" and m.get("tool_call_id"):
+            ids.add(m["tool_call_id"])
+        # assistant messages may have tool_calls whose results are in the tail
+        for tc in m.get("tool_calls", []):
+            tc_id = tc.get("id") or ""
+            if tc_id:
+                ids.add(tc_id)
+    return ids
+
+
+def _paired_drop_tools(
+    middle: list[dict[str, Any]],
+    tail: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Drop tool results from *middle* while preserving claim-evidence coherence.
+
+    - Tool results whose ``tool_call_id`` is referenced by an assistant message
+      in the *tail* are kept (the claim is visible, so the evidence must stay).
+    - When a tool result is dropped, the corresponding assistant tool_call in
+      *middle* is annotated with ``[result omitted]`` so the LLM knows evidence
+      was compressed, not that it never existed.
+    """
+    tail_ids = _collect_tail_tool_call_ids(tail)
+
+    # Identify which tool_call_ids from middle tool results we're dropping
+    kept_ids: set[str] = set()
+    dropped_ids: set[str] = set()
+    result: list[dict[str, Any]] = []
+
+    for m in middle:
+        if m.get("role") == "tool":
+            tc_id = m.get("tool_call_id", "")
+            if tc_id in tail_ids:
+                # The assistant call referencing this result is in the tail — keep it
+                kept_ids.add(tc_id)
+                result.append(m)
+            else:
+                dropped_ids.add(tc_id)
+                # Drop the tool result (don't append)
+        else:
+            result.append(m)
+
+    # Annotate assistant tool_calls in middle whose results were dropped
+    if dropped_ids:
+        for i, m in enumerate(result):
+            if m.get("role") != "assistant" or not m.get("tool_calls"):
+                continue
+            calls = m["tool_calls"]
+            needs_patch = any((tc.get("id") or "") in dropped_ids for tc in calls)
+            if needs_patch:
+                patched_calls = []
+                for tc in calls:
+                    tc_id = tc.get("id") or ""
+                    if tc_id in dropped_ids:
+                        # Mark that the result was omitted
+                        patched = {**tc}
+                        fn = {**patched.get("function", {})}
+                        fn["_result_omitted"] = True
+                        patched["function"] = fn
+                        patched_calls.append(patched)
+                    else:
+                        patched_calls.append(tc)
+                result[i] = {**m, "tool_calls": patched_calls}
+
+    return result
+
+
 def compress_context(
     messages: list[dict[str, Any]],
     max_tokens: int,
@@ -126,8 +198,8 @@ def compress_context(
     if estimate_messages_tokens(trial) <= max_tokens:
         return trial
 
-    # Phase 2: drop tool results from middle entirely (keep assistant + user)
-    middle = [m for m in middle if m.get("role") != "tool"]
+    # Phase 2: drop tool results from middle, preserving claim-evidence coherence
+    middle = _paired_drop_tools(middle, tail)
 
     trial = system + middle + tail
     if estimate_messages_tokens(trial) <= max_tokens:
@@ -206,8 +278,8 @@ async def summarize_and_compress(
     if estimate_messages_tokens(trial) <= max_tokens:
         return trial
 
-    # Phase 2: drop tool results from middle entirely (keep assistant + user)
-    middle_no_tools = [m for m in middle if m.get("role") != "tool"]
+    # Phase 2: drop tool results from middle, preserving claim-evidence coherence
+    middle_no_tools = _paired_drop_tools(middle, tail)
 
     trial = system + middle_no_tools + tail
     if estimate_messages_tokens(trial) <= max_tokens:
@@ -318,6 +390,19 @@ class ContextBuilder:
         self.memory_token_budget = memory_token_budget
         self.memory_md_token_cap = memory_md_token_cap
         self.role_system_prompt = role_system_prompt
+        self._contacts_context: str = ""
+
+    def set_contacts_context(self, contacts: list[str]) -> None:
+        """Update the known contacts displayed in the system prompt."""
+        if contacts:
+            lines = "\n".join(f"- {addr}" for addr in contacts)
+            self._contacts_context = (
+                "# Known Contacts\n\n"
+                "These are the ONLY email addresses you may send to. "
+                "Do NOT invent or guess email addresses.\n\n" + lines
+            )
+        else:
+            self._contacts_context = ""
 
     def build_system_prompt(
         self,
@@ -390,6 +475,10 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
 
 {skills_summary}""")
+
+        # Known contacts (email recipients, populated by channel manager)
+        if self._contacts_context:
+            parts.append(self._contacts_context)
 
         return "\n\n---\n\n".join(parts)
 
@@ -503,7 +592,7 @@ entity relationships, and past events. Follow these rules when answering:
             current_message: The new user message.
             skill_names: Optional skills to include.
             media: Optional list of local file paths for images/media.
-            channel: Current channel (telegram, feishu, etc.).
+            channel: Current channel (telegram, discord, etc.).
             chat_id: Current chat/user ID.
 
         Returns:

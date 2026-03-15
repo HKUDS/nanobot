@@ -10,12 +10,34 @@ to the session scratchpad.
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool, ToolResult
 
+
+@dataclass(slots=True)
+class DelegationResult:
+    """Structured result from a delegated sub-task."""
+
+    content: str
+    tools_used: list[str]
+
+    @property
+    def grounded(self) -> bool:
+        """True if the specialist used at least one tool (evidence-backed)."""
+        return len(self.tools_used) > 0
+
+
 # Type alias for the dispatch callback wired by AgentLoop
-DispatchFn = Callable[[str, str, str | None], Awaitable[str]]
+DispatchFn = Callable[[str, str, str | None], Awaitable[DelegationResult]]
+
+# Keywords that signal an investigation-type task where tool use is expected
+_INVESTIGATION_RE = re.compile(
+    r"\b(search|find|look\s*up|check|verify|investigate|retrieve|fetch|query|inspect)\b",
+    re.IGNORECASE,
+)
 
 
 class DelegateTool(Tool):
@@ -77,12 +99,27 @@ class DelegateTool(Tool):
             return ToolResult.fail("Delegation not available", error_type="config")
 
         try:
-            result = await self._dispatch(target_role, task, context or None)
-            return ToolResult.ok(result)
+            dr = await self._dispatch(target_role, task, context or None)
+            return self._format_result(dr, task)
         except _CycleError as exc:
             return ToolResult.fail(str(exc), error_type="cycle")
         except Exception as exc:  # crash-barrier: delegation dispatch callback
             return ToolResult.fail(f"Delegation failed: {exc}", error_type="delegation")
+
+    @staticmethod
+    def _format_result(dr: DelegationResult, task: str) -> ToolResult:
+        """Build a ToolResult with attestation metadata."""
+        tools_note = f"[tools_used={len(dr.tools_used)}, grounded={dr.grounded}]"
+        if dr.grounded:
+            return ToolResult.ok(f"{tools_note}\n{dr.content}")
+        # Ungrounded result — warn if the task looks investigative
+        if _INVESTIGATION_RE.search(task):
+            return ToolResult.ok(
+                f"{tools_note}\n"
+                "⚠️ This result was generated without tool use and may not be "
+                f"verified.\n{dr.content}"
+            )
+        return ToolResult.ok(f"{tools_note}\n{dr.content}")
 
 
 class DelegateParallelTool(Tool):
@@ -150,7 +187,7 @@ class DelegateParallelTool(Tool):
         if not subtasks:
             return ToolResult.fail("At least one subtask required", error_type="validation")
 
-        async def _run_one(st: dict[str, str]) -> str:
+        async def _run_one(st: dict[str, str]) -> DelegationResult:
             role = st.get("target_role", "")
             task = st.get("task", "")
             ctx = st.get("context") or None
@@ -166,6 +203,9 @@ class DelegateParallelTool(Tool):
             task_label = st.get("task", "?")[:60]
             if isinstance(res, Exception):
                 parts.append(f"[{i}] {task_label} → ERROR: {res}")
+            elif isinstance(res, DelegationResult):
+                tag = "✓" if res.grounded else "⚠ ungrounded"
+                parts.append(f"[{i}] ({tag}) {task_label} → {res.content}")
             else:
                 parts.append(f"[{i}] {task_label} → {res}")
 

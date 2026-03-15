@@ -31,10 +31,6 @@ def _get_channel_classes() -> list[tuple[str, type]]:
         ("slack", "SlackChannel"),
         ("whatsapp", "WhatsAppChannel"),
         ("email", "EmailChannel"),
-        ("dingtalk", "DingTalkChannel"),
-        ("feishu", "FeishuChannel"),
-        ("mochat", "MochatChannel"),
-        ("qq", "QQChannel"),
     ]
 
     for module_name, class_name in adapter_modules:

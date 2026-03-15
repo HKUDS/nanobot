@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted — Phase 2 superseded: Langfuse v4 provides OTEL-based tracing
+(see `nanobot/agent/observability.py`).
 
 ## Date
 
@@ -40,11 +41,16 @@ For a professional agent framework, we need to answer questions like:
 3. **Keep loguru** as the logging backend. Use loguru's `bind()` for structured context
    and `serialize=True` sink option for JSON output when needed.
 
-### Phase 2 — OpenTelemetry (future, separate ADR)
+### Phase 2 — OpenTelemetry (implemented via Langfuse v4)
 
-When the need arises for distributed tracing or integration with external observability
+~~When the need arises for distributed tracing or integration with external observability
 platforms (Grafana, Datadog, etc.), introduce OpenTelemetry spans. This is explicitly
-deferred to avoid premature complexity.
+deferred to avoid premature complexity.~~
+
+**Implemented (2026-03-14)**: Langfuse v4 SDK creates an OTEL `TracerProvider` that
+auto-captures litellm LLM calls as GENERATION observations. Custom spans wrap
+request processing, tool execution, context assembly, verification, and delegation.
+See `nanobot/agent/observability.py` for the full integration.
 
 ### MetricsCollector — Removed
 

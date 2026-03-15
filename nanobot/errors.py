@@ -17,6 +17,18 @@ class NanobotError(Exception):
 
 
 # ---------------------------------------------------------------------------
+# Delivery errors
+# ---------------------------------------------------------------------------
+
+
+class DeliverySkippedError(NanobotError):
+    """A channel declined to deliver a message (config missing, channel down, etc.)."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason, recoverable=True)
+
+
+# ---------------------------------------------------------------------------
 # Tool errors
 # ---------------------------------------------------------------------------
 

@@ -90,6 +90,8 @@ DEFAULT_ROLES: list[AgentRoleConfig] = [
             "synthesis to a writing agent as a SEPARATE call.\n"
             "  NEVER mix gathering and synthesis tasks in the same "
             "`delegate_parallel` — synthesis agents would see empty scratchpads.\n\n"
+            "  For large background investigations or scheduled audits, use "
+            "`mission_start` to launch an async mission that reports back when done.\n\n"
             "IMPORTANT: Use read_scratchpad to review other agents' findings before "
             "compiling reports. Synthesize from actual data — never fabricate metrics "
             "or statistics."

@@ -37,26 +37,6 @@ class TelegramConfig(Base):
     reply_to_message: bool = False  # If true, bot replies quote the original message
 
 
-class FeishuConfig(Base):
-    """Feishu/Lark channel configuration using WebSocket long connection."""
-
-    enabled: bool = False
-    app_id: str = ""  # App ID from Feishu Open Platform
-    app_secret: str = ""  # App Secret from Feishu Open Platform
-    encrypt_key: str = ""  # Encrypt Key for event subscription (optional)
-    verification_token: str = ""  # Verification Token for event subscription (optional)
-    allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
-
-
-class DingTalkConfig(Base):
-    """DingTalk channel configuration using Stream mode."""
-
-    enabled: bool = False
-    client_id: str = ""  # AppKey
-    client_secret: str = ""  # AppSecret
-    allow_from: list[str] = Field(default_factory=list)  # Allowed staff_ids
-
-
 class DiscordConfig(Base):
     """Discord channel configuration."""
 
@@ -99,45 +79,8 @@ class EmailConfig(Base):
     max_body_chars: int = 12000
     subject_prefix: str = "Re: "
     allow_from: list[str] = Field(default_factory=list)  # Allowed sender email addresses
-
-
-class MochatMentionConfig(Base):
-    """Mochat mention behavior configuration."""
-
-    require_in_groups: bool = False
-
-
-class MochatGroupRule(Base):
-    """Mochat per-group mention requirement."""
-
-    require_mention: bool = False
-
-
-class MochatConfig(Base):
-    """Mochat channel configuration."""
-
-    enabled: bool = False
-    base_url: str = "https://mochat.io"
-    socket_url: str = ""
-    socket_path: str = "/socket.io"
-    socket_disable_msgpack: bool = False
-    socket_reconnect_delay_ms: int = 1000
-    socket_max_reconnect_delay_ms: int = 10000
-    socket_connect_timeout_ms: int = 10000
-    refresh_interval_ms: int = 30000
-    watch_timeout_ms: int = 25000
-    watch_limit: int = 100
-    retry_delay_ms: int = 500
-    max_retry_attempts: int = 0  # 0 means unlimited retries
-    claw_token: str = ""
-    agent_user_id: str = ""
-    sessions: list[str] = Field(default_factory=list)
-    panels: list[str] = Field(default_factory=list)
-    allow_from: list[str] = Field(default_factory=list)
-    mention: MochatMentionConfig = Field(default_factory=MochatMentionConfig)
-    groups: dict[str, MochatGroupRule] = Field(default_factory=dict)
-    reply_delay_mode: str = "non-mention"  # off | non-mention
-    reply_delay_ms: int = 120000
+    allow_to: list[str] = Field(default_factory=list)  # Allowed recipient email addresses
+    proactive_send_policy: str = "known_only"  # "known_only", "allowlist", or "open"
 
 
 class SlackDMConfig(Base):
@@ -164,17 +107,6 @@ class SlackConfig(Base):
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
 
 
-class QQConfig(Base):
-    """QQ channel configuration using botpy SDK."""
-
-    enabled: bool = False
-    app_id: str = ""  # 机器人 ID (AppID) from q.qq.com
-    secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
-    allow_from: list[str] = Field(
-        default_factory=list
-    )  # Allowed user openids (empty = public access)
-
-
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -183,12 +115,8 @@ class ChannelsConfig(Base):
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
-    feishu: FeishuConfig = Field(default_factory=FeishuConfig)
-    mochat: MochatConfig = Field(default_factory=MochatConfig)
-    dingtalk: DingTalkConfig = Field(default_factory=DingTalkConfig)
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
-    qq: QQConfig = Field(default_factory=QQConfig)
 
 
 class Mem0Config(Base):
@@ -206,6 +134,14 @@ class RerankerConfig(Base):
     mode: str = "disabled"  # enabled | shadow | disabled (was NANOBOT_RERANKER_MODE)
     alpha: float = 0.5  # Blend weight 0.0–1.0 (was NANOBOT_RERANKER_ALPHA)
     model: str = ""  # Model name; blank = default (was NANOBOT_RERANKER_MODEL)
+
+
+class MissionConfig(Base):
+    """Background mission tuning."""
+
+    max_concurrent: int = 3
+    max_iterations: int = 15
+    result_max_chars: int = 4000
 
 
 class AgentDefaults(Base):
@@ -258,6 +194,9 @@ class AgentDefaults(Base):
 
     # mem0
     mem0: Mem0Config = Field(default_factory=Mem0Config)
+
+    # Missions
+    mission: MissionConfig = Field(default_factory=MissionConfig)
 
 
 class AgentConfig(Base):
@@ -350,6 +289,11 @@ class AgentConfig(Base):
     # Tools
     restrict_to_workspace: bool = False
 
+    # Missions
+    mission_max_concurrent: int = 3
+    mission_max_iterations: int = 15
+    mission_result_max_chars: int = 4000
+
     @classmethod
     def from_defaults(cls, defaults: "AgentDefaults", **overrides: Any) -> "AgentConfig":
         """Build an ``AgentConfig`` from the ``AgentDefaults`` section of the config file."""
@@ -394,6 +338,9 @@ class AgentConfig(Base):
             "mem0_verify_write": defaults.mem0.verify_write,
             "mem0_force_infer_true": defaults.mem0.force_infer_true,
             "vision_model": defaults.vision_model,
+            "mission_max_concurrent": defaults.mission.max_concurrent,
+            "mission_max_iterations": defaults.mission.max_iterations,
+            "mission_result_max_chars": defaults.mission.result_max_chars,
         }
         data.update(overrides)
         return cls(**data)  # type: ignore[arg-type]

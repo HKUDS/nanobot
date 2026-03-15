@@ -20,6 +20,7 @@ from nanobot.agent.coordinator import Coordinator, build_default_registry
 from nanobot.agent.tools.delegate import (
     DelegateParallelTool,
     DelegateTool,
+    DelegationResult,
     _CycleError,
 )
 from nanobot.config.schema import AgentConfig
@@ -74,9 +75,9 @@ class TestDelegateTool:
         tool = DelegateTool()
         calls: list[tuple] = []
 
-        async def fake_dispatch(role: str, task: str, ctx: str | None) -> str:
+        async def fake_dispatch(role: str, task: str, ctx: str | None) -> DelegationResult:
             calls.append((role, task, ctx))
-            return "result from delegate"
+            return DelegationResult(content="result from delegate", tools_used=["read_file"])
 
         tool.set_dispatch(fake_dispatch)
         result = await tool.execute(task="find info", target_role="research")
@@ -87,8 +88,8 @@ class TestDelegateTool:
     async def test_dispatch_with_context(self) -> None:
         tool = DelegateTool()
 
-        async def fake_dispatch(role: str, task: str, ctx: str | None) -> str:
-            return f"role={role} ctx={ctx}"
+        async def fake_dispatch(role: str, task: str, ctx: str | None) -> DelegationResult:
+            return DelegationResult(content=f"role={role} ctx={ctx}", tools_used=["exec"])
 
         tool.set_dispatch(fake_dispatch)
         result = await tool.execute(task="analyze", context="extra info")
@@ -98,7 +99,7 @@ class TestDelegateTool:
     async def test_cycle_error_caught(self) -> None:
         tool = DelegateTool()
 
-        async def cycle_dispatch(role: str, task: str, ctx: str | None) -> str:
+        async def cycle_dispatch(role: str, task: str, ctx: str | None) -> DelegationResult:
             raise _CycleError("Delegation cycle detected: A → B → A")
 
         tool.set_dispatch(cycle_dispatch)
@@ -109,7 +110,7 @@ class TestDelegateTool:
     async def test_general_error_caught(self) -> None:
         tool = DelegateTool()
 
-        async def error_dispatch(role: str, task: str, ctx: str | None) -> str:
+        async def error_dispatch(role: str, task: str, ctx: str | None) -> DelegationResult:
             raise RuntimeError("boom")
 
         tool.set_dispatch(error_dispatch)
@@ -132,8 +133,8 @@ class TestDelegateParallelTool:
     async def test_too_many_subtasks(self) -> None:
         tool = DelegateParallelTool()
 
-        async def noop(r: str, t: str, c: str | None) -> str:
-            return "ok"
+        async def noop(r: str, t: str, c: str | None) -> DelegationResult:
+            return DelegationResult(content="ok", tools_used=[])
 
         tool.set_dispatch(noop)
         result = await tool.execute(subtasks=[{"task": f"t{i}"} for i in range(6)])
@@ -143,8 +144,8 @@ class TestDelegateParallelTool:
     async def test_empty_subtasks(self) -> None:
         tool = DelegateParallelTool()
 
-        async def noop(r: str, t: str, c: str | None) -> str:
-            return "ok"
+        async def noop(r: str, t: str, c: str | None) -> DelegationResult:
+            return DelegationResult(content="ok", tools_used=[])
 
         tool.set_dispatch(noop)
         result = await tool.execute(subtasks=[])
@@ -154,10 +155,10 @@ class TestDelegateParallelTool:
         tool = DelegateParallelTool()
         execution_order: list[str] = []
 
-        async def tracked_dispatch(role: str, task: str, ctx: str | None) -> str:
+        async def tracked_dispatch(role: str, task: str, ctx: str | None) -> DelegationResult:
             execution_order.append(task)
             await asyncio.sleep(0.01)
-            return f"done:{task}"
+            return DelegationResult(content=f"done:{task}", tools_used=["exec"])
 
         tool.set_dispatch(tracked_dispatch)
         result = await tool.execute(
@@ -173,10 +174,10 @@ class TestDelegateParallelTool:
     async def test_partial_failure(self) -> None:
         tool = DelegateParallelTool()
 
-        async def mixed_dispatch(role: str, task: str, ctx: str | None) -> str:
+        async def mixed_dispatch(role: str, task: str, ctx: str | None) -> DelegationResult:
             if "fail" in task:
                 raise RuntimeError("intentional failure")
-            return f"ok:{task}"
+            return DelegationResult(content=f"ok:{task}", tools_used=["exec"])
 
         tool.set_dispatch(mixed_dispatch)
         result = await tool.execute(

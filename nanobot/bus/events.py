@@ -36,11 +36,21 @@ class OutboundMessage:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(slots=True)
+class DeliveryResult:
+    """Outcome of a synchronous message delivery attempt."""
+
+    success: bool
+    channel: str
+    chat_id: str
+    error: str | None = None
+
+
 @dataclass
 class ReactionEvent:
     """Emoji reaction received on a message.
 
-    Channels that support reactions (Telegram, Discord, Slack, Feishu) can
+    Channels that support reactions (Telegram, Discord, Slack) can
     emit this event so the agent loop can translate it into feedback.
     """
 

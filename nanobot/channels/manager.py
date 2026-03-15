@@ -10,7 +10,7 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import DeliveryResult, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
@@ -91,36 +91,6 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Discord channel not available: {}", e)
 
-        # Feishu channel
-        if self.config.channels.feishu.enabled:
-            try:
-                from nanobot.channels.feishu import FeishuChannel
-
-                self.channels["feishu"] = FeishuChannel(self.config.channels.feishu, self.bus)
-                logger.info("Feishu channel enabled")
-            except ImportError as e:
-                logger.warning("Feishu channel not available: {}", e)
-
-        # Mochat channel
-        if self.config.channels.mochat.enabled:
-            try:
-                from nanobot.channels.mochat import MochatChannel
-
-                self.channels["mochat"] = MochatChannel(self.config.channels.mochat, self.bus)
-                logger.info("Mochat channel enabled")
-            except ImportError as e:
-                logger.warning("Mochat channel not available: {}", e)
-
-        # DingTalk channel
-        if self.config.channels.dingtalk.enabled:
-            try:
-                from nanobot.channels.dingtalk import DingTalkChannel
-
-                self.channels["dingtalk"] = DingTalkChannel(self.config.channels.dingtalk, self.bus)
-                logger.info("DingTalk channel enabled")
-            except ImportError as e:
-                logger.warning("DingTalk channel not available: {}", e)
-
         # Email channel
         if self.config.channels.email.enabled:
             try:
@@ -140,19 +110,6 @@ class ChannelManager:
                 logger.info("Slack channel enabled")
             except ImportError as e:
                 logger.warning("Slack channel not available: {}", e)
-
-        # QQ channel
-        if self.config.channels.qq.enabled:
-            try:
-                from nanobot.channels.qq import QQChannel
-
-                self.channels["qq"] = QQChannel(
-                    self.config.channels.qq,
-                    self.bus,
-                )
-                logger.info("QQ channel enabled")
-            except ImportError as e:
-                logger.warning("QQ channel not available: {}", e)
 
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
@@ -210,6 +167,56 @@ class ChannelManager:
             except Exception as e:  # crash-barrier: channel stop varies
                 logger.error("Error stopping {}: {}", name, e)
 
+    async def _attempt_send(
+        self, channel: BaseChannel, msg: OutboundMessage, *, max_attempts: int = 3
+    ) -> DeliveryResult:
+        """Try to send a message with retries. Returns a DeliveryResult."""
+        last_error: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                await channel.send(msg)
+                return DeliveryResult(success=True, channel=msg.channel, chat_id=msg.chat_id)
+            except Exception as e:  # crash-barrier: channel send varies
+                last_error = e
+                logger.exception(
+                    "Error sending to {} (attempt {}/{}): {}",
+                    msg.channel,
+                    attempt,
+                    max_attempts,
+                    e,
+                )
+                if attempt < max_attempts:
+                    await asyncio.sleep(0.5 * attempt)
+
+        self._write_dead_letter(msg, last_error)
+        logger.error(
+            "Outbound message persisted to {} after delivery failure",
+            self._dead_letter_file,
+        )
+        return DeliveryResult(
+            success=False,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            error=str(last_error) if last_error else "unknown delivery error",
+        )
+
+    async def deliver(self, msg: OutboundMessage) -> DeliveryResult:
+        """Synchronous (awaitable) delivery for tool-initiated sends.
+
+        Looks up the target channel, sends with retries, and returns
+        a ``DeliveryResult`` so the calling tool can report success/failure
+        honestly.
+        """
+        channel = self.channels.get(msg.channel)
+        if not channel:
+            return DeliveryResult(
+                success=False,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                error=f"Unknown channel: {msg.channel}",
+            )
+        return await self._attempt_send(channel, msg)
+
     async def _dispatch_outbound(self) -> None:
         """Dispatch outbound messages to the appropriate channel."""
         logger.info("Outbound dispatcher started")
@@ -229,26 +236,7 @@ class ChannelManager:
 
                 channel = self.channels.get(msg.channel)
                 if channel:
-                    last_error: Exception | None = None
-                    sent = False
-                    for attempt in range(1, 4):
-                        try:
-                            await channel.send(msg)
-                            sent = True
-                            break
-                        except Exception as e:  # crash-barrier: channel send varies
-                            last_error = e
-                            logger.exception(
-                                "Error sending to {} (attempt {}/3): {}", msg.channel, attempt, e
-                            )
-                            if attempt < 3:
-                                await asyncio.sleep(0.5 * attempt)
-                    if not sent:
-                        self._write_dead_letter(msg, last_error)
-                        logger.error(
-                            "Outbound message persisted to {} after delivery failure",
-                            self._dead_letter_file,
-                        )
+                    await self._attempt_send(channel, msg)
                 else:
                     logger.warning("Unknown channel: {}", msg.channel)
 
@@ -276,6 +264,17 @@ class ChannelManager:
     def enabled_channels(self) -> list[str]:
         """Get list of enabled channel names."""
         return list(self.channels.keys())
+
+    def get_email_contacts(self) -> list[str]:
+        """Return known email recipients (allow_to + inbound senders)."""
+        ch = self.channels.get("email")
+        if ch is None:
+            return []
+        from nanobot.channels.email import EmailChannel
+
+        if isinstance(ch, EmailChannel):
+            return ch.known_recipients
+        return []
 
     # ------------------------------------------------------------------
     # Dead-letter replay (Step 16)

@@ -32,12 +32,18 @@ nanobot/
 │   ├── consolidation.py # Memory consolidation orchestration + fallback archival
 │   ├── context.py       # Prompt assembly + token budgeting
 │   ├── coordinator.py   # Multi-agent coordinator with LLM-based intent routing
+│   ├── delegation.py    # Delegation routing, cycle detection, contract construction
+│   ├── tool_executor.py # Tool batching (parallel readonly / sequential write)
 │   ├── registry.py      # AgentRegistry: maps role names to AgentRoleConfig
 │   ├── scratchpad.py    # Session-scoped JSONL-backed artifact sharing (multi-agent)
 │   ├── skills.py        # Skill discovery and loading (YAML frontmatter in SKILL.md)
-│   ├── subagent.py      # Subagent spawning for parallel tasks
+│   ├── mission.py       # Background mission manager (async delegated tasks)
+│   ├── tool_loop.py     # Shared lightweight think→act→observe loop
+│   ├── observability.py # Langfuse OTEL tracing: init, shutdown, spans, scoring
+│   ├── tracing.py       # Correlation IDs via contextvars, structured log binding
 │   ├── memory/          # Memory subsystem (mem0-first with local fallback + knowledge graph)
 │   │   ├── store.py     # MemoryStore: primary public API
+│   │   ├── event.py     # MemoryEvent Pydantic model + KnowledgeTriple
 │   │   ├── retrieval.py # Keyword-based local retrieval (fallback)
 │   │   ├── extractor.py # LLM + heuristic event extraction
 │   │   ├── persistence.py # JSONL events + profile.json + MEMORY.md I/O
@@ -60,8 +66,10 @@ nanobot/
 │       ├── feedback.py  # User feedback capture tool
 │       ├── cron.py      # Scheduled task tool
 │       ├── message.py   # Outbound message tool
-│       ├── spawn.py     # Subagent spawning tool
+│       ├── mission.py   # Background mission launch, status, list, cancel tools
 │       ├── delegate.py  # Multi-agent peer-to-peer + parallel delegation
+│       ├── result_cache.py # Large result caching + LLM summarization
+│       ├── excel.py     # Spreadsheet read, query, describe, find tools
 │       └── scratchpad.py # ScratchpadWriteTool for multi-agent artifacts
 ├── config/              # Configuration management
 │   ├── schema.py        # Pydantic config models
@@ -75,10 +83,7 @@ nanobot/
 │   ├── slack.py         # Slack
 │   ├── whatsapp.py      # WhatsApp
 │   ├── email.py         # Email
-│   ├── dingtalk.py      # DingTalk
-│   ├── feishu.py        # Feishu (Lark)
-│   ├── mochat.py        # MoChat
-│   └── qq.py            # Tencent QQ
+│   └── web.py           # Web/HTTP channel
 ├── providers/           # LLM provider abstraction
 │   ├── base.py          # LLMProvider ABC, LLMResponse, StreamChunk
 │   ├── litellm_provider.py  # Primary provider (100+ models via litellm)
@@ -151,7 +156,7 @@ make test-cov       # Run tests with coverage report
 make lint           # Ruff lint check
 make format         # Auto-format with ruff
 make typecheck      # Run mypy type checker
-make check          # Full validation: lint + typecheck + test
+make check          # Full validation: lint + typecheck + import-check + prompt-check + test
 make memory-eval    # Run memory retrieval benchmark
 make clean          # Remove build artifacts
 ```
@@ -198,13 +203,20 @@ Each top-level package has explicit import rules. Key forbidden imports:
 
 Full guidelines: `docs/refactoring-principles.md`
 
+### Pre-Commit Documentation Review
+
+Before every commit, review documentation affected by the changes: READMEs, CHANGELOG, ADRs, docstrings, and inline comments. Ensure they are accurate and up to date.
+
 ### Key ADRs
 
 - **ADR-001**: Modular monolith — refactor within current package structure, no microservices
 - **ADR-002**: Agent loop ownership — extract `ToolExecutor` and `DelegationDispatcher`
 - **ADR-003**: Memory architecture — typed `MemoryEvent`, mem0-first with local fallback
 - **ADR-004**: Tool execution contract — keep `Tool` ABC + `ToolResult`, extract executor
-- **ADR-005**: Observability — structured logging + correlation IDs before OpenTelemetry
+- **ADR-005**: Observability — Langfuse OTEL tracing (adopted, replaces legacy MetricsCollector)
+- **ADR-006**: Configuration strategy
+- **ADR-007**: Channel adapter model
+- **ADR-008**: Prompt management
 
 ### Prompt Files
 

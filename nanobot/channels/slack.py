@@ -15,6 +15,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.retry import connection_loop, retry_send
 from nanobot.config.schema import SlackConfig
+from nanobot.errors import DeliverySkippedError
 
 
 class SlackChannel(BaseChannel):
@@ -75,8 +76,7 @@ class SlackChannel(BaseChannel):
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Slack."""
         if not self._web_client:
-            logger.warning("Slack client not running")
-            return
+            raise DeliverySkippedError("Slack client not running")
 
         async def _do_send() -> None:
             slack_meta = msg.metadata.get("slack", {}) if msg.metadata else {}
