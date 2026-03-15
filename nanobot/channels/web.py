@@ -481,7 +481,7 @@ class WebChannel(BaseChannel):
         if not self.is_allowed(session_id):
             raise web.HTTPForbidden()
 
-        # Process attachments: images → multimodal media, text files → injected blocks
+        # Process attachments: images → multimodal image_url blocks, text files → <file> block
         media_paths: list[str] = []
         file_blocks: list[str] = []
 
@@ -495,6 +495,7 @@ class WebChannel(BaseChannel):
             if not upload_path:
                 continue
             mime = att.get("mime", "") or mimetypes.guess_type(str(upload_path))[0] or ""
+            name = att.get("name", upload_path.name)
             if mime.startswith("image/"):
                 media_paths.append(str(upload_path))
             elif mime in _TEXT_MIMES or upload_path.suffix.lower() in _TEXT_EXTENSIONS:
