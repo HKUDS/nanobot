@@ -1,6 +1,7 @@
 import json
 from types import SimpleNamespace
 
+import pydantic
 import pytest
 from typer.testing import CliRunner
 
@@ -159,7 +160,7 @@ def test_load_config_parses_notification_levels(tmp_path) -> None:
 
 
 def test_invalid_notification_level_fails_validation() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(pydantic.ValidationError):
         Config.model_validate(
             {
                 "gateway": {

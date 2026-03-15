@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from loguru import logger
+from nanobot.utils.evaluator import NotificationLevel
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -59,7 +60,7 @@ class HeartbeatService:
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
         enabled: bool = True,
-        notification_level: str = "all",
+        notification_level: NotificationLevel = "all",
     ):
         self.workspace = workspace
         self.provider = provider
