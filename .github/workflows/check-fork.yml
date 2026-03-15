@@ -1,0 +1,19 @@
+name: Check Fork Status
+on:
+  #schedule:
+    #- cron: '30 0,5,12 * * *'
+  workflow_dispatch:
+jobs:
+  check-fork:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check fork status
+        run: |
+          BEHIND=$(gh api repos/HKUDS/nanobot/compare/HKUDS:main...birdxs:main --jq '.behind_by')
+          if [ "$BEHIND" -gt 0 ]; then
+            COMMITS=$(gh api repos/HKUDS/nanobot/compare/HKUDS:main...birdxs:main --jq '.commits[:5] | .[] | "[\(.sha[:7])] \(.commit.message | split("\n")[0])"')
+            curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" -H "Content-Type: application/json" -d "{\"msg_type\": \"text\", \"content\": {\"text\": \"📦 birdxs/nanobot\n⚠️ 落后上游 $BEHIND 个 commits\n\n📝 新增提交:\n$COMMITS\"}}"
+          fi          
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
