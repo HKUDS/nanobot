@@ -190,6 +190,8 @@ class TelegramChannel(BaseChannel):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self._app: Application | None = None
+        self._bot_username: str | None = None  # Bot username for @mention detection
+        self._bot_id: int | None = None  # Bot user ID
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
         self._media_group_buffers: dict[str, dict] = {}
@@ -661,11 +663,40 @@ class TelegramChannel(BaseChannel):
         content_parts = []
         media_paths = []
 
+        is_group = message.chat.type in ("group", "supergroup")
+
+        # In group chats with "mention" policy, only respond when @mentioned or replied to
+        if is_group and self.config.group_policy == "mention":
+            if not self._is_bot_mentioned(message):
+                logger.debug(
+                    "Telegram group message in {} ignored (bot not mentioned)",
+                    chat_id,
+                )
+                return
+
         # Text content
-        if message.text:
-            content_parts.append(message.text)
+        raw_text = message.text or ""
+        # Strip the @bot_username mention from the text so the agent sees clean input
+        if self._bot_username and raw_text:
+            raw_text = re.sub(
+                rf"@{re.escape(self._bot_username)}\b",
+                "",
+                raw_text,
+                flags=re.IGNORECASE,
+            ).strip()
+        if raw_text:
+            content_parts.append(raw_text)
         if message.caption:
-            content_parts.append(message.caption)
+            caption = message.caption
+            if self._bot_username and caption:
+                caption = re.sub(
+                    rf"@{re.escape(self._bot_username)}\b",
+                    "",
+                    caption,
+                    flags=re.IGNORECASE,
+                ).strip()
+            if caption:
+                content_parts.append(caption)
 
         # Download current message media
         current_media_paths, current_media_parts = await self._download_message_media(
@@ -705,7 +736,8 @@ class TelegramChannel(BaseChannel):
                     "metadata": metadata,
                     "session_key": session_key,
                 }
-                self._start_typing(str_chat_id)
+                if self.is_allowed(sender_id):
+                    self._start_typing(str_chat_id)
             buf = self._media_group_buffers[key]
             if content and content != "[empty message]":
                 buf["contents"].append(content)
@@ -714,8 +746,9 @@ class TelegramChannel(BaseChannel):
                 self._media_group_tasks[key] = asyncio.create_task(self._flush_media_group(key))
             return
 
-        # Start typing indicator before processing
-        self._start_typing(str_chat_id)
+        # Start typing indicator only for allowed users (avoid "typing..." for denied users)
+        if self.is_allowed(sender_id):
+            self._start_typing(str_chat_id)
 
         # Forward to the message bus
         await self._handle_message(
@@ -765,6 +798,39 @@ class TelegramChannel(BaseChannel):
             pass
         except Exception as e:
             logger.debug("Typing indicator stopped for {}: {}", chat_id, e)
+
+    def _is_bot_mentioned(self, message) -> bool:
+        """Check whether the bot was @mentioned or the message is a reply to the bot."""
+        # 1. Check if the message is a reply to one of the bot's own messages
+        if message.reply_to_message and message.reply_to_message.from_user:
+            if self._bot_id and message.reply_to_message.from_user.id == self._bot_id:
+                return True
+
+        # 2. Check message entities for a mention of the bot username
+        if self._bot_username:
+            bot_lower = self._bot_username.lower()
+            for entity in message.entities or []:
+                if entity.type == "mention":
+                    # Extract @username from text
+                    mention_text = (message.text or "")[entity.offset : entity.offset + entity.length]
+                    if mention_text.lower().lstrip("@") == bot_lower:
+                        return True
+                elif entity.type == "text_mention":
+                    # Inline mention with user object
+                    if entity.user and self._bot_id and entity.user.id == self._bot_id:
+                        return True
+
+            # 3. Also check caption entities (for photos/documents with captions)
+            for entity in message.caption_entities or []:
+                if entity.type == "mention":
+                    mention_text = (message.caption or "")[entity.offset : entity.offset + entity.length]
+                    if mention_text.lower().lstrip("@") == bot_lower:
+                        return True
+                elif entity.type == "text_mention":
+                    if entity.user and self._bot_id and entity.user.id == self._bot_id:
+                        return True
+
+        return False
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
