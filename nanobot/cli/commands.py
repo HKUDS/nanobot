@@ -635,12 +635,29 @@ def agent(
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
-    def _thinking_ctx():
+    def _make_spinner():
         if logs:
-            from contextlib import nullcontext
-            return nullcontext()
-        # Animated spinner is safe to use with prompt_toolkit input handling
+            return None
         return console.status("[dim]nanobot is thinking...[/dim]", spinner="dots")
+
+    # Shared reference so progress callbacks can pause/resume the spinner
+    _active_spinner = None
+
+    def _pause_spinner() -> None:
+        """Temporarily stop the spinner before printing progress."""
+        if _active_spinner is not None:
+            try:
+                _active_spinner.stop()
+            except Exception:
+                pass
+
+    def _resume_spinner() -> None:
+        """Restart the spinner after printing progress."""
+        if _active_spinner is not None:
+            try:
+                _active_spinner.start()
+            except Exception:
+                pass
 
     async def _cli_progress(content: str, *, tool_hint: bool = False) -> None:
         ch = agent_loop.channels_config
@@ -648,13 +665,26 @@ def agent(
             return
         if ch and not tool_hint and not ch.send_progress:
             return
-        console.print(f"  [dim]↳ {content}[/dim]")
+        _pause_spinner()
+        try:
+            console.print(f"  [dim]↳ {content}[/dim]")
+        finally:
+            _resume_spinner()
 
     if message:
         # Single message mode — direct call, no bus needed
         async def run_once():
-            with _thinking_ctx():
+            nonlocal _active_spinner
+            spinner = _make_spinner()
+            _active_spinner = spinner
+            if spinner:
+                spinner.start()
+            try:
                 response = await agent_loop.process_direct(message, session_id, on_progress=_cli_progress)
+            finally:
+                if spinner:
+                    spinner.stop()
+                _active_spinner = None
             _print_agent_response(response, render_markdown=markdown)
             await agent_loop.close_mcp()
 
@@ -704,7 +734,11 @@ def agent(
                             elif ch and not is_tool_hint and not ch.send_progress:
                                 pass
                             else:
-                                await _print_interactive_line(msg.content)
+                                _pause_spinner()
+                                try:
+                                    await _print_interactive_line(msg.content)
+                                finally:
+                                    _resume_spinner()
 
                         elif not turn_done.is_set():
                             if msg.content:
@@ -744,8 +778,17 @@ def agent(
                             content=user_input,
                         ))
 
-                        with _thinking_ctx():
+                        nonlocal _active_spinner
+                        spinner = _make_spinner()
+                        _active_spinner = spinner
+                        if spinner:
+                            spinner.start()
+                        try:
                             await turn_done.wait()
+                        finally:
+                            if spinner:
+                                spinner.stop()
+                            _active_spinner = None
 
                         if turn_response:
                             _print_agent_response(turn_response[0], render_markdown=markdown)
