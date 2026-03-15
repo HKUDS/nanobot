@@ -444,6 +444,15 @@ def gateway(
     )
 
     # Set cron callback (needs agent)
+    channels = ChannelManager(config, bus)
+
+    if channels.api_channel is not None:
+        exposed_tools = set(config.channels.api.exposed_tools)
+        channels.api_channel.set_tool_runtime(
+            list_tools=lambda: agent.list_api_tools(exposed_tools),
+            call_tool=lambda name, arguments: agent.call_api_tool(name, arguments, exposed_tools),
+        )
+
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
         from nanobot.agent.tools.cron import CronTool
@@ -488,9 +497,6 @@ def gateway(
                 ))
         return response
     cron.on_job = on_cron_job
-
-    # Create channel manager
-    channels = ChannelManager(config, bus)
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""

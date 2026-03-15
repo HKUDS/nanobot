@@ -14,6 +14,15 @@ class Base(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
+class ApiChannelConfig(Base):
+    """Unix-socket API channel configuration."""
+
+    enabled: bool = False
+    socket_path: str = ""
+    allow_from: list[str] = Field(default_factory=lambda: ["*"])
+    exposed_tools: list[str] = Field(default_factory=list)
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels.
 
@@ -25,6 +34,7 @@ class ChannelsConfig(Base):
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
+    api: ApiChannelConfig = Field(default_factory=ApiChannelConfig)
 
 
 class AgentDefaults(Base):

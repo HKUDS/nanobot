@@ -27,6 +27,7 @@ class ChannelManager:
         self.bus = bus
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
+        self._api_channel: "ApiChannel | None" = None
 
         self._init_channels()
 
@@ -54,6 +55,15 @@ class ChannelManager:
                 logger.info("{} channel enabled", cls.display_name)
             except Exception as e:
                 logger.warning("{} channel not available: {}", name, e)
+
+        # API channel
+        if self.config.channels.api.enabled:
+            from nanobot.channels.api import ApiChannel
+
+            api_channel = ApiChannel(self.config.channels.api, self.bus)
+            self.channels["api"] = api_channel
+            self._api_channel = api_channel
+            logger.info("API channel enabled ({})", api_channel._socket_path)
 
         self._validate_allow_from()
 
@@ -140,6 +150,10 @@ class ChannelManager:
                 continue
             except asyncio.CancelledError:
                 break
+
+    @property
+    def api_channel(self):
+        return self._api_channel
 
     def get_channel(self, name: str) -> BaseChannel | None:
         """Get a channel by name."""
