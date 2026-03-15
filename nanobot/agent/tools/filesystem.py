@@ -363,3 +363,35 @@ class ListDirTool(_FsTool):
             return f"Error: {e}"
         except Exception as e:
             return f"Error listing directory: {e}"
+
+
+class LoadSkillTool(Tool):
+    """Tool to load a skill by name, bypassing workspace restriction."""
+
+    def __init__(self, skills_loader):
+        self._skills_loader = skills_loader
+
+    @property
+    def name(self) -> str:
+        return "load_skill"
+
+    @property
+    def description(self) -> str:
+        return "Load a skill by name. Returns the full SKILL.md content."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "The skill name to load"}},
+            "required": ["name"],
+        }
+
+    async def execute(self, name: str, **kwargs: Any) -> str:
+        try:
+            content = self._skills_loader.load_skill(name)
+            if content is None:
+                return f"Error: Skill not found: {name}"
+            return content
+        except Exception as e:
+            return f"Error loading skill: {str(e)}"
