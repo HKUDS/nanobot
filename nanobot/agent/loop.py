@@ -327,7 +327,8 @@ class AgentLoop:
 
                 for tc in response.tool_calls:
                     tools_used.append(tc.name)
-                    args_str = json.dumps(tc.arguments, ensure_ascii=False)
+                    max_len = 60
+                    args_str = json.dumps({k: (v[:max_len-3]+"..." if isinstance(v,str) and len(v)>max_len else v) for k,v in tc.arguments.items()})
                     logger.info("Tool call: {}({})", tc.name, args_str[:200])
 
                 # Re-bind tool context right before execution so that
