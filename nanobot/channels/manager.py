@@ -36,8 +36,15 @@ class ChannelManager:
 
         groq_key = self.config.providers.groq.api_key
 
+        def _to_camel(snake: str) -> str:
+            parts = snake.split("_")
+            return parts[0] + "".join(p.title() for p in parts[1:])
+
         for name, cls in discover_all().items():
+            # Try snake_case first (attribute), then camelCase (model_extra for plugin channels)
             section = getattr(self.config.channels, name, None)
+            if section is None:
+                section = (self.config.channels.model_extra or {}).get(_to_camel(name))
             if section is None:
                 continue
             enabled = (
@@ -51,6 +58,10 @@ class ChannelManager:
                 channel = cls(section, self.bus)
                 channel.transcription_api_key = groq_key
                 self.channels[name] = channel
+                # Also register by cls.name so OutboundMessage routing works
+                # even when the module name differs from the channel's name attribute
+                if hasattr(cls, "name") and cls.name and cls.name != name:
+                    self.channels[cls.name] = channel
                 logger.info("{} channel enabled", cls.display_name)
             except Exception as e:
                 logger.warning("{} channel not available: {}", name, e)
@@ -81,9 +92,14 @@ class ChannelManager:
         # Start outbound dispatcher
         self._dispatch_task = asyncio.create_task(self._dispatch_outbound())
 
-        # Start channels
+        # Start channels (deduplicate by object identity to avoid double-starting
+        # channels registered under multiple keys, e.g. inter_agent + interagent)
         tasks = []
+        seen: set[int] = set()
         for name, channel in self.channels.items():
+            if id(channel) in seen:
+                continue
+            seen.add(id(channel))
             logger.info("Starting {} channel...", name)
             tasks.append(asyncio.create_task(self._start_channel(name, channel)))
 
@@ -102,8 +118,12 @@ class ChannelManager:
             except asyncio.CancelledError:
                 pass
 
-        # Stop all channels
+        # Stop all channels (deduplicate by object identity)
+        seen: set[int] = set()
         for name, channel in self.channels.items():
+            if id(channel) in seen:
+                continue
+            seen.add(id(channel))
             try:
                 await channel.stop()
                 logger.info("Stopped {} channel", name)
