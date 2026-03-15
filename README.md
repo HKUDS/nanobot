@@ -86,6 +86,7 @@
 - [Features](#-features)
 - [Install](#-install)
 - [Quick Start](#-quick-start)
+- [Web UI](#-web-ui)
 - [Chat Apps](#-chat-apps)
 - [Agent Social Network](#-agent-social-network)
 - [Configuration](#️-configuration)
@@ -213,6 +214,35 @@ nanobot agent
 ```
 
 That's it! You have a working AI assistant in 2 minutes.
+
+## 🌐 Web UI
+
+Run nanobot in your browser with a lightweight chat page.
+
+**Start**
+
+On Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File webui/start_webui.ps1
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8790
+```
+
+**Stop**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File webui/stop_webui.ps1
+```
+
+Notes:
+- HTTP listens on port `8790`.
+- WebSocket listens on port `8791`.
+- Logs and runtime pid files are ignored by git via `webui/.gitignore`.
 
 ## 💬 Chat Apps
 
