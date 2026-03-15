@@ -82,6 +82,25 @@ class HeartbeatService:
                 return None
         return None
 
+    @staticmethod
+    def _has_active_tasks(content: str) -> bool:
+        """Return True only if there are non-empty, non-comment lines under ## Active Tasks."""
+        in_active = False
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("## "):
+                in_active = stripped == "## Active Tasks"
+                continue
+            if not in_active:
+                continue
+            if not stripped:
+                continue
+            if stripped.startswith("<!--") and stripped.endswith("-->"):
+                continue
+            # Real task content found
+            return True
+        return False
+
     async def _decide(self, content: str) -> tuple[str, str]:
         """Phase 1: ask LLM to decide skip/run via virtual tool call.
 
@@ -146,6 +165,10 @@ class HeartbeatService:
             logger.debug("Heartbeat: HEARTBEAT.md missing or empty")
             return
 
+        if not self._has_active_tasks(content):
+            logger.debug("Heartbeat: no active tasks, skipping LLM check")
+            return
+
         logger.info("Heartbeat: checking for tasks...")
 
         try:
@@ -174,7 +197,7 @@ class HeartbeatService:
     async def trigger_now(self) -> str | None:
         """Manually trigger a heartbeat."""
         content = self._read_heartbeat_file()
-        if not content:
+        if not content or not self._has_active_tasks(content):
             return None
         action, tasks = await self._decide(content)
         if action != "run" or not self.on_execute:
