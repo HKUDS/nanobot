@@ -7,7 +7,7 @@ import re
 import threading
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from loguru import logger
 
@@ -15,7 +15,8 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import FeishuConfig
+from nanobot.config.schema import Base
+from pydantic import Field
 
 import importlib.util
 
@@ -104,11 +105,6 @@ def _extract_element_content(element: dict) -> list[str]:
         content = element.get("content", "")
         if content:
             parts.append(content)
-
-    elif tag == "text":
-        text = element.get("text", "")
-        if isinstance(text, str) and text:
-            parts.append(text)
 
     elif tag == "div":
         text = element.get("text", {})
@@ -236,6 +232,21 @@ def _extract_post_text(content_json: dict) -> str:
     return text
 
 
+class FeishuConfig(Base):
+    """Feishu/Lark channel configuration using WebSocket long connection."""
+
+    enabled: bool = False
+    app_id: str = ""
+    app_secret: str = ""
+    encrypt_key: str = ""
+    verification_token: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+    react_emoji: str = "THUMBSUP"
+    group_policy: Literal["open", "mention", "allowlist"] = "mention"  # "allowlist" restricts to specific group chat_ids
+    group_allow_from: list[str] = Field(default_factory=list)  # Allowed group chat_ids (for allowlist policy)
+    bot_names: dict[str, str] = Field(default_factory=dict)  # Maps bot open_id or app_id to readable names in HISTORY.md
+
+
 class FeishuChannel(BaseChannel):
     """
     Feishu/Lark channel using WebSocket long connection.
@@ -251,7 +262,13 @@ class FeishuChannel(BaseChannel):
     name = "feishu"
     display_name = "Feishu"
 
-    def __init__(self, config: FeishuConfig, bus: MessageBus):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return FeishuConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = FeishuConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: FeishuConfig = config
         self._client: Any = None
@@ -259,7 +276,7 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._bot_open_id: str | None = None  # Bot's own open_id, fetched on start
+        self._bot_open_id: str | None = None  # Bot's own open_id for mention detection
 
     @staticmethod
     def _register_optional_event(builder: Any, method_name: str, handler: Any) -> Any:
@@ -288,22 +305,8 @@ class FeishuChannel(BaseChannel):
             .log_level(lark.LogLevel.INFO) \
             .build()
 
-        # Fetch bot's own open_id to correctly identify self in group @mentions
-        try:
-            import requests as _requests
-            _resp = _requests.get(
-                "https://open.feishu.cn/open-apis/bot/v3/info",
-                headers={"Authorization": f"Bearer {self._get_tenant_access_token()}"},
-                timeout=5,
-            )
-            _data = _resp.json()
-            self._bot_open_id = (_data.get("bot") or {}).get("open_id")
-            if self._bot_open_id:
-                logger.info(f"Feishu: bot open_id = {self._bot_open_id}")
-            else:
-                logger.warning("Feishu: could not fetch bot open_id, group mention filter may be inaccurate")
-        except Exception as e:
-            logger.warning(f"Feishu: failed to fetch bot open_id: {e}")
+        # Fetch bot's own open_id for precise mention detection in group chats
+        await self._fetch_bot_info()
 
         builder = lark.EventDispatcherHandler.builder(
             self.config.encrypt_key or "",
@@ -376,43 +379,66 @@ class FeishuChannel(BaseChannel):
         self._running = False
         logger.info("Feishu bot stopped")
 
-    def _get_tenant_access_token(self) -> str:
-        """Fetch a tenant_access_token using app_id and app_secret."""
-        import requests as _requests
-        resp = _requests.post(
-            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-            json={"app_id": self.config.app_id, "app_secret": self.config.app_secret},
-            timeout=5,
-        )
-        return resp.json().get("tenant_access_token", "")
-
     def _is_bot_mentioned(self, message: Any) -> bool:
-        """Check if this bot is @mentioned in the message."""
+        """Check if the bot is @mentioned in the message."""
         raw_content = message.content or ""
         if "@_all" in raw_content:
             return True
 
-        for mention in getattr(message, "mentions", None) or []:
-            mid = getattr(mention, "id", None)
-            if not mid:
-                continue
-            mention_open_id = getattr(mid, "open_id", None) or ""
-            # If we know our own open_id, match exactly to avoid responding to
-            # mentions of other bots in the same group.
-            if self._bot_open_id:
-                if mention_open_id == self._bot_open_id:
+        mentions = getattr(message, "mentions", None) or []
+        if self._bot_open_id:
+            # Precise match: only respond when this bot's exact open_id is mentioned
+            for mention in mentions:
+                mid = getattr(mention, "id", None)
+                if mid and getattr(mid, "open_id", None) == self._bot_open_id:
                     return True
-            else:
-                # Fallback: any bot mention (no user_id, valid ou_ open_id)
-                if not getattr(mid, "user_id", None) and mention_open_id.startswith("ou_"):
+            return False
+        else:
+            # Fallback (open_id fetch failed): any bot mention triggers response
+            for mention in mentions:
+                mid = getattr(mention, "id", None)
+                if not mid:
+                    continue
+                if not getattr(mid, "user_id", None) and (getattr(mid, "open_id", None) or "").startswith("ou_"):
                     return True
-        return False
+            return False
 
-    def _is_group_message_for_bot(self, message: Any) -> bool:
-        """Allow group messages when policy is open or bot is @mentioned."""
-        if self.config.group_policy == "open":
+    def _is_group_message_for_bot(self, message: Any, chat_id: str = "") -> bool:
+        """Allow group messages based on group_policy."""
+        policy = self.config.group_policy
+        if policy == "open":
             return True
+        if policy == "allowlist":
+            return chat_id in self.config.group_allow_from
+        # default: "mention"
         return self._is_bot_mentioned(message)
+
+    async def _fetch_bot_info(self) -> None:
+        """Fetch the bot's own open_id via Feishu API for precise mention detection."""
+        try:
+            loop = asyncio.get_running_loop()
+
+            def _get_bot_info():
+                import lark_oapi as lark
+                req = lark.BaseRequest()
+                req.http_method = lark.HttpMethod.GET
+                req.uri = "/open-apis/bot/v3/info"
+                req.token_types = {lark.AccessTokenType.TENANT}
+                return self._client.request(req)
+
+            response = await loop.run_in_executor(None, _get_bot_info)
+            if response.success():
+                import json as _json
+                data = _json.loads(response.raw.content)
+                self._bot_open_id = data.get("bot", {}).get("open_id")
+                if self._bot_open_id:
+                    logger.info("Feishu bot open_id: {}", self._bot_open_id)
+                else:
+                    logger.warning("Bot info response missing open_id: {}", data)
+            else:
+                logger.warning("Failed to fetch bot info: code={}, msg={}", response.code, response.msg)
+        except Exception as e:
+            logger.warning("Could not fetch bot info (mention detection may not work): {}", e)
 
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
         """Sync helper for adding reaction (runs in thread pool)."""
@@ -946,38 +972,21 @@ class FeishuChannel(BaseChannel):
             while len(self._processed_message_ids) > 1000:
                 self._processed_message_ids.popitem(last=False)
 
+            # Skip bot messages
+            if sender.sender_type == "bot":
+                return
+
             sender_id = sender.sender_id.open_id if sender.sender_id else "unknown"
             chat_id = message.chat_id
             chat_type = message.chat_type
             msg_type = message.message_type
-            is_bot_sender = sender.sender_type == "bot"
 
-            # Skip messages sent by this bot itself
-            if is_bot_sender and sender_id == self._bot_open_id:
+            if chat_type == "group" and not self._is_group_message_for_bot(message, chat_id):
+                logger.debug("Feishu: skipping group message (policy={}, chat={})", self.config.group_policy, chat_id)
                 return
 
-            # Determine if this bot is mentioned (only relevant for group messages)
-            is_mentioned = self._is_bot_mentioned(message) if chat_type == "group" else True
-
-            # Bot messages in group: always record silently, never reply
-            if is_bot_sender and chat_type == "group":
-                pass  # fall through to parse content, then record silently below
-
-            elif chat_type == "group" and self.config.group_policy == "mention" and not is_mentioned:
-                # Not mentioned — will silently record the message to memory after parsing
-                pass  # continue to parse content below, then handle silently
-            elif chat_type == "group" and self.config.group_policy == "mention" and is_mentioned:
-                # Mentioned — sync group history first, then add reaction and proceed
-                # Use this message's create_time as end_time so we don't miss messages
-                # that arrived between the last sync and this mention
-                mention_ts = int(getattr(message, "create_time", 0) or 0)
-                if mention_ts > 1e10:  # milliseconds → seconds
-                    mention_ts = mention_ts // 1000
-                await self._sync_group_history(chat_id, message_id, mention_ts or None)
-                await self._add_reaction(message_id, self.config.react_emoji)
-            else:
-                # open policy or DM — add reaction and proceed normally
-                await self._add_reaction(message_id, self.config.react_emoji)
+            # Add reaction
+            await self._add_reaction(message_id, self.config.react_emoji)
 
             # Parse content
             content_parts = []
@@ -1034,19 +1043,6 @@ class FeishuChannel(BaseChannel):
 
             # Forward to message bus
             reply_to = chat_id if chat_type == "group" else sender_id
-
-            if is_bot_sender and chat_type == "group":
-                # Another bot's message: silently record with bot label, never reply
-                logger.debug("Feishu: bot message in group, recording silently (sender={})", sender_id)
-                await self._record_to_memory(sender_id, chat_id, content, is_bot=True)
-                return
-
-            if chat_type == "group" and self.config.group_policy == "mention" and not is_mentioned:
-                # Not mentioned: silently record to memory/history without replying
-                logger.debug("Feishu: not mentioned, recording message to memory silently")
-                await self._record_to_memory(sender_id, chat_id, content)
-                return
-
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=reply_to,
@@ -1061,173 +1057,6 @@ class FeishuChannel(BaseChannel):
 
         except Exception as e:
             logger.error("Error processing Feishu message: {}", e)
-
-    def _get_cursor_path(self) -> "Path":
-        """Return path to group sync cursor file."""
-        from nanobot.config.loader import get_config_path
-        return get_config_path().parent / "workspace" / "memory" / "group_sync_cursor.json"
-
-    def _load_cursor(self, chat_id: str) -> float:
-        """Return last synced timestamp (Unix seconds) for a chat, default 0."""
-        import json as _json
-        path = self._get_cursor_path()
-        if not path.exists():
-            return 0.0
-        try:
-            data = _json.loads(path.read_text(encoding="utf-8"))
-            return float(data.get(chat_id, 0))
-        except Exception:
-            return 0.0
-
-    def _save_cursor(self, chat_id: str, ts: float) -> None:
-        """Persist last synced timestamp for a chat."""
-        import json as _json
-        path = self._get_cursor_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        data: dict = {}
-        if path.exists():
-            try:
-                data = _json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-        data[chat_id] = ts
-        path.write_text(_json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-
-    async def _sync_group_history(self, chat_id: str, before_message_id: str, mention_ts: int | None = None) -> None:
-        """Pull group chat history since last cursor and append new messages to HISTORY.md.
-
-        Called when this bot is mentioned, before handling the mention message.
-        Uses mention_ts (the mention message's create_time in seconds) as end_time,
-        so messages between the last sync and this mention are never missed.
-        Skips messages already recorded (dedup by cursor timestamp).
-        Skips messages sent by this bot itself.
-        """
-        import json as _json
-        import time
-
-        try:
-            token = self._get_tenant_access_token()
-            last_ts = self._load_cursor(chat_id)
-            end_time = mention_ts or int(time.time())
-            # BUG-4 fix: first sync only pulls last 24h to avoid fetching entire group history
-            if last_ts:
-                start_time = int(last_ts) + 1
-            else:
-                start_time = end_time - 86400
-
-            params: dict = {
-                "container_id_type": "chat",
-                "container_id": chat_id,
-                "sort_type": "ByCreateTimeAsc",
-                "page_size": 50,
-                "start_time": str(start_time),
-                "end_time": str(end_time),
-            }
-
-            import requests as _requests
-            headers = {"Authorization": f"Bearer {token}"}
-            url = "https://open.feishu.cn/open-apis/im/v1/messages"
-
-            new_entries: list[str] = []
-            latest_ts: float = last_ts
-            has_more = True
-
-            while has_more:
-                resp = _requests.get(url, headers=headers, params=params, timeout=10)
-                data = resp.json()
-                if data.get("code") != 0:
-                    logger.warning("Feishu: get chat history failed: {}", data.get("msg"))
-                    break
-
-                items = (data.get("data") or {}).get("items") or []
-                has_more = (data.get("data") or {}).get("has_more", False)
-                page_token = (data.get("data") or {}).get("page_token")
-                if has_more and page_token:
-                    params["page_token"] = page_token
-
-                from datetime import datetime
-                for item in items:
-                    msg_id = item.get("message_id", "")
-                    # Skip the trigger message itself (already handled by _on_message)
-                    if msg_id == before_message_id:
-                        continue
-                    sender = item.get("sender") or {}
-                    sender_id = sender.get("id", "")
-                    sender_type = sender.get("sender_type", "")
-                    # BUG-1 fix: REST API returns sender_type="app" and id=app_id for bot messages
-                    # (unlike WebSocket events which use sender_type="bot" and id=open_id)
-                    is_bot = sender_type == "app"
-                    # Skip self: compare app_id directly since REST API uses app_id for bots
-                    if is_bot and sender_id == self.config.app_id:
-                        continue
-                    create_time_ms = int(item.get("create_time", 0))
-                    create_ts = create_time_ms / 1000
-                    ts_str = datetime.fromtimestamp(create_ts).strftime("%Y-%m-%d %H:%M")
-
-                    # Extract text content
-                    try:
-                        body = _json.loads(item.get("body", {}).get("content", "{}"))
-                    except Exception:
-                        body = {}
-                    msg_type = item.get("msg_type", "text")
-                    if msg_type == "text":
-                        text = body.get("text", "").strip()
-                    elif msg_type == "post":
-                        text, _ = _extract_post_content(body)
-                    elif msg_type in ("interactive", "share_chat", "share_user", "share_calendar_event", "system", "merge_forward"):
-                        text = _extract_share_card_content(body, msg_type)
-                    else:
-                        text = MSG_TYPE_MAP.get(msg_type, f"[{msg_type}]")
-
-                    if not text:
-                        continue
-
-                    summary = text[:300] + ("..." if len(text) > 300 else "")
-                    if is_bot:
-                        # BUG-2 fix: REST API uses app_id as key, bot_names supports both app_id and open_id
-                        name = self.config.bot_names.get(sender_id, sender_id)
-                        label = f"[bot:{name}]"
-                    else:
-                        label = f"[user:{sender_id}]"
-
-                    entry = f"[{ts_str}] [feishu-group:{chat_id}] (silent) {label}: {summary}\n"
-                    new_entries.append(entry)
-                    if create_ts > latest_ts:
-                        latest_ts = create_ts
-
-                if not has_more:
-                    break
-
-            if new_entries:
-                from nanobot.config.loader import get_config_path
-                history_path = get_config_path().parent / "workspace" / "memory" / "HISTORY.md"
-                history_path.parent.mkdir(parents=True, exist_ok=True)
-                with history_path.open("a", encoding="utf-8") as f:
-                    f.writelines(new_entries)
-                logger.debug("Feishu: synced {} messages from group history", len(new_entries))
-
-            # Always update cursor to now to avoid re-fetching on next mention
-            self._save_cursor(chat_id, float(end_time))
-
-        except Exception as e:
-            logger.warning("Feishu: failed to sync group history: {}", e)
-
-    async def _record_to_memory(self, sender_id: str, chat_id: str, content: str, is_bot: bool = False) -> None:
-        """Silently record a group message to HISTORY.md without replying."""
-        try:
-            from datetime import datetime
-            from nanobot.config.loader import get_config_path
-            history_path = get_config_path().parent / "workspace" / "memory" / "HISTORY.md"
-            history_path.parent.mkdir(parents=True, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-            summary = content[:300] + ("..." if len(content) > 300 else "")
-            label = f"[bot:{self.config.bot_names.get(sender_id, sender_id)}]" if is_bot else f"[user:{sender_id}]"
-            entry = f"[{timestamp}] [feishu-group:{chat_id}] (silent) {label}: {summary}\n"
-            with history_path.open("a", encoding="utf-8") as f:
-                f.write(entry)
-            logger.debug("Feishu: recorded {} group message to HISTORY.md", "bot" if is_bot else "unmentioned user")
-        except Exception as e:
-            logger.warning(f"Feishu: failed to record message to memory: {e}")
 
     def _on_reaction_created(self, data: Any) -> None:
         """Ignore reaction events so they do not generate SDK noise."""
