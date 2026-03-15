@@ -48,6 +48,31 @@ function Test-AlreadyRunning {
 
     try {
         $proc = Get-Process -Id ([int]$existingPid) -ErrorAction Stop
+
+        # Validate that this PID actually belongs to the Web UI by checking the command line
+        $resolvedRunPy = $null
+        try {
+            $resolvedRunPy = (Resolve-Path -Path $runPy -ErrorAction Stop).Path
+        } catch {
+            $resolvedRunPy = $runPy
+        }
+
+        $cmdLine = $null
+        try {
+            $cimProc = Get-CimInstance Win32_Process -Filter "ProcessId = $($proc.Id)" -ErrorAction Stop
+            $cmdLine = $cimProc.CommandLine
+        } catch {
+            $cmdLine = $null
+        }
+
+        if ($cmdLine -and $resolvedRunPy) {
+            if ($cmdLine -notlike "*$resolvedRunPy*") {
+                # PID has been reused by a different process; clear stale PID file
+                Remove-Item $PidPath -Force -ErrorAction SilentlyContinue
+                return $false
+            }
+        }
+
         Write-Host "Web UI already running (PID: $($proc.Id))."
         Write-Host "Open: http://127.0.0.1:8790"
         return $true
