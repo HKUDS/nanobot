@@ -108,6 +108,32 @@ def test_exec_extract_absolute_paths_captures_posix_absolute_paths() -> None:
     assert "/tmp/out.txt" in paths
 
 
+def test_exec_extract_absolute_paths_captures_home_paths() -> None:
+    cmd = "cat ~/.nanobot/config.json > ~/out.txt"
+    paths = ExecTool._extract_absolute_paths(cmd)
+    assert "~/.nanobot/config.json" in paths
+    assert "~/out.txt" in paths
+
+
+def test_exec_extract_absolute_paths_captures_quoted_paths() -> None:
+    cmd = 'cat "/tmp/data.txt" "~/.nanobot/config.json"'
+    paths = ExecTool._extract_absolute_paths(cmd)
+    assert "/tmp/data.txt" in paths
+    assert "~/.nanobot/config.json" in paths
+
+
+def test_exec_guard_blocks_home_path_outside_workspace(tmp_path) -> None:
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command("cat ~/.nanobot/config.json", str(tmp_path))
+    assert error == "Error: Command blocked by safety guard (path outside working dir)"
+
+
+def test_exec_guard_blocks_quoted_home_path_outside_workspace(tmp_path) -> None:
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command('cat "~/.nanobot/config.json"', str(tmp_path))
+    assert error == "Error: Command blocked by safety guard (path outside working dir)"
+
+
 # --- cast_params tests ---
 
 
@@ -337,3 +363,46 @@ def test_cast_params_single_value_not_auto_wrapped_to_array() -> None:
     assert result["items"] == 5  # Not wrapped to [5]
     result = tool.cast_params({"items": "text"})
     assert result["items"] == "text"  # Not wrapped to ["text"]
+
+
+# --- ExecTool enhancement tests ---
+
+
+async def test_exec_always_returns_exit_code() -> None:
+    """Exit code should appear in output even on success (exit 0)."""
+    tool = ExecTool()
+    result = await tool.execute(command="echo hello")
+    assert "Exit code: 0" in result
+    assert "hello" in result
+
+
+async def test_exec_head_tail_truncation() -> None:
+    """Long output should preserve both head and tail."""
+    tool = ExecTool()
+    # Generate output that exceeds _MAX_OUTPUT (10_000 chars)
+    # Use python to generate output to avoid command line length limits
+    result = await tool.execute(
+        command="python -c \"print('A' * 6000 + '\\n' + 'B' * 6000)\""
+    )
+    assert "chars truncated" in result
+    # Head portion should start with As
+    assert result.startswith("A")
+    # Tail portion should end with the exit code which comes after Bs
+    assert "Exit code:" in result
+
+
+async def test_exec_timeout_parameter() -> None:
+    """LLM-supplied timeout should override the constructor default."""
+    tool = ExecTool(timeout=60)
+    # A very short timeout should cause the command to be killed
+    result = await tool.execute(command="sleep 10", timeout=1)
+    assert "timed out" in result
+    assert "1 seconds" in result
+
+
+async def test_exec_timeout_capped_at_max() -> None:
+    """Timeout values above _MAX_TIMEOUT should be clamped."""
+    tool = ExecTool()
+    # Should not raise — just clamp to 600
+    result = await tool.execute(command="echo ok", timeout=9999)
+    assert "Exit code: 0" in result
