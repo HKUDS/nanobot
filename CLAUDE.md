@@ -19,7 +19,7 @@ Run this after every code change. Fix any errors before proceeding.
 Before committing:
 
 ```bash
-make check    # lint + typecheck + test (full validation)
+make check    # lint + typecheck + import-check + prompt-check + test (full validation)
 ```
 
 ## Python Conventions
@@ -42,16 +42,28 @@ nanobot/
 │   ├── verifier.py      # Answer verification via LLM + grounding confidence
 │   ├── consolidation.py # Memory consolidation orchestration + fallback archival
 │   ├── context.py       # Prompt assembly + token budgeting
+│   ├── coordinator.py   # Multi-agent intent routing, role classification
+│   ├── delegation.py    # Delegation routing, cycle detection, contract construction
+│   ├── tool_executor.py # Tool batching (parallel readonly / sequential write)
+│   ├── registry.py      # AgentRegistry: maps role names to AgentRoleConfig
+│   ├── scratchpad.py    # Session-scoped JSONL artifact sharing (multi-agent)
 │   ├── skills.py        # Skill discovery and loading
 │   ├── subagent.py      # Subagent spawning
+│   ├── observability.py # Langfuse OTEL tracing: init, shutdown, spans, scoring
+│   ├── tracing.py       # Correlation IDs via contextvars, structured log binding
 │   ├── memory/          # Memory subsystem
 │   │   ├── store.py     # MemoryStore — primary public API (mem0-first with local fallback)
+│   │   ├── event.py     # MemoryEvent Pydantic model + KnowledgeTriple
 │   │   ├── retrieval.py # Local keyword retrieval (fallback when mem0 unavailable)
 │   │   ├── extractor.py # LLM + heuristic event extraction
 │   │   ├── persistence.py # JSONL events + profile.json + MEMORY.md file I/O
 │   │   ├── mem0_adapter.py # mem0 vector store adapter with health checks
 │   │   ├── reranker.py  # Optional cross-encoder re-ranking
-│   │   └── constants.py # Shared constants and tool schemas
+│   │   ├── constants.py # Shared constants and tool schemas
+│   │   ├── graph.py     # Knowledge graph support (optional, needs neo4j)
+│   │   ├── ontology.py  # Ontology management (re-exports classifier, linker)
+│   │   ├── entity_classifier.py # Entity type classification
+│   │   └── entity_linker.py    # Entity linking and resolution
 │   └── tools/           # Tool implementations
 │       ├── base.py      # Tool ABC + ToolResult dataclass
 │       ├── registry.py  # ToolRegistry — dynamic registration + parallel/sequential execution
@@ -59,13 +71,25 @@ nanobot/
 │       ├── filesystem.py # File read/write/edit/list tools with path validation
 │       ├── web.py       # WebFetch + WebSearch
 │       ├── mcp.py       # Model Context Protocol
-│       └── ...          # feedback, cron, message, spawn tools
+│       ├── delegate.py  # Multi-agent delegation tools
+│       ├── result_cache.py # Large result caching + LLM summarization
+│       ├── excel.py     # Spreadsheet read, query, describe, find tools
+│       ├── cron.py      # Scheduled task tool
+│       ├── feedback.py  # User feedback capture tool
+│       ├── message.py   # Outbound message tool
+│       ├── spawn.py     # Subagent spawning tool
+│       └── scratchpad.py # Scratchpad read/write tools
 ├── config/              # Pydantic config models + loader with migration
 ├── channels/            # Chat platforms (Telegram, Discord, Slack, WhatsApp, ...)
 │   ├── base.py          # BaseChannel ABC + ChannelHealth
 │   ├── retry.py         # Shared retry helpers, health tracking, reconnection loop
 │   ├── manager.py       # ChannelManager (multi-channel orchestration + dead-letter queue)
-│   └── ...              # 9 platform adapters
+│   ├── telegram.py      # Telegram (group mention policy, media handling)
+│   ├── discord.py       # Discord
+│   ├── slack.py         # Slack
+│   ├── whatsapp.py      # WhatsApp (localhost bridge)
+│   ├── email.py         # Email (IMAP/SMTP)
+│   └── web.py           # Web/HTTP channel
 ├── providers/           # LLM providers (litellm, OpenAI Codex, custom)
 ├── bus/                 # Async message bus (decoupled channel↔agent)
 ├── session/             # Conversation session management
@@ -143,14 +167,14 @@ make test           # Run tests (stop on first failure)
 make lint           # Ruff lint check
 make format         # Auto-format with ruff
 make typecheck      # mypy type checker
-make check          # Full validation: lint + typecheck + test
+make check          # Full validation: lint + typecheck + import-check + prompt-check + test
 make memory-eval    # Deterministic memory retrieval benchmark
 make clean          # Remove __pycache__, .mypy_cache, etc.
 ```
 
 ## Architecture & Refactoring
 
-- Architecture decisions: `docs/adr/` (ADR-001 through ADR-005)
+- Architecture decisions: `docs/adr/` (ADR-001 through ADR-008)
 - Module ownership and import rules: `docs/architecture.md`
 - Refactoring guidelines: `docs/refactoring-principles.md`
 - Reusable prompts: `.github/prompts/`

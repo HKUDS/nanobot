@@ -16,7 +16,7 @@ Run after every code change:
 
 ```bash
 make lint && make typecheck    # Fast feedback
-make check                     # Full: lint + typecheck + test
+make check                     # Full: lint + typecheck + import-check + prompt-check + test
 ```
 
 ## Python Conventions
@@ -33,9 +33,9 @@ make check                     # Full: lint + typecheck + test
 
 ```
 nanobot/
-├── agent/               # Core: loop.py, streaming.py, verifier.py, consolidation.py, tools/, memory/
+├── agent/               # Core: loop.py, streaming.py, verifier.py, consolidation.py, context.py, coordinator.py, delegation.py, tool_executor.py, observability.py, tracing.py, tools/, memory/
 ├── config/              # Pydantic config models + loader
-├── channels/            # Chat platforms (base.py, retry.py, manager.py + 9 adapters)
+├── channels/            # Chat platforms (base.py, retry.py, manager.py + 6 adapters)
 ├── providers/           # LLM providers (litellm → 100+ models, OpenAI Codex, custom)
 ├── bus/                 # Async message bus (channel↔agent decoupling)
 ├── session/             # Conversation session management
@@ -93,7 +93,7 @@ nanobot/
 
 ## Architecture & Refactoring
 
-- Architecture decisions: `docs/adr/` (ADR-001 through ADR-005)
+- Architecture decisions: `docs/adr/` (ADR-001 through ADR-008)
 - Module ownership and import rules: `docs/architecture.md`
 - Refactoring guidelines: `docs/refactoring-principles.md`
 - Reusable prompt files: `.github/prompts/`

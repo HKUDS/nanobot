@@ -7,6 +7,12 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Honest delivery**: `DeliveryResult` dataclass + `DeliverySkippedError` for truthful send confirmation
+- **Tool retry guard**: `ToolCallTracker` with 3-level escalation (warn → inject → force-stop) to prevent infinite tool loops
+- **Email validation**: `allow_to` allowlist + `proactive_send_policy` config fields; address format validation
+- **Compression coherence**: paired-drop logic (`_paired_drop_tools`) preserves tool-call/result pairs during context truncation
+- **Delegation verification**: `DelegationResult` attestation, scratchpad grounded tags, post-delegation nudge for ungrounded results
+- **Langfuse hardening**: `atexit` shutdown safety net, `auth_check()` on startup, `sample_rate`/`debug` config fields, verification confidence scoring via `score_current_trace`, session/user/tag propagation on all traces, logging filters for benign litellm/langfuse/OTEL warnings
 - **CI enforcement**: import-boundary check, prompt-manifest integrity, coverage gate (85%)
 - **CODEOWNERS**: code review ownership for all major subsystems
 - **Contract tests**: LLMProvider, MemoryStore, and BaseChannel compliance suites
@@ -27,8 +33,13 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `_process_message()` emits request-complete audit line with duration and tool count
 - Legacy `MetricsCollector` removed — observability now via Langfuse
 - Token consumption tracked per-turn via Langfuse span metadata
+- `shutdown_langfuse()` called in all CLI `finally` blocks for reliable trace export
+- `LangfuseConfig` extended with `sample_rate` (float, default 1.0) and `debug` (bool)
 - CI test job now enforces `--cov-fail-under=85`
 - `make check` now includes prompt manifest verification
+
+### Removed
+- **Channel adapters**: DingTalk, Feishu, Mochat, QQ (unmaintained, no active users)
 
 ## [0.1.4] - 2025-03-10
 
