@@ -7,12 +7,14 @@ import json
 import os
 import re
 import sys
+import time
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+from nanobot import __version__
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.subagent import SubagentManager
@@ -78,6 +80,8 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self._start_time = time.time()
+        self._last_usage: dict[str, int] = {}
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -197,6 +201,11 @@ class AgentLoop:
                 tools=tool_defs,
                 model=self.model,
             )
+            if response.usage:
+                self._last_usage = {
+                    "prompt_tokens": int(response.usage.get("prompt_tokens", 0) or 0),
+                    "completion_tokens": int(response.usage.get("completion_tokens", 0) or 0),
+                }
 
             if response.has_tool_calls:
                 if on_progress:
@@ -397,12 +406,49 @@ class AgentLoop:
             self.sessions.invalidate(session.key)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
+        if cmd == "/status":
+            history = session.get_history(max_messages=0)
+            msg_count = len(history)
+            active_subs = self.subagents.get_running_count()
+
+            uptime_s = int(time.time() - self._start_time)
+            uptime = (
+                f"{uptime_s // 3600}h {(uptime_s % 3600) // 60}m"
+                if uptime_s >= 3600
+                else f"{uptime_s // 60}m {uptime_s % 60}s"
+            )
+
+            last_in = self._last_usage.get("prompt_tokens", 0)
+            last_out = self._last_usage.get("completion_tokens", 0)
+
+            ctx_used = last_in
+            ctx_total_tokens = max(self.context_window_tokens, 0)
+            ctx_pct = int((ctx_used / ctx_total_tokens) * 100) if ctx_total_tokens > 0 else 0
+            ctx_used_str = f"{ctx_used // 1000}k" if ctx_used >= 1000 else str(ctx_used)
+            ctx_total_str = f"{ctx_total_tokens // 1024}k" if ctx_total_tokens > 0 else "n/a"
+
+            lines = [
+                f"🐈 nanobot v{__version__}",
+                f"🧠 Model: {self.model}",
+                f"📊 Tokens: {last_in} in / {last_out} out",
+                f"📚 Context: {ctx_used_str}/{ctx_total_str} ({ctx_pct}%)",
+                f"💬 Session: {msg_count} messages",
+                f"👾 Subagents: {active_subs} active",
+                f"🪢 Queue: {self.bus.inbound.qsize()} pending",
+                f"⏱ Uptime: {uptime}",
+            ]
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="\n".join(lines),
+            )
         if cmd == "/help":
             lines = [
                 "🐈 nanobot commands:",
                 "/new — Start a new conversation",
                 "/stop — Stop the current task",
                 "/restart — Restart the bot",
+                "/status — Show bot status",
                 "/help — Show available commands",
             ]
             return OutboundMessage(
