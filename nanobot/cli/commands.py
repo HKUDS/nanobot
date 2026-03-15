@@ -404,7 +404,10 @@ def gateway(
     from nanobot.config.paths import get_cron_dir
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
+    from loguru import logger
     from nanobot.heartbeat.service import HeartbeatService
+    from nanobot.event.service import EventService
+    from nanobot.config.schema import EventEndpointConfig
     from nanobot.session.manager import SessionManager
 
     if verbose:
@@ -543,6 +546,33 @@ def gateway(
         enabled=hb_cfg.enabled,
     )
 
+    # Create event webhook service
+    ev_cfg = config.gateway.events
+    event_svc = EventService(ev_cfg, host=config.gateway.host, port=port)
+
+    async def on_event_trigger(name: str, endpoint: EventEndpointConfig, payload: str) -> str | None:
+        """Execute an event endpoint through the agent."""
+        message = endpoint.message
+        if payload:
+            message = f"{endpoint.message}\n\nWebhook payload:\n{payload}"
+        logger.info("Event '{}': sending message to agent ({} chars, payload {} chars)", name, len(message), len(payload))
+        response = await agent.process_direct(
+            message,
+            session_key=f"event:{name}",
+            channel=endpoint.channel or "cli",
+            chat_id=endpoint.to or "direct",
+        )
+        if endpoint.deliver and endpoint.to:
+            from nanobot.bus.events import OutboundMessage
+            await bus.publish_outbound(OutboundMessage(
+                channel=endpoint.channel or "cli",
+                chat_id=endpoint.to,
+                content=response or "",
+            ))
+        return response
+
+    event_svc.on_event = on_event_trigger
+
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
@@ -554,14 +584,17 @@ def gateway(
 
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
+    if ev_cfg.enabled and ev_cfg.endpoints:
+        console.print(f"[green]✓[/green] Events: {len(ev_cfg.endpoints)} endpoints on port {port}")
+
     async def run():
         try:
             await cron.start()
             await heartbeat.start()
-            await asyncio.gather(
-                agent.run(),
-                channels.start_all(),
-            )
+            tasks = [agent.run(), channels.start_all()]
+            if ev_cfg.enabled and ev_cfg.endpoints:
+                tasks.append(event_svc.start())
+            await asyncio.gather(*tasks)
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         except Exception:
@@ -572,6 +605,7 @@ def gateway(
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
+            event_svc.stop()
             agent.stop()
             await channels.stop_all()
 

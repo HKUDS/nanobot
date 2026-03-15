@@ -97,12 +97,30 @@ class HeartbeatConfig(Base):
     interval_s: int = 30 * 60  # 30 minutes
 
 
+class EventEndpointConfig(Base):
+    """Configuration for a single named event endpoint."""
+
+    message: str                     # Task message sent to agent when event fires
+    channel: str | None = None       # Delivery channel (e.g. "telegram")
+    to: str | None = None            # Delivery target (chat_id / phone)
+    deliver: bool = False            # Whether to push response back to channel
+
+
+class EventsConfig(Base):
+    """HTTP webhook event trigger configuration."""
+
+    enabled: bool = True
+    secret: str | None = None        # Optional Bearer token for auth
+    endpoints: dict[str, EventEndpointConfig] = Field(default_factory=dict)
+
+
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
     host: str = "0.0.0.0"
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    events: EventsConfig = Field(default_factory=EventsConfig)
 
 
 class WebSearchConfig(Base):
