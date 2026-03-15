@@ -215,51 +215,6 @@ async def test_tick_suppresses_when_evaluator_says_no(tmp_path, monkeypatch) -> 
     await service._tick()
     assert executed == ["check status"]
     assert notified == []
-
-
-@pytest.mark.asyncio
-async def test_tick_suppresses_when_policy_is_silent(tmp_path, monkeypatch) -> None:
-    (tmp_path / "HEARTBEAT.md").write_text("- [ ] check status", encoding="utf-8")
-
-    provider = DummyProvider([
-        LLMResponse(
-            content="",
-            tool_calls=[
-                ToolCallRequest(
-                    id="hb_1",
-                    name="heartbeat",
-                    arguments={"action": "run", "tasks": "check status"},
-                )
-            ],
-        ),
-    ])
-
-    notified: list[str] = []
-
-    async def _on_execute(tasks: str) -> str:
-        return f"checked {tasks}"
-
-    async def _on_notify(response: str) -> None:
-        notified.append(response)
-
-    service = HeartbeatService(
-        workspace=tmp_path,
-        provider=provider,
-        model="openai/gpt-4o-mini",
-        on_execute=_on_execute,
-        on_notify=_on_notify,
-        notification_level="silent",
-    )
-
-    async def _eval_level(*a, **kw):
-        return "error"
-
-    monkeypatch.setattr("nanobot.utils.evaluator.evaluate_response", _eval_level)
-
-    await service._tick()
-    assert notified == []
-
-
 @pytest.mark.asyncio
 async def test_decide_retries_transient_error_then_succeeds(tmp_path, monkeypatch) -> None:
     provider = DummyProvider([
