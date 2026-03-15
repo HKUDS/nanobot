@@ -1,5 +1,7 @@
 """Message tool for sending messages to users."""
 
+from __future__ import annotations
+
 from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool

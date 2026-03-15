@@ -1,5 +1,7 @@
 """DingTalk/DingDing channel implementation using Stream Mode."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import mimetypes

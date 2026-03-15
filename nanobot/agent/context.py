@@ -1,5 +1,7 @@
 """Context builder for assembling agent prompts."""
 
+from __future__ import annotations
+
 import base64
 import mimetypes
 import platform
@@ -24,15 +26,25 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
-        """Build the system prompt from identity, bootstrap files, memory, and skills."""
-        parts = [self._get_identity()]
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        memory_store: "MemoryStore | None" = None,
+    ) -> str:
+        """Build the system prompt from identity, bootstrap files, memory, and skills.
+
+        Args:
+            memory_store: If provided, use this MemoryStore instead of the default
+                workspace-level one.  Used for per-session memory isolation.
+        """
+        parts = [self._get_identity(memory_store=memory_store)]
 
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
             parts.append(bootstrap)
 
-        memory = self.memory.get_memory_context()
+        store = memory_store or self.memory
+        memory = store.get_memory_context()
         if memory:
             parts.append(f"# Memory\n\n{memory}")
 
@@ -53,11 +65,18 @@ Skills with available="false" need dependencies installed first - you can try in
 
         return "\n\n---\n\n".join(parts)
 
-    def _get_identity(self) -> str:
+    def _get_identity(self, memory_store: "MemoryStore | None" = None) -> str:
         """Get the core identity section."""
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
+
+        if memory_store is not None:
+            mem_path = str(memory_store.memory_file)
+            hist_path = str(memory_store.history_file)
+        else:
+            mem_path = f"{workspace_path}/memory/MEMORY.md"
+            hist_path = f"{workspace_path}/memory/HISTORY.md"
 
         platform_policy = ""
         if system == "Windows":
@@ -81,8 +100,8 @@ You are nanobot, a helpful AI assistant.
 
 ## Workspace
 Your workspace is at: {workspace_path}
-- Long-term memory: {workspace_path}/memory/MEMORY.md (write important facts here)
-- History log: {workspace_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
+- Long-term memory: {mem_path} (write important facts here)
+- History log: {hist_path} (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
 {platform_policy}
@@ -126,6 +145,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        memory_store: "MemoryStore | None" = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id)
@@ -139,7 +159,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, memory_store=memory_store)},
             *history,
             {"role": "user", "content": merged},
         ]

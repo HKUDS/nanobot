@@ -1,5 +1,7 @@
 """QQ channel implementation using botpy SDK."""
 
+from __future__ import annotations
+
 import asyncio
 from collections import deque
 from typing import TYPE_CHECKING, Any, Literal

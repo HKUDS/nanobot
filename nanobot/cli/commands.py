@@ -1,5 +1,7 @@
 """CLI commands for nanobot."""
 
+from __future__ import annotations
+
 import asyncio
 import os
 import select
@@ -383,6 +385,85 @@ def _print_deprecated_memory_window_notice(config: Config) -> None:
             "`contextWindowTokens`. `memoryWindow` is ignored; run "
             "[cyan]nanobot onboard[/cyan] to refresh your config template."
         )
+
+
+# ============================================================================
+# OpenAI-Compatible API Server
+# ============================================================================
+
+
+@app.command()
+def serve(
+    port: int = typer.Option(8900, "--port", "-p", help="API server port"),
+    host: str = typer.Option("0.0.0.0", "--host", "-H", help="Bind address"),
+    timeout: float = typer.Option(120.0, "--timeout", "-t", help="Per-request timeout (seconds)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show nanobot runtime logs"),
+):
+    """Start the OpenAI-compatible API server (/v1/chat/completions)."""
+    try:
+        from aiohttp import web  # noqa: F401
+    except ImportError:
+        console.print("[red]aiohttp is required. Install with: pip install aiohttp[/red]")
+        raise typer.Exit(1)
+
+    from nanobot.config.loader import load_config
+    from nanobot.api.server import create_app
+    from loguru import logger
+
+    if verbose:
+        logger.enable("nanobot")
+    else:
+        logger.disable("nanobot")
+
+    config = load_config()
+    sync_workspace_templates(config.workspace_path)
+    provider = _make_provider(config)
+
+    from nanobot.bus.queue import MessageBus
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.session.manager import SessionManager
+
+    bus = MessageBus()
+    session_manager = SessionManager(config.workspace_path)
+    agent_loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=config.workspace_path,
+        model=config.agents.defaults.model,
+        temperature=config.agents.defaults.temperature,
+        max_tokens=config.agents.defaults.max_tokens,
+        max_iterations=config.agents.defaults.max_tool_iterations,
+        memory_window=config.agents.defaults.memory_window,
+        reasoning_effort=config.agents.defaults.reasoning_effort,
+        brave_api_key=config.tools.web.search.api_key or None,
+        web_proxy=config.tools.web.proxy or None,
+        exec_config=config.tools.exec,
+        restrict_to_workspace=config.tools.restrict_to_workspace,
+        session_manager=session_manager,
+        mcp_servers=config.tools.mcp_servers,
+        channels_config=config.channels,
+    )
+
+    model_name = config.agents.defaults.model
+    console.print(f"{__logo__} Starting OpenAI-compatible API server")
+    console.print(f"  [cyan]Endpoint[/cyan] : http://{host}:{port}/v1/chat/completions")
+    console.print(f"  [cyan]Model[/cyan]    : {model_name}")
+    console.print(f"  [cyan]Timeout[/cyan]  : {timeout}s")
+    console.print(f"  [cyan]Header[/cyan]   : x-session-key (required)")
+    console.print()
+
+    api_app = create_app(agent_loop, model_name=model_name, request_timeout=timeout)
+
+    async def on_startup(_app):
+        await agent_loop._connect_mcp()
+
+    async def on_cleanup(_app):
+        await agent_loop.close_mcp()
+
+    api_app.on_startup.append(on_startup)
+    api_app.on_cleanup.append(on_cleanup)
+
+    web.run_app(api_app, host=host, port=port, print=lambda msg: logger.info(msg))
 
 
 # ============================================================================

@@ -1,5 +1,7 @@
 """Tool registry for dynamic tool management."""
 
+from __future__ import annotations
+
 from typing import Any
 
 from nanobot.agent.tools.base import Tool

@@ -1,5 +1,7 @@
 """Session management for conversation history."""
 
+from __future__ import annotations
+
 import json
 import shutil
 from dataclasses import dataclass, field

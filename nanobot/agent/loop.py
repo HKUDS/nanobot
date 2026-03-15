@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
-from nanobot.agent.memory import MemoryConsolidator
+from nanobot.agent.memory import MemoryConsolidator, MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
@@ -180,12 +180,20 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        disabled_tools: set[str] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+
+        # Build tool definitions, filtering out disabled tools
+        if disabled_tools:
+            tool_defs = [d for d in self.tools.get_definitions()
+                         if d.get("function", {}).get("name") not in disabled_tools]
+        else:
+            tool_defs = self.tools.get_definitions()
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -221,7 +229,10 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    if disabled_tools and tool_call.name in disabled_tools:
+                        result = f"Error: Tool '{tool_call.name}' is not available in this mode."
+                    else:
+                        result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -345,6 +356,8 @@ class AgentLoop:
         msg: InboundMessage,
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        memory_store: MemoryStore | None = None,
+        disabled_tools: set[str] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -354,17 +367,20 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
-            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+            await self.memory_consolidator.maybe_consolidate_by_tokens(session, store=memory_store)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
+                memory_store=memory_store,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, _, all_msgs = await self._run_agent_loop(
+                messages, disabled_tools=disabled_tools,
+            )
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
-            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+            await self.memory_consolidator.maybe_consolidate_by_tokens(session, store=memory_store)
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
 
@@ -378,7 +394,9 @@ class AgentLoop:
         cmd = msg.content.strip().lower()
         if cmd == "/new":
             try:
-                if not await self.memory_consolidator.archive_unconsolidated(session):
+                if not await self.memory_consolidator.archive_unconsolidated(
+                    session, store=memory_store,
+                ):
                     return OutboundMessage(
                         channel=msg.channel,
                         chat_id=msg.chat_id,
@@ -408,7 +426,7 @@ class AgentLoop:
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
             )
-        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+        await self.memory_consolidator.maybe_consolidate_by_tokens(session, store=memory_store)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
@@ -421,6 +439,7 @@ class AgentLoop:
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            memory_store=memory_store,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -433,6 +452,7 @@ class AgentLoop:
 
         final_content, _, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
+            disabled_tools=disabled_tools,
         )
 
         if final_content is None:
@@ -440,7 +460,7 @@ class AgentLoop:
 
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
-        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+        await self.memory_consolidator.maybe_consolidate_by_tokens(session, store=memory_store)
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
@@ -487,6 +507,19 @@ class AgentLoop:
             session.messages.append(entry)
         session.updated_at = datetime.now()
 
+    def _isolated_memory_store(self, session_key: str) -> MemoryStore:
+        """Return a per-session-key MemoryStore for multi-tenant isolation."""
+        from nanobot.utils.helpers import safe_filename
+        safe_key = safe_filename(session_key.replace(":", "_"))
+        memory_dir = self.workspace / "sessions" / safe_key / "memory"
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        store = MemoryStore.__new__(MemoryStore)
+        store.memory_dir = memory_dir
+        store.memory_file = memory_dir / "MEMORY.md"
+        store.history_file = memory_dir / "HISTORY.md"
+        return store
+
+
     async def process_direct(
         self,
         content: str,
@@ -494,9 +527,26 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        isolate_memory: bool = False,
+        disabled_tools: set[str] | None = None,
     ) -> str:
-        """Process a message directly (for CLI or cron usage)."""
+        """Process a message directly (for CLI or cron usage).
+
+        Args:
+            isolate_memory: When True, use a per-session-key memory directory
+                instead of the shared workspace memory.  This prevents context
+                leakage between different session keys in multi-tenant (API) mode.
+            disabled_tools: Tool names to exclude from the LLM tool list and
+                reject at execution time.  Use to block filesystem access in
+                multi-tenant API mode.
+        """
         await self._connect_mcp()
+        memory_store: MemoryStore | None = None
+        if isolate_memory:
+            memory_store = self._isolated_memory_store(session_key)
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+        response = await self._process_message(
+            msg, session_key=session_key, on_progress=on_progress,
+            memory_store=memory_store, disabled_tools=disabled_tools,
+        )
         return response.content if response else ""

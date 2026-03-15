@@ -1,5 +1,7 @@
 """File system tools: read, write, edit, list."""
 
+from __future__ import annotations
+
 import difflib
 from pathlib import Path
 from typing import Any

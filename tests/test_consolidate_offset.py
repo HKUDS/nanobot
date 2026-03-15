@@ -516,7 +516,7 @@ class TestNewCommandArchival:
         loop.sessions.save(session)
         before_count = len(session.messages)
 
-        async def _failing_consolidate(_messages) -> bool:
+        async def _failing_consolidate(_messages, store=None) -> bool:
             return False
 
         loop.memory_consolidator.consolidate_messages = _failing_consolidate  # type: ignore[method-assign]
@@ -542,7 +542,7 @@ class TestNewCommandArchival:
 
         archived_count = -1
 
-        async def _fake_consolidate(messages) -> bool:
+        async def _fake_consolidate(messages, store=None) -> bool:
             nonlocal archived_count
             archived_count = len(messages)
             return True
@@ -567,7 +567,7 @@ class TestNewCommandArchival:
             session.add_message("assistant", f"resp{i}")
         loop.sessions.save(session)
 
-        async def _ok_consolidate(_messages) -> bool:
+        async def _ok_consolidate(_messages, store=None) -> bool:
             return True
 
         loop.memory_consolidator.consolidate_messages = _ok_consolidate  # type: ignore[method-assign]
@@ -578,3 +578,33 @@ class TestNewCommandArchival:
         assert response is not None
         assert "new session started" in response.content.lower()
         assert loop.sessions.get_or_create("cli:test").messages == []
+
+    @pytest.mark.asyncio
+    async def test_new_archives_to_custom_store_when_provided(self, tmp_path: Path) -> None:
+        """When memory_store is passed, /new must archive through that store."""
+        from nanobot.bus.events import InboundMessage
+        from nanobot.agent.memory import MemoryStore
+
+        loop = self._make_loop(tmp_path)
+        session = loop.sessions.get_or_create("cli:test")
+        for i in range(5):
+            session.add_message("user", f"msg{i}")
+            session.add_message("assistant", f"resp{i}")
+        loop.sessions.save(session)
+
+        used_store = None
+
+        async def _tracking_consolidate(messages, store=None) -> bool:
+            nonlocal used_store
+            used_store = store
+            return True
+
+        loop.memory_consolidator.consolidate_messages = _tracking_consolidate  # type: ignore[method-assign]
+
+        iso_store = MagicMock(spec=MemoryStore)
+        new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
+        response = await loop._process_message(new_msg, memory_store=iso_store)
+
+        assert response is not None
+        assert "new session started" in response.content.lower()
+        assert used_store is iso_store, "archive_unconsolidated must use the provided store"

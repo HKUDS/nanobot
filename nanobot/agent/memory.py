@@ -247,9 +247,14 @@ class MemoryConsolidator:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
 
-    async def consolidate_messages(self, messages: list[dict[str, object]]) -> bool:
+    async def consolidate_messages(
+        self,
+        messages: list[dict[str, object]],
+        store: MemoryStore | None = None,
+    ) -> bool:
         """Archive a selected message chunk into persistent memory."""
-        return await self.store.consolidate(messages, self.provider, self.model)
+        target = store or self.store
+        return await target.consolidate(messages, self.provider, self.model)
 
     def pick_consolidation_boundary(
         self,
@@ -290,16 +295,24 @@ class MemoryConsolidator:
             self._get_tool_definitions(),
         )
 
-    async def archive_unconsolidated(self, session: Session) -> bool:
+    async def archive_unconsolidated(
+        self,
+        session: Session,
+        store: MemoryStore | None = None,
+    ) -> bool:
         """Archive the full unconsolidated tail for /new-style session rollover."""
         lock = self.get_lock(session.key)
         async with lock:
             snapshot = session.messages[session.last_consolidated:]
             if not snapshot:
                 return True
-            return await self.consolidate_messages(snapshot)
+            return await self.consolidate_messages(snapshot, store=store)
 
-    async def maybe_consolidate_by_tokens(self, session: Session) -> None:
+    async def maybe_consolidate_by_tokens(
+        self,
+        session: Session,
+        store: MemoryStore | None = None,
+    ) -> None:
         """Loop: archive old messages until prompt fits within half the context window."""
         if not session.messages or self.context_window_tokens <= 0:
             return
@@ -347,7 +360,7 @@ class MemoryConsolidator:
                     source,
                     len(chunk),
                 )
-                if not await self.consolidate_messages(chunk):
+                if not await self.consolidate_messages(chunk, store=store):
                     return
                 session.last_consolidated = end_idx
                 self.sessions.save(session)

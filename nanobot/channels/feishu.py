@@ -1,5 +1,7 @@
 """Feishu/Lark channel implementation using lark-oapi SDK with WebSocket long connection."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import os
