@@ -391,6 +391,42 @@ async def test_exec_head_tail_truncation() -> None:
     assert "Exit code:" in result
 
 
+async def test_exec_custom_max_output() -> None:
+    """Custom max_output should override the default."""
+    tool = ExecTool(max_output=100)
+    # Generate output that exceeds custom max_output
+    big = "X" * 200
+    result = await tool.execute(command=f"echo '{big}'")
+    assert "chars truncated" in result
+    # Should preserve head only (tail mode default)
+    assert result.startswith("X")
+    assert "X" * 50 in result  # ~100 chars
+
+
+async def test_exec_truncate_mode_tail() -> None:
+    """truncate_mode='tail' should only preserve the end of output."""
+    tool = ExecTool(max_output=100, truncate_mode="tail")
+    big = "A" * 50 + "\n" + "B" * 200
+    result = await tool.execute(command=f"echo '{big}'")
+    assert "chars truncated" in result
+    # Should start with truncated message, not As
+    assert not result.startswith("A")
+    # Should end with Bs (the tail)
+    assert "B" in result
+
+
+async def test_exec_truncate_mode_both() -> None:
+    """truncate_mode='both' should preserve both head and tail."""
+    tool = ExecTool(max_output=100, truncate_mode="both")
+    big = "A" * 100 + "\n" + "B" * 100
+    result = await tool.execute(command=f"echo '{big}'")
+    assert "chars truncated" in result
+    # Should start with As (head)
+    assert result.startswith("A")
+    # Should end with Bs (tail)
+    assert "B" in result
+
+
 async def test_exec_timeout_parameter() -> None:
     """LLM-supplied timeout should override the constructor default."""
     tool = ExecTool(timeout=60)

@@ -20,6 +20,8 @@ class ExecTool(Tool):
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
         path_append: str = "",
+        max_output: int = 10_000,
+        truncate_mode: str = "both",
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -37,6 +39,8 @@ class ExecTool(Tool):
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
+        self.max_output = max_output
+        self.truncate_mode = truncate_mode
 
     @property
     def name(self) -> str:
@@ -126,15 +130,19 @@ class ExecTool(Tool):
 
             result = "\n".join(output_parts) if output_parts else "(no output)"
 
-            # Head + tail truncation to preserve both start and end of output
-            max_len = self._MAX_OUTPUT
+            # Truncate output based on configured mode
+            max_len = self.max_output
             if len(result) > max_len:
-                half = max_len // 2
-                result = (
-                    result[:half]
-                    + f"\n\n... ({len(result) - max_len:,} chars truncated) ...\n\n"
-                    + result[-half:]
-                )
+                if self.truncate_mode == "tail":
+                    # Keep only the tail portion
+                    result = result[-max_len:] + f"\n\n... ({len(result) - max_len:,} chars truncated)"
+                else:  # "both" - preserve start and end
+                    half = max_len // 2
+                    result = (
+                        result[:half]
+                        + f"\n\n... ({len(result) - max_len:,} chars truncated) ...\n\n"
+                        + result[-half:]
+                    )
 
             return result
 
