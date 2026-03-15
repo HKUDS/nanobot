@@ -215,47 +215,31 @@ def main(
 
 
 @app.command()
-def onboard(interactive: bool = typer.Option(True, "--interactive/--no-interactive", help="Use interactive wizard")):
-    """Initialize nanobot configuration and workspace."""
+def onboard():
+    """Initialize nanobot configuration and workspace with interactive wizard."""
     from nanobot.config.loader import get_config_path, load_config, save_config
     from nanobot.config.schema import Config
 
     config_path = get_config_path()
 
     if config_path.exists():
-        if interactive:
-            config = load_config()
-        else:
-            console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
-            console.print("  [bold]y[/bold] = overwrite with defaults (existing values will be lost)")
-            console.print("  [bold]N[/bold] = refresh config, keeping existing values and adding new fields")
-            if typer.confirm("Overwrite?"):
-                config = Config()
-                save_config(config)
-                console.print(f"[green]✓[/green] Config reset to defaults at {config_path}")
-            else:
-                config = load_config()
-                save_config(config)
-                console.print(f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)")
+        config = load_config()
     else:
         config = Config()
         save_config(config)
         console.print(f"[green]✓[/green] Created config at {config_path}")
 
-    # Run interactive wizard if enabled
-    if interactive:
-        from nanobot.cli.onboard_wizard import run_onboard
+    # Run interactive wizard
+    from nanobot.cli.onboard_wizard import run_onboard
 
-        try:
-            config = run_onboard()
-            save_config(config)
-            console.print(f"[green]✓[/green] Config saved at {config_path}")
-        except Exception as e:
-            console.print(f"[red]✗[/red] Error during configuration: {e}")
-            console.print("[yellow]Please run 'nanobot onboard' again to complete setup.[/yellow]")
-            raise typer.Exit(1)
-    else:
-        console.print("[dim]Config template now uses `maxTokens` + `contextWindowTokens`; `memoryWindow` is no longer a runtime setting.[/dim]")
+    try:
+        config = run_onboard()
+        save_config(config)
+        console.print(f"[green]✓[/green] Config saved at {config_path}")
+    except Exception as e:
+        console.print(f"[red]✗[/red] Error during configuration: {e}")
+        console.print("[yellow]Please run 'nanobot onboard' again to complete setup.[/yellow]")
+        raise typer.Exit(1)
 
     _onboard_plugins(config_path)
 
