@@ -198,6 +198,7 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
     def _build_subagent_prompt(self) -> str:
         """Build a focused system prompt for the subagent."""
         from nanobot.agent.context import ContextBuilder
+        from nanobot.agent.hooks.storage import HookStorage
         from nanobot.agent.skills import SkillsLoader
 
         time_ctx = ContextBuilder._build_runtime_context(None, None)
@@ -211,7 +212,13 @@ Stay focused on the assigned task. Your final response will be reported back to 
 ## Workspace
 {self.workspace}"""]
 
-        skills_summary = SkillsLoader(self.workspace).build_skills_summary()
+        # Build filtered skills summary (lightweight: no full ContextBuilder)
+        loader = SkillsLoader(self.workspace)
+        storage = HookStorage(self.workspace)
+        all_skills = loader.list_skills(filter_unavailable=False)
+        disabled = storage.get_disabled_skills()
+        filtered = [s for s in all_skills if s["name"] not in disabled]
+        skills_summary = loader.build_skills_summary_from(filtered)
         if skills_summary:
             parts.append(f"## Skills\n\nRead SKILL.md with read_file to use a skill.\n\n{skills_summary}")
 
