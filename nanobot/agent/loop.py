@@ -63,6 +63,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        consolidation_model: str | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -71,6 +72,7 @@ class AgentLoop:
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
+        self.consolidation_model = consolidation_model
         self.max_iterations = max_iterations
         self.context_window_tokens = context_window_tokens
         self.web_search_config = web_search_config or WebSearchConfig()
@@ -103,7 +105,7 @@ class AgentLoop:
         self.memory_consolidator = MemoryConsolidator(
             workspace=workspace,
             provider=provider,
-            model=self.model,
+            model=self.consolidation_model or self.model,
             sessions=self.sessions,
             context_window_tokens=context_window_tokens,
             build_messages=self.context.build_messages,

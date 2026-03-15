@@ -188,3 +188,26 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
     assert "consolidate" in order
     assert "llm" in order
     assert order.index("consolidate") < order.index("llm")
+
+
+def test_consolidation_model_defaults_to_main_model(tmp_path) -> None:
+    """When no consolidation_model is set, the main model is used."""
+    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
+    assert loop.memory_consolidator.model == "test-model"
+
+
+def test_consolidation_model_override(tmp_path) -> None:
+    """When consolidation_model is set, MemoryConsolidator uses it."""
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.estimate_prompt_tokens.return_value = (100, "test-counter")
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="expensive/main-model",
+        context_window_tokens=200,
+        consolidation_model="cheap/fast-model",
+    )
+    assert loop.memory_consolidator.model == "cheap/fast-model"
