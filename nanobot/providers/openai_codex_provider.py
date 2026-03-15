@@ -16,6 +16,12 @@ from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_ORIGINATOR = "nanobot"
 
+# Codex responses are streamed via SSE. The read timeout must be generous
+# because large system prompts + many tools can take well over 60 seconds.
+# Using separate timeouts follows httpx best practice: fail fast on
+# connection issues but allow plenty of time for the streaming response.
+_DEFAULT_TIMEOUT = httpx.Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0)
+
 
 class OpenAICodexProvider(LLMProvider):
     """Use Codex OAuth to call the Responses API."""
@@ -76,7 +82,7 @@ class OpenAICodexProvider(LLMProvider):
             )
         except Exception as e:
             return LLMResponse(
-                content=f"Error calling Codex: {str(e)}",
+                content=f"Error calling Codex: {repr(e)}",
                 finish_reason="error",
             )
 
@@ -108,7 +114,7 @@ async def _request_codex(
     body: dict[str, Any],
     verify: bool,
 ) -> tuple[str, list[ToolCallRequest], str]:
-    async with httpx.AsyncClient(timeout=60.0, verify=verify) as client:
+    async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT, verify=verify) as client:
         async with client.stream("POST", url, headers=headers, json=body) as response:
             if response.status_code != 200:
                 text = await response.aread()
