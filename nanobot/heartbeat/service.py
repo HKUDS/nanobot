@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
@@ -87,10 +88,19 @@ class HeartbeatService:
 
         Returns (action, tasks) where action is 'skip' or 'run'.
         """
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
         response = await self.provider.chat_with_retry(
             messages=[
-                {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
+                {"role": "system", "content": (
+                    "You are a heartbeat agent. Call the heartbeat tool to report your decision. "
+                    "The current date/time is provided so you can evaluate time-based conditions. "
+                    "Choose 'run' if there are active tasks to execute. "
+                    "Choose 'skip' if the file has no actionable tasks, if blocking conditions "
+                    "are not yet met, or if tasks are scheduled for a future time that has not arrived yet."
+                )},
                 {"role": "user", "content": (
+                    f"Current date/time: {now_str}\n\n"
                     "Review the following HEARTBEAT.md and decide whether there are active tasks.\n\n"
                     f"{content}"
                 )},
