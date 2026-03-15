@@ -25,23 +25,23 @@ MAX_REDIRECTS = 5  # Limit redirects to prevent DoS attacks
 
 def _strip_tags(text: str) -> str:
     """Remove HTML tags and decode entities."""
-    text = re.sub(r'<script[\s\S]*?</script>', '', text, flags=re.I)
-    text = re.sub(r'<style[\s\S]*?</style>', '', text, flags=re.I)
-    text = re.sub(r'<[^>]+>', '', text)
+    text = re.sub(r"<script[\s\S]*?</script>", "", text, flags=re.I)
+    text = re.sub(r"<style[\s\S]*?</style>", "", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", "", text)
     return html.unescape(text).strip()
 
 
 def _normalize(text: str) -> str:
     """Normalize whitespace."""
-    text = re.sub(r'[ \t]+', ' ', text)
-    return re.sub(r'\n{3,}', '\n\n', text).strip()
+    text = re.sub(r"[ \t]+", " ", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 def _validate_url(url: str) -> tuple[bool, str]:
     """Validate URL: must be http(s) with valid domain."""
     try:
         p = urlparse(url)
-        if p.scheme not in ('http', 'https'):
+        if p.scheme not in ("http", "https"):
             return False, f"Only http/https allowed, got '{p.scheme or 'none'}'"
         if not p.netloc:
             return False, "Missing domain"
@@ -73,7 +73,12 @@ class WebSearchTool(Tool):
         "type": "object",
         "properties": {
             "query": {"type": "string", "description": "Search query"},
-            "count": {"type": "integer", "description": "Results (1-10)", "minimum": 1, "maximum": 10},
+            "count": {
+                "type": "integer",
+                "description": "Results (1-10)",
+                "minimum": 1,
+                "maximum": 10,
+            },
         },
         "required": ["query"],
     }
@@ -104,8 +109,8 @@ class WebSearchTool(Tool):
     async def _search_brave(self, query: str, n: int) -> str:
         api_key = self.config.api_key or os.environ.get("BRAVE_API_KEY", "")
         if not api_key:
-            logger.warning("BRAVE_API_KEY not set, falling back to DuckDuckGo")
-            return await self._search_duckduckgo(query, n)
+            logger.warning("BRAVE_API_KEY not set, trying fallback chain (Gemini → DuckDuckGo)")
+            return await self._fallback_chain(query, n)
         try:
             async with httpx.AsyncClient(proxy=self.proxy) as client:
                 r = await client.get(
@@ -116,7 +121,11 @@ class WebSearchTool(Tool):
                 )
                 r.raise_for_status()
             items = [
-                {"title": x.get("title", ""), "url": x.get("url", ""), "content": x.get("description", "")}
+                {
+                    "title": x.get("title", ""),
+                    "url": x.get("url", ""),
+                    "content": x.get("description", ""),
+                }
                 for x in r.json().get("web", {}).get("results", [])
             ]
             return _format_results(query, items, n)
@@ -126,8 +135,8 @@ class WebSearchTool(Tool):
     async def _search_tavily(self, query: str, n: int) -> str:
         api_key = self.config.api_key or os.environ.get("TAVILY_API_KEY", "")
         if not api_key:
-            logger.warning("TAVILY_API_KEY not set, falling back to DuckDuckGo")
-            return await self._search_duckduckgo(query, n)
+            logger.warning("TAVILY_API_KEY not set, trying fallback chain (Gemini → DuckDuckGo)")
+            return await self._fallback_chain(query, n)
         try:
             async with httpx.AsyncClient(proxy=self.proxy) as client:
                 r = await client.post(
@@ -144,8 +153,8 @@ class WebSearchTool(Tool):
     async def _search_searxng(self, query: str, n: int) -> str:
         base_url = (self.config.base_url or os.environ.get("SEARXNG_BASE_URL", "")).strip()
         if not base_url:
-            logger.warning("SEARXNG_BASE_URL not set, falling back to DuckDuckGo")
-            return await self._search_duckduckgo(query, n)
+            logger.warning("SEARXNG_BASE_URL not set, trying fallback chain (Gemini → DuckDuckGo)")
+            return await self._fallback_chain(query, n)
         endpoint = f"{base_url.rstrip('/')}/search"
         is_valid, error_msg = _validate_url(endpoint)
         if not is_valid:
@@ -166,8 +175,8 @@ class WebSearchTool(Tool):
     async def _search_jina(self, query: str, n: int) -> str:
         api_key = self.config.api_key or os.environ.get("JINA_API_KEY", "")
         if not api_key:
-            logger.warning("JINA_API_KEY not set, falling back to DuckDuckGo")
-            return await self._search_duckduckgo(query, n)
+            logger.warning("JINA_API_KEY not set, trying fallback chain (Gemini → DuckDuckGo)")
+            return await self._fallback_chain(query, n)
         try:
             headers = {"Accept": "application/json", "Authorization": f"Bearer {api_key}"}
             async with httpx.AsyncClient(proxy=self.proxy) as client:
@@ -180,12 +189,64 @@ class WebSearchTool(Tool):
                 r.raise_for_status()
             data = r.json().get("data", [])[:n]
             items = [
-                {"title": d.get("title", ""), "url": d.get("url", ""), "content": d.get("content", "")[:500]}
+                {
+                    "title": d.get("title", ""),
+                    "url": d.get("url", ""),
+                    "content": d.get("content", "")[:500],
+                }
                 for d in data
             ]
             return _format_results(query, items, n)
         except Exception as e:
             return f"Error: {e}"
+
+    async def _search_gemini(self, query: str, n: int) -> str:
+        """Search using Gemini with Google Search grounding (fallback when no API key for primary provider)."""
+        api_key = self.config.gemini_api_key or os.environ.get("GEMINI_API_KEY", "")
+        if not api_key:
+            return ""  # No key configured, signal to try next fallback
+
+        try:
+            from litellm import acompletion
+
+            model = self.config.gemini_model
+            if not model.startswith("gemini/"):
+                model = f"gemini/{model}"
+
+            response = await acompletion(
+                model=model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": f"Search the web for: {query}. List the top {n} search results with titles, URLs, and brief summaries (1-2 sentences each). Format as a numbered list.",
+                    }
+                ],
+                tools=[{"google_search": {}}],
+                api_key=api_key,
+            )
+
+            content = response.choices[0].message.content or ""
+
+            # Try to extract grounding metadata for better formatting
+            choice = response.choices[0]
+            if hasattr(choice, "grounding_metadata") and choice.grounding_metadata:
+                gm = choice.grounding_metadata
+                queries = getattr(gm, "web_search_queries", [])
+                if queries:
+                    content = f"(Google Search queries: {', '.join(queries)})\n\n{content}"
+
+            return content if content.strip() else ""
+        except Exception as e:
+            logger.warning("Gemini search fallback failed: {}", e)
+            return ""  # Signal to try next fallback
+
+    async def _fallback_chain(self, query: str, n: int) -> str:
+        """Try Gemini fallback, then DuckDuckGo."""
+        if self.config.gemini_fallback:
+            result = await self._search_gemini(query, n)
+            if result:
+                return result
+        return await self._search_duckduckgo(query, n)
 
     async def _search_duckduckgo(self, query: str, n: int) -> str:
         try:
@@ -196,7 +257,11 @@ class WebSearchTool(Tool):
             if not raw:
                 return f"No results for: {query}"
             items = [
-                {"title": r.get("title", ""), "url": r.get("href", ""), "content": r.get("body", "")}
+                {
+                    "title": r.get("title", ""),
+                    "url": r.get("href", ""),
+                    "content": r.get("body", ""),
+                }
                 for r in raw
             ]
             return _format_results(query, items, n)
@@ -224,11 +289,15 @@ class WebFetchTool(Tool):
         self.max_chars = max_chars
         self.proxy = proxy
 
-    async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
+    async def execute(
+        self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any
+    ) -> str:
         max_chars = maxChars or self.max_chars
         is_valid, error_msg = _validate_url(url)
         if not is_valid:
-            return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False)
+            return json.dumps(
+                {"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False
+            )
 
         result = await self._fetch_jina(url, max_chars)
         if result is None:
@@ -261,10 +330,18 @@ class WebFetchTool(Tool):
             if truncated:
                 text = text[:max_chars]
 
-            return json.dumps({
-                "url": url, "finalUrl": data.get("url", url), "status": r.status_code,
-                "extractor": "jina", "truncated": truncated, "length": len(text), "text": text,
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "url": url,
+                    "finalUrl": data.get("url", url),
+                    "status": r.status_code,
+                    "extractor": "jina",
+                    "truncated": truncated,
+                    "length": len(text),
+                    "text": text,
+                },
+                ensure_ascii=False,
+            )
         except Exception as e:
             logger.debug("Jina Reader failed for {}, falling back to readability: {}", url, e)
             return None
@@ -289,7 +366,11 @@ class WebFetchTool(Tool):
                 text, extractor = json.dumps(r.json(), indent=2, ensure_ascii=False), "json"
             elif "text/html" in ctype or r.text[:256].lower().startswith(("<!doctype", "<html")):
                 doc = Document(r.text)
-                content = self._to_markdown(doc.summary()) if extract_mode == "markdown" else _strip_tags(doc.summary())
+                content = (
+                    self._to_markdown(doc.summary())
+                    if extract_mode == "markdown"
+                    else _strip_tags(doc.summary())
+                )
                 text = f"# {doc.title()}\n\n{content}" if doc.title() else content
                 extractor = "readability"
             else:
@@ -299,10 +380,18 @@ class WebFetchTool(Tool):
             if truncated:
                 text = text[:max_chars]
 
-            return json.dumps({
-                "url": url, "finalUrl": str(r.url), "status": r.status_code,
-                "extractor": extractor, "truncated": truncated, "length": len(text), "text": text,
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "url": url,
+                    "finalUrl": str(r.url),
+                    "status": r.status_code,
+                    "extractor": extractor,
+                    "truncated": truncated,
+                    "length": len(text),
+                    "text": text,
+                },
+                ensure_ascii=False,
+            )
         except httpx.ProxyError as e:
             logger.error("WebFetch proxy error for {}: {}", url, e)
             return json.dumps({"error": f"Proxy error: {e}", "url": url}, ensure_ascii=False)
@@ -312,11 +401,21 @@ class WebFetchTool(Tool):
 
     def _to_markdown(self, html_content: str) -> str:
         """Convert HTML to markdown."""
-        text = re.sub(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>([\s\S]*?)</a>',
-                      lambda m: f'[{_strip_tags(m[2])}]({m[1]})', html_content, flags=re.I)
-        text = re.sub(r'<h([1-6])[^>]*>([\s\S]*?)</h\1>',
-                      lambda m: f'\n{"#" * int(m[1])} {_strip_tags(m[2])}\n', text, flags=re.I)
-        text = re.sub(r'<li[^>]*>([\s\S]*?)</li>', lambda m: f'\n- {_strip_tags(m[1])}', text, flags=re.I)
-        text = re.sub(r'</(p|div|section|article)>', '\n\n', text, flags=re.I)
-        text = re.sub(r'<(br|hr)\s*/?>', '\n', text, flags=re.I)
+        text = re.sub(
+            r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>([\s\S]*?)</a>',
+            lambda m: f"[{_strip_tags(m[2])}]({m[1]})",
+            html_content,
+            flags=re.I,
+        )
+        text = re.sub(
+            r"<h([1-6])[^>]*>([\s\S]*?)</h\1>",
+            lambda m: f"\n{'#' * int(m[1])} {_strip_tags(m[2])}\n",
+            text,
+            flags=re.I,
+        )
+        text = re.sub(
+            r"<li[^>]*>([\s\S]*?)</li>", lambda m: f"\n- {_strip_tags(m[1])}", text, flags=re.I
+        )
+        text = re.sub(r"</(p|div|section|article)>", "\n\n", text, flags=re.I)
+        text = re.sub(r"<(br|hr)\s*/?>", "\n", text, flags=re.I)
         return _normalize(_strip_tags(text))
