@@ -40,6 +40,7 @@ class ExecToolConfig(Base):
     path_append: str = ""
     sandbox: str = ""
     allowed_env_keys: list[str] = Field(default_factory=list)
+    allowed_paths: list[str] = Field(default_factory=list)
     allow_patterns: list[str] = Field(default_factory=list)
     deny_patterns: list[str] = Field(default_factory=list)
 
@@ -84,6 +85,7 @@ class ExecTool(Tool):
             sandbox=cfg.sandbox,
             path_append=cfg.path_append,
             allowed_env_keys=cfg.allowed_env_keys,
+            allowed_paths=cfg.allowed_paths,
             allow_patterns=cfg.allow_patterns,
             deny_patterns=cfg.deny_patterns,
         )
@@ -98,6 +100,7 @@ class ExecTool(Tool):
         sandbox: str = "",
         path_append: str = "",
         allowed_env_keys: list[str] | None = None,
+        allowed_paths: list[str] | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -122,6 +125,8 @@ class ExecTool(Tool):
             r"\bsed\s+-i[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",  # sed -i
         ]
         self.allow_patterns = allow_patterns or []
+        allowed_paths = allowed_paths or []
+        self.allowed_paths = [Path(p).expanduser().resolve() for p in allowed_paths]
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
         self.allowed_env_keys = allowed_env_keys or []
@@ -396,9 +401,10 @@ class ExecTool(Tool):
                     and p != cwd_path
                     and media_path not in p.parents
                     and p != media_path
+                    and p not in self.allowed_paths
                 ):
                     return (
-                        "Error: Command blocked by safety guard (path outside working dir)"
+                        "Error: Command blocked by safety guard (path outside working dir and not in allowed_paths)"
                         + _WORKSPACE_BOUNDARY_NOTE
                     )
 

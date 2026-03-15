@@ -244,7 +244,7 @@ def test_exec_guard_blocks_home_path_outside_workspace(tmp_path) -> None:
     error = tool._guard_command("cat ~/.nanobot/config.json", str(tmp_path))
     assert error is not None
     assert error.startswith(
-        "Error: Command blocked by safety guard (path outside working dir)"
+        "Error: Command blocked by safety guard (path outside working dir and not in allowed_paths)"
     )
     assert "hard policy boundary" in error
 
@@ -254,7 +254,7 @@ def test_exec_guard_blocks_quoted_home_path_outside_workspace(tmp_path) -> None:
     error = tool._guard_command('cat "~/.nanobot/config.json"', str(tmp_path))
     assert error is not None
     assert error.startswith(
-        "Error: Command blocked by safety guard (path outside working dir)"
+        "Error: Command blocked by safety guard (path outside working dir and not in allowed_paths)"
     )
     assert "hard policy boundary" in error
 
@@ -342,6 +342,11 @@ def test_exec_extract_absolute_paths_ignores_pipe_tilde() -> None:
     paths = ExecTool._extract_absolute_paths(cmd)
     assert not any(p.startswith("~") for p in paths)
 
+
+def test_exec_guard_do_not_restricts_allowed_paths(tmp_path) -> None:
+    tool = ExecTool(restrict_to_workspace=True, allowed_paths=["~/.nanobot/config.json"])
+    error = tool._guard_command('cat ~/.nanobot/config.json', str(tmp_path))
+    assert error == None
 
 # --- cast_params tests ---
 
