@@ -66,6 +66,7 @@ class CronTool(Tool):
                     "description": "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00')",
                 },
                 "job_id": {"type": "string", "description": "Job ID (for remove)"},
+                "agent": {"type": "string", "description": "Named agent profile to use (for add)"},
             },
             "required": ["action"],
         }
@@ -79,12 +80,13 @@ class CronTool(Tool):
         tz: str | None = None,
         at: str | None = None,
         job_id: str | None = None,
+        agent: str | None = None,
         **kwargs: Any,
     ) -> str:
         if action == "add":
             if self._in_cron_context.get():
                 return "Error: cannot schedule new jobs from within a cron job execution"
-            return self._add_job(message, every_seconds, cron_expr, tz, at)
+            return self._add_job(message, every_seconds, cron_expr, tz, at, agent=agent)
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
@@ -98,6 +100,7 @@ class CronTool(Tool):
         cron_expr: str | None,
         tz: str | None,
         at: str | None,
+        agent: str | None = None,
     ) -> str:
         if not message:
             return "Error: message is required for add"
@@ -140,6 +143,7 @@ class CronTool(Tool):
             channel=self._channel,
             to=self._chat_id,
             delete_after_run=delete_after,
+            agent=agent,
         )
         return f"Created job '{job.name}' (id: {job.id})"
 
@@ -147,7 +151,10 @@ class CronTool(Tool):
         jobs = self._cron.list_jobs()
         if not jobs:
             return "No scheduled jobs."
-        lines = [f"- {j.name} (id: {j.id}, {j.schedule.kind})" for j in jobs]
+        lines = []
+        for j in jobs:
+            agent_info = f", agent: {j.payload.agent}" if j.payload.agent else ""
+            lines.append(f"- {j.name} (id: {j.id}, {j.schedule.kind}{agent_info})")
         return "Scheduled jobs:\n" + "\n".join(lines)
 
     def _remove_job(self, job_id: str | None) -> str:
