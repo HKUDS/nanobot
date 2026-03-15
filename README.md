@@ -459,11 +459,18 @@ nanobot channels login
   "channels": {
     "whatsapp": {
       "enabled": true,
-      "allowFrom": ["+1234567890"]
+      "allowFrom": ["+1234567890"],
+      "reactEmoji": "👍"
     }
   }
 }
 ```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | boolean | `false` | Enable WhatsApp channel |
+| `allowFrom` | string[] | `[]` | Allowed phone numbers (optional) |
+| `reactEmoji` | string | `"👍"` | Auto-react to incoming messages (set `null` to disable) |
 
 **3. Run** (two terminals)
 
