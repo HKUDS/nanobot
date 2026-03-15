@@ -7,8 +7,8 @@ the packages already listed in nanobot's pyproject.toml:
   • Python stdlib  (http.server, threading, asyncio, json, …)
   • websockets >=16.0  (already a dependency)
 
-HTTP  → port 7860   serves chat.html
-WS    → port 7861   handles chat messages in real-time
+HTTP  → port 8790   serves chat.html
+WS    → port 8791   handles chat messages in real-time
 
 Usage:
     python -m webui.server                      # from nano1/nanobot/
