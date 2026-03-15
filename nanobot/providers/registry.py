@@ -98,7 +98,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("openrouter",),
         env_key="OPENROUTER_API_KEY",
         display_name="OpenRouter",
-        litellm_prefix="",  # routing handled by custom_llm_provider kwarg; no prefix needed
+        litellm_prefix="openrouter",  # anthropic/claude-3 → openrouter/anthropic/claude-3
         skip_prefixes=(),
         env_extras=(),
         is_gateway=True,
@@ -107,7 +107,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="openrouter",
         default_api_base="https://openrouter.ai/api/v1",
         strip_model_prefix=False,
-        litellm_kwargs={"custom_llm_provider": "openrouter"},
         model_overrides=(),
         supports_prompt_caching=True,
     ),

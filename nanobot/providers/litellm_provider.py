@@ -91,11 +91,10 @@ class LiteLLMProvider(LLMProvider):
     def _resolve_model(self, model: str) -> str:
         """Resolve model name by applying provider/gateway prefixes."""
         if self._gateway:
-            # Gateway mode: apply gateway prefix, skip provider-specific prefixes
             prefix = self._gateway.litellm_prefix
             if self._gateway.strip_model_prefix:
                 model = model.split("/")[-1]
-            if prefix and not model.startswith(f"{prefix}/"):
+            if prefix:
                 model = f"{prefix}/{model}"
             return model
 
