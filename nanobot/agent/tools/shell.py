@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.sandbox import wrap_command
 
 
 class ExecTool(Tool):
@@ -19,10 +20,12 @@ class ExecTool(Tool):
         deny_patterns: list[str] | None = None,
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
+        sandbox: str = "",
         path_append: str = "",
     ):
         self.timeout = timeout
         self.working_dir = working_dir
+        self.sandbox = sandbox
         self.deny_patterns = deny_patterns or [
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
             r"\bdel\s+/[fq]\b",              # del /f, del /q
@@ -83,6 +86,11 @@ class ExecTool(Tool):
         guard_error = self._guard_command(command, cwd)
         if guard_error:
             return guard_error
+
+        if self.sandbox:
+            workspace = self.working_dir or cwd
+            command = wrap_command(self.sandbox, command, workspace, cwd)
+            cwd = str(Path(workspace).resolve())
 
         effective_timeout = min(timeout or self.timeout, self._MAX_TIMEOUT)
 

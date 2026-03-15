@@ -3,7 +3,9 @@ x-common-config: &common-config
     context: .
     dockerfile: Dockerfile
   volumes:
-    - ~/.nanobot:/root/.nanobot
+    - ~/.nanobot:/home/nanobot/.nanobot
+  security_opt:
+    - seccomp=./podman-seccomp.json
 
 services:
   nanobot-gateway:
