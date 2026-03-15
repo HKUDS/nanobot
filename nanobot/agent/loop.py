@@ -313,7 +313,20 @@ class AgentLoop:
             try:
                 response = await self._process_message(msg)
                 if response is not None:
-                    await self.bus.publish_outbound(response)
+                    # Heartbeat messages: apply post-run evaluation
+                    if msg.metadata.get("_source") == "heartbeat":
+                        from nanobot.utils.evaluator import evaluate_response
+                        task_context = msg.metadata.get("_task_context", msg.content)
+                        should_notify = await evaluate_response(
+                            response.content, task_context, self.provider, self.model,
+                        )
+                        if should_notify:
+                            logger.info("Heartbeat: completed, delivering response")
+                            await self.bus.publish_outbound(response)
+                        else:
+                            logger.info("Heartbeat: silenced by post-run evaluation")
+                    else:
+                        await self.bus.publish_outbound(response)
                 elif msg.channel == "cli":
                     await self.bus.publish_outbound(OutboundMessage(
                         channel=msg.channel, chat_id=msg.chat_id,

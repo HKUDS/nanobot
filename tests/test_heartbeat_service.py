@@ -1,7 +1,10 @@
 import asyncio
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.bus.events import InboundMessage
+from nanobot.bus.queue import MessageBus
 from nanobot.heartbeat.service import HeartbeatService
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
@@ -25,11 +28,13 @@ class DummyProvider(LLMProvider):
 @pytest.mark.asyncio
 async def test_start_is_idempotent(tmp_path) -> None:
     provider = DummyProvider([])
+    bus = MessageBus()
 
     service = HeartbeatService(
         workspace=tmp_path,
         provider=provider,
         model="openai/gpt-4o-mini",
+        bus=bus,
         interval_s=9999,
         enabled=True,
     )
@@ -47,10 +52,12 @@ async def test_start_is_idempotent(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_decide_returns_skip_when_no_tool_call(tmp_path) -> None:
     provider = DummyProvider([LLMResponse(content="no tool call", tool_calls=[])])
+    bus = MessageBus()
     service = HeartbeatService(
         workspace=tmp_path,
         provider=provider,
         model="openai/gpt-4o-mini",
+        bus=bus,
     )
 
     action, tasks = await service._decide("heartbeat content")
@@ -59,7 +66,8 @@ async def test_decide_returns_skip_when_no_tool_call(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_trigger_now_executes_when_decision_is_run(tmp_path) -> None:
+async def test_tick_publishes_to_bus_when_decision_is_run(tmp_path) -> None:
+    """Phase 1 run -> Phase 2 publish to bus with _source=heartbeat metadata."""
     (tmp_path / "HEARTBEAT.md").write_text("- [ ] do thing", encoding="utf-8")
 
     provider = DummyProvider([
@@ -75,26 +83,37 @@ async def test_trigger_now_executes_when_decision_is_run(tmp_path) -> None:
         )
     ])
 
-    called_with: list[str] = []
+    bus = MessageBus()
+    pick_target_calls: list[tuple[str, str]] = []
 
-    async def _on_execute(tasks: str) -> str:
-        called_with.append(tasks)
-        return "done"
+    def _pick_target() -> tuple[str, str]:
+        result = ("telegram", "chat-123")
+        pick_target_calls.append(result)
+        return result
 
     service = HeartbeatService(
         workspace=tmp_path,
         provider=provider,
         model="openai/gpt-4o-mini",
-        on_execute=_on_execute,
+        bus=bus,
+        pick_target=_pick_target,
     )
 
-    result = await service.trigger_now()
-    assert result == "done"
-    assert called_with == ["check open tasks"]
+    await service._tick()
+
+    # Verify message was published to bus
+    msg = await asyncio.wait_for(bus.consume_inbound(), timeout=1.0)
+    assert msg.content == "check open tasks"
+    assert msg.channel == "telegram"
+    assert msg.chat_id == "chat-123"
+    assert msg.metadata.get("_source") == "heartbeat"
+    assert msg.metadata.get("_task_context") == "check open tasks"
+    assert pick_target_calls == [("telegram", "chat-123")]
 
 
 @pytest.mark.asyncio
-async def test_trigger_now_returns_none_when_decision_is_skip(tmp_path) -> None:
+async def test_tick_does_not_publish_when_decision_is_skip(tmp_path) -> None:
+    """Phase 1 skip -> no message published to bus."""
     (tmp_path / "HEARTBEAT.md").write_text("- [ ] do thing", encoding="utf-8")
 
     provider = DummyProvider([
@@ -110,23 +129,23 @@ async def test_trigger_now_returns_none_when_decision_is_skip(tmp_path) -> None:
         )
     ])
 
-    async def _on_execute(tasks: str) -> str:
-        return tasks
-
+    bus = MessageBus()
     service = HeartbeatService(
         workspace=tmp_path,
         provider=provider,
         model="openai/gpt-4o-mini",
-        on_execute=_on_execute,
+        bus=bus,
     )
 
-    assert await service.trigger_now() is None
+    await service._tick()
+
+    # Verify no message was published
+    assert bus.inbound_size == 0
 
 
 @pytest.mark.asyncio
-async def test_tick_notifies_when_evaluator_says_yes(tmp_path, monkeypatch) -> None:
-    """Phase 1 run -> Phase 2 execute -> Phase 3 evaluate=notify -> on_notify called."""
-    (tmp_path / "HEARTBEAT.md").write_text("- [ ] check deployments", encoding="utf-8")
+async def test_trigger_now_publishes_to_bus(tmp_path) -> None:
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] do thing", encoding="utf-8")
 
     provider = DummyProvider([
         LLMResponse(
@@ -135,44 +154,32 @@ async def test_tick_notifies_when_evaluator_says_yes(tmp_path, monkeypatch) -> N
                 ToolCallRequest(
                     id="hb_1",
                     name="heartbeat",
-                    arguments={"action": "run", "tasks": "check deployments"},
+                    arguments={"action": "run", "tasks": "check open tasks"},
                 )
             ],
-        ),
+        )
     ])
 
-    executed: list[str] = []
-    notified: list[str] = []
-
-    async def _on_execute(tasks: str) -> str:
-        executed.append(tasks)
-        return "deployment failed on staging"
-
-    async def _on_notify(response: str) -> None:
-        notified.append(response)
-
+    bus = MessageBus()
     service = HeartbeatService(
         workspace=tmp_path,
         provider=provider,
         model="openai/gpt-4o-mini",
-        on_execute=_on_execute,
-        on_notify=_on_notify,
+        bus=bus,
+        pick_target=lambda: ("cli", "heartbeat"),
     )
 
-    async def _eval_notify(*a, **kw):
-        return True
+    await service.trigger_now()
 
-    monkeypatch.setattr("nanobot.utils.evaluator.evaluate_response", _eval_notify)
-
-    await service._tick()
-    assert executed == ["check deployments"]
-    assert notified == ["deployment failed on staging"]
+    # Verify message was published to bus
+    msg = await asyncio.wait_for(bus.consume_inbound(), timeout=1.0)
+    assert msg.content == "check open tasks"
+    assert msg.metadata.get("_source") == "heartbeat"
 
 
 @pytest.mark.asyncio
-async def test_tick_suppresses_when_evaluator_says_no(tmp_path, monkeypatch) -> None:
-    """Phase 1 run -> Phase 2 execute -> Phase 3 evaluate=silent -> on_notify NOT called."""
-    (tmp_path / "HEARTBEAT.md").write_text("- [ ] check status", encoding="utf-8")
+async def test_trigger_now_does_nothing_when_decision_is_skip(tmp_path) -> None:
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] do thing", encoding="utf-8")
 
     provider = DummyProvider([
         LLMResponse(
@@ -181,38 +188,40 @@ async def test_tick_suppresses_when_evaluator_says_no(tmp_path, monkeypatch) -> 
                 ToolCallRequest(
                     id="hb_1",
                     name="heartbeat",
-                    arguments={"action": "run", "tasks": "check status"},
+                    arguments={"action": "skip"},
                 )
             ],
-        ),
+        )
     ])
 
-    executed: list[str] = []
-    notified: list[str] = []
-
-    async def _on_execute(tasks: str) -> str:
-        executed.append(tasks)
-        return "everything is fine, no issues"
-
-    async def _on_notify(response: str) -> None:
-        notified.append(response)
-
+    bus = MessageBus()
     service = HeartbeatService(
         workspace=tmp_path,
         provider=provider,
         model="openai/gpt-4o-mini",
-        on_execute=_on_execute,
-        on_notify=_on_notify,
+        bus=bus,
     )
 
-    async def _eval_silent(*a, **kw):
-        return False
+    await service.trigger_now()
 
-    monkeypatch.setattr("nanobot.utils.evaluator.evaluate_response", _eval_silent)
+    # Verify no message was published
+    assert bus.inbound_size == 0
 
-    await service._tick()
-    assert executed == ["check status"]
-    assert notified == []
+
+@pytest.mark.asyncio
+async def test_pick_target_default(tmp_path) -> None:
+    """Default pick_target returns ('cli', 'heartbeat')."""
+    provider = DummyProvider([])
+    bus = MessageBus()
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        bus=bus,
+        # no pick_target provided
+    )
+
+    assert service.pick_target() == ("cli", "heartbeat")
 
 
 @pytest.mark.asyncio
@@ -238,10 +247,12 @@ async def test_decide_retries_transient_error_then_succeeds(tmp_path, monkeypatc
 
     monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
 
+    bus = MessageBus()
     service = HeartbeatService(
         workspace=tmp_path,
         provider=provider,
         model="openai/gpt-4o-mini",
+        bus=bus,
     )
 
     action, tasks = await service._decide("heartbeat content")
