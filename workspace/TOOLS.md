@@ -161,6 +161,36 @@ Available tools:
 - `mcp_playwright_browser_take_screenshot` — capture a screenshot
 - `mcp_playwright_browser_evaluate` — run JavaScript on the page
 
+## PostgreSQL Database Query (Postgres MCP)
+
+Use `mcp_postgres_query` to run read-only SQL queries against the connected PostgreSQL database.
+
+**IMPORTANT: Before querying, read the skill guide for workflow and patterns:**
+```
+read_file("~/.nanobot/workspace/skills/postgres/SKILL.md")
+```
+
+The skill covers: schema discovery, table inspection, common query patterns, and best practices.
+
+Available tool:
+- `mcp_postgres_query(sql: str)` — execute a read-only SQL query and return results
+
+**Quick reference:**
+```sql
+-- Discover tables
+SELECT table_name FROM information_schema.tables
+WHERE table_schema = 'public' AND table_type = 'BASE TABLE';
+
+-- Describe a table
+SELECT column_name, data_type FROM information_schema.columns
+WHERE table_name = 'your_table' ORDER BY ordinal_position;
+
+-- Query data (always LIMIT when exploring)
+SELECT * FROM your_table LIMIT 20;
+```
+
+Constraints: read-only only — INSERT, UPDATE, DELETE, and DDL are not permitted.
+
 ---
 
 ## Adding Custom Tools

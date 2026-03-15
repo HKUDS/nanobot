@@ -15,6 +15,7 @@ services:
     networks:
       - nanobot-net
       - playwright-net
+      - root_default
     command: ["gateway"]
     environment:
       - NANOBOT_BRIDGE=0
@@ -47,4 +48,6 @@ networks:
   nanobot-net:
     external: true
   playwright-net:
+    external: true
+  root_default:
     external: true
