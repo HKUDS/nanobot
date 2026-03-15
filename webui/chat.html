@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nanobot — Web Chat</title>
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:         #0f1117;
+      --surface:    #1a1d27;
+      --surface2:   #22263a;
+      --border:     #2e3350;
+      --accent:     #6c8bff;
+      --accent-dim: #3d5296;
+      --user-bg:    #2b3a6e;
+      --bot-bg:     #1e2235;
+      --text:       #e2e6f0;
+      --text-dim:   #8891b0;
+      --green:      #4ade80;
+      --red:        #f87171;
+      --yellow:     #facc15;
+      --radius:     12px;
+      --shadow:     0 4px 24px rgba(0,0,0,.45);
+    }
+    body.light {
+      --bg:         #f0f2f8;
+      --surface:    #ffffff;
+      --surface2:   #e8eaf4;
+      --border:     #c8cfe8;
+      --user-bg:    #3d5296;
+      --bot-bg:     #f5f6fc;
+      --text:       #1a1d2e;
+      --text-dim:   #5c6480;
+    }
+
+    html, body { height: 100%; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      font-size: 15px;
+      line-height: 1.6;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Header ───────────────────────────────────────────────────────────── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+      box-shadow: var(--shadow);
+      z-index: 10;
+    }
+    .logo {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, var(--accent), #a78bfa);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+    .header-title { font-size: 17px; font-weight: 700; }
+    .header-sub {
+      font-size: 12px; color: var(--text-dim);
+      margin-top: 1px;
+    }
+    .header-right {
+      margin-left: auto;
+      display: flex; align-items: center; gap: 10px;
+    }
+    #model-badge {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 3px 10px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+    #status-dot {
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      background: var(--text-dim);
+      transition: background .3s;
+    }
+    #status-dot.connected  { background: var(--green); }
+    #status-dot.connecting { background: var(--yellow); }
+    #status-dot.error      { background: var(--red); }
+
+    /* Theme toggle */
+    .theme-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 5px 10px;
+      cursor: pointer;
+      color: var(--text-dim);
+      font-size: 13px;
+      transition: border-color .2s;
+    }
+    .theme-btn:hover { border-color: var(--accent); color: var(--text); }
+
+    /* Clear button */
+    .clear-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 5px 10px;
+      cursor: pointer;
+      color: var(--text-dim);
+      font-size: 13px;
+      transition: border-color .2s, color .2s;
+    }
+    .clear-btn:hover { border-color: var(--red); color: var(--red); }
+
+    /* ── Chat area ────────────────────────────────────────────────────────── */
+    #chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      scroll-behavior: smooth;
+    }
+    #chat::-webkit-scrollbar { width: 6px; }
+    #chat::-webkit-scrollbar-track { background: transparent; }
+    #chat::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 3px;
+    }
+
+    /* Welcome message */
+    .welcome {
+      text-align: center;
+      color: var(--text-dim);
+      padding: 40px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+    .welcome .big-logo {
+      font-size: 48px;
+      background: linear-gradient(135deg, var(--accent), #a78bfa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .welcome h2 { font-size: 22px; color: var(--text); }
+    .welcome p  { font-size: 14px; max-width: 380px; line-height: 1.7; }
+
+    /* Message rows */
+    .msg-row {
+      display: flex;
+      gap: 10px;
+      max-width: 780px;
+      width: 100%;
+    }
+    .msg-row.user   { margin-left: auto; flex-direction: row-reverse; }
+    .msg-row.bot    { margin-right: auto; }
+    .msg-row.system { margin: 0 auto; }
+
+    /* Avatars */
+    .avatar {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px;
+      align-self: flex-end;
+    }
+    .user  .avatar { background: var(--user-bg); }
+    .bot   .avatar { background: linear-gradient(135deg, var(--accent), #a78bfa); }
+    .system .avatar { display: none; }
+
+    /* Bubbles */
+    .bubble {
+      padding: 11px 16px;
+      border-radius: var(--radius);
+      max-width: calc(100% - 48px);
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      writing-mode: horizontal-tb;
+      text-orientation: mixed;
+      line-height: 1.65;
+      box-shadow: 0 2px 8px rgba(0,0,0,.25);
+      position: relative;
+    }
+    .user   .bubble {
+      background: var(--user-bg);
+      border-bottom-right-radius: 4px;
+      color: #d8e0ff;
+      word-break: normal;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      writing-mode: horizontal-tb;
+      text-orientation: mixed;
+      display: inline-block;
+      width: fit-content;
+      max-width: min(78ch, calc(100% - 48px));
+    }
+    .bot    .bubble {
+      background: var(--bot-bg);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 4px;
+    }
+    .system .bubble {
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      font-size: 12px;
+      color: var(--text-dim);
+      text-align: center;
+    }
+
+    /* ── Message markup rendering ─────────────────────────────────────────── */
+    .bubble p   { margin: 0 0 8px; }
+    .bubble p:last-child { margin-bottom: 0; }
+
+    .bubble pre {
+      background: #0d0f1a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      overflow-x: auto;
+      font-size: 13px;
+      margin: 8px 0;
+    }
+    body.light .bubble pre { background: #1e2235; color: #e2e6f0; }
+
+    .bubble code:not(pre code) {
+      background: rgba(108,139,255,.15);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    }
+    .bubble pre code {
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      color: #b0c4ff;
+    }
+
+    .bubble ul, .bubble ol { padding-left: 20px; margin: 6px 0; }
+    .bubble li { margin: 3px 0; }
+
+    .bubble strong { color: var(--accent); font-weight: 600; }
+    .bubble em     { color: #a78bfa; }
+
+    .bubble blockquote {
+      border-left: 3px solid var(--accent-dim);
+      padding-left: 12px;
+      color: var(--text-dim);
+      margin: 8px 0;
+    }
+
+    .bubble h1, .bubble h2, .bubble h3 {
+      margin: 8px 0 4px;
+      color: var(--text);
+    }
+    .bubble h1 { font-size: 1.3em; }
+    .bubble h2 { font-size: 1.15em; }
+    .bubble h3 { font-size: 1.05em; }
+
+    /* Timestamp */
+    .msg-ts {
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-top: 4px;
+      padding: 0 2px;
+    }
+    .user .msg-ts { text-align: right; }
+
+    /* ── Typing / progress indicator ─────────────────────────────────────── */
+    #typing-row {
+      display: none;
+      gap: 10px;
+      max-width: 780px;
+      width: 100%;
+      align-items: flex-end;
+    }
+    #typing-row .avatar {
+      background: linear-gradient(135deg, var(--accent), #a78bfa);
+    }
+    #typing-bubble {
+      background: var(--bot-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      border-bottom-left-radius: 4px;
+      padding: 10px 14px;
+      display: flex; align-items: center; gap: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.25);
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+    .dots { display: flex; gap: 4px; }
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--accent-dim);
+      animation: bounce 1.2s infinite ease-in-out;
+    }
+    .dot:nth-child(1) { animation-delay: 0s; }
+    .dot:nth-child(2) { animation-delay: .2s; }
+    .dot:nth-child(3) { animation-delay: .4s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: scale(.6); opacity:.4; }
+      40%           { transform: scale(1);  opacity: 1; }
+    }
+    #progress-text {
+      font-size: 12px;
+      max-width: 300px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    /* ── Input area ───────────────────────────────────────────────────────── */
+    .input-bar {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 14px 16px;
+      flex-shrink: 0;
+    }
+    .input-wrap {
+      display: flex;
+      align-items: flex-end;
+      gap: 10px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px 10px;
+      transition: border-color .2s;
+      max-width: 780px;
+      margin: 0 auto;
+    }
+    .input-wrap:focus-within { border-color: var(--accent); }
+
+    #inp {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 15px;
+      resize: none;
+      max-height: 140px;
+      min-height: 24px;
+      line-height: 1.5;
+      overflow-y: auto;
+    }
+    #inp::placeholder { color: var(--text-dim); }
+
+    #send-btn {
+      width: 36px; height: 36px;
+      border: none;
+      border-radius: 9px;
+      background: var(--accent);
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      transition: background .2s, transform .1s;
+      align-self: flex-end;
+      flex-shrink: 0;
+    }
+    #send-btn:hover   { background: #5a79e8; }
+    #send-btn:active  { transform: scale(.94); }
+    #send-btn:disabled { background: var(--border); cursor: not-allowed; }
+    #send-btn svg { width: 16px; height: 16px; fill: #fff; }
+
+    .input-hint {
+      text-align: center;
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 6px;
+    }
+
+    /* ── Toast ─────────────────────────────────────────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: 80px; right: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 16px;
+      font-size: 13px;
+      box-shadow: var(--shadow);
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity .3s, transform .3s;
+      pointer-events: none;
+      z-index: 100;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+    #toast.error-toast { border-color: var(--red); color: var(--red); }
+    #toast.ok-toast    { border-color: var(--green); color: var(--green); }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="logo">🤖</div>
+  <div>
+    <div class="header-title">Nanobot</div>
+    <div class="header-sub">Personal AI Assistant</div>
+  </div>
+  <div class="header-right">
+    <span id="model-badge">connecting…</span>
+    <div id="status-dot" class="connecting" title="WebSocket status"></div>
+    <button class="clear-btn" onclick="clearChat()" title="Clear conversation">🗑 Clear</button>
+    <button class="theme-btn" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+  </div>
+</header>
+
+<!-- Chat messages -->
+<div id="chat">
+  <div class="welcome" id="welcome">
+    <div class="big-logo">🤖</div>
+    <h2>Hello! I'm Nanobot</h2>
+    <p>Your personal AI assistant. Ask me anything — I can answer questions, run tools, search the web, edit files, and much more.</p>
+  </div>
+</div>
+
+<!-- Typing indicator (hidden by default) -->
+<div id="typing-row" style="display:none; max-width:780px; margin: 0 auto 8px; padding: 0 16px; gap: 10px; align-items: flex-end;">
+  <div class="avatar">🤖</div>
+  <div id="typing-bubble">
+    <div class="dots">
+      <div class="dot"></div>
+      <div class="dot"></div>
+      <div class="dot"></div>
+    </div>
+    <span id="progress-text">Thinking…</span>
+  </div>
+</div>
+
+<!-- Input -->
+<div class="input-bar">
+  <div class="input-wrap">
+    <textarea id="inp" rows="1" placeholder="Message nanobot… (Enter to send, Shift+Enter for new line)"></textarea>
+    <button id="send-btn" onclick="sendMessage()" title="Send">
+      <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+    </button>
+  </div>
+  <div class="input-hint" id="conn-hint">Connecting to Nanobot…</div>
+</div>
+
+<!-- Toast notification -->
+<div id="toast"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+const WS_URL = 'ws://127.0.0.1:8791';
+let ws = null;
+let isWaiting = false;
+let reconnectDelay = 1000;
+let reconnectTimer = null;
+
+// ── DOM refs ───────────────────────────────────────────────────────────────
+const chatEl    = document.getElementById('chat');
+const inp       = document.getElementById('inp');
+const sendBtn   = document.getElementById('send-btn');
+const statusDot = document.getElementById('status-dot');
+const modelBadge= document.getElementById('model-badge');
+const typingRow = document.getElementById('typing-row');
+const progressT = document.getElementById('progress-text');
+const connHint  = document.getElementById('conn-hint');
+const welcome   = document.getElementById('welcome');
+
+// ── Theme ──────────────────────────────────────────────────────────────────
+function toggleTheme() {
+  document.body.classList.toggle('light');
+  const btn = document.querySelector('.theme-btn');
+  btn.textContent = document.body.classList.contains('light') ? '🌑' : '🌙';
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+function showToast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show ' + (type === 'error' ? 'error-toast' : type === 'ok' ? 'ok-toast' : '');
+  setTimeout(() => { t.className = t.className.replace('show', ''); }, 3000);
+}
+
+// ── Auto-resize textarea ───────────────────────────────────────────────────
+inp.addEventListener('input', () => {
+  inp.style.height = 'auto';
+  inp.style.height = Math.min(inp.scrollHeight, 140) + 'px';
+});
+
+inp.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+// ── Markdown-ish renderer ──────────────────────────────────────────────────
+function renderMarkdown(raw) {
+  // Escape html first
+  let html = raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  // Code blocks (```lang\n ... ```)
+  html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    return `<pre><code>${code.trimEnd()}</code></pre>`;
+  });
+
+  // Inline code
+  html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+
+  // Bold **text** or __text__
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+
+  // Italic *text* or _text_
+  html = html.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+  html = html.replace(/_([^_\n]+)_/g, '<em>$1</em>');
+
+  // Headers
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm,  '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm,   '<h1>$1</h1>');
+
+  // Blockquote
+  html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+
+  // Unordered lists
+  html = html.replace(/^[*\-] (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`);
+
+  // Ordered lists
+  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+
+  // Horizontal rule
+  html = html.replace(/^---+$/gm, '<hr/>');
+
+  // Paragraphs (double newline)
+  html = html.split(/\n{2,}/).map(para => {
+    if (!para.startsWith('<')) return `<p>${para.replace(/\n/g, '<br/>')}</p>`;
+    return para;
+  }).join('\n');
+
+  return html;
+}
+
+// ── Build a message bubble ─────────────────────────────────────────────────
+function makeMessage(role, text) {
+  const row = document.createElement('div');
+  row.className = `msg-row ${role}`;
+
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar';
+  avatar.textContent = role === 'user' ? '🧑' : (role === 'bot' ? '🤖' : '');
+
+  const col = document.createElement('div');
+  col.style.display = 'flex';
+  col.style.flexDirection = 'column';
+  col.style.gap = '3px';
+  col.style.maxWidth = 'calc(100% - 48px)';
+  if (role === 'user') col.style.alignItems = 'flex-end';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+
+  if (role === 'system') {
+    bubble.textContent = text;
+  } else if (role === 'user') {
+    bubble.textContent = text;  // user text is plain
+    // Force horizontal rendering for user-entered text.
+    bubble.style.writingMode = 'horizontal-tb';
+    bubble.style.textOrientation = 'mixed';
+    bubble.style.whiteSpace = 'pre-wrap';
+    bubble.style.wordBreak = 'normal';
+    bubble.style.overflowWrap = 'anywhere';
+  } else {
+    bubble.innerHTML = renderMarkdown(text);
+  }
+
+  const ts = document.createElement('div');
+  ts.className = 'msg-ts';
+  ts.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  col.appendChild(bubble);
+  col.appendChild(ts);
+
+  if (role === 'user') {
+    row.appendChild(col);
+    row.appendChild(avatar);
+  } else if (role === 'bot') {
+    row.appendChild(avatar);
+    row.appendChild(col);
+  } else {
+    row.appendChild(bubble);
+  }
+
+  return row;
+}
+
+function appendMessage(role, text) {
+  if (welcome && welcome.parentNode) {
+    welcome.remove();
+  }
+  const row = makeMessage(role, text);
+  chatEl.appendChild(row);
+  scrollToBottom();
+  return row;
+}
+
+function scrollToBottom() {
+  requestAnimationFrame(() => {
+    chatEl.scrollTop = chatEl.scrollHeight;
+  });
+}
+
+// ── UI state helpers ───────────────────────────────────────────────────────
+function setWaiting(on) {
+  isWaiting = on;
+  sendBtn.disabled = on;
+  inp.disabled = on;
+  typingRow.style.display = on ? 'flex' : 'none';
+  if (!on) progressT.textContent = 'Thinking…';
+  scrollToBottom();
+}
+
+function setConnected(on, model) {
+  if (on) {
+    statusDot.className = 'connected';
+    connHint.textContent = 'Connected · Enter to send';
+    inp.disabled = false;
+    sendBtn.disabled = false;
+    if (model) modelBadge.textContent = model;
+    reconnectDelay = 1000;
+  } else {
+    statusDot.className = 'error';
+    connHint.textContent = 'Disconnected — reconnecting…';
+    inp.disabled = true;
+    sendBtn.disabled = true;
+    modelBadge.textContent = 'offline';
+  }
+}
+
+// ── WebSocket connection ───────────────────────────────────────────────────
+function connect() {
+  statusDot.className = 'connecting';
+  connHint.textContent = 'Connecting to Nanobot…';
+  modelBadge.textContent = 'connecting…';
+
+  ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    console.log('WebSocket connected');
+    // wait for "ready" message to set model name
+  };
+
+  ws.onmessage = (e) => {
+    let data;
+    try { data = JSON.parse(e.data); } catch { return; }
+
+    switch (data.type) {
+
+      case 'ready':
+        setConnected(true, data.model);
+        break;
+
+      case 'pong':
+        break;
+
+      case 'status':
+        progressT.textContent = data.text || 'Thinking…';
+        break;
+
+      case 'progress':
+        progressT.textContent = data.text || '…';
+        break;
+
+      case 'response':
+        setWaiting(false);
+        appendMessage('bot', data.text);
+        break;
+
+      case 'error':
+        setWaiting(false);
+        appendMessage('bot', `⚠️ Error: ${data.text}`);
+        showToast(data.text, 'error');
+        break;
+    }
+  };
+
+  ws.onclose = () => {
+    setConnected(false);
+    setWaiting(false);
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+    reconnectTimer = setTimeout(connect, reconnectDelay);
+  };
+
+  ws.onerror = () => {
+    // onclose will fire after this
+  };
+}
+
+// Keepalive ping every 20s
+setInterval(() => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'ping' }));
+  }
+}, 20000);
+
+// ── Send message ───────────────────────────────────────────────────────────
+function sendMessage() {
+  if (isWaiting || !ws || ws.readyState !== WebSocket.OPEN) return;
+  const text = inp.value.trim();
+  if (!text) return;
+
+  appendMessage('user', text);
+  setWaiting(true);
+  inp.value = '';
+  inp.style.height = 'auto';
+
+  ws.send(JSON.stringify({ type: 'message', message: text }));
+}
+
+// ── Clear chat ─────────────────────────────────────────────────────────────
+function clearChat() {
+  chatEl.innerHTML = '';
+  // Re-add welcome card
+  const w = document.createElement('div');
+  w.className = 'welcome';
+  w.id = 'welcome';
+  w.innerHTML = `
+    <div class="big-logo">🤖</div>
+    <h2>Hello! I'm Nanobot</h2>
+    <p>Your personal AI assistant. Ask me anything — I can answer questions, run tools, search the web, edit files, and much more.</p>
+  `;
+  chatEl.appendChild(w);
+  showToast('Conversation cleared', 'ok');
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+inp.disabled = true;
+sendBtn.disabled = true;
+connect();
+</script>
+</body>
+</html>
