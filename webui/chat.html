@@ -420,7 +420,7 @@
     <span id="model-badge">connecting…</span>
     <div id="status-dot" class="connecting" title="WebSocket status"></div>
     <button class="clear-btn" onclick="clearChat()" title="Clear conversation">🗑 Clear</button>
-    <button class="theme-btn" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+    <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">🌙</button>
   </div>
 </header>
 
@@ -449,7 +449,7 @@
 <!-- Input -->
 <div class="input-bar">
   <div class="input-wrap">
-    <textarea id="inp" rows="1" placeholder="Message nanobot… (Enter to send, Shift+Enter for new line)"></textarea>
+    <textarea id="inp" rows="1" aria-label="Message nanobot" placeholder="Message nanobot… (Enter to send, Shift+Enter for new line)"></textarea>
     <button id="send-btn" onclick="sendMessage()" title="Send">
       <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
     </button>
@@ -482,8 +482,9 @@ const welcome   = document.getElementById('welcome');
 // ── Theme ──────────────────────────────────────────────────────────────────
 function toggleTheme() {
   document.body.classList.toggle('light');
-  const btn = document.querySelector('.theme-btn');
+  const btn = document.getElementById('theme-btn');
   btn.textContent = document.body.classList.contains('light') ? '🌑' : '🌙';
+  btn.setAttribute('aria-label', document.body.classList.contains('light') ? 'Switch to dark theme' : 'Switch to light theme');
 }
 
 // ── Toast ──────────────────────────────────────────────────────────────────
@@ -540,11 +541,14 @@ function renderMarkdown(raw) {
   html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
 
   // Unordered lists
-  html = html.replace(/^[*\-] (.+)$/gm, '<li>$1</li>');
-  html = html.replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`);
+  html = html.replace(/^[*\-] (.+)$/gm, '<li class="ul-item">$1</li>');
+  html = html.replace(/(<li class="ul-item">.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`);
+  html = html.replace(/<li class="ul-item">/g, '<li>');
 
   // Ordered lists
-  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/^\d+\. (.+)$/gm, '<li class="ol-item">$1</li>');
+  html = html.replace(/(<li class="ol-item">.*<\/li>\n?)+/g, m => `<ol>${m}</ol>`);
+  html = html.replace(/<li class="ol-item">/g, '<li>');
 
   // Horizontal rule
   html = html.replace(/^---+$/gm, '<hr/>');

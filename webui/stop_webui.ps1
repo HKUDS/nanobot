@@ -18,22 +18,58 @@ function Stop-ByPidFile {
 
     try {
         $id = [int]$pidText
-        Stop-Process -Id $id -Force -ErrorAction Stop
-        Write-Host "Stopped Web UI process (PID: $id)."
     } catch {
-        Write-Host "PID file found, but process is not running: $pidText"
+        Remove-Item $PidPath -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+
+    $proc = $null
+    try {
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $id" -ErrorAction Stop
+    } catch {
+        $proc = $null
+    }
+
+    if (-not $proc) {
+        Write-Host "PID file found, but no process is running with PID $id."
+        Remove-Item $PidPath -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+
+    $runScriptPath = [System.IO.Path]::GetFullPath((Join-Path $webuiDir "run.py"))
+    $cmdLine = $proc.CommandLine
+    if (-not ($cmdLine -and ($cmdLine -like "*$runScriptPath*"))) {
+        Write-Host "PID file refers to a process that does not match this Web UI instance (PID: $id). Skipping."
+        Remove-Item $PidPath -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+
+    $stopped = $false
+    try {
+        Stop-Process -Id $id -ErrorAction Stop
+        Write-Host "Stopped Web UI process (PID: $id)."
+        $stopped = $true
+    } catch {
+        try {
+            Stop-Process -Id $id -Force -ErrorAction Stop
+            Write-Host "Force-stopped Web UI process (PID: $id)."
+            $stopped = $true
+        } catch {
+            Write-Host "PID file found, but process could not be stopped: $pidText"
+        }
     }
 
     Remove-Item $PidPath -Force -ErrorAction SilentlyContinue
-    return $true
+    return $stopped
 }
 
 function Stop-ByCommandLine {
     $stoppedAny = $false
+    $runScriptPath = [System.IO.Path]::GetFullPath((Join-Path $webuiDir "run.py"))
     $procs = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'"
 
     foreach ($p in $procs) {
-        if ($p.CommandLine -and $p.CommandLine -like "*nano1\\nanobot\\webui\\run.py*") {
+        if ($p.CommandLine -and $p.CommandLine -like "*$runScriptPath*") {
             try {
                 Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop
                 Write-Host "Stopped orphan Web UI process (PID: $($p.ProcessId))."

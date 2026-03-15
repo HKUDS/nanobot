@@ -11,14 +11,15 @@ HTTP  → port 8790   serves chat.html
 WS    → port 8791   handles chat messages in real-time
 
 Usage:
-    python -m webui.server                      # from nano1/nanobot/
-    python nano1/nanobot/webui/server.py        # directly
+    python -m webui.server                      # from repository root
+    python webui/server.py                      # directly
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sys
 import threading
@@ -28,8 +29,10 @@ from pathlib import Path
 import websockets
 from websockets.server import WebSocketServerProtocol
 
+logger = logging.getLogger(__name__)
+
 # ── Make sure nanobot package is importable ──────────────────────────────────
-_PKG_ROOT = Path(__file__).parents[1]          # nano1/nanobot/
+_PKG_ROOT = Path(__file__).parents[1]          # repository root
 if str(_PKG_ROOT) not in sys.path:
     sys.path.insert(0, str(_PKG_ROOT))
 
@@ -88,6 +91,22 @@ def _create_provider(config):
 
     elif provider_name == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
+
+        # Mirror CLI validation so misconfiguration fails with a clear message.
+        missing = []
+        if p is None:
+            missing.extend(["api_key", "api_base"])
+        else:
+            if not getattr(p, "api_key", None):
+                missing.append("api_key")
+            if not getattr(p, "api_base", None):
+                missing.append("api_base")
+        if missing:
+            raise ValueError(
+                "Invalid configuration for azure_openai provider: missing "
+                f"{', '.join(missing)} for model '{model}'."
+            )
+
         provider = AzureOpenAIProvider(
             api_key=p.api_key,
             api_base=p.api_base,
@@ -159,6 +178,7 @@ def _create_agent():
 
 _agent = None
 _model_name = "unknown"
+_agent_lock: asyncio.Lock | None = None
 
 
 async def _ws_handler(websocket: WebSocketServerProtocol) -> None:
@@ -196,14 +216,24 @@ async def _ws_handler(websocket: WebSocketServerProtocol) -> None:
                     except Exception:
                         pass
 
-                # Run agent
-                response = await _agent.process_direct(
-                    msg,
-                    session_key=session_id,
-                    channel="web",
-                    chat_id=session_id,
-                    on_progress=on_progress,
-                )
+                # Run agent (serialize access to shared agent state)
+                if _agent_lock is None:
+                    response = await _agent.process_direct(
+                        msg,
+                        session_key=session_id,
+                        channel="web",
+                        chat_id=session_id,
+                        on_progress=on_progress,
+                    )
+                else:
+                    async with _agent_lock:
+                        response = await _agent.process_direct(
+                            msg,
+                            session_key=session_id,
+                            channel="web",
+                            chat_id=session_id,
+                            on_progress=on_progress,
+                        )
 
                 await websocket.send(json.dumps({
                     "type": "response",
@@ -216,9 +246,10 @@ async def _ws_handler(websocket: WebSocketServerProtocol) -> None:
                     "text": "Invalid JSON message",
                 }))
             except Exception as exc:
+                logger.exception("Unhandled error while processing WebSocket message")
                 await websocket.send(json.dumps({
                     "type": "error",
-                    "text": f"Agent error: {exc}",
+                    "text": "Agent error while processing your request.",
                 }))
 
     except websockets.exceptions.ConnectionClosed:
@@ -228,13 +259,19 @@ async def _ws_handler(websocket: WebSocketServerProtocol) -> None:
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 async def _main_async() -> None:
-    global _agent, _model_name
+    global _agent, _model_name, _agent_lock
 
     print("  Loading nanobot agent...", flush=True)
     _agent, _model_name = _create_agent()
+    _agent_lock = asyncio.Lock()
     print(f"  Agent ready  (model: {_model_name})", flush=True)
 
-    async with websockets.serve(_ws_handler, WS_HOST, WS_PORT):
+    # Restrict browser-origin access to local chat page(s) only.
+    allowed_origins = {
+        f"http://{HTTP_HOST}:{HTTP_PORT}",
+        f"http://localhost:{HTTP_PORT}",
+    }
+    async with websockets.serve(_ws_handler, WS_HOST, WS_PORT, origins=allowed_origins):
         print(f"  WebSocket  -> ws://{WS_HOST}:{WS_PORT}")
         print(f"  Chat UI    -> http://{HTTP_HOST}:{HTTP_PORT}")
         print()

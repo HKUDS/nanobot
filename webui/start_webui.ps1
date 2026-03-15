@@ -80,7 +80,12 @@ $proc.Id | Set-Content $pidFile -Encoding ascii
 Start-Sleep -Seconds 3
 
 try {
-    $check = Invoke-WebRequest -Uri "http://127.0.0.1:8790" -UseBasicParsing -TimeoutSec 5
+    if ($PSVersionTable.PSVersion.Major -lt 6) {
+        $check = Invoke-WebRequest -Uri "http://127.0.0.1:8790" -UseBasicParsing -TimeoutSec 5
+    }
+    else {
+        $check = Invoke-WebRequest -Uri "http://127.0.0.1:8790" -TimeoutSec 5
+    }
     if ($check.StatusCode -eq 200) {
         Write-Host "Web UI started successfully (PID: $($proc.Id))."
         Write-Host "Open: http://127.0.0.1:8790"
