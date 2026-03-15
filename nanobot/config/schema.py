@@ -42,6 +42,12 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     context_budget_tokens: int = 0  # Max old-history tokens during tool iterations (0 = no trim)
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    description: str | None = None
+
+    @property
+    def should_warn_deprecated_memory_window(self) -> bool:
+        """Return True when old memoryWindow is present without contextWindowTokens."""
+        return self.memory_window is not None and "context_window_tokens" not in self.model_fields_set
 
 
 class AgentsConfig(Base):
