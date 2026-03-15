@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.hooks import HookEvent
 from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
@@ -221,7 +222,24 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+
+                    # PreToolUse hook — may block execution
+                    pre_result = self.context.hooks.emit(HookEvent.PRE_TOOL_USE, {
+                        "tool_name": tool_call.name,
+                        "tool_args": tool_call.arguments,
+                    })
+                    if not pre_result.proceed:
+                        result = f"Hook blocked: {pre_result.reason}"
+                    else:
+                        result = await self.tools.execute(tool_call.name, tool_call.arguments)
+
+                        # PostToolUse hook
+                        self.context.hooks.emit(HookEvent.POST_TOOL_USE, {
+                            "tool_name": tool_call.name,
+                            "tool_args": tool_call.arguments,
+                            "result": result,
+                        })
+
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -337,6 +355,7 @@ class AgentLoop:
 
     def stop(self) -> None:
         """Stop the agent loop."""
+        self.context.hooks.emit(HookEvent.STOP, {})
         self._running = False
         logger.info("Agent loop stopping")
 
@@ -414,6 +433,13 @@ class AgentLoop:
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
+
+        # SessionStart hook
+        self.context.hooks.emit(HookEvent.SESSION_START, {
+            "session_key": key,
+            "channel": msg.channel,
+            "chat_id": msg.chat_id,
+        })
 
         history = session.get_history(max_messages=0)
         initial_messages = self.context.build_messages(

@@ -955,6 +955,89 @@ def plugins_list():
 
 
 # ============================================================================
+# Skills Commands
+# ============================================================================
+
+
+skills_app = typer.Typer(help="Manage skills")
+app.add_typer(skills_app, name="skills")
+
+
+@skills_app.command("list")
+def skills_list():
+    """List all skills and their status."""
+    from nanobot.agent.hooks.storage import HookStorage
+    from nanobot.agent.skills import SkillsLoader
+    from nanobot.config.loader import load_config
+
+    config = load_config()
+    loader = SkillsLoader(config.workspace_path)
+    storage = HookStorage(config.workspace_path)
+    all_skills = loader.list_skills(filter_unavailable=False)
+
+    if not all_skills:
+        console.print("[yellow]No skills found.[/yellow]")
+        return
+
+    table = Table(title="Skills")
+    table.add_column("Name", style="cyan")
+    table.add_column("Enabled", style="green")
+    table.add_column("Source", style="dim")
+    table.add_column("Description", style="yellow")
+
+    for s in all_skills:
+        enabled = not storage.is_skill_disabled(s["name"])
+        description = loader._get_skill_description(s["name"])
+        table.add_row(
+            s["name"],
+            "[green]✓[/green]" if enabled else "[red]✗[/red]",
+            s["source"],
+            description,
+        )
+
+    console.print(table)
+
+
+@skills_app.command("enable")
+def skills_enable(name: str = typer.Argument(..., help="Skill name to enable")):
+    """Enable a disabled skill."""
+    from nanobot.agent.hooks.storage import HookStorage
+    from nanobot.agent.skills import SkillsLoader
+    from nanobot.config.loader import load_config
+
+    config = load_config()
+    loader = SkillsLoader(config.workspace_path)
+
+    if loader.load_skill(name) is None:
+        console.print(f"[red]Skill '{name}' not found.[/red]")
+        raise typer.Exit(1)
+
+    storage = HookStorage(config.workspace_path)
+    storage.set_skill_enabled(name, True)
+    console.print(f"[green]✓[/green] Skill '{name}' enabled")
+
+
+@skills_app.command("disable")
+def skills_disable(name: str = typer.Argument(..., help="Skill name to disable")):
+    """Disable a skill without deleting it."""
+    from nanobot.agent.hooks.storage import HookStorage
+    from nanobot.agent.skills import SkillsLoader
+    from nanobot.config.loader import load_config
+
+    config = load_config()
+    loader = SkillsLoader(config.workspace_path)
+
+    if loader.load_skill(name) is None:
+        console.print(f"[red]Skill '{name}' not found.[/red]")
+        raise typer.Exit(1)
+
+    storage = HookStorage(config.workspace_path)
+    storage.set_skill_enabled(name, False)
+    console.print(f"[green]✓[/green] Skill '{name}' disabled")
+    console.print("[dim]Note: Start a new session or use a different session ID (-s flag) to see the change.[/dim]")
+
+
+# ============================================================================
 # Status Commands
 # ============================================================================
 

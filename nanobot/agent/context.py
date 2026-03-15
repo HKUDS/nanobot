@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from nanobot.agent.hooks import HookEvent, HookRegistry, SkillsEnabledFilter, load_hooks_from_json
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.utils.helpers import build_assistant_message, detect_image_mime
@@ -23,6 +24,17 @@ class ContextBuilder:
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
+        self.hooks = HookRegistry()
+        self._init_hooks()
+
+    def _init_hooks(self) -> None:
+        """Initialize default hooks and load user-defined hooks."""
+        # Built-in hook: skill disable/enable
+        self.hooks.register(SkillsEnabledFilter(self.workspace))
+
+        # Load user-defined hooks from .nanobot/hooks.json
+        for hook in load_hooks_from_json(self.workspace):
+            self.hooks.register(hook)
 
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
@@ -36,13 +48,13 @@ class ContextBuilder:
         if memory:
             parts.append(f"# Memory\n\n{memory}")
 
-        always_skills = self.skills.get_always_skills()
+        always_skills = self._get_filtered_always_skills()
         if always_skills:
             always_content = self.skills.load_skills_for_context(always_skills)
             if always_content:
                 parts.append(f"# Active Skills\n\n{always_content}")
 
-        skills_summary = self.skills.build_skills_summary()
+        skills_summary = self._build_filtered_skills_summary()
         if skills_summary:
             parts.append(f"""# Skills
 
@@ -52,6 +64,31 @@ Skills with available="false" need dependencies installed first - you can try in
 {skills_summary}""")
 
         return "\n\n---\n\n".join(parts)
+
+    def _build_filtered_skills_summary(self) -> str:
+        """Build skills summary with PRE_BUILD_CONTEXT hook filtering."""
+        all_skills = self.skills.list_skills(filter_unavailable=False)
+        filtered = self._apply_skills_hooks(all_skills)
+
+        if not filtered:
+            return ""
+
+        return self.skills.build_skills_summary_from(filtered)
+
+    def _get_filtered_always_skills(self) -> list[str]:
+        """Get always-on skills, filtered by hooks (respects disabled skills)."""
+        always_skills = self.skills.get_always_skills()
+        if not always_skills:
+            return []
+        # Build skill dicts for hook filtering
+        skill_dicts = [{"name": name} for name in always_skills]
+        filtered = self._apply_skills_hooks(skill_dicts)
+        return [s["name"] for s in filtered]
+
+    def _apply_skills_hooks(self, skills: list[dict]) -> list[dict]:
+        """Apply PRE_BUILD_CONTEXT hooks to a skills list."""
+        result = self.hooks.emit(HookEvent.PRE_BUILD_CONTEXT, {"type": "skills", "data": skills})
+        return result.modified_data if result.modified_data is not None else skills
 
     def _get_identity(self) -> str:
         """Get the core identity section."""

@@ -99,24 +99,27 @@ class SkillsLoader:
         return "\n\n---\n\n".join(parts) if parts else ""
 
     def build_skills_summary(self) -> str:
-        """
-        Build a summary of all skills (name, description, path, availability).
+        """Build a summary of all skills."""
+        return self.build_skills_summary_from(self.list_skills(filter_unavailable=False))
 
-        This is used for progressive loading - the agent can read the full
-        skill content using read_file when needed.
+    def build_skills_summary_from(self, skills: list[dict[str, str]]) -> str:
+        """
+        Build XML summary from a given skills list.
+
+        Args:
+            skills: List of skill info dicts with 'name', 'path', 'source'.
 
         Returns:
             XML-formatted skills summary.
         """
-        all_skills = self.list_skills(filter_unavailable=False)
-        if not all_skills:
+        if not skills:
             return ""
 
         def escape_xml(s: str) -> str:
             return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
         lines = ["<skills>"]
-        for s in all_skills:
+        for s in skills:
             name = escape_xml(s["name"])
             path = s["path"]
             desc = escape_xml(self._get_skill_description(s["name"]))
