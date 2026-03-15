@@ -125,7 +125,7 @@ async def test_trigger_now_returns_none_when_decision_is_skip(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_tick_notifies_when_evaluator_says_yes(tmp_path, monkeypatch) -> None:
-    """Phase 1 run -> Phase 2 execute -> Phase 3 evaluate=notify -> on_notify called."""
+    """Phase 1 run -> Phase 2 execute -> Phase 3 evaluate=error -> on_notify called."""
     (tmp_path / "HEARTBEAT.md").write_text("- [ ] check deployments", encoding="utf-8")
 
     provider = DummyProvider([
@@ -157,10 +157,11 @@ async def test_tick_notifies_when_evaluator_says_yes(tmp_path, monkeypatch) -> N
         model="openai/gpt-4o-mini",
         on_execute=_on_execute,
         on_notify=_on_notify,
+        notification_level="error",
     )
 
     async def _eval_notify(*a, **kw):
-        return True
+        return "error"
 
     monkeypatch.setattr("nanobot.utils.evaluator.evaluate_response", _eval_notify)
 
@@ -171,7 +172,7 @@ async def test_tick_notifies_when_evaluator_says_yes(tmp_path, monkeypatch) -> N
 
 @pytest.mark.asyncio
 async def test_tick_suppresses_when_evaluator_says_no(tmp_path, monkeypatch) -> None:
-    """Phase 1 run -> Phase 2 execute -> Phase 3 evaluate=silent -> on_notify NOT called."""
+    """Phase 1 run -> Phase 2 execute -> Phase 3 evaluate=normal -> on_notify NOT called."""
     (tmp_path / "HEARTBEAT.md").write_text("- [ ] check status", encoding="utf-8")
 
     provider = DummyProvider([
@@ -203,18 +204,17 @@ async def test_tick_suppresses_when_evaluator_says_no(tmp_path, monkeypatch) -> 
         model="openai/gpt-4o-mini",
         on_execute=_on_execute,
         on_notify=_on_notify,
+        notification_level="error",
     )
 
     async def _eval_silent(*a, **kw):
-        return False
+        return "normal"
 
     monkeypatch.setattr("nanobot.utils.evaluator.evaluate_response", _eval_silent)
 
     await service._tick()
     assert executed == ["check status"]
     assert notified == []
-
-
 @pytest.mark.asyncio
 async def test_decide_retries_transient_error_then_succeeds(tmp_path, monkeypatch) -> None:
     provider = DummyProvider([
