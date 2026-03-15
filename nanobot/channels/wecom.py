@@ -12,9 +12,20 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import WecomConfig
+from nanobot.config.schema import Base
+from pydantic import Field
 
 WECOM_AVAILABLE = importlib.util.find_spec("wecom_aibot_sdk") is not None
+
+class WecomConfig(Base):
+    """WeCom (Enterprise WeChat) AI Bot channel configuration."""
+
+    enabled: bool = False
+    bot_id: str = ""
+    secret: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+    welcome_message: str = ""
+
 
 # Message type display mapping
 MSG_TYPE_MAP = {
@@ -38,7 +49,13 @@ class WecomChannel(BaseChannel):
     name = "wecom"
     display_name = "WeCom"
 
-    def __init__(self, config: WecomConfig, bus: MessageBus):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return WecomConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = WecomConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: WecomConfig = config
         self._client: Any = None

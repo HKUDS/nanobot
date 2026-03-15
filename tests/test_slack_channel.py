@@ -5,7 +5,7 @@ import pytest
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.slack import SlackChannel
-from nanobot.config.schema import SlackConfig
+from nanobot.channels.slack import SlackConfig
 
 
 class _FakeAsyncWebClient:
