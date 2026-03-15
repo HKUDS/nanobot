@@ -1,7 +1,7 @@
 name: Check Fork Status
 on:
-  schedule:
-    - cron: '30 0,5,12 * * *'
+  #schedule:
+    #- cron: '30 0,5,12 * * *'
   workflow_dispatch:
 jobs:
   check-fork:
