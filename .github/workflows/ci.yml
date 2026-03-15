@@ -29,5 +29,12 @@ jobs:
         python -m pip install --upgrade pip
         pip install .[dev]
 
-    - name: Run tests
-      run: python -m pytest tests/ -v
+    - name: Run tests with coverage
+      run: python -m pytest tests/ -v --cov=nanobot --cov-report=xml
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        file: ./coverage.xml
+        fail_ci_if_error: true
