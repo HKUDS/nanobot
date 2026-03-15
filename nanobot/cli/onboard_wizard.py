@@ -11,6 +11,11 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from nanobot.cli.model_info import (
+    format_token_count,
+    get_model_context_limit,
+    get_model_suggestions,
+)
 from nanobot.config.loader import get_config_path, load_config
 from nanobot.config.schema import Config
 
@@ -224,6 +229,109 @@ def _input_with_existing(
 # --- Pydantic Model Configuration ---
 
 
+def _get_current_provider(model: BaseModel) -> str:
+    """Get the current provider setting from a model (if available)."""
+    if hasattr(model, "provider"):
+        return getattr(model, "provider", "auto") or "auto"
+    return "auto"
+
+
+def _input_model_with_autocomplete(
+    display_name: str, current: Any, provider: str
+) -> str | None:
+    """Get model input with autocomplete suggestions.
+
+    """
+    from prompt_toolkit.completion import Completer, Completion
+
+    default = str(current) if current else ""
+
+    class DynamicModelCompleter(Completer):
+        """Completer that dynamically fetches model suggestions."""
+
+        def __init__(self, provider_name: str):
+            self.provider = provider_name
+
+        def get_completions(self, document, complete_event):
+            text = document.text_before_cursor
+            suggestions = get_model_suggestions(text, provider=self.provider, limit=50)
+            for model in suggestions:
+                # Skip if model doesn't contain the typed text
+                if text.lower() not in model.lower():
+                    continue
+                yield Completion(
+                    model,
+                    start_position=-len(text),
+                    display=model,
+                )
+
+    value = questionary.autocomplete(
+        f"{display_name}:",
+        choices=[""],  # Placeholder, actual completions from completer
+        completer=DynamicModelCompleter(provider),
+        default=default,
+        qmark="→",
+    ).ask()
+
+    return value if value else None
+
+
+def _input_context_window_with_recommendation(
+    display_name: str, current: Any, model_obj: BaseModel
+) -> int | None:
+    """Get context window input with option to fetch recommended value."""
+    current_val = current if current else ""
+
+    choices = ["Enter new value"]
+    if current_val:
+        choices.append("Keep existing value")
+    choices.append("🔍 Get recommended value")
+
+    choice = questionary.select(
+        display_name,
+        choices=choices,
+        default="Enter new value",
+    ).ask()
+
+    if choice is None:
+        return None
+
+    if choice == "Keep existing value":
+        return None
+
+    if choice == "🔍 Get recommended value":
+        # Get the model name from the model object
+        model_name = getattr(model_obj, "model", None)
+        if not model_name:
+            console.print("[yellow]⚠ Please configure the model field first[/yellow]")
+            return None
+
+        provider = _get_current_provider(model_obj)
+        context_limit = get_model_context_limit(model_name, provider)
+
+        if context_limit:
+            console.print(f"[green]✓ Recommended context window: {format_token_count(context_limit)} tokens[/green]")
+            return context_limit
+        else:
+            console.print("[yellow]⚠ Could not fetch model info, please enter manually[/yellow]")
+            # Fall through to manual input
+
+    # Manual input
+    value = questionary.text(
+        f"{display_name}:",
+        default=str(current_val) if current_val else "",
+    ).ask()
+
+    if value is None or value == "":
+        return None
+
+    try:
+        return int(value)
+    except ValueError:
+        console.print("[yellow]⚠ Invalid number format, value not saved[/yellow]")
+        return None
+
+
 def _configure_pydantic_model(
     model: BaseModel,
     display_name: str,
@@ -289,6 +397,23 @@ def _configure_pydantic_model(
                 _configure_pydantic_model(nested_model, field_display)
             continue
 
+        # Special handling for model field (autocomplete)
+        if field_name == "model":
+            provider = _get_current_provider(model)
+            new_value = _input_model_with_autocomplete(field_display, current_value, provider)
+            if new_value is not None and new_value != current_value:
+                setattr(model, field_name, new_value)
+                # Auto-fill context_window_tokens if it's at default value
+                _try_auto_fill_context_window(model, new_value)
+            continue
+
+        # Special handling for context_window_tokens field
+        if field_name == "context_window_tokens":
+            new_value = _input_context_window_with_recommendation(field_display, current_value, model)
+            if new_value is not None:
+                setattr(model, field_name, new_value)
+            continue
+
         if field_type == "bool":
             new_value = _input_bool(field_display, current_value)
             if new_value is not None:
@@ -297,6 +422,39 @@ def _configure_pydantic_model(
             new_value = _input_with_existing(field_display, current_value, field_type)
             if new_value is not None:
                 setattr(model, field_name, new_value)
+
+
+def _try_auto_fill_context_window(model: BaseModel, new_model_name: str) -> None:
+    """Try to auto-fill context_window_tokens if it's at default value.
+
+    Note:
+        This function imports AgentDefaults from nanobot.config.schema to get
+        the default context_window_tokens value. If the schema changes, this
+        coupling needs to be updated accordingly.
+    """
+    # Check if context_window_tokens field exists
+    if not hasattr(model, "context_window_tokens"):
+        return
+
+    current_context = getattr(model, "context_window_tokens", None)
+
+    # Check if current value is the default (65536)
+    # We only auto-fill if the user hasn't changed it from default
+    from nanobot.config.schema import AgentDefaults
+
+    default_context = AgentDefaults.model_fields["context_window_tokens"].default
+
+    if current_context != default_context:
+        return  # User has customized it, don't override
+
+    provider = _get_current_provider(model)
+    context_limit = get_model_context_limit(new_model_name, provider)
+
+    if context_limit:
+        setattr(model, "context_window_tokens", context_limit)
+        console.print(f"[green]✓ Auto-filled context window: {format_token_count(context_limit)} tokens[/green]")
+    else:
+        console.print("[dim]ℹ Could not auto-fill context window (model not in database)[/dim]")
 
 
 # --- Provider Configuration ---
