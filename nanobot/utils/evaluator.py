@@ -1,5 +1,4 @@
 """Post-run evaluation for background tasks (heartbeat & cron).
-
 After the agent executes a background task, this module makes a lightweight
 LLM call to decide whether the result warrants notifying the user.
 """
@@ -55,9 +54,11 @@ async def evaluate_response(
     task_context: str,
     provider: LLMProvider,
     model: str,
+    temperature: float = 0.0,
+    max_tokens: int = 256,
+    reasoning_effort: str | None = None,
 ) -> bool:
     """Decide whether a background-task result should be delivered to the user.
-
     Uses a lightweight tool-call LLM request (same pattern as heartbeat
     ``_decide()``).  Falls back to ``True`` (notify) on any failure so
     that important messages are never silently dropped.
@@ -73,8 +74,9 @@ async def evaluate_response(
             ],
             tools=_EVALUATE_TOOL,
             model=model,
-            max_tokens=256,
-            temperature=0.0,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
         )
 
         if not llm_response.has_tool_calls:

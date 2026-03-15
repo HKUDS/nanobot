@@ -40,11 +40,9 @@ _HEARTBEAT_TOOL = [
 class HeartbeatService:
     """
     Periodic heartbeat service that wakes the agent to check for tasks.
-
     Phase 1 (decision): reads HEARTBEAT.md and asks the LLM — via a virtual
     tool call — whether there are active tasks.  This avoids free-text parsing
     and the unreliable HEARTBEAT_OK token.
-
     Phase 2 (execution): only triggered when Phase 1 returns ``run``.  The
     ``on_execute`` callback runs the task through the full agent loop and
     returns the result to deliver.
@@ -59,6 +57,12 @@ class HeartbeatService:
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
         enabled: bool = True,
+        decider_provider: LLMProvider | None = None,
+        decider_model: str | None = None,
+        decider_temperature: float = 0.0,
+        evaluator_provider: LLMProvider | None = None,
+        evaluator_model: str | None = None,
+        evaluator_config: Any | None = None,
     ):
         self.workspace = workspace
         self.provider = provider
@@ -67,6 +71,15 @@ class HeartbeatService:
         self.on_notify = on_notify
         self.interval_s = interval_s
         self.enabled = enabled
+
+        self.decider_provider = decider_provider or provider
+        self.decider_model = decider_model or model
+        self.decider_temperature = decider_temperature
+
+        self.evaluator_provider = evaluator_provider or provider
+        self.evaluator_model = evaluator_model or model
+        self.evaluator_config = evaluator_config
+
         self._running = False
         self._task: asyncio.Task | None = None
 
@@ -84,10 +97,9 @@ class HeartbeatService:
 
     async def _decide(self, content: str) -> tuple[str, str]:
         """Phase 1: ask LLM to decide skip/run via virtual tool call.
-
         Returns (action, tasks) where action is 'skip' or 'run'.
         """
-        response = await self.provider.chat_with_retry(
+        response = await self.decider_provider.chat_with_retry(
             messages=[
                 {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
                 {"role": "user", "content": (
@@ -96,7 +108,8 @@ class HeartbeatService:
                 )},
             ],
             tools=_HEARTBEAT_TOOL,
-            model=self.model,
+            model=self.decider_model,
+            temperature=self.decider_temperature,
         )
 
         if not response.has_tool_calls:
@@ -160,8 +173,13 @@ class HeartbeatService:
                 response = await self.on_execute(tasks)
 
                 if response:
+                    eval_temp = self.evaluator_config.temperature if self.evaluator_config and self.evaluator_config.temperature is not None else 0.0
+                    eval_reasoning = self.evaluator_config.reasoning_effort if self.evaluator_config else None
+                    eval_max = self.evaluator_config.max_tokens if self.evaluator_config and self.evaluator_config.max_tokens is not None else 256
+
                     should_notify = await evaluate_response(
-                        response, tasks, self.provider, self.model,
+                        response, tasks, self.evaluator_provider, self.evaluator_model,
+                        temperature=eval_temp, reasoning_effort=eval_reasoning, max_tokens=eval_max
                     )
                     if should_notify and self.on_notify:
                         logger.info("Heartbeat: completed, delivering response")

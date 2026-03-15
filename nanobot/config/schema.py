@@ -32,9 +32,7 @@ class AgentDefaults(Base):
 
     workspace: str = "~/.nanobot/workspace"
     model: str = "anthropic/claude-opus-4-5"
-    provider: str = (
-        "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
-    )
+    provider: str = "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     max_tokens: int = 8192
     context_window_tokens: int = 65_536
     temperature: float = 0.1
@@ -45,14 +43,30 @@ class AgentDefaults(Base):
 
     @property
     def should_warn_deprecated_memory_window(self) -> bool:
-        """Return True when old memoryWindow is present without contextWindowTokens."""
         return self.memory_window is not None and "context_window_tokens" not in self.model_fields_set
+        """Return True when old memoryWindow is present without contextWindowTokens."""
+
+class SubagentConfig(Base):
+    """Configuration for a specific subagent."""
+
+    model: str
+    provider: str | None = None
+    description: str = "A specialized subagent."
+    latency: str | None = None
+    cost: str | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
+    reasoning_effort: str | None = None
+    max_iterations: int | None = None
+    allowed_mcp_servers: list[str] | None = None
+    delegate: list[str] = Field(default_factory=list)
 
 
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    subagents: dict[str, SubagentConfig] = Field(default_factory=dict)
 
 
 class ProviderConfig(Base):
@@ -117,9 +131,7 @@ class WebSearchConfig(Base):
 class WebToolsConfig(Base):
     """Web tools configuration."""
 
-    proxy: str | None = (
-        None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
-    )
+    proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
@@ -141,6 +153,7 @@ class MCPServerConfig(Base):
     headers: dict[str, str] = Field(default_factory=dict)  # HTTP/SSE: custom headers
     tool_timeout: int = 30  # seconds before a tool call is cancelled
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
+
 
 class ToolsConfig(Base):
     """Tools configuration."""
@@ -166,12 +179,12 @@ class Config(BaseSettings):
         return Path(self.agents.defaults.workspace).expanduser()
 
     def _match_provider(
-        self, model: str | None = None
+        self, model: str | None = None, provider_override: str | None = None
     ) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
         from nanobot.providers.registry import PROVIDERS
 
-        forced = self.agents.defaults.provider
+        forced = provider_override if provider_override is not None else self.agents.defaults.provider
         if forced != "auto":
             p = getattr(self.providers, forced, None)
             return (p, forced) if p else (None, None)
@@ -227,26 +240,26 @@ class Config(BaseSettings):
                 return p, spec.name
         return None, None
 
-    def get_provider(self, model: str | None = None) -> ProviderConfig | None:
+    def get_provider(self, model: str | None = None, provider_override: str | None = None) -> ProviderConfig | None:
         """Get matched provider config (api_key, api_base, extra_headers). Falls back to first available."""
-        p, _ = self._match_provider(model)
+        p, _ = self._match_provider(model, provider_override)
         return p
 
-    def get_provider_name(self, model: str | None = None) -> str | None:
+    def get_provider_name(self, model: str | None = None, provider_override: str | None = None) -> str | None:
         """Get the registry name of the matched provider (e.g. "deepseek", "openrouter")."""
-        _, name = self._match_provider(model)
+        _, name = self._match_provider(model, provider_override)
         return name
 
-    def get_api_key(self, model: str | None = None) -> str | None:
+    def get_api_key(self, model: str | None = None, provider_override: str | None = None) -> str | None:
         """Get API key for the given model. Falls back to first available key."""
-        p = self.get_provider(model)
+        p = self.get_provider(model, provider_override)
         return p.api_key if p else None
 
-    def get_api_base(self, model: str | None = None) -> str | None:
+    def get_api_base(self, model: str | None = None, provider_override: str | None = None) -> str | None:
         """Get API base URL for the given model. Applies default URLs for gateway/local providers."""
         from nanobot.providers.registry import find_by_name
 
-        p, name = self._match_provider(model)
+        p, name = self._match_provider(model, provider_override)
         if p and p.api_base:
             return p.api_base
         # Only gateways get a default api_base here. Standard providers

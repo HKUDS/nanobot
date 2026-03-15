@@ -36,7 +36,6 @@ if TYPE_CHECKING:
 class AgentLoop:
     """
     The agent loop is the core processing engine.
-
     It:
     1. Receives messages from the bus
     2. Builds context with history, memory, skills
@@ -63,6 +62,8 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        subagent_configs: dict | None = None,
+        provider_factory: Callable[[str, str], LLMProvider] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -78,10 +79,28 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.subagent_configs = subagent_configs or {}
+        self.provider_factory = provider_factory
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
+
+        # Resolve Consolidator Delegate
+        cons_config = next((c for c in self.subagent_configs.values() if "consolidator" in c.delegate), None)
+        cons_model = cons_config.model if cons_config else self.model
+        cons_provider = self.provider_factory(cons_config.model, cons_config.provider) if (cons_config and self.provider_factory) else provider
+
+        self.memory_consolidator = MemoryConsolidator(
+            workspace=workspace,
+            provider=cons_provider,
+            model=cons_model,
+            sessions=self.sessions,
+            context_window_tokens=context_window_tokens,
+            build_messages=self.context.build_messages,
+            get_tool_definitions=self.tools.get_definitions,
+        )
+
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
@@ -91,6 +110,9 @@ class AgentLoop:
             web_proxy=web_proxy,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            subagent_configs=self.subagent_configs,
+            provider_factory=self.provider_factory,
+            parent_tools=self.tools,
         )
 
         self._running = False
@@ -100,15 +122,7 @@ class AgentLoop:
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._processing_lock = asyncio.Lock()
-        self.memory_consolidator = MemoryConsolidator(
-            workspace=workspace,
-            provider=provider,
-            model=self.model,
-            sessions=self.sessions,
-            context_window_tokens=context_window_tokens,
-            build_messages=self.context.build_messages,
-            get_tool_definitions=self.tools.get_definitions,
-        )
+
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -346,6 +360,10 @@ class AgentLoop:
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
+
+        # Safely handle metadata to prevent AttributeError
+        metadata = msg.metadata or {}
+
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
@@ -355,14 +373,16 @@ class AgentLoop:
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+            self._set_tool_context(channel, chat_id, metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
+            # Calculate memory offset dynamically
+            skip_count = len(messages) - 1
             final_content, _, all_msgs = await self._run_agent_loop(messages)
-            self._save_turn(session, all_msgs, 1 + len(history))
+            self._save_turn(session, all_msgs, skip_count)  # Use skip_count instead of 1 + len(history)
             self.sessions.save(session)
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
@@ -410,7 +430,7 @@ class AgentLoop:
             )
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        self._set_tool_context(msg.channel, msg.chat_id, metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
@@ -422,6 +442,9 @@ class AgentLoop:
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
         )
+
+        # Calculate memory offset dynamically
+        skip_count = len(initial_messages) - 1
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
@@ -438,7 +461,7 @@ class AgentLoop:
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        self._save_turn(session, all_msgs, 1 + len(history))
+        self._save_turn(session, all_msgs, skip_count)  # Use skip_count instead of 1 + len(history)
         self.sessions.save(session)
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
