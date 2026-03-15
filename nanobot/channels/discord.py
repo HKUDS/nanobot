@@ -14,6 +14,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.retry import connection_loop
 from nanobot.config.schema import DiscordConfig
+from nanobot.errors import DeliverySkippedError
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
@@ -92,8 +93,7 @@ class DiscordChannel(BaseChannel):
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Discord REST API."""
         if not self._http:
-            logger.warning("Discord HTTP client not initialized")
-            return
+            raise DeliverySkippedError("Discord HTTP client not initialized")
 
         url = f"{DISCORD_API_BASE}/channels/{msg.chat_id}/messages"
         headers = {"Authorization": f"Bot {self.config.token}"}

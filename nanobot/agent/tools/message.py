@@ -3,7 +3,7 @@
 from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import DeliveryResult, OutboundMessage
 
 
 class MessageTool(Tool):
@@ -11,7 +11,7 @@ class MessageTool(Tool):
 
     def __init__(
         self,
-        send_callback: Callable[[OutboundMessage], Awaitable[None]] | None = None,
+        send_callback: Callable[[OutboundMessage], Awaitable[DeliveryResult | None]] | None = None,
         default_channel: str = "",
         default_chat_id: str = "",
         default_message_id: str | None = None,
@@ -28,7 +28,9 @@ class MessageTool(Tool):
         self._default_chat_id = chat_id
         self._default_message_id = message_id
 
-    def set_send_callback(self, callback: Callable[[OutboundMessage], Awaitable[None]]) -> None:
+    def set_send_callback(
+        self, callback: Callable[[OutboundMessage], Awaitable[DeliveryResult | None]]
+    ) -> None:
         """Set the callback for sending messages."""
         self._send_callback = callback
 
@@ -100,7 +102,14 @@ class MessageTool(Tool):
         )
 
         try:
-            await self._send_callback(msg)
+            result = await self._send_callback(msg)
+            if isinstance(result, DeliveryResult):
+                if result.success:
+                    self._sent_in_turn = True
+                    media_info = f" with {len(media)} attachments" if media else ""
+                    return ToolResult.ok(f"Message delivered to {channel}:{chat_id}{media_info}")
+                return ToolResult.fail(f"Delivery failed: {result.error}")
+            # Fallback for legacy callbacks that return None (e.g. bus.publish_outbound)
             self._sent_in_turn = True
             media_info = f" with {len(media)} attachments" if media else ""
             return ToolResult.ok(f"Message sent to {channel}:{chat_id}{media_info}")

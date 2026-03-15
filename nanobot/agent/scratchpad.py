@@ -34,7 +34,9 @@ class Scratchpad:
     # Public API
     # ------------------------------------------------------------------
 
-    async def write(self, *, role: str, label: str, content: str) -> str:
+    async def write(
+        self, *, role: str, label: str, content: str, metadata: dict[str, Any] | None = None
+    ) -> str:
         """Append an entry and return its ID."""
         entry_id = uuid.uuid4().hex[:8]
         entry: dict[str, Any] = {
@@ -44,6 +46,8 @@ class Scratchpad:
             "content": content,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+        if metadata:
+            entry["metadata"] = metadata
         async with self._lock:
             self._ensure_loaded()
             self._entries.append(entry)
@@ -59,14 +63,29 @@ class Scratchpad:
         if entry_id:
             for e in self._entries:
                 if e["id"] == entry_id:
-                    return f"[{e['id']}] ({e['role']}) {e['label']}\n{e['content']}"
+                    tag = self._grounded_tag(e)
+                    return f"[{e['id']}]{tag} ({e['role']}) {e['label']}\n{e['content']}"
             return f"Entry {entry_id} not found."
         if not self._entries:
             return "Scratchpad is empty."
         parts = []
         for e in self._entries:
-            parts.append(f"[{e['id']}] ({e['role']}) {e['label']}: {e['content'][:200]}")
+            tag = self._grounded_tag(e)
+            parts.append(f"[{e['id']}]{tag} ({e['role']}) {e['label']}: {e['content'][:200]}")
         return "\n".join(parts)
+
+    @staticmethod
+    def _grounded_tag(entry: dict[str, Any]) -> str:
+        """Return a short verification tag from entry metadata."""
+        meta = entry.get("metadata")
+        if not isinstance(meta, dict):
+            return ""
+        grounded = meta.get("grounded")
+        if grounded is True:
+            return " ✓"
+        if grounded is False:
+            return " ⚠ungrounded"
+        return ""
 
     def list_entries(self) -> list[dict[str, Any]]:
         """Return all entries as dicts."""

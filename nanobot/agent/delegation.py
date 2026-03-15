@@ -26,7 +26,12 @@ from loguru import logger
 from nanobot.agent.observability import span as langfuse_span
 from nanobot.agent.subagent import run_tool_loop
 from nanobot.agent.tools.base import ToolResult  # noqa: F401 — re-export for tests
-from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool, _CycleError
+from nanobot.agent.tools.delegate import (
+    DelegateParallelTool,
+    DelegateTool,
+    DelegationResult,
+    _CycleError,
+)
 from nanobot.agent.tools.filesystem import (
     EditFileTool,
     ListDirTool,
@@ -509,7 +514,7 @@ class DelegationDispatcher:
         target_role: str,
         task: str,
         context: str | None,
-    ) -> str:
+    ) -> DelegationResult:
         """Route a delegated sub-task through the coordinator and execute it."""
         if not self.coordinator:
             raise RuntimeError("Coordinator not available for delegation")
@@ -569,7 +574,7 @@ class DelegationDispatcher:
                 message_excerpt=task,
                 tools_used=used_tools,
             )
-            return result
+            return DelegationResult(content=result, tools_used=used_tools)
         except Exception:  # crash-barrier: delegation must record trace on any error
             latency_ms = (time.monotonic() - t0) * 1000
             self.record_route_trace(
@@ -717,10 +722,12 @@ class DelegationDispatcher:
 
         # Write to scratchpad if available
         if self.scratchpad:
+            grounded = len(tools_used) > 0
             await self.scratchpad.write(
                 role=role.name,
                 label=task[:80],
                 content=summary,
+                metadata={"grounded": grounded, "tools_used": tools_used},
             )
 
         return summary, tools_used

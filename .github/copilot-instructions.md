@@ -74,11 +74,7 @@ nanobot/
 │   ├── discord.py       # Discord
 │   ├── slack.py         # Slack
 │   ├── whatsapp.py      # WhatsApp
-│   ├── email.py         # Email
-│   ├── dingtalk.py      # DingTalk
-│   ├── feishu.py        # Feishu (Lark)
-│   ├── mochat.py        # MoChat
-│   └── qq.py            # Tencent QQ
+│   └── email.py         # Email
 ├── providers/           # LLM provider abstraction
 │   ├── base.py          # LLMProvider ABC, LLMResponse, StreamChunk
 │   ├── litellm_provider.py  # Primary provider (100+ models via litellm)

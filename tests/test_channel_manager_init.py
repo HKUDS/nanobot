@@ -32,26 +32,18 @@ async def test_init_channels_and_start_all(monkeypatch: pytest.MonkeyPatch, tmp_
     cfg.channels.telegram.enabled = True
     cfg.channels.whatsapp.enabled = True
     cfg.channels.discord.enabled = True
-    cfg.channels.feishu.enabled = True
-    cfg.channels.mochat.enabled = True
-    cfg.channels.dingtalk.enabled = True
     cfg.channels.email.enabled = True
     cfg.channels.slack.enabled = True
-    cfg.channels.qq.enabled = True
 
     _install_fake_channel_module(monkeypatch, "nanobot.channels.telegram", "TelegramChannel")
     _install_fake_channel_module(monkeypatch, "nanobot.channels.whatsapp", "WhatsAppChannel")
     _install_fake_channel_module(monkeypatch, "nanobot.channels.discord", "DiscordChannel")
-    _install_fake_channel_module(monkeypatch, "nanobot.channels.feishu", "FeishuChannel")
-    _install_fake_channel_module(monkeypatch, "nanobot.channels.mochat", "MochatChannel")
-    _install_fake_channel_module(monkeypatch, "nanobot.channels.dingtalk", "DingTalkChannel")
     _install_fake_channel_module(monkeypatch, "nanobot.channels.email", "EmailChannel")
     _install_fake_channel_module(monkeypatch, "nanobot.channels.slack", "SlackChannel")
-    _install_fake_channel_module(monkeypatch, "nanobot.channels.qq", "QQChannel")
 
     bus = object()
     mgr = ChannelManager(cfg, bus)
-    assert len(mgr.channels) == 9
+    assert len(mgr.channels) == 5
 
     # Dead-letter auto-replay path
     dead = tmp_path / "outbound_failed.jsonl"

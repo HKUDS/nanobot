@@ -48,6 +48,13 @@ class _AgentLoop:
         self.model = "fake-model"
         self.channels_config = SimpleNamespace(send_tool_hints=True, send_progress=True)
         self._stopped = False
+        self.context = SimpleNamespace(set_contacts_context=lambda contacts: None)
+
+    def set_deliver_callback(self, callback):
+        pass
+
+    def set_contacts_provider(self, provider):
+        pass
 
     async def process_direct(self, *args, **kwargs):
         return "ok-response"
@@ -67,11 +74,17 @@ class _ChannelManager:
         self.enabled_channels = enabled or ["telegram"]
         self.channels = {name: object() for name in self.enabled_channels}
 
+    async def deliver(self, msg):
+        return None
+
     async def start_all(self):
         await asyncio.sleep(0)
 
     async def stop_all(self):
         await asyncio.sleep(0)
+
+    def get_email_contacts(self):
+        return []
 
 
 class _CronService:

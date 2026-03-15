@@ -35,7 +35,7 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Initial tracked release. Core agent framework with:
 - Plan-Act-Observe-Reflect agent loop
 - 100+ LLM model support via litellm
-- 9 channel adapters (Telegram, Discord, Slack, WhatsApp, Email, DingTalk, Feishu, Mochat, QQ)
+- 5 channel adapters (Telegram, Discord, Slack, WhatsApp, Email)
 - mem0-first memory with local JSONL fallback
 - Plugin skill system with auto-discovery
 - Multi-agent coordination with intent routing
