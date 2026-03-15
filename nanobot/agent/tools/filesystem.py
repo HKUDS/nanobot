@@ -8,7 +8,10 @@ from nanobot.agent.tools.base import Tool
 
 
 def _resolve_path(
-    path: str, workspace: Path | None = None, allowed_dir: Path | None = None
+    path: str,
+    workspace: Path | None = None,
+    allowed_dir: Path | None = None,
+    extra_allowed_dirs: list[Path] | None = None,
 ) -> Path:
     """Resolve path against workspace (if relative) and enforce directory restriction."""
     p = Path(path).expanduser()
@@ -16,22 +19,35 @@ def _resolve_path(
         p = workspace / p
     resolved = p.resolve()
     if allowed_dir:
-        try:
-            resolved.relative_to(allowed_dir.resolve())
-        except ValueError:
+        all_dirs = [allowed_dir] + (extra_allowed_dirs or [])
+        if not any(_is_under(resolved, d) for d in all_dirs):
             raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
     return resolved
+
+
+def _is_under(path: Path, directory: Path) -> bool:
+    try:
+        path.relative_to(directory.resolve())
+        return True
+    except ValueError:
+        return False
 
 
 class _FsTool(Tool):
     """Shared base for filesystem tools — common init and path resolution."""
 
-    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
+    def __init__(
+        self,
+        workspace: Path | None = None,
+        allowed_dir: Path | None = None,
+        extra_allowed_dirs: list[Path] | None = None,
+    ):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
+        self._extra_allowed_dirs = extra_allowed_dirs
 
     def _resolve(self, path: str) -> Path:
-        return _resolve_path(path, self._workspace, self._allowed_dir)
+        return _resolve_path(path, self._workspace, self._allowed_dir, self._extra_allowed_dirs)
 
 
 # ---------------------------------------------------------------------------
@@ -363,35 +379,3 @@ class ListDirTool(_FsTool):
             return f"Error: {e}"
         except Exception as e:
             return f"Error listing directory: {e}"
-
-
-class LoadSkillTool(Tool):
-    """Tool to load a skill by name, bypassing workspace restriction."""
-
-    def __init__(self, skills_loader):
-        self._skills_loader = skills_loader
-
-    @property
-    def name(self) -> str:
-        return "load_skill"
-
-    @property
-    def description(self) -> str:
-        return "Load a skill by name. Returns the full SKILL.md content."
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {"name": {"type": "string", "description": "The skill name to load"}},
-            "required": ["name"],
-        }
-
-    async def execute(self, name: str, **kwargs: Any) -> str:
-        try:
-            content = self._skills_loader.load_skill(name)
-            if content is None:
-                return f"Error: Skill not found: {name}"
-            return content
-        except Exception as e:
-            return f"Error loading skill: {str(e)}"
