@@ -95,6 +95,13 @@ class HeartbeatConfig(Base):
 
     enabled: bool = True
     interval_s: int = 30 * 60  # 30 minutes
+    notification_level: Literal["all", "error", "silent"] = "all"
+
+
+class CronConfig(Base):
+    """Cron notification configuration."""
+
+    notification_level: Literal["all", "error", "silent"] = "all"
 
 
 class GatewayConfig(Base):
@@ -103,6 +110,7 @@ class GatewayConfig(Base):
     host: str = "0.0.0.0"
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    cron: CronConfig = Field(default_factory=CronConfig)
 
 
 class WebSearchConfig(Base):

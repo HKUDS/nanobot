@@ -59,6 +59,7 @@ class HeartbeatService:
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
         enabled: bool = True,
+        notification_level: str = "all",
     ):
         self.workspace = workspace
         self.provider = provider
@@ -67,6 +68,7 @@ class HeartbeatService:
         self.on_notify = on_notify
         self.interval_s = interval_s
         self.enabled = enabled
+        self.notification_level = notification_level
         self._running = False
         self._task: asyncio.Task | None = None
 
@@ -139,7 +141,7 @@ class HeartbeatService:
 
     async def _tick(self) -> None:
         """Execute a single heartbeat tick."""
-        from nanobot.utils.evaluator import evaluate_response
+        from nanobot.utils.evaluator import evaluate_response, should_publish
 
         content = self._read_heartbeat_file()
         if not content:
@@ -160,14 +162,18 @@ class HeartbeatService:
                 response = await self.on_execute(tasks)
 
                 if response:
-                    should_notify = await evaluate_response(
+                    level = await evaluate_response(
                         response, tasks, self.provider, self.model,
                     )
-                    if should_notify and self.on_notify:
-                        logger.info("Heartbeat: completed, delivering response")
+                    if should_publish(level, self.notification_level) and self.on_notify:
+                        logger.info("Heartbeat: completed, delivering {} response", level)
                         await self.on_notify(response)
                     else:
-                        logger.info("Heartbeat: silenced by post-run evaluation")
+                        logger.info(
+                            "Heartbeat: suppressed level={} by policy={}",
+                            level,
+                            self.notification_level,
+                        )
         except Exception:
             logger.exception("Heartbeat execution failed")
 

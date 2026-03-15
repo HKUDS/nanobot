@@ -125,7 +125,7 @@ async def test_trigger_now_returns_none_when_decision_is_skip(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_tick_notifies_when_evaluator_says_yes(tmp_path, monkeypatch) -> None:
-    """Phase 1 run -> Phase 2 execute -> Phase 3 evaluate=notify -> on_notify called."""
+    """Phase 1 run -> Phase 2 execute -> Phase 3 evaluate=error -> on_notify called."""
     (tmp_path / "HEARTBEAT.md").write_text("- [ ] check deployments", encoding="utf-8")
 
     provider = DummyProvider([
@@ -157,10 +157,11 @@ async def test_tick_notifies_when_evaluator_says_yes(tmp_path, monkeypatch) -> N
         model="openai/gpt-4o-mini",
         on_execute=_on_execute,
         on_notify=_on_notify,
+        notification_level="error",
     )
 
     async def _eval_notify(*a, **kw):
-        return True
+        return "error"
 
     monkeypatch.setattr("nanobot.utils.evaluator.evaluate_response", _eval_notify)
 
@@ -171,7 +172,7 @@ async def test_tick_notifies_when_evaluator_says_yes(tmp_path, monkeypatch) -> N
 
 @pytest.mark.asyncio
 async def test_tick_suppresses_when_evaluator_says_no(tmp_path, monkeypatch) -> None:
-    """Phase 1 run -> Phase 2 execute -> Phase 3 evaluate=silent -> on_notify NOT called."""
+    """Phase 1 run -> Phase 2 execute -> Phase 3 evaluate=normal -> on_notify NOT called."""
     (tmp_path / "HEARTBEAT.md").write_text("- [ ] check status", encoding="utf-8")
 
     provider = DummyProvider([
@@ -203,15 +204,59 @@ async def test_tick_suppresses_when_evaluator_says_no(tmp_path, monkeypatch) -> 
         model="openai/gpt-4o-mini",
         on_execute=_on_execute,
         on_notify=_on_notify,
+        notification_level="error",
     )
 
     async def _eval_silent(*a, **kw):
-        return False
+        return "normal"
 
     monkeypatch.setattr("nanobot.utils.evaluator.evaluate_response", _eval_silent)
 
     await service._tick()
     assert executed == ["check status"]
+    assert notified == []
+
+
+@pytest.mark.asyncio
+async def test_tick_suppresses_when_policy_is_silent(tmp_path, monkeypatch) -> None:
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] check status", encoding="utf-8")
+
+    provider = DummyProvider([
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="hb_1",
+                    name="heartbeat",
+                    arguments={"action": "run", "tasks": "check status"},
+                )
+            ],
+        ),
+    ])
+
+    notified: list[str] = []
+
+    async def _on_execute(tasks: str) -> str:
+        return f"checked {tasks}"
+
+    async def _on_notify(response: str) -> None:
+        notified.append(response)
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        on_execute=_on_execute,
+        on_notify=_on_notify,
+        notification_level="silent",
+    )
+
+    async def _eval_level(*a, **kw):
+        return "error"
+
+    monkeypatch.setattr("nanobot.utils.evaluator.evaluate_response", _eval_level)
+
+    await service._tick()
     assert notified == []
 
 

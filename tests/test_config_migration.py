@@ -1,10 +1,12 @@
 import json
 from types import SimpleNamespace
 
+import pytest
 from typer.testing import CliRunner
 
 from nanobot.cli.commands import app
 from nanobot.config.loader import load_config, save_config
+from nanobot.config.schema import Config
 
 runner = CliRunner()
 
@@ -130,3 +132,40 @@ def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch)
     assert result.exit_code == 0
     saved = json.loads(config_path.read_text(encoding="utf-8"))
     assert saved["channels"]["qq"]["msgFormat"] == "plain"
+
+
+def test_load_config_parses_notification_levels(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "gateway": {
+                    "heartbeat": {
+                        "notificationLevel": "error",
+                    },
+                    "cron": {
+                        "notificationLevel": "silent",
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.gateway.heartbeat.notification_level == "error"
+    assert config.gateway.cron.notification_level == "silent"
+
+
+def test_invalid_notification_level_fails_validation() -> None:
+    with pytest.raises(Exception):
+        Config.model_validate(
+            {
+                "gateway": {
+                    "heartbeat": {
+                        "notificationLevel": "loud",
+                    }
+                }
+            }
+        )
