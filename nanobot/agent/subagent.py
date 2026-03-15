@@ -16,6 +16,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ExecToolConfig
 from nanobot.providers.base import LLMProvider
+from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import build_assistant_message
 
 
@@ -27,6 +28,7 @@ class SubagentManager:
         provider: LLMProvider,
         workspace: Path,
         bus: MessageBus,
+        session_manager: SessionManager,
         model: str | None = None,
         web_search_config: "WebSearchConfig | None" = None,
         web_proxy: str | None = None,
@@ -38,6 +40,7 @@ class SubagentManager:
         self.provider = provider
         self.workspace = workspace
         self.bus = bus
+        self.sessions = session_manager
         self.model = model or provider.get_default_model()
         self.web_search_config = web_search_config or WebSearchConfig()
         self.web_proxy = web_proxy
@@ -59,8 +62,20 @@ class SubagentManager:
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin = {"channel": origin_channel, "chat_id": origin_chat_id}
 
+        # Create subagent session for persistence
+        sub_session_key = f"subagent:{task_id}"
+        session = self.sessions.get_or_create(sub_session_key)
+        session.metadata.update({
+            "type": "subagent",
+            "task_id": task_id,
+            "label": display_label,
+            "parent_session": session_key,
+            "origin": origin,
+        })
+        self.sessions.save(session)
+
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin)
+            self._run_subagent(task_id, task, display_label, origin, session)
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -84,6 +99,7 @@ class SubagentManager:
         task: str,
         label: str,
         origin: dict[str, str],
+        session: Session,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -106,10 +122,10 @@ class SubagentManager:
             tools.register(WebFetchTool(proxy=self.web_proxy))
             
             system_prompt = self._build_subagent_prompt()
-            messages: list[dict[str, Any]] = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": task},
-            ]
+            if not session.messages:
+                session.add_message("system", system_prompt)
+                session.add_message("user", task)
+                self.sessions.save(session)
 
             # Run agent loop (limited iterations)
             max_iterations = 15
@@ -120,7 +136,7 @@ class SubagentManager:
                 iteration += 1
 
                 response = await self.provider.chat_with_retry(
-                    messages=messages,
+                    messages=session.get_history(max_messages=100),
                     tools=tools.get_definitions(),
                     model=self.model,
                 )
@@ -130,26 +146,31 @@ class SubagentManager:
                         tc.to_openai_tool_call()
                         for tc in response.tool_calls
                     ]
-                    messages.append(build_assistant_message(
+                    session.add_message(
+                        "assistant",
                         response.content or "",
                         tool_calls=tool_call_dicts,
                         reasoning_content=response.reasoning_content,
                         thinking_blocks=response.thinking_blocks,
-                    ))
+                    )
+                    self.sessions.save(session)
 
                     # Execute tools
                     for tool_call in response.tool_calls:
                         args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                         logger.debug("Subagent [{}] executing: {} with arguments: {}", task_id, tool_call.name, args_str)
                         result = await tools.execute(tool_call.name, tool_call.arguments)
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "name": tool_call.name,
-                            "content": result,
-                        })
+                        session.add_message(
+                            "tool",
+                            result,
+                            tool_call_id=tool_call.id,
+                            name=tool_call.name,
+                        )
+                        self.sessions.save(session)
                 else:
                     final_result = response.content
+                    session.add_message("assistant", final_result or "")
+                    self.sessions.save(session)
                     break
 
             if final_result is None:
@@ -161,6 +182,9 @@ class SubagentManager:
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             logger.error("Subagent [{}] failed: {}", task_id, e)
+            if session:
+                session.add_message("system", f"Subagent failed: {error_msg}")
+                self.sessions.save(session)
             await self._announce_result(task_id, label, task, error_msg, origin, "error")
 
     async def _announce_result(
