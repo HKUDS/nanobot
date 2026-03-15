@@ -1,7 +1,9 @@
 """Discord channel implementation using Discord Gateway websocket."""
 
 import asyncio
+import base64
 import json
+import subprocess
 from pathlib import Path
 from typing import Any, Literal
 
@@ -20,6 +22,32 @@ from nanobot.utils.helpers import split_message
 DISCORD_API_BASE = "https://discord.com/api/v10"
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
+AUDIO_EXTENSIONS = {".ogg", ".mp3", ".m4a", ".wav", ".aac", ".webm", ".opus"}
+
+
+def _get_ogg_duration(path: Path) -> float:
+    """Get audio duration in seconds using ffprobe."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+            capture_output=True, text=True, timeout=10,
+        )
+        return float(result.stdout.strip())
+    except Exception:
+        return float(path.stat().st_size) / 16000  # rough estimate
+
+
+def _generate_waveform(path: Path, num_bars: int = 64) -> str:
+    """Generate a base64-encoded waveform for Discord voice messages."""
+    data = path.read_bytes()
+    chunk_size = max(1, len(data) // num_bars)
+    amplitudes = []
+    for i in range(num_bars):
+        chunk = data[i * chunk_size:(i + 1) * chunk_size]
+        peak = max(chunk) if chunk else 0
+        amplitudes.append(min(255, peak))
+    return base64.b64encode(bytes(amplitudes)).decode()
 
 
 class DiscordConfig(Base):
@@ -43,16 +71,19 @@ class DiscordChannel(BaseChannel):
     def default_config(cls) -> dict[str, Any]:
         return DiscordConfig().model_dump(by_alias=True)
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(self, config: Any, bus: MessageBus, *, groq_api_key: str = ""):
         if isinstance(config, dict):
             config = DiscordConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: DiscordConfig = config
+        self.groq_api_key = groq_api_key
+        self.transcription_api_key = groq_api_key
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._seq: int | None = None
         self._heartbeat_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._http: httpx.AsyncClient | None = None
+        self._dm_channel_cache: dict[str, str] = {}  # user_id -> dm_channel_id
         self._bot_user_id: str | None = None
 
     async def start(self) -> None:
@@ -62,7 +93,7 @@ class DiscordChannel(BaseChannel):
             return
 
         self._running = True
-        self._http = httpx.AsyncClient(timeout=30.0)
+        self._http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=120.0))
 
         while self._running:
             try:
@@ -94,48 +125,218 @@ class DiscordChannel(BaseChannel):
             await self._http.aclose()
             self._http = None
 
+    async def _resolve_channel_id(self, chat_id: str) -> str:
+        """Resolve a chat_id to a channel ID, creating a DM channel if needed."""
+        if chat_id in self._dm_channel_cache:
+            return self._dm_channel_cache[chat_id]
+        # Try to create/get a DM channel with chat_id as a user ID
+        headers = {"Authorization": f"Bot {self.config.token}"}
+        try:
+            resp = await self._http.post(
+                f"{DISCORD_API_BASE}/users/@me/channels",
+                headers=headers,
+                json={"recipient_id": chat_id},
+            )
+            if resp.status_code == 200:
+                dm_id = resp.json().get("id", chat_id)
+                self._dm_channel_cache[chat_id] = dm_id
+                logger.info("Resolved user {} to DM channel {}", chat_id, dm_id)
+                return dm_id
+        except Exception as e:
+            logger.warning("Failed to create DM channel for {}: {}", chat_id, e)
+        return chat_id
+
+    async def _send_with_files(
+        self,
+        url: str,
+        headers: dict[str, str],
+        text: str,
+        file_paths: list[str],
+        reply_to: str | None = None,
+    ) -> bool:
+        """Upload files as Discord attachments using multipart form-data."""
+        from pathlib import Path as _Path
+
+        files_to_upload: list[tuple[str, tuple[str, bytes, str]]] = []
+        attachments_meta: list[dict[str, Any]] = []
+
+        for path in file_paths:
+            p = _Path(path)
+            if not p.exists():
+                logger.warning("Attachment not found: {}", path)
+                continue
+            size = p.stat().st_size
+            if size > MAX_ATTACHMENT_BYTES:
+                logger.warning("Attachment too large ({}B): {}", size, path)
+                continue
+            try:
+                data = p.read_bytes()
+            except Exception as e:
+                logger.warning("Cannot read attachment {}: {}", path, e)
+                continue
+            idx = len(files_to_upload)
+            files_to_upload.append(
+                (f"files[{idx}]", (p.name, data, "application/octet-stream"))
+            )
+            attachments_meta.append({"id": idx, "filename": p.name})
+
+        if not files_to_upload:
+            # No valid files — fall back to text-only payload
+            payload: dict[str, Any] = {"content": text}
+            if reply_to:
+                payload["message_reference"] = {"message_id": reply_to}
+                payload["allowed_mentions"] = {"replied_user": False}
+            return await self._send_payload(url, headers, payload)
+
+        payload_json: dict[str, Any] = {"content": text, "attachments": attachments_meta}
+        if reply_to:
+            payload_json["message_reference"] = {"message_id": reply_to}
+            payload_json["allowed_mentions"] = {"replied_user": False}
+
+        for attempt in range(3):
+            try:
+                response = await self._http.post(
+                    url,
+                    headers=headers,
+                    data={"payload_json": json.dumps(payload_json)},
+                    files=files_to_upload,
+                )
+                if response.status_code == 429:
+                    retry_after = float(response.json().get("retry_after", 1.0))
+                    logger.warning("Discord rate limited on file upload, retrying in {}s", retry_after)
+                    await asyncio.sleep(retry_after)
+                    continue
+                if response.status_code == 404:
+                    logger.warning("Discord channel not found (404) on file upload: {}", url)
+                    return False
+                response.raise_for_status()
+                return True
+            except Exception as e:
+                if attempt == 2:
+                    logger.error("Error uploading Discord attachment: {}", e)
+                else:
+                    await asyncio.sleep(1)
+        return False
+
+    async def _send_voice_message(
+        self, url: str, headers: dict[str, str], ogg_path: Path
+    ) -> bool:
+        """Send OGG as a Discord voice message with waveform."""
+        try:
+            duration = _get_ogg_duration(ogg_path)
+            waveform = _generate_waveform(ogg_path)
+
+            files_data = [
+                ("files[0]", (ogg_path.name, ogg_path.read_bytes(), "audio/ogg"))
+            ]
+            payload = {
+                "payload_json": json.dumps({
+                    "flags": 8192,  # IS_VOICE_MESSAGE = 1 << 13
+                    "attachments": [{
+                        "id": 0,
+                        "filename": ogg_path.name,
+                        "duration_secs": duration,
+                        "waveform": waveform,
+                    }],
+                })
+            }
+
+            for attempt in range(3):
+                try:
+                    resp = await self._http.post(
+                        url, headers=headers, files=files_data, data=payload
+                    )
+                    if resp.status_code == 429:
+                        retry_after = float(resp.json().get("retry_after", 1.0))
+                        logger.warning("Discord rate limited on voice send, retrying in {}s", retry_after)
+                        await asyncio.sleep(retry_after)
+                        continue
+                    if resp.status_code in (200, 201, 204):
+                        return True
+                    logger.warning("Discord voice message failed ({}): {}", resp.status_code, resp.text[:200])
+                    return False
+                except Exception as e:
+                    if attempt == 2:
+                        logger.error("Error sending Discord voice message: {}", e)
+                    else:
+                        await asyncio.sleep(1)
+        except Exception as e:
+            logger.warning("Voice message prep failed, falling back to file: {}", e)
+        return False
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Discord REST API, including file attachments."""
         if not self._http:
             logger.warning("Discord HTTP client not initialized")
             return
 
-        url = f"{DISCORD_API_BASE}/channels/{msg.chat_id}/messages"
+        channel_id = msg.chat_id
         headers = {"Authorization": f"Bot {self.config.token}"}
+        url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages"
+        has_files = bool(msg.media)
+
+        async def _resolve_if_needed(success: bool) -> bool:
+            """On failure, try resolving as DM channel and update url/channel_id."""
+            nonlocal channel_id, url
+            if success:
+                return True
+            resolved = await self._resolve_channel_id(channel_id)
+            if resolved != channel_id:
+                channel_id = resolved
+                url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages"
+            return False
 
         try:
-            sent_media = False
-            failed_media: list[str] = []
-
-            # Send file attachments first
-            for media_path in msg.media or []:
-                if await self._send_file(url, headers, media_path, reply_to=msg.reply_to):
-                    sent_media = True
-                else:
-                    failed_media.append(Path(media_path).name)
-
-            # Send text content
             chunks = split_message(msg.content or "", MAX_MESSAGE_LEN)
-            if not chunks and failed_media and not sent_media:
-                chunks = split_message(
-                    "\n".join(f"[attachment: {name} - send failed]" for name in failed_media),
-                    MAX_MESSAGE_LEN,
-                )
-            if not chunks:
+            if not chunks and not has_files:
                 return
 
-            for i, chunk in enumerate(chunks):
-                payload: dict[str, Any] = {"content": chunk}
+            if has_files:
+                # Separate OGG files for voice message rendering
+                ogg_files = [p for p in msg.media if p.lower().endswith(".ogg")]
+                other_media = [p for p in msg.media if not p.lower().endswith(".ogg")]
 
-                # Let the first successful attachment carry the reply if present.
-                if i == 0 and msg.reply_to and not sent_media:
-                    payload["message_reference"] = {"message_id": msg.reply_to}
-                    payload["allowed_mentions"] = {"replied_user": False}
+                # Send text chunks before media
+                for i, chunk in enumerate(chunks[:-1] if (other_media or not ogg_files) else chunks):
+                    payload: dict[str, Any] = {"content": chunk}
+                    success = await self._send_payload(url, headers, payload)
+                    if not await _resolve_if_needed(success):
+                        if not await self._send_payload(url, headers, payload):
+                            return
 
-                if not await self._send_payload(url, headers, payload):
-                    break  # Abort remaining chunks on failure
+                # Send OGG files as voice messages
+                for ogg in ogg_files:
+                    success = await self._send_voice_message(url, headers, Path(ogg))
+                    if not success:
+                        if not await _resolve_if_needed(False):
+                            success = await self._send_voice_message(url, headers, Path(ogg))
+                        if not success:
+                            # Fallback: send as regular file attachment
+                            await self._send_with_files(url, headers, "", [ogg])
+
+                # Send remaining non-OGG media with last text chunk
+                if other_media:
+                    last_text = chunks[-1] if chunks else ""
+                    reply_to = msg.reply_to if len(chunks) <= 1 else None
+                    success = await self._send_with_files(url, headers, last_text, other_media, reply_to=reply_to)
+                    if not await _resolve_if_needed(success):
+                        await self._send_with_files(url, headers, last_text, other_media, reply_to=reply_to)
+            else:
+                # Text-only
+                for i, chunk in enumerate(chunks):
+                    payload = {"content": chunk}
+                    if i == 0 and msg.reply_to:
+                        payload["message_reference"] = {"message_id": msg.reply_to}
+                        payload["allowed_mentions"] = {"replied_user": False}
+                    success = await self._send_payload(url, headers, payload)
+                    if not success:
+                        if i == 0 and not await _resolve_if_needed(False):
+                            if not await self._send_payload(url, headers, payload):
+                                break
+                        else:
+                            break
         finally:
-            await self._stop_typing(msg.chat_id)
+            await self._stop_typing(channel_id)
 
     async def _send_payload(
         self, url: str, headers: dict[str, str], payload: dict[str, Any]
@@ -150,6 +351,10 @@ class DiscordChannel(BaseChannel):
                     logger.warning("Discord rate limited, retrying in {}s", retry_after)
                     await asyncio.sleep(retry_after)
                     continue
+                if response.status_code == 404:
+                    # No point retrying — channel not found, caller will try DM resolution
+                    logger.warning("Discord channel not found (404): {}", url)
+                    return False
                 response.raise_for_status()
                 return True
             except Exception as e:
@@ -323,11 +528,25 @@ class DiscordChannel(BaseChannel):
             try:
                 media_dir.mkdir(parents=True, exist_ok=True)
                 file_path = media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
-                resp = await self._http.get(url)
-                resp.raise_for_status()
-                file_path.write_bytes(resp.content)
+                async with self._http.stream("GET", url) as resp:
+                    resp.raise_for_status()
+                    file_path.write_bytes(await resp.aread())
                 media_paths.append(str(file_path))
-                content_parts.append(f"[attachment: {file_path}]")
+
+                # Detect audio and transcribe (voice-in)
+                ext = Path(filename).suffix.lower()
+                api_key = self.groq_api_key or self.transcription_api_key
+                if ext in AUDIO_EXTENSIONS and api_key:
+                    from nanobot.providers.transcription import GroqTranscriptionProvider
+                    transcriber = GroqTranscriptionProvider(api_key=api_key)
+                    transcription = await transcriber.transcribe(file_path)
+                    if transcription:
+                        logger.info("Transcribed Discord audio: {}...", transcription[:50])
+                        content_parts.append(f"[transcription: {transcription}]")
+                    else:
+                        content_parts.append(f"[attachment: {file_path}]")
+                else:
+                    content_parts.append(f"[attachment: {file_path}]")
             except Exception as e:
                 logger.warning("Failed to download Discord attachment: {}", e)
                 content_parts.append(f"[attachment: {filename} - download failed]")

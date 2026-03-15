@@ -22,6 +22,7 @@ from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.agent.tools.tts import TTSTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -57,6 +58,7 @@ class AgentLoop:
         context_window_tokens: int = 65_536,
         web_search_config: WebSearchConfig | None = None,
         web_proxy: str | None = None,
+        groq_api_key: str | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
@@ -75,6 +77,7 @@ class AgentLoop:
         self.context_window_tokens = context_window_tokens
         self.web_search_config = web_search_config or WebSearchConfig()
         self.web_proxy = web_proxy
+        self.groq_api_key = groq_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
@@ -124,8 +127,15 @@ class AgentLoop:
         ))
         self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
-        self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
+        message_tool = MessageTool(send_callback=self.bus.publish_outbound)
+        self.tools.register(message_tool)
         self.tools.register(SpawnTool(manager=self.subagents))
+        if self.groq_api_key:
+            self.tools.register(TTSTool(
+                groq_api_key=self.groq_api_key,
+                send_callback=self.bus.publish_outbound,
+                message_tool=message_tool,
+            ))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
@@ -153,10 +163,21 @@ class AgentLoop:
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
-        for name in ("message", "spawn", "cron"):
-            if tool := self.tools.get(name):
-                if hasattr(tool, "set_context"):
-                    tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+        if message_tool := self.tools.get("message"):
+            if isinstance(message_tool, MessageTool):
+                message_tool.set_context(channel, chat_id, message_id)
+
+        if spawn_tool := self.tools.get("spawn"):
+            if isinstance(spawn_tool, SpawnTool):
+                spawn_tool.set_context(channel, chat_id)
+
+        if tts_tool := self.tools.get("speak"):
+            if isinstance(tts_tool, TTSTool):
+                tts_tool.set_context(channel, chat_id)
+
+        if cron_tool := self.tools.get("cron"):
+            if isinstance(cron_tool, CronTool):
+                cron_tool.set_context(channel, chat_id)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -431,7 +452,7 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
+        final_content, tools_used, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
         )
 
@@ -443,6 +464,9 @@ class AgentLoop:
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
+            return None
+
+        if "speak" in tools_used:
             return None
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
