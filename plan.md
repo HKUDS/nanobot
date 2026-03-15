@@ -2,7 +2,7 @@
 
 ## Summary
 
-Replace the internals of `nanobot/channels/discord.py` from the current custom Gateway + raw REST client to `discord.py`, while preserving the existing channel boundary, config shape, bus contract, and user-facing Discord behavior.
+Replace the internals of `nanobot/channels/discord.py` from the current custom Gateway + raw REST client to `discord.py` so the Discord adapter relies on a maintained library instead of bespoke protocol handling. The intent is to reduce transport-specific maintenance risk and simplify future Discord compatibility work while preserving the existing channel boundary, config shape, bus contract, and user-facing Discord behavior.
 
 This remains a transport swap only. The Discord adapter should fail cleanly if the `discord.py` client cannot be constructed or started, and it should not carry a custom HTTP fallback path.
 
@@ -70,7 +70,7 @@ This remains a transport swap only. The Discord adapter should fail cleanly if t
   - guild message accepted in `"mention"` mode with a mention
   - guild message accepted in `"open"` mode
 - Cover inbound payload shaping:
-  - metadata includes `message_id`, `guild_id`, and reply context
+  - metadata includes `message_id`, `guild_id`, and `reply_to`
   - attachments are downloaded and surfaced in both `content` markers and `media`
   - oversized or failed attachments degrade to text markers instead of crashing
 - Cover outbound behavior:
