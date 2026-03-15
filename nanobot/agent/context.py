@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from nanobot.agent.media_cache import MediaCache
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.utils.helpers import build_assistant_message, detect_image_mime
@@ -23,6 +24,7 @@ class ContextBuilder:
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
+        self.media_cache = MediaCache(workspace)
 
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
@@ -144,27 +146,115 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             {"role": "user", "content": merged},
         ]
 
-    def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
-        """Build user message content with optional base64-encoded images."""
+    def _build_user_content(
+        self,
+        text: str,
+        media: list[str] | None,
+        skip_cached: bool = False,
+    ) -> str | list[dict[str, Any]]:
+        """Build user message content with optional base64-encoded images.
+
+        Args:
+            text: The user's text message.
+            media: Optional list of local file paths.
+            skip_cached: If True, already-cached images are injected as text
+                         descriptions instead of being re-encoded (used when
+                         the vision model has already transcribed them).
+        """
         if not media:
             return text
 
-        images = []
+        parts: list[dict[str, Any]] = []
+        cached_descriptions: list[str] = []
+
         for path in media:
             p = Path(path)
             if not p.is_file():
+                # Non-existent file -- try cache anyway
+                file_hash = self.media_cache.hash_file(path) if Path(path).exists() else None
+                desc = self.media_cache.get(file_hash) if file_hash else None
+                if desc:
+                    cached_descriptions.append(f"[Image: {p.name}]\n{desc}")
                 continue
             raw = p.read_bytes()
             # Detect real MIME type from magic bytes; fallback to filename guess
             mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
             if not mime or not mime.startswith("image/"):
                 continue
-            b64 = base64.b64encode(raw).decode()
-            images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
 
-        if not images:
-            return text
-        return images + [{"type": "text", "text": text}]
+            file_hash = self.media_cache.hash_file(p)
+            cached = self.media_cache.get(file_hash) if file_hash else None
+
+            if cached:
+                # Already transcribed -- inject description as text, skip base64
+                cached_descriptions.append(f"[Image: {p.name}]\n{cached}")
+            elif not skip_cached:
+                # Fresh image -- encode as base64 for vision model
+                b64 = base64.b64encode(raw).decode()
+                parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+
+        # Build final content
+        text_parts = []
+        if cached_descriptions:
+            text_parts.append("Previously transcribed images:\n" + "\n\n".join(cached_descriptions))
+        text_parts.append(text)
+        full_text = "\n\n".join(text_parts)
+
+        if not parts:
+            return full_text
+        return parts + [{"type": "text", "text": full_text}]
+
+    def build_vision_messages(
+        self,
+        history: list[dict[str, Any]],
+        current_message: str,
+        media: list[str],
+        context_window: int = 6,
+    ) -> list[dict[str, Any]]:
+        """Build a focused message list for the vision model (preprocessor role).
+
+        The vision model receives:
+        - A tightly scoped system prompt describing its transcription role
+        - The last ``context_window`` turns of conversation history so it
+          understands WHAT is being asked about the image
+        - The current user message + image(s) as base64
+
+        Returns:
+            Messages list for provider.chat() -- no tools, no agent loop.
+        """
+        system = (
+            "You are a vision analysis assistant. "
+            "The user is chatting with an AI agent and has attached one or more images. "
+            "Your job is to describe each image in rich, structured detail so the main "
+            "agent can answer the user's question WITHOUT seeing the raw image again.\n\n"
+            "Guidelines:\n"
+            "- Describe visual content thoroughly: layout, text, charts, numbers, labels\n"
+            "- For screenshots: capture UI state, visible text, error messages verbatim\n"
+            "- For charts/graphs: describe axes, values, trends, colour coding\n"
+            "- For photos: describe objects, scene, any text visible\n"
+            "- Tailor depth to what the conversation context suggests is important\n"
+            "- End with a one-line summary: 'Summary: <what the image shows>'\n\n"
+            "Conversation context follows (to understand what matters in this image)."
+        )
+
+        messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
+
+        # Inject trimmed history so vision model understands the conversation
+        if history and context_window > 0:
+            trimmed = history[-context_window:]
+            # Strip tool_calls / tool results -- vision model doesn't need those
+            for m in trimmed:
+                role = m.get("role", "")
+                if role in ("user", "assistant") and not m.get("tool_calls"):
+                    content = m.get("content", "")
+                    if isinstance(content, str) and content.strip():
+                        messages.append({"role": role, "content": content})
+
+        # Current message + raw images (no cache bypass here -- these are fresh)
+        user_content = self._build_user_content(current_message, media, skip_cached=False)
+        messages.append({"role": "user", "content": user_content})
+
+        return messages
 
     def add_tool_result(
         self, messages: list[dict[str, Any]],
