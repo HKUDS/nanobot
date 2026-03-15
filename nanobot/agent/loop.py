@@ -8,6 +8,7 @@ import os
 import re
 import sys
 from contextlib import AsyncExitStack
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -32,6 +33,17 @@ from nanobot.session.manager import Session, SessionManager
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
     from nanobot.cron.service import CronService
+
+
+@dataclass
+class RunLoopResult:
+    """Result of a single agent loop execution."""
+
+    final_content: str | None = None           # from terminal (non-tool-call) LLM response
+    fallback_content: str | None = None        # last nonempty thought from a tool-call turn
+    emitted_fallback_content: str | None = None  # the fallback text that was actually sent as progress
+    tools_used: list[str] = field(default_factory=list)
+    messages: list[dict] = field(default_factory=list)
 
 
 class AgentLoop:
@@ -184,12 +196,14 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
-    ) -> tuple[str | None, list[str], list[dict]]:
+    ) -> RunLoopResult:
         """Run the agent iteration loop."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        fallback_content: str | None = None
+        emitted_fallback_content: str | None = None
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -203,10 +217,14 @@ class AgentLoop:
             )
 
             if response.has_tool_calls:
+                thought = self._strip_think(response.content)
+                if thought:
+                    fallback_content = thought
+
                 if on_progress:
-                    thought = self._strip_think(response.content)
                     if thought:
                         await on_progress(thought)
+                        emitted_fallback_content = thought
                     tool_hint = self._tool_hint(response.tool_calls)
                     tool_hint = self._strip_think(tool_hint)
                     await on_progress(tool_hint, tool_hint=True)
@@ -251,7 +269,13 @@ class AgentLoop:
                 "without completing the task. You can try breaking the task into smaller steps."
             )
 
-        return final_content, tools_used, messages
+        return RunLoopResult(
+            final_content=final_content,
+            fallback_content=fallback_content,
+            emitted_fallback_content=emitted_fallback_content,
+            tools_used=tools_used,
+            messages=messages,
+        )
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
@@ -357,7 +381,7 @@ class AgentLoop:
         self,
         msg: InboundMessage,
         session_key: str | None = None,
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_progress: Callable[..., Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -377,10 +401,13 @@ class AgentLoop:
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
-            self._save_turn(session, all_msgs, 1 + len(history))
+            result = await self._run_agent_loop(messages)
+            self._save_turn(session, result.messages, 1 + len(history))
             self.sessions.save(session)
             self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+            final_content = result.final_content
+            if final_content is None:
+                final_content = result.fallback_content
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
 
@@ -433,22 +460,37 @@ class AgentLoop:
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
             meta["_tool_hint"] = tool_hint
+            logger.debug("Progress to {}:{}: {}{}", msg.channel, msg.chat_id,
+                         content[:80], "..." if len(content) > 80 else "")
             await self.bus.publish_outbound(OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+        # Gate progress: explicit callback > config-driven bus progress > None
+        effective_progress: Callable[..., Awaitable[None]] | None = None
+        if on_progress:
+            effective_progress = on_progress
+        elif self.channels_config and self.channels_config.send_progress:
+            effective_progress = _bus_progress
+
+        result = await self._run_agent_loop(
+            initial_messages, on_progress=effective_progress,
         )
 
-        if final_content is None:
-            final_content = "I've completed processing but have no response to give."
+        final_content = result.final_content
 
-        self._save_turn(session, all_msgs, 1 + len(history))
+        # Use fallback only if: final is empty AND fallback wasn't already sent as progress
+        if final_content is None and result.fallback_content and result.fallback_content != result.emitted_fallback_content:
+            final_content = result.fallback_content
+
+        self._save_turn(session, result.messages, 1 + len(history))
         self.sessions.save(session)
         self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
+            return None
+
+        if final_content is None:
             return None
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
@@ -501,7 +543,7 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_progress: Callable[..., Awaitable[None]] | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()
