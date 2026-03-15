@@ -505,7 +505,8 @@ class TestNewCommandArchival:
         return loop
 
     @pytest.mark.asyncio
-    async def test_new_does_not_clear_session_when_archive_fails(self, tmp_path: Path) -> None:
+    async def test_new_clears_session_immediately_even_if_archive_fails(self, tmp_path: Path) -> None:
+        """/new clears session immediately, archive failure only logs warning."""
         from nanobot.bus.events import InboundMessage
 
         loop = self._make_loop(tmp_path)
@@ -514,7 +515,6 @@ class TestNewCommandArchival:
             session.add_message("user", f"msg{i}")
             session.add_message("assistant", f"resp{i}")
         loop.sessions.save(session)
-        before_count = len(session.messages)
 
         async def _failing_consolidate(_messages) -> bool:
             return False
@@ -524,9 +524,13 @@ class TestNewCommandArchival:
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
         response = await loop._process_message(new_msg)
 
+        # /new returns immediately with success message
         assert response is not None
-        assert "failed" in response.content.lower()
-        assert len(loop.sessions.get_or_create("cli:test").messages) == before_count
+        assert "new session started" in response.content.lower()
+
+        # Session is cleared immediately, even though archive will fail in background
+        session_after = loop.sessions.get_or_create("cli:test")
+        assert len(session_after.messages) == 0
 
     @pytest.mark.asyncio
     async def test_new_archives_only_unconsolidated_messages(self, tmp_path: Path) -> None:
@@ -541,10 +545,12 @@ class TestNewCommandArchival:
         loop.sessions.save(session)
 
         archived_count = -1
+        archive_done = asyncio.Event()
 
         async def _fake_consolidate(messages) -> bool:
             nonlocal archived_count
             archived_count = len(messages)
+            archive_done.set()
             return True
 
         loop.memory_consolidator.consolidate_messages = _fake_consolidate  # type: ignore[method-assign]
@@ -554,6 +560,9 @@ class TestNewCommandArchival:
 
         assert response is not None
         assert "new session started" in response.content.lower()
+
+        # Wait for background archival to complete
+        await asyncio.wait_for(archive_done.wait(), timeout=1.0)
         assert archived_count == 3
 
     @pytest.mark.asyncio
