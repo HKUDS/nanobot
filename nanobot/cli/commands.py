@@ -7,6 +7,8 @@ import signal
 import sys
 from pathlib import Path
 from typing import Any
+import json
+import time
 
 # Force UTF-8 encoding for Windows console
 if sys.platform == "win32":
@@ -554,13 +556,117 @@ def gateway(
 
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
+    # Create HTTP API server for external integrations
+    from aiohttp import web
+
+    # Track outbound messages for unknown channels (used by HTTP API)
+    pending_outbound: dict[str, list[dict]] = {}
+
+    async def handle_message(request: web.Request) -> web.Response:
+        """Handle incoming messages from external sources (e.g., wechat_bridge)."""
+        try:
+            data = await request.json()
+            message = data.get("message", "").strip()
+            user_id = data.get("user_id", "unknown")
+            channel = data.get("channel", "wechat")
+            timeout = data.get("timeout", 60)
+
+            if not message:
+                return web.json_response({"error": "message is required"}, status=400)
+
+            # Clear pending outbound for this session
+            session_key = f"{channel}:{user_id}"
+            pending_outbound[session_key] = []
+
+            # Process message through agent
+            response = await asyncio.wait_for(
+                agent.process_direct(
+                    message,
+                    session_key=session_key,
+                    channel=channel,
+                    chat_id=user_id,
+                ),
+                timeout=timeout
+            )
+
+            # Collect any pending outbound messages for unknown channels
+            outbound_messages = pending_outbound.pop(session_key, [])
+            media_paths = []
+            for msg in outbound_messages:
+                if msg.get("media"):
+                    media_paths.extend(msg.get("media", []))
+                # If no text response but there's outbound content, use it
+                if not response and msg.get("content"):
+                    response = msg["content"]
+
+            return web.json_response({
+                "response": response or "",
+                "media": media_paths
+            })
+
+        except asyncio.TimeoutError:
+            return web.json_response({"error": "timeout"}, status=504)
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    # Subscribe to outbound messages to capture those for unknown channels
+    async def capture_unknown_channel_outbound():
+        """Capture outbound messages for unknown channels."""
+        while True:
+            try:
+                msg = await asyncio.wait_for(
+                    bus.consume_outbound(),
+                    timeout=1.0
+                )
+                # Only capture messages for channels not handled by channel manager
+                if msg.channel not in channels.enabled_channels:
+                    session_key = f"{msg.channel}:{msg.chat_id}"
+                    if session_key in pending_outbound:
+                        pending_outbound[session_key].append({
+                            "content": msg.content,
+                            "media": msg.media,
+                        })
+                    else:
+                        # Also try with just the channel (for messages sent to different users)
+                        for key in list(pending_outbound.keys()):
+                            if key.startswith(f"{msg.channel}:"):
+                                pending_outbound[key].append({
+                                    "content": msg.content,
+                                    "media": msg.media,
+                                })
+                                break
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                continue
+
+    async def handle_health(request: web.Request) -> web.Response:
+        """Health check endpoint."""
+        return web.json_response({"status": "ok", "channels": list(channels.enabled_channels)})
+
+    # Create aiohttp app
+    http_app = web.Application()
+    http_app.router.add_post("/api/message", handle_message)
+    http_app.router.add_get("/api/health", handle_health)
+
+    # Reuse the gateway port for HTTP API
+    http_runner = web.AppRunner(http_app)
+
     async def run():
         try:
             await cron.start()
             await heartbeat.start()
+            await http_runner.setup()
+            http_site = web.TCPSite(http_runner, "0.0.0.0", port)
+            await http_site.start()
+            console.print(f"[green]✓[/green] HTTP API: http://0.0.0.0:{port}/api/message")
+
             await asyncio.gather(
                 agent.run(),
                 channels.start_all(),
+                capture_unknown_channel_outbound(),
             )
         except KeyboardInterrupt:
             console.print("\nShutting down...")
@@ -569,6 +675,7 @@ def gateway(
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
+            await http_runner.cleanup()
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
