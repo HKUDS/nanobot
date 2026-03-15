@@ -215,7 +215,7 @@ class BrowserManager:
         Args:
             session_id: The session ID to update.
         """
-        if session_id in self._session_last_used:
+        if session_id in self._sessions:
             self._session_last_used[session_id] = time.time()
     
     def get_session(self, session_id: str) -> BrowserSession | None:
@@ -329,7 +329,7 @@ class BrowserActionTool(Tool):
     # Default session ID for convenience
     DEFAULT_SESSION_ID = "default"
     
-    def __init__(self, manager: BrowserManager | None = None, enable_vision: bool = True):
+    def __init__(self, manager: BrowserManager | None = None, enable_vision: bool = True, session_timeout: int = 1800):
         """Initialize the browser action tool.
         
         Args:
@@ -337,8 +337,9 @@ class BrowserActionTool(Tool):
             enable_vision: Whether to enable vision capabilities (screenshot returns images).
                           If False, screenshots return text descriptions only.
                           This should be set based on whether the LLM provider supports vision.
+            session_timeout: Session timeout in seconds (default: 1800 = 30 minutes).
         """
-        self._manager = manager or BrowserManager()
+        self._manager = manager or BrowserManager(session_timeout=session_timeout)
         self._console_logs: dict[str, list[dict]] = {}
         self._network_logs: dict[str, list[dict]] = {}
         self._enable_vision = enable_vision
@@ -499,27 +500,30 @@ Actions:
         
         # Execute the action
         try:
+            # Remove session from kwargs to avoid duplicate parameter error
+            action_kwargs = {k: v for k, v in kwargs.items() if k != "session"}
+            
             match action:
                 case "launch":
                     result = await self._handle_launch()
                 case "navigate":
-                    result = await self._handle_navigate(session, **kwargs)
+                    result = await self._handle_navigate(session, **action_kwargs)
                 case "click":
-                    result = await self._handle_click(session, **kwargs)
+                    result = await self._handle_click(session, **action_kwargs)
                 case "type":
-                    result = await self._handle_type(session, **kwargs)
+                    result = await self._handle_type(session, **action_kwargs)
                 case "check":
-                    result = await self._handle_check(session, **kwargs)
+                    result = await self._handle_check(session, **action_kwargs)
                 case "screenshot":
                     result = await self._handle_screenshot(session)
                 case "evaluate":
-                    result = await self._handle_evaluate(session, **kwargs)
+                    result = await self._handle_evaluate(session, **action_kwargs)
                 case "console":
                     result = await self._handle_console(session_id)
                 case "network":
                     result = await self._handle_network(session_id)
                 case "wait":
-                    result = await self._handle_wait(session, **kwargs)
+                    result = await self._handle_wait(session, **action_kwargs)
                 case "close":
                     result = await self._handle_close()
                 case _:

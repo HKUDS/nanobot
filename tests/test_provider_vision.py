@@ -19,7 +19,15 @@ class TestLLMProviderVisionSupport:
 
     def test_base_provider_supports_vision_default(self):
         """Test that base provider returns False for vision support by default."""
-        provider = LLMProvider(api_key="test_key")
+        
+        class ConcreteProvider(LLMProvider):
+            async def chat(self, messages, tools=None, model=None, **kwargs):
+                return LLMResponse(content="test")
+            
+            def get_default_model(self):
+                return "test-model"
+        
+        provider = ConcreteProvider(api_key="test_key")
         assert provider.supports_vision() is False
 
     def test_base_provider_supports_vision_can_be_overridden(self):

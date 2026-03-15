@@ -67,17 +67,27 @@ def mock_playwright():
     """Create a mock Playwright instance."""
     with patch("nanobot.agent.tools.browser.PLAYWRIGHT_AVAILABLE", True):
         with patch("nanobot.agent.tools.browser.async_playwright") as mock_pw:
+            # Mock async_playwright() to return an object with start() method
+            mock_playwright_context_manager = AsyncMock()
+            mock_pw.return_value = mock_playwright_context_manager
+            
+            # Mock playwright instance (returned by start())
             mock_playwright_instance = AsyncMock()
-            mock_pw.return_value = mock_playwright_instance
+            mock_playwright_context_manager.start = AsyncMock(return_value=mock_playwright_instance)
+            mock_playwright_instance.stop = AsyncMock()
             
             # Mock browser
             mock_browser = AsyncMock()
+            mock_browser.close = AsyncMock()
+            mock_playwright_instance.chromium = Mock()
             mock_playwright_instance.chromium.launch = AsyncMock(return_value=mock_browser)
             
             # Mock context and page
             mock_context = AsyncMock()
-            mock_page = AsyncMock()
+            mock_context.close = AsyncMock()
             mock_browser.new_context = AsyncMock(return_value=mock_context)
+            
+            mock_page = AsyncMock()
             mock_context.new_page = AsyncMock(return_value=mock_page)
             
             # Mock page methods
@@ -86,10 +96,13 @@ def mock_playwright():
             mock_page.click = AsyncMock()
             mock_page.fill = AsyncMock()
             mock_page.set_checked = AsyncMock()
-            mock_page.screenshot = AsyncMock(return_value=b"fake_screenshot")
+            # Return valid PNG image data for screenshot
+            mock_page.screenshot = AsyncMock(return_value=base64.b64decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+            ))
             mock_page.evaluate = AsyncMock(return_value="result")
             mock_page.wait_for_selector = AsyncMock()
-            mock_page.on = Mock()
+            mock_page.on = Mock(return_value=None)
             
             yield {
                 "playwright": mock_playwright_instance,

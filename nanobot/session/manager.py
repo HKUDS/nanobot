@@ -56,7 +56,13 @@ class Session:
 
         out: list[dict[str, Any]] = []
         for m in sliced:
-            entry: dict[str, Any] = {"role": m["role"], "content": m.get("content", "")}
+            content = m.get("content", "")
+            
+            # Truncate large tool results to avoid excessive token usage
+            if m.get("role") == "tool" and len(content) > 10000:
+                content = content[:10000] + "\n\n[Content truncated due to size]"
+            
+            entry: dict[str, Any] = {"role": m["role"], "content": content}
             for k in ("tool_calls", "tool_call_id", "name"):
                 if k in m:
                     entry[k] = m[k]
@@ -182,6 +188,18 @@ class SessionManager:
     def invalidate(self, key: str) -> None:
         """Remove a session from the in-memory cache."""
         self._cache.pop(key, None)
+
+    def close_session(self, key: str) -> bool:
+        """
+        Close and remove a session from the cache.
+
+        Args:
+            key: Session key to close.
+
+        Returns:
+            True if the session existed and was removed, False otherwise.
+        """
+        return self._cache.pop(key, None) is not None
 
     def list_sessions(self) -> list[dict[str, Any]]:
         """

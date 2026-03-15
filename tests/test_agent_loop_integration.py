@@ -80,7 +80,7 @@ class TestAgentLoopBrowserIntegration:
             assert browser_tool is not None
 
     @pytest.mark.asyncio
-    async def test_multimodal_tool_result_processing(self, mock_workspace, mock_message_bus, sample_image_b64):
+    async def test_multimodal_tool_result_processing(self, mock_workspace, mock_message_bus, sample_image_b64, mock_playwright):
         """Test processing of multimodal tool results in agent loop."""
         mock_provider = Mock()
         mock_provider.chat = AsyncMock()
@@ -105,43 +105,30 @@ class TestAgentLoopBrowserIntegration:
 
         mock_provider.chat_with_retry.return_value = mock_response
 
-        with patch("nanobot.agent.tools.browser.PLAYWRIGHT_AVAILABLE", True):
-            with patch("nanobot.agent.tools.browser.async_playwright") as mock_pw:
-                # Setup mock Playwright
-                mock_playwright_instance = AsyncMock()
-                mock_pw.return_value = mock_playwright_instance
-                mock_browser = AsyncMock()
-                mock_playwright_instance.chromium.launch = AsyncMock(return_value=mock_browser)
-                mock_context = AsyncMock()
-                mock_page = AsyncMock()
-                mock_browser.new_context = AsyncMock(return_value=mock_context)
-                mock_context.new_page = AsyncMock(return_value=mock_page)
-                mock_page.screenshot = AsyncMock(return_value=b"fake_screenshot")
+        agent = AgentLoop(
+            bus=mock_message_bus,
+            provider=mock_provider,
+            workspace=mock_workspace,
+            model="test-model",
+        )
 
-                agent = AgentLoop(
-                    bus=mock_message_bus,
-                    provider=mock_provider,
-                    workspace=mock_workspace,
-                    model="test-model",
-                )
+        # Process a message that triggers browser tool
+        msg = InboundMessage(
+            channel="test",
+            sender_id="user1",
+            chat_id="chat1",
+            content="Take a screenshot",
+            media=[],
+            metadata={},
+        )
 
-                # Process a message that triggers browser tool
-                msg = InboundMessage(
-                    channel="test",
-                    sender_id="user1",
-                    chat_id="chat1",
-                    content="Take a screenshot",
-                    media=[],
-                    metadata={},
-                )
+        response = await agent._process_message(msg)
 
-                response = await agent._process_message(msg)
-
-                # Check that the tool was executed
-                assert mock_provider.chat_with_retry.called
+        # Check that the tool was executed
+        assert mock_provider.chat_with_retry.called
 
     @pytest.mark.asyncio
-    async def test_vision_disabled_screenshot_returns_text(self, mock_workspace, mock_message_bus):
+    async def test_vision_disabled_screenshot_returns_text(self, mock_workspace, mock_message_bus, mock_playwright):
         """Test that screenshot returns text when vision is disabled."""
         mock_provider = Mock()
         mock_provider.chat = AsyncMock()
@@ -149,40 +136,27 @@ class TestAgentLoopBrowserIntegration:
         mock_provider.get_default_model = Mock(return_value="test-model")
         mock_provider.supports_vision = Mock(return_value=False)
 
-        with patch("nanobot.agent.tools.browser.PLAYWRIGHT_AVAILABLE", True):
-            with patch("nanobot.agent.tools.browser.async_playwright") as mock_pw:
-                # Setup mock Playwright
-                mock_playwright_instance = AsyncMock()
-                mock_pw.return_value = mock_playwright_instance
-                mock_browser = AsyncMock()
-                mock_playwright_instance.chromium.launch = AsyncMock(return_value=mock_browser)
-                mock_context = AsyncMock()
-                mock_page = AsyncMock()
-                mock_browser.new_context = AsyncMock(return_value=mock_context)
-                mock_context.new_page = AsyncMock(return_value=mock_page)
-                mock_page.screenshot = AsyncMock(return_value=b"fake_screenshot")
+        agent = AgentLoop(
+            bus=mock_message_bus,
+            provider=mock_provider,
+            workspace=mock_workspace,
+            model="test-model",
+        )
 
-                agent = AgentLoop(
-                    bus=mock_message_bus,
-                    provider=mock_provider,
-                    workspace=mock_workspace,
-                    model="test-model",
-                )
+        # Get browser tool
+        browser_tool = agent.tools.get("browser_action")
+        assert browser_tool is not None
 
-                # Get browser tool
-                browser_tool = agent.tools.get("browser_action")
-                assert browser_tool is not None
+        # Execute screenshot
+        result = await browser_tool.execute(action="screenshot")
 
-                # Execute screenshot
-                result = await browser_tool.execute(action="screenshot")
-
-                # Should return text description, not image
-                assert isinstance(result, ToolResult)
-                assert "vision disabled" in result.content
-                assert result.images is None
+        # Should return text description, not image
+        assert isinstance(result, ToolResult)
+        assert "vision disabled" in result.content
+        assert result.images is None
 
     @pytest.mark.asyncio
-    async def test_vision_enabled_screenshot_returns_image(self, mock_workspace, mock_message_bus):
+    async def test_vision_enabled_screenshot_returns_image(self, mock_workspace, mock_message_bus, mock_playwright):
         """Test that screenshot returns image when vision is enabled."""
         mock_provider = Mock()
         mock_provider.chat = AsyncMock()
@@ -190,39 +164,29 @@ class TestAgentLoopBrowserIntegration:
         mock_provider.get_default_model = Mock(return_value="test-model")
         mock_provider.supports_vision = Mock(return_value=True)
 
-        with patch("nanobot.agent.tools.browser.PLAYWRIGHT_AVAILABLE", True):
-            with patch("nanobot.agent.tools.browser.async_playwright") as mock_pw:
-                # Setup mock Playwright
-                mock_playwright_instance = AsyncMock()
-                mock_pw.return_value = mock_playwright_instance
-                mock_browser = AsyncMock()
-                mock_playwright_instance.chromium.launch = AsyncMock(return_value=mock_browser)
-                mock_context = AsyncMock()
-                mock_page = AsyncMock()
-                mock_browser.new_context = AsyncMock(return_value=mock_context)
-                mock_context.new_page = AsyncMock(return_value=mock_page)
-                mock_page.screenshot = AsyncMock(return_value=b"fake_screenshot")
+        # Get the mock page from the fixture
+        mock_page = mock_playwright["page"]
+        
+        agent = AgentLoop(
+            bus=mock_message_bus,
+            provider=mock_provider,
+            workspace=mock_workspace,
+            model="test-model",
+        )
 
-                agent = AgentLoop(
-                    bus=mock_message_bus,
-                    provider=mock_provider,
-                    workspace=mock_workspace,
-                    model="test-model",
-                )
+        # Get browser tool
+        browser_tool = agent.tools.get("browser_action")
+        assert browser_tool is not None
 
-                # Get browser tool
-                browser_tool = agent.tools.get("browser_action")
-                assert browser_tool is not None
+        # Execute screenshot
+        result = await browser_tool.execute(action="screenshot")
 
-                # Execute screenshot
-                result = await browser_tool.execute(action="screenshot")
-
-                # Should return image
-                assert isinstance(result, ToolResult)
-                assert "Screenshot captured" in result.content
-                assert result.images is not None
-                assert len(result.images) == 1
-                assert result.images[0]["type"] == "image_url"
+        # Should return image
+        assert isinstance(result, ToolResult)
+        assert "Screenshot captured" in result.content
+        assert result.images is not None
+        assert len(result.images) == 1
+        assert result.images[0]["type"] == "image_url"
 
     @pytest.mark.asyncio
     async def test_tool_result_to_message_content_conversion(self, mock_workspace, mock_message_bus, sample_image_b64):
@@ -447,7 +411,7 @@ class TestAgentLoopBrowserIntegration:
             assert "Error:" in result.content or "Unknown action" in result.content
 
     @pytest.mark.asyncio
-    async def test_browser_tool_session_management(self, mock_workspace, mock_message_bus):
+    async def test_browser_tool_session_management(self, mock_workspace, mock_message_bus, mock_playwright):
         """Test browser tool session management."""
         mock_provider = Mock()
         mock_provider.chat = AsyncMock()
@@ -455,45 +419,33 @@ class TestAgentLoopBrowserIntegration:
         mock_provider.get_default_model = Mock(return_value="test-model")
         mock_provider.supports_vision = Mock(return_value=True)
 
-        with patch("nanobot.agent.tools.browser.PLAYWRIGHT_AVAILABLE", True):
-            with patch("nanobot.agent.tools.browser.async_playwright") as mock_pw:
-                # Setup mock Playwright
-                mock_playwright_instance = AsyncMock()
-                mock_pw.return_value = mock_playwright_instance
-                mock_browser = AsyncMock()
-                mock_playwright_instance.chromium.launch = AsyncMock(return_value=mock_browser)
-                mock_context = AsyncMock()
-                mock_page = AsyncMock()
-                mock_browser.new_context = AsyncMock(return_value=mock_context)
-                mock_context.new_page = AsyncMock(return_value=mock_page)
+        agent = AgentLoop(
+            bus=mock_message_bus,
+            provider=mock_provider,
+            workspace=mock_workspace,
+            model="test-model",
+        )
 
-                agent = AgentLoop(
-                    bus=mock_message_bus,
-                    provider=mock_provider,
-                    workspace=mock_workspace,
-                    model="test-model",
-                )
+        browser_tool = agent.tools.get("browser_action")
 
-                browser_tool = agent.tools.get("browser_action")
+        # Create session
+        result1 = await browser_tool.execute(action="new_session", session="test_session")
+        assert "Created new session: test_session" in result1.content
 
-                # Create session
-                result1 = await browser_tool.execute(action="new_session", session="test_session")
-                assert "Created new session: test_session" in result1.content
+        # Use session
+        result2 = await browser_tool.execute(
+            action="navigate",
+            session="test_session",
+            url="https://example.com"
+        )
+        assert "Session: test_session" in result2.content
 
-                # Use session
-                result2 = await browser_tool.execute(
-                    action="navigate",
-                    session="test_session",
-                    url="https://example.com"
-                )
-                assert "Session: test_session" in result2.content
-
-                # Close session
-                result3 = await browser_tool.execute(action="close_session", session="test_session")
-                assert "Closed session: test_session" in result3.content
+        # Close session
+        result3 = await browser_tool.execute(action="close_session", session="test_session")
+        assert "Closed session: test_session" in result3.content
 
     @pytest.mark.asyncio
-    async def test_browser_tool_auto_session_creation(self, mock_workspace, mock_message_bus):
+    async def test_browser_tool_auto_session_creation(self, mock_workspace, mock_message_bus, mock_playwright):
         """Test automatic session creation in browser tool."""
         mock_provider = Mock()
         mock_provider.chat = AsyncMock()
@@ -501,33 +453,21 @@ class TestAgentLoopBrowserIntegration:
         mock_provider.get_default_model = Mock(return_value="test-model")
         mock_provider.supports_vision = Mock(return_value=True)
 
-        with patch("nanobot.agent.tools.browser.PLAYWRIGHT_AVAILABLE", True):
-            with patch("nanobot.agent.tools.browser.async_playwright") as mock_pw:
-                # Setup mock Playwright
-                mock_playwright_instance = AsyncMock()
-                mock_pw.return_value = mock_playwright_instance
-                mock_browser = AsyncMock()
-                mock_playwright_instance.chromium.launch = AsyncMock(return_value=mock_browser)
-                mock_context = AsyncMock()
-                mock_page = AsyncMock()
-                mock_browser.new_context = AsyncMock(return_value=mock_context)
-                mock_context.new_page = AsyncMock(return_value=mock_page)
+        agent = AgentLoop(
+            bus=mock_message_bus,
+            provider=mock_provider,
+            workspace=mock_workspace,
+            model="test-model",
+        )
 
-                agent = AgentLoop(
-                    bus=mock_message_bus,
-                    provider=mock_provider,
-                    workspace=mock_workspace,
-                    model="test-model",
-                )
+        browser_tool = agent.tools.get("browser_action")
 
-                browser_tool = agent.tools.get("browser_action")
+        # Navigate without creating session first
+        result = await browser_tool.execute(
+            action="navigate",
+            url="https://example.com"
+        )
 
-                # Navigate without creating session first
-                result = await browser_tool.execute(
-                    action="navigate",
-                    url="https://example.com"
-                )
-
-                # Should auto-create default session
-                assert "Session: default" in result.content
-                assert "Navigated to https://example.com" in result.content
+        # Should auto-create default session
+        assert "Session: default" in result.content
+        assert "Navigated to https://example.com" in result.content

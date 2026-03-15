@@ -105,12 +105,12 @@ class TestBaseChannel:
         # Should work with numeric input
         assert channel.is_allowed(123456) is True
 
-    def test_handle_message_allowed(self, mock_message_bus):
+    async def test_handle_message_allowed(self, mock_message_bus):
         """Test message handling for allowed users."""
         config = {"allow_from": ["user1"]}
         channel = MockChannel(config, mock_message_bus)
 
-        channel._handle_message(
+        await channel._handle_message(
             sender_id="user1",
             chat_id="chat1",
             content="Hello",
@@ -129,12 +129,12 @@ class TestBaseChannel:
         assert msg.chat_id == "chat1"
         assert msg.content == "Hello"
 
-    def test_handle_message_denied(self, mock_message_bus):
+    async def test_handle_message_denied(self, mock_message_bus):
         """Test message handling for denied users."""
         config = {"allow_from": ["user1"]}
         channel = MockChannel(config, mock_message_bus)
 
-        channel._handle_message(
+        await channel._handle_message(
             sender_id="user2",
             chat_id="chat1",
             content="Hello",
@@ -145,13 +145,13 @@ class TestBaseChannel:
         # Should not publish to bus
         mock_message_bus.publish_inbound.assert_not_called()
 
-    def test_handle_message_with_media(self, mock_message_bus):
+    async def test_handle_message_with_media(self, mock_message_bus):
         """Test message handling with media attachments."""
         config = {"allow_from": ["user1"]}
         channel = MockChannel(config, mock_message_bus)
 
         media_paths = ["/path/to/image.jpg", "/path/to/file.pdf"]
-        channel._handle_message(
+        await channel._handle_message(
             sender_id="user1",
             chat_id="chat1",
             content="Check this out",
@@ -164,13 +164,13 @@ class TestBaseChannel:
 
         assert msg.media == media_paths
 
-    def test_handle_message_with_metadata(self, mock_message_bus):
+    async def test_handle_message_with_metadata(self, mock_message_bus):
         """Test message handling with metadata."""
         config = {"allow_from": ["user1"]}
         channel = MockChannel(config, mock_message_bus)
 
         metadata = {"message_id": "msg123", "timestamp": "2024-01-01"}
-        channel._handle_message(
+        await channel._handle_message(
             sender_id="user1",
             chat_id="chat1",
             content="Hello",
@@ -183,12 +183,12 @@ class TestBaseChannel:
 
         assert msg.metadata == metadata
 
-    def test_handle_message_with_session_key_override(self, mock_message_bus):
+    async def test_handle_message_with_session_key_override(self, mock_message_bus):
         """Test message handling with session key override."""
         config = {"allow_from": ["user1"]}
         channel = MockChannel(config, mock_message_bus)
 
-        channel._handle_message(
+        await channel._handle_message(
             sender_id="user1",
             chat_id="chat1",
             content="Hello",
@@ -202,16 +202,16 @@ class TestBaseChannel:
 
         assert msg.session_key_override == "custom:session"
 
-    def test_transcribe_audio_no_key(self, mock_message_bus):
+    async def test_transcribe_audio_no_key(self, mock_message_bus):
         """Test audio transcription without API key."""
         channel = MockChannel({}, mock_message_bus)
         channel.transcription_api_key = ""
 
-        result = channel.transcribe_audio("/path/to/audio.mp3")
+        result = await channel.transcribe_audio("/path/to/audio.mp3")
 
         assert result == ""
 
-    @patch("nanobot.channels.base.GroqTranscriptionProvider")
+    @patch("nanobot.providers.transcription.GroqTranscriptionProvider")
     def test_transcribe_audio_with_key(self, mock_provider_class, mock_message_bus):
         """Test audio transcription with API key."""
         mock_provider = Mock()
@@ -226,7 +226,7 @@ class TestBaseChannel:
         # For now, just test the setup
         assert channel.transcription_api_key == "test_key"
 
-    @patch("nanobot.channels.base.GroqTranscriptionProvider")
+    @patch("nanobot.providers.transcription.GroqTranscriptionProvider")
     def test_transcribe_audio_failure(self, mock_provider_class, mock_message_bus):
         """Test audio transcription failure handling."""
         mock_provider = Mock()
@@ -260,12 +260,12 @@ class TestBaseChannel:
 
         assert channel.display_name == "Mock Channel"
 
-    def test_handle_message_empty_content(self, mock_message_bus):
+    async def test_handle_message_empty_content(self, mock_message_bus):
         """Test handling message with empty content."""
         config = {"allow_from": ["user1"]}
         channel = MockChannel(config, mock_message_bus)
 
-        channel._handle_message(
+        await channel._handle_message(
             sender_id="user1",
             chat_id="chat1",
             content="",
@@ -278,13 +278,13 @@ class TestBaseChannel:
 
         assert msg.content == ""
 
-    def test_handle_message_unicode_content(self, mock_message_bus):
+    async def test_handle_message_unicode_content(self, mock_message_bus):
         """Test handling message with unicode content."""
         config = {"allow_from": ["user1"]}
         channel = MockChannel(config, mock_message_bus)
 
         unicode_content = "Hello 世界 🌍"
-        channel._handle_message(
+        await channel._handle_message(
             sender_id="user1",
             chat_id="chat1",
             content=unicode_content,
@@ -297,13 +297,13 @@ class TestBaseChannel:
 
         assert msg.content == unicode_content
 
-    def test_handle_message_long_content(self, mock_message_bus):
+    async def test_handle_message_long_content(self, mock_message_bus):
         """Test handling message with very long content."""
         config = {"allow_from": ["user1"]}
         channel = MockChannel(config, mock_message_bus)
 
         long_content = "x" * 10000
-        channel._handle_message(
+        await channel._handle_message(
             sender_id="user1",
             chat_id="chat1",
             content=long_content,
@@ -316,12 +316,12 @@ class TestBaseChannel:
 
         assert msg.content == long_content
 
-    def test_handle_message_with_empty_media_list(self, mock_message_bus):
+    async def test_handle_message_with_empty_media_list(self, mock_message_bus):
         """Test handling message with empty media list."""
         config = {"allow_from": ["user1"]}
         channel = MockChannel(config, mock_message_bus)
 
-        channel._handle_message(
+        await channel._handle_message(
             sender_id="user1",
             chat_id="chat1",
             content="Hello",
@@ -334,12 +334,12 @@ class TestBaseChannel:
 
         assert msg.media == []
 
-    def test_handle_message_with_none_media(self, mock_message_bus):
+    async def test_handle_message_with_none_media(self, mock_message_bus):
         """Test handling message with None media."""
         config = {"allow_from": ["user1"]}
         channel = MockChannel(config, mock_message_bus)
 
-        channel._handle_message(
+        await channel._handle_message(
             sender_id="user1",
             chat_id="chat1",
             content="Hello",
@@ -352,12 +352,12 @@ class TestBaseChannel:
 
         assert msg.media == []
 
-    def test_handle_message_with_none_metadata(self, mock_message_bus):
+    async def test_handle_message_with_none_metadata(self, mock_message_bus):
         """Test handling message with None metadata."""
         config = {"allow_from": ["user1"]}
         channel = MockChannel(config, mock_message_bus)
 
-        channel._handle_message(
+        await channel._handle_message(
             sender_id="user1",
             chat_id="chat1",
             content="Hello",
@@ -436,14 +436,14 @@ class TestBaseChannel:
         channel._running = False
         assert channel.is_running is False
 
-    def test_handle_message_concurrent(self, mock_message_bus):
+    async def test_handle_message_concurrent(self, mock_message_bus):
         """Test handling multiple messages concurrently."""
         config = {"allow_from": ["user1"]}
         channel = MockChannel(config, mock_message_bus)
 
         # Send multiple messages
         for i in range(5):
-            channel._handle_message(
+            await channel._handle_message(
                 sender_id="user1",
                 chat_id="chat1",
                 content=f"Message {i}",
