@@ -2,7 +2,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.formatted_text import ANSI, HTML
 
 from nanobot.cli import commands
 
@@ -57,3 +57,45 @@ def test_init_prompt_session_creates_session():
         _, kwargs = MockSession.call_args
         assert kwargs["multiline"] is False
         assert kwargs["enable_open_in_editor"] is False
+
+
+def test_print_agent_response_uses_console_without_name_error():
+    """Regression test for NameError in _print_agent_response."""
+    mock_console = MagicMock()
+    with patch("nanobot.cli.commands._make_console", return_value=mock_console):
+        commands._print_agent_response("hello", render_markdown=True)
+    assert mock_console.print.call_count == 4
+
+
+class _PromptTeamManager:
+    def has_active_team(self, _sk):
+        return True
+
+    def active_team_id(self, _sk):
+        return "nano-x"
+
+    def list_members(self, _sk):
+        return ["lead"]
+
+    def get_member_snapshot(self, _sk, _name):
+        return None
+
+    def get_board_snapshot(self, _sk):
+        return {
+            "team_id": "nano-x",
+            "status": "active",
+            "members": [{"name": "lead", "status": "active", "task": "msg -> *"}],
+            "tasks": [],
+            "approvals": [],
+            "recent_updates": [],
+        }
+
+
+def test_prompt_message_suppresses_board_once_for_btw():
+    tm = _PromptTeamManager()
+    commands._sync_team_view(tm)
+    commands._TEAM_VIEW.suppress_board_once = True
+    first = commands._prompt_message(tm)
+    second = commands._prompt_message(tm)
+    assert isinstance(first, HTML)
+    assert isinstance(second, ANSI)
