@@ -354,7 +354,18 @@ class TelegramChannel(BaseChannel):
                     "audio": self._app.bot.send_audio,
                 }.get(media_type, self._app.bot.send_document)
                 param = "photo" if media_type == "photo" else media_type if media_type in ("voice", "audio") else "document"
-                with open(media_path, 'rb') as f:
+
+                # Telegram Bot API accepts HTTP(S) URLs directly for media params.
+                if media_path.startswith(("http://", "https://")):
+                    await sender(
+                        chat_id=chat_id,
+                        **{param: media_path},
+                        reply_parameters=reply_params,
+                        **thread_kwargs,
+                    )
+                    continue
+
+                with open(media_path, "rb") as f:
                     await sender(
                         chat_id=chat_id,
                         **{param: f},
