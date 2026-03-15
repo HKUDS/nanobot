@@ -86,6 +86,38 @@ class TestMessageToolSuppressLogic:
         assert result is not None
         assert "Hello" in result.content
 
+    @pytest.mark.asyncio
+    async def test_empty_final_uses_last_tool_result(self, tmp_path: Path) -> None:
+        loop = _make_loop(tmp_path)
+        tool_call = ToolCallRequest(id="call1", name="read_file", arguments={"path": "foo.txt"})
+        calls = iter([
+            LLMResponse(content="", tool_calls=[tool_call]),
+            LLMResponse(content="", tool_calls=[]),
+        ])
+        loop.provider.chat = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.tools.execute = AsyncMock(return_value="file contents")
+
+        msg = InboundMessage(channel="cli", sender_id="user1", chat_id="chat123", content="Read")
+        result = await loop._process_message(msg)
+
+        assert result is not None
+        assert result.content == "file contents"
+
+    @pytest.mark.asyncio
+    async def test_empty_final_without_tool_results_returns_task_completed(
+        self, tmp_path: Path
+    ) -> None:
+        loop = _make_loop(tmp_path)
+        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="", tool_calls=[]))
+        loop.tools.get_definitions = MagicMock(return_value=[])
+
+        msg = InboundMessage(channel="cli", sender_id="user1", chat_id="chat123", content="Hi")
+        result = await loop._process_message(msg)
+
+        assert result is not None
+        assert result.content == "Task completed."
+
     async def test_progress_hides_internal_reasoning(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
         tool_call = ToolCallRequest(id="call1", name="read_file", arguments={"path": "foo.txt"})

@@ -176,6 +176,21 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    @staticmethod
+    def _fallback_from_tool_results(messages: list[dict[str, Any]]) -> str | None:
+        """Use the most recent non-empty tool result when the model ends with no text."""
+        for msg in reversed(messages):
+            if msg.get("role") != "tool":
+                continue
+            content = msg.get("content")
+            if not isinstance(content, str):
+                continue
+            text = content.strip()
+            if not text:
+                continue
+            return text[:1000].rstrip() + ("..." if len(text) > 1000 else "")
+        return None
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -237,7 +252,7 @@ class AgentLoop:
                     messages, clean, reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
                 )
-                final_content = clean
+                final_content = clean or self._fallback_from_tool_results(messages)
                 break
 
         if final_content is None and iteration >= self.max_iterations:
@@ -436,7 +451,7 @@ class AgentLoop:
         )
 
         if final_content is None:
-            final_content = "I've completed processing but have no response to give."
+            final_content = "Task completed."
 
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
