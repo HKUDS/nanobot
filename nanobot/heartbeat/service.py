@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Coroutine
+from typing import TYPE_CHECKING, Callable
 
 from loguru import logger
+
+from nanobot.bus.events import InboundMessage
+from nanobot.bus.queue import MessageBus
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -42,12 +45,11 @@ class HeartbeatService:
     Periodic heartbeat service that wakes the agent to check for tasks.
 
     Phase 1 (decision): reads HEARTBEAT.md and asks the LLM — via a virtual
-    tool call — whether there are active tasks.  This avoids free-text parsing
-    and the unreliable HEARTBEAT_OK token.
+    tool call — whether there are active tasks.
 
-    Phase 2 (execution): only triggered when Phase 1 returns ``run``.  The
-    ``on_execute`` callback runs the task through the full agent loop and
-    returns the result to deliver.
+    Phase 2 (execution): publishes an InboundMessage to the bus with
+    ``_source: "heartbeat"`` metadata. The agent processes it and applies
+    post-run evaluation to decide whether to notify the user.
     """
 
     def __init__(
@@ -55,16 +57,16 @@ class HeartbeatService:
         workspace: Path,
         provider: LLMProvider,
         model: str,
-        on_execute: Callable[[str], Coroutine[Any, Any, str]] | None = None,
-        on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
+        bus: MessageBus,
+        pick_target: Callable[[], tuple[str, str]] | None = None,
         interval_s: int = 30 * 60,
         enabled: bool = True,
     ):
         self.workspace = workspace
         self.provider = provider
         self.model = model
-        self.on_execute = on_execute
-        self.on_notify = on_notify
+        self.bus = bus
+        self.pick_target = pick_target or (lambda: ("cli", "heartbeat"))
         self.interval_s = interval_s
         self.enabled = enabled
         self._running = False
@@ -139,8 +141,6 @@ class HeartbeatService:
 
     async def _tick(self) -> None:
         """Execute a single heartbeat tick."""
-        from nanobot.utils.evaluator import evaluate_response
-
         content = self._read_heartbeat_file()
         if not content:
             logger.debug("Heartbeat: HEARTBEAT.md missing or empty")
@@ -155,28 +155,34 @@ class HeartbeatService:
                 logger.info("Heartbeat: OK (nothing to report)")
                 return
 
-            logger.info("Heartbeat: tasks found, executing...")
-            if self.on_execute:
-                response = await self.on_execute(tasks)
+            channel, chat_id = self.pick_target()
+            logger.info("Heartbeat: tasks found, publishing to bus ({}:{})...", channel, chat_id)
+            msg = InboundMessage(
+                channel=channel,
+                sender_id="heartbeat",
+                chat_id=chat_id,
+                content=tasks,
+                metadata={"_source": "heartbeat", "_task_context": tasks},
+            )
+            await self.bus.publish_inbound(msg)
 
-                if response:
-                    should_notify = await evaluate_response(
-                        response, tasks, self.provider, self.model,
-                    )
-                    if should_notify and self.on_notify:
-                        logger.info("Heartbeat: completed, delivering response")
-                        await self.on_notify(response)
-                    else:
-                        logger.info("Heartbeat: silenced by post-run evaluation")
         except Exception:
             logger.exception("Heartbeat execution failed")
 
-    async def trigger_now(self) -> str | None:
+    async def trigger_now(self) -> None:
         """Manually trigger a heartbeat."""
         content = self._read_heartbeat_file()
         if not content:
-            return None
+            return
         action, tasks = await self._decide(content)
-        if action != "run" or not self.on_execute:
-            return None
-        return await self.on_execute(tasks)
+        if action != "run":
+            return
+        channel, chat_id = self.pick_target()
+        msg = InboundMessage(
+            channel=channel,
+            sender_id="heartbeat",
+            chat_id=chat_id,
+            content=tasks,
+            metadata={"_source": "heartbeat", "_task_context": tasks},
+        )
+        await self.bus.publish_inbound(msg)
