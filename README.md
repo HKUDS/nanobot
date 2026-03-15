@@ -216,7 +216,7 @@ That's it! You have a working AI assistant in 2 minutes.
 
 ## 💬 Chat Apps
 
-Connect nanobot to your favorite chat platform. Want to build your own? See the [Channel Plugin Guide](.docs/CHANNEL_PLUGIN_GUIDE.md).
+Connect nanobot to your favorite chat platform. Want to build your own? See the [Channel Plugin Guide](./docs/CHANNEL_PLUGIN_GUIDE.md).
 
 > Channel plugin support is available in the `main` branch; not yet published to PyPI.
 
