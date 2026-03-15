@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import html
+import ipaddress
 import json
 import os
 import re
+import socket
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
@@ -21,6 +23,33 @@ if TYPE_CHECKING:
 # Shared constants
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
 MAX_REDIRECTS = 5  # Limit redirects to prevent DoS attacks
+
+# SSRF protection: block private/internal network ranges
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("0.0.0.0/8"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("100.64.0.0/10"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+
+
+def _is_private_ip(hostname: str) -> bool:
+    """Check if hostname resolves to a private/loopback/internal IP address."""
+    try:
+        addrs = socket.getaddrinfo(hostname, None)
+        for _family, _, _, _, sockaddr in addrs:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if any(ip in net for net in _BLOCKED_NETWORKS):
+                return True
+        return False
+    except (socket.gaierror, ValueError):
+        return True  # DNS failure → deny (fail-closed)
 
 
 def _strip_tags(text: str) -> str:
@@ -220,15 +249,21 @@ class WebFetchTool(Tool):
         "required": ["url"],
     }
 
-    def __init__(self, max_chars: int = 50000, proxy: str | None = None):
+    def __init__(self, max_chars: int = 50000, proxy: str | None = None, allow_private_ip: bool = False):
         self.max_chars = max_chars
         self.proxy = proxy
+        self.allow_private_ip = allow_private_ip
 
     async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
         max_chars = maxChars or self.max_chars
         is_valid, error_msg = _validate_url(url)
         if not is_valid:
             return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False)
+
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if not self.allow_private_ip and hostname and _is_private_ip(hostname):
+            return json.dumps({"error": f"Access to private/internal network address '{hostname}' is blocked for security reasons.", "url": url}, ensure_ascii=False)
 
         result = await self._fetch_jina(url, max_chars)
         if result is None:

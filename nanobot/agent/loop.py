@@ -64,6 +64,8 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        max_concurrent_subagents: int | None = 5,
+        allow_private_ip: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -76,6 +78,7 @@ class AgentLoop:
         self.context_window_tokens = context_window_tokens
         self.web_search_config = web_search_config or WebSearchConfig()
         self.web_proxy = web_proxy
+        self.allow_private_ip = allow_private_ip
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
@@ -92,6 +95,7 @@ class AgentLoop:
             web_proxy=web_proxy,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            max_concurrent=max_concurrent_subagents,
         )
 
         self._running = False
@@ -126,8 +130,8 @@ class AgentLoop:
             path_append=self.exec_config.path_append,
         ))
         self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
-        self.tools.register(WebFetchTool(proxy=self.web_proxy))
-        self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
+        self.tools.register(WebFetchTool(proxy=self.web_proxy, allow_private_ip=self.allow_private_ip))
+        self.tools.register(MessageTool(send_callback=self.bus.publish_outbound, workspace=self.workspace))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))

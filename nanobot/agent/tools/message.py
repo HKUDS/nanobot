@@ -1,5 +1,6 @@
 """Message tool for sending messages to users."""
 
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool
@@ -15,12 +16,14 @@ class MessageTool(Tool):
         default_channel: str = "",
         default_chat_id: str = "",
         default_message_id: str | None = None,
+        workspace: Path | None = None,
     ):
         self._send_callback = send_callback
         self._default_channel = default_channel
         self._default_chat_id = default_chat_id
         self._default_message_id = default_message_id
         self._sent_in_turn: bool = False
+        self._workspace = workspace.resolve() if workspace else None
 
     def set_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Set the current message context."""
@@ -70,6 +73,25 @@ class MessageTool(Tool):
             "required": ["content"]
         }
 
+    def _filter_media(self, media: list[str]) -> list[str]:
+        """Filter media paths to only allow files within workspace or /tmp."""
+        if not media:
+            return []
+        allowed: list[str] = []
+        tmp_dir = Path("/tmp").resolve()
+        for path_str in media:
+            try:
+                p = Path(path_str).resolve()
+                in_workspace = self._workspace and p == self._workspace or (
+                    self._workspace and self._workspace in p.parents
+                )
+                in_tmp = p == tmp_dir or tmp_dir in p.parents
+                if in_workspace or in_tmp:
+                    allowed.append(path_str)
+            except (ValueError, OSError):
+                continue
+        return allowed
+
     async def execute(
         self,
         content: str,
@@ -88,6 +110,9 @@ class MessageTool(Tool):
 
         if not self._send_callback:
             return "Error: Message sending not configured"
+
+        if media:
+            media = self._filter_media(media)
 
         msg = OutboundMessage(
             channel=channel,

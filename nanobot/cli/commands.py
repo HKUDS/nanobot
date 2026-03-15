@@ -423,7 +423,7 @@ def gateway(
 
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_cron_dir() / "jobs.json"
-    cron = CronService(cron_store_path)
+    cron = CronService(cron_store_path, max_jobs=config.tools.max_cron_jobs)
 
     # Create agent with cron service
     agent = AgentLoop(
@@ -441,6 +441,8 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        max_concurrent_subagents=config.tools.max_concurrent_subagents,
+        allow_private_ip=config.tools.web.allow_private_ip,
     )
 
     # Set cron callback (needs agent)
@@ -611,7 +613,7 @@ def agent(
 
     # Create cron service for tool usage (no callback needed for CLI unless running)
     cron_store_path = get_cron_dir() / "jobs.json"
-    cron = CronService(cron_store_path)
+    cron = CronService(cron_store_path, max_jobs=config.tools.max_cron_jobs)
 
     if logs:
         logger.enable("nanobot")
@@ -632,6 +634,8 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        max_concurrent_subagents=config.tools.max_concurrent_subagents,
+        allow_private_ip=config.tools.web.allow_private_ip,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
