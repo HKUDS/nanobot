@@ -16,6 +16,8 @@ from loguru import logger
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.tools.base import ToolResult
+from nanobot.agent.tools.browser import BrowserActionTool
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
@@ -126,6 +128,16 @@ class AgentLoop:
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
+        
+        # Register browser tool with vision support based on provider capability
+        # This ensures that screenshot images are only sent to models that support vision
+        if self.provider.supports_vision():
+            self.tools.register(BrowserActionTool(enable_vision=True))
+            logger.info("Browser tool registered with vision support (screenshot returns images)")
+        else:
+            self.tools.register(BrowserActionTool(enable_vision=False))
+            logger.info("Browser tool registered without vision support (screenshot returns text only)")
+        
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
@@ -222,8 +234,17 @@ class AgentLoop:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    
+                    # Process the results of multi-modal tools
+                    if result is None:
+                        content = "Tool returned no result"
+                    elif isinstance(result, ToolResult):
+                        content = result.to_message_content()
+                    else:
+                        content = result
+                    
                     messages = self.context.add_tool_result(
-                        messages, tool_call.id, tool_call.name, result
+                        messages, tool_call.id, tool_call.name, content
                     )
             else:
                 clean = self._strip_think(response.content)

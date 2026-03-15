@@ -353,3 +353,31 @@ class LiteLLMProvider(LLMProvider):
     def get_default_model(self) -> str:
         """Get the default model."""
         return self.default_model
+
+    def supports_vision(self) -> bool:
+        """Check if this provider supports vision/image input.
+        
+        Returns True if the current provider (gateway or standard) supports
+        multimodal input, which allows tools to return images that the model
+        can process (e.g., browser screenshots).
+        
+        Returns:
+            True if the provider supports vision, False otherwise.
+        
+        Note:
+            - For gateway providers (OpenRouter, etc.), checks gateway spec
+            - For standard providers, checks the model's provider spec
+            - Returns False if provider spec is not found (safe default)
+            - Used by AgentLoop to conditionally enable vision-dependent tools
+        """
+        # Check gateway first (highest priority)
+        if self._gateway is not None:
+            return self._gateway.supports_vision
+        
+        # For standard providers, check the default model's spec
+        spec = find_by_model(self.default_model)
+        if spec is not None:
+            return spec.supports_vision
+        
+        # Safe default: assume no vision support if spec not found
+        return False

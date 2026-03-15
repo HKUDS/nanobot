@@ -1,7 +1,88 @@
-"""Base class for agent tools."""
+"""Base class for agent tools.
+
+This module provides the abstract base class for all agent tools, including
+support for multimodal tool results (text + images).
+
+Key Components:
+- ToolResult: A dataclass for tool execution results that can include images
+- Tool: Abstract base class that all tools must implement
+
+Example:
+    class MyTool(Tool):
+        name = "my_tool"
+        description = "Does something useful"
+        
+        async def execute(self, **kwargs) -> ToolResult | str:
+            # Return string for backward compatibility
+            return "Result text"
+            
+            # Or return ToolResult for multimodal support
+            # return ToolResult(
+            #     content="Result text",
+            #     images=[{"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}]
+            # )
+"""
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import Any
+
+
+@dataclass
+class ToolResult:
+    """Tool execution result with optional multimodal content.
+    
+    This dataclass represents the result of a tool execution. It supports
+    both plain text results and multimodal results that include images.
+    
+    Attributes:
+        content: The text content of the result. This is always required
+            and will be sent to the LLM as part of the tool response.
+        images: Optional list of image content blocks in OpenAI format.
+            Each image should be a dict with format:
+            {"type": "image_url", "image_url": {"url": "data:image/...;base64,..."}}
+    
+    Example:
+        # Text-only result
+        result = ToolResult(content="File read successfully")
+        
+        # Multimodal result with screenshot
+        result = ToolResult(
+            content="Screenshot captured",
+            images=[{
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{base64_data}"}
+            }]
+        )
+    
+    Note:
+        When images are present, the to_message_content() method returns
+        a list format suitable for LLM multimodal messages. Otherwise,
+        it returns just the text content for backward compatibility.
+    """
+    
+    content: str
+    images: list[dict[str, Any]] | None = None
+    
+    def to_message_content(self) -> str | list[dict[str, Any]]:
+        """Convert the result to LLM message content format.
+        
+        Returns:
+            - If no images: returns the content string directly (backward compatible)
+            - If images present: returns a list of content blocks in OpenAI format
+              [image1, image2, ..., text_block]
+        
+        Note:
+            Images are placed before text in the returned list, following
+            OpenAI's convention for multimodal messages.
+        """
+        if not self.images:
+            return self.content
+        
+        # Build multimodal content: images first, then text
+        content_blocks: list[dict[str, Any]] = list(self.images)
+        content_blocks.append({"type": "text", "text": self.content})
+        return content_blocks
 
 
 class Tool(ABC):
@@ -10,6 +91,33 @@ class Tool(ABC):
 
     Tools are capabilities that the agent can use to interact with
     the environment, such as reading files, executing commands, etc.
+    
+    All tools must implement the following abstract properties and methods:
+    - name: A unique identifier for the tool
+    - description: A human-readable description of what the tool does
+    - parameters: JSON Schema defining the tool's parameters
+    - execute: The async method that performs the tool's action
+    
+    Return Types:
+        The execute() method can return either:
+        - str: A plain text result (backward compatible with all existing tools)
+        - ToolResult: A structured result that can include images for multimodal
+          capable models (e.g., screenshot tools)
+    
+    Example:
+        class EchoTool(Tool):
+            name = "echo"
+            description = "Echo back the input message"
+            parameters = {
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string", "description": "Message to echo"}
+                },
+                "required": ["message"]
+            }
+            
+            async def execute(self, message: str, **kwargs) -> str:
+                return f"Echo: {message}"
     """
 
     _TYPE_MAP = {
@@ -40,15 +148,43 @@ class Tool(ABC):
         pass
 
     @abstractmethod
-    async def execute(self, **kwargs: Any) -> str:
-        """
-        Execute the tool with given parameters.
-
+    async def execute(self, **kwargs: Any) -> ToolResult | str:
+        """Execute the tool with given parameters.
+        
+        This is the main entry point for tool execution. Implementations
+        should perform the tool's action and return the result.
+        
         Args:
-            **kwargs: Tool-specific parameters.
-
+            **kwargs: Tool-specific parameters as defined in the parameters
+                property. These are validated against the JSON Schema before
+                being passed to this method.
+        
         Returns:
-            String result of the tool execution.
+            Either:
+            - str: A plain text result (backward compatible)
+            - ToolResult: A structured result with optional images for
+              multimodal support
+        
+        Raises:
+            Exception: Implementations may raise exceptions, which will
+                be caught by the tool registry and returned as error strings.
+        
+        Example:
+            async def execute(self, path: str, **kwargs) -> str:
+                # Simple text result
+                return f"File {path} read successfully"
+            
+            async def execute(self, **kwargs) -> ToolResult:
+                # Multimodal result with screenshot
+                screenshot_bytes = await capture_screenshot()
+                b64 = base64.b64encode(screenshot_bytes).decode()
+                return ToolResult(
+                    content="Screenshot captured",
+                    images=[{
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{b64}"}
+                    }]
+                )
         """
         pass
 
