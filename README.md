@@ -1461,6 +1461,15 @@ nanobot/
 
 PRs welcome! The codebase is intentionally small and readable. 🤗
 
+### Branching Strategy
+
+| Branch | Purpose |
+|--------|---------|
+| `main` | Stable releases — bug fixes and minor improvements |
+| `nightly` | Experimental features — new features and breaking changes |
+
+**Unsure which branch to target?** See [CONTRIBUTING.md](./CONTRIBUTING.md) for details.
+
 **Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
 
 - [ ] **Multi-modal** — See and hear (images, voice, video)
