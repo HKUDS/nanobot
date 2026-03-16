@@ -9,8 +9,6 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.agent.monitoring import add_llm_call_step, _AGENTSCOPE_AVAILABLE
-
 
 @dataclass
 class ToolCallRequest:
@@ -263,6 +261,9 @@ class LLMProvider(ABC):
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
         )
 
+        # Lazy import to avoid circular imports
+        from nanobot.agent.monitoring import add_llm_call_step, _AGENTSCOPE_AVAILABLE
+        
         start_time = time.time()
         final_model = model or self.get_default_model()
         

@@ -18,6 +18,24 @@ try:
     _AGENTSCOPE_AVAILABLE = True
 except ImportError:
     _AGENTSCOPE_AVAILABLE = False
+    # Define stubs when AgentScope is not available
+    TraceEvent = None
+    ExecutionStep = None
+    StepType = None
+    Status = None
+    ToolCall = None
+    
+    def init_monitor(*args, **kwargs):
+        pass
+    
+    def get_current_trace():
+        return None
+    
+    def set_current_trace(trace):
+        pass
+    
+    def _send_trace(trace):
+        pass
 
 # Current trace context
 _current_trace: ContextVar[Optional[TraceEvent]] = ContextVar('nanobot_trace', default=None)
