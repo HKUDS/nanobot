@@ -31,6 +31,7 @@ dependencies = [
     "rich>=14.0.0,<15.0.0",
     "croniter>=6.0.0,<7.0.0",
     "dingtalk-stream>=0.24.0,<1.0.0",
+    "wecom-aibot-sdk-python>=0.1.5",
     "python-telegram-bot[socks]>=22.6,<23.0",
     "lark-oapi>=1.5.0,<2.0.0",
     "socksio>=1.0.0,<2.0.0",
