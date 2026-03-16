@@ -97,6 +97,7 @@
 - [Linux Service](#-linux-service)
 - [Project Structure](#-project-structure)
 - [Contribute & Roadmap](#-contribute--roadmap)
+- [Contributors](#-contributors)
 - [Star History](#-star-history)
 
 ## ✨ Features
@@ -1386,6 +1387,8 @@ nanobot/
 
 PRs welcome! The codebase is intentionally small and readable. 🤗
 
+- Check out the [CONTRIBUTORS.md](./CONTRIBUTORS.md) to learn more about the project and its contributors.
+
 **Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
 
 - [ ] **Multi-modal** — See and hear (images, voice, video)
@@ -1400,6 +1403,9 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
   <img src="https://contrib.rocks/image?repo=HKUDS/nanobot&max=100&columns=12&updated=20260210" alt="Contributors" />
 </a>
 
+## 👤 Contributors
+
+For more details about the nanobot AI assistant and its capabilities, see [CONTRIBUTORS.md](./CONTRIBUTORS.md).
 
 ## ⭐ Star History
 
