@@ -1,0 +1,31 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Nanobot Agent",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "nanobot",
+      "args": ["agent"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "justMyCode": false
+    },
+    {
+      "name": "Nanobot Gateway",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "nanobot",
+      "args": ["gateway"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "justMyCode": false
+    }
+  ]
+}
