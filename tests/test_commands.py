@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 from nanobot.cli.commands import _make_provider, app
 from nanobot.config.schema import Config
 from nanobot.providers.litellm_provider import LiteLLMProvider
+from nanobot.providers.multi_model_provider import MultiModelProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_model
 
@@ -268,6 +269,40 @@ def test_make_provider_passes_extra_headers_to_custom_provider():
     assert kwargs["base_url"] == "https://example.com/v1"
     assert kwargs["default_headers"]["APP-Code"] == "demo-app"
     assert kwargs["default_headers"]["x-session-affinity"] == "sticky-session"
+
+
+def test_make_provider_builds_multi_model_fallback_chain():
+    from nanobot.cli.commands import _make_provider
+
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "model": "anthropic/claude-opus-4-5",
+                    "temperature": 0.2,
+                    "maxTokens": 2048,
+                }
+            },
+            "multi_model": {
+                "enabled": True,
+                "models": [
+                    "anthropic/claude-opus-4-5",
+                    "openrouter/openai/gpt-5-mini",
+                ],
+            },
+            "providers": {
+                "anthropic": {"apiKey": "anthropic-key"},
+                "openrouter": {"apiKey": "openrouter-key"},
+            },
+        }
+    )
+
+    provider = _make_provider(config)
+
+    assert isinstance(provider, MultiModelProvider)
+    assert provider.get_default_model() == "anthropic/claude-opus-4-5"
+    assert provider.generation.temperature == 0.2
+    assert provider.generation.max_tokens == 2048
 
 
 @pytest.fixture

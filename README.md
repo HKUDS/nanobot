@@ -214,6 +214,19 @@ Add or merge these **two parts** into your config (other options have defaults).
 }
 ```
 
+*Optional: add ordered multi-model fallback for transient provider/model failures:*
+```json
+{
+  "multi_model": {
+    "enabled": true,
+    "models": [
+      "anthropic/claude-opus-4-5",
+      "openrouter/openai/gpt-5-mini"
+    ]
+  }
+}
+```
+
 **3. Chat**
 
 ```bash

@@ -54,6 +54,14 @@ class AgentsConfig(Base):
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
 
 
+class MultiModelConfig(Base):
+    """Ordered model/provider fallback configuration."""
+
+    enabled: bool = False
+    default_model: str = ""
+    models: list[str] = Field(default_factory=list)
+
+
 class ProviderConfig(Base):
     """LLM provider configuration."""
 
@@ -154,6 +162,7 @@ class Config(BaseSettings):
     """Root configuration for nanobot."""
 
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
+    multi_model: MultiModelConfig = Field(default_factory=MultiModelConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
