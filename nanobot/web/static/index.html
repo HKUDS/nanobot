@@ -85,6 +85,9 @@
         <button id="btn-send"
           class="px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-sm font-medium flex-shrink-0"
         >Send</button>
+        <button id="btn-stop"
+          class="hidden px-4 py-3 rounded-xl bg-red-600 hover:bg-red-500 transition-colors text-sm font-medium flex-shrink-0"
+          title="Stop response">Stop</button>
       </div>
     </div>
   </main>
@@ -95,7 +98,7 @@
     // ──────────────────────────────────────────────────────────
     let currentSession = 'web:default';
     let isStreaming = false;
-    let currentController = null;
+    let abortController = null;
 
     const messagesEl = document.getElementById('messages');
     const inputEl = document.getElementById('input');
@@ -104,6 +107,7 @@
     const headerSession = document.getElementById('header-session');
     const statusIndicator = document.getElementById('status-indicator');
     const emptyHint = document.getElementById('empty-hint');
+    const btnStop = document.getElementById('btn-stop');
 
     marked.setOptions({ breaks: true, gfm: true });
 
@@ -158,12 +162,21 @@
       });
     }
 
+    function clearMessages() {
+      Array.from(messagesEl.children).forEach(child => {
+        if (child.id !== 'empty-hint') child.remove();
+      });
+    }
+
+    function setEmptyState(empty) {
+      emptyHint.style.display = empty ? 'block' : 'none';
+    }
+
     function switchSession(key) {
       currentSession = key;
       headerSession.textContent = key;
-      messagesEl.innerHTML = '';
-      emptyHint && messagesEl.appendChild(emptyHint);
-      emptyHint.style.display = 'block';
+      clearMessages();
+      setEmptyState(true);
       loadSessions();
       loadHistory();
     }
@@ -173,14 +186,13 @@
         const res = await fetch(`/api/sessions/${encodeURIComponent(currentSession)}`);
         if (!res.ok) return;
         const data = await res.json();
-        messagesEl.innerHTML = '';
+        clearMessages();
         const msgs = data.messages || [];
         if (msgs.length === 0) {
-          messagesEl.appendChild(emptyHint);
-          emptyHint.style.display = 'block';
+          setEmptyState(true);
           return;
         }
-        emptyHint.style.display = 'none';
+        setEmptyState(false);
         msgs.forEach(m => {
           if (m.role === 'user') appendMessage('user', m.content);
           else if (m.role === 'assistant' && m.content) appendMessage('assistant', m.content);
@@ -200,7 +212,7 @@
     // Messages
     // ──────────────────────────────────────────────────────────
     function appendMessage(role, content, { streaming = false } = {}) {
-      emptyHint.style.display = 'none';
+      setEmptyState(false);
 
       const wrap = document.createElement('div');
       wrap.className = 'flex ' + (role === 'user' ? 'justify-end' : 'justify-start') + ' max-w-4xl mx-auto w-full';
@@ -262,12 +274,14 @@
       const assistantBubble = appendMessage('assistant', '', { streaming: true });
 
       let responseText = '';
+      abortController = new AbortController();
 
       try {
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: text, session_id: currentSession }),
+          signal: abortController.signal,
         });
 
         if (!res.ok) {
@@ -314,7 +328,12 @@
       } catch (err) {
         removeProgressLine();
         assistantBubble.classList.remove('streaming-cursor');
-        assistantBubble.innerHTML = `<span class="text-red-400">Error: ${err.message}</span>`;
+        if (err.name === 'AbortError') {
+          assistantBubble.innerHTML = (responseText ? marked.parse(responseText) : '') +
+            '<p class="text-gray-500 text-sm mt-2 italic">(Stopped)</p>';
+        } else {
+          assistantBubble.innerHTML = `<span class="text-red-400">Error: ${err.message}</span>`;
+        }
         scrollToBottom();
       } finally {
         setStreaming(false);
@@ -325,7 +344,13 @@
     function setStreaming(val) {
       isStreaming = val;
       btnSend.disabled = val;
+      btnSend.classList.toggle('hidden', val);
+      btnStop.classList.toggle('hidden', !val);
       statusIndicator.textContent = val ? 'thinking…' : '';
+    }
+
+    function stopResponse() {
+      if (abortController) abortController.abort();
     }
 
     // ──────────────────────────────────────────────────────────
@@ -344,6 +369,7 @@
       }
     });
     btnSend.addEventListener('click', sendMessage);
+    btnStop.addEventListener('click', stopResponse);
 
     // ──────────────────────────────────────────────────────────
     // Init

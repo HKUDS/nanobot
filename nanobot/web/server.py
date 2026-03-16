@@ -104,10 +104,11 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
                         break
                     yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
             finally:
-                task.cancel()
+                if not task.done():
+                    task.cancel()
                 try:
                     await task
-                except (asyncio.CancelledError, Exception):
+                except asyncio.CancelledError:
                     pass
 
         return StreamingResponse(
