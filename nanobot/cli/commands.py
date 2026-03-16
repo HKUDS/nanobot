@@ -33,7 +33,7 @@ from rich.text import Text
 
 from nanobot import __logo__, __version__
 from nanobot.config.paths import get_workspace_path
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, WebConfig
 from nanobot.utils.helpers import sync_workspace_templates
 
 app = typer.Typer(
@@ -839,15 +839,15 @@ def web(
 
     config = _load_runtime_config(config, workspace)
     _print_deprecated_memory_window_notice(config)
-    port = port if port is not None else config.channels.web.port
+
+    web_cfg = getattr(config.channels, "web", None)
+    base = web_cfg if isinstance(web_cfg, dict) else (web_cfg.model_dump() if web_cfg else {})
+    web_cfg = WebConfig(**{**base, "enabled": True, "host": host, "port": port or base.get("port", 18080)})
+    config.channels.web = web_cfg
+    port = web_cfg.port
 
     console.print(f"{__logo__} Starting nanobot web on {host}:{port}...")
     sync_workspace_templates(config.workspace_path)
-
-    # Force-enable web channel with CLI host/port
-    config.channels.web.enabled = True
-    config.channels.web.host = host
-    config.channels.web.port = port
 
     bus = MessageBus()
     provider = _make_provider(config)
