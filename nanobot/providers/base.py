@@ -192,6 +192,10 @@ class LLMProvider(ABC):
         """
         pass
 
+    async def list_models(self) -> list[tuple[str, str]]:
+        """Return available models when the provider can enumerate them."""
+        return []
+
     @classmethod
     def _is_transient_error(cls, content: str | None) -> bool:
         err = (content or "").lower()

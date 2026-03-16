@@ -26,7 +26,9 @@ from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.config.loader import load_config, save_config
 from nanobot.providers.base import LLMProvider
+from nanobot.runtime import make_provider, resolve_subagent_model
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -54,6 +56,8 @@ class AgentLoop:
         provider: LLMProvider,
         workspace: Path,
         model: str | None = None,
+        subagent_provider: LLMProvider | None = None,
+        subagent_model: str | None = None,
         max_iterations: int = 40,
         context_window_tokens: int = 65_536,
         web_search_config: WebSearchConfig | None = None,
@@ -72,6 +76,7 @@ class AgentLoop:
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
+        self.subagent_model = subagent_model or self.model
         self.max_iterations = max_iterations
         self.context_window_tokens = context_window_tokens
         self.web_search_config = web_search_config or WebSearchConfig()
@@ -84,10 +89,10 @@ class AgentLoop:
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
-            provider=provider,
+            provider=subagent_provider or provider,
             workspace=workspace,
             bus=bus,
-            model=self.model,
+            model=self.subagent_model,
             web_search_config=self.web_search_config,
             web_proxy=web_proxy,
             exec_config=self.exec_config,
@@ -112,6 +117,56 @@ class AgentLoop:
             get_tool_definitions=self.tools.get_definitions,
         )
         self._register_default_tools()
+
+    async def _reload_runtime_from_config(self, config: "Config | None" = None) -> tuple[str, str]:
+        """Reload provider, tools, MCP, and model state from config for future turns."""
+        from nanobot.config.schema import Config
+
+        cfg = config or load_config()
+        main_model = cfg.agents.defaults.model
+        subagent_model = resolve_subagent_model(cfg, main_model)
+        main_provider = make_provider(cfg, model=main_model)
+        subagent_provider = (
+            main_provider
+            if subagent_model == main_model
+            else make_provider(cfg, model=subagent_model)
+        )
+
+        if self._mcp_stack:
+            try:
+                await self._mcp_stack.aclose()
+            except Exception:
+                pass
+        self._mcp_stack = None
+        self._mcp_connected = False
+        self._mcp_connecting = False
+        self._mcp_servers = cfg.tools.mcp_servers
+
+        self.provider = main_provider
+        self.model = main_model
+        self.subagent_model = subagent_model
+        self.web_search_config = cfg.tools.web.search
+        self.web_proxy = cfg.tools.web.proxy or None
+        self.exec_config = cfg.tools.exec
+        self.restrict_to_workspace = cfg.tools.restrict_to_workspace
+        self.channels_config = cfg.channels
+
+        self.subagents.provider = subagent_provider
+        self.subagents.model = subagent_model
+        self.subagents.web_search_config = self.web_search_config
+        self.subagents.web_proxy = self.web_proxy
+        self.subagents.exec_config = self.exec_config
+        self.subagents.restrict_to_workspace = self.restrict_to_workspace
+
+        self.memory_consolidator.provider = main_provider
+        self.memory_consolidator.model = main_model
+        self.memory_consolidator.context_window_tokens = cfg.agents.defaults.context_window_tokens
+
+        self.tools = ToolRegistry()
+        self._register_default_tools()
+
+        logger.info("Reloaded runtime config: main_model={} subagent_model={}", main_model, subagent_model)
+        return main_model, subagent_model
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -388,8 +443,10 @@ class AgentLoop:
         session = self.sessions.get_or_create(key)
 
         # Slash commands
-        cmd = msg.content.strip().lower()
-        if cmd == "/new":
+        raw = msg.content.strip()
+        first_token = raw.split(maxsplit=1)[0].lower() if raw else ""
+        cmd_base = first_token.split("@", 1)[0]
+        if cmd_base == "/new":
             snapshot = session.messages[session.last_consolidated:]
             session.clear()
             self.sessions.save(session)
@@ -400,16 +457,85 @@ class AgentLoop:
 
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
-        if cmd == "/help":
+        if cmd_base == "/help":
             lines = [
                 "🐈 nanobot commands:",
                 "/new — Start a new conversation",
+                "/model — Pick or set main/subagent model",
+                "/reload — Reload config/runtime in-process",
                 "/stop — Stop the current task",
                 "/restart — Restart the bot",
                 "/help — Show available commands",
             ]
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
+            )
+        if cmd_base == "/reload":
+            try:
+                main_model, subagent_model = await self._reload_runtime_from_config()
+            except Exception as exc:
+                return OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content=f"Reload failed: {exc}",
+                )
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content=(
+                    "Reloaded config/runtime successfully.\n"
+                    f"Main model: {main_model}\n"
+                    f"Subagent model: {subagent_model}"
+                ),
+            )
+        if cmd_base == "/model":
+            parts = raw.split(maxsplit=2)
+            if len(parts) > 2 and parts[1].lower() == "subagent":
+                subagent_arg = parts[2].strip()
+                cfg = load_config()
+                if subagent_arg.lower() in {"clear", "default", "main"}:
+                    cfg.agents.defaults.subagent_model = None
+                else:
+                    cfg.agents.defaults.subagent_model = subagent_arg
+                save_config(cfg)
+                _, subagent_model = await self._reload_runtime_from_config(cfg)
+                return OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content=(
+                        "Subagent model updated.\n"
+                        f"Main model: {self.model}\n"
+                        f"Subagent model: {subagent_model}"
+                    ),
+                )
+            model_arg = ""
+            if len(parts) > 2 and parts[1].lower() == "main":
+                model_arg = parts[2].strip()
+            elif len(parts) > 1 and parts[1].lower() != "subagent":
+                model_arg = raw.split(maxsplit=1)[1].strip()
+            if model_arg:
+                cfg = load_config()
+                cfg.agents.defaults.model = model_arg
+                save_config(cfg)
+                main_model, subagent_model = await self._reload_runtime_from_config(cfg)
+                return OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content=(
+                        "Model updated.\n"
+                        f"Main model: {main_model}\n"
+                        f"Subagent model: {subagent_model}"
+                    ),
+                )
+            all_models = sorted(mid for mid, _ in await self.provider.list_models())
+            explicit_subagent = load_config().agents.defaults.subagent_model
+            subagent_display = explicit_subagent or f"{self.model} (follows main)"
+            content = f"Main: {self.model}\nSubagent: {subagent_display}"
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content=content,
+                metadata={
+                    "_model_list": all_models,
+                    "_model_action": "active",
+                    "_model_page": 0,
+                    "_current_model": self.model,
+                } if all_models else {},
             )
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 

@@ -60,3 +60,10 @@ class CustomProvider(LLMProvider):
     def get_default_model(self) -> str:
         return self.default_model
 
+    async def list_models(self) -> list[tuple[str, str]]:
+        """List available models from the endpoint."""
+        try:
+            result = await self._client.models.list()
+            return [(m.id, m.id) for m in result.data]
+        except Exception:
+            return []
