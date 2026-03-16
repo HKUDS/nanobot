@@ -422,7 +422,6 @@ def gateway(
 
     config = _load_runtime_config(config, workspace)
     _print_deprecated_memory_window_notice(config)
-
     port = port if port is not None else config.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
