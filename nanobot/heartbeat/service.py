@@ -37,6 +37,9 @@ _HEARTBEAT_TOOL = [
 ]
 
 
+_UNSET = object()
+
+
 class HeartbeatService:
     """
     Periodic heartbeat service that wakes the agent to check for tasks.
@@ -69,6 +72,7 @@ class HeartbeatService:
         self.enabled = enabled
         self._running = False
         self._task: asyncio.Task | None = None
+        self._user_tz: str | None | type = _UNSET
 
     @property
     def heartbeat_file(self) -> Path:
@@ -87,13 +91,16 @@ class HeartbeatService:
 
         Returns (action, tasks) where action is 'skip' or 'run'.
         """
-        from nanobot.utils.helpers import current_time_str
+        from nanobot.utils.helpers import current_time_str, parse_user_timezone
+
+        if self._user_tz is _UNSET:
+            self._user_tz = parse_user_timezone(self.workspace)
 
         response = await self.provider.chat_with_retry(
             messages=[
                 {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
                 {"role": "user", "content": (
-                    f"Current Time: {current_time_str()}\n\n"
+                    f"Current Time: {current_time_str(self._user_tz)}\n\n"
                     "Review the following HEARTBEAT.md and decide whether there are active tasks.\n\n"
                     f"{content}"
                 )},

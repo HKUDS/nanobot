@@ -34,11 +34,44 @@ def timestamp() -> str:
     return datetime.now().isoformat()
 
 
-def current_time_str() -> str:
+def current_time_str(tz_name: str | None = None) -> str:
     """Human-readable current time with weekday and timezone, e.g. '2026-03-15 22:30 (Saturday) (CST)'."""
+    if tz_name:
+        try:
+            from zoneinfo import ZoneInfo
+
+            now = datetime.now(ZoneInfo(tz_name)).strftime("%Y-%m-%d %H:%M (%A)")
+            return f"{now} ({tz_name})"
+        except (KeyError, Exception):
+            pass  # invalid tz → fallback to system timezone
     now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
     tz = time.strftime("%Z") or "UTC"
     return f"{now} ({tz})"
+
+
+def parse_user_timezone(workspace: Path) -> str | None:
+    """Parse IANA timezone from USER.md Timezone field, return None if not configured."""
+    user_md = workspace / "USER.md"
+    if not user_md.exists():
+        return None
+    try:
+        text = user_md.read_text(encoding="utf-8")
+    except Exception:
+        return None
+    for line in text.splitlines():
+        m = re.match(r'\s*[-*]\s*\*\*Timezone\*\*\s*:\s*(.+)', line)
+        if m:
+            val = m.group(1).strip()
+            if not val or val.startswith("("):
+                return None
+            try:
+                from zoneinfo import ZoneInfo
+
+                ZoneInfo(val)
+                return val
+            except (KeyError, Exception):
+                return None
+    return None
 
 
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
