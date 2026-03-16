@@ -80,6 +80,21 @@ class EmailChannel(BaseChannel):
         "Nov",
         "Dec",
     )
+    _IMAP_RECONNECT_MARKERS = (
+        "disconnected for inactivity",
+        "eof occurred in violation of protocol",
+        "socket error",
+        "connection reset",
+        "broken pipe",
+        "bye",
+    )
+    _IMAP_MISSING_MAILBOX_MARKERS = (
+        "mailbox doesn't exist",
+        "select failed",
+        "no such mailbox",
+        "can't open mailbox",
+        "does not exist",
+    )
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -267,6 +282,21 @@ class EmailChannel(BaseChannel):
         dedupe: bool,
         limit: int,
     ) -> list[dict[str, Any]]:
+        try:
+            return self._fetch_messages_once(search_criteria, mark_seen, dedupe, limit)
+        except Exception as exc:
+            if not self._is_stale_imap_error(exc):
+                raise
+            logger.warning("Email IMAP connection went stale, retrying once: {}", exc)
+            return self._fetch_messages_once(search_criteria, mark_seen, dedupe, limit)
+
+    def _fetch_messages_once(
+        self,
+        search_criteria: tuple[str, ...],
+        mark_seen: bool,
+        dedupe: bool,
+        limit: int,
+    ) -> list[dict[str, Any]]:
         """Fetch messages by arbitrary IMAP search criteria."""
         messages: list[dict[str, Any]] = []
         mailbox = self.config.imap_mailbox or "INBOX"
@@ -278,8 +308,15 @@ class EmailChannel(BaseChannel):
 
         try:
             client.login(self.config.imap_username, self.config.imap_password)
-            status, _ = client.select(mailbox)
+            try:
+                status, _ = client.select(mailbox)
+            except Exception as exc:
+                if self._is_missing_mailbox_error(exc):
+                    logger.warning("Email mailbox unavailable, skipping poll for {}: {}", mailbox, exc)
+                    return messages
+                raise
             if status != "OK":
+                logger.warning("Email mailbox select returned {}, skipping poll for {}", status, mailbox)
                 return messages
 
             status, data = client.search(None, *search_criteria)
@@ -357,6 +394,16 @@ class EmailChannel(BaseChannel):
                 pass
 
         return messages
+
+    @classmethod
+    def _is_stale_imap_error(cls, exc: Exception) -> bool:
+        message = str(exc).lower()
+        return any(marker in message for marker in cls._IMAP_RECONNECT_MARKERS)
+
+    @classmethod
+    def _is_missing_mailbox_error(cls, exc: Exception) -> bool:
+        message = str(exc).lower()
+        return any(marker in message for marker in cls._IMAP_MISSING_MAILBOX_MARKERS)
 
     @classmethod
     def _format_imap_date(cls, value: date) -> str:
