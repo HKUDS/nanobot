@@ -99,6 +99,7 @@ class TestBrowserManager:
         manager._sessions["test"] = BrowserSession(id="test", context=Mock(), page=Mock())
 
         import time
+
         before = time.time()
         manager.update_session_activity("test")
         after = time.time()
@@ -222,6 +223,7 @@ class TestBrowserManager:
 
         # Mark one as old
         import time
+
         old_time = time.time() - 2
         manager._session_last_used["session1"] = old_time
 
@@ -296,9 +298,20 @@ class TestBrowserActionTool:
         actions = tool.parameters["properties"]["action"]["enum"]
 
         expected_actions = [
-            "launch", "new_session", "close_session", "list_sessions",
-            "navigate", "click", "type", "check", "screenshot",
-            "evaluate", "console", "network", "wait", "close"
+            "launch",
+            "new_session",
+            "close_session",
+            "list_sessions",
+            "navigate",
+            "click",
+            "type",
+            "check",
+            "screenshot",
+            "evaluate",
+            "console",
+            "network",
+            "wait",
+            "close",
         ]
         assert actions == expected_actions
 
@@ -382,9 +395,7 @@ class TestBrowserActionTool:
         await tool.execute(action="new_session", session="test_session")
 
         result = await tool.execute(
-            action="navigate",
-            session="test_session",
-            url="https://example.com"
+            action="navigate", session="test_session", url="https://example.com"
         )
 
         assert isinstance(result, ToolResult)
@@ -409,9 +420,7 @@ class TestBrowserActionTool:
         await tool.execute(action="new_session", session="test_session")
 
         result = await tool.execute(
-            action="click",
-            session="test_session",
-            selector="#submit-button"
+            action="click", session="test_session", selector="#submit-button"
         )
 
         assert isinstance(result, ToolResult)
@@ -424,10 +433,7 @@ class TestBrowserActionTool:
         await tool.execute(action="new_session", session="test_session")
 
         result = await tool.execute(
-            action="type",
-            session="test_session",
-            selector="#input-field",
-            text="Hello, World!"
+            action="type", session="test_session", selector="#input-field", text="Hello, World!"
         )
 
         assert isinstance(result, ToolResult)
@@ -439,11 +445,7 @@ class TestBrowserActionTool:
         tool = BrowserActionTool()
         await tool.execute(action="new_session", session="test_session")
 
-        result = await tool.execute(
-            action="type",
-            session="test_session",
-            selector="#input-field"
-        )
+        result = await tool.execute(action="type", session="test_session", selector="#input-field")
 
         assert isinstance(result, ToolResult)
         assert "Error: text required" in result.content
@@ -455,10 +457,7 @@ class TestBrowserActionTool:
         await tool.execute(action="new_session", session="test_session")
 
         result = await tool.execute(
-            action="check",
-            session="test_session",
-            selector="#checkbox",
-            checked=True
+            action="check", session="test_session", selector="#checkbox", checked=True
         )
 
         assert isinstance(result, ToolResult)
@@ -499,9 +498,7 @@ class TestBrowserActionTool:
         await tool.execute(action="new_session", session="test_session")
 
         result = await tool.execute(
-            action="evaluate",
-            session="test_session",
-            script="document.title"
+            action="evaluate", session="test_session", script="document.title"
         )
 
         assert isinstance(result, ToolResult)
@@ -536,10 +533,7 @@ class TestBrowserActionTool:
         await tool.execute(action="new_session", session="test_session")
 
         result = await tool.execute(
-            action="wait",
-            session="test_session",
-            selector="#element",
-            timeout=5000
+            action="wait", session="test_session", selector="#element", timeout=5000
         )
 
         assert isinstance(result, ToolResult)
@@ -571,10 +565,7 @@ class TestBrowserActionTool:
         tool = BrowserActionTool()
 
         # Navigate without creating session first
-        result = await tool.execute(
-            action="navigate",
-            url="https://example.com"
-        )
+        result = await tool.execute(action="navigate", url="https://example.com")
 
         assert isinstance(result, ToolResult)
         assert "Session: default" in result.content
@@ -586,9 +577,7 @@ class TestBrowserActionTool:
         tool = BrowserActionTool()
 
         result = await tool.execute(
-            action="navigate",
-            session="nonexistent",
-            url="https://example.com"
+            action="navigate", session="nonexistent", url="https://example.com"
         )
 
         assert isinstance(result, ToolResult)
@@ -621,6 +610,7 @@ class TestBrowserActionTool:
         await tool.execute(action="new_session", session="test_session")
 
         import time
+
         before = time.time()
         await tool.execute(action="navigate", session="test_session", url="https://example.com")
         after = time.time()
@@ -637,16 +627,12 @@ class TestBrowserActionTool:
 
         # Navigate in session1
         result1 = await tool.execute(
-            action="navigate",
-            session="session1",
-            url="https://example1.com"
+            action="navigate", session="session1", url="https://example1.com"
         )
 
         # Navigate in session2
         result2 = await tool.execute(
-            action="navigate",
-            session="session2",
-            url="https://example2.com"
+            action="navigate", session="session2", url="https://example2.com"
         )
 
         assert "Session: session1" in result1.content
@@ -676,10 +662,12 @@ class TestBrowserActionTool:
 
         result = ToolResult(
             content="Screenshot captured",
-            images=[{
-                "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{sample_image_b64}"}
-            }]
+            images=[
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{sample_image_b64}"},
+                }
+            ],
         )
 
         content = result.to_message_content()
@@ -735,6 +723,7 @@ class TestBrowserActionTool:
 
         # Wait for timeout
         import time
+
         time.sleep(1.1)
 
         # Create new session to trigger cleanup

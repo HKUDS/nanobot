@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+
 # Fixtures for common test objects
 @pytest.fixture
 def mock_workspace(tmp_path: Path) -> Path:
@@ -70,26 +71,26 @@ def mock_playwright():
             # Mock async_playwright() to return an object with start() method
             mock_playwright_context_manager = AsyncMock()
             mock_pw.return_value = mock_playwright_context_manager
-            
+
             # Mock playwright instance (returned by start())
             mock_playwright_instance = AsyncMock()
             mock_playwright_context_manager.start = AsyncMock(return_value=mock_playwright_instance)
             mock_playwright_instance.stop = AsyncMock()
-            
+
             # Mock browser
             mock_browser = AsyncMock()
             mock_browser.close = AsyncMock()
             mock_playwright_instance.chromium = Mock()
             mock_playwright_instance.chromium.launch = AsyncMock(return_value=mock_browser)
-            
+
             # Mock context and page
             mock_context = AsyncMock()
             mock_context.close = AsyncMock()
             mock_browser.new_context = AsyncMock(return_value=mock_context)
-            
+
             mock_page = AsyncMock()
             mock_context.new_page = AsyncMock(return_value=mock_page)
-            
+
             # Mock page methods
             mock_page.goto = AsyncMock()
             mock_page.title = AsyncMock(return_value="Test Page")
@@ -97,13 +98,15 @@ def mock_playwright():
             mock_page.fill = AsyncMock()
             mock_page.set_checked = AsyncMock()
             # Return valid PNG image data for screenshot
-            mock_page.screenshot = AsyncMock(return_value=base64.b64decode(
-                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
-            ))
+            mock_page.screenshot = AsyncMock(
+                return_value=base64.b64decode(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+                )
+            )
             mock_page.evaluate = AsyncMock(return_value="result")
             mock_page.wait_for_selector = AsyncMock()
             mock_page.on = Mock(return_value=None)
-            
+
             yield {
                 "playwright": mock_playwright_instance,
                 "browser": mock_browser,
@@ -124,7 +127,7 @@ def event_loop():
 def mock_inbound_message():
     """Create a mock inbound message."""
     from nanobot.bus.events import InboundMessage
-    
+
     return InboundMessage(
         channel="test",
         sender_id="test_user",
@@ -139,7 +142,7 @@ def mock_inbound_message():
 def mock_outbound_message():
     """Create a mock outbound message."""
     from nanobot.bus.events import OutboundMessage
-    
+
     return OutboundMessage(
         channel="test",
         chat_id="test_chat",
@@ -152,7 +155,7 @@ def mock_outbound_message():
 def mock_session():
     """Create a mock session."""
     from nanobot.session.manager import Session
-    
+
     return Session(key="test:chat")
 
 
@@ -160,7 +163,7 @@ def mock_session():
 def mock_session_manager(mock_workspace):
     """Create a mock session manager."""
     from nanobot.session.manager import SessionManager
-    
+
     return SessionManager(mock_workspace)
 
 
@@ -168,8 +171,10 @@ def mock_session_manager(mock_workspace):
 @pytest.fixture
 async def async_mock_function():
     """Create an async mock function."""
+
     async def mock_func(*args, **kwargs):
         return "mocked_result"
+
     return mock_func
 
 
@@ -177,21 +182,25 @@ async def async_mock_function():
 @pytest.fixture
 def create_test_file(mock_workspace):
     """Helper to create test files."""
+
     def _create(path: str, content: str = "test content"):
         file_path = mock_workspace / path
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content)
         return file_path
+
     return _create
 
 
 @pytest.fixture
 def create_test_dir(mock_workspace):
     """Helper to create test directories."""
+
     def _create(path: str):
         dir_path = mock_workspace / path
         dir_path.mkdir(parents=True, exist_ok=True)
         return dir_path
+
     return _create
 
 
@@ -249,7 +258,7 @@ def mock_whatsapp_config():
 def mock_tool_registry():
     """Create a mock tool registry."""
     from nanobot.agent.tools.registry import ToolRegistry
-    
+
     registry = ToolRegistry()
     return registry
 
@@ -258,7 +267,7 @@ def mock_tool_registry():
 def mock_tool_result():
     """Create a mock tool result."""
     from nanobot.agent.tools.base import ToolResult
-    
+
     return ToolResult(
         content="Tool executed successfully",
         images=None,
@@ -269,13 +278,12 @@ def mock_tool_result():
 def mock_multimodal_tool_result(sample_image_b64):
     """Create a mock multimodal tool result with image."""
     from nanobot.agent.tools.base import ToolResult
-    
+
     return ToolResult(
         content="Screenshot captured",
-        images=[{
-            "type": "image_url",
-            "image_url": {"url": f"data:image/png;base64,{sample_image_b64}"}
-        }],
+        images=[
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{sample_image_b64}"}}
+        ],
     )
 
 
@@ -284,7 +292,7 @@ def mock_multimodal_tool_result(sample_image_b64):
 def mock_provider_spec():
     """Create a mock provider spec."""
     from nanobot.providers.registry import ProviderSpec
-    
+
     return ProviderSpec(
         name="test_provider",
         keywords=("test",),
@@ -299,7 +307,7 @@ def mock_provider_spec():
 def mock_llm_response():
     """Create a mock LLM response."""
     from nanobot.providers.base import LLMResponse, ToolCallRequest
-    
+
     return LLMResponse(
         content="Test response",
         tool_calls=[
@@ -376,7 +384,7 @@ def mock_logger():
 def mock_datetime():
     """Create a mock datetime."""
     from datetime import datetime
-    
+
     with patch("nanobot.session.manager.datetime") as mock_dt:
         mock_dt.now = Mock(return_value=datetime(2024, 1, 1, 12, 0, 0))
         mock_dt.fromisoformat = Mock(return_value=datetime(2024, 1, 1, 12, 0, 0))
@@ -418,10 +426,10 @@ def sample_multimodal_messages(sample_image_b64):
             "content": [
                 {
                     "type": "image_url",
-                    "image_url": {"url": f"data:image/png;base64,{sample_image_b64}"}
+                    "image_url": {"url": f"data:image/png;base64,{sample_image_b64}"},
                 },
-                {"type": "text", "text": "What do you see?"}
-            ]
+                {"type": "text", "text": "What do you see?"},
+            ],
         },
     ]
 
@@ -475,7 +483,7 @@ def mock_cron_service():
 def mock_memory_store(mock_workspace):
     """Create a mock memory store."""
     from nanobot.agent.memory import MemoryStore
-    
+
     return MemoryStore(mock_workspace)
 
 
@@ -484,7 +492,7 @@ def mock_memory_store(mock_workspace):
 def mock_skills_loader(mock_workspace):
     """Create a mock skills loader."""
     from nanobot.agent.skills import SkillsLoader
-    
+
     return SkillsLoader(mock_workspace)
 
 
@@ -493,7 +501,7 @@ def mock_skills_loader(mock_workspace):
 def mock_context_builder(mock_workspace):
     """Create a mock context builder."""
     from nanobot.agent.context import ContextBuilder
-    
+
     return ContextBuilder(mock_workspace)
 
 
@@ -502,7 +510,7 @@ def mock_context_builder(mock_workspace):
 def mock_agent_loop(mock_workspace, mock_llm_provider, mock_message_bus):
     """Create a mock agent loop."""
     from nanobot.agent.loop import AgentLoop
-    
+
     return AgentLoop(
         bus=mock_message_bus,
         provider=mock_llm_provider,
@@ -516,7 +524,7 @@ def mock_agent_loop(mock_workspace, mock_llm_provider, mock_message_bus):
 def mock_subagent_manager(mock_workspace, mock_llm_provider, mock_message_bus):
     """Create a mock subagent manager."""
     from nanobot.agent.subagent import SubagentManager
-    
+
     return SubagentManager(
         provider=mock_llm_provider,
         workspace=mock_workspace,
@@ -530,7 +538,7 @@ def mock_subagent_manager(mock_workspace, mock_llm_provider, mock_message_bus):
 def mock_memory_consolidator(mock_workspace, mock_llm_provider, mock_session_manager):
     """Create a mock memory consolidator."""
     from nanobot.agent.memory import MemoryConsolidator
-    
+
     return MemoryConsolidator(
         workspace=mock_workspace,
         provider=mock_llm_provider,
