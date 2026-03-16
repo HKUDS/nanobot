@@ -121,9 +121,13 @@ if [[ -n "$CURRENT_IMAGE" && "$ROLLBACK" != "true" ]]; then
     log "Saved previous image for rollback: $CURRENT_IMAGE"
 fi
 
-# Pull and deploy
-log "Pulling image..."
-docker pull "$IMAGE"
+# Pull image (skip if already available locally)
+if docker image inspect "$IMAGE" > /dev/null 2>&1; then
+    log "Image already available locally — skipping pull"
+else
+    log "Pulling image..."
+    docker pull "$IMAGE"
+fi
 
 log "Starting services..."
 cd "$COMPOSE_DIR"

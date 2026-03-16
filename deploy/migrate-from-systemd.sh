@@ -5,14 +5,13 @@
 #   1. Stops the systemd user service
 #   2. Deploys nanobot via Docker Compose (production)
 #   3. Verifies health
-#   4. Disables the systemd service (keeps unit file as fallback)
+#   4. Disables the systemd service (no fallback)
 #
 # Usage:
 #   bash deploy/migrate-from-systemd.sh --image ghcr.io/cgajagon/nanobot:latest
 #
 # To revert:
 #   docker compose -p nanobot-prod -f deploy/production/docker-compose.yml down
-#   systemctl --user start nanobot-gateway
 
 set -euo pipefail
 
@@ -59,22 +58,19 @@ sleep 3
 STATUS=$(curl -sf http://127.0.0.1:18790/health 2>/dev/null | grep -o '"ok"' || echo "")
 if [[ -z "$STATUS" ]]; then
     log "ERROR: Docker deployment health check failed!"
-    log "Reverting to systemd..."
     docker compose -p nanobot-prod -f "$SCRIPT_DIR/production/docker-compose.yml" down 2>/dev/null || true
-    systemctl --user start nanobot-gateway
-    log "Reverted to systemd service"
+    log "Manual intervention required. Docker deployment failed."
     exit 1
 fi
 
-# Step 4: Disable systemd service (don't remove — keep as fallback)
-log "Disabling systemd service (unit file kept as fallback)..."
+# Step 4: Disable systemd service (no fallback)
+log "Disabling systemd service..."
 systemctl --user disable nanobot-gateway 2>/dev/null || true
 
 log ""
 log "Migration complete!"
 log "  nanobot is now running via Docker (container: nanobot-prod)"
-log "  systemd service disabled (unit file preserved at ~/.config/systemd/user/)"
+log "  systemd service disabled"
 log ""
-log "To revert to systemd if needed:"
+log "To revert:"
 log "  docker compose -p nanobot-prod -f deploy/production/docker-compose.yml down"
-log "  systemctl --user enable --now nanobot-gateway"
