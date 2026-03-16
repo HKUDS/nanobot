@@ -389,12 +389,49 @@ def bitable_add_daily_report(
     return bitable_add_record_smart(app_token, DAILY_TABLE_ID, fields)
 
 
+def _build_filter(*parts: Optional[str]) -> Optional[str]:
+    """合并多个过滤条件为 AND 表达式，过滤空值"""
+    valid = [p for p in parts if p and p.strip()]
+    if not valid:
+        return None
+    return "&&".join(f"({p})" for p in valid)
+
+
 def bitable_query_daily_reports(
     page_size: int = 20,
+    filter_expr: Optional[str] = None,
+    page_token: str = "",
     app_token: str = BITABLE_APP_TOKEN,
+    table_id: Optional[str] = None,
+    date: Optional[str] = None,
+    user_id: Optional[str] = None,
+    project: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """查询日报记录"""
-    return bitable_list_records(app_token, DAILY_TABLE_ID, page_size=page_size)
+    """查询日报记录
+
+    Args:
+        page_size: 每页条数
+        filter_expr: 过滤表达式，如 'CurrentValue.[项目]="xxx"'
+        page_token: 分页标记
+        app_token: 多维表格 app_token
+        table_id: 日报表 ID，默认 DAILY_TABLE_ID
+        date: 按日期筛选，如 "2026-03-13"
+        user_id: 按姓名（执行人 open_id）筛选
+        project: 按项目名筛选
+    """
+    tid = table_id or DAILY_TABLE_ID
+    parts = []
+    if date:
+        parts.append(f'CurrentValue.[日期] = "{date}"')
+    if user_id:
+        parts.append(f'CurrentValue.[姓名].contains("{user_id}")')
+    if project:
+        parts.append(f'CurrentValue.[项目] = "{project}"')
+    if filter_expr:
+        parts.append(filter_expr)
+    final_filter = _build_filter(*parts) if parts else None
+    return bitable_list_records(app_token, tid, page_size=page_size,
+                                filter_expr=final_filter, page_token=page_token)
 
 
 def bitable_add_task(
@@ -437,11 +474,53 @@ def bitable_add_task(
 
 def bitable_query_tasks(
     page_size: int = 20,
+    filter_expr: Optional[str] = None,
+    page_token: str = "",
+    table_id: str = TASK_TABLE_ID,
+    app_token: str = BITABLE_APP_TOKEN,
+    status: Optional[str] = None,
+    executor_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """查询任务记录
+
+    Args:
+        page_size: 每页条数
+        filter_expr: 过滤表达式，如 'CurrentValue.[状态]="进行中"'
+        page_token: 分页标记
+        table_id: 任务表 ID
+        app_token: 多维表格 app_token
+        status: 按状态筛选，如 "进行中"、"待处理"、"完成"
+        executor_id: 按执行人 open_id 筛选
+    """
+    parts = []
+    if status:
+        parts.append(f'CurrentValue.[状态] = "{status}"')
+    if executor_id:
+        parts.append(f'CurrentValue.[执行人].contains("{executor_id}")')
+    if filter_expr:
+        parts.append(filter_expr)
+    final_filter = _build_filter(*parts) if parts else None
+    return bitable_list_records(app_token, table_id, page_size=page_size,
+                                filter_expr=final_filter, page_token=page_token)
+
+
+def bitable_complete_task(
+    record_id: str,
     table_id: str = TASK_TABLE_ID,
     app_token: str = BITABLE_APP_TOKEN,
 ) -> Dict[str, Any]:
-    """查询任务记录"""
-    return bitable_list_records(app_token, table_id, page_size=page_size)
+    """将任务标记为完成（更新状态为「完成」）"""
+    return bitable_update_record_smart(app_token, table_id, record_id, {"状态": "完成"})
+
+
+def bitable_list_projects(
+    page_size: int = 50,
+    app_token: str = BITABLE_APP_TOKEN,
+    table_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """查询项目列表"""
+    tid = table_id or PROJECT_TABLE_ID
+    return bitable_list_records(app_token, tid, page_size=page_size)
 
 
 # ============================================================
@@ -516,7 +595,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--hours", type=float, required=True)
     
     p = sub.add_parser("daily-query", help="查询日报")
-    p.add_argument("--limit", type=int, default=10)
+    p.add_argument("--limit", type=int, default=20)
+    p.add_argument("--filter", default="", help="过滤表达式")
+    p.add_argument("--date", default="", help="按日期筛选，如 2026-03-13")
+    p.add_argument("--user-id", default="", help="按姓名 open_id 筛选")
+    p.add_argument("--project", default="", help="按项目名筛选")
+    p.add_argument("--page-token", default="")
+    p.add_argument("--app-token", default=BITABLE_APP_TOKEN)
+    p.add_argument("--table-id", default="", help="日报表 ID，默认 DAILY_TABLE_ID")
     
     p = sub.add_parser("task-add", help="录入任务")
     p.add_argument("--name", required=True)
@@ -529,8 +615,23 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--table", default=TASK_TABLE_ID)
     
     p = sub.add_parser("task-query", help="查询任务")
-    p.add_argument("--limit", type=int, default=10)
+    p.add_argument("--limit", type=int, default=20)
+    p.add_argument("--filter", default="", help="过滤表达式")
+    p.add_argument("--status", default="", help="按状态筛选：待处理/进行中/完成")
+    p.add_argument("--executor", default="", help="按执行人 open_id 筛选")
+    p.add_argument("--page-token", default="")
     p.add_argument("--table", default=TASK_TABLE_ID)
+    p.add_argument("--app-token", default=BITABLE_APP_TOKEN)
+
+    p = sub.add_parser("task-complete", help="将任务标记为完成")
+    p.add_argument("--record-id", required=True)
+    p.add_argument("--table", default=TASK_TABLE_ID)
+    p.add_argument("--app-token", default=BITABLE_APP_TOKEN)
+
+    p = sub.add_parser("projects", help="查询项目列表")
+    p.add_argument("--limit", type=int, default=50)
+    p.add_argument("--app-token", default=BITABLE_APP_TOKEN)
+    p.add_argument("--table-id", default="", help="项目表 ID，默认 PROJECT_TABLE_ID")
     
     return parser
 
@@ -569,13 +670,24 @@ def _run_cli(args: argparse.Namespace) -> None:
         _pp(bitable_add_daily_report(args.user_id, args.date, args.project,
                                      args.content, args.hours))
     elif act == "daily-query":
-        _pp(bitable_query_daily_reports(args.limit))
+        _pp(bitable_query_daily_reports(args.limit,
+            filter_expr=args.filter or None, page_token=args.page_token or "",
+            app_token=args.app_token, table_id=args.table_id or None,
+            date=args.date or None, user_id=args.user_id or None,
+            project=args.project or None))
     elif act == "task-add":
         _pp(bitable_add_task(args.name, args.project, args.executor,
                              args.status, args.deadline, args.hours, args.description,
                              args.table))
     elif act == "task-query":
-        _pp(bitable_query_tasks(args.limit, args.table))
+        _pp(bitable_query_tasks(args.limit,
+            filter_expr=args.filter or None, page_token=args.page_token or "",
+            table_id=args.table, app_token=args.app_token,
+            status=args.status or None, executor_id=args.executor or None))
+    elif act == "task-complete":
+        _pp(bitable_complete_task(args.record_id, args.table, args.app_token))
+    elif act == "projects":
+        _pp(bitable_list_projects(args.limit, args.app_token, args.table_id or None))
 
 
 def main() -> int:

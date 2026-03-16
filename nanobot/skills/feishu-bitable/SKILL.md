@@ -9,150 +9,102 @@ metadata:
 
 # 飞书多维表格 (Bitable)
 
-支持飞书多维表格 API，支持数据表的 CRUD 操作和字段定义查询、智能字段格式转换、便捷业务函数、批量操作。
+飞书多维表格 API，支持数据表 CRUD、字段定义查询、智能字段格式转换、日报/任务便捷函数、批量操作。
 
-## 功能特点
+## 使用流程
 
-### 1. 智能字段转换
-自动处理日期、用户、多选等字段格式，无需手动转换毫秒时间戳。
-
-### 2. 错误提示优化
-API 错误码映射为可读提示，快速定位问题。
-
-### 3. 便捷函数
-- `daily-add` - 录入日报
-- `task-add` - 录入任务（完整功能）
-
-### 4. 批量操作
-- `batch-add` - 批量创建记录
-- `batch-update` - 批量更新记录
-- `batch-delete` - 批量删除记录
-
----
+1. 根据下方 API 函数说明确认所需操作
+2. 通过 `exec` 工具调用脚本执行
 
 ## API 函数
 
-### 基础函数
+### bitable_list_tables
 
-| 函数 | 说明 |
-|------|------|
-| `bitable_list_tables` | 获取数据表列表 |
-| `bitable_get_fields` | 获取字段定义 |
-| `bitable_list_records` | 查询记录（支持 filter 表达式） |
-| `bitable_add_record` | 创建记录 |
-| `bitable_add_record_smart` | 创建记录（智能转换格式） |
-| `bitable_update_record` | 更新记录 |
-| `bitable_update_record_smart` | 更新记录（智能转换格式） |
-| `bitable_delete_record` | 删除记录 |
-| `bitable_batch_add_records` | 批量创建记录（飞书批量 API，单次最多 500 条） |
-| `bitable_batch_update_records` | 批量更新记录（单次最多 500 条） |
-| `bitable_batch_delete_records` | 批量删除记录（单次最多 500 条） |
+获取数据表列表。
 
-### 便捷函数
-
-| 函数 | 说明 |
-|------|------|
-| `bitable_add_daily_report` | 录入日报 |
-| `bitable_query_daily_reports` | 查询日报 |
-| `bitable_add_task` | 录入任务 |
-| `bitable_query_tasks` | 查询任务 |
-
----
-
-## 使用示例
-
-### 智能创建记录
-
-```bash
-# 自动转换日期和用户字段格式
-python3 scripts/feishu_bitable.py add-smart \
-  --app-token JXdtbkkchaSXmksx6eFc2Eatn45 \
-  --table-id tblH6xn2dp6E1UtD \
-  --fields '{"任务名称":"测试任务","执行人":"ou_xxx","计划截止时间":"2026-03-14","状态":["待处理"]}'
+```
+python3 scripts/feishu_bitable.py tables --app-token bascnXXX
 ```
 
-### 录入日报
+### bitable_get_fields
 
-```bash
-python3 scripts/feishu_bitable.py daily-add \
-  --user-id ou_617ce34ae1db1f2b7eb2aa04f55aca11 \
-  --date 2026-03-13 \
-  --project hiperone_bot 开发 \
-  --content "完成功能开发" \
-  --hours 8
+获取字段定义（创建/更新前建议先调用以确认字段名）。
+
+```
+python3 scripts/feishu_bitable.py fields --app-token bascnXXX --table-id tblXXX
 ```
 
-### 录入任务
+### bitable_list_records
 
-```bash
-python3 scripts/feishu_bitable.py task-add \
-  --name "明天休息下" \
-  --project recXXX \
-  --executor ou_617ce34ae1db1f2b7eb2aa04f55aca11 \
-  --status 待处理 \
-  --deadline 7 \
-  --hours 0 \
-  --description "个人休息日"
+查询记录，支持 filter 表达式。
+
+```
+python3 scripts/feishu_bitable.py list --app-token bascnXXX --table-id tblXXX --limit 200
+python3 scripts/feishu_bitable.py list --app-token bascnXXX --table-id tblXXX --filter 'CurrentValue.[项目]="xxx"'
 ```
 
-### 智能更新记录
+### bitable_add_record / bitable_add_record_smart
 
-```bash
-python3 scripts/feishu_bitable.py update-smart \
-  --app-token JXdtbkkchaSXmksx6eFc2Eatn45 \
-  --table-id tblH6xn2dp6E1UtD \
-  --record-id recXXX \
-  --fields '{"状态":"完成","实际完成时间":"2026-03-13"}'
+创建记录。`add` 需按飞书 API 格式传字段；`add-smart` 自动转换日期、用户、多选等格式。
+
+```
+python3 scripts/feishu_bitable.py add --app-token bascnXXX --table-id tblXXX --fields '{"字段名":"值"}'
+python3 scripts/feishu_bitable.py add-smart --app-token bascnXXX --table-id tblXXX --fields '{"任务名称":"测试","执行人":"ou_xxx","计划截止时间":"2026-03-14","状态":["待处理"]}'
 ```
 
-### 批量创建记录
+### bitable_update_record / bitable_update_record_smart
 
-```bash
-# 普通批量
-python3 scripts/feishu_bitable.py batch-add \
-  --app-token JXdtbkkchaSXmksx6eFc2Eatn45 \
-  --table-id tblH6xn2dp6E1UtD \
-  --records '[{"任务名称":"任务 1","状态":["待处理"]},{"任务名称":"任务 2","状态":["待处理"]}]'
+更新记录。`update-smart` 自动转换字段格式。
 
-# 带智能转换的批量
-python3 scripts/feishu_bitable.py batch-add \
-  --app-token JXdtbkkchaSXmksx6eFc2Eatn45 \
-  --table-id tblH6xn2dp6E1UtD \
-  --records '[{"任务名称":"任务","执行人":"ou_xxx","计划截止时间":"2026-03-20"}]' \
-  --smart
+```
+python3 scripts/feishu_bitable.py update --app-token bascnXXX --table-id tblXXX --record-id recXXX --fields '{"状态":"完成"}'
+python3 scripts/feishu_bitable.py update-smart --app-token bascnXXX --table-id tblXXX --record-id recXXX --fields '{"状态":"完成","实际完成时间":"2026-03-13"}'
 ```
 
-### 批量更新记录
+### bitable_delete_record
 
-```bash
-python3 scripts/feishu_bitable.py batch-update \
-  --app-token JXdtbkkchaSXmksx6eFc2Eatn45 \
-  --table-id tblH6xn2dp6E1UtD \
-  --records '[{"record_id":"recXXX","fields":{"状态":"完成"}},{"record_id":"recYYY","fields":{"状态":"完成"}}]'
+删除记录。
+
+```
+python3 scripts/feishu_bitable.py delete --app-token bascnXXX --table-id tblXXX --record-id recXXX
 ```
 
-### 批量删除记录
+### bitable_batch_add_records / batch_update / batch_delete
 
-```bash
-python3 scripts/feishu_bitable.py batch-delete \
-  --app-token JXdtbkkchaSXmksx6eFc2Eatn45 \
-  --table-id tblH6xn2dp6E1UtD \
-  --record-ids '["recXXX","recYYY"]'
+批量操作（单次最多 500 条）。`batch-add` 支持 `--smart` 启用智能转换。
+
+```
+python3 scripts/feishu_bitable.py batch-add --app-token bascnXXX --table-id tblXXX --records '[{"任务名称":"A"},{"任务名称":"B"}]'
+python3 scripts/feishu_bitable.py batch-add --app-token bascnXXX --table-id tblXXX --records '[{"任务名称":"A","执行人":"ou_xxx"}]' --smart
+python3 scripts/feishu_bitable.py batch-update --app-token bascnXXX --table-id tblXXX --records '[{"record_id":"recXXX","fields":{"状态":"完成"}}]'
+python3 scripts/feishu_bitable.py batch-delete --app-token bascnXXX --table-id tblXXX --record-ids '["recXXX","recYYY"]'
 ```
 
-### 带过滤条件查询
+### bitable_add_daily_report / bitable_query_daily_reports
 
-```bash
-python3 scripts/feishu_bitable.py list \
-  --app-token JXdtbkkchaSXmksx6eFc2Eatn45 \
-  --table-id tblYWOnDxGsVSfDN \
-  --filter 'CurrentValue.[项目]="华谊问数问知"' \
-  --limit 10
+录入日报、查询日报。脚本内预置 `BITABLE_APP_TOKEN`、`DAILY_TABLE_ID`，可修改脚本或传参覆盖。
+
+```
+python3 scripts/feishu_bitable.py daily-add --user-id ou_xxx --date 2026-03-13 --project "项目名" --content "完成开发" --hours 8
+python3 scripts/feishu_bitable.py daily-query --limit 200
+python3 scripts/feishu_bitable.py daily-query --limit 500 --filter 'CurrentValue.[项目]="xxx"'
+python3 scripts/feishu_bitable.py daily-query --limit 200 --page-token xxx --app-token bascnXXX --table-id tblXXX
 ```
 
----
+### bitable_add_task / bitable_query_tasks
 
-## 字段格式自动转换
+录入任务、查询任务。`--project` 为项目 record_id，`--executor` 为执行人 open_id。
+
+```
+python3 scripts/feishu_bitable.py task-add --name "任务名" --project recXXX --executor ou_xxx --status 待处理 --deadline 7
+python3 scripts/feishu_bitable.py task-query --limit 200
+python3 scripts/feishu_bitable.py task-query --limit 500 --filter 'CurrentValue.[状态]="进行中"'
+python3 scripts/feishu_bitable.py task-query --limit 200 --page-token xxx --table tblXXX --app-token bascnXXX
+```
+
+## 智能字段转换
+
+`add-smart`、`update-smart`、`batch-add --smart` 会自动转换以下格式。`add_record_smart` / `update_record_smart` 会缓存字段定义，避免重复 API 调用。日期使用 UTC+8 时区。
 
 | 字段类型 | 输入格式 | 自动转换为 |
 |---------|---------|-----------|
@@ -162,9 +114,7 @@ python3 scripts/feishu_bitable.py list \
 | MultiSelect | `"选项"` | `["选项"]` |
 | Number | `"8"` | `8` |
 
----
-
-## 错误码提示
+## 常见错误
 
 | 错误码 | 提示 |
 |--------|------|
@@ -173,51 +123,19 @@ python3 scripts/feishu_bitable.py list \
 | 1254066 | 用户字段格式错误，请提供有效的 open_id 或 union_id |
 | 1254063 | 单选/多选字段值错误，请检查选项是否存在 |
 
----
-
 ## 预置常量
 
-| 常量 | 值 | 说明 |
-|------|------|------|
-| BITABLE_APP_TOKEN | JXdtbkkchaSXmksx6eFc2Eatn45 | 多维表格 app_token |
-| DAILY_TABLE_ID | tblYWOnDxGsVSfDN | 日报表 |
-| TASK_TABLE_ID | tblH6xn2dp6E1UtD | 任务表 |
-| PROJECT_TABLE_ID | tblihZwJnOg84PUQ | 项目表 |
+脚本内可配置 `BITABLE_APP_TOKEN`、`DAILY_TABLE_ID`、`TASK_TABLE_ID`、`PROJECT_TABLE_ID`。日报/任务便捷函数使用这些默认值，其他命令需显式传 `--app-token`、`--table-id`。
 
----
+## 所需权限
 
-## 字段缓存
+- `bitable:app` — 读写多维表格
+- `bitable:app:readonly` — 只读多维表格
 
-`bitable_add_record_smart` 和 `bitable_update_record_smart` 会自动缓存字段定义，避免重复 API 调用。日期转换统一使用 UTC+8 (Asia/Shanghai) 时区。
+## 凭据
 
-```python
-# 首次调用会获取字段定义并缓存
-bitable_add_record_smart(app_token, table_id, fields)
+自动读取 `~/.hiperone/config.json` 或环境变量 `NANOBOT_CHANNELS__FEISHU__APP_ID` / `NANOBOT_CHANNELS__FEISHU__APP_SECRET`，无需手动配置。
 
-# 后续调用使用缓存，性能更好
-bitable_add_record_smart(app_token, table_id, fields2)
-```
+## 测试
 
----
-
-## CLI 命令
-
-| 命令 | 说明 |
-|------|------|
-| `tables` | 列出数据表 |
-| `fields` | 获取字段定义 |
-| `list` | 查询记录（支持 `--filter`） |
-| `add` | 创建记录 |
-| `add-smart` | 创建记录（智能转换格式） |
-| `update` | 更新记录 |
-| `update-smart` | 更新记录（智能转换格式） |
-| `delete` | 删除记录 |
-| `batch-add` | 批量创建记录（支持 `--smart`） |
-| `batch-update` | 批量更新记录 |
-| `batch-delete` | 批量删除记录 |
-| `daily-add` | 录入日报 |
-| `daily-query` | 查询日报 |
-| `task-add` | 录入任务 |
-| `task-query` | 查询任务 |
-
----
+运行 `python test_feishu_bitable.py` 可测试本技能全部 14 个函数。
