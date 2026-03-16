@@ -1467,6 +1467,7 @@ This repository includes a built-in `msteams` channel MVP for Microsoft Teams di
 - Tenant-aware OAuth token acquisition
 - Conversation reference persistence for replies
 - Public HTTPS webhook support through a tunnel or reverse proxy
+- Inbound Teams quote-reply normalization for model-friendly context
 
 ### Not yet included
 
@@ -1505,6 +1506,8 @@ This repository includes a built-in `msteams` channel MVP for Microsoft Teams di
 - `replyInThread: true` replies to the triggering Teams activity when a stored `activity_id` is available.
 - `replyInThread: false` posts replies as normal conversation messages.
 - If `replyInThread` is enabled but no `activity_id` is stored, Nanobot falls back to a normal conversation message.
+- Inbound Teams quote replies are normalized into a compact text form such as `User is replying to: ...` and `User reply: ...` so the model can understand which earlier message the user is responding to.
+- Quote normalization is triggered both by normal Teams reply metadata and by observed wrapper text patterns such as `FWDIOC-BOT ...`, which improves compatibility with relays or clients that omit `replyToId`.
 - `mentionOnlyResponse` controls what Nanobot receives when a user sends only a bot mention such as `<at>Nanobot</at>`.
 - Set `mentionOnlyResponse` to an empty string to ignore mention-only messages.
 - `validateInboundAuth: true` enables inbound Bot Framework bearer-token validation.

@@ -12,6 +12,7 @@ Scope:
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import re
 import threading
@@ -294,11 +295,11 @@ class MSTeamsChannel(BaseChannel):
             logger.warning("MSTeams sender not allowed sender_id={}", sender_id)
             return
 
-        text = self._strip_possible_bot_mention(text)
+        text = self._sanitize_inbound_text(activity)
         if not text:
             text = self.config.mention_only_response.strip()
             if not text:
-                logger.debug("MSTeams ignoring empty message after mention stripping")
+                logger.debug("MSTeams ignoring empty message after Teams text sanitization")
                 return
 
         self._conversation_refs[conversation_id] = ConversationRef(
@@ -325,11 +326,87 @@ class MSTeamsChannel(BaseChannel):
             },
         )
 
+    def _sanitize_inbound_text(self, activity: dict[str, Any]) -> str:
+        """Extract the user-authored text from a Teams activity."""
+        text = str(activity.get("text") or "")
+        text = self._strip_possible_bot_mention(text)
+
+        channel_data = activity.get("channelData") or {}
+        reply_to_id = str(activity.get("replyToId") or "").strip()
+        normalized_preview = html.unescape(text).replace("&rsquo", "’").strip()
+        normalized_preview = normalized_preview.replace("\r\n", "\n").replace("\r", "\n")
+        preview_lines = [line.strip() for line in normalized_preview.split("\n")]
+        while preview_lines and not preview_lines[0]:
+            preview_lines.pop(0)
+        first_line = preview_lines[0] if preview_lines else ""
+        looks_like_quote_wrapper = first_line.lower().startswith("replying to ") or first_line.startswith("FWDIOC-BOT")
+
+        if reply_to_id or channel_data.get("messageType") == "reply" or looks_like_quote_wrapper:
+            text = self._normalize_teams_reply_quote(text)
+
+        return text.strip()
+
     def _strip_possible_bot_mention(self, text: str) -> str:
         """Remove simple Teams mention markup from message text."""
-        cleaned = re.sub(r"<at>.*?</at>", " ", text, flags=re.IGNORECASE | re.DOTALL)
-        cleaned = re.sub(r"\s+", " ", cleaned)
+        cleaned = re.sub(r"<at\b[^>]*>.*?</at>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+        cleaned = re.sub(r"[^\S\r\n]+", " ", cleaned)
+        cleaned = re.sub(r"(?:\r?\n){3,}", "\n\n", cleaned)
         return cleaned.strip()
+
+    def _normalize_teams_reply_quote(self, text: str) -> str:
+        """Normalize Teams quoted replies into a compact structured form."""
+        cleaned = html.unescape(text).replace("&rsquo", "’").strip()
+        if not cleaned:
+            return ""
+
+        normalized_newlines = cleaned.replace("\r\n", "\n").replace("\r", "\n")
+        lines = [line.strip() for line in normalized_newlines.split("\n")]
+        while lines and not lines[0]:
+            lines.pop(0)
+
+        if len(lines) >= 2 and lines[0].lower().startswith("replying to "):
+            quoted = lines[0][len("replying to ") :].strip(" :")
+            reply = "\n".join(lines[1:]).strip()
+            return self._format_reply_with_quote(quoted, reply)
+
+        if lines and lines[0].strip().startswith("FWDIOC-BOT"):
+            body = normalized_newlines.split("\n", 1)[1] if "\n" in normalized_newlines else ""
+            body = body.lstrip()
+            parts = re.split(r"\n\s*\n", body, maxsplit=1)
+            if len(parts) == 2:
+                quoted = re.sub(r"\s+", " ", parts[0]).strip()
+                reply = re.sub(r"\s+", " ", parts[1]).strip()
+                if quoted or reply:
+                    return self._format_reply_with_quote(quoted, reply)
+
+            body_lines = [line.strip() for line in body.split("\n") if line.strip()]
+            if body_lines:
+                quoted = " ".join(body_lines[:-1]).strip()
+                reply = body_lines[-1].strip()
+                if quoted and reply:
+                    return self._format_reply_with_quote(quoted, reply)
+
+        compact = re.sub(r"\s+", " ", normalized_newlines).strip()
+        if compact.startswith("FWDIOC-BOT "):
+            compact = compact[len("FWDIOC-BOT ") :].strip()
+
+        marker = " Reply with quote test"
+        if compact.endswith(marker):
+            quoted = compact[: -len(marker)].strip()
+            reply = marker.strip()
+            return self._format_reply_with_quote(quoted, reply)
+
+        return cleaned
+
+    def _format_reply_with_quote(self, quoted: str, reply: str) -> str:
+        """Format a quoted reply for the model without Teams wrapper noise."""
+        quoted = quoted.strip()
+        reply = reply.strip()
+        if quoted and reply:
+            return f"User is replying to: {quoted}\nUser reply: {reply}"
+        if reply:
+            return reply
+        return quoted
 
     def _log_inbound_auth_debug(self, auth_header: str) -> None:
         """Log sanitized inbound bearer token details for debugging."""

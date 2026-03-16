@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -179,6 +180,51 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    @staticmethod
+    def _debug_content_preview(content: Any, limit: int = 240) -> str:
+        """Return a compact preview of message content for debug logging."""
+        if isinstance(content, str):
+            text = content.replace("\n", "\\n")
+        else:
+            try:
+                text = json.dumps(content, ensure_ascii=False)
+            except Exception:
+                text = repr(content)
+        return text[:limit] + ("…" if len(text) > limit else "")
+
+    @staticmethod
+    def _debug_content_hash(content: Any) -> str:
+        """Return a stable short hash for message content."""
+        if isinstance(content, str):
+            raw = content.encode("utf-8", errors="replace")
+        else:
+            try:
+                raw = json.dumps(content, ensure_ascii=False, sort_keys=True).encode("utf-8", errors="replace")
+            except Exception:
+                raw = repr(content).encode("utf-8", errors="replace")
+        return hashlib.sha256(raw).hexdigest()[:16]
+
+    def _log_prompt_debug(self, stage: str, messages: list[dict]) -> None:
+        """Log the exact message roles/content shape being sent to the provider."""
+        if not getattr(getattr(self, "channels_config", None), "prompt_debug", False):
+            return
+        try:
+            logger.info("Prompt debug stage={} message_count={}", stage, len(messages))
+            for idx, msg in enumerate(messages):
+                content = msg.get("content")
+                logger.info(
+                    "Prompt debug stage={} idx={} role={} content_type={} content_len={} content_hash={} preview={}",
+                    stage,
+                    idx,
+                    msg.get("role"),
+                    type(content).__name__,
+                    len(content) if isinstance(content, (str, list)) else -1,
+                    self._debug_content_hash(content),
+                    self._debug_content_preview(content),
+                )
+        except Exception:
+            logger.exception("Prompt debug logging failed at stage {}", stage)
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -195,6 +241,7 @@ class AgentLoop:
 
             tool_defs = self.tools.get_definitions()
 
+            self._log_prompt_debug(f"pre_provider_iter_{iteration}", messages)
             response = await self.provider.chat_with_retry(
                 messages=messages,
                 tools=tool_defs,
@@ -364,6 +411,7 @@ class AgentLoop:
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
+            self._log_prompt_debug("system_initial_messages", messages)
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
@@ -434,6 +482,7 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
+        self._log_prompt_debug("initial_messages", initial_messages)
         final_content, _, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
         )
@@ -458,9 +507,19 @@ class AgentLoop:
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
-        for m in messages[skip:]:
+        for idx, m in enumerate(messages[skip:], start=skip):
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
+            if getattr(getattr(self, "channels_config", None), "prompt_debug", False):
+                logger.info(
+                    "Save turn debug idx={} role={} content_type={} content_len={} content_hash={} preview={}",
+                    idx,
+                    role,
+                    type(content).__name__,
+                    len(content) if isinstance(content, (str, list)) else -1,
+                    self._debug_content_hash(content),
+                    self._debug_content_preview(content),
+                )
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
             if role == "tool" and isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:

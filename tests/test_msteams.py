@@ -239,6 +239,174 @@ def test_strip_possible_bot_mention_removes_generic_at_tags(tmp_path, monkeypatc
     assert ch._strip_possible_bot_mention("hi <at>Some Bot</at> there") == "hi there"
 
 
+def test_sanitize_inbound_text_keeps_normal_inline_message(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
+
+    bus = DummyBus()
+    ch = MSTeamsChannel(
+        {
+            "enabled": True,
+            "appId": "app-id",
+            "appPassword": "secret",
+            "tenantId": "tenant-id",
+            "allowFrom": ["*"],
+        },
+        bus,
+    )
+
+    activity = {
+        "text": "<at>Nanobot</at> normal inline message",
+        "channelData": {},
+    }
+
+    assert ch._sanitize_inbound_text(activity) == "normal inline message"
+
+
+def test_sanitize_inbound_text_normalizes_fwdioc_wrapper_without_reply_metadata(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
+
+    bus = DummyBus()
+    ch = MSTeamsChannel(
+        {
+            "enabled": True,
+            "appId": "app-id",
+            "appPassword": "secret",
+            "tenantId": "tenant-id",
+            "allowFrom": ["*"],
+        },
+        bus,
+    )
+
+    activity = {
+        "text": "FWDIOC-BOT \r\nQuoted prior message\r\n\r\nThis is a reply with quote test",
+        "channelData": {},
+    }
+
+    assert ch._sanitize_inbound_text(activity) == (
+        "User is replying to: Quoted prior message\n"
+        "User reply: This is a reply with quote test"
+    )
+
+
+def test_sanitize_inbound_text_structures_reply_quote_prefix(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
+
+    bus = DummyBus()
+    ch = MSTeamsChannel(
+        {
+            "enabled": True,
+            "appId": "app-id",
+            "appPassword": "secret",
+            "tenantId": "tenant-id",
+            "allowFrom": ["*"],
+        },
+        bus,
+    )
+
+    activity = {
+        "text": "Replying to Bob Smith\nactual reply text",
+        "replyToId": "parent-activity",
+        "channelData": {"messageType": "reply"},
+    }
+
+    assert ch._sanitize_inbound_text(activity) == "User is replying to: Bob Smith\nUser reply: actual reply text"
+
+
+def test_sanitize_inbound_text_structures_live_fwdioc_quote_shape(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
+
+    bus = DummyBus()
+    ch = MSTeamsChannel(
+        {
+            "enabled": True,
+            "appId": "app-id",
+            "appPassword": "secret",
+            "tenantId": "tenant-id",
+            "allowFrom": ["*"],
+        },
+        bus,
+    )
+
+    activity = {
+        "text": "FWDIOC-BOT Got it. I’ll watch for the exact text reply with quote test and then inspect that turn specifically. Reply with quote test",
+        "replyToId": "parent-activity",
+        "channelData": {"messageType": "reply"},
+    }
+
+    assert ch._sanitize_inbound_text(activity) == (
+        "User is replying to: Got it. I’ll watch for the exact text reply with quote test and then inspect that turn specifically.\n"
+        "User reply: Reply with quote test"
+    )
+
+
+def test_sanitize_inbound_text_structures_multiline_fwdioc_quote_shape(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
+
+    bus = DummyBus()
+    ch = MSTeamsChannel(
+        {
+            "enabled": True,
+            "appId": "app-id",
+            "appPassword": "secret",
+            "tenantId": "tenant-id",
+            "allowFrom": ["*"],
+        },
+        bus,
+    )
+
+    activity = {
+        "text": (
+            "FWDIOC-BOT\r\n"
+            "Understood — then the restart already happened, and the new Teams quote normalization should now be live. "
+            "Next best step: • send one more real reply-with-quote message in Teams • I&rsquo…\r\n"
+            "\r\n"
+            "This is a reply with quote"
+        ),
+        "replyToId": "parent-activity",
+        "channelData": {"messageType": "reply"},
+    }
+
+    assert ch._sanitize_inbound_text(activity) == (
+        "User is replying to: Understood — then the restart already happened, and the new Teams quote normalization should now be live. "
+        "Next best step: • send one more real reply-with-quote message in Teams • I’…\n"
+        "User reply: This is a reply with quote"
+    )
+
+
+def test_sanitize_inbound_text_structures_exact_live_crlf_fwdioc_shape(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
+
+    bus = DummyBus()
+    ch = MSTeamsChannel(
+        {
+            "enabled": True,
+            "appId": "app-id",
+            "appPassword": "secret",
+            "tenantId": "tenant-id",
+            "allowFrom": ["*"],
+        },
+        bus,
+    )
+
+    activity = {
+        "text": (
+            "FWDIOC-BOT \r\n"
+            "Please send one real reply-with-quote message in Teams. That single test should be enough now: "
+            "• I’ll check the new MSTeams sanitized inbound text ... log • and compare it to the prompt…\r\n"
+            "\r\n"
+            "This is a reply with quote test"
+        ),
+        "replyToId": "parent-activity",
+        "channelData": {"messageType": "reply"},
+    }
+
+    assert ch._sanitize_inbound_text(activity) == (
+        "User is replying to: Please send one real reply-with-quote message in Teams. That single test should be enough now: "
+        "• I’ll check the new MSTeams sanitized inbound text ... log • and compare it to the prompt…\n"
+        "User reply: This is a reply with quote test"
+    )
+
+
 @pytest.mark.asyncio
 async def test_get_access_token_uses_configured_tenant(tmp_path, monkeypatch):
     monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)

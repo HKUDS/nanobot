@@ -25,6 +25,7 @@ class ChannelsConfig(Base):
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
+    prompt_debug: bool = False  # log assembled prompt/message payload previews before provider calls
 
 
 class AgentDefaults(Base):
