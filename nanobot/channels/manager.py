@@ -22,11 +22,13 @@ class ChannelManager:
     - Route outbound messages
     """
 
-    def __init__(self, config: Config, bus: MessageBus):
+    def __init__(self, config: Config, bus: MessageBus,session_manager: "SessionManager | None" = None,cron_service: Any = None):
         self.config = config
         self.bus = bus
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
+        self.session_manager = session_manager
+        self.cron_service = cron_service
 
         self._init_channels()
 
@@ -55,15 +57,15 @@ class ChannelManager:
             except Exception as e:
                 logger.warning("{} channel not available: {}", name, e)
 
-        self._validate_allow_from()
+        # self._validate_allow_from()
 
-    def _validate_allow_from(self) -> None:
-        for name, ch in self.channels.items():
-            if getattr(ch.config, "allow_from", None) == []:
-                raise SystemExit(
-                    f'Error: "{name}" has empty allowFrom (denies all). '
-                    f'Set ["*"] to allow everyone, or add specific user IDs.'
-                )
+    # def _validate_allow_from(self) -> None:
+        # for name, ch in self.channels.items():
+        #     if getattr(ch.config, "allow_from", None) == []:
+        #         raise SystemExit(
+        #             f'Error: "{name}" has empty allowFrom (denies all). '
+        #             f'Set ["*"] to allow everyone, or add specific user IDs.'
+        #         )
 
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""

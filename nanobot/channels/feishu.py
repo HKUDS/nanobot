@@ -142,7 +142,8 @@ def _extract_element_content(element: dict) -> list[str]:
 
     elif tag == "img":
         alt = element.get("alt", {})
-        parts.append(alt.get("content", "[image]") if isinstance(alt, dict) else "[image]")
+        alt_text = alt.get("content", "") if isinstance(alt, dict) else ""
+        parts.append(alt_text or "[icon]")
 
     elif tag == "note":
         for ne in element.get("elements", []):
@@ -275,6 +276,7 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._user_name_cache: dict[str, str] = {}
 
     @staticmethod
     def _register_optional_event(builder: Any, method_name: str, handler: Any) -> Any:
@@ -456,14 +458,21 @@ class FeishuChannel(BaseChannel):
             "rows": [{f"c{i}": r[i] if i < len(r) else "" for i in range(len(headers))} for r in rows],
         }
 
+    _MAX_CARD_TABLES = 4
+
     def _build_card_elements(self, content: str) -> list[dict]:
         """Split content into div/markdown + table elements for Feishu card."""
-        elements, last_end = [], 0
+        elements, last_end, table_count = [], 0, 0
         for m in self._TABLE_RE.finditer(content):
             before = content[last_end:m.start()]
             if before.strip():
                 elements.extend(self._split_headings(before))
-            elements.append(self._parse_md_table(m.group(1)) or {"tag": "markdown", "content": m.group(1)})
+            parsed = self._parse_md_table(m.group(1)) if table_count < self._MAX_CARD_TABLES else None
+            if parsed:
+                table_count += 1
+                elements.append(parsed)
+            else:
+                elements.append({"tag": "markdown", "content": m.group(1)})
             last_end = m.end()
         remaining = content[last_end:]
         if remaining.strip():
@@ -1032,12 +1041,83 @@ class FeishuChannel(BaseChannel):
             chat_type = message.chat_type
             msg_type = message.message_type
 
+            loop = asyncio.get_running_loop()
+            sender_name = await loop.run_in_executor(
+                None, self._get_user_name_sync, sender_id,
+            ) if sender_id != "unknown" else ""
+            
             if chat_type == "group" and not self._is_group_message_for_bot(message):
                 logger.debug("Feishu: skipping group message (not mentioned)")
                 return
 
             # Add reaction
             await self._add_reaction(message_id, self.config.react_emoji)
+
+            # Build mention key-to-name map (e.g. "@_user_1" -> "@张三")
+            mention_map: dict[str, str] = {}
+            if message.mentions:
+                for m in message.mentions:
+                    if m.key and m.name:
+                        mention_map[m.key] = f"@{m.name}"
+
+            # Fetch quoted message content when replying/quoting
+            quote_text = ""
+            quote_media: list[str] = []
+            if message.parent_id:
+                loop = asyncio.get_running_loop()
+                parent_data = await loop.run_in_executor(
+                    None, self._get_message_sync, message.parent_id
+                )
+                if parent_data:
+                    p_type = parent_data["msg_type"]
+                    p_content_str = parent_data["content"]
+
+                    # Build mention map for the parent message
+                    parent_mention_map: dict[str, str] = {}
+                    for m in parent_data.get("mentions", []):
+                        if m.key and m.name:
+                            parent_mention_map[m.key] = f"@{m.name}"
+
+                    try:
+                        p_json = json.loads(p_content_str)
+                    except (json.JSONDecodeError, TypeError):
+                        p_json = {}
+
+                    if p_type == "image":
+                        fp, _ = await self._download_and_save_media(
+                            "image", p_json, message.parent_id
+                        )
+                        if fp:
+                            quote_media.append(fp)
+                        quote_text = "> [quoted image]\n"
+                    elif p_type == "sticker":
+                        quote_text = "> [quoted sticker/emoji]\n"
+                    elif p_type == "post":
+                        text, img_keys = _extract_post_content(p_json)
+                        for img_key in img_keys:
+                            fp, _ = await self._download_and_save_media(
+                                "image", {"image_key": img_key}, message.parent_id
+                            )
+                            if fp:
+                                quote_media.append(fp)
+                        raw = text or ""
+                        if raw:
+                            quoted_lines = "\n".join(
+                                f"> {line}" for line in raw.splitlines()
+                            )
+                            quote_text = quoted_lines + "\n"
+                    else:
+                        raw = self._extract_message_text(p_type, p_content_str)
+                        if raw:
+                            quoted_lines = "\n".join(
+                                f"> {line}" for line in raw.splitlines()
+                            )
+                            quote_text = quoted_lines + "\n"
+
+                    # Replace mention placeholders in quoted text
+                    if parent_mention_map and quote_text:
+                        for key, display in parent_mention_map.items():
+                            quote_text = quote_text.replace(key, display)
 
             # Parse content
             content_parts = []
@@ -1102,6 +1182,17 @@ class FeishuChannel(BaseChannel):
 
             content = "\n".join(content_parts) if content_parts else ""
 
+            # Replace mention placeholders with display names
+            if mention_map:
+                for key, display in mention_map.items():
+                    content = content.replace(key, display)
+
+            # Prepend quoted message and merge quoted media
+            if quote_text:
+                content = quote_text + content
+            if quote_media:
+                media_paths = quote_media + media_paths
+
             if not content and not media_paths:
                 return
 
@@ -1116,6 +1207,7 @@ class FeishuChannel(BaseChannel):
                     "message_id": message_id,
                     "chat_type": chat_type,
                     "msg_type": msg_type,
+                    "sender_name": sender_name,
                     "parent_id": parent_id,
                     "root_id": root_id,
                 }

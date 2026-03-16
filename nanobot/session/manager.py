@@ -53,6 +53,8 @@ class Session:
             if m.get("role") == "user":
                 sliced = sliced[i:]
                 break
+        else:
+            sliced = []
 
         out: list[dict[str, Any]] = []
         for m in sliced:
@@ -62,6 +64,17 @@ class Session:
                     entry[k] = m[k]
             out.append(entry)
         return out
+
+    def clone(self) -> "Session":
+        """Return a shallow copy with an independent messages list."""
+        return Session(
+            key=self.key,
+            messages=list(self.messages),
+            created_at=self.created_at,
+            updated_at=self.updated_at,
+            metadata=dict(self.metadata),
+            last_consolidated=self.last_consolidated,
+        )
 
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
@@ -89,7 +102,7 @@ class SessionManager:
         return self.sessions_dir / f"{safe_key}.jsonl"
 
     def _get_legacy_session_path(self, key: str) -> Path:
-        """Legacy global session path (~/.nanobot/sessions/)."""
+        """Legacy global session path (~/.hiperone/sessions/)."""
         safe_key = safe_filename(key.replace(":", "_"))
         return self.legacy_sessions_dir / f"{safe_key}.jsonl"
 

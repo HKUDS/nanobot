@@ -17,6 +17,31 @@ class Base(BaseModel):
 class ChannelsConfig(Base):
     """Configuration for chat channels.
 
+class OpenVikingConfig(Base):
+    """OpenViking semantic memory configuration."""
+
+    enabled: bool = False
+    mode: str = "local"  # "local" (embedded) or "remote" (HTTP server)
+    server_url: str = ""
+    user_id: str = ""
+    api_key: str = ""
+    data_dir: str = "~/.hiperone/openviking"
+    vlm_api_key: str = ""
+    vlm_base_url: str = ""
+    vlm_model: str = ""
+    embedding_model: str = ""
+    embedding_api_key: str = ""
+    embedding_base_url: str = ""
+    embedding_dimension: int = 1024
+    max_concurrent_commits: int = 1
+
+
+class WebConfig(BaseModel):
+    """Web channel configuration (WebSocket-based)."""
+    enabled: bool = False
+    host: str = "0.0.0.0"
+    port: int = 18080
+    allow_from: list[str] = Field(default_factory=list)
     Built-in and plugin channel configs are stored as extra fields (dicts).
     Each channel parses its own config in __init__.
     """
@@ -30,7 +55,7 @@ class ChannelsConfig(Base):
 class AgentDefaults(Base):
     """Default agent configuration."""
 
-    workspace: str = "~/.nanobot/workspace"
+    workspace: str = "~/.hiperone/workspace"
     model: str = "anthropic/claude-opus-4-5"
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
@@ -97,12 +122,38 @@ class HeartbeatConfig(Base):
     interval_s: int = 30 * 60  # 30 minutes
 
 
+class CronRetryConfig(Base):
+    """Retry policy for cron jobs."""
+
+    max_attempts: int = 3
+    backoff_ms: list[int] = Field(default_factory=lambda: [30_000, 60_000, 300_000, 900_000, 3_600_000])
+    retry_on: list[str] = Field(default_factory=lambda: ["rate_limit", "network", "server_error"])
+
+
+class CronRunLogConfig(Base):
+    """Run log retention for cron jobs."""
+
+    max_bytes: int = 2_000_000
+    keep_lines: int = 2000
+
+
+class CronConfig(Base):
+    """Cron scheduler configuration."""
+
+    enabled: bool = True
+    max_concurrent_runs: int = 1
+    retry: CronRetryConfig = Field(default_factory=CronRetryConfig)
+    session_retention: str = "24h"
+    run_log: CronRunLogConfig = Field(default_factory=CronRunLogConfig)
+
+
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
     host: str = "0.0.0.0"
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    cron: CronConfig = Field(default_factory=CronConfig)
 
 
 class WebSearchConfig(Base):
@@ -159,6 +210,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    openviking: OpenVikingConfig = Field(default_factory=OpenVikingConfig)
 
     @property
     def workspace_path(self) -> Path:

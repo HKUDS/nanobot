@@ -196,6 +196,10 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
     _write(None, workspace / "memory" / "HISTORY.md")
     (workspace / "skills").mkdir(exist_ok=True)
 
+    for name in ("ERRORS.md", "LEARNINGS.md", "FEATURE_REQUESTS.md"):
+        src = tpl / ".learnings" / name
+        _write(src if src.is_file() else None, workspace / ".learnings" / name)
+
     if added and not silent:
         from rich.console import Console
         for name in added:

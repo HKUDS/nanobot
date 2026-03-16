@@ -17,7 +17,7 @@ WORKDIR /app
 # Install Python dependencies first (cached layer)
 COPY pyproject.toml README.md LICENSE ./
 RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
-    uv pip install --system --no-cache . && \
+    uv pip install --system --no-cache hatchling . && \
     rm -rf nanobot bridge
 
 # Copy the full source and install
@@ -30,8 +30,16 @@ WORKDIR /app/bridge
 RUN npm install && npm run build
 WORKDIR /app
 
+# Install agent-browser for browser automation
+# Include CJK fonts so headless Chromium renders Chinese text correctly
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends fonts-noto-cjk && \
+    rm -rf /var/lib/apt/lists/* && \
+    npm install -g agent-browser && \
+    agent-browser install --with-deps
+
 # Create config directory
-RUN mkdir -p /root/.nanobot
+RUN mkdir -p /root/.hiperone
 
 # Gateway default port
 EXPOSE 18790
