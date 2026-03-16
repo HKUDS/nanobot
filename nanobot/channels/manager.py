@@ -111,6 +111,17 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Slack channel not available: {}", e)
 
+        # Web UI channel
+        if self.config.channels.web.enabled:
+            from nanobot.channels.web import WebChannel
+
+            self.channels["web"] = WebChannel(
+                self.config.channels.web,
+                self.bus,
+                managed=True,
+            )
+            logger.info("Web channel enabled")
+
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
         try:
