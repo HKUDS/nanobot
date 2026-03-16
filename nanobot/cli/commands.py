@@ -354,8 +354,32 @@ def _make_provider(config: Config):
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
 
+    # Extras: dynamic custom providers
+    if provider_name and provider_name.startswith("extras:"):
+        if not p or not p.api_key:
+            console.print(f"[red]Error: No API key configured for extras provider '{provider_name}'.[/red]")
+            raise typer.Exit(1)
+        api_protocol = (p.api or "openai").lower()
+        # Strip provider prefix: "scnet/MiniMax-M2.5" → "MiniMax-M2.5"
+        bare_model = model.split("/", 1)[1] if "/" in model else model
+        # Look up model declaration for context_window / max_tokens overrides
+        model_cfg = config.get_model_config(model)
+        if api_protocol == "openai-responses":
+            from nanobot.providers.openai_responses_provider import OpenAIResponsesProvider
+            provider = OpenAIResponsesProvider(
+                api_key=p.api_key,
+                api_base=p.api_base or "https://api.openai.com/v1",
+                default_model=bare_model,
+            )
+        else:
+            from nanobot.providers.custom_provider import CustomProvider
+            provider = CustomProvider(
+                api_key=p.api_key,
+                api_base=p.api_base or "http://localhost:8000/v1",
+                default_model=bare_model,
+            )
     # OpenAI Codex (OAuth)
-    if provider_name == "openai_codex" or model.startswith("openai-codex/"):
+    elif provider_name == "openai_codex" or model.startswith("openai-codex/"):
         provider = OpenAICodexProvider(default_model=model)
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
     elif provider_name == "custom":
@@ -394,11 +418,21 @@ def _make_provider(config: Config):
         )
 
     defaults = config.agents.defaults
+    # Apply model declaration overrides for max_tokens / context_window
+    model_cfg = config.get_model_config(model)
+    gen_max_tokens = model_cfg.max_tokens if model_cfg else defaults.max_tokens
     provider.generation = GenerationSettings(
         temperature=defaults.temperature,
-        max_tokens=defaults.max_tokens,
+        max_tokens=gen_max_tokens,
         reasoning_effort=defaults.reasoning_effort,
     )
+
+    # Apply model declaration overrides
+    if model_cfg:
+        provider.model_supports_image = model_cfg.supports_image
+        if model_cfg.context_window:
+            config.agents.defaults.context_window_tokens = model_cfg.context_window
+
     return provider
 
 
@@ -1026,6 +1060,20 @@ def status():
             else:
                 has_key = bool(p.api_key)
                 console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+
+        # Extras providers
+        for name, ep in config.providers.extras.items():
+            has_key = bool(ep.api_key)
+            api_type = ep.api or "openai"
+            model_count = len(ep.models)
+            label = f"{name} (extras, {api_type})"
+            status = f"[green]✓[/green] {model_count} model(s)" if has_key else "[dim]not set[/dim]"
+            console.print(f"{label}: {status}")
+            if has_key and ep.models:
+                for mc in ep.models:
+                    img = "[green]img[/green]" if mc.supports_image else "[dim]no-img[/dim]"
+                    think = "[green]think[/green]" if mc.supports_reasoning else ""
+                    console.print(f"  - {mc.id}  ctx={mc.context_window}  {img} {think}")
 
 
 # ============================================================================

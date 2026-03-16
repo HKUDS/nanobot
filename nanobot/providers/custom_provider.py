@@ -17,18 +17,24 @@ class CustomProvider(LLMProvider):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         # Keep affinity stable for this provider instance to improve backend cache locality.
+        import httpx
         self._client = AsyncOpenAI(
             api_key=api_key,
             base_url=api_base,
             default_headers={"x-session-affinity": uuid.uuid4().hex},
+            http_client=httpx.AsyncClient(proxy=None),  # Avoid proxy pollution from other channels
         )
 
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
                    model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
                    reasoning_effort: str | None = None,
                    tool_choice: str | dict[str, Any] | None = None) -> LLMResponse:
+        resolved = model or self.default_model
+        # Strip provider prefix (e.g. "scnet/MiniMax-M2.5" → "MiniMax-M2.5")
+        if "/" in resolved:
+            resolved = resolved.split("/", 1)[1]
         kwargs: dict[str, Any] = {
-            "model": model or self.default_model,
+            "model": resolved,
             "messages": self._sanitize_empty_content(messages),
             "max_tokens": max(1, max_tokens),
             "temperature": temperature,
