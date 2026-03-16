@@ -109,3 +109,71 @@ class TestSession:
         window = s.get_history(max_messages=3)
         assert len(window) == 3
         assert window[-1]["content"] == "msg 9"
+
+    def test_get_history_remaps_long_tool_call_ids(self):
+        """Oversized tool_call IDs are replaced with deterministic hashes."""
+        long_id_a = "call_" + "A" * 50  # 55 chars — exceeds 40-char limit
+        long_id_b = "call_" + "B" * 50  # different long ID
+        s = Session(key="k")
+        s.messages = [
+            {"role": "user", "content": "go"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": long_id_a,
+                        "type": "function",
+                        "function": {"name": "t1", "arguments": "{}"},
+                    },
+                    {
+                        "id": long_id_b,
+                        "type": "function",
+                        "function": {"name": "t2", "arguments": "{}"},
+                    },
+                ],
+            },
+            {"role": "tool", "tool_call_id": long_id_a, "name": "t1", "content": "ok"},
+            {"role": "tool", "tool_call_id": long_id_b, "name": "t2", "content": "ok"},
+        ]
+        history = s.get_history()
+
+        assistant_msg = history[1]
+        tool_a = history[2]
+        tool_b = history[3]
+
+        # IDs are now ≤40 chars
+        assert len(assistant_msg["tool_calls"][0]["id"]) <= 40
+        assert len(assistant_msg["tool_calls"][1]["id"]) <= 40
+        assert len(tool_a["tool_call_id"]) <= 40
+        assert len(tool_b["tool_call_id"]) <= 40
+
+        # Pairing preserved: assistant call ID matches the tool result ID
+        assert assistant_msg["tool_calls"][0]["id"] == tool_a["tool_call_id"]
+        assert assistant_msg["tool_calls"][1]["id"] == tool_b["tool_call_id"]
+
+        # Different original IDs map to different short IDs (no collision)
+        assert tool_a["tool_call_id"] != tool_b["tool_call_id"]
+
+    def test_get_history_short_ids_unchanged(self):
+        """IDs that are already ≤40 chars pass through untouched."""
+        short_id = "call_abc123"
+        s = Session(key="k")
+        s.messages = [
+            {"role": "user", "content": "go"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": short_id,
+                        "type": "function",
+                        "function": {"name": "t", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": short_id, "name": "t", "content": "ok"},
+        ]
+        history = s.get_history()
+        assert history[1]["tool_calls"][0]["id"] == short_id
+        assert history[2]["tool_call_id"] == short_id

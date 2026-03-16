@@ -1,5 +1,6 @@
 """Session management for conversation history."""
 
+import hashlib
 import json
 import shutil
 from dataclasses import dataclass, field
@@ -10,6 +11,24 @@ from typing import Any
 from loguru import logger
 
 from nanobot.utils.helpers import ensure_dir, safe_filename
+
+_TOOL_ID_MAX = 40
+
+
+def _clamp_tool_id(raw: str, cache: dict[str, str]) -> str:
+    """Return *raw* if it fits within the OpenAI 40-char limit for tool_call IDs.
+
+    For oversized IDs (e.g. from old session data), produce a deterministic
+    hash-based replacement so that the same raw value always maps to the same
+    short ID — preserving the assistant↔tool_result pairing without collisions.
+    """
+    if len(raw) <= _TOOL_ID_MAX:
+        return raw
+    if raw in cache:
+        return cache[raw]
+    short = "tc_" + hashlib.sha256(raw.encode()).hexdigest()[:37]
+    cache[raw] = short
+    return short
 
 
 @dataclass
@@ -49,11 +68,21 @@ class Session:
                 break
 
         out: list[dict[str, Any]] = []
+        id_remap: dict[str, str] = {}  # long ID → deterministic short ID
         for m in sliced:
             entry: dict[str, Any] = {"role": m["role"], "content": m.get("content", "")}
             for k in ("tool_calls", "tool_call_id", "name"):
                 if k in m:
                     entry[k] = m[k]
+            # Remap oversized tool_call IDs (OpenAI max 40 chars).
+            # Uses a deterministic hash so the same raw ID always maps to the
+            # same short ID, preserving the assistant↔tool_result pairing.
+            if "tool_call_id" in entry:
+                entry["tool_call_id"] = _clamp_tool_id(entry["tool_call_id"], id_remap)
+            if "tool_calls" in entry:
+                for tc in entry["tool_calls"]:
+                    if tc.get("id"):
+                        tc["id"] = _clamp_tool_id(tc["id"], id_remap)
             out.append(entry)
         return out
 
