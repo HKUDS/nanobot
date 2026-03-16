@@ -19,6 +19,7 @@ from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.agent.tools.interactive import AskUserChoiceTool, AskUserLocationTool, ConfirmActionTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
@@ -138,6 +139,9 @@ class AgentLoop:
         self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
+        self.tools.register(AskUserChoiceTool(send_callback=self.bus.publish_outbound))
+        self.tools.register(ConfirmActionTool(send_callback=self.bus.publish_outbound))
+        self.tools.register(AskUserLocationTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
@@ -174,10 +178,12 @@ class AgentLoop:
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
-        for name in ("message", "spawn", "cron"):
+        _keyboard_tools = ("message", "ask_user_choice", "confirm_action", "ask_user_location", "spawn", "cron")
+        _needs_message_id = ("message", "ask_user_choice", "confirm_action", "ask_user_location")
+        for name in _keyboard_tools:
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
-                    tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+                    tool.set_context(channel, chat_id, *([message_id] if name in _needs_message_id else []))
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -283,6 +289,35 @@ class AgentLoop:
                 continue
             except Exception as e:
                 logger.warning("Error consuming inbound message: {}, continuing...", e)
+                continue
+
+            # Route interactive tool responses to pending futures
+            if msg.metadata.get("_callback_query"):
+                for tool_name in ("ask_user_choice", "confirm_action"):
+                    tool = self.tools.get(tool_name)
+                    if tool and hasattr(tool, "resolve"):
+                        if tool.resolve(msg.channel, msg.chat_id, msg.content):
+                            break
+                continue
+            if msg.metadata.get("_location_response"):
+                tool = self.tools.get("ask_user_location")
+                if tool and hasattr(tool, "resolve") and tool.resolve(msg.channel, msg.chat_id, msg.content):
+                    continue
+                # No pending request — rewrite as a normal location message
+                msg.content = f"[location: {msg.content}]"
+                msg.metadata.pop("_location_response", None)
+
+            # If a tool is awaiting a button press, resolve it with the user's
+            # text reply so the LLM sees it in one turn.  Skip dispatching the
+            # message separately to avoid a double-reply.
+            _resolved_pending = False
+            for tool_name in ("ask_user_choice", "confirm_action", "ask_user_location"):
+                tool = self.tools.get(tool_name)
+                if tool and hasattr(tool, "cancel_pending"):
+                    if tool.cancel_pending(msg.channel, msg.chat_id, reply_text=msg.content):
+                        _resolved_pending = True
+                        break
+            if _resolved_pending:
                 continue
 
             cmd = msg.content.strip().lower()

@@ -10,11 +10,15 @@ from typing import Any, Literal
 
 from loguru import logger
 from pydantic import Field
-from telegram import BotCommand, ReplyParameters, Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import (
+    BotCommand, InlineKeyboardButton, InlineKeyboardMarkup,
+    KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove,
+    ReplyParameters, Update,
+)
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
@@ -197,6 +201,8 @@ class TelegramChannel(BaseChannel):
         self._message_threads: dict[tuple[str, int], int] = {}
         self._bot_user_id: int | None = None
         self._bot_username: str | None = None
+        # Track sent interactive keyboard messages so we can remove stale ones
+        self._pending_keyboards: dict[str, tuple[int, int]] = {}  # chat_id -> (chat_id_int, message_id)
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -253,6 +259,9 @@ class TelegramChannel(BaseChannel):
             )
         )
 
+        # Add callback query handler for inline keyboard responses
+        self._app.add_handler(CallbackQueryHandler(self._on_callback_query))
+
         logger.info("Starting Telegram bot (polling mode)...")
 
         # Initialize and start polling
@@ -273,7 +282,7 @@ class TelegramChannel(BaseChannel):
 
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
-            allowed_updates=["message"],
+            allowed_updates=["message", "callback_query"],
             drop_pending_updates=True  # Ignore old messages on startup
         )
 
@@ -343,6 +352,67 @@ class TelegramChannel(BaseChannel):
                     message_id=reply_to_message_id,
                     allow_sending_without_reply=True
                 )
+
+        # Send inline keyboard if present
+        if kb_data := msg.metadata.get("interactive_buttons"):
+            buttons = kb_data.get("buttons", [])
+            columns = kb_data.get("columns", 2)
+            rows: list[list[InlineKeyboardButton]] = []
+            row: list[InlineKeyboardButton] = []
+            for btn in buttons:
+                row.append(InlineKeyboardButton(text=btn["label"], callback_data=btn["value"]))
+                if len(row) >= columns:
+                    rows.append(row)
+                    row = []
+            if row:
+                rows.append(row)
+            markup = InlineKeyboardMarkup(rows)
+            html = _markdown_to_telegram_html(msg.content) if msg.content else ""
+            try:
+                sent = await self._app.bot.send_message(
+                    chat_id=chat_id,
+                    text=html or "Please select:",
+                    parse_mode="HTML",
+                    reply_markup=markup,
+                    reply_parameters=reply_params,
+                    **thread_kwargs,
+                )
+            except Exception:
+                # Fallback: send as plain text without HTML parse mode
+                sent = await self._app.bot.send_message(
+                    chat_id=chat_id,
+                    text=msg.content or "Please select:",
+                    reply_markup=markup,
+                    reply_parameters=reply_params,
+                    **thread_kwargs,
+                )
+            self._pending_keyboards[msg.chat_id] = (chat_id, sent.message_id)
+            return
+
+        # Send location request reply keyboard if present
+        if msg.metadata.get("request_location"):
+            markup = ReplyKeyboardMarkup(
+                [[KeyboardButton("📍 Share Location", request_location=True)]],
+                one_time_keyboard=True,
+                resize_keyboard=True,
+            )
+            html = _markdown_to_telegram_html(msg.content) if msg.content else ""
+            try:
+                await self._app.bot.send_message(
+                    chat_id=chat_id,
+                    text=html or "Please share your location:",
+                    parse_mode="HTML",
+                    reply_markup=markup,
+                    **thread_kwargs,
+                )
+            except Exception:
+                await self._app.bot.send_message(
+                    chat_id=chat_id,
+                    text=msg.content or "Please share your location:",
+                    reply_markup=markup,
+                    **thread_kwargs,
+                )
+            return
 
         # Send media files
         for media_path in (msg.media or []):
@@ -625,6 +695,51 @@ class TelegramChannel(BaseChannel):
         if len(self._message_threads) > 1000:
             self._message_threads.pop(next(iter(self._message_threads)))
 
+    async def _on_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle inline keyboard button presses."""
+        query = update.callback_query
+        if not query or not query.from_user:
+            return
+
+        await query.answer()
+
+        chat_id = str(query.message.chat_id) if query.message else None
+        if not chat_id:
+            return
+
+        sender_id = self._sender_id(query.from_user)
+        if not self.is_allowed(sender_id):
+            return
+
+        # Find the label for the selected value
+        selected_label = query.data
+        if query.message and query.message.reply_markup:
+            for row in query.message.reply_markup.inline_keyboard:
+                for btn in row:
+                    if btn.callback_data == query.data:
+                        selected_label = btn.text
+                        break
+
+        # Edit the original message to show the selection and remove the keyboard
+        try:
+            original_text = (query.message.text or "") if query.message else ""
+            await query.edit_message_text(
+                text=f"{original_text}\n\n<b>Selected:</b> {selected_label}",
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.debug("Could not edit callback message: {}", e)
+        self._pending_keyboards.pop(chat_id, None)
+
+        # Publish the selection as an inbound message with callback metadata
+        await self.bus.publish_inbound(InboundMessage(
+            channel="telegram",
+            sender_id=sender_id,
+            chat_id=chat_id,
+            content=query.data or "",
+            metadata={"_callback_query": True},
+        ))
+
     async def _forward_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Forward slash commands to the bus for unified handling in AgentLoop."""
         if not update.message or not update.effective_user:
@@ -657,6 +772,17 @@ class TelegramChannel(BaseChannel):
         if not await self._is_group_message_for_bot(message):
             return
 
+        # Remove any stale inline keyboard from a previous interaction
+        str_chat_id = str(chat_id)
+        if pending_kb := self._pending_keyboards.pop(str_chat_id, None):
+            kb_chat_id, kb_msg_id = pending_kb
+            try:
+                await self._app.bot.edit_message_reply_markup(
+                    chat_id=kb_chat_id, message_id=kb_msg_id, reply_markup=None,
+                )
+            except Exception:
+                pass
+
         # Build content from text and/or media
         content_parts = []
         media_paths = []
@@ -671,7 +797,23 @@ class TelegramChannel(BaseChannel):
         if getattr(message, "location", None):
             lat = message.location.latitude
             lon = message.location.longitude
-            content_parts.append(f"[location: latitude={lat}, longitude={lon}]")
+            loc_str = f"latitude={lat}, longitude={lon}"
+            # Route as interactive response if a tool is awaiting location
+            await self.bus.publish_inbound(InboundMessage(
+                channel="telegram",
+                sender_id=sender_id,
+                chat_id=str(chat_id),
+                content=loc_str,
+                metadata={"_location_response": True},
+            ))
+            try:
+                await self._app.bot.send_message(
+                    chat_id=chat_id, text="📍 Location received",
+                    reply_markup=ReplyKeyboardRemove(),
+                )
+            except Exception:
+                pass
+            return
 
         # Download current message media
         current_media_paths, current_media_parts = await self._download_message_media(

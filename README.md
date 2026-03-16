@@ -47,6 +47,16 @@ This is a fork of [HKUDS/nanobot](https://github.com/HKUDS/nanobot) with the fol
 - Replaced tool-call based consolidation with structured text parsing for broader model compatibility
 - Consolidation inherits the agent's temperature setting
 
+### Interactive Tools
+- **`ask_user_choice`** — present interactive buttons for the user to pick from (rendered as Telegram inline keyboards)
+- **`confirm_action`** — Yes/No confirmation before destructive operations
+- **`ask_user_location`** — request the user's GPS location via a "Share Location" button
+- Currently Telegram-only with text fallback on other channels
+- **TODO:** Refactor to a channel capability system so Discord (Components), Slack (Block Kit), etc. can plug in native rendering
+
+### Telegram Enhancements
+- Support for receiving location messages
+
 ### Configuration & Extensibility
 - `agents.disabled_tools` config list to disable specific tools (e.g. `["exec"]` to remove shell access)
 - Webhook endpoint (`POST /notify`) for ingesting external events into the message bus
