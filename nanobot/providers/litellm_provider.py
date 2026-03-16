@@ -159,7 +159,7 @@ class LiteLLMProvider(LLMProvider):
 
     @staticmethod
     def _sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Strip non-standard keys and ensure assistant messages have a content key."""
+        """Strip non-standard keys, ensure content key, and repair orphaned tool_calls."""
         sanitized = []
         for msg in messages:
             clean = {k: v for k, v in msg.items() if k in _ALLOWED_MSG_KEYS}
@@ -167,7 +167,32 @@ class LiteLLMProvider(LLMProvider):
             if clean.get("role") == "assistant" and "content" not in clean:
                 clean["content"] = None
             sanitized.append(clean)
-        return sanitized
+
+        # Repair orphaned tool_calls: every tool_call_id in an assistant message
+        # must have a following tool-role message with the same tool_call_id.
+        # If a crash interrupted tool execution, the result messages may be missing.
+        tool_result_ids: set[str] = {
+            m["tool_call_id"] for m in sanitized if m.get("role") == "tool" and "tool_call_id" in m
+        }
+        repaired = []
+        for msg in sanitized:
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                orphaned = [
+                    tc
+                    for tc in msg["tool_calls"]
+                    if tc.get("id") and tc["id"] not in tool_result_ids
+                ]
+                if orphaned:
+                    # Keep only tool_calls that have matching results
+                    valid = [tc for tc in msg["tool_calls"] if tc["id"] in tool_result_ids]
+                    if valid:
+                        repaired.append({**msg, "tool_calls": valid})
+                    else:
+                        # No valid tool_calls remain — drop them entirely
+                        repaired.append({k: v for k, v in msg.items() if k != "tool_calls"})
+                    continue
+            repaired.append(msg)
+        return repaired
 
     async def chat(
         self,

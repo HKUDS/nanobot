@@ -177,3 +177,43 @@ class TestSession:
         history = s.get_history()
         assert history[1]["tool_calls"][0]["id"] == short_id
         assert history[2]["tool_call_id"] == short_id
+
+    def test_get_history_repairs_orphaned_tool_calls(self):
+        """Tool_calls without matching tool results should be stripped from history."""
+        s = Session(key="k")
+        s.messages = [
+            {"role": "user", "content": "go"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {"id": "tc_ok", "type": "function", "function": {"name": "a"}},
+                    {"id": "tc_orphan", "type": "function", "function": {"name": "b"}},
+                ],
+            },
+            {"role": "tool", "tool_call_id": "tc_ok", "name": "a", "content": "result"},
+            # tc_orphan has no tool result (crash mid-execution)
+            {"role": "user", "content": "retry"},
+        ]
+        history = s.get_history()
+        assistant = [m for m in history if m.get("tool_calls")][0]
+        assert len(assistant["tool_calls"]) == 1
+        assert assistant["tool_calls"][0]["id"] == "tc_ok"
+
+    def test_get_history_drops_all_tool_calls_when_all_orphaned(self):
+        """When all tool_calls are orphaned, the tool_calls key should be removed."""
+        s = Session(key="k")
+        s.messages = [
+            {"role": "user", "content": "go"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {"id": "tc_lost", "type": "function", "function": {"name": "x"}},
+                ],
+            },
+            {"role": "user", "content": "try again"},
+        ]
+        history = s.get_history()
+        assistant = [m for m in history if m.get("role") == "assistant"][0]
+        assert "tool_calls" not in assistant
