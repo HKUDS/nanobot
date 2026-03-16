@@ -227,6 +227,32 @@ class ToolResultCache:
         result.metadata["summary"] = summary
         return key
 
+    def store_only(
+        self,
+        tool_name: str,
+        args: dict[str, Any],
+        result: ToolResult,
+    ) -> str:
+        """Cache the full output *without* generating a summary.
+
+        The LLM sees raw output on the current turn.  On later turns the
+        context compressor can truncate the message and the agent can use
+        ``cache_get_slice`` with the returned key to page through the data.
+        """
+        key = _make_cache_key(tool_name, args)
+        self.store(
+            tool_name,
+            args,
+            result.output,
+            summary="",
+            truncated=result.truncated,
+            token_estimate=len(result.output) // 4,
+        )
+        # Set cache_key so context compression hints reference it,
+        # but do NOT set "summary" — to_llm_string() will return raw output.
+        result.metadata["cache_key"] = key
+        return key
+
     def get_slice(self, cache_key: str, start: int = 0, end: int = 25) -> str | None:
         """Return a slice of the cached output (lines or JSON rows)."""
         entry = self._entries.get(cache_key)

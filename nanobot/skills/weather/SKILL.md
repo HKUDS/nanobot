@@ -37,6 +37,16 @@ Tips:
 - Today only: `?1` · Current only: `?0`
 - PNG: `curl -s "wttr.in/Berlin.png" -o /tmp/weather.png`
 
+## Using web_fetch for weather
+
+When calling `web_fetch` for wttr.in or other API endpoints, always set
+`userAgent: "bot"` — these services return lightweight text to non-browser
+clients but heavy HTML pages to browser User-Agents:
+
+```json
+{"url": "https://wttr.in/Montreal?format=3", "userAgent": "bot"}
+```
+
 ## Open-Meteo (fallback, JSON)
 
 Free, no key, good for programmatic use:

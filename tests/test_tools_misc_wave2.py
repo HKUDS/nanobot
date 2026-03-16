@@ -282,3 +282,85 @@ async def test_web_fetch_html_and_error(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda **kwargs: _BadClient())
     fail = await tool.execute(url="https://example.com")
     assert not fail.success
+
+
+# ---------------------------------------------------------------------------
+# WebFetchTool: userAgent parameter & cacheable flag
+# ---------------------------------------------------------------------------
+
+
+def test_web_fetch_cache_without_summary() -> None:
+    """WebFetchTool caches for retrieval but does not summarize away the data."""
+    tool = WebFetchTool()
+    assert tool.cacheable is True
+    assert tool.summarize is False
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_bot_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When userAgent='bot', the request should use the bot UA string."""
+    captured_headers: dict[str, str] = {}
+
+    class _Resp:
+        headers = {"content-type": "text/plain"}
+        text = "Montreal: +5°C"
+        url = "https://wttr.in/Montreal?format=3"
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url: str, **kwargs):
+            captured_headers.update(kwargs.get("headers", {}))
+            return _Resp()
+
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda **kwargs: _Client())
+
+    tool = WebFetchTool()
+    result = await tool.execute(url="https://wttr.in/Montreal?format=3", userAgent="bot")
+    assert result.success
+    assert "nanobot/" in captured_headers["User-Agent"]
+
+    # Verify content is passed through (not summarised)
+    payload = json.loads(result.output)
+    assert payload["text"] == "Montreal: +5°C"
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_browser_user_agent_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default userAgent should use the browser UA string."""
+    captured_headers: dict[str, str] = {}
+
+    class _Resp:
+        headers = {"content-type": "text/plain"}
+        text = "hello"
+        url = "https://example.com"
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url: str, **kwargs):
+            captured_headers.update(kwargs.get("headers", {}))
+            return _Resp()
+
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda **kwargs: _Client())
+
+    tool = WebFetchTool()
+    result = await tool.execute(url="https://example.com")
+    assert result.success
+    assert "Mozilla" in captured_headers["User-Agent"]

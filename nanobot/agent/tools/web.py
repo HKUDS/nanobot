@@ -12,7 +12,9 @@ import httpx
 from nanobot.agent.tools.base import Tool, ToolResult
 
 # Shared constants
-USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
+_BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
+_BOT_UA = "nanobot/1.0 (compatible; +https://github.com/cgajagon/nanobot)"
+USER_AGENT = _BROWSER_UA  # backward compat alias
 MAX_REDIRECTS = 5  # Limit redirects to prevent DoS attacks
 
 
@@ -109,6 +111,8 @@ class WebFetchTool(Tool):
     """Fetch and extract content from a URL using Readability."""
 
     readonly = True
+    cacheable = True
+    summarize = False  # cache for later retrieval but don't replace output with summary
 
     name = "web_fetch"
     description = "Fetch URL and extract readable content (HTML → markdown/text)."
@@ -118,6 +122,17 @@ class WebFetchTool(Tool):
             "url": {"type": "string", "description": "URL to fetch"},
             "extractMode": {"type": "string", "enum": ["markdown", "text"], "default": "markdown"},
             "maxChars": {"type": "integer", "minimum": 100},
+            "userAgent": {
+                "type": "string",
+                "enum": ["browser", "bot"],
+                "default": "browser",
+                "description": (
+                    "User-Agent mode. 'browser' (default) sends a Chrome-like UA "
+                    "for sites that block bots. 'bot' sends a minimal UA — use for "
+                    "APIs, weather services (wttr.in), and endpoints that serve "
+                    "lighter responses to non-browser clients."
+                ),
+            },
         },
         "required": ["url"],
     }
@@ -130,6 +145,7 @@ class WebFetchTool(Tool):
         url: str,
         extract_mode: str = "markdown",  # noqa: N803
         max_chars: int | None = None,
+        user_agent: str = "browser",
         **kwargs: Any,
     ) -> ToolResult:
         from readability import Document
@@ -137,6 +153,9 @@ class WebFetchTool(Tool):
         # Accept camelCase from LLM tool calls
         extract_mode = kwargs.pop("extractMode", extract_mode)  # type: ignore[assignment]
         max_chars = kwargs.pop("maxChars", max_chars) or self.max_chars  # type: ignore[assignment]
+        user_agent = kwargs.pop("userAgent", user_agent)  # type: ignore[assignment]
+
+        ua_string = _BOT_UA if user_agent == "bot" else _BROWSER_UA
 
         # Validate URL before fetching
         is_valid, error_msg = _validate_url(url)
@@ -151,7 +170,7 @@ class WebFetchTool(Tool):
             async with httpx.AsyncClient(
                 follow_redirects=True, max_redirects=MAX_REDIRECTS, timeout=30.0
             ) as client:
-                r = await client.get(url, headers={"User-Agent": USER_AGENT})
+                r = await client.get(url, headers={"User-Agent": ua_string})
                 r.raise_for_status()
 
             ctype = r.headers.get("content-type", "")

@@ -67,6 +67,11 @@ class Tool(ABC):
     # whose purpose is to return raw data from the cache.
     cacheable: bool = True
 
+    # Whether large results should be *summarised* in the LLM context.
+    # When False the full output is shown on the current turn and cached
+    # for later retrieval via cache_get_slice, but no LLM summary replaces it.
+    summarize: bool = True
+
     _TYPE_MAP: dict[str, type | tuple[type, ...]] = {
         "string": str,
         "integer": int,
