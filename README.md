@@ -1462,3 +1462,53 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 <p align="center">
   <sub>nanobot is for educational, research, and technical exchange purposes only</sub>
 </p>
+
+
+## Microsoft Teams (MVP)
+
+This repository includes a built-in `msteams` channel MVP for Microsoft Teams direct messages.
+
+### Current scope
+
+- Direct-message text in/out
+- Tenant-aware OAuth token acquisition
+- Conversation reference persistence for replies
+- Public HTTPS webhook support through a tunnel or reverse proxy
+
+### Not yet included
+
+- Group/channel handling
+- Attachments and cards
+- Polls
+- Richer Teams activity handling
+
+### Example config
+
+```json
+{
+  "channels": {
+    "msteams": {
+      "enabled": true,
+      "appId": "YOUR_APP_ID",
+      "appPassword": "YOUR_APP_SECRET",
+      "tenantId": "YOUR_TENANT_ID",
+      "host": "0.0.0.0",
+      "port": 3978,
+      "path": "/api/messages",
+      "allowFrom": ["*"],
+      "replyInThread": true
+    }
+  }
+}
+```
+
+### Setup notes
+
+1. Create or reuse a Microsoft Teams / Azure bot app registration.
+2. Set the bot messaging endpoint to a public HTTPS URL ending in `/api/messages`.
+3. Forward that public endpoint to `http://localhost:3978/api/messages`.
+4. Start Nanobot with:
+
+```bash
+nanobot gateway
+```
