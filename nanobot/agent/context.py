@@ -298,7 +298,7 @@ async def summarize_and_compress(
         digest_parts: list[str] = []
         for m in middle:
             role = m.get("role", "?")
-            content = m.get("content", "")
+            content = m.get("content") or ""
             if isinstance(content, list):
                 content = " ".join(
                     p.get("text", "")
