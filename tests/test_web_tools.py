@@ -13,6 +13,7 @@ WebFetchTool = _web_mod.WebFetchTool
 WebSearchTool = _web_mod.WebSearchTool
 _normalize = _web_mod._normalize
 _strip_tags = _web_mod._strip_tags
+    _url_cache,
 _validate_url = _web_mod._validate_url
 
 
@@ -144,10 +145,8 @@ async def test_web_fetch_invalid_url() -> None:
 
 
 @pytest.mark.asyncio
-    _web_mod._url_cache.clear()
     _url_cache.clear()
-
-    class _Resp:
+    _url_cache.clear()
         def __init__(self, ctype: str, text: str, payload: dict | None = None):
             self.headers = {"content-type": ctype}
         def __init__(self, ctype: str, text: str, payload: dict | None = None):
@@ -230,10 +229,8 @@ async def test_web_fetch_html_and_error(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda **kwargs: _Client())
     monkeypatch.setitem(__import__("sys").modules, "readability", SimpleNamespace(Document=_Doc))
 
-    _web_mod._url_cache.clear()
     _url_cache.clear()
-
-    tool = WebFetchTool(max_chars=20)
+    _url_cache.clear()
     out = await tool.execute(url="https://example.com", extractMode="markdown")
     assert out.success
     payload = json.loads(out.output)
@@ -272,10 +269,8 @@ def test_web_fetch_cache_without_summary() -> None:
 async def test_web_fetch_bot_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
     """When userAgent='bot', the request should use the bot UA string."""
     _url_cache.clear()
-
+    _url_cache.clear()
     captured_headers: dict[str, str] = {}
-
-    class _Resp:
         headers = {"content-type": "text/plain"}
         text = "Montreal: +5°C"
         url = "https://wttr.in/Montreal?format=3"
@@ -313,10 +308,8 @@ async def test_web_fetch_browser_user_agent_default(monkeypatch: pytest.MonkeyPa
     _url_cache.clear()
 
     captured_headers: dict[str, str] = {}
-
+    _url_cache.clear()
     class _Resp:
-        headers = {"content-type": "text/plain"}
-        text = "hello"
         url = "https://example.com"
         status_code = 200
 
