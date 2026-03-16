@@ -27,6 +27,7 @@ dependencies = [
     "httpx>=0.28.0,<1.0.0",
     "loguru>=0.7.3,<1.0.0",
     "readability-lxml>=0.8.4,<1.0.0",
+    "markdownify>=1.2.0,<2.0.0",
     "rich>=14.0.0,<15.0.0",
     "croniter>=6.0.0,<7.0.0",
     "python-telegram-bot[socks]>=22.0,<23.0",

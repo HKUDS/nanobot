@@ -308,7 +308,7 @@ async def _consume_sse(response: httpx.Response) -> tuple[str, list[ToolCallRequ
                     args = {"raw": args_raw}
                 tool_calls.append(
                     ToolCallRequest(
-                        id=f"{call_id}|{buf.get('id') or item.get('id') or 'fc_0'}",
+                        id=call_id,
                         name=str(buf.get("name") or item.get("name") or ""),
                         arguments=args,
                     )

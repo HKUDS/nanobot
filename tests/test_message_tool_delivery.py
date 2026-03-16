@@ -141,3 +141,43 @@ async def test_sent_in_turn_not_set_on_failure() -> None:
     tool.start_turn()
     await tool.execute(content="hello")
     assert not tool._sent_in_turn
+
+
+# ---------------------------------------------------------------------------
+# Tests: validation paths and error handling
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_message_tool_paths() -> None:
+    tool = MessageTool()
+
+    missing_target = await tool.execute(content="hello")
+    assert not missing_target.success
+
+    tool.set_context("telegram", "123")
+    no_callback = await tool.execute(content="hello")
+    assert not no_callback.success
+
+    sent: list[object] = []
+
+    async def _send(msg):
+        sent.append(msg)
+
+    tool.set_send_callback(_send)
+    tool.start_turn()
+    ok = await tool.execute(content="hello", media=["a.png"])
+    assert ok.success
+    assert "attachments" in ok.output
+    assert len(sent) == 1
+
+
+@pytest.mark.asyncio
+async def test_message_tool_send_error() -> None:
+    async def _bad(_msg):
+        raise RuntimeError("boom")
+
+    tool = MessageTool(send_callback=_bad, default_channel="telegram", default_chat_id="123")
+    out = await tool.execute(content="hello")
+    assert not out.success
+    assert "Error sending message" in out.output

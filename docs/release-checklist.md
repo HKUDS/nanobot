@@ -26,6 +26,10 @@
 ## Post-Release
 
 - [ ] Verify GitHub Actions runs clean on the tag
+- [ ] Verify Docker image built and pushed to GHCR
+- [ ] Verify staging auto-deployed successfully (check `staging.nanobot.internal`)
+- [ ] Deploy to production: Actions → Deploy Production → Run workflow with tag `vX.Y.Z`
+- [ ] Verify production health: `curl http://127.0.0.1:18790/health`
 - [ ] Add `[Unreleased]` section back to `CHANGELOG.md`
 - [ ] Announce release (if applicable)
 

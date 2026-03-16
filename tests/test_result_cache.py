@@ -119,6 +119,21 @@ class TestToolResultCache:
         count = sum(1 for k in range(55) if cache2.has("t", {"i": k}))
         assert count <= 50
 
+    def test_store_only_caches_without_summary(self, tmp_path: Path):
+        """store_only caches the full output but doesn't set summary on result."""
+        cache = ToolResultCache(workspace=tmp_path)
+        result = ToolResult.ok("x" * 5000)
+        key = cache.store_only("web_fetch", {"url": "https://example.com"}, result)
+        # Full output cached and retrievable
+        entry = cache.get(key)
+        assert entry is not None
+        assert entry.full_output == "x" * 5000
+        assert entry.summary == ""
+        # Result has cache_key but NOT summary — to_llm_string returns raw output
+        assert result.metadata["cache_key"] == key
+        assert "summary" not in result.metadata
+        assert result.to_llm_string() == "x" * 5000
+
 
 # ---------------------------------------------------------------------------
 # store_with_summary — LLM integration

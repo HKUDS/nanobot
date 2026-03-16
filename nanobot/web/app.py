@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from nanobot.web.routes import router
@@ -73,6 +74,20 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Health check routes (outside /api — used by Docker HEALTHCHECK & probes)
+    @app.get("/health", tags=["health"])
+    async def health():
+        """Liveness probe — returns 200 if the process is alive."""
+        return {"status": "ok"}
+
+    @app.get("/ready", tags=["health"])
+    async def ready():
+        """Readiness probe — returns 200 if the agent loop is accepting work."""
+        loop = app.state.agent_loop
+        if loop and getattr(loop, "_running", False):
+            return {"status": "ready"}
+        return JSONResponse({"status": "not_ready"}, status_code=503)
 
     # API routes
     app.include_router(router)

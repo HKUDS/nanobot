@@ -1,9 +1,13 @@
 """Web tools: web_search and web_fetch."""
 
+from __future__ import annotations
+
+import asyncio
 import html
 import json
 import os
 import re
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -12,8 +16,19 @@ import httpx
 from nanobot.agent.tools.base import Tool, ToolResult
 
 # Shared constants
-USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
+_BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
+_BOT_UA = "nanobot/1.0 (compatible; +https://github.com/cgajagon/nanobot)"
+USER_AGENT = _BROWSER_UA  # backward compat alias
 MAX_REDIRECTS = 5  # Limit redirects to prevent DoS attacks
+_BOT_TIMEOUT = 15.0  # Bot endpoints (APIs, plain-text services) are typically fast
+_BROWSER_TIMEOUT = 30.0  # HTML pages may be slower
+_RETRY_ATTEMPTS = 2  # Total attempts for transient failures
+_RETRY_BACKOFF = 1.0  # Seconds between retries
+_CACHE_TTL = 300  # 5 min in-memory URL cache
+_COMPACT_THRESHOLD = 500  # Output below this length omits verbose metadata
+
+# In-memory URL cache: url+ua → (timestamp, ToolResult)
+_url_cache: dict[str, tuple[float, ToolResult]] = {}
 
 
 def _strip_tags(text: str) -> str:
@@ -109,15 +124,37 @@ class WebFetchTool(Tool):
     """Fetch and extract content from a URL using Readability."""
 
     readonly = True
+    cacheable = True
+    summarize = False  # cache for later retrieval but don't replace output with summary
 
     name = "web_fetch"
-    description = "Fetch URL and extract readable content (HTML → markdown/text)."
+    description = "Fetch URL and extract readable content (HTML → markdown/text/json)."
     parameters = {
         "type": "object",
         "properties": {
             "url": {"type": "string", "description": "URL to fetch"},
-            "extractMode": {"type": "string", "enum": ["markdown", "text"], "default": "markdown"},
+            "extractMode": {
+                "type": "string",
+                "enum": ["markdown", "text", "json"],
+                "default": "markdown",
+                "description": (
+                    "'markdown' (default): convert HTML to Markdown. "
+                    "'text': plain text (tags stripped). "
+                    "'json': return raw response body (best for API endpoints)."
+                ),
+            },
             "maxChars": {"type": "integer", "minimum": 100},
+            "userAgent": {
+                "type": "string",
+                "enum": ["browser", "bot"],
+                "default": "browser",
+                "description": (
+                    "User-Agent mode. 'browser' (default) sends a Chrome-like UA "
+                    "for sites that block bots. 'bot' sends a minimal UA — use for "
+                    "APIs, weather services (wttr.in), and endpoints that serve "
+                    "lighter responses to non-browser clients."
+                ),
+            },
         },
         "required": ["url"],
     }
@@ -130,13 +167,13 @@ class WebFetchTool(Tool):
         url: str,
         extract_mode: str = "markdown",  # noqa: N803
         max_chars: int | None = None,
+        user_agent: str = "browser",
         **kwargs: Any,
     ) -> ToolResult:
-        from readability import Document
-
         # Accept camelCase from LLM tool calls
         extract_mode = kwargs.pop("extractMode", extract_mode)  # type: ignore[assignment]
         max_chars = kwargs.pop("maxChars", max_chars) or self.max_chars  # type: ignore[assignment]
+        user_agent = kwargs.pop("userAgent", user_agent)  # type: ignore[assignment]
 
         # Validate URL before fetching
         is_valid, error_msg = _validate_url(url)
@@ -147,35 +184,101 @@ class WebFetchTool(Tool):
                 )
             )
 
-        try:
-            async with httpx.AsyncClient(
-                follow_redirects=True, max_redirects=MAX_REDIRECTS, timeout=30.0
-            ) as client:
-                r = await client.get(url, headers={"User-Agent": USER_AGENT})
-                r.raise_for_status()
+        # Check in-memory cache
+        cache_key = f"{url}|{user_agent}"
+        cached = _url_cache.get(cache_key)
+        if cached:
+            ts, result = cached
+            if time.monotonic() - ts < _CACHE_TTL:
+                return result
+            del _url_cache[cache_key]
 
-            ctype = r.headers.get("content-type", "")
+        ua_string = _BOT_UA if user_agent == "bot" else _BROWSER_UA
+        timeout = _BOT_TIMEOUT if user_agent == "bot" else _BROWSER_TIMEOUT
 
-            # JSON
-            if "application/json" in ctype:
-                text, extractor = json.dumps(r.json(), indent=2, ensure_ascii=False), "json"
-            # HTML
-            elif "text/html" in ctype or r.text[:256].lower().startswith(("<!doctype", "<html")):
-                doc = Document(r.text)
-                content = (
-                    self._to_markdown(doc.summary())
-                    if extract_mode == "markdown"
-                    else _strip_tags(doc.summary())
+        # Fetch with internal retry for transient failures
+        last_err: Exception | None = None
+        r: httpx.Response | None = None
+        for attempt in range(_RETRY_ATTEMPTS):
+            try:
+                async with httpx.AsyncClient(
+                    follow_redirects=True, max_redirects=MAX_REDIRECTS, timeout=timeout
+                ) as client:
+                    r = await client.get(url, headers={"User-Agent": ua_string})
+                    r.raise_for_status()
+                break
+            except (httpx.TimeoutException, httpx.NetworkError) as e:
+                last_err = e
+                if attempt < _RETRY_ATTEMPTS - 1:
+                    await asyncio.sleep(_RETRY_BACKOFF)
+            except httpx.HTTPStatusError as e:
+                # Don't retry client errors (4xx), only server errors (5xx)
+                if e.response.status_code < 500:
+                    return ToolResult.fail(
+                        json.dumps({"error": str(e), "url": url}, ensure_ascii=False)
+                    )
+                last_err = e
+                if attempt < _RETRY_ATTEMPTS - 1:
+                    await asyncio.sleep(_RETRY_BACKOFF)
+            except Exception as e:  # crash-barrier: unexpected httpx errors
+                return ToolResult.fail(
+                    json.dumps({"error": str(e), "url": url}, ensure_ascii=False)
                 )
-                text = f"# {doc.title()}\n\n{content}" if doc.title() else content
-                extractor = "readability"
-            else:
-                text, extractor = r.text, "raw"
 
-            truncated = len(text) > max_chars
-            if truncated:
-                text = text[:max_chars]
+        if r is None:
+            return ToolResult.fail(
+                json.dumps({"error": str(last_err), "url": url}, ensure_ascii=False)
+            )
 
+        try:
+            result = self._extract(r, extract_mode, max_chars, url)
+        except Exception as e:  # crash-barrier: readability / markdownify errors
+            return ToolResult.fail(json.dumps({"error": str(e), "url": url}, ensure_ascii=False))
+
+        # Store in cache
+        _url_cache[cache_key] = (time.monotonic(), result)
+
+        return result
+
+    def _extract(
+        self, r: httpx.Response, extract_mode: str, max_chars: int, url: str
+    ) -> ToolResult:
+        """Extract content from the HTTP response."""
+        from readability import Document
+
+        ctype = r.headers.get("content-type", "")
+
+        # JSON response or explicit json mode — return raw body
+        if "application/json" in ctype or extract_mode == "json":
+            try:
+                text = json.dumps(r.json(), indent=2, ensure_ascii=False)
+            except (ValueError, TypeError):
+                text = r.text
+            extractor = "json"
+        # HTML
+        elif "text/html" in ctype or r.text[:256].lower().startswith(("<!doctype", "<html")):
+            doc = Document(r.text)
+            content = (
+                self._to_markdown(doc.summary())
+                if extract_mode == "markdown"
+                else _strip_tags(doc.summary())
+            )
+            text = f"# {doc.title()}\n\n{content}" if doc.title() else content
+            extractor = "readability"
+        else:
+            text, extractor = r.text, "raw"
+
+        truncated = len(text) > max_chars
+        if truncated:
+            text = text[:max_chars]
+
+        # Compact output for small responses to save tokens
+        if len(text) < _COMPACT_THRESHOLD:
+            output = json.dumps(
+                {"url": str(r.url), "text": text},
+                ensure_ascii=False,
+            )
+        else:
             output = json.dumps(
                 {
                     "url": url,
@@ -188,28 +291,11 @@ class WebFetchTool(Tool):
                 },
                 ensure_ascii=False,
             )
-            return ToolResult.ok(output, truncated=truncated)
-        except Exception as e:  # crash-barrier: third-party httpx + readability errors
-            return ToolResult.fail(json.dumps({"error": str(e), "url": url}, ensure_ascii=False))
+        return ToolResult.ok(output, truncated=truncated)
 
-    def _to_markdown(self, html: str) -> str:
-        """Convert HTML to markdown."""
-        # Convert links, headings, lists before stripping tags
-        text = re.sub(
-            r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>([\s\S]*?)</a>',
-            lambda m: f"[{_strip_tags(m[2])}]({m[1]})",
-            html,
-            flags=re.I,
-        )
-        text = re.sub(
-            r"<h([1-6])[^>]*>([\s\S]*?)</h\1>",
-            lambda m: f"\n{'#' * int(m[1])} {_strip_tags(m[2])}\n",
-            text,
-            flags=re.I,
-        )
-        text = re.sub(
-            r"<li[^>]*>([\s\S]*?)</li>", lambda m: f"\n- {_strip_tags(m[1])}", text, flags=re.I
-        )
-        text = re.sub(r"</(p|div|section|article)>", "\n\n", text, flags=re.I)
-        text = re.sub(r"<(br|hr)\s*/?>", "\n", text, flags=re.I)
-        return _normalize(_strip_tags(text))
+    def _to_markdown(self, html_content: str) -> str:
+        """Convert HTML to markdown using markdownify."""
+        from markdownify import markdownify
+
+        md = markdownify(html_content, heading_style="ATX", strip=["img"])
+        return _normalize(md)

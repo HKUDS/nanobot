@@ -1,0 +1,30 @@
+# Prometheus scrape config snippet for nanobot
+#
+# Add this to the scrape_configs section of your existing prometheus.yml
+# at ~/infra/monitoring/prometheus/prometheus.yml, then restart Prometheus:
+#   docker restart prometheus
+#
+# Note: nanobot doesn't expose a /metrics endpoint yet — this scrapes
+# the health endpoint. For full metrics, consider adding prometheus_client
+# or exporting via Langfuse in a future iteration.
+#
+# Container-level CPU/memory/network metrics are already collected
+# by cAdvisor (already scraping Docker).
+
+# --- Add to scrape_configs: ---
+
+#   - job_name: "nanobot-prod"
+#     metrics_path: /health
+#     static_configs:
+#       - targets: ["host.docker.internal:18790"]
+#         labels:
+#           environment: "production"
+#     scrape_interval: 30s
+#
+#   - job_name: "nanobot-staging"
+#     metrics_path: /health
+#     static_configs:
+#       - targets: ["host.docker.internal:18791"]
+#         labels:
+#           environment: "staging"
+#     scrape_interval: 30s

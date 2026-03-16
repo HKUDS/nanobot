@@ -1,13 +1,49 @@
-__pycache__
+# Build context exclusions — keep Docker image builds fast
+
+# Python artifacts
+__pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.egg-info
+*.egg-info/
 dist/
 build/
-.git
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Git and CI
+.git/
+.github/
+
+# Tests, docs, and tooling (not needed in the image)
+tests/
+docs/
+artifacts/
+case/
+scripts/
+memory/
+
+# Frontend dev artifacts (built frontend copied separately if needed)
+frontend/node_modules/
+frontend/.vite/
+
+# Deployment and infrastructure
+deploy/
+terraform/
+
+# Misc
+*.md
+!README.md
 .env
+.env.*
 .assets
-node_modules/
+.dockerignore
+Makefile
+
+# Bridge build artifacts (rebuilt in container)
 bridge/dist/
+bridge/node_modules/
+
+# Runtime data
 workspace/

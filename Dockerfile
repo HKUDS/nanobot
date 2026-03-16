@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+FROM ghcr.io/astral-sh/uv:python3.10-bookworm-slim
 
 # Install Node.js 20 for the WhatsApp bridge
 RUN apt-get update && \
@@ -32,6 +32,10 @@ WORKDIR /app
 
 # Create config directory
 RUN mkdir -p /root/.nanobot
+
+# Health check for orchestrators (Docker, Compose, Kubernetes)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -sf http://localhost:18790/health || exit 1
 
 # Gateway default port
 EXPOSE 18790

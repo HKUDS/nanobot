@@ -167,13 +167,16 @@ class ToolRegistry:
                     and tool.cacheable
                     and len(result.output) > self._SUMMARY_THRESHOLD
                 ):
-                    await self._cache.store_with_summary(
-                        name,
-                        params,
-                        result,
-                        provider=self._summary_provider,
-                        model=self._summary_model,
-                    )
+                    if tool.summarize:
+                        await self._cache.store_with_summary(
+                            name,
+                            params,
+                            result,
+                            provider=self._summary_provider,
+                            model=self._summary_model,
+                        )
+                    else:
+                        self._cache.store_only(name, params, result)
 
                 return result
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -112,3 +113,76 @@ class TestCronToolExecute:
         cron_tool._cron.remove_job.return_value = True
         result = await cron_tool.execute(action="remove", job_id="j1")
         assert result.success
+
+
+# ---------------------------------------------------------------------------
+# Integration-style tests with a fake in-memory cron service
+# ---------------------------------------------------------------------------
+
+
+class _FakeCron:
+    def __init__(self) -> None:
+        self.jobs: dict[str, SimpleNamespace] = {}
+
+    def add_job(self, **kwargs):
+        job = SimpleNamespace(id="job-1", name=kwargs["name"], schedule=kwargs["schedule"])
+        self.jobs[job.id] = job
+        return job
+
+    def list_jobs(self):
+        return list(self.jobs.values())
+
+    def remove_job(self, job_id: str) -> bool:
+        return self.jobs.pop(job_id, None) is not None
+
+
+def test_cron_tool_invalid_and_remove_paths() -> None:
+    tool = CronTool(_FakeCron())
+
+    bad_msg = tool._add_job(message="", every_seconds=1, cron_expr=None, tz=None, at=None)
+    assert not bad_msg.success
+
+    tool.set_context("telegram", "123")
+    bad_tz = tool._add_job(message="hello", every_seconds=None, cron_expr=None, tz="UTC", at=None)
+    assert not bad_tz.success
+
+    missing_schedule = tool._add_job(
+        message="hello", every_seconds=None, cron_expr=None, tz=None, at=None
+    )
+    assert not missing_schedule.success
+
+    assert not tool._remove_job(None).success
+    assert not tool._remove_job("missing").success
+
+
+def test_cron_tool_add_list_remove_success() -> None:
+    tool = CronTool(_FakeCron())
+    tool.set_context("telegram", "123")
+
+    created = tool._add_job("hello", every_seconds=10, cron_expr=None, tz=None, at=None)
+    assert created.success
+
+    listed = tool._list_jobs()
+    assert listed.success
+    assert "Scheduled jobs" in listed.output
+
+    removed = tool._remove_job("job-1")
+    assert removed.success
+
+
+@pytest.mark.asyncio
+async def test_cron_tool_execute_dispatch() -> None:
+    tool = CronTool(_FakeCron())
+    tool.set_context("telegram", "123")
+
+    out = await tool.execute(action="add", message="ping", every_seconds=1)
+    assert out.success
+
+    listed = await tool.execute(action="list")
+    assert listed.success
+
+    rm = await tool.execute(action="remove", job_id="job-1")
+    assert rm.success
+
+    unknown = await tool.execute(action="wat")
+    assert not unknown.success
