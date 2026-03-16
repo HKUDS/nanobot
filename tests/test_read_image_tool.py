@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -52,6 +52,16 @@ class TestReadImageTool:
 
         assert result == "Error: not a recognized image file (.txt)"
 
+    @pytest.mark.asyncio
+    async def test_read_image_handles_read_failure(self, tool, tmp_path):
+        image_path = tmp_path / "pixel.png"
+        image_path.write_bytes(PNG_1X1)
+
+        with patch.object(type(image_path), "read_bytes", side_effect=OSError("boom")):
+            result = await tool.execute(path=str(image_path))
+
+        assert result == "Error: could not read image file: boom"
+
 
 @pytest.mark.asyncio
 async def test_save_turn_strips_base64_from_tool_image_results(tmp_path):
@@ -90,3 +100,43 @@ async def test_save_turn_strips_base64_from_tool_image_results(tmp_path):
     assert saved["role"] == "tool"
     assert saved["content"] == [{"type": "text", "text": "[Image: pixel.png, 1 KB, image/png]"}]
     assert "timestamp" in saved
+
+
+@pytest.mark.asyncio
+async def test_save_turn_skips_non_dict_tool_blocks_and_truncates_text(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+
+    with patch.object(AgentLoop, "_register_default_tools", lambda self: None), \
+         patch("nanobot.agent.loop.ContextBuilder"), \
+         patch("nanobot.agent.loop.SubagentManager"):
+        loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+
+    long_text = "x" * (loop._TOOL_RESULT_MAX_CHARS + 100)
+    session = Session(key="cli:test")
+    loop._save_turn(
+        session,
+        [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "show image"},
+            {
+                "role": "tool",
+                "tool_call_id": "call-1",
+                "name": "read_image",
+                "content": [
+                    "unexpected",
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+                    {"type": "text", "text": long_text},
+                ],
+            },
+        ],
+        skip=2,
+    )
+
+    saved = session.messages[0]
+    assert isinstance(saved["content"], list)
+    assert saved["content"][0]["type"] == "text"
+    assert saved["content"][0]["text"].endswith("\n... (truncated)")

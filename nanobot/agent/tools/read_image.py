@@ -1,7 +1,6 @@
 """Read image tool: lets the agent view an image file on disk."""
 
 import base64
-import mimetypes
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +12,12 @@ class ReadImageTool(Tool):
     """Read an image file and return it as a multimodal content block."""
 
     _MAX_BYTES = 20 * 1024 * 1024  # 20 MB
+    _SUPPORTED_MIME_TYPES = {
+        "image/gif",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+    }
 
     def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
         self._workspace = workspace
@@ -57,12 +62,21 @@ class ReadImageTool(Tool):
         if not resolved.is_file():
             return f"Error: file not found: {path_str}"
 
-        raw = resolved.read_bytes()
-        if len(raw) > self._MAX_BYTES:
-            return f"Error: image too large ({len(raw) / 1024 / 1024:.1f} MB, max 20 MB)"
+        try:
+            size_bytes = resolved.stat().st_size
+        except OSError as e:
+            return f"Error: could not access image file: {e}"
 
-        mime = detect_image_mime(raw) or mimetypes.guess_type(str(resolved))[0]
-        if not mime or not mime.startswith("image/"):
+        if size_bytes > self._MAX_BYTES:
+            return f"Error: image too large ({size_bytes / 1024 / 1024:.1f} MB, max 20 MB)"
+
+        try:
+            raw = resolved.read_bytes()
+        except OSError as e:
+            return f"Error: could not read image file: {e}"
+
+        mime = detect_image_mime(raw)
+        if mime not in self._SUPPORTED_MIME_TYPES:
             return f"Error: not a recognized image file ({resolved.suffix})"
 
         b64 = base64.b64encode(raw).decode()
