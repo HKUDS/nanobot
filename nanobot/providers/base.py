@@ -175,6 +175,8 @@ class LLMProvider(ABC):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        service_tier: str | None = None,
+        text_verbosity: str | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request.
@@ -240,6 +242,8 @@ class LLMProvider(ABC):
         temperature: object = _SENTINEL,
         reasoning_effort: object = _SENTINEL,
         tool_choice: str | dict[str, Any] | None = None,
+        service_tier: str | None = None,
+        text_verbosity: str | None = None,
     ) -> LLMResponse:
         """Call chat() with retry on transient provider failures.
 
@@ -258,6 +262,7 @@ class LLMProvider(ABC):
             messages=messages, tools=tools, model=model,
             max_tokens=max_tokens, temperature=temperature,
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
+            service_tier=service_tier, text_verbosity=text_verbosity,
         )
 
         for attempt, delay in enumerate(self._CHAT_RETRY_DELAYS, start=1):

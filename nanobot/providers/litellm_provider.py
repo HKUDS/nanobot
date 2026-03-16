@@ -216,6 +216,8 @@ class LiteLLMProvider(LLMProvider):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        service_tier: str | None = None,
+        text_verbosity: str | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
@@ -272,6 +274,12 @@ class LiteLLMProvider(LLMProvider):
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
             kwargs["drop_params"] = True
+            
+        if service_tier:
+            kwargs["service_tier"] = service_tier
+            
+        if text_verbosity:
+            kwargs["text_verbosity"] = text_verbosity
         
         if tools:
             kwargs["tools"] = tools

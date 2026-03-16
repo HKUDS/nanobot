@@ -42,6 +42,8 @@ class AgentDefaults(Base):
     # Deprecated compatibility field: accepted from old configs but ignored at runtime.
     memory_window: int | None = Field(default=None, exclude=True)
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    service_tier: str | None = None  # auto / standard_only (for Anthropic)
+    text_verbosity: str | None = None  # low / medium / high (for OpenAI)
 
     @property
     def should_warn_deprecated_memory_window(self) -> bool:

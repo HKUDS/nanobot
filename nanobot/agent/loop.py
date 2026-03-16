@@ -200,6 +200,8 @@ class AgentLoop:
                 messages=messages,
                 tools=tool_defs,
                 model=self.model,
+                service_tier=self.provider.config.agents.defaults.service_tier if hasattr(self.provider, "config") else None,
+                text_verbosity=self.provider.config.agents.defaults.text_verbosity if hasattr(self.provider, "config") else None,
             )
 
             if response.has_tool_calls:
