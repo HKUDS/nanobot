@@ -97,6 +97,7 @@
 - [Linux Service](#-linux-service)
 - [Project Structure](#-project-structure)
 - [Contribute & Roadmap](#-contribute--roadmap)
+- [Contributors](#-contributors)
 - [Star History](#-star-history)
 
 ## ✨ Features
@@ -1386,7 +1387,9 @@ nanobot/
 
 PRs welcome! The codebase is intentionally small and readable. 🤗
 
-**Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
+- Check out the [CONTRIBUTORS.md](./CONTRIBUTORS.md) to learn more about the project and its contributors.
+
+**Roadmap** — Pick an item and [open a PR](https://github.com/Keep-In-Mind-Git/nanobot/pulls)!
 
 - [ ] **Multi-modal** — See and hear (images, voice, video)
 - [ ] **Long-term memory** — Never forget important context
@@ -1396,10 +1399,13 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 
 ### Contributors
 
-<a href="https://github.com/HKUDS/nanobot/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=HKUDS/nanobot&max=100&columns=12&updated=20260210" alt="Contributors" />
+<a href="https://github.com/Keep-In-Mind-Git/nanobot/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Keep-In-Mind-Git/nanobot&max=100&columns=12&updated=20260210" alt="Contributors" />
 </a>
 
+## 👤 Contributors
+
+For more details about the nanobot AI assistant and its capabilities, see [CONTRIBUTORS.md](./CONTRIBUTORS.md).
 
 ## ⭐ Star History
 
