@@ -12,6 +12,8 @@ import makeWASocket, {
   downloadMediaMessage,
   extractMessageContent as baileysExtractMessageContent,
 } from '@whiskeysockets/baileys';
+import { readFileSync } from 'fs';
+import { extname, basename } from 'path';
 
 import { Boom } from '@hapi/boom';
 import qrcode from 'qrcode-terminal';
@@ -228,6 +230,26 @@ export class WhatsAppClient {
     }
 
     await this.sock.sendMessage(to, { text });
+  }
+
+  async sendMediaMessage(to: string, filePath: string, caption?: string): Promise<void> {
+    if (!this.sock) {
+      throw new Error('Not connected');
+    }
+
+    const buffer = readFileSync(filePath);
+    const ext = extname(filePath).toLowerCase();
+    const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+
+    if (imageExts.includes(ext)) {
+      await this.sock.sendMessage(to, { image: buffer, caption: caption || '' });
+    } else {
+      await this.sock.sendMessage(to, {
+        document: buffer,
+        caption: caption || '',
+        fileName: basename(filePath),
+      });
+    }
   }
 
   async disconnect(): Promise<void> {
