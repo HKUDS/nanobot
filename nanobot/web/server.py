@@ -21,6 +21,10 @@ class ChatRequest(BaseModel):
     session_id: str = "web:default"
 
 
+class RenameSessionRequest(BaseModel):
+    new_session_id: str
+
+
 def create_app(config_path: str | None = None, workspace: str | None = None) -> FastAPI:
     """Create and configure the FastAPI application."""
     from nanobot.agent.loop import AgentLoop
@@ -146,6 +150,19 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
         path.unlink()
         session_manager.invalidate(session_id)
         return {"status": "deleted"}
+
+    @app.patch("/api/sessions/{session_id:path}")
+    async def rename_session(session_id: str, request: RenameSessionRequest) -> dict[str, str]:
+        try:
+            session = session_manager.rename_session(session_id, request.new_session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        except FileExistsError as exc:
+            raise HTTPException(status_code=409, detail=f'Session "{exc.args[0]}" already exists') from exc
+
+        return {"status": "renamed", "key": session.key}
 
     # ------------------------------------------------------------------
     # Static files / SPA

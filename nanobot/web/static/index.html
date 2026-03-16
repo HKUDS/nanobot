@@ -37,8 +37,8 @@
     @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
 
     /* Session item hover */
-    .session-item:hover .session-delete { opacity: 1; }
-    .session-delete { opacity: 0; transition: opacity 0.15s; }
+    .session-item:hover .session-action { opacity: 1; }
+    .session-action { opacity: 0; transition: opacity 0.15s; }
   </style>
 </head>
 <body class="h-full bg-gray-950 text-gray-100 flex">
@@ -141,8 +141,17 @@
         label.className = 'flex-1 truncate';
         label.textContent = s.key.replace(/^web:/, '');
 
+        const rename = document.createElement('button');
+        rename.className = 'session-action text-gray-600 hover:text-blue-400 transition-colors ml-1 flex-shrink-0';
+        rename.innerHTML = '✎';
+        rename.title = 'Rename session';
+        rename.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          await renameSession(s.key);
+        });
+
         const del = document.createElement('button');
-        del.className = 'session-delete text-gray-600 hover:text-red-400 transition-colors ml-1 flex-shrink-0';
+        del.className = 'session-action text-gray-600 hover:text-red-400 transition-colors ml-1 flex-shrink-0';
         del.innerHTML = '×';
         del.title = 'Delete session';
         del.addEventListener('click', async (e) => {
@@ -156,6 +165,7 @@
         });
 
         div.appendChild(label);
+        div.appendChild(rename);
         div.appendChild(del);
         div.addEventListener('click', () => switchSession(s.key));
         sessionList.appendChild(div);
@@ -179,6 +189,43 @@
       setEmptyState(true);
       loadSessions();
       loadHistory();
+    }
+
+    async function renameSession(oldKey) {
+      const currentName = oldKey.replace(/^web:/, '');
+      const input = prompt('Rename session:', currentName);
+      if (input === null) return;
+
+      const trimmed = input.trim();
+      if (!trimmed) {
+        alert('Session name cannot be empty.');
+        return;
+      }
+
+      const newKey = trimmed.startsWith('web:') ? trimmed : `web:${trimmed}`;
+      if (newKey === oldKey) return;
+
+      try {
+        const res = await fetch(`/api/sessions/${encodeURIComponent(oldKey)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ new_session_id: newKey }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.detail || 'Failed to rename session');
+        }
+        if (currentSession === oldKey) {
+          currentSession = newKey;
+          headerSession.textContent = newKey;
+        }
+        await loadSessions();
+        if (currentSession === newKey) {
+          await loadHistory();
+        }
+      } catch (err) {
+        alert(err.message || 'Failed to rename session');
+      }
     }
 
     async function loadHistory() {
