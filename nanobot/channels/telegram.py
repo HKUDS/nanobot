@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import re
-import time
 import unicodedata
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from loguru import logger
 from pydantic import Field
-from telegram import BotCommand, ReplyParameters, Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters, Update
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
@@ -23,6 +30,7 @@ from nanobot.utils.helpers import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
 TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message
+MODEL_PICKER_PAGE_SIZE = 6
 
 
 def _strip_md(s: str) -> str:
@@ -150,6 +158,25 @@ def _markdown_to_telegram_html(text: str) -> str:
     return text
 
 
+@dataclass
+class ModelPickerState:
+    models: list[str]
+    action_prefix: str
+    current_model: str
+    page: int
+
+    def total_pages(self, page_size: int) -> int:
+        return max(1, (len(self.models) + page_size - 1) // page_size)
+
+    def clamp_page(self, page_size: int, requested: int) -> None:
+        total_pages = self.total_pages(page_size)
+        self.page = max(0, min(requested, total_pages - 1))
+
+    def page_models(self, page_size: int) -> list[str]:
+        start = self.page * page_size
+        return self.models[start : start + page_size]
+
+
 class TelegramConfig(Base):
     """Telegram channel configuration."""
 
@@ -175,6 +202,8 @@ class TelegramChannel(BaseChannel):
     BOT_COMMANDS = [
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
+        BotCommand("model", "Pick/set model (saved to config)"),
+        BotCommand("reload", "Reload nanobot gateway"),
         BotCommand("stop", "Stop the current task"),
         BotCommand("help", "Show available commands"),
         BotCommand("restart", "Restart the bot"),
@@ -197,6 +226,7 @@ class TelegramChannel(BaseChannel):
         self._message_threads: dict[tuple[str, int], int] = {}
         self._bot_user_id: int | None = None
         self._bot_username: str | None = None
+        self._model_picker_state: dict[str, ModelPickerState] = {}
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -240,9 +270,12 @@ class TelegramChannel(BaseChannel):
         # Add command handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("new", self._forward_command))
+        self._app.add_handler(CommandHandler("model", self._on_model))
+        self._app.add_handler(CommandHandler("reload", self._forward_command))
         self._app.add_handler(CommandHandler("stop", self._forward_command))
         self._app.add_handler(CommandHandler("restart", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
+        self._app.add_handler(CallbackQueryHandler(self._on_model_callback, pattern=r"^model:"))
 
         # Add message handler for text, photos, voice, documents
         self._app.add_handler(
@@ -273,7 +306,7 @@ class TelegramChannel(BaseChannel):
 
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
-            allowed_updates=["message"],
+            allowed_updates=["message", "callback_query"],
             drop_pending_updates=True  # Ignore old messages on startup
         )
 
@@ -371,22 +404,39 @@ class TelegramChannel(BaseChannel):
                     **thread_kwargs,
                 )
 
+        # Build inline keyboard if model list is present
+        reply_markup = None
+        metadata = msg.metadata or {}
+        model_list = metadata.get("_model_list")
+        model_action = metadata.get("_model_action", "active")
+        if model_list:
+            action_prefix = {
+                "active": "set",
+                "default": "default",
+                "subagent": "subagent",
+            }.get(model_action, "set")
+            page = int(metadata.get("_model_page") or 0)
+            current_model = metadata.get("_current_model", "")
+            reply_markup = self._build_model_keyboard(
+                chat_id=str(msg.chat_id),
+                model_list=model_list,
+                action_prefix=action_prefix,
+                page=page,
+                current_model=current_model,
+            )
+
         # Send text content
         if msg.content and msg.content != "[empty message]":
-            is_progress = msg.metadata.get("_progress", False)
-
             for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
-                # Final response: simulate streaming via draft, then persist
-                if not is_progress:
-                    await self._send_with_streaming(chat_id, chunk, reply_params, thread_kwargs)
-                else:
-                    await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
+                await self._send_text(chat_id, chunk, reply_params, reply_markup, thread_kwargs)
+                reply_markup = None
 
     async def _send_text(
         self,
         chat_id: int,
         text: str,
         reply_params=None,
+        reply_markup=None,
         thread_kwargs: dict | None = None,
     ) -> None:
         """Send a plain text message with HTML fallback."""
@@ -395,6 +445,7 @@ class TelegramChannel(BaseChannel):
             await self._app.bot.send_message(
                 chat_id=chat_id, text=html, parse_mode="HTML",
                 reply_parameters=reply_params,
+                reply_markup=reply_markup,
                 **(thread_kwargs or {}),
             )
         except Exception as e:
@@ -404,34 +455,11 @@ class TelegramChannel(BaseChannel):
                     chat_id=chat_id,
                     text=text,
                     reply_parameters=reply_params,
+                    reply_markup=reply_markup,
                     **(thread_kwargs or {}),
                 )
             except Exception as e2:
                 logger.error("Error sending Telegram message: {}", e2)
-
-    async def _send_with_streaming(
-        self,
-        chat_id: int,
-        text: str,
-        reply_params=None,
-        thread_kwargs: dict | None = None,
-    ) -> None:
-        """Simulate streaming via send_message_draft, then persist with send_message."""
-        draft_id = int(time.time() * 1000) % (2**31)
-        try:
-            step = max(len(text) // 8, 40)
-            for i in range(step, len(text), step):
-                await self._app.bot.send_message_draft(
-                    chat_id=chat_id, draft_id=draft_id, text=text[:i],
-                )
-                await asyncio.sleep(0.04)
-            await self._app.bot.send_message_draft(
-                chat_id=chat_id, draft_id=draft_id, text=text,
-            )
-            await asyncio.sleep(0.15)
-        except Exception:
-            pass
-        await self._send_text(chat_id, text, reply_params, thread_kwargs)
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
@@ -452,10 +480,125 @@ class TelegramChannel(BaseChannel):
         await update.message.reply_text(
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
+            "/model — Pick or set model\n"
+            "/reload — Reload nanobot gateway\n"
             "/stop — Stop the current task\n"
             "/restart — Restart the bot\n"
             "/help — Show available commands"
         )
+
+    async def _on_model(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /model command — forward to agent loop."""
+        if not update.message or not update.effective_user:
+            return
+        self._start_typing(str(update.message.chat_id))
+        await self._handle_message(
+            sender_id=self._sender_id(update.effective_user),
+            chat_id=str(update.message.chat_id),
+            content=update.message.text or "/model",
+        )
+
+    async def _on_model_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle model selection from inline keyboard."""
+        query = update.callback_query
+        if not query or not query.data:
+            return
+
+        await query.answer()
+        payload = query.data.removeprefix("model:")
+        parts = payload.split(":", 3)
+        action = parts[0] if parts else "set"
+        if action == "noop":
+            return
+        if action == "page":
+            if len(parts) < 3:
+                return
+            action_prefix = parts[1]
+            try:
+                page = int(parts[2])
+            except ValueError:
+                return
+            await self._update_model_picker(query, action_prefix, page)
+            return
+        model_id = parts[1] if len(parts) == 2 else parts[2] if len(parts) >= 3 else payload
+        chat_id = str(query.message.chat_id)
+        sender_id = self._sender_id(query.from_user) if query.from_user else "unknown"
+
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=chat_id,
+            content=f"/model {model_id}",
+        )
+
+        try:
+            text = f"Model saved and active: <b>{model_id}</b>"
+            await query.edit_message_text(text, parse_mode="HTML")
+        except Exception:
+            pass
+
+    def _build_model_keyboard(
+        self,
+        *,
+        chat_id: str,
+        model_list: list,
+        action_prefix: str,
+        page: int,
+        current_model: str = "",
+    ) -> InlineKeyboardMarkup:
+        normalized: list[str] = [str(item) for item in model_list]
+        state = ModelPickerState(
+            models=normalized,
+            action_prefix=action_prefix,
+            current_model=current_model,
+            page=page,
+        )
+        self._model_picker_state[chat_id] = state
+        return self._render_model_keyboard(state)
+
+    async def _update_model_picker(self, query, action_prefix: str, page: int) -> None:
+        chat_id = str(query.message.chat_id)
+        state = self._model_picker_state.get(chat_id)
+        if not state or state.action_prefix != action_prefix:
+            return
+        state.clamp_page(MODEL_PICKER_PAGE_SIZE, page)
+        reply_markup = self._render_model_keyboard(state)
+        try:
+            await query.edit_message_reply_markup(reply_markup=reply_markup)
+        except Exception:
+            pass
+
+    def _render_model_keyboard(self, state: ModelPickerState) -> InlineKeyboardMarkup:
+        state.clamp_page(MODEL_PICKER_PAGE_SIZE, state.page)
+        total_pages = state.total_pages(MODEL_PICKER_PAGE_SIZE)
+        page_models = state.page_models(MODEL_PICKER_PAGE_SIZE)
+
+        buttons: list[list[InlineKeyboardButton]] = []
+        for mid in page_models:
+            label = f"\u2713 {mid}" if mid == state.current_model else mid
+            buttons.append([
+                InlineKeyboardButton(label, callback_data=f"model:{state.action_prefix}:{mid}")
+            ])
+
+        nav_row: list[InlineKeyboardButton] = []
+        if state.page > 0:
+            nav_row.append(
+                InlineKeyboardButton(
+                    "\u2190 Prev",
+                    callback_data=f"model:page:{state.action_prefix}:{state.page - 1}",
+                )
+            )
+        nav_row.append(
+            InlineKeyboardButton(f"{state.page + 1}/{total_pages}", callback_data="model:noop")
+        )
+        if state.page + 1 < total_pages:
+            nav_row.append(
+                InlineKeyboardButton(
+                    "Next \u2192",
+                    callback_data=f"model:page:{state.action_prefix}:{state.page + 1}",
+                )
+            )
+        buttons.append(nav_row)
+        return InlineKeyboardMarkup(buttons)
 
     @staticmethod
     def _sender_id(user) -> str:

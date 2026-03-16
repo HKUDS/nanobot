@@ -26,7 +26,9 @@ from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.config.loader import load_config, save_config
 from nanobot.providers.base import LLMProvider
+from nanobot.providers.custom_provider import CustomProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -47,6 +49,7 @@ class AgentLoop:
     """
 
     _TOOL_RESULT_MAX_CHARS = 16_000
+    _DEFAULT_SUBAGENT_MODEL = "claude-haiku-4-5-20251001"
 
     def __init__(
         self,
@@ -72,6 +75,7 @@ class AgentLoop:
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
+        self.subagent_model = self._subagent_default_for_model(self.model)
         self.max_iterations = max_iterations
         self.context_window_tokens = context_window_tokens
         self.web_search_config = web_search_config or WebSearchConfig()
@@ -111,6 +115,23 @@ class AgentLoop:
             get_tool_definitions=self.tools.get_definitions,
         )
         self._register_default_tools()
+
+    def _switch_model(self, model_ref: str) -> None:
+        """Switch active model."""
+        self.model = model_ref
+        cfg = load_config()
+        self.provider = CustomProvider(
+            api_key=cfg.get_api_key() or "",
+            api_base=cfg.get_api_base(),
+            default_model=model_ref,
+        )
+        self.subagents.provider = self.provider
+        logger.info("Switched model to %s", model_ref)
+
+    @classmethod
+    def _subagent_default_for_model(cls, model: str) -> str:
+        """Return default subagent model (fast/cheap) for a given main model."""
+        return cls._DEFAULT_SUBAGENT_MODEL
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -378,7 +399,10 @@ class AgentLoop:
         session = self.sessions.get_or_create(key)
 
         # Slash commands
-        cmd = msg.content.strip().lower()
+        raw = msg.content.strip()
+        cmd = raw.lower()
+        first_token = raw.split(maxsplit=1)[0].lower() if raw else ""
+        cmd_base = first_token.split("@", 1)[0]
         if cmd == "/new":
             try:
                 if not await self.memory_consolidator.archive_unconsolidated(session):
@@ -404,12 +428,79 @@ class AgentLoop:
             lines = [
                 "🐈 nanobot commands:",
                 "/new — Start a new conversation",
+                "/model — Pick or set model (saved to config)",
+                "/reload — Reload nanobot gateway service",
                 "/stop — Stop the current task",
                 "/restart — Restart the bot",
                 "/help — Show available commands",
             ]
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
+            )
+        if cmd_base == "/reload":
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "systemctl", "--user", "reload", "nanobot-gateway",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                )
+                stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=20)
+            except FileNotFoundError:
+                return OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content="Reload failed: `systemctl` not found on this host.",
+                )
+            except asyncio.TimeoutError:
+                return OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content="Reload command timed out after 20s.",
+                )
+            except Exception as exc:
+                return OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content=f"Reload failed: {exc}",
+                )
+            stdout = stdout_b.decode(errors="ignore").strip()
+            stderr = stderr_b.decode(errors="ignore").strip()
+            if proc.returncode == 0:
+                detail = f"\n{stdout}" if stdout else ""
+                return OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content=f"Reloaded `nanobot-gateway` successfully.{detail}",
+                )
+            detail = stderr or stdout or "Unknown error"
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content=f"Reload failed (exit {proc.returncode}): {detail}",
+            )
+        if cmd_base == "/model":
+            parts = raw.split(maxsplit=1)
+            model_arg = parts[1].strip() if len(parts) > 1 else ""
+            if model_arg:
+                cfg = load_config()
+                subagent_model = self._subagent_default_for_model(model_arg)
+                cfg.agents.defaults.model = model_arg
+                self._switch_model(model_arg)
+                self.subagent_model = subagent_model
+                self.subagents.model = subagent_model
+                save_config(cfg)
+                return OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content=(
+                        f"Model saved and activated: {model_arg}\n"
+                        f"Subagent model: {subagent_model}"
+                    ),
+                )
+            all_models = sorted(mid for mid, _ in await self.provider.list_models())
+            content = f"Active: {self.model}"
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content=content,
+                metadata={
+                    "_model_list": all_models,
+                    "_model_action": "active",
+                    "_model_page": 0,
+                    "_current_model": self.model,
+                } if all_models else {},
             )
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
