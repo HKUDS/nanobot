@@ -15,6 +15,7 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Honest delivery**: `DeliveryResult` dataclass + `DeliverySkippedError` for truthful send confirmation
 - **Tool retry guard**: `ToolCallTracker` with 3-level escalation (warn → inject → force-stop) to prevent infinite tool loops
 - **Email validation**: `allow_to` allowlist + `proactive_send_policy` config fields; address format validation
+- **Email checking tool**: `CheckEmailTool` for on-demand mailbox reading via IMAP (periods: unread, today, yesterday, last_N_days, custom date ranges); wired via callback pattern respecting module boundaries
 - **Compression coherence**: paired-drop logic (`_paired_drop_tools`) preserves tool-call/result pairs during context truncation
 - **Delegation verification**: `DelegationResult` attestation, scratchpad grounded tags, post-delegation nudge for ungrounded results
 - **Langfuse hardening**: `atexit` shutdown safety net, `auth_check()` on startup, `sample_rate`/`debug` config fields, verification confidence scoring via `score_current_trace`, session/user/tag propagation on all traces, logging filters for benign litellm/langfuse/OTEL warnings

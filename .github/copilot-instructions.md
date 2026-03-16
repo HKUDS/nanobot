@@ -69,6 +69,7 @@ nanobot/
 │       ├── mission.py   # Background mission launch, status, list, cancel tools
 │       ├── delegate.py  # Multi-agent peer-to-peer + parallel delegation
 │       ├── result_cache.py # Large result caching + LLM summarization
+│       ├── email.py     # On-demand email checking (CheckEmailTool)
 │       ├── excel.py     # Spreadsheet read, query, describe, find tools
 │       └── scratchpad.py # ScratchpadWriteTool for multi-agent artifacts
 ├── config/              # Configuration management

@@ -47,6 +47,7 @@ from nanobot.agent.streaming import StreamingLLMCaller, strip_think
 from nanobot.agent.tool_executor import ToolExecutor
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool, DelegationResult
+from nanobot.agent.tools.email import CheckEmailTool
 from nanobot.agent.tools.excel import (
     DescribeDataTool,
     ExcelFindTool,
@@ -426,6 +427,11 @@ class AgentLoop:
             if _should_register(extra_tool.name):
                 self.tools.register(extra_tool)
 
+        # Email checking tool (callback set later by gateway via set_email_fetch)
+        email_tool = CheckEmailTool()
+        if _should_register(email_tool.name):
+            self.tools.register(email_tool)
+
         if self.cron_service:
             cron_tool = CronTool(self.cron_service)
             if _should_register(cron_tool.name):
@@ -534,6 +540,17 @@ class AgentLoop:
     ) -> None:
         """Set a callback that returns known email contacts (refreshed per-turn)."""
         self._contacts_provider = provider
+
+    def set_email_fetch(
+        self,
+        fetch_callback: Callable[..., list[dict[str, Any]]],
+        fetch_unread_callback: Callable[..., list[dict[str, Any]]],
+    ) -> None:
+        """Wire email fetch callbacks into the CheckEmailTool."""
+        if tool := self.tools.get("check_email"):
+            if isinstance(tool, CheckEmailTool):
+                tool._fetch = fetch_callback
+                tool._fetch_unread = fetch_unread_callback
 
     def _refresh_contacts(self) -> None:
         """Pull latest contacts from the provider into the context builder."""

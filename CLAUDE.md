@@ -76,6 +76,7 @@ nanobot/
 │       ├── mcp.py       # Model Context Protocol
 │       ├── delegate.py  # Multi-agent delegation tools
 │       ├── result_cache.py # Large result caching + LLM summarization
+│       ├── email.py     # On-demand email checking (CheckEmailTool)
 │       ├── excel.py     # Spreadsheet read, query, describe, find tools
 │       ├── cron.py      # Scheduled task tool
 │       ├── feedback.py  # User feedback capture tool

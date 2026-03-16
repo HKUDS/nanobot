@@ -87,6 +87,7 @@ Each module has a clear responsibility, a public API, and boundaries it must not
 | `result_cache.py` | Large result caching + LLM summarization | `ToolResultCache`, `CacheGetSliceTool` | `channels/`, `memory/` |
 | `excel.py` | Spreadsheet read, query, describe, find | `ReadSpreadsheetTool`, `QueryDataTool`, etc. | `channels/`, `memory/` |
 | `cron.py` | Scheduled task creation tool | `CronTool` | `channels/`, `memory/` |
+| `email.py` | On-demand email checking via IMAP | `CheckEmailTool` | `channels/`, `memory/` |
 | `feedback.py` | User feedback capture tool | `FeedbackTool` | `channels/`, `memory/` |
 | `message.py` | Outbound message tool | `MessageTool` | `memory/` |
 | `spawn.py` | Subagent spawning tool | `SpawnTool` | `channels/`, `memory/` |
