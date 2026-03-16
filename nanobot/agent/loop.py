@@ -84,7 +84,7 @@ class AgentLoop:
         self.cron_service = cron_service
         self.peer_buses = peer_buses or {}
         self.peer_profiles = peer_profiles or {}
-        self.allowed_agent_delegates = allowed_agent_delegates or ["*"]
+        self.allowed_agent_delegates = allowed_agent_delegates if allowed_agent_delegates is not None else ["*"]
         self.self_agent_name = self_agent_name
         self.restrict_to_workspace = restrict_to_workspace
 
