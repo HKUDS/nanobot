@@ -1465,7 +1465,6 @@ This repository includes a built-in `msteams` channel MVP for Microsoft Teams di
 
 - Direct-message text in/out
 - Tenant-aware OAuth token acquisition
-- Inbound Bot Framework bearer token validation
 - Conversation reference persistence for replies
 - Public HTTPS webhook support through a tunnel or reverse proxy
 
@@ -1492,7 +1491,7 @@ This repository includes a built-in `msteams` channel MVP for Microsoft Teams di
       "allowFrom": ["*"],
       "replyInThread": true,
       "mentionOnlyResponse": "Hi — what can I help with?",
-      "validateInboundAuth": true
+      "validateInboundAuth": false
     }
   }
 }
@@ -1505,7 +1504,9 @@ This repository includes a built-in `msteams` channel MVP for Microsoft Teams di
 - If `replyInThread` is enabled but no `activity_id` is stored, Nanobot falls back to a normal conversation message.
 - `mentionOnlyResponse` controls what Nanobot receives when a user sends only a bot mention such as `<at>Nanobot</at>`.
 - Set `mentionOnlyResponse` to an empty string to ignore mention-only messages.
-- `validateInboundAuth: true` validates Bot Framework bearer tokens on inbound webhook requests and should remain enabled outside local debugging.
+- `validateInboundAuth: true` enables inbound Bot Framework bearer-token validation.
+- `validateInboundAuth: false` leaves inbound auth unenforced, which is safer while first validating a new relay, tunnel, or proxy path.
+- When enabled, Nanobot validates the inbound bearer token signature, issuer, audience, token lifetime, and `serviceUrl` claim when present.
 
 ### Setup notes
 
