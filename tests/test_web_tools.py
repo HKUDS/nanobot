@@ -13,6 +13,7 @@ from nanobot.agent.tools.web import (
     _normalize,
     _strip_tags,
     _validate_url,
+    _url_cache,
 )
 
 # ---------------------------------------------------------------------------
@@ -144,11 +145,11 @@ async def test_web_fetch_invalid_url() -> None:
 
 @pytest.mark.asyncio
 async def test_web_fetch_json_and_raw(monkeypatch: pytest.MonkeyPatch) -> None:
-    import nanobot.agent.tools.web as _web_mod
-
-    _web_mod._url_cache.clear()
+    _url_cache.clear()
 
     class _Resp:
+        def __init__(self, ctype: str, text: str, payload: dict | None = None):
+            self.headers = {"content-type": ctype}
         def __init__(self, ctype: str, text: str, payload: dict | None = None):
             self.headers = {"content-type": ctype}
             self.text = text
@@ -230,9 +231,7 @@ async def test_web_fetch_html_and_error(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setitem(__import__("sys").modules, "readability", SimpleNamespace(Document=_Doc))
 
     # Clear URL cache from prior tests
-    import nanobot.agent.tools.web as _web_mod
-
-    _web_mod._url_cache.clear()
+    _url_cache.clear()
 
     tool = WebFetchTool(max_chars=20)
     out = await tool.execute(url="https://example.com", extractMode="markdown")
@@ -272,9 +271,7 @@ def test_web_fetch_cache_without_summary() -> None:
 @pytest.mark.asyncio
 async def test_web_fetch_bot_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
     """When userAgent='bot', the request should use the bot UA string."""
-    import nanobot.agent.tools.web as _web_mod
-
-    _web_mod._url_cache.clear()
+    _url_cache.clear()
 
     captured_headers: dict[str, str] = {}
 
@@ -313,9 +310,7 @@ async def test_web_fetch_bot_user_agent(monkeypatch: pytest.MonkeyPatch) -> None
 @pytest.mark.asyncio
 async def test_web_fetch_browser_user_agent_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default userAgent should use the browser UA string."""
-    import nanobot.agent.tools.web as _web_mod
-
-    _web_mod._url_cache.clear()
+    _url_cache.clear()
 
     captured_headers: dict[str, str] = {}
 
