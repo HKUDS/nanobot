@@ -99,6 +99,8 @@
 
 ## ✨ Features
 
+- Provider-reported token usage is preserved in session JSONL history when available (`prompt_tokens`, `completion_tokens`, `total_tokens`).
+
 <table align="center">
   <tr align="center">
     <th><p align="center">📈 24/7 Real-Time Market Analysis</p></th>
