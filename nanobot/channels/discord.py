@@ -258,7 +258,7 @@ class DiscordChannel(BaseChannel):
             return True
 
         if self.config.group_policy == "mention":
-            bot_user_id = self._bot_user_id or (str(self._client.user.id) if self._client and self._client.user else None)
+            bot_user_id = self._bot_user_id
             if bot_user_id is None:
                 logger.debug("Discord message in {} ignored (bot identity unavailable)", message.channel.id)
                 return False
