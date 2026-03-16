@@ -1,0 +1,45 @@
+# Nanobot Staging — Docker Compose
+#
+# Deploy:  deploy/deploy.sh --env staging --image ghcr.io/cgajagon/nanobot:latest
+# Logs:    docker compose -p nanobot-staging -f deploy/staging/docker-compose.yml logs -f
+# Stop:    docker compose -p nanobot-staging -f deploy/staging/docker-compose.yml down
+#
+# Staging runs on port 18791 with reduced resources.
+# Neo4j is disabled to save RAM — graph features won't be available.
+
+x-common: &common
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "5m"
+      max-file: "2"
+
+services:
+  nanobot-gateway:
+    <<: *common
+    container_name: nanobot-staging
+    image: ${NANOBOT_IMAGE:-ghcr.io/cgajagon/nanobot:latest}
+    command: ["gateway", "--port", "18791"]
+    ports:
+      - "127.0.0.1:18791:18791"
+    volumes:
+      - ${NANOBOT_CONFIG_DIR:-~/.nanobot-staging}:/root/.nanobot
+    env_file:
+      - .env
+    environment:
+      - NANOBOT_GATEWAY__PORT=18791
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    networks:
+      - nanobot-staging
+
+networks:
+  nanobot-staging:
+    name: nanobot-staging

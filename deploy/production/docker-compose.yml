@@ -1,0 +1,67 @@
+# Nanobot Production — Docker Compose
+#
+# Deploy:  deploy/deploy.sh --env production --image ghcr.io/cgajagon/nanobot:latest
+# Logs:    docker compose -p nanobot-prod -f deploy/production/docker-compose.yml logs -f
+# Stop:    docker compose -p nanobot-prod -f deploy/production/docker-compose.yml down
+
+x-common: &common
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  nanobot-gateway:
+    <<: *common
+    container_name: nanobot-prod
+    image: ${NANOBOT_IMAGE:-ghcr.io/cgajagon/nanobot:latest}
+    command: ["gateway", "--port", "18790"]
+    ports:
+      - "127.0.0.1:18790:18790"
+    volumes:
+      - ${NANOBOT_CONFIG_DIR:-~/.nanobot}:/root/.nanobot
+    env_file:
+      - .env
+    environment:
+      - NANOBOT_GATEWAY__PORT=18790
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - nanobot-prod
+
+  neo4j:
+    <<: *common
+    container_name: nanobot-prod-neo4j
+    image: neo4j:5-community
+    ports:
+      - "127.0.0.1:7687:7687"
+      - "127.0.0.1:7474:7474"
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/nanobot_graph}
+    volumes:
+      - neo4j-prod-data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+    networks:
+      - nanobot-prod
+
+networks:
+  nanobot-prod:
+    name: nanobot-prod
+
+volumes:
+  neo4j-prod-data:
