@@ -5,6 +5,7 @@ on:
     workflows: ["Build & Push Docker Image"]
     types: [completed]
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,7 +15,7 @@ jobs:
   deploy-staging:
     name: Deploy to staging
     runs-on: [self-hosted, linux, x64]
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     timeout-minutes: 10
 
     environment:
@@ -31,9 +32,13 @@ jobs:
       - name: Determine image tag
         id: tag
         run: |
-          SHORT_SHA=$(echo "${{ github.event.workflow_run.head_sha }}" | cut -c1-7)
-          echo "image=ghcr.io/${{ github.repository }}:sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
-          echo "Deploying image: ghcr.io/${{ github.repository }}:sha-${SHORT_SHA}"
+          if [ -n "${{ github.event.workflow_run.head_sha }}" ]; then
+            SHORT_SHA=$(echo "${{ github.event.workflow_run.head_sha }}" | cut -c1-7)
+            echo "image=ghcr.io/${{ github.repository }}:sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          else
+            echo "image=ghcr.io/${{ github.repository }}:latest" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Deploying image: $(grep image= "$GITHUB_OUTPUT" | cut -d= -f2-)"
 
       - name: Deploy to staging
         run: |
