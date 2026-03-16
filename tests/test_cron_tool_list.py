@@ -1,8 +1,8 @@
 """Tests for CronTool._list_jobs() output formatting."""
 
-from nanobot.cron.service import CronService
-from nanobot.cron.types import CronJob, CronJobState, CronSchedule
 from nanobot.agent.tools.cron import CronTool
+from nanobot.cron.service import CronService
+from nanobot.cron.types import CronSchedule
 
 
 def _make_tool(tmp_path) -> CronTool:
