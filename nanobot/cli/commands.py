@@ -406,11 +406,11 @@ def gateway(
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
     from nanobot.session.manager import SessionManager
-    from nanobot.utils.lock_manager import check_duplicate_instance, release_instance_lock
+    from nanobot.utils.lock_manager import confirm_single_instance, release_instance_lock
 
-    # Check for duplicate instance with same config - do this before loading config
+    # Confirm single instance with same config - do this before loading config
     config_path = Path(config or "~/.nanobot/config.json").expanduser().resolve() if config else None
-    if not check_duplicate_instance(config_path):
+    if not confirm_single_instance(config_path):
         console.print("[red]Error: Another instance with the same config is already running.[/red]")
         console.print(f"[red]Config file: {config_path}[/red]")
         console.print("[red]Please stop the existing instance first or use a different config file.[/red]")
@@ -419,7 +419,6 @@ def gateway(
     if verbose:
         import logging
         logging.basicConfig(level=logging.DEBUG)
-
     config = _load_runtime_config(config, workspace)
     _print_deprecated_memory_window_notice(config)
     

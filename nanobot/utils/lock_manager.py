@@ -145,8 +145,8 @@ class LockManager:
                 self._lock_fd = None
 
 
-def check_duplicate_instance(config_path: Optional[Path] = None) -> bool:
-    """Check if another instance with the same config is running.
+def confirm_single_instance(config_path: Optional[Path] = None) -> bool:
+    """Confirm that only a single instance with the given config is running.
     
     Args:
         config_path: Path to config file to check for duplicates

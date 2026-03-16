@@ -9,7 +9,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from nanobot.utils.lock_manager import LockManager, check_duplicate_instance, release_instance_lock
+from nanobot.utils.lock_manager import LockManager, confirm_single_instance, release_instance_lock
 
 
 class TestLockManager:
@@ -129,14 +129,14 @@ class TestLockManager:
             if config_path.exists():
                 config_path.unlink()
     
-    def test_check_duplicate_instance_helper(self):
-        """Test the check_duplicate_instance helper function."""
+    def test_confirm_single_instance_helper(self):
+        """Test the confirm_single_instance helper function."""
         with tempfile.NamedTemporaryFile(delete=False) as temp_config:
             config_path = Path(temp_config.name)
             
         try:
             # Should be able to acquire lock initially (no duplicate)
-            assert check_duplicate_instance(config_path) is True
+            assert confirm_single_instance(config_path) is True
             
             # Create another instance to try to acquire the same lock
             # This should fail because the lock is already held by the first call
@@ -145,14 +145,14 @@ class TestLockManager:
             lock_manager = LockManager(config_path)
             assert lock_manager.acquire() is True  # Hold the lock
             
-            # Now check_duplicate_instance should return False (duplicate detected)
-            assert check_duplicate_instance(config_path) is False
+            # Now confirm_single_instance should return False (duplicate detected)
+            assert confirm_single_instance(config_path) is False
             
             # Release the lock
             lock_manager.release()
             
             # Should be able to acquire again after release
-            assert check_duplicate_instance(config_path) is True
+            assert confirm_single_instance(config_path) is True
             
         finally:
             # Clean up temp file
