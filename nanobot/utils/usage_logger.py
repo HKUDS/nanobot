@@ -8,6 +8,8 @@ from pathlib import Path
 
 from loguru import logger
 
+from nanobot.utils.helpers import ensure_dir
+
 
 class UsageLogger:
     """Append-only JSONL logger for per-request LLM token usage.
@@ -20,8 +22,8 @@ class UsageLogger:
 
     _FILENAME = "usage.jsonl"
 
-    def __init__(self, log_dir: Path) -> None:
-        self._log_dir = log_dir / "logs"
+    def __init__(self, workspace: Path) -> None:
+        self._log_dir = workspace / "logs"
         self._path = self._log_dir / self._FILENAME
 
     def log(
@@ -48,9 +50,8 @@ class UsageLogger:
             record["provider"] = provider
 
         try:
-            if not self._log_dir.exists():
-                self._log_dir.mkdir(parents=True, exist_ok=True)
+            ensure_dir(self._log_dir)
             with self._path.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(record, ensure_ascii=False) + "\n")
         except OSError:
-            logger.opt(exception=True).warning("Failed to write usage log")
+            logger.exception("Failed to write usage log")
