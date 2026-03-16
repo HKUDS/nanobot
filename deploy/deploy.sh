@@ -129,6 +129,13 @@ else
     docker pull "$IMAGE"
 fi
 
+# Stop existing container if running outside Compose project
+if docker inspect "$CONTAINER_NAME" > /dev/null 2>&1; then
+    log "Stopping existing container: $CONTAINER_NAME"
+    docker stop "$CONTAINER_NAME" 2>/dev/null || true
+    docker rm "$CONTAINER_NAME" 2>/dev/null || true
+fi
+
 log "Starting services..."
 cd "$COMPOSE_DIR"
 NANOBOT_IMAGE="$IMAGE" docker compose -p "$PROJECT_NAME" -f docker-compose.yml up -d --remove-orphans
