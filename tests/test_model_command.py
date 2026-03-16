@@ -1,4 +1,4 @@
-"""Tests for /model and /reload slash commands."""
+"""Tests for /model, /reload, and slash command aliases."""
 
 from __future__ import annotations
 
@@ -148,3 +148,30 @@ async def test_reload_reloads_runtime_in_process(tmp_path):
         "Main model: main-model\n"
         "Subagent model: sub-model"
     )
+
+
+@pytest.mark.asyncio
+async def test_help_command_accepts_telegram_command_suffix(tmp_path):
+    loop, _provider, _subagents = _make_loop(tmp_path)
+
+    response = await loop._process_message(
+        InboundMessage(channel="telegram", sender_id="u1", chat_id="123", content="/help@nanobot_test")
+    )
+
+    assert response is not None
+    assert "/model — Pick or set main/subagent model" in response.content
+
+
+@pytest.mark.asyncio
+async def test_new_command_accepts_telegram_command_suffix(tmp_path):
+    loop, _provider, _subagents = _make_loop(tmp_path)
+
+    response = await loop._process_message(
+        InboundMessage(channel="telegram", sender_id="u1", chat_id="123", content="/new@nanobot_test")
+    )
+
+    loop.memory_consolidator.archive_unconsolidated.assert_awaited_once()
+    loop.sessions.save.assert_called_once()
+    loop.sessions.invalidate.assert_called_once()
+    assert response is not None
+    assert response.content == "New session started."

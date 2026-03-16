@@ -164,6 +164,7 @@ class ModelPickerState:
     action_prefix: str
     current_model: str
     page: int
+    token_to_model: dict[str, str]
 
     def total_pages(self, page_size: int) -> int:
         return max(1, (len(self.models) + page_size - 1) // page_size)
@@ -520,18 +521,26 @@ class TelegramChannel(BaseChannel):
                 return
             await self._update_model_picker(query, action_prefix, page)
             return
-        model_id = parts[1] if len(parts) == 2 else parts[2] if len(parts) >= 3 else payload
         chat_id = str(query.message.chat_id)
         sender_id = self._sender_id(query.from_user) if query.from_user else "unknown"
+        state = self._model_picker_state.get(chat_id)
+        if not state:
+            return
+        model_token = parts[1] if len(parts) == 2 else parts[2] if len(parts) >= 3 else payload
+        model_id = state.token_to_model.get(model_token)
+        if not model_id:
+            return
+        command = self._model_command_for_action(state.action_prefix, model_id)
+        label = "main model" if state.action_prefix == "set" else "subagent model"
 
         await self._handle_message(
             sender_id=sender_id,
             chat_id=chat_id,
-            content=f"/model {model_id}",
+            content=command,
         )
 
         try:
-            text = f"Model saved and active: <b>{model_id}</b>"
+            text = f"Requested {label}: <b>{model_id}</b>"
             await query.edit_message_text(text, parse_mode="HTML")
         except Exception:
             pass
@@ -551,6 +560,7 @@ class TelegramChannel(BaseChannel):
             action_prefix=action_prefix,
             current_model=current_model,
             page=page,
+            token_to_model={},
         )
         self._model_picker_state[chat_id] = state
         return self._render_model_keyboard(state)
@@ -571,12 +581,15 @@ class TelegramChannel(BaseChannel):
         state.clamp_page(MODEL_PICKER_PAGE_SIZE, state.page)
         total_pages = state.total_pages(MODEL_PICKER_PAGE_SIZE)
         page_models = state.page_models(MODEL_PICKER_PAGE_SIZE)
+        state.token_to_model = {}
 
         buttons: list[list[InlineKeyboardButton]] = []
-        for mid in page_models:
+        for idx, mid in enumerate(page_models):
             label = f"\u2713 {mid}" if mid == state.current_model else mid
+            token = str(idx)
+            state.token_to_model[token] = mid
             buttons.append([
-                InlineKeyboardButton(label, callback_data=f"model:{state.action_prefix}:{mid}")
+                InlineKeyboardButton(label, callback_data=f"model:{state.action_prefix}:{token}")
             ])
 
         nav_row: list[InlineKeyboardButton] = []
@@ -599,6 +612,13 @@ class TelegramChannel(BaseChannel):
             )
         buttons.append(nav_row)
         return InlineKeyboardMarkup(buttons)
+
+    @staticmethod
+    def _model_command_for_action(action_prefix: str, model_id: str) -> str:
+        """Map a picker action to the matching /model command."""
+        if action_prefix == "subagent":
+            return f"/model subagent {model_id}"
+        return f"/model {model_id}"
 
     @staticmethod
     def _sender_id(user) -> str:

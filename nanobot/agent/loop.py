@@ -164,7 +164,7 @@ class AgentLoop:
         self.tools = ToolRegistry()
         self._register_default_tools()
 
-        logger.info("Reloaded runtime config: main_model=%s subagent_model=%s", main_model, subagent_model)
+        logger.info("Reloaded runtime config: main_model={} subagent_model={}", main_model, subagent_model)
         return main_model, subagent_model
 
     def _register_default_tools(self) -> None:
@@ -437,7 +437,7 @@ class AgentLoop:
         cmd = raw.lower()
         first_token = raw.split(maxsplit=1)[0].lower() if raw else ""
         cmd_base = first_token.split("@", 1)[0]
-        if cmd == "/new":
+        if cmd_base == "/new":
             try:
                 if not await self.memory_consolidator.archive_unconsolidated(session):
                     return OutboundMessage(
@@ -458,7 +458,7 @@ class AgentLoop:
             self.sessions.invalidate(session.key)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
-        if cmd == "/help":
+        if cmd_base == "/help":
             lines = [
                 "🐈 nanobot commands:",
                 "/new — Start a new conversation",

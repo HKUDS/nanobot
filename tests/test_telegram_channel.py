@@ -663,3 +663,50 @@ async def test_on_help_includes_restart_command() -> None:
     update.message.reply_text.assert_awaited_once()
     help_text = update.message.reply_text.await_args.args[0]
     assert "/restart" in help_text
+
+
+def test_build_model_keyboard_uses_compact_callback_tokens() -> None:
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]), MessageBus())
+
+    keyboard = channel._build_model_keyboard(
+        chat_id="123",
+        model_list=["very-long-provider/model-name-that-should-not-be-in-callback-data"],
+        action_prefix="set",
+        page=0,
+        current_model="",
+    )
+
+    callback_data = keyboard.inline_keyboard[0][0].callback_data
+    assert callback_data == "model:set:0"
+    assert len(callback_data) < 64
+
+
+@pytest.mark.asyncio
+async def test_model_callback_preserves_subagent_action() -> None:
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]), MessageBus())
+    channel._handle_message = AsyncMock()
+    channel._build_model_keyboard(
+        chat_id="123",
+        model_list=["provider/model-a"],
+        action_prefix="subagent",
+        page=0,
+        current_model="provider/model-a",
+    )
+
+    query = SimpleNamespace(
+        data="model:subagent:0",
+        message=SimpleNamespace(chat_id=123),
+        from_user=SimpleNamespace(id=12345, username="alice"),
+        answer=AsyncMock(),
+        edit_message_text=AsyncMock(),
+    )
+    update = SimpleNamespace(callback_query=query)
+
+    await channel._on_model_callback(update, None)
+
+    channel._handle_message.assert_awaited_once_with(
+        sender_id="12345|alice",
+        chat_id="123",
+        content="/model subagent provider/model-a",
+    )
+    query.edit_message_text.assert_awaited_once()
