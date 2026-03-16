@@ -100,6 +100,7 @@ class AgentLoop:
         self._mcp_connected = False
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
+        self._pending_archives: list[asyncio.Task] = []
         self._processing_lock = asyncio.Lock()
         self.memory_consolidator = MemoryConsolidator(
             workspace=workspace,
@@ -330,7 +331,10 @@ class AgentLoop:
                 ))
 
     async def close_mcp(self) -> None:
-        """Close MCP connections."""
+        """Drain pending background archives, then close MCP connections."""
+        if self._pending_archives:
+            await asyncio.gather(*self._pending_archives, return_exceptions=True)
+            self._pending_archives.clear()
         if self._mcp_stack:
             try:
                 await self._mcp_stack.aclose()
@@ -380,28 +384,17 @@ class AgentLoop:
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
-            # Capture messages before clearing for background archival
-            messages_to_archive = session.messages[session.last_consolidated:]
-
-            # Immediately clear session and return
+            snapshot = session.messages[session.last_consolidated:]
             session.clear()
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
 
-            # Schedule background archival (serialized with normal consolidation via lock)
-            if messages_to_archive:
-
-                async def _archive_in_background():
-                    lock = self.memory_consolidator.get_lock(session.key)
-                    async with lock:
-                        try:
-                            success = await self.memory_consolidator.consolidate_messages(messages_to_archive)
-                            if not success:
-                                logger.warning("/new background archival failed for {}", session.key)
-                        except Exception:
-                            logger.exception("/new background archival error for {}", session.key)
-
-                asyncio.create_task(_archive_in_background())
+            if snapshot:
+                task = asyncio.create_task(
+                    self.memory_consolidator.archive_messages(snapshot)
+                )
+                self._pending_archives.append(task)
+                task.add_done_callback(self._pending_archives.remove)
 
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
