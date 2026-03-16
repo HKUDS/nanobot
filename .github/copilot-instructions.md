@@ -69,6 +69,7 @@ nanobot/
 │       ├── mission.py   # Background mission launch, status, list, cancel tools
 │       ├── delegate.py  # Multi-agent peer-to-peer + parallel delegation
 │       ├── result_cache.py # Large result caching + LLM summarization
+│       ├── email.py     # On-demand email checking (CheckEmailTool)
 │       ├── excel.py     # Spreadsheet read, query, describe, find tools
 │       └── scratchpad.py # ScratchpadWriteTool for multi-agent artifacts
 ├── config/              # Configuration management
@@ -152,13 +153,19 @@ make install        # Install dev dependencies
 make install-all    # Install with optional extras (reranker, oauth) + npm bridge
 make test           # Run tests (fast, stop on first failure)
 make test-verbose   # Run tests with verbose output
-make test-cov       # Run tests with coverage report
-make lint           # Ruff lint check
+make test-cov       # Run tests with coverage report (85% gate)
+make lint           # Ruff lint + format check
 make format         # Auto-format with ruff
 make typecheck      # Run mypy type checker
 make check          # Full validation: lint + typecheck + import-check + prompt-check + test
+make ci             # CI pipeline: lint + typecheck + import-check + prompt-check + test-cov
+make pre-push       # CI + merge-readiness check (run before pushing PRs)
+make import-check   # Check module boundary violations
+make prompt-check   # Check prompt manifest consistency
 make memory-eval    # Run memory retrieval benchmark
+make live-eval      # Run live agent evaluation
 make clean          # Remove build artifacts
+make pre-commit-install  # Install pre-commit hooks
 ```
 
 ## Adding a New Tool

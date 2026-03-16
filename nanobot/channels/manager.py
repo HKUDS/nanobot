@@ -276,6 +276,29 @@ class ChannelManager:
             return ch.known_recipients
         return []
 
+    def fetch_emails(self, start_date: Any, end_date: Any, limit: int = 20) -> list[dict[str, Any]]:
+        """Fetch emails in a date range via the email channel."""
+        ch = self.channels.get("email")
+        if ch is None:
+            return []
+        from nanobot.channels.email import EmailChannel
+
+        if isinstance(ch, EmailChannel):
+            return ch.fetch_messages_between_dates(start_date, end_date, limit)
+        return []
+
+    def fetch_unread_emails(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Fetch unread emails via the email channel."""
+        ch = self.channels.get("email")
+        if ch is None:
+            return []
+        from nanobot.channels.email import EmailChannel
+
+        if isinstance(ch, EmailChannel):
+            msgs = ch._fetch_new_messages()
+            return msgs[:limit] if limit and len(msgs) > limit else msgs
+        return []
+
     # ------------------------------------------------------------------
     # Dead-letter replay (Step 16)
     # ------------------------------------------------------------------

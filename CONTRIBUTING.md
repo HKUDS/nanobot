@@ -13,50 +13,22 @@ make check         # Verify everything works: lint + typecheck + test
 
 ```
 nanobot/
-├── agent/               # Core agent engine
-│   ├── loop.py          # Plan-Act-Observe-Reflect main loop — the central processing engine
-│   ├── context.py       # Prompt assembly, token budgeting, 3-phase context compression
-│   ├── skills.py        # Skill discovery: loads YAML frontmatter from SKILL.md files
-│   ├── subagent.py      # Subagent spawning for parallel task delegation
-│   ├── memory/          # Memory subsystem (mem0-first with local fallback)
-│   │   ├── store.py     # MemoryStore — primary public API for all memory operations
-│   │   ├── retrieval.py # Local keyword-based retrieval (fallback when mem0 unavailable)
-│   │   ├── extractor.py # LLM + heuristic extraction of structured memory events
-│   │   ├── persistence.py # Low-level file I/O: events.jsonl, profile.json, MEMORY.md
-│   │   ├── mem0_adapter.py # mem0 vector store adapter with health checks + fallback
-│   │   ├── reranker.py  # Optional cross-encoder re-ranking (sentence-transformers)
-│   │   └── constants.py # Shared constants and tool schemas for memory operations
-│   └── tools/           # Tool implementations
-│       ├── base.py      # Tool ABC + ToolResult dataclass
-│       ├── registry.py  # ToolRegistry — registration, validation, parallel/sequential execution
-│       ├── shell.py     # ExecTool — shell execution with deny/allow security patterns
-│       ├── filesystem.py # ReadFile, WriteFile, EditFile, ListDir with path validation
-│       ├── web.py       # WebFetch + WebSearch tools
-│       ├── mcp.py       # Model Context Protocol integration
-│       ├── feedback.py  # User feedback capture (thumbs up/down, corrections)
-│       ├── cron.py      # Scheduled task creation tool
-│       ├── message.py   # Outbound message tool
-│       └── spawn.py     # Subagent spawning tool
-├── config/              # Configuration management
-│   ├── schema.py        # Pydantic config models (Config, AgentDefaults, ChannelConfig, ...)
-│   └── loader.py        # Config file loading with migration support
-├── channels/            # Chat platform integrations
-│   ├── base.py          # BaseChannel ABC — extend this for new platforms
-│   ├── manager.py       # ChannelManager — multi-channel orchestration
-│   └── telegram.py, discord.py, slack.py, whatsapp.py, ...
-├── providers/           # LLM provider abstraction
-│   ├── base.py          # LLMProvider ABC, LLMResponse, StreamChunk dataclasses
-│   ├── litellm_provider.py # Primary provider (100+ models via litellm)
-│   └── registry.py      # Provider discovery
-├── bus/                 # Async message bus (decoupled channel↔agent communication)
-├── session/             # Conversation session management
-├── cron/                # Cron service for scheduled agent tasks
-├── heartbeat/           # Periodic task execution (reads HEARTBEAT.md every 30 min)
-├── skills/              # Built-in skills (weather, github, summarize, cron, ...)
-├── cli/                 # Typer CLI (onboard, agent, gateway, memory, cron commands)
-├── errors.py            # Structured error taxonomy (NanobotError hierarchy)
-└── utils/               # Path helpers, filename sanitization
+├── agent/          # Core engine: loop, context, streaming, tools/, memory/
+├── channels/       # Chat platforms (Telegram, Discord, Slack, WhatsApp, Email, Web)
+├── providers/      # LLM provider abstraction (100+ models via litellm)
+├── bus/            # Async message bus (channel↔agent decoupling)
+├── config/         # Pydantic config models + loader with migration
+├── session/        # Conversation session management
+├── cron/           # Scheduled task service
+├── heartbeat/      # Periodic task execution (reads HEARTBEAT.md)
+├── skills/         # Built-in skills (weather, github, summarize, ...)
+├── cli/            # Typer CLI (onboard, agent, gateway, memory, cron)
+├── errors.py       # Structured error taxonomy (NanobotError hierarchy)
+└── utils/          # Path helpers, filename sanitization
 ```
+
+> For detailed module ownership, file-level descriptions, and import rules, see
+> [docs/architecture.md](../docs/architecture.md).
 
 ## Development Workflow
 
@@ -81,7 +53,7 @@ nanobot/
    refactor: extract token counting from context builder
    ```
 
-4. **Push**: Ensure `make check` passes before pushing
+4. **Push**: Run `make pre-push` before pushing (CI + merge-readiness check)
 
 ## Coding Conventions
 
@@ -156,8 +128,9 @@ Never catch bare `Exception` — use the specific error type.
 ```bash
 make test           # Fast: stop on first failure (-x -q)
 make test-verbose   # Verbose output
-make test-cov       # With coverage report
+make test-cov       # With coverage report (85% gate)
 make memory-eval    # Deterministic memory retrieval benchmark
+make live-eval      # Run live agent evaluation
 ```
 
 ### Writing Tests
@@ -278,8 +251,8 @@ All changes follow a PR-first workflow. No direct pushes to `main`.
 2. **Branch** from `main`: `git checkout -b feature/short-description`
 3. **Implement** the change. Run `make check` after every edit.
 4. **Commit** with a clear message: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`.
-5. **Push** and open a PR. Fill out the PR template checklist.
-6. **CI must pass** — lint, typecheck, and tests.
+5. **Push**: Run `make pre-push` to validate CI + merge-readiness, then push and open a PR.
+6. **CI must pass** — lint, typecheck, import-check, prompt-check, and tests.
 7. **Review** — request Copilot review + human review for non-trivial changes.
 8. **Merge** only after all checks pass.
 

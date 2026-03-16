@@ -16,7 +16,7 @@ Closes #
 ## Checklist
 
 ### Required
-- [ ] `make check` passes (lint + typecheck + test)
+- [ ] `make check` passes (lint + typecheck + import-check + prompt-check + test)
 - [ ] Tests added or updated for changed behavior
 - [ ] No unrelated changes ("while I'm here" changes split to separate PR)
 - [ ] Public API preserved (or ADR written if changed)

@@ -478,6 +478,10 @@ def gateway(
     agent.set_contacts_provider(channels.get_email_contacts)
     agent.context.set_contacts_context(channels.get_email_contacts())
 
+    # Wire email fetch so check_email tool can read the mailbox on demand
+    if config.channels.email.enabled:
+        agent.set_email_fetch(channels.fetch_emails, channels.fetch_unread_emails)
+
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
         enabled = set(channels.enabled_channels)
