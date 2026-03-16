@@ -167,13 +167,22 @@ The memory subsystem (`nanobot/agent/memory/`) uses a **mem0-first strategy**:
 
 ```bash
 make install        # Install dev dependencies
+make install-all    # Install with optional extras (reranker, oauth) + npm bridge
 make test           # Run tests (stop on first failure)
-make lint           # Ruff lint check
+make test-verbose   # Run tests with verbose output
+make test-cov       # Run tests with coverage report (85% gate)
+make lint           # Ruff lint + format check
 make format         # Auto-format with ruff
 make typecheck      # mypy type checker
 make check          # Full validation: lint + typecheck + import-check + prompt-check + test
+make ci             # CI pipeline: lint + typecheck + import-check + prompt-check + test-cov
+make pre-push       # CI + merge-readiness check (run before pushing PRs)
+make import-check   # Check module boundary violations
+make prompt-check   # Check prompt manifest consistency
 make memory-eval    # Deterministic memory retrieval benchmark
+make live-eval      # Run live agent evaluation
 make clean          # Remove __pycache__, .mypy_cache, etc.
+make pre-commit-install  # Install pre-commit hooks
 ```
 
 ## Architecture & Refactoring

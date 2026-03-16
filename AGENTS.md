@@ -17,6 +17,7 @@ Run after every code change:
 ```bash
 make lint && make typecheck    # Fast feedback
 make check                     # Full: lint + typecheck + import-check + prompt-check + test
+make pre-push                  # CI + merge-readiness check (run before pushing PRs)
 ```
 
 ## Python Conventions

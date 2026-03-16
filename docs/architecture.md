@@ -1,7 +1,7 @@
 # Nanobot Architecture
 
 > Living document. Updated as the codebase evolves.
-> Last updated: 2026-03-15.
+> Last updated: 2026-03-16.
 
 ## Overview
 
@@ -52,7 +52,8 @@ Each module has a clear responsibility, a public API, and boundaries it must not
 | `registry.py` | Agent role registry (name → config mapping) | `AgentRegistry.get()`, `.register()` | `channels/`, `cli/`, `providers/` |
 | `scratchpad.py` | Session-scoped JSONL artifact sharing | `Scratchpad.write()`, `.read()` | `channels/`, `providers/` |
 | `skills.py` | Skill discovery and YAML frontmatter loading | `SkillsLoader.load()` | `channels/`, `providers/` |
-| `subagent.py` | Subagent spawning for parallel tasks | `spawn_subagent()` | `channels/` |
+| `mission.py` | Background mission manager (async delegated tasks) | `MissionManager`, `Mission`, `MissionStatus` | `channels/`, `cli/` |
+| `tool_loop.py` | Shared lightweight think→act→observe loop | `run_tool_loop()` | `channels/`, `cli/` |
 | `observability.py` | Langfuse OTEL tracing: init, shutdown, spans, scoring | `init_langfuse()`, `shutdown()`, `trace_request()`, `tool_span()`, `span()` | `channels/`, `cli/` |
 | `tracing.py` | Correlation IDs via contextvars, structured log binding | `TraceContext`, `bind_trace()` | `channels/`, `cli/` |
 
@@ -90,7 +91,7 @@ Each module has a clear responsibility, a public API, and boundaries it must not
 | `email.py` | On-demand email checking via IMAP | `CheckEmailTool` | `channels/`, `memory/` |
 | `feedback.py` | User feedback capture tool | `FeedbackTool` | `channels/`, `memory/` |
 | `message.py` | Outbound message tool | `MessageTool` | `memory/` |
-| `spawn.py` | Subagent spawning tool | `SpawnTool` | `channels/`, `memory/` |
+| `mission.py` | Background mission launch, status, list, cancel | `MissionStartTool`, `MissionStatusTool`, `MissionListTool`, `MissionCancelTool` | `channels/`, `memory/` |
 | `scratchpad.py` | Scratchpad read/write tools | `ScratchpadWriteTool`, `ScratchpadReadTool` | `channels/`, `memory/` |
 
 ### `channels/` — Chat Platform Adapters
