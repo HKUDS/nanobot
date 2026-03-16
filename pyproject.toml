@@ -3,10 +3,8 @@ name = "nanobot-ai"
 version = "0.1.4.post4"
 description = "A lightweight personal AI assistant framework"
 requires-python = ">=3.11"
-license = {text = "MIT"}
-authors = [
-    {name = "nanobot contributors"}
-]
+license = { text = "MIT" }
+authors = [{ name = "nanobot contributors" }]
 keywords = ["ai", "agent", "chatbot"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -50,17 +48,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-wecom = [
-    "wecom-aibot-sdk-python>=0.1.5",
-]
+wecom = ["wecom-aibot-sdk-python>=0.1.5"]
+zalo = ["python-zalo-bot>=0.1.4", "fastapi>=0.115.0", "uvicorn>=0.34.0"]
 matrix = [
     "matrix-nio[e2e]>=0.25.2",
     "mistune>=3.0.0,<4.0.0",
     "nh3>=0.2.17,<1.0.0",
 ]
-langsmith = [
-    "langsmith>=0.1.0",
-]
+langsmith = ["langsmith>=0.1.0"]
 dev = [
     "pytest>=9.0.0,<10.0.0",
     "pytest-asyncio>=1.3.0,<2.0.0",
@@ -98,12 +93,7 @@ packages = ["nanobot"]
 "bridge" = "nanobot/bridge"
 
 [tool.hatch.build.targets.sdist]
-include = [
-    "nanobot/",
-    "bridge/",
-    "README.md",
-    "LICENSE",
-]
+include = ["nanobot/", "bridge/", "README.md", "LICENSE"]
 
 [tool.ruff]
 line-length = 100
