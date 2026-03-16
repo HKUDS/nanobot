@@ -979,7 +979,7 @@ nanobot supports multiple web search providers. Configure in `~/.nanobot/config.
 | Provider | Config fields | Env var fallback | Free |
 |----------|--------------|------------------|------|
 | `brave` (default) | `apiKey` | `BRAVE_API_KEY` | No |
-| `exa` | `apiKey` | `EXA_API_KEY` | No |
+| `exa` | `apiKey` | `EXA_API_KEY` | Free tier(1000k per month, no credit card need) |
 | `tavily` | `apiKey` | `TAVILY_API_KEY` | No |
 | `jina` | `apiKey` | `JINA_API_KEY` | Free tier (10M tokens) |
 | `searxng` | `baseUrl` | `SEARXNG_BASE_URL` | Yes (self-hosted) |
