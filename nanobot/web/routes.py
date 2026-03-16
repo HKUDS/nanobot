@@ -24,8 +24,9 @@ router = APIRouter(prefix="/api")
 WEB_PREFIX = "web:"
 
 # Matches <attachment name="…">…</attachment> blocks injected by assistant-ui
+# Handles both quoted (name="file.csv") and unquoted (name=file.csv) attributes
 _ATTACHMENT_RE = re.compile(
-    r"<attachment\b[^>]*?name=[\"']([^\"']+)[\"'][^>]*>(.*?)</attachment>",
+    r"<attachment\b[^>]*?name=[\"']?([^\"'>\s]+)[\"']?[^>]*>(.*?)</attachment>",
     re.DOTALL,
 )
 
