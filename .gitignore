@@ -21,4 +21,6 @@ poetry.lock
 .pytest_cache/
 botpy.log
 nano.*.save
+.DS_Store
+uv.lock
 .idea
