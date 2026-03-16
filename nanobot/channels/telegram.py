@@ -6,8 +6,10 @@ import asyncio
 import re
 import time
 import unicodedata
+from typing import Any, Literal
 
 from loguru import logger
+from pydantic import Field
 from telegram import BotCommand, ReplyParameters, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
@@ -16,7 +18,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import TelegramConfig
+from nanobot.config.schema import Base
 from nanobot.utils.helpers import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
@@ -148,6 +150,17 @@ def _markdown_to_telegram_html(text: str) -> str:
     return text
 
 
+class TelegramConfig(Base):
+    """Telegram channel configuration."""
+
+    enabled: bool = False
+    token: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+    proxy: str | None = None
+    reply_to_message: bool = False
+    group_policy: Literal["open", "mention"] = "mention"
+
+
 class TelegramChannel(BaseChannel):
     """
     Telegram channel using long polling.
@@ -167,7 +180,13 @@ class TelegramChannel(BaseChannel):
         BotCommand("restart", "Restart the bot"),
     ]
 
-    def __init__(self, config: TelegramConfig, bus: MessageBus):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return TelegramConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = TelegramConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self._app: Application | None = None
@@ -434,6 +453,7 @@ class TelegramChannel(BaseChannel):
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
+            "/restart — Restart the bot\n"
             "/help — Show available commands"
         )
 
@@ -514,7 +534,8 @@ class TelegramChannel(BaseChannel):
                 getattr(media_file, "file_name", None),
             )
             media_dir = get_media_dir("telegram")
-            file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
+            unique_id = getattr(media_file, "file_unique_id", media_file.file_id)
+            file_path = media_dir / f"{unique_id}{ext}"
             await file.download_to_drive(str(file_path))
             path_str = str(file_path)
             if media_type in ("voice", "audio"):

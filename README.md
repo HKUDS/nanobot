@@ -169,7 +169,9 @@ nanobot channels login
 
 > [!TIP]
 > Set your API key in `~/.nanobot/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
+> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global)
+>
+> For web search capability setup, please see [Web Search](#web-search).
 
 **1. Initialize**
 
@@ -214,7 +216,9 @@ That's it! You have a working AI assistant in 2 minutes.
 
 ## 💬 Chat Apps
 
-Connect nanobot to your favorite chat platform.
+Connect nanobot to your favorite chat platform. Want to build your own? See the [Channel Plugin Guide](.docs/CHANNEL_PLUGIN_GUIDE.md).
+
+> Channel plugin support is available in the `main` branch; not yet published to PyPI.
 
 | Channel | What you need |
 |---------|---------------|
@@ -542,6 +546,7 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
 **3. Configure**
 
 > - `allowFrom`: Add your openid (find it in nanobot logs when you message the bot). Use `["*"]` for public access.
+> - `msgFormat`: Optional. Use `"plain"` (default) for maximum compatibility with legacy QQ clients, or `"markdown"` for richer formatting on newer clients.
 > - For production: submit a review in the bot console and publish. See [QQ Bot Docs](https://bot.q.qq.com/wiki/) for the full publishing flow.
 
 ```json
@@ -551,7 +556,8 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
       "enabled": true,
       "appId": "YOUR_APP_ID",
       "secret": "YOUR_APP_SECRET",
-      "allowFrom": ["YOUR_OPENID"]
+      "allowFrom": ["YOUR_OPENID"],
+      "msgFormat": "plain"
     }
   }
 }
@@ -761,7 +767,7 @@ Config file: `~/.nanobot/config.json`
 > - **VolcEngine / BytePlus Coding Plan**: Use dedicated providers `volcengineCodingPlan` or `byteplusCodingPlan` instead of the pay-per-use `volcengine` / `byteplus` providers.
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
-> - **Alibaba Cloud Coding Plan**: If you're on the Alibaba Cloud Coding Plan (BaiLian), set `"apiBase": "https://coding.dashscope.aliyuncs.com/v1"` in your dashscope provider config.
+> - **Alibaba Cloud BaiLian**: If you're using Alibaba Cloud BaiLian's OpenAI-compatible endpoint, set `"apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1"` in your dashscope provider config.
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
@@ -960,6 +966,102 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 </details>
 
 
+### Web Search
+
+> [!TIP]
+> Use `proxy` in `tools.web` to route all web requests (search + fetch) through a proxy:
+> ```json
+> { "tools": { "web": { "proxy": "http://127.0.0.1:7890" } } }
+> ```
+
+nanobot supports multiple web search providers. Configure in `~/.nanobot/config.json` under `tools.web.search`.
+
+| Provider | Config fields | Env var fallback | Free |
+|----------|--------------|------------------|------|
+| `brave` (default) | `apiKey` | `BRAVE_API_KEY` | No |
+| `tavily` | `apiKey` | `TAVILY_API_KEY` | No |
+| `jina` | `apiKey` | `JINA_API_KEY` | Free tier (10M tokens) |
+| `searxng` | `baseUrl` | `SEARXNG_BASE_URL` | Yes (self-hosted) |
+| `duckduckgo` | — | — | Yes |
+
+When credentials are missing, nanobot automatically falls back to DuckDuckGo.
+
+**Brave** (default):
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "brave",
+        "apiKey": "BSA..."
+      }
+    }
+  }
+}
+```
+
+**Tavily:**
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "tavily",
+        "apiKey": "tvly-..."
+      }
+    }
+  }
+}
+```
+
+**Jina** (free tier with 10M tokens):
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "jina",
+        "apiKey": "jina_..."
+      }
+    }
+  }
+}
+```
+
+**SearXNG** (self-hosted, no API key needed):
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "searxng",
+        "baseUrl": "https://searx.example"
+      }
+    }
+  }
+}
+```
+
+**DuckDuckGo** (zero config):
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "duckduckgo"
+      }
+    }
+  }
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `provider` | string | `"brave"` | Search backend: `brave`, `tavily`, `jina`, `searxng`, `duckduckgo` |
+| `apiKey` | string | `""` | API key for Brave or Tavily |
+| `baseUrl` | string | `""` | Base URL for SearXNG |
+| `maxResults` | integer | `5` | Results per search (1–10) |
+
 ### MCP (Model Context Protocol)
 
 > [!TIP]
@@ -1009,6 +1111,28 @@ Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
   }
 }
 ```
+
+Use `enabledTools` to register only a subset of tools from an MCP server:
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "filesystem": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"],
+        "enabledTools": ["read_file", "mcp_filesystem_write_file"]
+      }
+    }
+  }
+}
+```
+
+`enabledTools` accepts either the raw MCP tool name (for example `read_file`) or the wrapped nanobot tool name (for example `mcp_filesystem_write_file`).
+
+- Omit `enabledTools`, or set it to `["*"]`, to register all tools.
+- Set `enabledTools` to `[]` to register no tools from that server.
+- Set `enabledTools` to a non-empty list of names to register only that subset.
 
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
 
@@ -1272,7 +1396,7 @@ nanobot/
 │   ├── subagent.py #    Background task execution
 │   └── tools/      #    Built-in tools (incl. spawn)
 ├── skills/         # 🎯 Bundled skills (github, weather, tmux...)
-├── channels/       # 📱 Chat channel integrations
+├── channels/       # 📱 Chat channel integrations (supports plugins)
 ├── bus/            # 🚌 Message routing
 ├── cron/           # ⏰ Scheduled tasks
 ├── heartbeat/      # 💓 Proactive wake-up
@@ -1285,6 +1409,15 @@ nanobot/
 ## 🤝 Contribute & Roadmap
 
 PRs welcome! The codebase is intentionally small and readable. 🤗
+
+### Branching Strategy
+
+| Branch | Purpose |
+|--------|---------|
+| `main` | Stable releases — bug fixes and minor improvements |
+| `nightly` | Experimental features — new features and breaking changes |
+
+**Unsure which branch to target?** See [CONTRIBUTING.md](./CONTRIBUTING.md) for details.
 
 **Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import weakref
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -74,10 +75,13 @@ def _is_tool_choice_unsupported(content: str | None) -> bool:
 class MemoryStore:
     """Two-layer memory: MEMORY.md (long-term facts) + HISTORY.md (grep-searchable log)."""
 
+    _MAX_FAILURES_BEFORE_RAW_ARCHIVE = 3
+
     def __init__(self, workspace: Path):
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "HISTORY.md"
+        self._consecutive_failures = 0
 
     def read_long_term(self) -> str:
         if self.memory_file.exists():
@@ -159,25 +163,60 @@ class MemoryStore:
                     len(response.content or ""),
                     (response.content or "")[:200],
                 )
-                return False
+                return self._fail_or_raw_archive(messages)
 
             args = _normalize_save_memory_args(response.tool_calls[0].arguments)
             if args is None:
                 logger.warning("Memory consolidation: unexpected save_memory arguments")
-                return False
+                return self._fail_or_raw_archive(messages)
 
-            if entry := args.get("history_entry"):
-                self.append_history(_ensure_text(entry))
-            if update := args.get("memory_update"):
-                update = _ensure_text(update)
-                if update != current_memory:
-                    self.write_long_term(update)
+            if "history_entry" not in args or "memory_update" not in args:
+                logger.warning("Memory consolidation: save_memory payload missing required fields")
+                return self._fail_or_raw_archive(messages)
 
+            entry = args["history_entry"]
+            update = args["memory_update"]
+
+            if entry is None or update is None:
+                logger.warning("Memory consolidation: save_memory payload contains null required fields")
+                return self._fail_or_raw_archive(messages)
+
+            entry = _ensure_text(entry).strip()
+            if not entry:
+                logger.warning("Memory consolidation: history_entry is empty after normalization")
+                return self._fail_or_raw_archive(messages)
+
+            self.append_history(entry)
+            update = _ensure_text(update)
+            if update != current_memory:
+                self.write_long_term(update)
+
+            self._consecutive_failures = 0
             logger.info("Memory consolidation done for {} messages", len(messages))
             return True
         except Exception:
             logger.exception("Memory consolidation failed")
+            return self._fail_or_raw_archive(messages)
+
+    def _fail_or_raw_archive(self, messages: list[dict]) -> bool:
+        """Increment failure count; after threshold, raw-archive messages and return True."""
+        self._consecutive_failures += 1
+        if self._consecutive_failures < self._MAX_FAILURES_BEFORE_RAW_ARCHIVE:
             return False
+        self._raw_archive(messages)
+        self._consecutive_failures = 0
+        return True
+
+    def _raw_archive(self, messages: list[dict]) -> None:
+        """Fallback: dump raw messages to HISTORY.md without LLM summarization."""
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+        self.append_history(
+            f"[{ts}] [RAW] {len(messages)} messages\n"
+            f"{self._format_messages(messages)}"
+        )
+        logger.warning(
+            "Memory consolidation degraded: raw-archived {} messages", len(messages)
+        )
 
 
 class MemoryConsolidator:
