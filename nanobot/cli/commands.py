@@ -473,8 +473,19 @@ def gateway(
 # ============================================================================
 # Agent Commands
 # ============================================================================
-
-
+"""
+总结：
+1、环境准备：加载配置，划定安全工作区 (workspace)。
+2、大脑启动：实例化 AgentLoop，注入 LLM 能力和工具集（搜索、执行代码、MCP）。
+3、模式选择：
+- 如果是脚本调用：直接问 -> 等答 -> 打印 -> 走人。
+- 如果是人工聊天：
+    - 启动后台监听器（听 Agent 说话）。
+    - 启动前台输入器（听用户说话）。
+    - 利用 MessageBus 在两者之间传递消息。
+    - 处理 Ctrl+C 保证终端不乱码。
+    - 资源管理：确保在使用完 MCP 服务器或异步任务后，干净地关闭连接，防止内存泄漏或僵尸进程。
+"""
 @app.command()
 def agent(
     message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
@@ -491,13 +502,20 @@ def agent(
     from nanobot.bus.queue import MessageBus
     from nanobot.config.paths import get_cron_dir
     from nanobot.cron.service import CronService
-
+    # 1. 加载配置和工作区模板
     config = _load_runtime_config(config, workspace)
     sync_workspace_templates(config.workspace_path)
-
+    # 2. 初始化消息总线 (MessageBus)
+    # 作用：作为内部通信枢纽，解耦输入、处理和输出。
+    # 在交互模式下，用户输入 -> Bus -> Agent -> Bus -> 屏幕输出
     bus = MessageBus()
+
+    # 3. 创建 LLM 提供商 (Provider)
+    # 作用：封装对 LLM API (如 OpenAI, Claude) 的调用 
     provider = _make_provider(config)
 
+    # 4. 初始化定时任务服务 (CronService)
+    # 作用：让 Agent 能够管理定时任务 (虽然 CLI 模式下主要为了工具兼容性)
     # Create cron service for tool usage (no callback needed for CLI unless running)
     cron_store_path = get_cron_dir() / "jobs.json"
     cron = CronService(cron_store_path)
@@ -542,6 +560,7 @@ def agent(
             return
         console.print(f"  [dim]↳ {content}[/dim]")
 
+    # 参数-m单次运行
     if message:
         # Single message mode — direct call, no bus needed
         async def run_once():
@@ -561,7 +580,7 @@ def agent(
             cli_channel, cli_chat_id = session_id.split(":", 1)
         else:
             cli_channel, cli_chat_id = "cli", session_id
-
+        # 捕获 Ctrl+C (SIGINT) 或 终止信号
         def _handle_signal(signum, frame):
             sig_name = signal.Signals(signum).name
             _restore_terminal()
@@ -579,11 +598,12 @@ def agent(
             signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
         async def run_interactive():
+            #这是 Agent 的主循环任务，一直在监听 bus 上的消息
             bus_task = asyncio.create_task(agent_loop.run())
             turn_done = asyncio.Event()
             turn_done.set()
             turn_response: list[str] = []
-
+            # 不断从 bus 读取 Agent 产生的消息，消费输出
             async def _consume_outbound():
                 while True:
                     try:
@@ -615,6 +635,7 @@ def agent(
                 while True:
                     try:
                         _flush_pending_tty_input()
+                        # 1. 读取用户输入 (支持异步，不阻塞其他任务)
                         user_input = await _read_interactive_input_async()
                         command = user_input.strip()
                         if not command:
@@ -628,6 +649,7 @@ def agent(
                         turn_done.clear()
                         turn_response.clear()
 
+                        # 4. 将用户消息发布到总线
                         await bus.publish_inbound(InboundMessage(
                             channel=cli_channel,
                             sender_id="user",
@@ -635,6 +657,7 @@ def agent(
                             content=user_input,
                         ))
 
+                        # 5. 等待 Agent 回复 (带思考动画)
                         with _thinking_ctx():
                             await turn_done.wait()
 
