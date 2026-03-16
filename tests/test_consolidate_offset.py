@@ -505,7 +505,8 @@ class TestNewCommandArchival:
         return loop
 
     @pytest.mark.asyncio
-    async def test_new_does_not_clear_session_when_archive_fails(self, tmp_path: Path) -> None:
+    async def test_new_clears_session_immediately_even_if_archive_fails(self, tmp_path: Path) -> None:
+        """/new clears session immediately; archive_messages retries until raw dump."""
         from nanobot.bus.events import InboundMessage
 
         loop = self._make_loop(tmp_path)
@@ -514,9 +515,12 @@ class TestNewCommandArchival:
             session.add_message("user", f"msg{i}")
             session.add_message("assistant", f"resp{i}")
         loop.sessions.save(session)
-        before_count = len(session.messages)
+
+        call_count = 0
 
         async def _failing_consolidate(_messages) -> bool:
+            nonlocal call_count
+            call_count += 1
             return False
 
         loop.memory_consolidator.consolidate_messages = _failing_consolidate  # type: ignore[method-assign]
@@ -525,8 +529,13 @@ class TestNewCommandArchival:
         response = await loop._process_message(new_msg)
 
         assert response is not None
-        assert "failed" in response.content.lower()
-        assert len(loop.sessions.get_or_create("cli:test").messages) == before_count
+        assert "new session started" in response.content.lower()
+
+        session_after = loop.sessions.get_or_create("cli:test")
+        assert len(session_after.messages) == 0
+
+        await loop.close_mcp()
+        assert call_count == 3  # retried up to raw-archive threshold
 
     @pytest.mark.asyncio
     async def test_new_archives_only_unconsolidated_messages(self, tmp_path: Path) -> None:
@@ -554,6 +563,8 @@ class TestNewCommandArchival:
 
         assert response is not None
         assert "new session started" in response.content.lower()
+
+        await loop.close_mcp()
         assert archived_count == 3
 
     @pytest.mark.asyncio
@@ -578,3 +589,31 @@ class TestNewCommandArchival:
         assert response is not None
         assert "new session started" in response.content.lower()
         assert loop.sessions.get_or_create("cli:test").messages == []
+
+    @pytest.mark.asyncio
+    async def test_close_mcp_drains_background_tasks(self, tmp_path: Path) -> None:
+        """close_mcp waits for background tasks to complete."""
+        from nanobot.bus.events import InboundMessage
+
+        loop = self._make_loop(tmp_path)
+        session = loop.sessions.get_or_create("cli:test")
+        for i in range(3):
+            session.add_message("user", f"msg{i}")
+            session.add_message("assistant", f"resp{i}")
+        loop.sessions.save(session)
+
+        archived = asyncio.Event()
+
+        async def _slow_consolidate(_messages) -> bool:
+            await asyncio.sleep(0.1)
+            archived.set()
+            return True
+
+        loop.memory_consolidator.consolidate_messages = _slow_consolidate  # type: ignore[method-assign]
+
+        new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
+        await loop._process_message(new_msg)
+
+        assert not archived.is_set()
+        await loop.close_mcp()
+        assert archived.is_set()
