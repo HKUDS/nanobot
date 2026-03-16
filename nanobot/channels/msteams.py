@@ -46,6 +46,11 @@ class MSTeamsConfig(Base):
     reply_in_thread: bool = True
     mention_only_response: str = "Hi — what can I help with?"
     validate_inbound_auth: bool = False
+    restart_notify_enabled: bool = False
+    restart_notify_pre_message: str = (
+        "Nanobot agent initiated a gateway restart. I will message again when the gateway is back online."
+    )
+    restart_notify_post_message: str = "Nanobot gateway is back online."
 
 
 @dataclass

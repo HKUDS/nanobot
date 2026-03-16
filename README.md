@@ -1491,7 +1491,10 @@ This repository includes a built-in `msteams` channel MVP for Microsoft Teams di
       "allowFrom": ["*"],
       "replyInThread": true,
       "mentionOnlyResponse": "Hi — what can I help with?",
-      "validateInboundAuth": false
+      "validateInboundAuth": false,
+      "restartNotifyEnabled": false,
+      "restartNotifyPreMessage": "Nanobot agent initiated a gateway restart. I will message again when the gateway is back online.",
+      "restartNotifyPostMessage": "Nanobot gateway is back online."
     }
   }
 }
@@ -1507,6 +1510,8 @@ This repository includes a built-in `msteams` channel MVP for Microsoft Teams di
 - `validateInboundAuth: true` enables inbound Bot Framework bearer-token validation.
 - `validateInboundAuth: false` leaves inbound auth unenforced, which is safer while first validating a new relay, tunnel, or proxy path.
 - When enabled, Nanobot validates the inbound bearer token signature, issuer, audience, token lifetime, and `serviceUrl` claim when present.
+- `restartNotifyEnabled: true` enables optional Teams restart announcements for wrapper-script driven restarts.
+- `restartNotifyPreMessage` and `restartNotifyPostMessage` control the before/after restart announcement text.
 
 ### Setup notes
 
@@ -1518,3 +1523,5 @@ This repository includes a built-in `msteams` channel MVP for Microsoft Teams di
 ```bash
 nanobot gateway
 ```
+
+5. Optional: if you use an external restart wrapper (for example a script that stops and restarts the gateway), you can enable Teams restart announcements with `restartNotifyEnabled: true` and have the wrapper send `restartNotifyPreMessage` before restart and `restartNotifyPostMessage` after the gateway is back online.

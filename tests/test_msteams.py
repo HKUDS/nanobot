@@ -5,7 +5,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.channels.msteams import ConversationRef, MSTeamsChannel
+from nanobot.channels.msteams import ConversationRef, MSTeamsChannel, MSTeamsConfig
 
 
 class DummyBus:
@@ -492,3 +492,25 @@ async def test_validate_inbound_auth_rejects_missing_bearer_token(tmp_path, monk
 
     with pytest.raises(ValueError, match="missing bearer token"):
         await ch._validate_inbound_auth("", {"serviceUrl": "https://smba.trafficmanager.net/amer/tenant/"})
+
+
+def test_msteams_default_config_includes_restart_notify_fields():
+    cfg = MSTeamsChannel.default_config()
+
+    assert cfg["restartNotifyEnabled"] is False
+    assert "restartNotifyPreMessage" in cfg
+    assert "restartNotifyPostMessage" in cfg
+
+
+def test_msteams_config_accepts_restart_notify_aliases():
+    cfg = MSTeamsConfig.model_validate(
+        {
+            "restartNotifyEnabled": True,
+            "restartNotifyPreMessage": "Restarting now.",
+            "restartNotifyPostMessage": "Back online.",
+        }
+    )
+
+    assert cfg.restart_notify_enabled is True
+    assert cfg.restart_notify_pre_message == "Restarting now."
+    assert cfg.restart_notify_post_message == "Back online."
