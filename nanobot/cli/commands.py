@@ -426,10 +426,10 @@ def gateway(
     port = port if port is not None else config_obj.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
-    sync_workspace_templates(config.workspace_path)
+    sync_workspace_templates(config_obj.workspace_path)
     bus = MessageBus()
-    provider = _make_provider(config)
-    session_manager = SessionManager(config.workspace_path)
+    provider = _make_provider(config_obj)
+    session_manager = SessionManager(config_obj.workspace_path)
 
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_cron_dir() / "jobs.json"
@@ -439,18 +439,18 @@ def gateway(
     agent = AgentLoop(
         bus=bus,
         provider=provider,
-        workspace=config.workspace_path,
-        model=config.agents.defaults.model,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        context_window_tokens=config.agents.defaults.context_window_tokens,
-        web_search_config=config.tools.web.search,
-        web_proxy=config.tools.web.proxy or None,
-        exec_config=config.tools.exec,
+        workspace=config_obj.workspace_path,
+        model=config_obj.agents.defaults.model,
+        max_iterations=config_obj.agents.defaults.max_tool_iterations,
+        context_window_tokens=config_obj.agents.defaults.context_window_tokens,
+        web_search_config=config_obj.tools.web.search,
+        web_proxy=config_obj.tools.web.proxy or None,
+        exec_config=config_obj.tools.exec,
         cron_service=cron,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
+        restrict_to_workspace=config_obj.tools.restrict_to_workspace,
         session_manager=session_manager,
-        mcp_servers=config.tools.mcp_servers,
-        channels_config=config.channels,
+        mcp_servers=config_obj.tools.mcp_servers,
+        channels_config=config_obj.channels,
     )
 
     # Set cron callback (needs agent)
@@ -542,9 +542,9 @@ def gateway(
             return  # No external channel available to deliver to
         await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
 
-    hb_cfg = config.gateway.heartbeat
+    hb_cfg = config_obj.gateway.heartbeat
     heartbeat = HeartbeatService(
-        workspace=config.workspace_path,
+        workspace=config_obj.workspace_path,
         provider=provider,
         model=agent.model,
         on_execute=on_heartbeat_execute,
