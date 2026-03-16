@@ -581,6 +581,38 @@ def gateway(
 
 
 # ============================================================================
+# Web Interface
+# ============================================================================
+
+
+@app.command()
+def web(
+    port: int = typer.Option(8000, "--port", "-p", help="Port to listen on"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Start the nanobot web interface."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]uvicorn not installed.[/red] Run: pip install 'nanobot-ai[web]'")
+        raise typer.Exit(1)
+
+    try:
+        from fastapi import FastAPI  # noqa: F401
+    except ImportError:
+        console.print("[red]fastapi not installed.[/red] Run: pip install 'nanobot-ai[web]'")
+        raise typer.Exit(1)
+
+    from nanobot.web.server import create_app
+
+    console.print(f"{__logo__} Starting web interface at http://{host}:{port} ...")
+    app_instance = create_app(config, workspace)
+    uvicorn.run(app_instance, host=host, port=port)
+
+
+# ============================================================================
 # Agent Commands
 # ============================================================================
 

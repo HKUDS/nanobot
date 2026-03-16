@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>nanobot</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    /* Custom scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 2px; }
+
+    /* Markdown content styles */
+    .md-content pre { background: #1e293b; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin: 0.5rem 0; }
+    .md-content code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.85em; }
+    .md-content p:not(:last-child) { margin-bottom: 0.5rem; }
+    .md-content ul, .md-content ol { padding-left: 1.25rem; margin: 0.5rem 0; }
+    .md-content li { margin-bottom: 0.25rem; }
+    .md-content h1, .md-content h2, .md-content h3 { font-weight: 600; margin: 0.75rem 0 0.5rem; }
+    .md-content h1 { font-size: 1.25rem; }
+    .md-content h2 { font-size: 1.1rem; }
+    .md-content h3 { font-size: 1rem; }
+    .md-content blockquote { border-left: 3px solid #4b5563; padding-left: 0.75rem; color: #9ca3af; margin: 0.5rem 0; }
+    .md-content a { color: #60a5fa; text-decoration: underline; }
+    .md-content table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
+    .md-content th, .md-content td { border: 1px solid #374151; padding: 0.4rem 0.75rem; }
+    .md-content th { background: #1f2937; }
+
+    /* Blinking cursor for streaming */
+    .streaming-cursor::after {
+      content: '▋';
+      animation: blink 1s step-end infinite;
+      color: #60a5fa;
+    }
+    @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+
+    /* Session item hover */
+    .session-item:hover .session-action { opacity: 1; }
+    .session-action { opacity: 0; transition: opacity 0.15s; }
+  </style>
+</head>
+<body class="h-full bg-gray-950 text-gray-100 flex">
+
+  <!-- Sidebar -->
+  <aside class="w-64 flex-shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col">
+    <div class="p-4 border-b border-gray-800 flex items-center justify-between">
+      <span class="font-semibold text-blue-400 tracking-wide">🐈 nanobot</span>
+      <button id="btn-new-session"
+        class="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 transition-colors"
+        title="New session">+ New</button>
+    </div>
+
+    <div class="flex-1 overflow-y-auto p-2" id="session-list">
+      <!-- populated by JS -->
+    </div>
+  </aside>
+
+  <!-- Main chat area -->
+  <main class="flex-1 flex flex-col min-w-0">
+
+    <!-- Header -->
+    <header class="px-6 py-3 border-b border-gray-800 flex items-center gap-3">
+      <span id="header-session" class="text-sm text-gray-400 font-mono truncate">web:default</span>
+      <span class="ml-auto text-xs text-gray-600" id="status-indicator"></span>
+    </header>
+
+    <!-- Messages -->
+    <div class="flex-1 overflow-y-auto px-4 py-6 space-y-4" id="messages">
+      <div class="text-center text-gray-600 text-sm mt-16 select-none" id="empty-hint">
+        Send a message to start chatting
+      </div>
+    </div>
+
+    <!-- Input area -->
+    <div class="px-4 pb-4 pt-2 border-t border-gray-800">
+      <div class="flex gap-2 items-end max-w-4xl mx-auto">
+        <textarea
+          id="input"
+          rows="1"
+          placeholder="Message nanobot… (Enter to send, Shift+Enter for newline)"
+          class="flex-1 resize-none bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors max-h-48 overflow-y-auto"
+        ></textarea>
+        <button id="btn-send"
+          class="px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-sm font-medium flex-shrink-0"
+        >Send</button>
+        <button id="btn-stop"
+          class="hidden px-4 py-3 rounded-xl bg-red-600 hover:bg-red-500 transition-colors text-sm font-medium flex-shrink-0"
+          title="Stop response">Stop</button>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // ──────────────────────────────────────────────────────────
+    // State
+    // ──────────────────────────────────────────────────────────
+    let currentSession = 'web:default';
+    let isStreaming = false;
+    let abortController = null;
+
+    const messagesEl = document.getElementById('messages');
+    const inputEl = document.getElementById('input');
+    const btnSend = document.getElementById('btn-send');
+    const sessionList = document.getElementById('session-list');
+    const headerSession = document.getElementById('header-session');
+    const statusIndicator = document.getElementById('status-indicator');
+    const emptyHint = document.getElementById('empty-hint');
+    const btnStop = document.getElementById('btn-stop');
+
+    marked.setOptions({ breaks: true, gfm: true });
+
+    // ──────────────────────────────────────────────────────────
+    // Sessions
+    // ──────────────────────────────────────────────────────────
+    async function loadSessions() {
+      try {
+        const res = await fetch('/api/sessions');
+        const sessions = await res.json();
+        renderSessionList(sessions);
+      } catch (_) {}
+    }
+
+    function renderSessionList(sessions) {
+      sessionList.innerHTML = '';
+
+      // Always include current session at top if not in list
+      const keys = sessions.map(s => s.key);
+      if (!keys.includes(currentSession)) {
+        sessions.unshift({ key: currentSession });
+      }
+
+      sessions.forEach(s => {
+        const div = document.createElement('div');
+        div.className = 'session-item flex items-center gap-1 rounded-lg px-3 py-2 cursor-pointer text-sm mb-1 ' +
+          (s.key === currentSession ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200');
+        div.dataset.key = s.key;
+
+        const label = document.createElement('span');
+        label.className = 'flex-1 truncate';
+        label.textContent = s.key.replace(/^web:/, '');
+
+        const rename = document.createElement('button');
+        rename.className = 'session-action text-gray-600 hover:text-blue-400 transition-colors ml-1 flex-shrink-0';
+        rename.innerHTML = '✎';
+        rename.title = 'Rename session';
+        rename.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          await renameSession(s.key);
+        });
+
+        const del = document.createElement('button');
+        del.className = 'session-action text-gray-600 hover:text-red-400 transition-colors ml-1 flex-shrink-0';
+        del.innerHTML = '×';
+        del.title = 'Delete session';
+        del.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (!confirm(`Delete session "${s.key}"?`)) return;
+          await fetch(`/api/sessions/${encodeURIComponent(s.key)}`, { method: 'DELETE' });
+          if (s.key === currentSession) {
+            switchSession('web:default');
+          }
+          loadSessions();
+        });
+
+        div.appendChild(label);
+        div.appendChild(rename);
+        div.appendChild(del);
+        div.addEventListener('click', () => switchSession(s.key));
+        sessionList.appendChild(div);
+      });
+    }
+
+    function clearMessages() {
+      Array.from(messagesEl.children).forEach(child => {
+        if (child.id !== 'empty-hint') child.remove();
+      });
+    }
+
+    function setEmptyState(empty) {
+      emptyHint.style.display = empty ? 'block' : 'none';
+    }
+
+    function switchSession(key) {
+      currentSession = key;
+      headerSession.textContent = key;
+      clearMessages();
+      setEmptyState(true);
+      loadSessions();
+      loadHistory();
+    }
+
+    async function renameSession(oldKey) {
+      const currentName = oldKey.replace(/^web:/, '');
+      const input = prompt('Rename session:', currentName);
+      if (input === null) return;
+
+      const trimmed = input.trim();
+      if (!trimmed) {
+        alert('Session name cannot be empty.');
+        return;
+      }
+
+      const newKey = trimmed.startsWith('web:') ? trimmed : `web:${trimmed}`;
+      if (newKey === oldKey) return;
+
+      try {
+        const res = await fetch(`/api/sessions/${encodeURIComponent(oldKey)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ new_session_id: newKey }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.detail || 'Failed to rename session');
+        }
+        if (currentSession === oldKey) {
+          currentSession = newKey;
+          headerSession.textContent = newKey;
+        }
+        await loadSessions();
+        if (currentSession === newKey) {
+          await loadHistory();
+        }
+      } catch (err) {
+        alert(err.message || 'Failed to rename session');
+      }
+    }
+
+    async function loadHistory() {
+      try {
+        const res = await fetch(`/api/sessions/${encodeURIComponent(currentSession)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        clearMessages();
+        const msgs = data.messages || [];
+        if (msgs.length === 0) {
+          setEmptyState(true);
+          return;
+        }
+        setEmptyState(false);
+        msgs.forEach(m => {
+          if (m.role === 'user') appendMessage('user', m.content);
+          else if (m.role === 'assistant' && m.content) appendMessage('assistant', m.content);
+        });
+        scrollToBottom();
+      } catch (_) {}
+    }
+
+    document.getElementById('btn-new-session').addEventListener('click', () => {
+      const id = prompt('Session name (will be prefixed with "web:"):', Date.now().toString());
+      if (!id) return;
+      const key = id.startsWith('web:') ? id : `web:${id}`;
+      switchSession(key);
+    });
+
+    // ──────────────────────────────────────────────────────────
+    // Messages
+    // ──────────────────────────────────────────────────────────
+    function appendMessage(role, content, { streaming = false } = {}) {
+      setEmptyState(false);
+
+      const wrap = document.createElement('div');
+      wrap.className = 'flex ' + (role === 'user' ? 'justify-end' : 'justify-start') + ' max-w-4xl mx-auto w-full';
+
+      const bubble = document.createElement('div');
+      bubble.className = role === 'user'
+        ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[75%] text-sm leading-relaxed'
+        : 'bg-gray-800 text-gray-100 rounded-2xl rounded-tl-sm px-4 py-2.5 max-w-[85%] text-sm leading-relaxed md-content';
+
+      if (role === 'user') {
+        bubble.textContent = content;
+      } else {
+        bubble.innerHTML = content ? marked.parse(content) : '';
+        if (streaming) bubble.classList.add('streaming-cursor');
+      }
+
+      wrap.appendChild(bubble);
+      messagesEl.appendChild(wrap);
+      scrollToBottom();
+      return bubble;
+    }
+
+    function appendProgressLine(text) {
+      const existing = document.getElementById('progress-line');
+      if (existing) { existing.remove(); }
+
+      const div = document.createElement('div');
+      div.id = 'progress-line';
+      div.className = 'flex justify-start max-w-4xl mx-auto w-full';
+      const inner = document.createElement('div');
+      inner.className = 'text-gray-500 text-xs italic px-1 py-0.5';
+      inner.textContent = '↳ ' + text;
+      div.appendChild(inner);
+      messagesEl.appendChild(div);
+      scrollToBottom();
+    }
+
+    function removeProgressLine() {
+      document.getElementById('progress-line')?.remove();
+    }
+
+    function scrollToBottom() {
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Send
+    // ──────────────────────────────────────────────────────────
+    async function sendMessage() {
+      const text = inputEl.value.trim();
+      if (!text || isStreaming) return;
+
+      inputEl.value = '';
+      autoResize();
+      setStreaming(true);
+
+      appendMessage('user', text);
+
+      const assistantBubble = appendMessage('assistant', '', { streaming: true });
+
+      let responseText = '';
+      abortController = new AbortController();
+
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text, session_id: currentSession }),
+          signal: abortController.signal,
+        });
+
+        if (!res.ok) {
+          const err = await res.text();
+          throw new Error(err);
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop(); // keep incomplete line
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const raw = line.slice(6).trim();
+            if (!raw) continue;
+
+            let event;
+            try { event = JSON.parse(raw); } catch { continue; }
+
+            if (event.type === 'progress') {
+              appendProgressLine(event.content);
+            } else if (event.type === 'done') {
+              removeProgressLine();
+              responseText = event.content || '';
+              assistantBubble.classList.remove('streaming-cursor');
+              assistantBubble.innerHTML = responseText ? marked.parse(responseText) : '<em class="text-gray-500">No response</em>';
+              scrollToBottom();
+            } else if (event.type === 'error') {
+              removeProgressLine();
+              assistantBubble.classList.remove('streaming-cursor');
+              assistantBubble.innerHTML = `<span class="text-red-400">Error: ${event.content}</span>`;
+              scrollToBottom();
+            }
+          }
+        }
+      } catch (err) {
+        removeProgressLine();
+        assistantBubble.classList.remove('streaming-cursor');
+        if (err.name === 'AbortError') {
+          assistantBubble.innerHTML = (responseText ? marked.parse(responseText) : '') +
+            '<p class="text-gray-500 text-sm mt-2 italic">(Stopped)</p>';
+        } else {
+          assistantBubble.innerHTML = `<span class="text-red-400">Error: ${err.message}</span>`;
+        }
+        scrollToBottom();
+      } finally {
+        setStreaming(false);
+        loadSessions();
+      }
+    }
+
+    function setStreaming(val) {
+      isStreaming = val;
+      btnSend.disabled = val;
+      btnSend.classList.toggle('hidden', val);
+      btnStop.classList.toggle('hidden', !val);
+      statusIndicator.textContent = val ? 'thinking…' : '';
+    }
+
+    function stopResponse() {
+      if (abortController) abortController.abort();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Input auto-resize
+    // ──────────────────────────────────────────────────────────
+    function autoResize() {
+      inputEl.style.height = 'auto';
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 192) + 'px';
+    }
+
+    inputEl.addEventListener('input', autoResize);
+    inputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+    btnSend.addEventListener('click', sendMessage);
+    btnStop.addEventListener('click', stopResponse);
+
+    // ──────────────────────────────────────────────────────────
+    // Init
+    // ──────────────────────────────────────────────────────────
+    loadSessions();
+    loadHistory();
+  </script>
+</body>
+</html>

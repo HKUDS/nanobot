@@ -179,6 +179,29 @@ class SessionManager:
 
         self._cache[session.key] = session
 
+    def rename_session(self, old_key: str, new_key: str) -> Session:
+        """Rename a session by moving its persisted identity and cached state."""
+        old_key = old_key.strip()
+        new_key = new_key.strip()
+        if not old_key or not new_key:
+            raise ValueError("Session key cannot be empty")
+        if old_key == new_key:
+            return self.get_or_create(old_key)
+
+        old_path = self._get_session_path(old_key)
+        new_path = self._get_session_path(new_key)
+        if not old_path.exists():
+            raise FileNotFoundError(old_key)
+        if new_path.exists():
+            raise FileExistsError(new_key)
+
+        session = self.get_or_create(old_key)
+        old_path.replace(new_path)
+        self.invalidate(old_key)
+        session.key = new_key
+        self.save(session)
+        return session
+
     def invalidate(self, key: str) -> None:
         """Remove a session from the in-memory cache."""
         self._cache.pop(key, None)
