@@ -33,7 +33,7 @@ def _make_loop(tmp_path, *, model: str = "main-model"):
     loop.sessions = MagicMock()
     loop.sessions.get_or_create.return_value = session
     loop.memory_consolidator = MagicMock()
-    loop.memory_consolidator.archive_unconsolidated = AsyncMock(return_value=True)
+    loop.memory_consolidator.archive_messages = AsyncMock(return_value=True)
     loop.memory_consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
     return loop, provider, subagents
 
@@ -165,12 +165,19 @@ async def test_help_command_accepts_telegram_command_suffix(tmp_path):
 @pytest.mark.asyncio
 async def test_new_command_accepts_telegram_command_suffix(tmp_path):
     loop, _provider, _subagents = _make_loop(tmp_path)
+    loop.sessions.get_or_create.return_value.messages = [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "hi"},
+    ]
 
     response = await loop._process_message(
         InboundMessage(channel="telegram", sender_id="u1", chat_id="123", content="/new@nanobot_test")
     )
 
-    loop.memory_consolidator.archive_unconsolidated.assert_awaited_once()
+    loop.memory_consolidator.archive_messages.assert_called_once_with([
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "hi"},
+    ])
     loop.sessions.save.assert_called_once()
     loop.sessions.invalidate.assert_called_once()
     assert response is not None
