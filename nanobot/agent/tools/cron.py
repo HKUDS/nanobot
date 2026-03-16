@@ -164,6 +164,7 @@ class CronTool(Tool):
                     timing = f"every {secs}s"
             elif s.kind == "at" and s.at_ms:
                 from datetime import datetime, timezone
+
                 dt = datetime.fromtimestamp(s.at_ms / 1000, tz=timezone.utc)
                 timing = f"at {dt.isoformat()}"
             else:
@@ -172,13 +173,17 @@ class CronTool(Tool):
             parts = [f"- {j.name} (id: {j.id}, {timing}, {status})"]
             if j.state.last_run_at_ms:
                 from datetime import datetime, timezone
+
                 last_dt = datetime.fromtimestamp(j.state.last_run_at_ms / 1000, tz=timezone.utc)
-                last_info = f"  Last run: {last_dt.isoformat()} — {j.state.last_status or 'unknown'}"
+                last_info = (
+                    f"  Last run: {last_dt.isoformat()} — {j.state.last_status or 'unknown'}"
+                )
                 if j.state.last_error:
                     last_info += f" ({j.state.last_error})"
                 parts.append(last_info)
             if j.state.next_run_at_ms:
                 from datetime import datetime, timezone
+
                 next_dt = datetime.fromtimestamp(j.state.next_run_at_ms / 1000, tz=timezone.utc)
                 parts.append(f"  Next run: {next_dt.isoformat()}")
             lines.append("\n".join(parts))
