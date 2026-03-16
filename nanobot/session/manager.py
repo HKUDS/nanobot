@@ -44,37 +44,27 @@ class Session:
         self.updated_at = datetime.now()
 
     @staticmethod
-    def _tool_call_ids(messages: list[dict[str, Any]]) -> set[str]:
-        ids: set[str] = set()
-        for message in messages:
-            if message.get("role") != "assistant":
-                continue
-            for tool_call in message.get("tool_calls") or []:
-                if not isinstance(tool_call, dict):
-                    continue
-                tool_id = tool_call.get("id")
-                if tool_id:
-                    ids.add(str(tool_id))
-        return ids
-
-    @classmethod
-    def _trim_orphan_tool_messages(cls, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Drop the oldest prefix that contains tool results without matching tool_calls."""
-        trimmed = list(messages)
-        while trimmed:
-            tool_call_ids = cls._tool_call_ids(trimmed)
-            cut_to = None
-            for index, message in enumerate(trimmed):
-                if message.get("role") != "tool":
-                    continue
-                tool_call_id = message.get("tool_call_id")
-                if tool_call_id and str(tool_call_id) not in tool_call_ids:
-                    cut_to = index + 1
-                    break
-            if cut_to is None:
-                break
-            trimmed = trimmed[cut_to:]
-        return trimmed
+    def _find_legal_start(messages: list[dict[str, Any]]) -> int:
+        """Find first index where every tool result has a matching assistant tool_call."""
+        declared: set[str] = set()
+        start = 0
+        for i, msg in enumerate(messages):
+            role = msg.get("role")
+            if role == "assistant":
+                for tc in msg.get("tool_calls") or []:
+                    if isinstance(tc, dict) and tc.get("id"):
+                        declared.add(str(tc["id"]))
+            elif role == "tool":
+                tid = msg.get("tool_call_id")
+                if tid and str(tid) not in declared:
+                    start = i + 1
+                    declared.clear()
+                    for prev in messages[start:i + 1]:
+                        if prev.get("role") == "assistant":
+                            for tc in prev.get("tool_calls") or []:
+                                if isinstance(tc, dict) and tc.get("id"):
+                                    declared.add(str(tc["id"]))
+        return start
 
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
         """Return unconsolidated messages for LLM input, aligned to a legal tool-call boundary."""
@@ -89,7 +79,9 @@ class Session:
 
         # Some providers reject orphan tool results if the matching assistant
         # tool_calls message fell outside the fixed-size history window.
-        sliced = self._trim_orphan_tool_messages(sliced)
+        start = self._find_legal_start(sliced)
+        if start:
+            sliced = sliced[start:]
 
         out: list[dict[str, Any]] = []
         for message in sliced:
