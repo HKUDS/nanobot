@@ -55,7 +55,7 @@ chmod 600 ~/.nanobot/config.json
 ```
 
 **Security Notes:**
-- Empty `allowFrom` list will **ALLOW ALL** users (open by default for personal use)
+- In `v0.1.4.post3` and earlier, an empty `allowFrom` allowed all users. Since `v0.1.4.post4`, empty `allowFrom` denies all access by default — set `["*"]` to explicitly allow everyone.
 - Get your Telegram user ID from `@userinfobot`
 - Use full phone numbers with country code for WhatsApp
 - Review access logs regularly for unauthorized access attempts
@@ -212,9 +212,8 @@ If you suspect a security breach:
 - Input length limits on HTTP requests
 
 ✅ **Authentication**
-- Allow-list based access control
+- Allow-list based access control — in `v0.1.4.post3` and earlier empty `allowFrom` allowed all; since `v0.1.4.post4` it denies all (`["*"]` explicitly allows all)
 - Failed authentication attempt logging
-- Open by default (configure allowFrom for production use)
 
 ✅ **Resource Protection**
 - Command execution timeouts (60s default)
