@@ -141,6 +141,13 @@ class ChannelManager:
             except asyncio.CancelledError:
                 break
 
+    def get_all_channel_tools(self) -> list:
+        """Collect platform-specific tools from all enabled channels."""
+        tools = []
+        for channel in self.channels.values():
+            tools.extend(channel.get_tools())
+        return tools
+
     def get_channel(self, name: str) -> BaseChannel | None:
         """Get a channel by name."""
         return self.channels.get(name)

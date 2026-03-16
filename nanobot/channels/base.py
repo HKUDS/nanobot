@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+
+if TYPE_CHECKING:
+    from nanobot.agent.tools.base import Tool
 
 
 class BaseChannel(ABC):
@@ -127,6 +130,15 @@ class BaseChannel(ABC):
         )
 
         await self.bus.publish_inbound(msg)
+
+    def get_tools(self) -> list[Tool]:
+        """Return channel-specific tools for the agent.
+
+        Override in subclasses to expose platform-specific capabilities
+        (e.g., Feishu doc/sheet APIs, Discord role management).
+        Tools returned here share this channel's authenticated client.
+        """
+        return []
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:

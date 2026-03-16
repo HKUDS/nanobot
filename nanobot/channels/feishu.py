@@ -1,5 +1,7 @@
 """Feishu/Lark channel implementation using lark-oapi SDK with WebSocket long connection."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import os
@@ -7,7 +9,7 @@ import re
 import threading
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
@@ -19,6 +21,9 @@ from nanobot.config.schema import Base
 from pydantic import Field
 
 import importlib.util
+
+if TYPE_CHECKING:
+    from nanobot.agent.tools.base import Tool
 
 FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
 
@@ -265,6 +270,21 @@ class FeishuChannel(BaseChannel):
     def default_config(cls) -> dict[str, Any]:
         return FeishuConfig().model_dump(by_alias=True)
 
+    def get_tools(self) -> list[Tool]:
+        if not self._client:
+            return []
+        return [
+            FeishuListChatsTool(self),
+            FeishuListChatMembersTool(self),
+            FeishuCreateDocTool(self),
+            FeishuReadDocTool(self),
+            FeishuListDocBlocksTool(self),
+            FeishuEditDocTool(self),
+            FeishuCreateSheetTool(self),
+            FeishuReadSheetTool(self),
+            FeishuWriteSheetTool(self),
+        ]
+
     def __init__(self, config: Any, bus: MessageBus):
         if isinstance(config, dict):
             config = FeishuConfig.model_validate(config)
@@ -296,12 +316,12 @@ class FeishuChannel(BaseChannel):
         self._running = True
         self._loop = asyncio.get_running_loop()
 
-        # Create Lark client for sending messages
-        self._client = lark.Client.builder() \
-            .app_id(self.config.app_id) \
-            .app_secret(self.config.app_secret) \
-            .log_level(lark.LogLevel.INFO) \
-            .build()
+        if not self._client:
+            self._client = lark.Client.builder() \
+                .app_id(self.config.app_id) \
+                .app_secret(self.config.app_secret) \
+                .log_level(lark.LogLevel.INFO) \
+                .build()
         builder = lark.EventDispatcherHandler.builder(
             self.config.encrypt_key or "",
             self.config.verification_token or "",
@@ -1211,3 +1231,618 @@ class FeishuChannel(BaseChannel):
             receive_id_type, receive_id, "interactive",
             json.dumps(card, ensure_ascii=False),
         )
+
+
+# ---------------------------------------------------------------------------
+# Feishu channel-provided tools
+# ---------------------------------------------------------------------------
+
+from nanobot.agent.tools.base import Tool as _Tool
+
+
+class FeishuListChatsTool(_Tool):
+    """List chats/groups the Feishu bot belongs to."""
+
+    def __init__(self, channel: FeishuChannel):
+        self._channel = channel
+
+    @property
+    def name(self) -> str:
+        return "feishu_list_chats"
+
+    @property
+    def description(self) -> str:
+        return "List chats and groups the Feishu bot is a member of. Returns chat_id, name, and type."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "page_size": {
+                    "type": "integer",
+                    "description": "Max number of chats to return (default 50, max 100)",
+                },
+            },
+            "required": [],
+        }
+
+    async def execute(self, page_size: int = 50, **kwargs: Any) -> str:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._list_sync, min(page_size, 100))
+
+    def _list_sync(self, page_size: int) -> str:
+        from lark_oapi.api.im.v1 import ListChatRequest
+        request = ListChatRequest.builder().page_size(page_size).build()
+        response = self._channel._client.im.v1.chat.list(request)
+        if not response.success():
+            return f"Error listing chats: code={response.code}, msg={response.msg}"
+        items = getattr(response.data, "items", None) or []
+        if not items:
+            return "No chats found."
+        lines = []
+        for item in items:
+            chat_id = getattr(item, "chat_id", "")
+            chat_name = getattr(item, "name", "")
+            chat_type = getattr(item, "chat_type", "")
+            lines.append(f"- {chat_name} (id={chat_id}, type={chat_type})")
+        return "\n".join(lines)
+
+
+class FeishuListChatMembersTool(_Tool):
+    """List members of a specific Feishu chat."""
+
+    def __init__(self, channel: FeishuChannel):
+        self._channel = channel
+
+    @property
+    def name(self) -> str:
+        return "feishu_list_chat_members"
+
+    @property
+    def description(self) -> str:
+        return "List members of a Feishu chat/group by chat_id."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "chat_id": {"type": "string", "description": "The chat ID to list members for"},
+                "page_size": {"type": "integer", "description": "Max members to return (default 50)"},
+            },
+            "required": ["chat_id"],
+        }
+
+    async def execute(self, chat_id: str, page_size: int = 50, **kwargs: Any) -> str:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._list_sync, chat_id, min(page_size, 100))
+
+    def _list_sync(self, chat_id: str, page_size: int) -> str:
+        from lark_oapi.api.im.v1 import GetChatMembersRequest
+        request = (
+            GetChatMembersRequest.builder()
+            .chat_id(chat_id)
+            .page_size(page_size)
+            .build()
+        )
+        response = self._channel._client.im.v1.chat_members.get(request)
+        if not response.success():
+            return f"Error listing members: code={response.code}, msg={response.msg}"
+        items = getattr(response.data, "items", None) or []
+        if not items:
+            return "No members found."
+        lines = []
+        for item in items:
+            member_id = getattr(item, "member_id", "")
+            member_name = getattr(item, "name", "")
+            member_type = getattr(item, "member_id_type", "")
+            lines.append(f"- {member_name} (id={member_id}, type={member_type})")
+        return "\n".join(lines)
+
+
+class FeishuCreateDocTool(_Tool):
+    """Create a new Feishu document."""
+
+    def __init__(self, channel: FeishuChannel):
+        self._channel = channel
+
+    @property
+    def name(self) -> str:
+        return "feishu_create_doc"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Create a new Feishu document. Returns the document URL. "
+            "Optionally specify a folder_token to place the doc in a specific folder."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Document title"},
+                "folder_token": {
+                    "type": "string",
+                    "description": "Optional: folder token to place the document in",
+                },
+            },
+            "required": ["title"],
+        }
+
+    async def execute(self, title: str, folder_token: str | None = None, **kwargs: Any) -> str:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._create_sync, title, folder_token)
+
+    def _create_sync(self, title: str, folder_token: str | None) -> str:
+        import lark_oapi as lark
+        from lark_oapi.api.docx.v1 import CreateDocumentRequest, CreateDocumentRequestBody
+
+        body_builder = CreateDocumentRequestBody.builder().title(title)
+        if folder_token:
+            body_builder = body_builder.folder_token(folder_token)
+        request = CreateDocumentRequest.builder().request_body(body_builder.build()).build()
+        response = self._channel._client.docx.v1.document.create(request)
+        if not response.success():
+            return f"Error creating doc: code={response.code}, msg={response.msg}"
+        doc = response.data.document
+        doc_id = getattr(doc, "document_id", "")
+        doc_url = getattr(doc, "url", "") or f"https://feishu.cn/docx/{doc_id}"
+        return f"Document created: {doc_url} (id={doc_id})"
+
+
+class FeishuReadDocTool(_Tool):
+    """Read the content of a Feishu document."""
+
+    def __init__(self, channel: FeishuChannel):
+        self._channel = channel
+
+    @property
+    def name(self) -> str:
+        return "feishu_read_doc"
+
+    @property
+    def description(self) -> str:
+        return "Read the text content of a Feishu document by document_id."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "document_id": {
+                    "type": "string",
+                    "description": "The document ID (from the URL, e.g. the part after /docx/)",
+                },
+            },
+            "required": ["document_id"],
+        }
+
+    async def execute(self, document_id: str, **kwargs: Any) -> str:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._read_sync, document_id)
+
+    def _read_sync(self, document_id: str) -> str:
+        from lark_oapi.api.docx.v1 import RawContentDocumentRequest
+        request = (
+            RawContentDocumentRequest.builder()
+            .document_id(document_id)
+            .build()
+        )
+        response = self._channel._client.docx.v1.document.raw_content(request)
+        if not response.success():
+            return f"Error reading doc: code={response.code}, msg={response.msg}"
+        content = getattr(response.data, "content", "")
+        return content if content else "(empty document)"
+
+
+class FeishuCreateSheetTool(_Tool):
+    """Create a new Feishu spreadsheet."""
+
+    def __init__(self, channel: FeishuChannel):
+        self._channel = channel
+
+    @property
+    def name(self) -> str:
+        return "feishu_create_sheet"
+
+    @property
+    def description(self) -> str:
+        return "Create a new Feishu spreadsheet. Returns the spreadsheet URL and token."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Spreadsheet title"},
+                "folder_token": {
+                    "type": "string",
+                    "description": "Optional: folder token to place the spreadsheet in",
+                },
+            },
+            "required": ["title"],
+        }
+
+    async def execute(self, title: str, folder_token: str | None = None, **kwargs: Any) -> str:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._create_sync, title, folder_token)
+
+    def _create_sync(self, title: str, folder_token: str | None) -> str:
+        from lark_oapi.api.sheets.v3 import CreateSpreadsheetRequest, CreateSpreadsheetRequestBody
+
+        body_builder = CreateSpreadsheetRequestBody.builder().title(title)
+        if folder_token:
+            body_builder = body_builder.folder_token(folder_token)
+        request = CreateSpreadsheetRequest.builder().request_body(body_builder.build()).build()
+        response = self._channel._client.sheets.v3.spreadsheet.create(request)
+        if not response.success():
+            return f"Error creating sheet: code={response.code}, msg={response.msg}"
+        sheet = response.data.spreadsheet
+        token = getattr(sheet, "spreadsheet_token", "")
+        url = getattr(sheet, "url", "") or f"https://feishu.cn/sheets/{token}"
+        return f"Spreadsheet created: {url} (token={token})"
+
+
+class FeishuReadSheetTool(_Tool):
+    """Read data from a Feishu spreadsheet range."""
+
+    def __init__(self, channel: FeishuChannel):
+        self._channel = channel
+
+    @property
+    def name(self) -> str:
+        return "feishu_read_sheet"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Read data from a Feishu spreadsheet. Specify the spreadsheet_token and "
+            "a range like 'Sheet1!A1:D10'. Returns the cell values as formatted text."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "spreadsheet_token": {"type": "string", "description": "Spreadsheet token"},
+                "range": {
+                    "type": "string",
+                    "description": "Cell range, e.g. 'Sheet1!A1:D10'",
+                },
+            },
+            "required": ["spreadsheet_token", "range"],
+        }
+
+    async def execute(self, spreadsheet_token: str, range: str, **kwargs: Any) -> str:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._read_sync, spreadsheet_token, range)
+
+    def _read_sync(self, spreadsheet_token: str, cell_range: str) -> str:
+        import lark_oapi as lark
+
+        url = f"/open-apis/sheets/v2/spreadsheets/{spreadsheet_token}/values/{cell_range}"
+        request = lark.BaseRequest.builder() \
+            .http_method(lark.HttpMethod.GET) \
+            .uri(url) \
+            .token_types({lark.AccessTokenType.TENANT}) \
+            .build()
+        response = self._channel._client.request(request)
+        if not response.success():
+            return f"Error reading sheet: code={response.code}, msg={response.msg}"
+        try:
+            data = json.loads(str(response.raw.content, lark.UTF_8))
+            values = data.get("data", {}).get("valueRange", {}).get("values", [])
+            if not values:
+                return "(no data in range)"
+            lines = []
+            for row in values:
+                lines.append("\t".join(str(cell) if cell is not None else "" for cell in row))
+            return "\n".join(lines)
+        except (json.JSONDecodeError, AttributeError):
+            return f"Error parsing sheet response"
+
+
+class FeishuWriteSheetTool(_Tool):
+    """Write data to a Feishu spreadsheet range."""
+
+    def __init__(self, channel: FeishuChannel):
+        self._channel = channel
+
+    @property
+    def name(self) -> str:
+        return "feishu_write_sheet"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Write data to a Feishu spreadsheet. Specify the spreadsheet_token, "
+            "a range like 'Sheet1!A1:D3', and values as a 2D array of strings."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "spreadsheet_token": {"type": "string", "description": "Spreadsheet token"},
+                "range": {"type": "string", "description": "Cell range, e.g. 'Sheet1!A1:D3'"},
+                "values": {
+                    "type": "array",
+                    "items": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "description": "2D array of cell values, e.g. [['a','b'],['c','d']]",
+                },
+            },
+            "required": ["spreadsheet_token", "range", "values"],
+        }
+
+    async def execute(self, spreadsheet_token: str, range: str, values: list[list[str]], **kwargs: Any) -> str:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._write_sync, spreadsheet_token, range, values)
+
+    def _write_sync(self, spreadsheet_token: str, cell_range: str, values: list[list[str]]) -> str:
+        import lark_oapi as lark
+
+        url = f"/open-apis/sheets/v2/spreadsheets/{spreadsheet_token}/values"
+        request = lark.BaseRequest.builder() \
+            .http_method(lark.HttpMethod.PUT) \
+            .uri(url) \
+            .token_types({lark.AccessTokenType.TENANT}) \
+            .body({"valueRange": {"range": cell_range, "values": values}}) \
+            .build()
+        response = self._channel._client.request(request)
+        if not response.success():
+            return f"Error writing sheet: code={response.code}, msg={response.msg}"
+        return f"Successfully wrote {len(values)} rows to {cell_range}"
+
+
+class FeishuListDocBlocksTool(_Tool):
+    """List content blocks in a Feishu document for inspection before editing."""
+
+    def __init__(self, channel: FeishuChannel):
+        self._channel = channel
+
+    @property
+    def name(self) -> str:
+        return "feishu_list_doc_blocks"
+
+    @property
+    def description(self) -> str:
+        return (
+            "List the content blocks of a Feishu document. Returns block IDs, types, "
+            "and text content so you can target specific blocks for editing."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "document_id": {
+                    "type": "string",
+                    "description": "The document ID (from the URL, e.g. the part after /docx/)",
+                },
+                "page_size": {
+                    "type": "integer",
+                    "description": "Max blocks to return (default 50)",
+                },
+            },
+            "required": ["document_id"],
+        }
+
+    async def execute(self, document_id: str, page_size: int = 50, **kwargs: Any) -> str:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._list_sync, document_id, min(page_size, 500))
+
+    def _list_sync(self, document_id: str, page_size: int) -> str:
+        import lark_oapi as lark
+
+        url = f"/open-apis/docx/v1/documents/{document_id}/blocks"
+        request = lark.BaseRequest.builder() \
+            .http_method(lark.HttpMethod.GET) \
+            .uri(url) \
+            .token_types({lark.AccessTokenType.TENANT}) \
+            .build()
+        response = self._channel._client.request(request)
+        if not response.success():
+            return f"Error listing blocks: code={response.code}, msg={response.msg}"
+        try:
+            data = json.loads(str(response.raw.content, lark.UTF_8))
+            items = data.get("data", {}).get("items", [])
+            if not items:
+                return "(document has no blocks)"
+            lines = []
+            for block in items[:page_size]:
+                block_id = block.get("block_id", "")
+                block_type = block.get("block_type", "")
+                text = self._extract_block_text(block)
+                preview = text[:120] + "..." if len(text) > 120 else text
+                lines.append(f"- [{block_type}] id={block_id}: {preview}" if preview else f"- [{block_type}] id={block_id}")
+            return "\n".join(lines)
+        except (json.JSONDecodeError, AttributeError):
+            return "Error parsing block list response"
+
+    @staticmethod
+    def _extract_block_text(block: dict) -> str:
+        """Extract readable text from a block's content elements."""
+        block_type = block.get("block_type", 0)
+        # Type numbers: 2=text, 3=heading1, 4=heading2, ..., 9=bullet, 10=ordered, 14=code, 22=callout
+        type_key_map = {
+            2: "text", 3: "heading1", 4: "heading2", 5: "heading3",
+            6: "heading4", 7: "heading5", 8: "heading6", 9: "bullet",
+            10: "ordered", 11: "code", 14: "quote",
+        }
+        key = type_key_map.get(block_type)
+        if not key:
+            return ""
+        content = block.get(key, {})
+        elements = content.get("elements", [])
+        parts = []
+        for el in elements:
+            text_run = el.get("text_run", {})
+            parts.append(text_run.get("content", ""))
+        return "".join(parts)
+
+
+class FeishuEditDocTool(_Tool):
+    """Edit a Feishu document by appending content or updating/deleting blocks."""
+
+    def __init__(self, channel: FeishuChannel):
+        self._channel = channel
+
+    @property
+    def name(self) -> str:
+        return "feishu_edit_doc"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Edit a Feishu document. Supports three actions:\n"
+            "- 'append': Append text content as new blocks to the document (under a parent block).\n"
+            "- 'update': Update the text content of an existing block (by block_id).\n"
+            "- 'delete': Delete blocks by their block_ids.\n"
+            "Use feishu_list_doc_blocks first to discover block IDs."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "document_id": {
+                    "type": "string",
+                    "description": "The document ID",
+                },
+                "action": {
+                    "type": "string",
+                    "enum": ["append", "update", "delete"],
+                    "description": "The edit action to perform",
+                },
+                "parent_block_id": {
+                    "type": "string",
+                    "description": "For 'append': parent block ID to append under (use document_id for root-level)",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "For 'append'/'update': text content. For append, each line becomes a text block.",
+                },
+                "block_id": {
+                    "type": "string",
+                    "description": "For 'update': the block ID to update",
+                },
+                "block_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "For 'delete': list of block IDs to delete",
+                },
+                "index": {
+                    "type": "integer",
+                    "description": "For 'append': insertion index among siblings (-1 for end, default -1)",
+                },
+            },
+            "required": ["document_id", "action"],
+        }
+
+    async def execute(
+        self,
+        document_id: str,
+        action: str,
+        parent_block_id: str | None = None,
+        content: str | None = None,
+        block_id: str | None = None,
+        block_ids: list[str] | None = None,
+        index: int = -1,
+        **kwargs: Any,
+    ) -> str:
+        loop = asyncio.get_running_loop()
+        if action == "append":
+            if not content:
+                return "Error: 'content' is required for append action"
+            parent = parent_block_id or document_id
+            return await loop.run_in_executor(
+                None, self._append_sync, document_id, parent, content, index
+            )
+        elif action == "update":
+            if not block_id or not content:
+                return "Error: 'block_id' and 'content' are required for update action"
+            return await loop.run_in_executor(
+                None, self._update_sync, document_id, block_id, content
+            )
+        elif action == "delete":
+            if not block_ids:
+                return "Error: 'block_ids' is required for delete action"
+            return await loop.run_in_executor(
+                None, self._delete_sync, document_id, block_ids
+            )
+        else:
+            return f"Error: unknown action '{action}'. Use 'append', 'update', or 'delete'."
+
+    def _append_sync(self, document_id: str, parent_block_id: str, content: str, index: int) -> str:
+        import lark_oapi as lark
+
+        blocks = []
+        for line in content.split("\n"):
+            if not line.strip():
+                continue
+            blocks.append({
+                "block_type": 2,
+                "text": {
+                    "elements": [{"text_run": {"content": line}}],
+                    "style": {},
+                },
+            })
+
+        if not blocks:
+            return "Error: no non-empty lines in content"
+
+        url = f"/open-apis/docx/v1/documents/{document_id}/blocks/{parent_block_id}/children"
+        request = lark.BaseRequest.builder() \
+            .http_method(lark.HttpMethod.POST) \
+            .uri(url) \
+            .token_types({lark.AccessTokenType.TENANT}) \
+            .body({"children": blocks, "index": index}) \
+            .build()
+        response = self._channel._client.request(request)
+        if not response.success():
+            return f"Error appending blocks: code={response.code}, msg={response.msg}"
+        return f"Appended {len(blocks)} block(s) to document"
+
+    def _update_sync(self, document_id: str, block_id: str, content: str) -> str:
+        import lark_oapi as lark
+
+        url = f"/open-apis/docx/v1/documents/{document_id}/blocks/{block_id}"
+        request = lark.BaseRequest.builder() \
+            .http_method(lark.HttpMethod.PATCH) \
+            .uri(url) \
+            .token_types({lark.AccessTokenType.TENANT}) \
+            .body({
+                "update_text_elements": {
+                    "elements": [{"text_run": {"content": content}}],
+                },
+            }) \
+            .build()
+        response = self._channel._client.request(request)
+        if not response.success():
+            return f"Error updating block: code={response.code}, msg={response.msg}"
+        return f"Updated block {block_id}"
+
+    def _delete_sync(self, document_id: str, block_ids: list[str]) -> str:
+        import lark_oapi as lark
+
+        url = f"/open-apis/docx/v1/documents/{document_id}/blocks/batch_delete"
+        request = lark.BaseRequest.builder() \
+            .http_method(lark.HttpMethod.DELETE) \
+            .uri(url) \
+            .token_types({lark.AccessTokenType.TENANT}) \
+            .body({"block_ids": block_ids}) \
+            .build()
+        response = self._channel._client.request(request)
+        if not response.success():
+            return f"Error deleting blocks: code={response.code}, msg={response.msg}"
+        return f"Deleted {len(block_ids)} block(s)"
