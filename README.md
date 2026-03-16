@@ -851,6 +851,37 @@ Connects directly to any OpenAI-compatible endpoint — LM Studio, llama.cpp, To
 
 > For local servers that don't require a key, set `apiKey` to any non-empty string (e.g. `"no-key"`).
 
+To configure multiple custom endpoints and switch between them, keep the legacy `providers.custom` entry if you want, and add named entries like `providers.custom_gmncode`. Then set `agents.defaults.provider` to the same `custom_<name>` key.
+
+```json
+{
+  "providers": {
+    "custom": {
+      "apiKey": "legacy-default-key",
+      "apiBase": "https://legacy.example.com/v1"
+    },
+    "custom_gmncode": {
+      "apiKey": "your-api-key",
+      "apiBase": "https://gmncode.cn/v1"
+    },
+    "custom_backup": {
+      "apiKey": "backup-key",
+      "apiBase": "https://backup.example.com/v1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "custom_gmncode",
+      "model": "gpt-5.4"
+    }
+  }
+}
+```
+
+- `"provider": "custom"` uses the legacy single `providers.custom` entry.
+- `"provider": "custom_gmncode"` selects `providers.custom_gmncode`.
+- `"provider": "auto"` does not auto-pick from `custom_*` entries.
+
 </details>
 
 <details>

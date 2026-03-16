@@ -307,6 +307,17 @@ def _make_provider(config: Config):
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
+    selected_named_custom, provider_key = config.get_named_custom_provider_selection()
+
+    if selected_named_custom and provider_name is None:
+        available_profiles = ", ".join(config.providers.get_named_custom_provider_names()) or "(none configured)"
+        if provider_key:
+            console.print(f"[red]Error: Unknown custom provider '{provider_key}'.[/red]")
+        else:
+            console.print("[red]Error: Named custom providers must use the form 'custom_<name>'.[/red]")
+        console.print(f"Available custom providers: {available_profiles}")
+        console.print("Set them in ~/.nanobot/config.json as providers.custom_<name>")
+        raise typer.Exit(1)
 
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
@@ -962,6 +973,12 @@ def status():
         from nanobot.providers.registry import PROVIDERS
 
         console.print(f"Model: {config.agents.defaults.model}")
+        configured_provider = (config.agents.defaults.provider or "auto").strip() or "auto"
+        if configured_provider == "auto":
+            matched_provider = config.get_provider_name(config.agents.defaults.model) or "unresolved"
+            console.print(f"Provider: auto -> {matched_provider}")
+        else:
+            console.print(f"Provider: {configured_provider}")
 
         # Check API keys from registry
         for spec in PROVIDERS:
@@ -979,6 +996,15 @@ def status():
             else:
                 has_key = bool(p.api_key)
                 console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+
+        for name, profile in config.providers.iter_named_custom_providers():
+            has_key = bool(profile.api_key)
+            base = profile.api_base or "(no apiBase)"
+            active_suffix = " [dim](active)[/dim]" if configured_provider == name else ""
+            if has_key:
+                console.print(f"{name}: [green]✓ {base}[/green]{active_suffix}")
+            else:
+                console.print(f"{name}: [dim]not set[/dim]{active_suffix}")
 
 
 # ============================================================================

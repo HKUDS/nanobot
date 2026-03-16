@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -66,6 +66,8 @@ class ProviderConfig(Base):
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="allow")
+
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -88,6 +90,40 @@ class ProvidersConfig(Base):
     byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
+
+    def _coerce_provider_config(self, value: object) -> ProviderConfig | None:
+        """Normalize an extra provider entry to ProviderConfig."""
+        if isinstance(value, ProviderConfig):
+            return value
+        if isinstance(value, dict):
+            try:
+                return ProviderConfig.model_validate(value)
+            except ValidationError:
+                return None
+        return None
+
+    def get_named_custom_provider(self, provider_name: str) -> ProviderConfig | None:
+        """Return a named custom provider entry like custom_gmncode."""
+        if not provider_name.startswith("custom_") or provider_name == "custom_":
+            return None
+        value = (self.model_extra or {}).get(provider_name)
+        provider = self._coerce_provider_config(value)
+        if provider is not None and self.model_extra is not None:
+            self.model_extra[provider_name] = provider
+        return provider
+
+    def iter_named_custom_providers(self) -> list[tuple[str, ProviderConfig]]:
+        """Return all named custom providers sorted by name."""
+        providers: list[tuple[str, ProviderConfig]] = []
+        for name, value in sorted((self.model_extra or {}).items()):
+            provider = self.get_named_custom_provider(name)
+            if provider is not None:
+                providers.append((name, provider))
+        return providers
+
+    def get_named_custom_provider_names(self) -> list[str]:
+        """Return the configured custom_* provider names."""
+        return [name for name, _ in self.iter_named_custom_providers()]
 
 
 class HeartbeatConfig(Base):
@@ -165,13 +201,27 @@ class Config(BaseSettings):
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
 
+    def get_named_custom_provider_selection(self) -> tuple[bool, str | None]:
+        """Return whether a named custom_* provider was selected and its key."""
+        forced = (self.agents.defaults.provider or "").strip()
+        if not forced.startswith("custom_"):
+            return False, None
+        return True, forced if forced != "custom_" else None
+
     def _match_provider(
         self, model: str | None = None
     ) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
         from nanobot.providers.registry import PROVIDERS
 
-        forced = self.agents.defaults.provider
+        forced = (self.agents.defaults.provider or "auto").strip()
+        selected_named_custom, provider_key = self.get_named_custom_provider_selection()
+        if selected_named_custom:
+            if provider_key is None:
+                return None, None
+            p = self.providers.get_named_custom_provider(provider_key)
+            return (p, "custom") if p else (None, None)
+
         if forced != "auto":
             p = getattr(self.providers, forced, None)
             return (p, forced) if p else (None, None)
