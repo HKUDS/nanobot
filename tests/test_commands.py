@@ -27,11 +27,12 @@ class _StopGateway(RuntimeError):
 
 @pytest.fixture
 def mock_paths():
-    """Mock config/workspace paths for test isolation."""
+    """Mock config/workspace paths for test isolation."""    
+
     with patch("nanobot.config.loader.get_config_path") as mock_cp, \
          patch("nanobot.config.loader.save_config") as mock_sc, \
-         patch("nanobot.config.loader.load_config") as mock_lc, \
-         patch("nanobot.cli.commands.get_workspace_path") as mock_ws:
+         patch("nanobot.cli.commands.get_workspace_path") as mock_ws, \
+         patch("nanobot.config.paths.get_workspace_path") as mock_ws2:
 
         base_dir = Path("./test_onboard_data")
         if base_dir.exists():
@@ -43,6 +44,7 @@ def mock_paths():
 
         mock_cp.return_value = config_file
         mock_ws.return_value = workspace_dir
+        mock_ws2.return_value = workspace_dir
         mock_sc.side_effect = lambda config: config_file.write_text("{}")
 
         yield config_file, workspace_dir
@@ -282,7 +284,7 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: config_file.parent / "cron")
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config, _agent_cfg: object())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
     monkeypatch.setattr("nanobot.cron.service.CronService", lambda _store: object())
 
@@ -363,7 +365,7 @@ def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Pa
     )
     monkeypatch.setattr(
         "nanobot.cli.commands._make_provider",
-        lambda _config: (_ for _ in ()).throw(_StopGateway("stop")),
+        lambda _config, _agent_cfg: (_ for _ in ()).throw(_StopGateway("stop")),
     )
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
@@ -391,7 +393,7 @@ def test_gateway_workspace_option_overrides_config(monkeypatch, tmp_path: Path) 
     )
     monkeypatch.setattr(
         "nanobot.cli.commands._make_provider",
-        lambda _config: (_ for _ in ()).throw(_StopGateway("stop")),
+        lambda _config, _agent_cfg: (_ for _ in ()).throw(_StopGateway("stop")),
     )
 
     result = runner.invoke(
@@ -417,7 +419,7 @@ def test_gateway_warns_about_deprecated_memory_window(monkeypatch, tmp_path: Pat
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr(
         "nanobot.cli.commands._make_provider",
-        lambda _config: (_ for _ in ()).throw(_StopGateway("stop")),
+        lambda _config, _agent_cfg: (_ for _ in ()).throw(_StopGateway("stop")),
     )
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
@@ -437,14 +439,14 @@ def test_gateway_uses_config_directory_for_cron_store(monkeypatch, tmp_path: Pat
 
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: config_file.parent / "cron")
+    monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda workspace_dir=None: config_file.parent / "cron")
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config, _agent_cfg: object())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
     monkeypatch.setattr("nanobot.session.manager.SessionManager", lambda _workspace: object())
 
     class _StopCron:
-        def __init__(self, store_path: Path) -> None:
+        def __init__(self, store_path: Path, agent_name: str = "") -> None:
             seen["cron_store"] = store_path
             raise _StopGateway("stop")
 
@@ -469,7 +471,7 @@ def test_gateway_uses_configured_port_when_cli_flag_is_missing(monkeypatch, tmp_
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr(
         "nanobot.cli.commands._make_provider",
-        lambda _config: (_ for _ in ()).throw(_StopGateway("stop")),
+        lambda _config, _agent_cfg: (_ for _ in ()).throw(_StopGateway("stop")),
     )
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
@@ -491,7 +493,7 @@ def test_gateway_cli_port_overrides_configured_port(monkeypatch, tmp_path: Path)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr(
         "nanobot.cli.commands._make_provider",
-        lambda _config: (_ for _ in ()).throw(_StopGateway("stop")),
+        lambda _config, _agent_cfg: (_ for _ in ()).throw(_StopGateway("stop")),
     )
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file), "--port", "18792"])

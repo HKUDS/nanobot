@@ -224,7 +224,6 @@ def onboard():
     from nanobot.config.schema import AgentDefaults, Config
 
     config_path = get_config_path()
-    main_workspace = str(Path.home() / ".nanobot" / "workspace" / "defaults")
 
     if config_path.exists():
         console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
@@ -232,19 +231,17 @@ def onboard():
         console.print("  [bold]N[/bold] = refresh config, keeping existing values and adding new fields")
         if typer.confirm("Overwrite?"):
             config = Config()
-            config.agents.defaults.workspace = main_workspace
             save_config(config)
             console.print(f"[green]✓[/green] Config reset to defaults at {config_path}")
         else:
             config = load_config()
             # Ensure defaults has the workspace set after refresh
             if not config.agents.defaults.workspace:
-                config.agents.defaults.workspace = main_workspace
+                config.agents.defaults.workspace = get_workspace_path()
             save_config(config)
             console.print(f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)")
     else:
         config = Config()
-        config.agents.defaults.workspace = main_workspace
         save_config(config)
         console.print(f"[green]✓[/green] Created config at {config_path}")
 
@@ -255,7 +252,7 @@ def onboard():
     agent_config = config.agents.defaults
     
     # Create workspace
-    workspace_path = Path(agent_config.workspace).expanduser() if agent_config.workspace else config.workspace_path
+    workspace_path = Path(agent_config.workspace) if agent_config.workspace else config.workspace_path
     
     if not workspace_path.exists():
         workspace_path.mkdir(parents=True, exist_ok=True)
@@ -386,7 +383,7 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
 
     loaded = load_config(config_path)
     if workspace:
-        config.agents.defaults.workspace = workspace
+        loaded.agents.defaults.workspace = workspace
     return loaded
 
 
@@ -450,7 +447,7 @@ def gateway(
     for idx, (instance_name, cfg) in enumerate(instances.items()):
         is_primary = (instance_name == "defaults")
         all_buses[instance_name] = main_bus if is_primary else MessageBus()
-        profile_path = Path(cfg.workspace).expanduser() / "PROFILE.md"
+        profile_path = Path(cfg.workspace) / "PROFILE.md"
         if profile_path.exists():
             peer_profiles[instance_name] = profile_path.read_text(encoding="utf-8")
         else:
@@ -462,7 +459,7 @@ def gateway(
         peer_buses = {k: v for k, v in all_buses.items() if k != instance_name}
         peer_profiles_filtered = {k: v for k, v in peer_profiles.items() if k != instance_name}
 
-        instance_workspace = Path(agent_config.workspace).expanduser()
+        instance_workspace = Path(agent_config.workspace)
         sync_workspace_templates(instance_workspace)
         session_manager = SessionManager(instance_workspace)
         
@@ -514,7 +511,7 @@ def gateway(
                 return _forward
             forward_coros.append(_make_forward(bus, instance_name))
             
-        cron_store_path = instance_workspace / "cron" / "jobs.json"
+        cron_store_path = get_cron_dir(agent_config.workspace) / "jobs.json"
         cron_store_path.parent.mkdir(parents=True, exist_ok=True)
         cron = CronService(cron_store_path, agent_name=instance_name)
         
@@ -716,7 +713,7 @@ def agent(
     config = _load_runtime_config(config, workspace)
     
     agent_config = config.agents.defaults
-    instance_workspace = Path(agent_config.workspace).expanduser() if agent_config.workspace else config.workspace_path
+    instance_workspace = Path(agent_config.workspace) if agent_config.workspace else config.workspace_path
     
     _print_deprecated_memory_window_notice(config)
     sync_workspace_templates(instance_workspace)
@@ -1070,7 +1067,7 @@ def status():
     config = load_config()
     
     agent_config = config.agents.instances.get("main") or config.agents.defaults
-    workspace = Path(agent_config.workspace).expanduser() if agent_config.workspace else config.workspace_path
+    workspace = Path(agent_config.workspace) if agent_config.workspace else config.workspace_path
 
     console.print(f"{__logo__} nanobot Status\n")
 
