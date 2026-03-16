@@ -138,7 +138,8 @@ class LiteLLMProvider(LLMProvider):
                     new_content = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
                 else:
                     new_content = list(content)
-                    new_content[-1] = {**new_content[-1], "cache_control": {"type": "ephemeral"}}
+                    if new_content:
+                        new_content[-1] = {**new_content[-1], "cache_control": {"type": "ephemeral"}}
                 new_messages.append({**msg, "content": new_content})
             else:
                 new_messages.append(msg)
