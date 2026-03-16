@@ -49,10 +49,11 @@ jobs:
 
       - name: Verify deployment
         run: |
-          sleep 5
-          STATUS=$(curl -sf http://127.0.0.1:18791/health | jq -r '.status' 2>/dev/null || echo "failed")
+          sleep 10
+          BODY=$(curl -sf http://127.0.0.1:18791/health 2>/dev/null || echo '{}')
+          STATUS=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "failed")
           if [ "$STATUS" != "ok" ]; then
-            echo "::error::Staging health check failed after deployment"
+            echo "::error::Staging health check failed after deployment (got: $BODY)"
             exit 1
           fi
           echo "Staging deployment verified — health check passed"
