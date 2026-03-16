@@ -548,7 +548,12 @@ def gateway(
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
     async def run():
+        health_server: asyncio.Server | None = None
         try:
+            # Start lightweight health endpoint for Docker HEALTHCHECK
+            from nanobot.web.health import start_health_server
+
+            health_server = await start_health_server(agent, port=port)
             await cron.start()
             await heartbeat.start()
             await asyncio.gather(
@@ -558,6 +563,9 @@ def gateway(
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         finally:
+            if health_server:
+                health_server.close()
+                await health_server.wait_closed()
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
