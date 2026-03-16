@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, RootModel
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -30,7 +30,7 @@ class ChannelsConfig(Base):
 class AgentDefaults(Base):
     """Default agent configuration."""
 
-    workspace: str = "~/.nanobot/workspace"
+    workspace: str | None = None
     model: str = "anthropic/claude-opus-4-5"
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
@@ -42,6 +42,9 @@ class AgentDefaults(Base):
     # Deprecated compatibility field: accepted from old configs but ignored at runtime.
     memory_window: int | None = Field(default=None, exclude=True)
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    allowed_agent_delegates: list[str] = Field(
+        default_factory=lambda: ["*"]
+    )  # List of peer agent names this agent is allowed to delegate to. ["*"] allows all.
 
     @property
     def should_warn_deprecated_memory_window(self) -> bool:
@@ -49,10 +52,44 @@ class AgentDefaults(Base):
         return self.memory_window is not None and "context_window_tokens" not in self.model_fields_set
 
 
-class AgentsConfig(Base):
+class AgentsConfig(RootModel[dict[str, AgentDefaults]]):
     """Agent configuration."""
 
-    defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    root: dict[str, AgentDefaults] = Field(default_factory=lambda: {"defaults": AgentDefaults()})
+
+    @property
+    def defaults(self) -> AgentDefaults:
+        if "defaults" not in self.root:
+            self.root["defaults"] = AgentDefaults()
+        return self.root["defaults"]
+
+    @defaults.setter
+    def defaults(self, value: AgentDefaults):
+        self.root["defaults"] = value
+
+    def items(self):
+        return self.root.items()
+
+    def keys(self):
+        return self.root.keys()
+
+    def values(self):
+        return self.root.values()
+
+    def get(self, item: str, default=None):
+        return self.root.get(item, default)
+
+    def __getitem__(self, item: str) -> AgentDefaults:
+        return self.root[item]
+
+    def __setitem__(self, key: str, value: AgentDefaults):
+        self.root[key] = value
+
+    def __contains__(self, item: str) -> bool:
+        return item in self.root
+
+    def __iter__(self):
+        return iter(self.root)
 
 
 class ProviderConfig(Base):
@@ -160,10 +197,15 @@ class Config(BaseSettings):
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
 
+    def model_post_init(self, _context):
+        from nanobot.config.paths import get_workspace_path
+        if not self.agents.defaults.workspace:
+            self.agents.defaults.workspace = str(get_workspace_path())
+
     @property
     def workspace_path(self) -> Path:
         """Get expanded workspace path."""
-        return Path(self.agents.defaults.workspace).expanduser()
+        return Path(self.agents.defaults.workspace)
 
     def _match_provider(
         self, model: str | None = None

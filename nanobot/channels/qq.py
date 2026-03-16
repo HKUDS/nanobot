@@ -160,7 +160,7 @@ class QQChannel(BaseChannel):
                 return
             self._processed_ids.append(data.id)
 
-            content = (data.content or "").strip()
+            content = (data.content or "").strip()            
             if not content:
                 return
 

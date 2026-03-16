@@ -66,10 +66,12 @@ class CronService:
     def __init__(
         self,
         store_path: Path,
-        on_job: Callable[[CronJob], Coroutine[Any, Any, str | None]] | None = None
+        on_job: Callable[[CronJob], Coroutine[Any, Any, str | None]] | None = None,
+        agent_name: str = "agent",
     ):
         self.store_path = store_path
         self.on_job = on_job
+        self.agent_name = agent_name
         self._store: CronStore | None = None
         self._last_mtime: float = 0.0
         self._timer_task: asyncio.Task | None = None
@@ -80,7 +82,7 @@ class CronService:
         if self._store and self.store_path.exists():
             mtime = self.store_path.stat().st_mtime
             if mtime != self._last_mtime:
-                logger.info("Cron: jobs.json modified externally, reloading")
+                logger.info("[{}] Cron: jobs.json modified externally, reloading", self.agent_name)
                 self._store = None
         if self._store:
             return self._store
@@ -179,7 +181,7 @@ class CronService:
         self._recompute_next_runs()
         self._save_store()
         self._arm_timer()
-        logger.info("Cron service started with {} jobs", len(self._store.jobs if self._store else []))
+        logger.info("[{}] Cron service started with {} jobs", self.agent_name, len(self._store.jobs if self._store else []))
 
     def stop(self) -> None:
         """Stop the cron service."""
@@ -245,7 +247,7 @@ class CronService:
     async def _execute_job(self, job: CronJob) -> None:
         """Execute a single job."""
         start_ms = _now_ms()
-        logger.info("Cron: executing job '{}' ({})", job.name, job.id)
+        logger.info("[{}] Cron: executing job '{}' ({})", self.agent_name, job.name, job.id)
 
         try:
             response = None
@@ -254,7 +256,7 @@ class CronService:
 
             job.state.last_status = "ok"
             job.state.last_error = None
-            logger.info("Cron: job '{}' completed", job.name)
+            logger.info("[{}] Cron: job '{}' completed", self.agent_name, job.name)
 
         except Exception as e:
             job.state.last_status = "error"
@@ -320,7 +322,7 @@ class CronService:
         self._save_store()
         self._arm_timer()
 
-        logger.info("Cron: added job '{}' ({})", name, job.id)
+        logger.info("[{}] Cron: added job '{}' ({})", self.agent_name, name, job.id)
         return job
 
     def remove_job(self, job_id: str) -> bool:
@@ -333,7 +335,7 @@ class CronService:
         if removed:
             self._save_store()
             self._arm_timer()
-            logger.info("Cron: removed job {}", job_id)
+            logger.info("[{}] Cron: removed job {}", self.agent_name, job_id)
 
         return removed
 

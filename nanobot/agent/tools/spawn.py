@@ -48,15 +48,20 @@ class SpawnTool(Tool):
                     "type": "string",
                     "description": "Optional short label for the task (for display)",
                 },
+                "include_bootstrap": {
+                    "type": "boolean",
+                    "description": "If true, loads workspace core instructions and behavior policies (AGENTS.md, SOUL.md, etc.) into the subagent. Use this whenever the task requires adherence to project-wide rules, workflows, or specific user-defined constraints.",
+                },
             },
             "required": ["task"],
         }
 
-    async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str:
+    async def execute(self, task: str, label: str | None = None, include_bootstrap: bool = False, **kwargs: Any) -> str:
         """Spawn a subagent to execute the given task."""
         return await self._manager.spawn(
             task=task,
             label=label,
+            include_bootstrap=include_bootstrap,
             origin_channel=self._origin_channel,
             origin_chat_id=self._origin_chat_id,
             session_key=self._session_key,

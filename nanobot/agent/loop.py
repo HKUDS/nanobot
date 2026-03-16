@@ -64,6 +64,10 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        peer_buses: dict[str, MessageBus] | None = None,
+        peer_profiles: dict[str, str] | None = None,
+        allowed_agent_delegates: list[str] | None = None,
+        self_agent_name: str = "main",
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -78,6 +82,10 @@ class AgentLoop:
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
+        self.peer_buses = peer_buses or {}
+        self.peer_profiles = peer_profiles or {}
+        self.allowed_agent_delegates = allowed_agent_delegates if allowed_agent_delegates is not None else ["*"]
+        self.self_agent_name = self_agent_name
         self.restrict_to_workspace = restrict_to_workspace
 
         self.context = ContextBuilder(workspace)
@@ -132,6 +140,17 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+        if getattr(self, "peer_buses", None):
+            from nanobot.agent.tools.delegate import AgentDelegateTool
+            delegate_tool = AgentDelegateTool(
+                peer_buses=self.peer_buses,
+                allowed_agent_delegates=self.allowed_agent_delegates,
+                peer_profiles=self.peer_profiles,
+                self_agent_name=self.self_agent_name,
+                main_bus=self.bus,
+            )
+            self.tools.register(delegate_tool)
+            self.subagents.register_tool(delegate_tool)
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -155,12 +174,21 @@ class AgentLoop:
         finally:
             self._mcp_connecting = False
 
-    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
+    def _set_tool_context(
+        self, 
+        channel: str, 
+        chat_id: str, 
+        message_id: str | None = None,
+        extra_metadata: dict[str, Any] | None = None
+    ) -> None:
         """Update context for all tools that need routing info."""
-        for name in ("message", "spawn", "cron"):
+        for name in ("message", "spawn", "cron", "agent_delegate"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
-                    tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+                    if name == "message":
+                        tool.set_context(channel, chat_id, message_id, extra_metadata)
+                    else:
+                        tool.set_context(channel, chat_id)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -224,7 +252,7 @@ class AgentLoop:
                 for tool_call in response.tool_calls:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                    logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                    logger.info("[{}] Tool call: {}({})", self.self_agent_name, tool_call.name, args_str[:200])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
@@ -257,7 +285,7 @@ class AgentLoop:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
         await self._connect_mcp()
-        logger.info("Agent loop started")
+        logger.info("[{}] Agent loop started", self.self_agent_name)
 
         while self._running:
             try:
@@ -321,7 +349,7 @@ class AgentLoop:
                         content="", metadata=msg.metadata or {},
                     ))
             except asyncio.CancelledError:
-                logger.info("Task cancelled for session {}", msg.session_key)
+                logger.info("[{}] Task cancelled for session {}", self.self_agent_name, msg.session_key)
                 raise
             except Exception:
                 logger.exception("Error processing message for session {}", msg.session_key)
@@ -351,7 +379,7 @@ class AgentLoop:
     def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
-        logger.info("Agent loop stopping")
+        logger.info("[{}] Agent loop stopping", self.self_agent_name)
 
     async def _process_message(
         self,
@@ -362,27 +390,48 @@ class AgentLoop:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
-            channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
-                                else ("cli", msg.chat_id))
-            logger.info("Processing system message from {}", msg.sender_id)
+            # sender_id is 'peer:engineer' or 'peer_agent' — extract actual name
+            peer_name = msg.sender_id.split(":", 1)[-1] if ":" in msg.sender_id else msg.sender_id
+            logger.info("[{}] Processing system message from agent '{}'", self.self_agent_name, peer_name)
+            # chat_id is "channel:chat_id" - the original user session that triggered the delegation
+            if ":" in msg.chat_id:
+                channel, chat_id = msg.chat_id.split(":", 1)
+            else:
+                channel, chat_id = "cli", msg.chat_id
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"), msg.metadata)
+            
+            # This is a task delegated TO me. Trigger the response and reply back to the caller.
             history = session.get_history(max_messages=0)
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
+            
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
-            self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
-            return OutboundMessage(channel=channel, chat_id=chat_id,
-                                  content=final_content or "Background task completed.")
+            
+            if final_content:
+                meta = msg.metadata.copy() if msg.metadata else {}
+                meta["is_final"] = True
+                self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+            
+                # We return the response instead of explicitly publishing it, 
+                # allowing the caller (_dispatch) or interceptor (commands.py) to handle it.
+                return OutboundMessage(
+                    channel=channel,
+                    chat_id=chat_id,
+                    content=final_content or "Background task completed.",
+                    metadata=meta,
+                )
+                
+            return None
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
-        logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
+        logger.info("[{}] Processing message from {}:{}: {}", self.self_agent_name, msg.channel, msg.sender_id, preview)
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
@@ -413,7 +462,12 @@ class AgentLoop:
             )
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        self._set_tool_context(
+            msg.channel, 
+            msg.chat_id, 
+            msg.metadata.get("message_id"),
+            msg.metadata
+        )
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
@@ -446,13 +500,20 @@ class AgentLoop:
         self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
-            return None
+            if msg.channel != "system":
+                return None
+            if final_content is None:
+                final_content = "Task execution completed."
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+        logger.info("[{}] Response to {}:{}: {}", self.self_agent_name, msg.channel, msg.sender_id, preview)
+        
+        meta = msg.metadata.copy() if msg.metadata else {}
+        meta["is_final"] = True
+        
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
-            metadata=msg.metadata or {},
+            metadata=meta,
         )
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:

@@ -24,9 +24,9 @@ def get_media_dir(channel: str | None = None) -> Path:
     return ensure_dir(base / channel) if channel else base
 
 
-def get_cron_dir() -> Path:
+def get_cron_dir(workspace_dir: str | None = None) -> Path:
     """Return the cron storage directory."""
-    return get_runtime_subdir("cron")
+    return Path(workspace_dir) / "cron" if workspace_dir else get_runtime_subdir("cron")
 
 
 def get_logs_dir() -> Path:
@@ -36,7 +36,7 @@ def get_logs_dir() -> Path:
 
 def get_workspace_path(workspace: str | None = None) -> Path:
     """Resolve and ensure the agent workspace path."""
-    path = Path(workspace).expanduser() if workspace else Path.home() / ".nanobot" / "workspace"
+    path = Path(workspace).expanduser() if workspace else Path.home() / ".nanobot" / "workspace" / "defaults"
     return ensure_dir(path)
 
 
