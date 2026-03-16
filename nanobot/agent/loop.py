@@ -234,7 +234,10 @@ class AgentLoop:
                 # Don't persist error responses to session history — they can
                 # poison the context and cause permanent 400 loops (#1303).
                 if response.finish_reason == "error":
-                    logger.error("LLM returned error: {}", (clean or "")[:200])
+                    import re
+                    err_brief = re.sub(r"<[^>]+>", " ", clean or "").strip()
+                    err_brief = re.sub(r"\s+", " ", err_brief)[:200]
+                    logger.error("LLM returned error: {}", err_brief)
                     final_content = clean or "Sorry, I encountered an error calling the AI model."
                     break
                 messages = self.context.add_assistant_message(

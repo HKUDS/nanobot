@@ -104,6 +104,7 @@ class LLMProvider(ABC):
         self.api_key = api_key
         self.api_base = api_base
         self.generation: GenerationSettings = GenerationSettings()
+        self.model_supports_image: bool | None = None  # Set from ModelConfig declaration
 
     @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -254,6 +255,13 @@ class LLMProvider(ABC):
         if reasoning_effort is self._SENTINEL:
             reasoning_effort = self.generation.reasoning_effort
 
+        # Proactively strip images if model declaration says images are unsupported
+        if self.model_supports_image is False:
+            stripped = self._strip_image_content(messages)
+            if stripped is not None:
+                logger.info("Model does not support images (declared), stripping images proactively")
+                messages = stripped
+
         kw: dict[str, Any] = dict(
             messages=messages, tools=tools, model=model,
             max_tokens=max_tokens, temperature=temperature,
@@ -274,10 +282,13 @@ class LLMProvider(ABC):
                         return await self._safe_chat(**{**kw, "messages": stripped})
                 return response
 
+            # Strip HTML tags for cleaner log output
+            import re
+            err_text = re.sub(r"<[^>]+>", " ", response.content or "").strip()
+            err_text = re.sub(r"\s+", " ", err_text)[:150]
             logger.warning(
                 "LLM transient error (attempt {}/{}), retrying in {}s: {}",
-                attempt, len(self._CHAT_RETRY_DELAYS), delay,
-                (response.content or "")[:120].lower(),
+                attempt, len(self._CHAT_RETRY_DELAYS), delay, err_text,
             )
             await asyncio.sleep(delay)
 
