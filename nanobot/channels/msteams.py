@@ -5,6 +5,7 @@ Scope:
 - text inbound/outbound
 - conversation reference persistence
 - sender allowlist support
+- optional inbound Bot Framework bearer-token validation
 - no attachments/cards/polls yet
 """
 
