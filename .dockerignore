@@ -41,9 +41,8 @@ terraform/
 .dockerignore
 Makefile
 
-# Bridge build artifacts (rebuilt in container)
-bridge/dist/
-bridge/node_modules/
+# Bridge (WhatsApp bridge is optional — run as separate container if needed)
+bridge/
 
 # Runtime data
 workspace/
