@@ -1,0 +1,59 @@
+name: Deploy to Staging
+
+on:
+  workflow_run:
+    workflows: ["Build & Push Docker Image"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy-staging:
+    name: Deploy to staging
+    runs-on: [self-hosted, linux, x64]
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    timeout-minutes: 10
+
+    environment:
+      name: staging
+      url: https://staging.nanobot.internal
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Determine image tag
+        id: tag
+        run: |
+          SHORT_SHA=$(echo "${{ github.event.workflow_run.head_sha }}" | cut -c1-7)
+          echo "image=ghcr.io/${{ github.repository }}:sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "Deploying image: ghcr.io/${{ github.repository }}:sha-${SHORT_SHA}"
+
+      - name: Deploy to staging
+        run: |
+          bash deploy/deploy.sh \
+            --env staging \
+            --image "${{ steps.tag.outputs.image }}" \
+            --timeout 60
+
+      - name: Verify deployment
+        run: |
+          sleep 5
+          STATUS=$(curl -sf http://127.0.0.1:18791/health | jq -r '.status' 2>/dev/null || echo "failed")
+          if [ "$STATUS" != "ok" ]; then
+            echo "::error::Staging health check failed after deployment"
+            exit 1
+          fi
+          echo "Staging deployment verified — health check passed"
+
+      - name: Report failure
+        if: failure()
+        run: |
+          echo "::error::Staging deployment failed. Check container logs:"
+          echo "  docker compose -p nanobot-staging -f deploy/staging/docker-compose.yml logs --tail 50"

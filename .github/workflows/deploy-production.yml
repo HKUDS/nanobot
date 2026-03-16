@@ -1,0 +1,65 @@
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Docker image tag to deploy (e.g., sha-abc1234 or latest)'
+        required: false
+        default: 'latest'
+      rollback:
+        description: 'Rollback to previous image?'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy-production:
+    name: Deploy to production
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 10
+
+    environment:
+      name: production
+      url: https://nanobot.internal
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Deploy
+        run: |
+          if [ "${{ inputs.rollback }}" == "true" ]; then
+            echo "Rolling back production to previous image..."
+            bash deploy/deploy.sh --env production --rollback --timeout 60
+          else
+            IMAGE="ghcr.io/${{ github.repository }}:${{ inputs.image_tag }}"
+            echo "Deploying to production: ${IMAGE}"
+            bash deploy/deploy.sh --env production --image "${IMAGE}" --timeout 60
+          fi
+
+      - name: Verify deployment
+        run: |
+          sleep 5
+          STATUS=$(curl -sf http://127.0.0.1:18790/health | jq -r '.status' 2>/dev/null || echo "failed")
+          if [ "$STATUS" != "ok" ]; then
+            echo "::error::Production health check failed after deployment"
+            exit 1
+          fi
+          echo "Production deployment verified — health check passed"
+
+      - name: Report failure
+        if: failure()
+        run: |
+          echo "::error::Production deployment failed. Check container logs:"
+          echo "  docker compose -p nanobot-prod -f deploy/production/docker-compose.yml logs --tail 50"
+          echo ""
+          echo "To rollback manually:"
+          echo "  bash deploy/deploy.sh --env production --rollback"
