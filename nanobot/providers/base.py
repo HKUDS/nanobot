@@ -2,11 +2,14 @@
 
 import asyncio
 import json
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
 from loguru import logger
+
+from nanobot.agent.monitoring import add_llm_call_step, _AGENTSCOPE_AVAILABLE
 
 
 @dataclass
@@ -260,10 +263,16 @@ class LLMProvider(ABC):
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
         )
 
+        start_time = time.time()
+        final_model = model or self.get_default_model()
+        
         for attempt, delay in enumerate(self._CHAT_RETRY_DELAYS, start=1):
             response = await self._safe_chat(**kw)
 
             if response.finish_reason != "error":
+                if _AGENTSCOPE_AVAILABLE:
+                    latency_ms = (time.time() - start_time) * 1000
+                    add_llm_call_step(final_model, messages, tools or [], response, latency_ms)
                 return response
 
             if not self._is_transient_error(response.content):
@@ -271,7 +280,14 @@ class LLMProvider(ABC):
                     stripped = self._strip_image_content(messages)
                     if stripped is not None:
                         logger.warning("Model does not support image input, retrying without images")
-                        return await self._safe_chat(**{**kw, "messages": stripped})
+                        response = await self._safe_chat(**{**kw, "messages": stripped})
+                        if _AGENTSCOPE_AVAILABLE:
+                            latency_ms = (time.time() - start_time) * 1000
+                            add_llm_call_step(final_model, messages, tools or [], response, latency_ms)
+                        return response
+                if _AGENTSCOPE_AVAILABLE:
+                    latency_ms = (time.time() - start_time) * 1000
+                    add_llm_call_step(final_model, messages, tools or [], response, latency_ms)
                 return response
 
             logger.warning(
@@ -281,7 +297,11 @@ class LLMProvider(ABC):
             )
             await asyncio.sleep(delay)
 
-        return await self._safe_chat(**kw)
+        response = await self._safe_chat(**kw)
+        if _AGENTSCOPE_AVAILABLE:
+            latency_ms = (time.time() - start_time) * 1000
+            add_llm_call_step(final_model, messages, tools or [], response, latency_ms)
+        return response
 
     @abstractmethod
     def get_default_model(self) -> str:

@@ -1,8 +1,10 @@
 """Tool registry for dynamic tool management."""
 
+import time
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
+from nanobot.agent.monitoring import add_tool_execution_step, _AGENTSCOPE_AVAILABLE
 
 
 class ToolRegistry:
@@ -43,6 +45,7 @@ class ToolRegistry:
         if not tool:
             return f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
 
+        start_time = time.time()
         try:
             # Attempt to cast parameters to match schema types
             params = tool.cast_params(params)
@@ -50,13 +53,23 @@ class ToolRegistry:
             # Validate parameters
             errors = tool.validate_params(params)
             if errors:
-                return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors) + _HINT
+                error_msg = f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)
+                if _AGENTSCOPE_AVAILABLE:
+                    add_tool_execution_step(name, params, error_msg, (time.time() - start_time) * 1000)
+                return error_msg + _HINT
             result = await tool.execute(**params)
             if isinstance(result, str) and result.startswith("Error"):
+                if _AGENTSCOPE_AVAILABLE:
+                    add_tool_execution_step(name, params, result, (time.time() - start_time) * 1000)
                 return result + _HINT
+            if _AGENTSCOPE_AVAILABLE:
+                add_tool_execution_step(name, params, result, (time.time() - start_time) * 1000)
             return result
         except Exception as e:
-            return f"Error executing {name}: {str(e)}" + _HINT
+            error_msg = f"Error executing {name}: {str(e)}"
+            if _AGENTSCOPE_AVAILABLE:
+                add_tool_execution_step(name, params, error_msg, (time.time() - start_time) * 1000)
+            return error_msg + _HINT
 
     @property
     def tool_names(self) -> list[str]:
