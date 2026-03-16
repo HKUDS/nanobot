@@ -377,7 +377,7 @@ class TelegramChannel(BaseChannel):
 
             for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
                 # Final response: simulate streaming via draft, then persist
-                if not is_progress:
+                if not is_progress and getattr(self.config, "send_progress", True):
                     await self._send_with_streaming(chat_id, chunk, reply_params, thread_kwargs)
                 else:
                     await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
