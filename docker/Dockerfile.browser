@@ -1,0 +1,80 @@
+# Nanobot with Browser Automation Support
+# Based on Playwright's official Python image for best compatibility
+
+FROM mcr.microsoft.com/playwright/python:v1.41.0-jammy
+
+LABEL maintainer="nanobot"
+LABEL description="Nanobot AI assistant with browser automation capabilities"
+
+# Install additional system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # X11 and display support
+    xvfb \
+    x11vnc \
+    novnc \
+    websockify \
+    # Fonts for better rendering
+    fonts-liberation \
+    fonts-noto-cjk \
+    fonts-noto-color-emoji \
+    # Common libraries
+    libappindicator3-1 \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgbm1 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxrandr2 \
+    # Utilities
+    curl \
+    unzip \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set display environment variable
+ENV DISPLAY=:99
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Set nanobot-specific environment variables
+ENV NANOBOT__TOOLS__BROWSER__DOCKER_MODE=true
+ENV NANOBOT__TOOLS__BROWSER__HEADLESS=true
+ENV NANOBOT__TOOLS__BROWSER__NO_SANDBOX=true
+ENV NANOBOT__TOOLS__BROWSER__DISABLE_DEV_SHM=true
+
+# Create app directory
+WORKDIR /app
+
+# Copy requirements first for better caching
+COPY pyproject.toml ./
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -e . playwright && \
+    playwright install chromium
+
+# Copy application code
+COPY . .
+
+# Create necessary directories
+RUN mkdir -p /app/workspace /app/screenshots /app/downloads
+
+# Copy entrypoint script
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Expose ports for VNC (optional, for debugging)
+EXPOSE 5900 6080
+
+# Set entrypoint
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["nanobot", "gateway"]

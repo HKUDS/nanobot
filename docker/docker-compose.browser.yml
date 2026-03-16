@@ -1,0 +1,126 @@
+# Nanobot with Browser Automation - Docker Compose
+# 
+# Usage:
+#   Basic mode (headless):
+#     docker-compose -f docker/docker-compose.browser.yml up -d
+#
+#   With VNC debugging:
+#     VNC_ENABLED=true docker-compose -f docker/docker-compose.browser.yml up -d
+#     Then open http://localhost:6080/vnc.html
+#
+#   Interactive shell:
+#     docker-compose -f docker/docker-compose.browser.yml run --rm nanobot bash
+#
+#   Run agent command:
+#     docker-compose -f docker/docker-compose.browser.yml run --rm nanobot nanobot agent -m "open example.com"
+
+version: "3.8"
+
+services:
+  nanobot:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.browser
+    image: nanobot:browser
+    container_name: nanobot-browser
+    
+    environment:
+      # Browser configuration
+      - NANOBOT__TOOLS__BROWSER__ENABLED=true
+      - NANOBOT__TOOLS__BROWSER__HEADLESS=true
+      - NANOBOT__TOOLS__BROWSER__DOCKER_MODE=true
+      - NANOBOT__TOOLS__BROWSER__NO_SANDBOX=true
+      - NANOBOT__TOOLS__BROWSER__DISABLE_DEV_SHM=true
+      - NANOBOT__TOOLS__BROWSER__VIEWPORT_WIDTH=1280
+      - NANOBOT__TOOLS__BROWSER__VIEWPORT_HEIGHT=720
+      
+      # VNC configuration (set VNC_ENABLED=true to enable)
+      - VNC_ENABLED=${VNC_ENABLED:-false}
+      
+      # LLM Provider configuration (set via .env file or environment)
+      - NANOBOT__PROVIDERS__OPENROUTER__API_KEY=${OPENROUTER_API_KEY:-}
+      - NANOBOT__PROVIDERS__OPENAI__API_KEY=${OPENAI_API_KEY:-}
+      - NANOBOT__PROVIDERS__ANTHROPIC__API_KEY=${ANTHROPIC_API_KEY:-}
+      
+      # Optional: Default model
+      - NANOBOT__AGENTS__DEFAULTS__MODEL=${DEFAULT_MODEL:-anthropic/claude-opus-4-5}
+      
+      # Display for browser
+      - DISPLAY=:99
+    
+    volumes:
+      # Persist workspace data
+      - nanobot-workspace:/app/workspace
+      - nanobot-config:/root/.nanobot
+      
+      # Optional: Mount local workspace for development
+      # - ./workspace:/app/workspace
+      
+      # Optional: Mount screenshots directory
+      - ./screenshots:/app/workspace/screenshots
+      
+      # Optional: Mount downloads directory
+      - ./downloads:/app/workspace/downloads
+    
+    ports:
+      # Gateway port
+      - "${NANOBOT_PORT:-18790}:18790"
+      
+      # VNC port (for remote desktop access)
+      - "5900:5900"
+      
+      # noVNC web port (browser-based VNC)
+      - "6080:6080"
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "nanobot", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: Browserless/chrome service for remote browser control
+  # Uncomment if you want to use a separate browser service
+  # browser:
+  #   image: browserless/chrome:latest
+  #   container_name: nanobot-browserless
+  #   environment:
+  #     - DEBUG=browserless:*
+  #     - MAX_CONCURRENT_SESSIONS=10
+  #     - CONNECTION_TIMEOUT=300000
+  #   ports:
+  #     - "3000:3000"
+  #   volumes:
+  #     - browserless-data:/usr/src/app/workspace
+
+volumes:
+  nanobot-workspace:
+    driver: local
+  nanobot-config:
+    driver: local
+  # browserless-data:
+  #   driver: local
+
+# Network configuration (optional)
+networks:
+  default:
+    name: nanobot-network
