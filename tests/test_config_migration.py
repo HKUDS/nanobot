@@ -1,12 +1,6 @@
 import json
-from types import SimpleNamespace
 
-from typer.testing import CliRunner
-
-from nanobot.cli.commands import app
 from nanobot.config.loader import load_config, save_config
-
-runner = CliRunner()
 
 
 def test_load_config_keeps_max_tokens_and_warns_on_legacy_memory_window(tmp_path) -> None:
@@ -78,6 +72,9 @@ def test_onboard_refresh_rewrites_legacy_config_template(tmp_path, monkeypatch) 
     monkeypatch.setattr("nanobot.config.loader.get_config_path", lambda: config_path)
     monkeypatch.setattr("nanobot.cli.commands.get_workspace_path", lambda _workspace=None: workspace)
 
+    from typer.testing import CliRunner
+    from nanobot.cli.commands import app
+    runner = CliRunner()
     result = runner.invoke(app, ["onboard"], input="n\n")
 
     assert result.exit_code == 0
@@ -90,6 +87,8 @@ def test_onboard_refresh_rewrites_legacy_config_template(tmp_path, monkeypatch) 
 
 
 def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch) -> None:
+    from types import SimpleNamespace
+
     config_path = tmp_path / "config.json"
     workspace = tmp_path / "workspace"
     config_path.write_text(
@@ -125,6 +124,9 @@ def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch)
         },
     )
 
+    from typer.testing import CliRunner
+    from nanobot.cli.commands import app
+    runner = CliRunner()
     result = runner.invoke(app, ["onboard"], input="n\n")
 
     assert result.exit_code == 0
