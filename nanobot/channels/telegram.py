@@ -202,8 +202,8 @@ class TelegramChannel(BaseChannel):
     BOT_COMMANDS = [
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
-        BotCommand("model", "Pick/set model (saved to config)"),
-        BotCommand("reload", "Reload nanobot gateway"),
+        BotCommand("model", "Pick/set main or subagent model"),
+        BotCommand("reload", "Reload config/runtime"),
         BotCommand("stop", "Stop the current task"),
         BotCommand("help", "Show available commands"),
         BotCommand("restart", "Restart the bot"),
@@ -480,8 +480,8 @@ class TelegramChannel(BaseChannel):
         await update.message.reply_text(
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
-            "/model — Pick or set model\n"
-            "/reload — Reload nanobot gateway\n"
+            "/model — Pick or set main/subagent model\n"
+            "/reload — Reload config/runtime\n"
             "/stop — Stop the current task\n"
             "/restart — Restart the bot\n"
             "/help — Show available commands"
