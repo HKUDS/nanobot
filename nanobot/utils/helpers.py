@@ -2,6 +2,7 @@
 
 import json
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,13 @@ def ensure_dir(path: Path) -> Path:
 def timestamp() -> str:
     """Current ISO timestamp."""
     return datetime.now().isoformat()
+
+
+def current_time_str() -> str:
+    """Human-readable current time with weekday and timezone, e.g. '2026-03-15 22:30 (Saturday) (CST)'."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+    tz = time.strftime("%Z") or "UTC"
+    return f"{now} ({tz})"
 
 
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
