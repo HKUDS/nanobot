@@ -1,6 +1,6 @@
 [project]
 name = "nanobot-ai-tng"
-version = "0.1.4.post4"
+version = "0.1.4.post5"
 description = "A lightweight personal AI assistant framework (fork with Alexa, additional providers, and subagent improvements)"
 requires-python = ">=3.11"
 license = {text = "MIT"}
