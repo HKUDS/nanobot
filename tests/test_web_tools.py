@@ -7,16 +7,14 @@ from types import SimpleNamespace
 
 import pytest
 
-import nanobot.agent.tools.web as _web_mod
+from nanobot.agent.tools.web import (
+    WebFetchTool,
+    WebSearchTool,
+    _normalize,
+    _strip_tags,
+    _url_cache,
+    _validate_url,
 )
-WebFetchTool = _web_mod.WebFetchTool
-WebSearchTool = _web_mod.WebSearchTool
-_normalize = _web_mod._normalize
-_strip_tags = _web_mod._strip_tags
-    _url_cache,
-    _url_cache,
-_validate_url = _web_mod._validate_url
-
 
 # ---------------------------------------------------------------------------
 # WebSearchTool
@@ -145,9 +143,11 @@ async def test_web_fetch_invalid_url() -> None:
     assert "validation" in payload["error"].lower()
 
 
+@pytest.mark.asyncio
+async def test_web_fetch_json_and_raw(monkeypatch: pytest.MonkeyPatch) -> None:
     _url_cache.clear()
-    _url_cache.clear()
-            self.headers = {"content-type": ctype}
+
+    class _Resp:
         def __init__(self, ctype: str, text: str, payload: dict | None = None):
             self.headers = {"content-type": ctype}
             self.text = text
@@ -228,9 +228,13 @@ async def test_web_fetch_html_and_error(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda **kwargs: _Client())
     monkeypatch.setitem(__import__("sys").modules, "readability", SimpleNamespace(Document=_Doc))
 
+    # Clear URL cache from prior tests
     _url_cache.clear()
-    _url_cache.clear()
+
+    tool = WebFetchTool(max_chars=20)
     out = await tool.execute(url="https://example.com", extractMode="markdown")
+    assert out.success
+    payload = json.loads(out.output)
     # Compact output for small responses may omit extractor; verify content present
     assert "text" in payload
 
@@ -245,11 +249,11 @@ async def test_web_fetch_html_and_error(monkeypatch: pytest.MonkeyPatch) -> None
             raise RuntimeError("boom")
 
     monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda **kwargs: _BadClient())
-    _web_mod._url_cache.clear()  # clear cached success for same URL
+    _url_cache.clear()  # clear cached success for same URL
     fail = await tool.execute(url="https://example.com")
     assert not fail.success
 
-    _url_cache.clear()  # clear cached success for same URL
+
 # ---------------------------------------------------------------------------
 # WebFetchTool: userAgent parameter & cacheable flag
 # ---------------------------------------------------------------------------
@@ -266,11 +270,15 @@ def test_web_fetch_cache_without_summary() -> None:
 async def test_web_fetch_bot_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
     """When userAgent='bot', the request should use the bot UA string."""
     _url_cache.clear()
-    _url_cache.clear()
+
     captured_headers: dict[str, str] = {}
+
+    class _Resp:
         headers = {"content-type": "text/plain"}
-    _url_cache.clear()
+        text = "Montreal: +5°C"
         url = "https://wttr.in/Montreal?format=3"
+        status_code = 200
+
         def raise_for_status(self) -> None:
             return None
 
@@ -303,13 +311,17 @@ async def test_web_fetch_browser_user_agent_default(monkeypatch: pytest.MonkeyPa
     _url_cache.clear()
 
     captured_headers: dict[str, str] = {}
-    _url_cache.clear()
+
     class _Resp:
+        headers = {"content-type": "text/plain"}
+        text = "hello"
         url = "https://example.com"
         status_code = 200
 
-    _url_cache.clear()
+        def raise_for_status(self) -> None:
             return None
+
+    class _Client:
         async def __aenter__(self):
             return self
 
