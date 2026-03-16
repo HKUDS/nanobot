@@ -1,6 +1,8 @@
 import json
 
+import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels.msteams import ConversationRef, MSTeamsChannel
@@ -376,3 +378,117 @@ async def test_send_posts_to_conversation_when_thread_reply_enabled_but_no_activ
     assert kwargs["headers"]["Authorization"] == "Bearer tok"
     assert kwargs["json"]["text"] == "Reply text"
     assert "replyToId" not in kwargs["json"]
+
+
+def _make_test_rsa_jwk(kid: str = "test-kid"):
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key = private_key.public_key()
+    jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(public_key))
+    jwk["kid"] = kid
+    jwk["use"] = "sig"
+    jwk["kty"] = "RSA"
+    jwk["alg"] = "RS256"
+    return private_key, jwk
+
+
+@pytest.mark.asyncio
+async def test_validate_inbound_auth_accepts_observed_botframework_shape(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
+
+    bus = DummyBus()
+    ch = MSTeamsChannel(
+        {
+            "enabled": True,
+            "appId": "app-id",
+            "appPassword": "secret",
+            "tenantId": "tenant-id",
+            "allowFrom": ["*"],
+            "validateInboundAuth": True,
+        },
+        bus,
+    )
+
+    private_key, jwk = _make_test_rsa_jwk()
+    ch._botframework_jwks = {"keys": [jwk]}
+    ch._botframework_jwks_expires_at = 9999999999
+
+    service_url = "https://smba.trafficmanager.net/amer/tenant/"
+    token = jwt.encode(
+        {
+            "iss": "https://api.botframework.com",
+            "aud": "app-id",
+            "serviceurl": service_url,
+            "nbf": 1700000000,
+            "exp": 4100000000,
+        },
+        private_key,
+        algorithm="RS256",
+        headers={"kid": jwk["kid"]},
+    )
+
+    await ch._validate_inbound_auth(
+        f"Bearer {token}",
+        {"serviceUrl": service_url},
+    )
+
+
+@pytest.mark.asyncio
+async def test_validate_inbound_auth_rejects_service_url_mismatch(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
+
+    bus = DummyBus()
+    ch = MSTeamsChannel(
+        {
+            "enabled": True,
+            "appId": "app-id",
+            "appPassword": "secret",
+            "tenantId": "tenant-id",
+            "allowFrom": ["*"],
+            "validateInboundAuth": True,
+        },
+        bus,
+    )
+
+    private_key, jwk = _make_test_rsa_jwk()
+    ch._botframework_jwks = {"keys": [jwk]}
+    ch._botframework_jwks_expires_at = 9999999999
+
+    token = jwt.encode(
+        {
+            "iss": "https://api.botframework.com",
+            "aud": "app-id",
+            "serviceurl": "https://smba.trafficmanager.net/amer/tenant-a/",
+            "nbf": 1700000000,
+            "exp": 4100000000,
+        },
+        private_key,
+        algorithm="RS256",
+        headers={"kid": jwk["kid"]},
+    )
+
+    with pytest.raises(ValueError, match="serviceUrl claim mismatch"):
+        await ch._validate_inbound_auth(
+            f"Bearer {token}",
+            {"serviceUrl": "https://smba.trafficmanager.net/amer/tenant-b/"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_validate_inbound_auth_rejects_missing_bearer_token(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
+
+    bus = DummyBus()
+    ch = MSTeamsChannel(
+        {
+            "enabled": True,
+            "appId": "app-id",
+            "appPassword": "secret",
+            "tenantId": "tenant-id",
+            "allowFrom": ["*"],
+            "validateInboundAuth": True,
+        },
+        bus,
+    )
+
+    with pytest.raises(ValueError, match="missing bearer token"):
+        await ch._validate_inbound_auth("", {"serviceUrl": "https://smba.trafficmanager.net/amer/tenant/"})
