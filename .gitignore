@@ -21,3 +21,7 @@ poetry.lock
 .pytest_cache/
 botpy.log
 
+# Bridge build artifacts
+bridge/node_modules/
+bridge/package-lock.json
+
