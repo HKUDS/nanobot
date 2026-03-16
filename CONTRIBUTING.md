@@ -1,6 +1,14 @@
 # Contributing to nanobot
 
-Thank you for your interest in contributing! This guide will help you get started.
+Thank you for being here.
+
+nanobot is built with a simple belief: good tools should feel calm, clear, and humane.
+We care deeply about useful features, but we also believe in achieving more with less:
+solutions should be powerful without becoming heavy, and ambitious without becoming
+needlessly complicated.
+
+This guide is not only about how to open a PR. It is also about how we hope to build
+software together: with care, clarity, and respect for the next person reading the code.
 
 ## Maintainers
 
@@ -11,7 +19,7 @@ Thank you for your interest in contributing! This guide will help you get starte
 
 ## Branching Strategy
 
-nanobot uses a two-branch model to balance stability and innovation:
+We use a two-branch model to balance stability and exploration:
 
 | Branch | Purpose | Stability |
 |--------|---------|-----------|
@@ -32,7 +40,8 @@ nanobot uses a two-branch model to balance stability and innovation:
 - Documentation improvements
 - Minor tweaks that don't affect functionality
 
-**When in doubt, target `nightly`.** It's easier to cherry-pick stable changes to `main` than to revert unstable changes.
+**When in doubt, target `nightly`.** It is easier to move a stable idea from `nightly`
+to `main` than to undo a risky change after it lands in the stable branch.
 
 ### How Does Nightly Get Merged to Main?
 
@@ -58,6 +67,8 @@ This happens approximately **once a week**, but the timing depends on when featu
 
 ## Development Setup
 
+Keep setup boring and reliable. The goal is to get you into the code quickly:
+
 ```bash
 # Clone the repository
 git clone https://github.com/HKUDS/nanobot.git
@@ -78,14 +89,34 @@ ruff format nanobot/
 
 ## Code Style
 
-- Line length: 100 characters (ruff)
+We care about more than passing lint. We want nanobot to stay small, calm, and readable.
+
+When contributing, please aim for code that feels:
+
+- Simple: prefer the smallest change that solves the real problem
+- Clear: optimize for the next reader, not for cleverness
+- Decoupled: keep boundaries clean and avoid unnecessary new abstractions
+- Honest: do not hide complexity, but do not create extra complexity either
+- Durable: choose solutions that are easy to maintain, test, and extend
+
+In practice:
+
+- Line length: 100 characters (`ruff`)
 - Target: Python 3.11+
 - Linting: `ruff` with rules E, F, I, N, W (E501 ignored)
-- Async: Uses `asyncio` throughout; pytest with `asyncio_mode = "auto"`
+- Async: uses `asyncio` throughout; pytest with `asyncio_mode = "auto"`
+- Prefer readable code over magical code
+- Prefer focused patches over broad rewrites
+- If a new abstraction is introduced, it should clearly reduce complexity rather than move it around
 
 ## Questions?
 
-Feel free to open an [issue](https://github.com/HKUDS/nanobot/issues) or join our community:
+If you have questions, ideas, or half-formed insights, you are warmly welcome here.
+
+Please feel free to open an [issue](https://github.com/HKUDS/nanobot/issues), join the community, or simply reach out:
 
 - [Discord](https://discord.gg/MnCvHqpUGB)
 - [Feishu/WeChat](./COMMUNICATION.md)
+- Email: Xubin Ren (@Re-bin) — <xubinrencs@gmail.com>
+
+Thank you for spending your time and care on nanobot. We would love for more people to participate in this community, and we genuinely welcome contributions of all sizes.
