@@ -279,14 +279,19 @@ class InterAgentChannel(BaseChannel):
             from_instance, self.config.instance_name, session_id, round_count, message
         ))
 
-        # Inject into agent loop — use task_id as chat_id so send() can find the task
+        # Inject into agent loop.
+        # - chat_id = task_id  → send() can look up the task in _tasks
+        # - session_key_override = interagent:{task_id}  → each task gets its own
+        #   session key so tasks within the same logical session don't block each other
+        #   via the global _processing_lock. Conversation history is still scoped to
+        #   the task (not shared across rounds), which is correct for stateless calls.
         await self.bus.publish_inbound(InboundMessage(
             channel=self.name,
             sender_id=from_instance,
             chat_id=task_id,
             content=message,
             metadata={"from_instance": from_instance, "round_count": round_count, "session_id": session_id},
-            session_key_override=f"interagent:{session_id}",
+            session_key_override=f"interagent:{task_id}",
         ))
 
         task.status = TaskStatus.RUNNING
