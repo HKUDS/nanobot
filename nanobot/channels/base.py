@@ -130,6 +130,11 @@ class BaseChannel(ABC):
 
         await self.bus.publish_inbound(msg)
 
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        """Return default config for onboard. Override in plugins to auto-populate config.json."""
+        return {"enabled": False}
+
     @property
     def is_running(self) -> bool:
         """Check if the channel is running."""
