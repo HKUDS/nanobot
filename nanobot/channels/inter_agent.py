@@ -3,20 +3,34 @@
 Enables direct HTTP-based communication between nanobot instances, allowing
 multiple agents to collaborate autonomously on tasks without human mediation.
 
-Each instance exposes a lightweight HTTP API. When one agent needs to consult
-another, it POSTs to the target's API endpoint and awaits the response — all
-within the normal agent tool loop, with full session isolation and audit logging.
+Design: Async Task Model
+------------------------
+Unlike a simple synchronous request/response, this channel uses an async task
+model so the initiating instance is never blocked waiting for a peer to finish.
+
+Flow:
+  1. POST /inter-agent/chat  → submit task, get task_id immediately (202)
+  2. GET  /inter-agent/task/{task_id}  → poll for status + result
+  3. When status == "done", result contains the agent's response
+
+This means:
+  - The initiating agent submits a task and moves on (no blocking)
+  - The receiving agent processes at its own pace, regardless of queue depth
+  - The initiator polls until done, with full visibility into task state
+  - No silent result loss: a task is either pending/running/done/failed
 
 API
 ---
 POST /inter-agent/chat
-    {
-        "message": "...",
-        "session_id": "collab_abc123",
-        "from_instance": "alice",
-        "round_count": 3
-    }
-    → {"response": "...", "is_final": false, "instance": "bob", "session_id": "..."}
+    {"message": "...", "session_id": "collab_abc", "from_instance": "alice", "round_count": 1}
+    → 202 {"task_id": "...", "status": "pending", "instance": "bob"}
+
+GET /inter-agent/task/{task_id}
+    → {"task_id": "...", "status": "pending|running|done|failed",
+       "response": "...",      # present when status == "done"
+       "is_final": false,      # present when status == "done"
+       "error": "...",         # present when status == "failed"
+       "instance": "bob", "session_id": "collab_abc"}
 
 GET /inter-agent/health
     → {"status": "ok", "instance": "bob", "port": 18801}
@@ -30,45 +44,51 @@ Configuration (config.json)
       "apiPort": 18801,
       "instanceName": "bob",
       "auditWebhookUrl": "https://...",
-      "maxRoundsPerSession": 30
+      "maxRoundsPerSession": 30,
+      "taskTtlSeconds": 3600
     }
   }
 }
 
-Session isolation
------------------
-Each inter-agent conversation uses a unique session_id as the session key
-(``inter_agent:<session_id>``), completely isolated from the human-facing
-chat sessions of both instances.
+Polling pattern (in AGENTS.md / skill)
+---------------------------------------
+import httpx, time
 
-Audit webhook
--------------
-Every message — both inbound and outbound — is pushed to ``auditWebhookUrl``
-so a human supervisor can monitor all inter-agent conversations in real time.
-Long messages are automatically split into chunks to respect webhook limits.
+def submit(url, message, session_id, from_instance, round_count):
+    r = httpx.post(f"{url}/inter-agent/chat", json={
+        "message": message, "session_id": session_id,
+        "from_instance": from_instance, "round_count": round_count,
+    }, timeout=10)
+    return r.json()["task_id"]
 
-Round-limit guard
------------------
-``maxRoundsPerSession`` (default 30) caps how many turns this instance will
-participate in before the initiating agent pauses and asks the human whether
-to continue. The initiating agent is responsible for enforcing this; the
-receiving instance exposes the current ``round_count`` in every request so
-the initiator can track it.
+def poll(url, task_id, interval=3, max_wait=600):
+    deadline = time.time() + max_wait
+    while time.time() < deadline:
+        r = httpx.get(f"{url}/inter-agent/task/{task_id}", timeout=10)
+        data = r.json()
+        if data["status"] in ("done", "failed"):
+            return data
+        time.sleep(interval)
+    raise TimeoutError(f"task {task_id} not done after {max_wait}s")
 """
 
 from __future__ import annotations
 
 import asyncio
+import time
+import uuid
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
 
 import aiohttp.web
 from loguru import logger
-from pydantic import Field
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
+
 
 # ---------------------------------------------------------------------------
 # Config
@@ -82,16 +102,55 @@ class InterAgentConfig(Base):
     instance_name: str = ""
     audit_webhook_url: str = ""
     max_rounds_per_session: int = 30
+    task_ttl_seconds: int = 3600  # how long to keep completed tasks in memory
 
 
 # ---------------------------------------------------------------------------
-# Pending-response registry  (session_id → Future[str])
+# Task registry
 # ---------------------------------------------------------------------------
 
-_pending: dict[str, asyncio.Future[str]] = {}
+class TaskStatus(str, Enum):
+    PENDING = "pending"    # queued, agent hasn't started yet
+    RUNNING = "running"    # agent is processing
+    DONE    = "done"       # agent replied successfully
+    FAILED  = "failed"     # agent loop error or explicit failure
+
+
+@dataclass
+class AgentTask:
+    task_id: str
+    session_id: str
+    from_instance: str
+    round_count: int
+    status: TaskStatus = TaskStatus.PENDING
+    response: str | None = None
+    is_final: bool = False
+    error: str | None = None
+    created_at: float = field(default_factory=time.time)
+    finished_at: float | None = None
+
+    def to_dict(self, instance_name: str) -> dict[str, Any]:
+        d: dict[str, Any] = {
+            "task_id": self.task_id,
+            "status": self.status.value,
+            "instance": instance_name,
+            "session_id": self.session_id,
+            "round_count": self.round_count,
+        }
+        if self.status == TaskStatus.DONE:
+            d["response"] = self.response
+            d["is_final"] = self.is_final
+        if self.status == TaskStatus.FAILED:
+            d["error"] = self.error
+        return d
+
+
+# task_id → AgentTask
+_tasks: dict[str, AgentTask] = {}
+
 
 # ---------------------------------------------------------------------------
-# Channel
+# Constants
 # ---------------------------------------------------------------------------
 
 _CHUNK = 3800  # safe chunk size under Feishu's 4096-char webhook limit
@@ -103,15 +162,15 @@ _FINAL_SIGNALS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Channel
+# ---------------------------------------------------------------------------
+
 class InterAgentChannel(BaseChannel):
-    """HTTP API channel for real-time inter-agent communication."""
+    """HTTP API channel for real-time inter-agent communication (async task model)."""
 
     name = "interagent"
     display_name = "Inter-Agent"
-
-    # ------------------------------------------------------------------
-    # Plugin architecture hooks
-    # ------------------------------------------------------------------
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -131,8 +190,9 @@ class InterAgentChannel(BaseChannel):
     async def start(self) -> None:
         self._running = True
         app = aiohttp.web.Application()
-        app.router.add_get("/inter-agent/health", self._handle_health)
-        app.router.add_post("/inter-agent/chat", self._handle_chat)
+        app.router.add_get("/inter-agent/health",         self._handle_health)
+        app.router.add_post("/inter-agent/chat",          self._handle_chat)
+        app.router.add_get("/inter-agent/task/{task_id}", self._handle_task_status)
 
         self._runner = aiohttp.web.AppRunner(app)
         await self._runner.setup()
@@ -145,7 +205,8 @@ class InterAgentChannel(BaseChannel):
         )
         try:
             while self._running:
-                await asyncio.sleep(1)
+                await asyncio.sleep(60)
+                self._evict_old_tasks()
         except asyncio.CancelledError:
             pass
 
@@ -155,10 +216,21 @@ class InterAgentChannel(BaseChannel):
             await self._runner.cleanup()
 
     async def send(self, msg: OutboundMessage) -> None:
-        """Resolve the pending future so the HTTP handler can return the response."""
-        future = _pending.pop(msg.chat_id, None)
-        if future and not future.done():
-            future.set_result(msg.content)
+        """Called by the agent loop when a response is ready. Marks the task done."""
+        task = _tasks.get(msg.chat_id)
+        if task is None:
+            logger.warning("Inter-agent: send() called for unknown task_id={}", msg.chat_id)
+            return
+        task.status = TaskStatus.DONE
+        task.response = msg.content
+        task.is_final = _is_final(msg.content)
+        task.finished_at = time.time()
+        logger.info("Inter-agent task {} done (session={})", msg.chat_id, task.session_id)
+
+        asyncio.create_task(self._push_audit(
+            self.config.instance_name, task.from_instance,
+            task.session_id, task.round_count, msg.content,
+        ))
 
     # ------------------------------------------------------------------
     # HTTP handlers
@@ -172,6 +244,7 @@ class InterAgentChannel(BaseChannel):
         })
 
     async def _handle_chat(self, request: aiohttp.web.Request) -> aiohttp.web.Response:
+        """Submit a task. Returns 202 immediately with task_id."""
         try:
             body: dict[str, Any] = await request.json()
         except Exception:
@@ -187,49 +260,66 @@ class InterAgentChannel(BaseChannel):
                 {"error": "message and session_id are required"}, status=400
             )
 
+        task_id = str(uuid.uuid4())
+        task = AgentTask(
+            task_id=task_id,
+            session_id=session_id,
+            from_instance=from_instance,
+            round_count=round_count,
+        )
+        _tasks[task_id] = task
+
         logger.info(
-            "Inter-agent message from {} | session={} | round={}",
-            from_instance, session_id, round_count,
+            "Inter-agent task {} created | from={} session={} round={}",
+            task_id, from_instance, session_id, round_count,
         )
 
-        # Audit: inbound message
+        # Audit: inbound
         asyncio.create_task(self._push_audit(
             from_instance, self.config.instance_name, session_id, round_count, message
         ))
 
-        # Register future before publishing so send() can resolve it
-        loop = asyncio.get_event_loop()
-        future: asyncio.Future[str] = loop.create_future()
-        _pending[session_id] = future
-
-        # Inject into the agent via the message bus (isolated session)
+        # Inject into agent loop — use task_id as chat_id so send() can find the task
         await self.bus.publish_inbound(InboundMessage(
             channel=self.name,
             sender_id=from_instance,
-            chat_id=session_id,
+            chat_id=task_id,
             content=message,
-            metadata={"from_instance": from_instance, "round_count": round_count},
+            metadata={"from_instance": from_instance, "round_count": round_count, "session_id": session_id},
             session_key_override=f"interagent:{session_id}",
         ))
 
-        # Wait for the agent to respond (2-minute timeout)
-        try:
-            response = await asyncio.wait_for(future, timeout=120.0)
-        except asyncio.TimeoutError:
-            _pending.pop(session_id, None)
-            return aiohttp.web.json_response({"error": "agent response timeout"}, status=504)
+        task.status = TaskStatus.RUNNING
 
-        # Audit: outbound reply
-        asyncio.create_task(self._push_audit(
-            self.config.instance_name, from_instance, session_id, round_count, response
-        ))
+        return aiohttp.web.json_response(
+            task.to_dict(self.config.instance_name), status=202
+        )
 
-        return aiohttp.web.json_response({
-            "response": response,
-            "is_final": _is_final(response),
-            "instance": self.config.instance_name,
-            "session_id": session_id,
-        })
+    async def _handle_task_status(self, request: aiohttp.web.Request) -> aiohttp.web.Response:
+        """Poll task status and result."""
+        task_id: str = request.match_info["task_id"]
+        task = _tasks.get(task_id)
+        if task is None:
+            return aiohttp.web.json_response({"error": "task not found"}, status=404)
+        return aiohttp.web.json_response(task.to_dict(self.config.instance_name))
+
+    # ------------------------------------------------------------------
+    # Housekeeping
+    # ------------------------------------------------------------------
+
+    def _evict_old_tasks(self) -> None:
+        """Remove completed tasks older than task_ttl_seconds."""
+        cutoff = time.time() - self.config.task_ttl_seconds
+        to_delete = [
+            tid for tid, t in _tasks.items()
+            if t.status in (TaskStatus.DONE, TaskStatus.FAILED)
+            and t.finished_at is not None
+            and t.finished_at < cutoff
+        ]
+        for tid in to_delete:
+            del _tasks[tid]
+        if to_delete:
+            logger.debug("Inter-agent: evicted {} expired tasks", len(to_delete))
 
     # ------------------------------------------------------------------
     # Audit webhook
@@ -243,7 +333,7 @@ class InterAgentChannel(BaseChannel):
         round_count: int,
         message: str,
     ) -> None:
-        """Push message to audit webhook, chunking if it exceeds the size limit."""
+        """Push message to audit webhook, chunking if needed."""
         url = self.config.audit_webhook_url
         if not url:
             return
@@ -260,10 +350,7 @@ class InterAgentChannel(BaseChannel):
             async with aiohttp.ClientSession() as http:
                 for idx, chunk in enumerate(chunks):
                     page = f"（{idx + 1}/{total}）\n" if total > 1 else ""
-                    payload = {
-                        "msg_type": "text",
-                        "content": {"text": header + page + chunk},
-                    }
+                    payload = {"msg_type": "text", "content": {"text": header + page + chunk}}
                     await http.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10))
         except Exception as exc:
             logger.warning("Inter-agent audit webhook failed: {}", exc)

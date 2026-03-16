@@ -149,7 +149,11 @@ async def test_chat_invalid_json():
 
 @pytest.mark.asyncio
 async def test_chat_round_trip():
-    """Simulate a full request → agent response cycle."""
+    """POST creates a task, send() marks it done — full lifecycle."""
+    import json
+    from nanobot.channels.inter_agent import _tasks
+    from nanobot.bus.events import OutboundMessage
+
     bus = MessageBus()
     cfg = InterAgentConfig(enabled=True, api_port=18800, instance_name="xuejie")
     ch = InterAgentChannel(cfg, bus)
@@ -157,61 +161,61 @@ async def test_chat_round_trip():
     mock_request = AsyncMock()
     mock_request.json = AsyncMock(return_value={
         "message": "请审阅方案",
-        "session_id": "collab_test_001",
+        "session_id": "collab_roundtrip",
         "from_instance": "yanshifan",
         "round_count": 1,
     })
 
-    # Simulate agent responding after a short delay
-    async def fake_agent():
-        await asyncio.sleep(0.05)
-        from nanobot.bus.events import OutboundMessage
-        await bus.publish_outbound(OutboundMessage(
+    with patch.object(ch, "_push_audit", new=AsyncMock()):
+        resp = await ch._handle_chat(mock_request)
+
+    assert resp.status == 202
+    body = json.loads(resp.body)
+    task_id = body["task_id"]
+    assert body["status"] == "running"
+
+    # Simulate agent finishing and calling send()
+    with patch.object(ch, "_push_audit", new=AsyncMock()):
+        await ch.send(OutboundMessage(
             channel="interagent",
-            chat_id="collab_test_001",
+            chat_id=task_id,
             content="方案已审阅，建议补充安全测评维度。",
         ))
-        # Manually resolve the future (normally done by channel.send())
-        from nanobot.channels.inter_agent import _pending
-        fut = _pending.get("collab_test_001")
-        if fut and not fut.done():
-            fut.set_result("方案已审阅，建议补充安全测评维度。")
 
-    with patch.object(ch, "_push_audit", new=AsyncMock()):
-        task = asyncio.create_task(fake_agent())
-        response = await ch._handle_chat(mock_request)
-        await task
+    task = _tasks[task_id]
+    assert task.status.value == "done"
+    assert task.response == "方案已审阅，建议补充安全测评维度。"
+    assert task.is_final is False
 
-    import json
-    body = json.loads(response.body)
-    assert body["response"] == "方案已审阅，建议补充安全测评维度。"
-    assert body["instance"] == "xuejie"
-    assert body["session_id"] == "collab_test_001"
-    assert body["is_final"] is False
+    _tasks.pop(task_id, None)
 
 
 # ---------------------------------------------------------------------------
-# send() resolves pending future
+# send() marks task done
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_send_resolves_future():
-    from nanobot.channels.inter_agent import _pending
+async def test_send_marks_task_done():
+    from nanobot.channels.inter_agent import _tasks, AgentTask, TaskStatus
     from nanobot.bus.events import OutboundMessage
 
     bus = MessageBus()
     ch = InterAgentChannel({"instanceName": "xuejie"}, bus)
 
-    loop = asyncio.get_event_loop()
-    fut: asyncio.Future[str] = loop.create_future()
-    _pending["test_session"] = fut
+    task = AgentTask(task_id="t_send2", session_id="s_send2", from_instance="bob", round_count=1)
+    task.status = TaskStatus.RUNNING
+    _tasks["t_send2"] = task
 
-    await ch.send(OutboundMessage(
-        channel="inter_agent",
-        chat_id="test_session",
-        content="审阅完毕，最终方案已确认。",
-    ))
+    with patch.object(ch, "_push_audit", new=AsyncMock()):
+        await ch.send(OutboundMessage(
+            channel="interagent",
+            chat_id="t_send2",
+            content="审阅完毕，最终方案已确认。",
+        ))
 
-    assert fut.done()
-    assert fut.result() == "审阅完毕，最终方案已确认。"
-    assert "test_session" not in _pending
+    assert task.status == TaskStatus.DONE
+    assert task.response == "审阅完毕，最终方案已确认。"
+    assert task.is_final is True
+    assert task.finished_at is not None
+
+    _tasks.pop("t_send2", None)
