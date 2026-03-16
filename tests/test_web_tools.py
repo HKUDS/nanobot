@@ -14,6 +14,7 @@ WebSearchTool = _web_mod.WebSearchTool
 _normalize = _web_mod._normalize
 _strip_tags = _web_mod._strip_tags
     _url_cache,
+    _url_cache,
 _validate_url = _web_mod._validate_url
 
 
@@ -144,10 +145,8 @@ async def test_web_fetch_invalid_url() -> None:
     assert "validation" in payload["error"].lower()
 
 
-@pytest.mark.asyncio
     _url_cache.clear()
     _url_cache.clear()
-        def __init__(self, ctype: str, text: str, payload: dict | None = None):
             self.headers = {"content-type": ctype}
         def __init__(self, ctype: str, text: str, payload: dict | None = None):
             self.headers = {"content-type": ctype}
@@ -232,8 +231,6 @@ async def test_web_fetch_html_and_error(monkeypatch: pytest.MonkeyPatch) -> None
     _url_cache.clear()
     _url_cache.clear()
     out = await tool.execute(url="https://example.com", extractMode="markdown")
-    assert out.success
-    payload = json.loads(out.output)
     # Compact output for small responses may omit extractor; verify content present
     assert "text" in payload
 
@@ -252,7 +249,7 @@ async def test_web_fetch_html_and_error(monkeypatch: pytest.MonkeyPatch) -> None
     fail = await tool.execute(url="https://example.com")
     assert not fail.success
 
-
+    _url_cache.clear()  # clear cached success for same URL
 # ---------------------------------------------------------------------------
 # WebFetchTool: userAgent parameter & cacheable flag
 # ---------------------------------------------------------------------------
@@ -272,10 +269,8 @@ async def test_web_fetch_bot_user_agent(monkeypatch: pytest.MonkeyPatch) -> None
     _url_cache.clear()
     captured_headers: dict[str, str] = {}
         headers = {"content-type": "text/plain"}
-        text = "Montreal: +5°C"
+    _url_cache.clear()
         url = "https://wttr.in/Montreal?format=3"
-        status_code = 200
-
         def raise_for_status(self) -> None:
             return None
 
@@ -313,10 +308,8 @@ async def test_web_fetch_browser_user_agent_default(monkeypatch: pytest.MonkeyPa
         url = "https://example.com"
         status_code = 200
 
-        def raise_for_status(self) -> None:
+    _url_cache.clear()
             return None
-
-    class _Client:
         async def __aenter__(self):
             return self
 
