@@ -816,6 +816,69 @@ class FeishuChannel(BaseChannel):
 
         return None, f"[{msg_type}: download failed]"
 
+
+    def _get_user_name_sync(self, open_id: str) -> str:
+        """Look up a user's display name by open_id, with in-memory cache."""
+        if open_id in self._user_name_cache:
+            return self._user_name_cache[open_id]
+        try:
+            from lark_oapi.api.contact.v3 import GetUserRequest as ContactGetUserRequest
+            request = ContactGetUserRequest.builder() \
+                .user_id(open_id) \
+                .user_id_type("open_id") \
+                .build()
+            response = self._client.contact.v3.user.get(request)
+            if response.success() and response.data and response.data.user:
+                name = response.data.user.name or ""
+                self._user_name_cache[open_id] = name
+                return name
+        except Exception as e:
+            logger.debug("Failed to fetch user name for {}: {}", open_id, e)
+        self._user_name_cache[open_id] = ""
+        return ""
+
+    def _get_message_sync(self, message_id: str) -> dict | None:
+        """Fetch a message by ID and return its msg_type, body content, and mentions."""
+        from lark_oapi.api.im.v1 import GetMessageRequest
+        try:
+            request = GetMessageRequest.builder() \
+                .message_id(message_id) \
+                .build()
+            response = self._client.im.v1.message.get(request)
+            if response.success() and response.data and response.data.items:
+                msg = response.data.items[0]
+                body_content = msg.body.content if msg.body else None
+                if body_content:
+                    result: dict[str, Any] = {
+                        "msg_type": msg.msg_type,
+                        "content": body_content,
+                    }
+                    mentions = getattr(msg, "mentions", None) or []
+                    if mentions:
+                        result["mentions"] = list(mentions)
+                    return result
+        except Exception as e:
+            logger.warning("Failed to fetch message {}: {}", message_id, e)
+        return None
+
+    @staticmethod
+    def _extract_message_text(msg_type: str, content_str: str) -> str:
+        """Extract plain text from a fetched message's body content."""
+        try:
+            content_json = json.loads(content_str)
+        except (json.JSONDecodeError, TypeError):
+            return content_str or ""
+        if msg_type == "text":
+            return content_json.get("text", "")
+        elif msg_type == "post":
+            return _extract_post_text(content_json)
+        elif msg_type == "interactive":
+            parts = _extract_interactive_content(content_json)
+            return "\n".join(parts)
+        elif msg_type in ("image", "audio", "file", "sticker"):
+            return MSG_TYPE_MAP.get(msg_type, f"[{msg_type}]")
+        return f"[{msg_type}]"
+
     _REPLY_CONTEXT_MAX_LEN = 200
 
     def _get_message_content_sync(self, message_id: str) -> str | None:
