@@ -2,11 +2,14 @@
 
 import asyncio
 import json
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
 from loguru import logger
+
+from nanobot.agent.monitoring import add_llm_call_step
 
 
 @dataclass
@@ -212,6 +215,8 @@ class LLMProvider(ABC):
         if reasoning_effort is self._SENTINEL:
             reasoning_effort = self.generation.reasoning_effort
 
+        _llm_start = time.time()
+
         for attempt, delay in enumerate(self._CHAT_RETRY_DELAYS, start=1):
             try:
                 response = await self.chat(
@@ -232,6 +237,23 @@ class LLMProvider(ABC):
                 )
 
             if response.finish_reason != "error":
+                latency_ms = (time.time() - _llm_start) * 1000
+                tokens_in = sum(len(str(m.get('content', ''))) for m in messages) // 4
+                tokens_out = len(response.content or "") // 4
+                tool_calls_list = [
+                    {"name": tc.name, "arguments": tc.arguments} 
+                    for tc in response.tool_calls
+                ]
+                add_llm_call_step(
+                    model=model or "default",
+                    messages_count=len(messages),
+                    tools_count=len(tools) if tools else 0,
+                    response_content=response.content,
+                    tool_calls=tool_calls_list,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                    latency_ms=latency_ms,
+                )
                 return response
             if not self._is_transient_error(response.content):
                 return response
@@ -247,7 +269,7 @@ class LLMProvider(ABC):
             await asyncio.sleep(delay)
 
         try:
-            return await self.chat(
+            response = await self.chat(
                 messages=messages,
                 tools=tools,
                 model=model,
@@ -256,6 +278,24 @@ class LLMProvider(ABC):
                 reasoning_effort=reasoning_effort,
                 tool_choice=tool_choice,
             )
+            latency_ms = (time.time() - _llm_start) * 1000
+            tokens_in = sum(len(str(m.get('content', ''))) for m in messages) // 4
+            tokens_out = len(response.content or "") // 4
+            tool_calls_list = [
+                {"name": tc.name, "arguments": tc.arguments} 
+                for tc in response.tool_calls
+            ]
+            add_llm_call_step(
+                model=model or "default",
+                messages_count=len(messages),
+                tools_count=len(tools) if tools else 0,
+                response_content=response.content,
+                tool_calls=tool_calls_list,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                latency_ms=latency_ms,
+            )
+            return response
         except asyncio.CancelledError:
             raise
         except Exception as exc:

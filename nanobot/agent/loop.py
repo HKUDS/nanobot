@@ -7,11 +7,36 @@ import json
 import os
 import re
 import sys
+import time
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
+
+# AgentScope 监控集成
+from nanobot.agent.monitoring import (
+    init_monitor,
+    start_trace,
+    finish_trace,
+    add_context_building_step,
+    add_llm_call_step,
+    add_memory_step,
+    get_trace,
+    _AGENTSCOPE_AVAILABLE,
+)
+
+# 导入 TraceEvent 用于类型提示
+try:
+    from agentscope.models import TraceEvent, ExecutionStep, StepType, Status
+    from agentscope.monitor import _send_trace, set_current_trace
+except ImportError:
+    TraceEvent = None
+    ExecutionStep = None
+    StepType = None
+    Status = None
+    _send_trace = None
+    set_current_trace = None
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryConsolidator
@@ -110,6 +135,14 @@ class AgentLoop:
             get_tool_definitions=self.tools.get_definitions,
         )
         self._register_default_tools()
+        
+        # 初始化 AgentScope 监控
+        if _AGENTSCOPE_AVAILABLE:
+            try:
+                init_monitor("http://localhost:8000")
+                logger.info("AgentScope monitoring enabled")
+            except Exception as e:
+                logger.debug(f"AgentScope init failed: {e}")
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -338,6 +371,33 @@ class AgentLoop:
         self._running = False
         logger.info("Agent loop stopping")
 
+    def _finish_agentscope_trace(self, trace: TraceEvent | None, content: str | None, error: Exception | None = None):
+        """Finish and send AgentScope trace."""
+        if not trace or not _AGENTSCOPE_AVAILABLE:
+            return
+        try:
+            if error:
+                trace.add_step(ExecutionStep(
+                    type=StepType.ERROR,
+                    content=str(error)[:500],
+                    status=Status.ERROR,
+                ))
+                trace.finish(Status.ERROR)
+                logger.debug(f"AgentScope: Trace finished with error: {error}")
+            else:
+                trace.output_result = content[:500] if content else ""
+                trace.add_step(ExecutionStep(
+                    type=StepType.OUTPUT,
+                    content=trace.output_result,
+                    status=Status.SUCCESS,
+                ))
+                trace.finish(Status.SUCCESS)
+                logger.debug(f"AgentScope: Trace finished successfully, content length: {len(content or '')}")
+            _send_trace(trace)
+            logger.debug("AgentScope: Trace sent to backend")
+        except Exception as e:
+            logger.warning(f"AgentScope trace finish failed: {e}")
+
     async def _process_message(
         self,
         msg: InboundMessage,
@@ -345,6 +405,49 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
+        # AgentScope 监控开始
+        _as_trace = None
+        _should_trace = _AGENTSCOPE_AVAILABLE and msg.channel not in ("system", "inter_agent")
+        
+        preview = msg.content[:50] + "..." if len(msg.content) > 50 else msg.content
+        logger.info(f"AgentScope: Processing message from {msg.channel}, content: {preview}")
+        
+        if _should_trace:
+            try:
+                _as_trace = TraceEvent(
+                    name="nanobot_message",
+                    tags=["nanobot", msg.channel]
+                )
+                _as_trace.input_query = msg.content[:500]
+                set_current_trace(_as_trace)
+                logger.info(f"AgentScope: Started trace { _as_trace.id} for {msg.channel}")
+            except Exception as e:
+                logger.warning(f"AgentScope trace start failed: {e}")
+        else:
+            if not _AGENTSCOPE_AVAILABLE:
+                logger.info("AgentScope: Not available")
+            else:
+                logger.info(f"AgentScope: Skipping trace for channel {msg.channel}")
+        
+        try:
+            result = await self._process_message_impl(msg, session_key, on_progress)
+            if _should_trace:
+                self._finish_agentscope_trace(_as_trace, result.content if result else None)
+            logger.info(f"AgentScope: Finished processing message from {msg.channel}")
+            return result
+        except Exception as e:
+            if _should_trace:
+                self._finish_agentscope_trace(_as_trace, None, e)
+            logger.error(f"AgentScope: Error processing message: {e}")
+            raise
+
+    async def _process_message_impl(
+        self,
+        msg: InboundMessage,
+        session_key: str | None = None,
+        on_progress: Callable[[str], Awaitable[None]] | None = None,
+    ) -> OutboundMessage | None:
+        """Inner implementation of message processing."""
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
