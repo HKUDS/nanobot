@@ -591,8 +591,8 @@ class TestNewCommandArchival:
         assert loop.sessions.get_or_create("cli:test").messages == []
 
     @pytest.mark.asyncio
-    async def test_close_mcp_drains_pending_archives(self, tmp_path: Path) -> None:
-        """close_mcp waits for background archive tasks to complete."""
+    async def test_close_mcp_drains_background_tasks(self, tmp_path: Path) -> None:
+        """close_mcp waits for background tasks to complete."""
         from nanobot.bus.events import InboundMessage
 
         loop = self._make_loop(tmp_path)
