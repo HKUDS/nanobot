@@ -406,14 +406,24 @@ def gateway(
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
     from nanobot.session.manager import SessionManager
+    from nanobot.utils.lock_manager import check_duplicate_instance, release_instance_lock
 
     if verbose:
         import logging
         logging.basicConfig(level=logging.DEBUG)
 
-    config = _load_runtime_config(config, workspace)
-    _print_deprecated_memory_window_notice(config)
-    port = port if port is not None else config.gateway.port
+    config_obj = _load_runtime_config(config, workspace)
+    _print_deprecated_memory_window_notice(config_obj)
+    
+    # Check for duplicate instance with same config
+    config_path = Path(config or "~/.nanobot/config.json").expanduser().resolve() if config else None
+    if not check_duplicate_instance(config_path):
+        console.print("[red]Error: Another instance with the same config is already running.[/red]")
+        console.print(f"[red]Config file: {config_path or config_obj.config_path}[/red]")
+        console.print("[red]Please stop the existing instance first or use a different config file.[/red]")
+        raise typer.Exit(1)
+    
+    port = port if port is not None else config_obj.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
     sync_workspace_templates(config.workspace_path)
@@ -574,6 +584,9 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
+            # Release the instance lock
+            from nanobot.utils.lock_manager import release_instance_lock
+            release_instance_lock(config_path)
 
     asyncio.run(run())
 
