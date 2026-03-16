@@ -447,6 +447,7 @@ def gateway(
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
+    from nanobot.config import confirm_single_instance, get_config_path
     from nanobot.config.paths import get_cron_dir
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
@@ -456,6 +457,19 @@ def gateway(
     if verbose:
         import logging
         logging.basicConfig(level=logging.DEBUG)
+
+    # Determine the config path first
+    config_path = None
+    if config:
+        config_path = Path(config).expanduser().resolve()
+    else:
+        config_path = get_config_path()
+
+    # Check and create lock file
+    if not confirm_single_instance(config_path):
+        console.print(f"[red]Error: Another nanobot gateway instance is already running with config {config_path}[/red]")
+        console.print("  To proceed, either stop the existing instance or use a different config file.")
+        raise typer.Exit(1)
 
     config = _load_runtime_config(config, workspace)
     _print_deprecated_memory_window_notice(config)
@@ -615,13 +629,19 @@ def gateway(
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
+            from nanobot.config import cleanup_lock
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
             agent.stop()
             await channels.stop_all()
+            cleanup_lock()
 
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    finally:
+        from nanobot.config import cleanup_lock
+        cleanup_lock()
 
 
 

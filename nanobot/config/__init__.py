@@ -1,6 +1,7 @@
 """Configuration module for nanobot."""
 
-from nanobot.config.loader import get_config_path, load_config
+from nanobot.config.loader import get_config_path, load_config, set_config_path
+from nanobot.config.instance_lock import confirm_single_instance, cleanup_lock
 from nanobot.config.paths import (
     get_bridge_install_dir,
     get_cli_history_path,
@@ -18,6 +19,9 @@ __all__ = [
     "Config",
     "load_config",
     "get_config_path",
+    "set_config_path",
+    "confirm_single_instance",
+    "cleanup_lock",
     "get_data_dir",
     "get_runtime_subdir",
     "get_media_dir",
