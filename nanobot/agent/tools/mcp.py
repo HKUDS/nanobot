@@ -138,11 +138,47 @@ async def connect_mcp_servers(
             await session.initialize()
 
             tools = await session.list_tools()
+            enabled_tools = set(cfg.enabled_tools)
+            allow_all_tools = "*" in enabled_tools
+            registered_count = 0
+            matched_enabled_tools: set[str] = set()
+            available_raw_names = [tool_def.name for tool_def in tools.tools]
+            available_wrapped_names = [f"mcp_{name}_{tool_def.name}" for tool_def in tools.tools]
             for tool_def in tools.tools:
+                wrapped_name = f"mcp_{name}_{tool_def.name}"
+                if (
+                    not allow_all_tools
+                    and tool_def.name not in enabled_tools
+                    and wrapped_name not in enabled_tools
+                ):
+                    logger.debug(
+                        "MCP: skipping tool '{}' from server '{}' (not in enabledTools)",
+                        wrapped_name,
+                        name,
+                    )
+                    continue
                 wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
                 registry.register(wrapper)
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
+                registered_count += 1
+                if enabled_tools:
+                    if tool_def.name in enabled_tools:
+                        matched_enabled_tools.add(tool_def.name)
+                    if wrapped_name in enabled_tools:
+                        matched_enabled_tools.add(wrapped_name)
 
-            logger.info("MCP server '{}': connected, {} tools registered", name, len(tools.tools))
+            if enabled_tools and not allow_all_tools:
+                unmatched_enabled_tools = sorted(enabled_tools - matched_enabled_tools)
+                if unmatched_enabled_tools:
+                    logger.warning(
+                        "MCP server '{}': enabledTools entries not found: {}. Available raw names: {}. "
+                        "Available wrapped names: {}",
+                        name,
+                        ", ".join(unmatched_enabled_tools),
+                        ", ".join(available_raw_names) or "(none)",
+                        ", ".join(available_wrapped_names) or "(none)",
+                    )
+
+            logger.info("MCP server '{}': connected, {} tools registered", name, registered_count)
         except Exception as e:
             logger.error("MCP server '{}': failed to connect: {}", name, e)

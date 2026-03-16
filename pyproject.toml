@@ -1,7 +1,8 @@
 [project]
 name = "nanobot-ai"
-version = "0.1.4.post4"
+version = "0.1.4.post5"
 description = "A lightweight personal AI assistant framework"
+readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
@@ -50,7 +51,7 @@ dependencies = [
 
 [project.optional-dependencies]
 wecom = [
-    "wecom-aibot-sdk-python>=0.1.2",
+    "wecom-aibot-sdk-python>=0.1.5",
 ]
 matrix = [
     "matrix-nio[e2e]>=0.25.2",
