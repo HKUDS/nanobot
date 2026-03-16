@@ -23,3 +23,5 @@ botpy.log
 nano.*.save
 .DS_Store
 nanobot/.DS_Store
+uv.lock
+/TODO/archive

@@ -51,6 +51,24 @@ async def test_tavily_search(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_exa_search(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert "exa.ai" in str(url)
+        assert kw["headers"]["x-api-key"] == "exa-key"
+        return _response(json={
+            "results": [
+                {"title": "Exa Result", "url": "https://exa.ai", "highlights": ["Semantic AI search"]}
+            ]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="exa", api_key="exa-key")
+    result = await tool.execute(query="AI search")
+    assert "Exa Result" in result
+    assert "https://exa.ai" in result
+
+
+@pytest.mark.asyncio
 async def test_searxng_search(monkeypatch):
     async def mock_get(self, url, **kw):
         assert "searx.example" in url
