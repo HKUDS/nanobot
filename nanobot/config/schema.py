@@ -122,6 +122,14 @@ class GatewayConfig(Base):
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
+class WebSearchFallbackConfig(Base):
+    """Fallback configuration for web search."""
+
+    provider: str
+    api_key: str = ""
+    base_url: str = ""
+
+
 class WebSearchConfig(Base):
     """Web search tool configuration."""
 
@@ -129,6 +137,7 @@ class WebSearchConfig(Base):
     api_key: str = ""
     base_url: str = ""  # SearXNG base URL
     max_results: int = 5
+    fallbacks: list[WebSearchFallbackConfig] = Field(default_factory=list)
 
 
 class WebToolsConfig(Base):

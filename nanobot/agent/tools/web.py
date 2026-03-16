@@ -93,27 +93,40 @@ class WebSearchTool(Tool):
         self.proxy = proxy
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
-        provider = self.config.provider.strip().lower() or "brave"
         n = min(max(count or self.config.max_results, 1), 10)
+        
+        providers_to_try = [self.config] + self.config.fallbacks
+        errors = []
 
-        if provider == "duckduckgo":
-            return await self._search_duckduckgo(query, n)
-        elif provider == "tavily":
-            return await self._search_tavily(query, n)
-        elif provider == "searxng":
-            return await self._search_searxng(query, n)
-        elif provider == "jina":
-            return await self._search_jina(query, n)
-        elif provider == "brave":
-            return await self._search_brave(query, n)
-        else:
-            return f"Error: unknown search provider '{provider}'"
+        for p_config in providers_to_try:
+            provider = p_config.provider.strip().lower() or "brave"
+            try:
+                if provider == "duckduckgo":
+                    result = await self._search_duckduckgo(query, n)
+                elif provider == "tavily":
+                    result = await self._search_tavily(query, n, p_config)
+                elif provider == "searxng":
+                    result = await self._search_searxng(query, n, p_config)
+                elif provider == "jina":
+                    result = await self._search_jina(query, n, p_config)
+                elif provider == "brave":
+                    result = await self._search_brave(query, n, p_config)
+                else:
+                    result = f"Error: unknown search provider '{provider}'"
+                
+                if not result.startswith("Error:"):
+                    return result
+                errors.append(f"{provider}: {result}")
+            except Exception as e:
+                logger.warning("Web search provider '{}' failed: {}. Trying next fallback...", provider, e)
+                errors.append(f"{provider}: {e}")
 
-    async def _search_brave(self, query: str, n: int) -> str:
-        api_key = self.config.api_key or os.environ.get("BRAVE_API_KEY", "")
+        return f"All search providers failed. Errors: {'; '.join(errors)}"
+
+    async def _search_brave(self, query: str, n: int, config: Any) -> str:
+        api_key = config.api_key or os.environ.get("BRAVE_API_KEY", "")
         if not api_key:
-            logger.warning("BRAVE_API_KEY not set, falling back to DuckDuckGo")
-            return await self._search_duckduckgo(query, n)
+            return "Error: BRAVE_API_KEY not set"
         try:
             async with httpx.AsyncClient(proxy=self.proxy) as client:
                 r = await client.get(
@@ -131,11 +144,10 @@ class WebSearchTool(Tool):
         except Exception as e:
             return f"Error: {e}"
 
-    async def _search_tavily(self, query: str, n: int) -> str:
-        api_key = self.config.api_key or os.environ.get("TAVILY_API_KEY", "")
+    async def _search_tavily(self, query: str, n: int, config: Any) -> str:
+        api_key = config.api_key or os.environ.get("TAVILY_API_KEY", "")
         if not api_key:
-            logger.warning("TAVILY_API_KEY not set, falling back to DuckDuckGo")
-            return await self._search_duckduckgo(query, n)
+            return "Error: TAVILY_API_KEY not set"
         try:
             async with httpx.AsyncClient(proxy=self.proxy) as client:
                 r = await client.post(
@@ -149,11 +161,10 @@ class WebSearchTool(Tool):
         except Exception as e:
             return f"Error: {e}"
 
-    async def _search_searxng(self, query: str, n: int) -> str:
-        base_url = (self.config.base_url or os.environ.get("SEARXNG_BASE_URL", "")).strip()
+    async def _search_searxng(self, query: str, n: int, config: Any) -> str:
+        base_url = (config.base_url or os.environ.get("SEARXNG_BASE_URL", "")).strip()
         if not base_url:
-            logger.warning("SEARXNG_BASE_URL not set, falling back to DuckDuckGo")
-            return await self._search_duckduckgo(query, n)
+            return "Error: SEARXNG_BASE_URL not set"
         endpoint = f"{base_url.rstrip('/')}/search"
         is_valid, error_msg = _validate_url(endpoint)
         if not is_valid:
@@ -171,11 +182,10 @@ class WebSearchTool(Tool):
         except Exception as e:
             return f"Error: {e}"
 
-    async def _search_jina(self, query: str, n: int) -> str:
-        api_key = self.config.api_key or os.environ.get("JINA_API_KEY", "")
+    async def _search_jina(self, query: str, n: int, config: Any) -> str:
+        api_key = config.api_key or os.environ.get("JINA_API_KEY", "")
         if not api_key:
-            logger.warning("JINA_API_KEY not set, falling back to DuckDuckGo")
-            return await self._search_duckduckgo(query, n)
+            return "Error: JINA_API_KEY not set"
         try:
             headers = {"Accept": "application/json", "Authorization": f"Bearer {api_key}"}
             async with httpx.AsyncClient(proxy=self.proxy) as client:
