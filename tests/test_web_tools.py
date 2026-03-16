@@ -7,14 +7,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from nanobot.agent.tools.web import (
-    WebFetchTool,
-    WebSearchTool,
-    _normalize,
-    _strip_tags,
-    _validate_url,
-    _url_cache,
+import nanobot.agent.tools.web as _web_mod
 )
+WebFetchTool = _web_mod.WebFetchTool
+WebSearchTool = _web_mod.WebSearchTool
+_normalize = _web_mod._normalize
+_strip_tags = _web_mod._strip_tags
+_validate_url = _web_mod._validate_url
+
 
 # ---------------------------------------------------------------------------
 # WebSearchTool
@@ -144,7 +144,7 @@ async def test_web_fetch_invalid_url() -> None:
 
 
 @pytest.mark.asyncio
-async def test_web_fetch_json_and_raw(monkeypatch: pytest.MonkeyPatch) -> None:
+    _web_mod._url_cache.clear()
     _url_cache.clear()
 
     class _Resp:
@@ -230,7 +230,7 @@ async def test_web_fetch_html_and_error(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda **kwargs: _Client())
     monkeypatch.setitem(__import__("sys").modules, "readability", SimpleNamespace(Document=_Doc))
 
-    # Clear URL cache from prior tests
+    _web_mod._url_cache.clear()
     _url_cache.clear()
 
     tool = WebFetchTool(max_chars=20)
