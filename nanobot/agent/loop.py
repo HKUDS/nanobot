@@ -20,6 +20,7 @@ from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.types import AgentResponse, PendingAction
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.agent.tools.memory import SaveMemoryTool, UpdateBotIdentityTool, UpdateUserProfileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
@@ -129,6 +130,8 @@ class AgentLoop:
         self.tools.register(WebFetchTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
+        for cls in (UpdateBotIdentityTool, UpdateUserProfileTool, SaveMemoryTool):
+            self.tools.register(cls(workspace=self.workspace))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
@@ -229,6 +232,24 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    _MEMORY_TOOL_NAMES = frozenset({"update_bot_identity", "update_user_profile", "save_memory"})
+
+    @staticmethod
+    def _memory_saved_label(tool_name: str, arguments: dict[str, Any]) -> str:
+        """Generate a user-friendly label for a memory tool execution."""
+        if tool_name == "update_bot_identity":
+            name = arguments.get("name")
+            return f"Saved my new name: {name}" if name else "Updated my personality"
+        if tool_name == "update_user_profile":
+            name = arguments.get("name")
+            if name:
+                return f"Remembered your name"
+            fields = [k for k in ("timezone", "language", "role", "communication_style", "technical_level") if arguments.get(k)]
+            if fields:
+                return f"Updated your {fields[0].replace('_', ' ')}"
+            return "Updated your profile"
+        return "Saved to memory"
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -239,6 +260,7 @@ class AgentLoop:
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        memory_labels: list[str] = []
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -312,6 +334,8 @@ class AgentLoop:
                         logger.info("Tool {} requires confirmation, queued as pending action", tool_call.name)
                     else:
                         result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                        if tool_call.name in self._MEMORY_TOOL_NAMES and result.startswith("[memory_saved]"):
+                            memory_labels.append(self._memory_saved_label(tool_call.name, tool_call.arguments))
 
                     result_preview = result[:200] + "..." if len(result) > 200 else result
                     logger.debug("Tool result for {}: {}", tool_call.name, result_preview)
@@ -321,8 +345,6 @@ class AgentLoop:
                     )
             else:
                 clean = self._strip_think(response.content)
-                # Don't persist error responses to session history — they can
-                # poison the context and cause permanent 400 loops (#1303).
                 if response.finish_reason == "error":
                     logger.error("LLM returned error: {}", (clean or "")[:200])
                     final_content = clean or "Sorry, I encountered an error calling the AI model."
@@ -342,6 +364,10 @@ class AgentLoop:
                 f"I reached the maximum number of tool call iterations ({self.max_iterations}) "
                 "without completing the task. You can try breaking the task into smaller steps."
             )
+
+        if memory_labels and final_content:
+            directives = "\n".join(f'::memory-saved{{label="{label}"}}' for label in memory_labels)
+            final_content = final_content.rstrip() + "\n" + directives
 
         return final_content, tools_used, messages
 
