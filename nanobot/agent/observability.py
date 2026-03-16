@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import time
 from typing import TYPE_CHECKING, Any, AsyncIterator, Literal
 
 from loguru import logger
@@ -25,6 +26,15 @@ if TYPE_CHECKING:
 
 _client: Any | None = None
 _enabled: bool = False
+
+# ---------------------------------------------------------------------------
+# Health counters — lightweight, lock-free (single-threaded async)
+# ---------------------------------------------------------------------------
+
+_traces_created: int = 0
+_traces_failed: int = 0
+_last_trace_ts: float = 0.0
+_HEALTH_LOG_INTERVAL: int = 50  # log a health summary every N traces
 
 
 def init_langfuse(config: LangfuseConfig) -> None:
@@ -79,7 +89,7 @@ def init_langfuse(config: LangfuseConfig) -> None:
                     "Check public_key / secret_key / host."
                 )
         except Exception:  # crash-barrier: auth check is best-effort
-            logger.opt(exception=True).debug("Langfuse auth_check raised")
+            logger.opt(exception=True).warning("Langfuse auth_check raised")
 
         logger.info("Langfuse observability initialized (host={})", config.host)
 
@@ -111,9 +121,15 @@ def init_langfuse(config: LangfuseConfig) -> None:
             # (both are gated by the same check in set_attributes line ~175).
             from litellm.integrations.opentelemetry import OpenTelemetry as _OtelCls
 
-            _OtelCls._maybe_log_raw_request = lambda self, *a, **kw: None  # type: ignore[assignment]
+            if hasattr(_OtelCls, "_maybe_log_raw_request"):
+                _OtelCls._maybe_log_raw_request = lambda self, *a, **kw: None  # type: ignore[assignment]
+            else:
+                logger.warning(
+                    "litellm OpenTelemetry._maybe_log_raw_request not found — "
+                    "raw request spans may cause duplicate GENERATION costs"
+                )
         except Exception:  # crash-barrier: litellm import/config is optional
-            logger.opt(exception=True).debug("Could not enable litellm OTEL callback")
+            logger.opt(exception=True).warning("Could not enable litellm OTEL callback")
 
         # Suppress benign warnings from litellm/langfuse loggers.
         try:
@@ -172,9 +188,49 @@ def shutdown() -> None:
             _client.flush()
             _client.shutdown()
         except Exception:  # crash-barrier: shutdown should not raise
-            logger.opt(exception=True).debug("Error shutting down Langfuse")
+            logger.opt(exception=True).warning("Error shutting down Langfuse")
         _client = None
     _enabled = False
+
+
+def reset_trace_context() -> None:
+    """Detach any stale OTEL span context left from a previous iteration.
+
+    Call this before ``trace_request()`` in long-running loops to prevent
+    context leaks where a failed ``__exit__`` leaves an ended span as
+    the "current" observation, causing all subsequent traces to become
+    orphaned children that Langfuse silently discards.
+    """
+    if not _enabled or _client is None:
+        return
+    try:
+        from opentelemetry import context as otel_context
+        from opentelemetry import trace as otel_trace
+
+        current_span = otel_trace.get_current_span()
+        # INVALID_SPAN is the sentinel for "no active span"
+        if current_span is not otel_trace.INVALID_SPAN and not current_span.is_recording():
+            # There's a stale/ended span lingering in the context — detach it
+            logger.warning(
+                "Detaching stale OTEL span '{}' before new trace",
+                current_span.name if hasattr(current_span, "name") else "unknown",
+            )
+            otel_context.attach(otel_context.Context())
+    except Exception:  # crash-barrier: context reset is best-effort
+        logger.opt(exception=True).warning("Failed to reset OTEL trace context")
+
+
+def tracing_health() -> dict[str, Any]:
+    """Return a snapshot of tracing health counters."""
+    return {
+        "enabled": _enabled,
+        "client_alive": _client is not None,
+        "traces_created": _traces_created,
+        "traces_failed": _traces_failed,
+        "last_trace_age_s": (
+            round(time.monotonic() - _last_trace_ts, 1) if _last_trace_ts > 0 else None
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +324,7 @@ def update_current_span(
         if kwargs:
             _client.update_current_span(**kwargs)
     except Exception:  # crash-barrier: observability must never break agent flow
-        logger.opt(exception=True).debug("Failed to update langfuse span")
+        logger.opt(exception=True).warning("Failed to update langfuse span")
 
 
 def score_current_trace(
@@ -286,7 +342,7 @@ def score_current_trace(
             kwargs["comment"] = comment
         _client.score_current_trace(**kwargs)
     except Exception:  # crash-barrier: scoring must never break agent flow
-        logger.opt(exception=True).debug("Failed to score langfuse trace")
+        logger.opt(exception=True).warning("Failed to score langfuse trace")
 
 
 def flush() -> None:
@@ -295,7 +351,7 @@ def flush() -> None:
         try:
             _client.flush()
         except Exception:  # crash-barrier: flush should not raise
-            pass
+            logger.opt(exception=True).warning("Langfuse flush failed")
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +380,8 @@ async def trace_request(
         yield None
         return
 
+    global _traces_created, _traces_failed, _last_trace_ts  # noqa: PLW0603
+
     try:
         from langfuse import propagate_attributes as _propagate
 
@@ -347,8 +405,17 @@ async def trace_request(
                 else contextlib.nullcontext()
             ):
                 yield obs
+        _traces_created += 1
+        _last_trace_ts = time.monotonic()
+        if _traces_created % _HEALTH_LOG_INTERVAL == 0:
+            logger.info(
+                "Langfuse health: {} traces created, {} failed",
+                _traces_created,
+                _traces_failed,
+            )
     except Exception:  # crash-barrier: tracing must never break the agent
-        logger.opt(exception=True).debug("Langfuse trace_request failed")
+        _traces_failed += 1
+        logger.opt(exception=True).warning("Langfuse trace_request failed")
         yield None
 
 
@@ -377,7 +444,7 @@ async def tool_span(
         ) as obs:
             yield obs
     except Exception:  # crash-barrier: tracing must never break the agent
-        logger.opt(exception=True).debug("Langfuse tool_span failed")
+        logger.opt(exception=True).warning("Langfuse tool_span failed")
         yield None
 
 
@@ -406,5 +473,5 @@ async def span(
         ) as obs:
             yield obs
     except Exception:  # crash-barrier: tracing must never break the agent
-        logger.opt(exception=True).debug("Langfuse span failed")
+        logger.opt(exception=True).warning("Langfuse span failed")
         yield None

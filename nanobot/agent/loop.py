@@ -40,7 +40,14 @@ from nanobot.agent.context import (
 )
 from nanobot.agent.delegation import DelegationDispatcher
 from nanobot.agent.mission import MissionManager
-from nanobot.agent.observability import trace_request, update_current_span
+from nanobot.agent.observability import (
+    flush as flush_langfuse,
+)
+from nanobot.agent.observability import (
+    reset_trace_context,
+    trace_request,
+    update_current_span,
+)
 from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.scratchpad import Scratchpad
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
@@ -1209,6 +1216,12 @@ class AgentLoop:
                     session_id=msg.session_key,
                     agent_id=self.role_name,
                 )
+
+                # Detach any stale OTEL span context from a previous iteration
+                # to prevent context leaks that silently orphan all subsequent
+                # traces (see ADR-005 / Langfuse v4 hardening).
+                reset_trace_context()
+
                 try:
                     # Route through coordinator if enabled (skip system messages)
                     role_applied = False
@@ -1267,12 +1280,33 @@ class AgentLoop:
 
                         # Wrap with timeout to prevent infinite processing
                         timeout = self.message_timeout if self.message_timeout > 0 else None
-                        if timeout:
-                            response = await asyncio.wait_for(
-                                self._process_message(msg), timeout=timeout
+                        try:
+                            if timeout:
+                                response = await asyncio.wait_for(
+                                    self._process_message(msg), timeout=timeout
+                                )
+                            else:
+                                response = await self._process_message(msg)
+                        except asyncio.TimeoutError:
+                            logger.error(
+                                "Message processing timed out after {}s for {}:{}",
+                                self.message_timeout,
+                                msg.channel,
+                                msg.chat_id,
                             )
-                        else:
-                            response = await self._process_message(msg)
+                            update_current_span(
+                                output="TIMEOUT",
+                                metadata={"timeout_s": str(self.message_timeout)},
+                                level="ERROR",
+                            )
+                            response = OutboundMessage(
+                                channel=msg.channel,
+                                chat_id=msg.chat_id,
+                                content=(
+                                    "Sorry, I ran out of time processing your request. "
+                                    "Try breaking it into smaller steps."
+                                ),
+                            )
 
                     if role_applied:
                         self._reset_role_after_turn()
@@ -1288,25 +1322,13 @@ class AgentLoop:
                                 metadata=msg.metadata or {},
                             )
                         )
-                except asyncio.TimeoutError:
-                    logger.error(
-                        "Message processing timed out after {}s for {}:{}",
-                        self.message_timeout,
-                        msg.channel,
-                        msg.chat_id,
-                    )
-                    if role_applied:
-                        self._reset_role_after_turn()
-                    await self.bus.publish_outbound(
-                        OutboundMessage(
-                            channel=msg.channel,
-                            chat_id=msg.chat_id,
-                            content=(
-                                "Sorry, I ran out of time processing your request. "
-                                "Try breaking it into smaller steps."
-                            ),
-                        )
-                    )
+
+                    # Explicit flush: the gateway run() loop never calls
+                    # shutdown_langfuse() during normal operation, so without
+                    # this, traces rely on the OTEL BatchSpanProcessor timer.
+                    # Flushing per-request guarantees delivery.
+                    flush_langfuse()
+
                 except Exception as e:  # crash-barrier: message processing
                     logger.error("Error processing message: {}", e)
                     if role_applied:

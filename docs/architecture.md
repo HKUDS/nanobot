@@ -54,7 +54,7 @@ Each module has a clear responsibility, a public API, and boundaries it must not
 | `skills.py` | Skill discovery and YAML frontmatter loading | `SkillsLoader.load()` | `channels/`, `providers/` |
 | `mission.py` | Background mission manager (async delegated tasks) | `MissionManager`, `Mission`, `MissionStatus` | `channels/`, `cli/` |
 | `tool_loop.py` | Shared lightweight think→act→observe loop | `run_tool_loop()` | `channels/`, `cli/` |
-| `observability.py` | Langfuse OTEL tracing: init, shutdown, spans, scoring | `init_langfuse()`, `shutdown()`, `trace_request()`, `tool_span()`, `span()` | `channels/`, `cli/` |
+| `observability.py` | Langfuse OTEL tracing: init, shutdown, spans, scoring | `init_langfuse()`, `shutdown()`, `trace_request()`, `tool_span()`, `span()`, `reset_trace_context()`, `tracing_health()`, `flush()` | `channels/`, `cli/` |
 | `tracing.py` | Correlation IDs via contextvars, structured log binding | `TraceContext`, `bind_trace()` | `channels/`, `cli/` |
 
 ### `agent/memory/` — Memory Subsystem
@@ -255,7 +255,11 @@ These imports **must never exist** (enforced by `scripts/check_imports.py` in CI
   - litellm auto-instrumented via `"otel"` callback → GENERATION observations
   - `atexit.register(shutdown)` safety net + `auth_check()` on startup
   - Logging filters suppress benign warnings from litellm, langfuse, and OTEL SDK
+  - `reset_trace_context()` — clears stale OTEL spans between bus-loop iterations
+  - `flush()` — explicit trace export after each request (bus-loop path)
+  - `tracing_health()` — diagnostic counters (`traces_created`, `traces_failed`, `last_trace_age_s`)
+  - Crash-barrier log levels: WARNING (not DEBUG) for immediate visibility
 - **Config**: `LangfuseConfig` — `enabled`, `public_key`, `secret_key`, `host`, `environment`, `sample_rate`, `debug`
-- **Lifecycle**: `init_langfuse()` at CLI startup, `shutdown_langfuse()` in all `finally` blocks
+- **Lifecycle**: `init_langfuse()` at CLI startup, `shutdown_langfuse()` in all `finally` blocks, `flush()` after each bus-loop request
 - **Request audit**: Each completed request emits `request_complete` log with duration, tool count
 - **JSON log sink**: Optional via `config.log.json_file` (loguru serialize mode, 10MB rotation)
