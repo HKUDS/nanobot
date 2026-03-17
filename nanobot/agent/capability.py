@@ -190,13 +190,31 @@ class CapabilityRegistry:
         return self._tools.get_definitions()
 
     def get_unavailable_summary(self) -> str:
-        """Human-readable summary of all unavailable capabilities."""
+        """Human-readable summary of all unavailable capabilities.
+
+        Includes both capabilities tracked in the registry *and* tools
+        registered directly in the underlying ``ToolRegistry`` that report
+        themselves unavailable via ``check_available()``.
+        """
         lines: list[str] = []
+        seen: set[str] = set()
+        # 1. Check Capability entries (roles, skills, and any tools registered
+        #    through register_tool())
         for cap in self._capabilities.values():
             if cap.health == "unavailable":
                 lines.append(
                     f"- {cap.name} ({cap.kind}): {cap.unavailability_reason or 'unavailable'}"
                 )
+                seen.add(cap.name)
+        # 2. Check ToolRegistry for tools registered directly (bypassing
+        #    CapabilityRegistry.register_tool), e.g. via ToolExecutor.register()
+        tool_summary = self._tools.get_unavailable_summary()
+        if tool_summary:
+            for line in tool_summary.splitlines():
+                # Extract tool name from "- tool_name: reason" format
+                name = line.lstrip("- ").split(":")[0].strip()
+                if name and name not in seen:
+                    lines.append(line)
         return "\n".join(lines)
 
     def role_names(self) -> list[str]:

@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+from nanobot.agent.capability import CapabilityRegistry
 from nanobot.agent.consolidation import ConsolidationOrchestrator
 from nanobot.agent.context import (
     ContextBuilder,
@@ -280,14 +281,19 @@ class AgentLoop:
             role_system_prompt=role_config.system_prompt if role_config else "",
         )
         self.sessions = session_manager or SessionManager(self.workspace)
-        self.tools = ToolExecutor(ToolRegistry())
+        _tool_registry = ToolRegistry()
+        self._capabilities = CapabilityRegistry(
+            tool_registry=_tool_registry,
+            skills_loader=self.context.skills,
+        )
+        self.tools = ToolExecutor(_tool_registry)
         self.result_cache = ToolResultCache(workspace=self.workspace)
-        self.tools._registry.set_cache(
+        self._capabilities.tool_registry.set_cache(
             self.result_cache,
             provider=provider,
             summary_model=config.tool_summary_model or None,
         )
-        self.context.set_unavailable_tools_fn(self.tools._registry.get_unavailable_summary)
+        self.context.set_unavailable_tools_fn(self._capabilities.get_unavailable_summary)
         self.missions = MissionManager(
             provider=provider,
             workspace=self.workspace,
@@ -511,13 +517,17 @@ class AgentLoop:
         try:
             self._mcp_stack = AsyncExitStack()
             await self._mcp_stack.__aenter__()
-            await connect_mcp_servers(self._mcp_servers, self.tools._registry, self._mcp_stack)
+            await connect_mcp_servers(
+                self._mcp_servers,
+                self._capabilities.tool_registry,
+                self._mcp_stack,
+            )
             self._mcp_connected = True
             # Share MCP tools with missions and delegation
             mcp_tools = [
                 t
-                for name in self.tools._registry.tool_names
-                if name.startswith("mcp_") and (t := self.tools._registry.get(name))
+                for name in self._capabilities.tool_registry.tool_names
+                if name.startswith("mcp_") and (t := self._capabilities.tool_registry.get(name))
             ]
             if mcp_tools:
                 self.missions.mcp_tools = mcp_tools
@@ -1384,6 +1394,24 @@ class AgentLoop:
         self._dispatcher.coordinator = self._coordinator
         self.missions.coordinator = self._coordinator
         self._wire_delegate_tools()
+
+        # Wire agent registry into the unified capability registry
+        self._capabilities._agents = registry
+        for role_name in registry.role_names():
+            role = registry.get(role_name)
+            if role and role.name not in self._capabilities:
+                # Populate Capability entry without re-registering in AgentRegistry
+                from nanobot.agent.capability import Capability
+
+                self._capabilities._capabilities[role.name] = Capability(
+                    name=role.name,
+                    kind="delegate_role",
+                    description=role.description,
+                    health="healthy" if role.enabled else "unavailable",
+                    unavailability_reason=None if role.enabled else "role disabled",
+                    role_config=role,
+                )
+
         logger.info(
             "Multi-agent routing enabled with {} roles",
             len(registry),
