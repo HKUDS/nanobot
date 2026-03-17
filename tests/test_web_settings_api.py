@@ -104,8 +104,10 @@ def test_settings_endpoint_returns_workspace_templates_skills_and_runtime_state(
         item["name"] == "local-skill"
         and item["source"] == "workspace"
         and item["description"] == "local skill"
+        and item["always"] is False
         for item in data["skills"]
     )
+    assert any(item["name"] == "memory" and item["always"] is True for item in data["skills"])
     assert data["cron_jobs"][0]["name"] == "Daily review"
     assert data["cron_jobs"][0]["topic_id"] == "web:default:topic-1"
     assert data["cron_jobs"][0]["cron_expr"] == "0 9 * * *"
@@ -172,6 +174,8 @@ def test_agent_topic_flow_and_agent_updates_propagate(tmp_path: Path) -> None:
         agent = response.json()
         assert agent["name"] == "Pharmacogenomics Analyst"
         assert agent["model"] == "openai/gpt-4.1-mini"
+        assert "memory" not in agent["enabled_skills"]
+        assert "weather" in agent["enabled_skills"]
 
         topic_response = client.post(
             "/api/agents/pgx/topics",
@@ -185,7 +189,7 @@ def test_agent_topic_flow_and_agent_updates_propagate(tmp_path: Path) -> None:
         update_response = client.patch(
             "/api/agents/pgx",
             json={
-                "enabled_skills": ["literature-review", "citation-check"],
+                "enabled_skills": ["memory", "literature-review", "citation-check"],
                 "enabled_mcps": ["exa"],
                 "agent_identity": "You are a stricter pharmacogenomics reviewer.",
                 "user_identity": "The user is a clinical pharmacologist.",
@@ -201,6 +205,35 @@ def test_agent_topic_flow_and_agent_updates_propagate(tmp_path: Path) -> None:
         assert session["metadata"]["assistant"]["enabled_skills"] == ["literature-review", "citation-check"]
         assert session["metadata"]["assistant"]["enabled_mcps"] == ["exa"]
         assert session["metadata"]["assistant"]["system_prompt"] == "Always produce a literature-backed summary."
+
+
+def test_new_agents_default_to_builtin_non_always_skills_only(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "skills" / "local-skill").mkdir(parents=True)
+    (workspace / "skills" / "local-skill" / "SKILL.md").write_text("---\ndescription: local skill\n---", encoding="utf-8")
+
+    config = Config.model_validate({"agents": {"defaults": {"workspace": str(workspace), "model": "openai/gpt-4.1-mini"}}})
+
+    with patch("nanobot.cli.commands._load_runtime_config", return_value=config), \
+         patch("nanobot.cli.commands._make_provider", return_value=object()), \
+         patch("nanobot.utils.helpers.sync_workspace_templates", side_effect=lambda path: path), \
+         patch("nanobot.bus.queue.MessageBus"), \
+         patch("nanobot.agent.loop.AgentLoop", _FakeAgentLoop), \
+         patch("nanobot.cron.service.CronService", _FakeCronService):
+        app = create_app()
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/agents",
+            json={"assistant_id": "custom-agent", "template_id": None, "name": "Custom Agent"},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "memory" not in data["enabled_skills"]
+    assert "local-skill" not in data["enabled_skills"]
+    assert "weather" in data["enabled_skills"]
 
 
 def test_runtime_can_upsert_custom_preset(tmp_path: Path) -> None:

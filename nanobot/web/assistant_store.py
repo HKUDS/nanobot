@@ -78,9 +78,32 @@ class AssistantStore:
         self.store_path = self.store_dir / "assistants.json"
 
     def _default_enabled_skills(self) -> list[str]:
-        """Enable all globally available skills for newly created agents by default."""
+        """Enable built-in, non-always skills for newly created agents by default."""
         loader = SkillsLoader(self.workspace)
-        return [item["name"] for item in loader.list_skills(filter_unavailable=False)]
+        return [
+            str(item["name"])
+            for item in loader.list_skills(filter_unavailable=False)
+            if item["source"] == "builtin" and not item["always"]
+        ]
+
+    def _sanitize_enabled_skills(self, values: list[str] | None) -> list[str] | None:
+        """Drop always-on skills from persisted enabled_skills while preserving order."""
+        if values is None:
+            return None
+
+        loader = SkillsLoader(self.workspace)
+        always = set(loader.get_always_skills())
+        seen: set[str] = set()
+        result: list[str] = []
+        for raw in values:
+            if not isinstance(raw, str):
+                continue
+            name = raw.strip()
+            if not name or name in always or name in seen:
+                continue
+            seen.add(name)
+            result.append(name)
+        return result
 
     def list_assistants(self) -> list[AssistantConfig]:
         assistants = self._load()
@@ -162,6 +185,8 @@ class AssistantStore:
                 continue
             data = assistant.model_dump()
             updates = payload.model_dump(exclude_unset=True)
+            if "enabled_skills" in updates:
+                updates["enabled_skills"] = self._sanitize_enabled_skills(updates["enabled_skills"])
             
             # Check for name uniqueness when updating name
             if "name" in updates and updates["name"]:

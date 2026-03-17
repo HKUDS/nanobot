@@ -882,6 +882,7 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
                 "name": item["name"],
                 "source": item["source"],
                 "description": item["description"],
+                "always": item["always"],
                 "path": item["path"],
             }
             for item in skills_loader.list_skills(filter_unavailable=False)

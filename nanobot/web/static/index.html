@@ -183,10 +183,10 @@
     <aside class="hidden md:flex w-80 flex-shrink-0 flex-col glass-panel rounded-[1.75rem] overflow-hidden">
       <div class="p-4 border-b hairline">
         <div class="flex items-start gap-3">
-            <div id="topics-header-icon" class="h-12 w-12 rounded-2xl flex items-center justify-center text-2xl" style="background: var(--bg-soft); border: 1px solid var(--border);">🐈</div>
+          <div id="topics-header-icon" class="h-12 w-12 rounded-2xl flex items-center justify-center text-2xl" style="background: var(--bg-soft); border: 1px solid var(--border);">🐈</div>
           <div class="min-w-0 flex-1">
             <div class="text-[11px] uppercase tracking-[0.24em]" style="color: var(--text-faint);">Agent</div>
-            <div id="topics-header-name" class="text-base font-semibold truncate">Default Agent</div>
+            <div id="topics-header-name" class="text-base font-semibold leading-5 break-words">Default Agent</div>
             <div id="topics-header-model" class="text-xs font-mono truncate mt-1" style="color: var(--text-muted);"></div>
           </div>
         </div>
@@ -832,11 +832,11 @@
               <div class="h-11 w-11 rounded-2xl flex items-center justify-center text-xl flex-shrink-0" style="background: var(--bg-soft); border: 1px solid var(--border);">${escapeHtml(assistant.icon || '🐈')}</div>
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-2">
-                  <div class="text-sm font-semibold truncate">${escapeHtml(assistant.name)}</div>
-                  <div class="ml-auto flex gap-1">
+                  <div class="min-w-0 flex-1 text-sm font-semibold leading-5 break-words">${escapeHtml(assistant.name)}</div>
+                  <div class="ml-auto flex flex-shrink-0 gap-1">
+                    <button class="agent-row-action h-7 w-7 rounded-xl border text-xs" style="border-color: var(--border); color: var(--text-muted);" title="Agent Settings">⚙</button>
                     <button class="agent-row-action h-7 w-7 rounded-xl border text-xs" style="border-color: var(--border); color: var(--text-muted);" title="Rename agent">✎</button>
                     ${assistant.id === 'default' ? '' : '<button class="agent-row-action h-7 w-7 rounded-xl border text-xs" style="border-color: var(--border); color: var(--text-muted);" title="Delete agent">×</button>'}
-                    <button class="agent-row-action h-7 w-7 rounded-xl border text-xs" style="border-color: var(--border); color: var(--text-muted);" title="Agent Settings">⚙</button>
                   </div>
                 </div>
                 <div class="text-xs mt-2" style="color: var(--text-muted);">${assistant.topic_count || 0} topic${assistant.topic_count === 1 ? '' : 's'}</div>
@@ -845,9 +845,9 @@
           `;
           item.addEventListener('click', () => setActiveAssistant(assistant.id));
           const actionButtons = item.querySelectorAll('.agent-row-action');
-          const renameButton = actionButtons[0];
-          const deleteButton = assistant.id === 'default' ? null : actionButtons[1];
-          const settingsButton = assistant.id === 'default' ? actionButtons[1] : actionButtons[2];
+          const settingsButton = actionButtons[0];
+          const renameButton = actionButtons[1];
+          const deleteButton = assistant.id === 'default' ? null : actionButtons[2];
           renameButton.addEventListener('click', async (event) => {
             event.stopPropagation();
             const nextName = prompt('Rename agent:', assistant.name);
@@ -913,7 +913,7 @@
                 <div class="text-sm font-semibold truncate">${escapeHtml(topic.name)}</div>
                 <div class="text-xs mt-1 truncate" style="color: var(--text-faint);">${escapeHtml(topic.updated_at)}</div>
               </div>
-              <div class="flex gap-1">
+              <div class="flex flex-shrink-0 gap-1">
                 <button class="topic-item-action h-7 w-7 rounded-xl border text-xs" style="border-color: var(--border); color: var(--text-muted);" title="Topic cron settings">⚙</button>
                 <button class="topic-item-action h-7 w-7 rounded-xl border text-xs" style="border-color: var(--border); color: var(--text-muted);" title="Rename topic">✎</button>
                 <button class="topic-item-action h-7 w-7 rounded-xl border text-xs" style="border-color: var(--border); color: var(--text-muted);" title="Delete topic">×</button>
@@ -1665,7 +1665,8 @@
       return `
         <div>
           <div class="text-xs uppercase tracking-[0.22em]" style="color: var(--text-faint);">Skills</div>
-          <h2 class="text-2xl font-semibold mt-1">Available skills</h2>
+          <h2 class="text-2xl font-semibold mt-1">Globally available skills</h2>
+          <p class="text-sm mt-3" style="color: var(--text-muted);">These skills are installed and available to agents. Availability here does not mean every agent has them enabled.</p>
         </div>
         <div class="grid lg:grid-cols-2 gap-4">
           ${skills.map((skill) => `
@@ -1862,10 +1863,33 @@
           <div class="flex flex-wrap gap-2" id="agent-settings-mcp-chips"></div>
         </div>
       `;
+      const alwaysSkills = globalSkills.filter((item) => item.always);
+      const builtinSkills = globalSkills.filter((item) => item.source === 'builtin' && !item.always);
+      const installedSkills = globalSkills.filter((item) => item.source !== 'builtin' && !item.always);
       const skillsHtml = `
-        <div class="space-y-4">
-          <p class="text-sm" style="color: var(--text-muted);">Globally configured skills. Toggle to enable for this agent.</p>
-          <div class="flex flex-wrap gap-2" id="agent-settings-skills-chips"></div>
+        <div class="space-y-5">
+          <p class="text-sm" style="color: var(--text-muted);">Choose which non-always skills are enabled for this agent. Built-in skills are enabled by default for new agents. Installed skills are optional additions added later.</p>
+          <div class="space-y-3">
+            <div>
+              <div class="text-xs uppercase tracking-[0.2em]" style="color: var(--text-faint);">Always</div>
+              <p class="text-sm mt-2" style="color: var(--text-muted);">These skills are always loaded and cannot be disabled.</p>
+            </div>
+            <div class="flex flex-wrap gap-2" id="agent-settings-skills-always"></div>
+          </div>
+          <div class="space-y-3">
+            <div>
+              <div class="text-xs uppercase tracking-[0.2em]" style="color: var(--text-faint);">Built-in</div>
+              <p class="text-sm mt-2" style="color: var(--text-muted);">Bundled with nanobot. New agents enable these by default, except always-on skills shown above.</p>
+            </div>
+            <div class="flex flex-wrap gap-2" id="agent-settings-skills-builtin"></div>
+          </div>
+          <div class="space-y-3">
+            <div>
+              <div class="text-xs uppercase tracking-[0.2em]" style="color: var(--text-faint);">Installed</div>
+              <p class="text-sm mt-2" style="color: var(--text-muted);">Skills installed later into the workspace. Enable them per agent as needed.</p>
+            </div>
+            <div class="flex flex-wrap gap-2" id="agent-settings-skills-installed"></div>
+          </div>
         </div>
       `;
 
@@ -1880,7 +1904,9 @@
       }).join('');
 
       const mcpChips = document.getElementById('agent-settings-mcp-chips');
-      const skillsChips = document.getElementById('agent-settings-skills-chips');
+      const alwaysSkillsChips = document.getElementById('agent-settings-skills-always');
+      const builtinSkillsChips = document.getElementById('agent-settings-skills-builtin');
+      const installedSkillsChips = document.getElementById('agent-settings-skills-installed');
       if (mcpChips) {
         globalMcps.forEach((s) => {
           const b = document.createElement('button');
@@ -1898,8 +1924,28 @@
           mcpChips.appendChild(b);
         });
       }
-      if (skillsChips) {
-        globalSkills.forEach((s) => {
+      if (alwaysSkillsChips) {
+        alwaysSkills.forEach((s) => {
+          const b = document.createElement('div');
+          b.className = 'px-3 py-1.5 rounded-xl text-xs border';
+          b.textContent = `${s.name} always`;
+          b.style.background = 'rgba(79, 140, 255, 0.12)';
+          b.style.borderColor = 'rgba(79, 140, 255, 0.22)';
+          b.style.color = 'var(--text)';
+          alwaysSkillsChips.appendChild(b);
+        });
+      }
+      function appendSkillToggles(target, items) {
+        if (!target) return;
+        if (!items.length) {
+          const empty = document.createElement('div');
+          empty.className = 'text-sm';
+          empty.style.color = 'var(--text-muted)';
+          empty.textContent = 'None';
+          target.appendChild(empty);
+          return;
+        }
+        items.forEach((s) => {
           const b = document.createElement('button');
           b.type = 'button';
           b.className = 'px-3 py-1.5 rounded-xl text-xs border transition-colors agent-settings-chip agent-settings-skills-chip';
@@ -1912,9 +1958,11 @@
             else enabledSkills.add(s.name);
             renderAgentSettings(getActiveAssistant());
           });
-          skillsChips.appendChild(b);
+          target.appendChild(b);
         });
       }
+      appendSkillToggles(builtinSkillsChips, builtinSkills);
+      appendSkillToggles(installedSkillsChips, installedSkills);
       const store = { enabledSkills, enabledMcps };
       agentSettingsContent.dataset.agentSettingsStore = JSON.stringify({
         enabledSkills: [...store.enabledSkills],

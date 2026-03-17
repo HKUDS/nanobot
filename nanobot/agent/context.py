@@ -45,27 +45,44 @@ class ContextBuilder:
             parts.append(f"# Memory\n\n{memory}")
 
         always_skills = self.skills.get_always_skills()
+        enabled_skills = self._get_enabled_skills(session_metadata)
+        visible_skills = list(dict.fromkeys([*(always_skills or []), *enabled_skills]))
+
         if always_skills:
             always_content = self.skills.load_skills_for_context(always_skills)
             if always_content:
                 parts.append(f"# Active Skills\n\n{always_content}")
 
-        enabled_skills = self._get_enabled_skills(session_metadata)
-        visible_skills: list[str] | None = None
         if enabled_skills:
             always_set = set(always_skills or [])
             selected_skills = [name for name in enabled_skills if name not in always_set]
             selected_content = self.skills.load_skills_for_context(selected_skills)
             if selected_content:
                 parts.append(f"# Enabled Skills\n\n{selected_content}")
-            visible_skills = list(dict.fromkeys([*(always_skills or []), *enabled_skills]))
 
-        skills_summary = self.skills.build_skills_summary(visible_skills)
+        if visible_skills:
+            always_label = ", ".join(always_skills) if always_skills else "none"
+            enabled_label = ", ".join(enabled_skills) if enabled_skills else "none"
+            parts.append(
+                "# Skill Activation State\n\n"
+                f"- Always-loaded skills: {always_label}\n"
+                f"- Enabled for this agent: {enabled_label}\n"
+                "- Only the skills listed above are active in this session.\n"
+                "- `runtime_available=true` means the skill's dependencies are installed; it does not mean the skill is enabled."
+            )
+
+        skills_summary = self.skills.build_skills_summary(
+            visible_skills,
+            enabled_skills=enabled_skills,
+            always_skills=always_skills,
+        )
         if skills_summary:
             parts.append(f"""# Skills
 
-The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
-Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
+The following skills are active in this session. To use a skill, read its SKILL.md file using the read_file tool.
+Use `enabled="true"` to determine which skills this agent has enabled.
+Use `always="true"` to determine which skills are loaded for every agent.
+Use `runtime_available="false"` to identify skills whose dependencies are missing.
 
 {skills_summary}""")
 
