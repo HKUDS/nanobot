@@ -77,8 +77,10 @@ def test_onboard_refresh_rewrites_legacy_config_template(tmp_path, monkeypatch) 
 
     monkeypatch.setattr("nanobot.config.loader.get_config_path", lambda: config_path)
     monkeypatch.setattr("nanobot.cli.commands.get_workspace_path", lambda _workspace=None: workspace)
+    monkeypatch.setattr("nanobot.cli.onboard_wizard.run_onboard", lambda: load_config(config_path))
+    monkeypatch.setattr("nanobot.channels.registry.discover_all", lambda: {})
 
-    result = runner.invoke(app, ["onboard"], input="n\n")
+    result = runner.invoke(app, ["onboard"])
 
     assert result.exit_code == 0
     assert "contextWindowTokens" in result.stdout
@@ -110,6 +112,7 @@ def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch)
 
     monkeypatch.setattr("nanobot.config.loader.get_config_path", lambda: config_path)
     monkeypatch.setattr("nanobot.cli.commands.get_workspace_path", lambda _workspace=None: workspace)
+    monkeypatch.setattr("nanobot.cli.onboard_wizard.run_onboard", lambda: load_config(config_path))
     monkeypatch.setattr(
         "nanobot.channels.registry.discover_all",
         lambda: {
@@ -125,7 +128,7 @@ def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch)
         },
     )
 
-    result = runner.invoke(app, ["onboard"], input="n\n")
+    result = runner.invoke(app, ["onboard"])
 
     assert result.exit_code == 0
     saved = json.loads(config_path.read_text(encoding="utf-8"))

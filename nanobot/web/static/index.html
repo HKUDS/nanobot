@@ -2125,10 +2125,16 @@
         if (runtimeResult.model_config) {
           runtimeData = { ...(runtimeData || {}), model_config: runtimeResult.model_config };
         }
-        await loadRuntime();
         if (runtimeResult.restart_required) {
-          alert(`Runtime config saved. Restart the web app to apply the new workspace.\nCurrent workspace: ${runtimeResult.active_workspace}`);
+          alert(
+            `Runtime config saved. Restart the web app to apply the new workspace.\n` +
+            `Active workspace: ${runtimeResult.active_workspace}\n` +
+            `Saved workspace: ${runtimeResult.model_config?.workspace || ''}`
+          );
+          renderRuntimePanel();
+          return;
         }
+        await loadRuntime();
       }).catch((error) => alert(error.message));
     }
 

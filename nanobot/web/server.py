@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import json
 import re
 from datetime import datetime
@@ -276,6 +277,11 @@ def _iso_from_ms(timestamp_ms: int | None) -> str | None:
     return datetime.fromtimestamp(timestamp_ms / 1000).isoformat()
 
 
+def _web_cron_store_path(workspace: Path) -> Path:
+    """Store web topic cron jobs inside the active workspace."""
+    return workspace / "web" / "cron-jobs.json"
+
+
 def create_app(config_path: str | None = None, workspace: str | None = None) -> FastAPI:
     """Create and configure the FastAPI application."""
     from nanobot.agent.loop import AgentLoop
@@ -293,7 +299,7 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
     bus = MessageBus()
     provider = _make_provider(cfg)
 
-    cron_store_path = get_cron_dir() / "jobs.json"
+    cron_store_path = _web_cron_store_path(cfg.workspace_path)
     cron = CronService(cron_store_path)
 
     session_manager = SessionManager(cfg.workspace_path)
@@ -320,7 +326,7 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
 
     app = FastAPI(title="nanobot web", docs_url=None, redoc_url=None)
 
-    def _apply_runtime_config(payload: ModelConfigRequest) -> tuple[dict[str, Any], bool]:
+    def _apply_runtime_config(payload: ModelConfigRequest) -> tuple[dict[str, Any], bool, str]:
         workspace_value = payload.workspace.strip()
         model_value = payload.model.strip()
         provider_name = payload.provider.strip()
@@ -340,8 +346,22 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
             raise HTTPException(status_code=400, detail=f"Unknown provider '{provider_name}'")
 
         restart_required = cfg.agents.defaults.workspace != workspace_value
+        active_workspace = str(agent.workspace)
 
-        cfg.agents.defaults.workspace = workspace_value
+        saved_cfg = cfg.model_copy(deep=True)
+        saved_cfg.agents.defaults.workspace = workspace_value
+        saved_cfg.agents.defaults.model = model_value
+        saved_cfg.agents.defaults.provider = provider_name
+        saved_cfg.providers.custom = ProviderConfig(
+            api_key=payload.custom.api_key.strip(),
+            api_base=payload.custom.api_base.strip() or None,
+        )
+        saved_cfg.tools.web.search.provider = search_provider
+        saved_cfg.tools.web.search.api_key = payload.search.api_key.strip()
+        saved_cfg.tools.web.search.max_results = min(max(payload.search.max_results, 1), 10)
+
+        save_config(saved_cfg, get_config_path())
+
         cfg.agents.defaults.model = model_value
         cfg.agents.defaults.provider = provider_name
         cfg.providers.custom = ProviderConfig(
@@ -351,8 +371,6 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
         cfg.tools.web.search.provider = search_provider
         cfg.tools.web.search.api_key = payload.search.api_key.strip()
         cfg.tools.web.search.max_results = min(max(payload.search.max_results, 1), 10)
-
-        save_config(cfg, get_config_path())
 
         new_provider = _make_provider(cfg)
         agent.provider = new_provider
@@ -370,7 +388,7 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
         if isinstance(web_search_tool, WebSearchTool):
             web_search_tool.config = cfg.tools.web.search
 
-        return _serialize_model_config(cfg), restart_required
+        return _serialize_model_config(saved_cfg), restart_required, active_workspace
 
     def _apply_prompt_config(payload: PromptConfigRequest) -> dict[str, Any]:
         path = _prompt_config_path(cfg)
@@ -425,10 +443,41 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
             jobs.append(payload)
         return jobs
 
-    def _purge_agent_level_cron_jobs() -> None:
-        for job in list(cron.list_jobs(include_disabled=True)):
-            if not job.payload.topic_session_id:
-                cron.remove_job(job.id)
+    def _migrate_workspace_topic_cron_jobs() -> None:
+        legacy_path = get_cron_dir() / "jobs.json"
+        if legacy_path == cron_store_path or not legacy_path.exists():
+            return
+
+        legacy_cron = CronService(legacy_path)
+        workspace_store = cron._load_store()
+        existing_ids = {job.id for job in workspace_store.jobs}
+        migrated_ids: list[str] = []
+
+        def _ensure_topic_session_local(session_id: str) -> bool:
+            local_path = session_manager._get_session_path(session_id)
+            if local_path.exists():
+                return True
+            legacy_session_path = session_manager._get_legacy_session_path(session_id)
+            if not legacy_session_path.exists():
+                return False
+            session_manager.get_or_create(session_id)
+            return local_path.exists()
+
+        for job in legacy_cron.list_jobs(include_disabled=True):
+            session_id = job.payload.topic_session_id
+            if not session_id:
+                continue
+            if not _ensure_topic_session_local(session_id):
+                continue
+            if job.id not in existing_ids:
+                workspace_store.jobs.append(deepcopy(job))
+                existing_ids.add(job.id)
+            migrated_ids.append(job.id)
+
+        if existing_ids and migrated_ids:
+            cron._save_store()
+        for job_id in migrated_ids:
+            legacy_cron.remove_job(job_id)
 
     def _build_cron_schedule(payload: AgentCronJobRequest) -> tuple[CronSchedule, bool]:
         kind = (payload.schedule_kind or "").strip().lower()
@@ -481,8 +530,8 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
     @app.on_event("startup")
     async def _startup() -> None:
         await agent._connect_mcp()
+        _migrate_workspace_topic_cron_jobs()
         await cron.start()
-        _purge_agent_level_cron_jobs()
 
     @app.on_event("shutdown")
     async def _shutdown() -> None:
@@ -915,12 +964,12 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
 
     @app.put("/api/settings/model-config")
     async def update_model_config(request: ModelConfigRequest) -> dict[str, Any]:
-        updated, restart_required = _apply_runtime_config(request)
+        updated, restart_required, active_workspace = _apply_runtime_config(request)
         return {
             "status": "ok",
             "model_config": updated,
             "restart_required": restart_required,
-            "active_workspace": str(agent.workspace),
+            "active_workspace": active_workspace,
         }
 
     @app.put("/api/settings/prompt-config")
