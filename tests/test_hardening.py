@@ -4,6 +4,7 @@ from pathlib import Path
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.tools.filesystem import EditFileTool, WriteFileTool
+from nanobot.agent.tools.web import WebFetchTool
 from nanobot.session.manager import Session, SessionManager
 
 
@@ -98,3 +99,33 @@ def test_session_save_preserves_small_sessions(tmp_path: Path) -> None:
     mgr.save(session)
 
     assert len(session.messages) == 50
+
+
+# --- Web fetch URL restriction ---
+
+
+async def test_web_fetch_blocks_non_user_url() -> None:
+    tool = WebFetchTool(restrict_to_user_urls=True)
+    result = await tool.execute(url="https://evil.com/payload")
+
+    assert "not allowed" in result.lower()
+
+
+async def test_web_fetch_allows_user_provided_url() -> None:
+    tool = WebFetchTool(restrict_to_user_urls=True)
+    tool.add_user_urls("Check out https://example.com/article")
+    # We don't actually fetch — just verify it passes the allowlist check
+    assert tool._is_allowed("https://example.com/article")
+    assert not tool._is_allowed("https://evil.com/other")
+
+
+async def test_web_fetch_allows_pre_registered_domain() -> None:
+    tool = WebFetchTool(restrict_to_user_urls=True, allowed_domains=["trusted.org"])
+    assert tool._is_allowed("https://trusted.org/page")
+    assert tool._is_allowed("https://sub.trusted.org/page")
+    assert not tool._is_allowed("https://untrusted.com/page")
+
+
+async def test_web_fetch_unrestricted_allows_all() -> None:
+    tool = WebFetchTool(restrict_to_user_urls=False)
+    assert tool._is_allowed("https://anything.com/whatever")

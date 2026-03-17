@@ -101,26 +101,60 @@ class WebSearchTool(Tool):
 
 class WebFetchTool(Tool):
     """Fetch and extract content from a URL using Readability."""
-    
+
     name = "web_fetch"
-    description = "Fetch URL and extract readable content (HTML → markdown/text)."
+    description = "Fetch URL and extract readable content (HTML → markdown/text). Only URLs provided by the user can be fetched."
     parameters = {
         "type": "object",
         "properties": {
-            "url": {"type": "string", "description": "URL to fetch"},
+            "url": {"type": "string", "description": "URL to fetch (must be from user message)"},
             "extractMode": {"type": "string", "enum": ["markdown", "text"], "default": "markdown"},
             "maxChars": {"type": "integer", "minimum": 100}
         },
         "required": ["url"]
     }
-    
-    def __init__(self, max_chars: int = 50000):
+
+    _URL_RE = re.compile(r'https?://[^\s<>\"\')]+')
+
+    def __init__(
+        self,
+        max_chars: int = 50000,
+        restrict_to_user_urls: bool = False,
+        allowed_domains: list[str] | None = None,
+    ):
         self.max_chars = max_chars
-    
+        self.restrict_to_user_urls = restrict_to_user_urls
+        self._allowed_urls: set[str] = set()
+        self._allowed_domains: list[str] = allowed_domains or []
+
+    def add_user_urls(self, text: str) -> None:
+        """Extract and register URLs from a user message."""
+        for url in self._URL_RE.findall(text):
+            self._allowed_urls.add(url.rstrip(".,;:!?)]}"))
+
+    def _is_allowed(self, url: str) -> bool:
+        """Check if the URL was provided by the user or matches an allowed domain."""
+        if not self.restrict_to_user_urls:
+            return True
+        # Check pre-registered allowed domains
+        try:
+            domain = urlparse(url).netloc.lower()
+            if any(domain == d or domain.endswith("." + d) for d in self._allowed_domains):
+                return True
+        except Exception:
+            pass
+        return any(url.startswith(allowed) for allowed in self._allowed_urls)
+
     async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
         from readability import Document
 
         max_chars = maxChars or self.max_chars
+
+        if not self._is_allowed(url):
+            return json.dumps(
+                {"error": "URL not allowed — only URLs provided by the user can be fetched.", "url": url},
+                ensure_ascii=False,
+            )
 
         # Validate URL before fetching
         is_valid, error_msg = _validate_url(url)

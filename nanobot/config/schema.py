@@ -289,10 +289,18 @@ class WebSearchConfig(Base):
     max_results: int = 5
 
 
+class WebFetchConfig(Base):
+    """Web fetch tool configuration."""
+
+    restrict_to_user_urls: bool = False  # Only allow fetching URLs from user messages
+    allowed_domains: list[str] = Field(default_factory=list)  # Pre-approved domains
+
+
 class WebToolsConfig(Base):
     """Web tools configuration."""
 
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    fetch: WebFetchConfig = Field(default_factory=WebFetchConfig)
 
 
 class ExecToolConfig(Base):

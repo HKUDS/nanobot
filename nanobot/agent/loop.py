@@ -64,6 +64,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        web_fetch_config: Any | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -80,6 +81,7 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.web_fetch_config = web_fetch_config
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -131,7 +133,11 @@ class AgentLoop:
             path_append=self.exec_config.path_append,
         ))
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
-        self.tools.register(WebFetchTool())
+        wf_cfg = self.web_fetch_config
+        self.tools.register(WebFetchTool(
+            restrict_to_user_urls=getattr(wf_cfg, "restrict_to_user_urls", False),
+            allowed_domains=getattr(wf_cfg, "allowed_domains", None),
+        ))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
@@ -422,6 +428,8 @@ class AgentLoop:
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
+        if (wf := self.tools.get("web_fetch")) and isinstance(wf, WebFetchTool):
+            wf.add_user_urls(msg.content)
 
         history = session.get_history(max_messages=self.memory_window)
         meta = msg.metadata or {}
