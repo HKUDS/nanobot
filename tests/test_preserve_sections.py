@@ -25,7 +25,8 @@ class TestPreserveSections:
             "whatsapp": type("Channel", (), {"default_config": lambda: {"token": "", "phone": ""}}),
         }
 
-        with patch("nanobot.cli.commands.discover_all", return_value=mock_channels):
+        # Patch where discover_all is imported (inside the function)
+        with patch("nanobot.channels.registry.discover_all", return_value=mock_channels):
             _onboard_plugins(config_path, preserve_sections=False)
 
         data = json.loads(config_path.read_text())
@@ -46,7 +47,8 @@ class TestPreserveSections:
             "whatsapp": type("Channel", (), {"default_config": lambda: {"token": "", "phone": ""}}),
         }
 
-        with patch("nanobot.cli.commands.discover_all", return_value=mock_channels):
+        # Patch where discover_all is imported (inside the function)
+        with patch("nanobot.channels.registry.discover_all", return_value=mock_channels):
             _onboard_plugins(config_path, preserve_sections=True)
 
         data = json.loads(config_path.read_text())
@@ -70,7 +72,8 @@ class TestPreserveSections:
             ),
         }
 
-        with patch("nanobot.cli.commands.discover_all", return_value=mock_channels):
+        # Patch where discover_all is imported (inside the function)
+        with patch("nanobot.channels.registry.discover_all", return_value=mock_channels):
             _onboard_plugins(config_path, preserve_sections=True)
 
         data = json.loads(config_path.read_text())
@@ -90,7 +93,8 @@ class TestPreserveSections:
             "discord": type("Channel", (), {"default_config": lambda: {"token": ""}}),
         }
 
-        with patch("nanobot.cli.commands.discover_all", return_value=mock_channels):
+        # Patch where discover_all is imported (inside the function)
+        with patch("nanobot.channels.registry.discover_all", return_value=mock_channels):
             _onboard_plugins(config_path, preserve_sections=True)
 
         data = json.loads(config_path.read_text())
@@ -106,7 +110,8 @@ class TestPreserveSections:
             "telegram": type("Channel", (), {"default_config": lambda: {"token": ""}}),
         }
 
-        with patch("nanobot.cli.commands.discover_all", return_value=mock_channels):
+        # Patch where discover_all is imported (inside the function)
+        with patch("nanobot.channels.registry.discover_all", return_value=mock_channels):
             _onboard_plugins(config_path, preserve_sections=True)
 
         data = json.loads(config_path.read_text())
