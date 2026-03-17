@@ -350,11 +350,7 @@ class AgentLoop:
             default = self.provider.get_default_model()
             config.agents.defaults.model = default
             save_config(config)
-            self.model = default
-            return OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id,
-                content=f"Model reset to: {default}\nRestart (/restart) to fully apply.",
-            )
+            return self._apply_model_switch(config, default, msg)
 
         # Switch model — by index or by name
         new_model = arg
@@ -370,10 +366,20 @@ class AgentLoop:
 
         config.agents.defaults.model = new_model
         save_config(config)
+        return self._apply_model_switch(config, new_model, msg)
+
+    def _apply_model_switch(self, config, new_model: str, msg: InboundMessage) -> OutboundMessage:
+        """Switch the model and recreate the provider if needed."""
+        from nanobot.cli.commands import _make_provider
+
         self.model = new_model
+        try:
+            self.provider = _make_provider(config)
+        except SystemExit:
+            pass  # keep old provider if new one fails (e.g. missing API key)
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id,
-            content=f"Model switched to: {new_model}\nRestart (/restart) to fully apply.",
+            content=f"Model switched to: {new_model}",
         )
 
     async def _dispatch(self, msg: InboundMessage) -> None:
