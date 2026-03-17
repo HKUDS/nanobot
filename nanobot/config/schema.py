@@ -127,6 +127,8 @@ class ExecToolConfig(Base):
 
     timeout: int = 60
     path_append: str = ""
+    max_output: int = 10_000
+    truncate_mode: str = "both"
 
 
 class MCPServerConfig(Base):
