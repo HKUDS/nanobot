@@ -182,7 +182,7 @@ class BrowserManager:
 
         async with self._lock:
             # Clean up expired sessions before creating new one
-            await self._cleanup_expired_sessions()
+            await self.cleanup_expired_sessions()
 
             if len(self._sessions) >= self._max_contexts:
                 raise RuntimeError(
@@ -198,23 +198,24 @@ class BrowserManager:
             self._session_last_used[session_id] = time.time()
             return session
 
-    async def _cleanup_expired_sessions(self) -> None:
+    async def cleanup_expired_sessions(self) -> None:
         """Clean up expired sessions based on timeout.
 
-        This method should be called with the lock held.
+        This method can be called externally to clean up old sessions.
         """
-        now = time.time()
-        expired = [
-            sid
-            for sid, last_used in self._session_last_used.items()
-            if now - last_used > self._session_timeout
-        ]
+        async with self._lock:
+            now = time.time()
+            expired = [
+                sid
+                for sid, last_used in self._session_last_used.items()
+                if now - last_used > self._session_timeout
+            ]
 
-        for session_id in expired:
-            logger.info(f"Closing expired browser session: {session_id}")
-            if session := self._sessions.pop(session_id, None):
-                await session.context.close()
-            self._session_last_used.pop(session_id, None)
+            for session_id in expired:
+                logger.info(f"Closing expired browser session: {session_id}")
+                if session := self._sessions.pop(session_id, None):
+                    await session.context.close()
+                self._session_last_used.pop(session_id, None)
 
     def update_session_activity(self, session_id: str) -> None:
         """Update the last used time for a session.
@@ -265,25 +266,6 @@ class BrowserManager:
     def session_count(self) -> int:
         """Get the number of active sessions."""
         return len(self._sessions)
-
-    def get_sessions(self) -> dict[str, BrowserSession]:
-        """Get all active sessions.
-
-        Returns:
-            A copy of the sessions dictionary to prevent external modification.
-        """
-        return self._sessions.copy()
-
-    def get_session_last_used(self, session_id: str) -> float | None:
-        """Get the last used timestamp for a session.
-
-        Args:
-            session_id: The session ID to query.
-
-        Returns:
-            The timestamp of last use, or None if session not found.
-        """
-        return self._session_last_used.get(session_id)
 
     def get_sessions(self) -> dict[str, BrowserSession]:
         """Get all active sessions.
@@ -442,16 +424,18 @@ Screenshot returns base64-encoded image data."""
             "required": ["action"],
         }
 
-    async def execute(self, action: str, **kwargs: Any) -> ToolResult | str:
+    async def execute(self, **kwargs: Any) -> ToolResult | str:
         """Execute the browser action.
 
         Args:
-            action: The browser action to perform.
-            **kwargs: Action-specific parameters.
+            **kwargs: Action-specific parameters. Must include 'action'.
 
         Returns:
             ToolResult with the action result. All results include the session ID.
         """
+        action = kwargs.get("action")
+        if not action:
+            return ToolResult(content="Error: action is required", images=None)
         if not PLAYWRIGHT_AVAILABLE:
             return ToolResult(
                 content="Error: Playwright is not installed. Install with: pip install nanobot[browser]",
@@ -477,7 +461,7 @@ Screenshot returns base64-encoded image data."""
         else:
             # Other actions need a session
             # Clean up expired sessions before getting session
-            await self._manager._cleanup_expired_sessions()
+            await self._manager.cleanup_expired_sessions()
 
             if session_id:
                 # Use the specified session
@@ -519,22 +503,36 @@ Screenshot returns base64-encoded image data."""
                 case "launch":
                     result = await self._handle_launch()
                 case "navigate":
+                    if not session:
+                        return ToolResult(content="Error: No active session", images=None)
                     result = await self._handle_navigate(session, **action_kwargs)
                 case "click":
+                    if not session:
+                        return ToolResult(content="Error: No active session", images=None)
                     result = await self._handle_click(session, **action_kwargs)
                 case "type":
+                    if not session:
+                        return ToolResult(content="Error: No active session", images=None)
                     result = await self._handle_type(session, **action_kwargs)
                 case "check":
+                    if not session:
+                        return ToolResult(content="Error: No active session", images=None)
                     result = await self._handle_check(session, **action_kwargs)
                 case "screenshot":
+                    if not session:
+                        return ToolResult(content="Error: No active session", images=None)
                     result = await self._handle_screenshot(session, **action_kwargs)
                 case "evaluate":
+                    if not session:
+                        return ToolResult(content="Error: No active session", images=None)
                     result = await self._handle_evaluate(session, **action_kwargs)
                 case "console":
                     result = await self._handle_console(session_id)
                 case "network":
                     result = await self._handle_network(session_id)
                 case "wait":
+                    if not session:
+                        return ToolResult(content="Error: No active session", images=None)
                     result = await self._handle_wait(session, **action_kwargs)
                 case "close":
                     result = await self._handle_close()
@@ -578,6 +576,11 @@ Screenshot returns base64-encoded image data."""
         url = kwargs.get("url")
         if not url:
             return ToolResult(content="Error: url required", images=None)
+
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return ToolResult(content=f"Error: Only http:// and https:// URLs are allowed, got: {parsed.scheme}", images=None)
 
         await session.page.goto(url)
         title = await session.page.title()
@@ -634,12 +637,17 @@ Screenshot returns base64-encoded image data."""
 
         path = kwargs.get("path")
 
-        # Determine image type from path extension
-        image_type = "png"
         if path:
+            import os
+            abspath = os.path.abspath(path)
+            if ".." in path or os.path.isabs(path):
+                return ToolResult(content="Error: Path traversal not allowed", images=None)
             ext = os.path.splitext(path)[1].lower()
-            if ext in [".jpeg", ".jpg"]:
-                image_type = "jpeg"
+            if ext not in (".png", ".jpeg", ".jpg"):
+                return ToolResult(content="Error: Only .png, .jpeg, .jpg extensions allowed", images=None)
+            image_type = "jpeg" if ext in (".jpeg", ".jpg") else "png"
+        else:
+            image_type = "png"
 
         # Capture screenshot
         screenshot_bytes = await session.page.screenshot(type=image_type)
