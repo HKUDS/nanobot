@@ -359,16 +359,25 @@ def _make_provider(config: Config):
         if not p or not p.api_key:
             console.print(f"[red]Error: No API key configured for extras provider '{provider_name}'.[/red]")
             raise typer.Exit(1)
+        api_protocol = (p.api or "openai").lower()
         # Strip provider prefix: "scnet/MiniMax-M2.5" → "MiniMax-M2.5"
         bare_model = model.split("/", 1)[1] if "/" in model else model
         # Look up model declaration for context_window / max_tokens overrides
         model_cfg = config.get_model_config(model)
-        from nanobot.providers.custom_provider import CustomProvider
-        provider = CustomProvider(
-            api_key=p.api_key,
-            api_base=p.api_base or "http://localhost:8000/v1",
-            default_model=bare_model,
-        )
+        if api_protocol == "openai-responses":
+            from nanobot.providers.openai_responses_provider import OpenAIResponsesProvider
+            provider = OpenAIResponsesProvider(
+                api_key=p.api_key,
+                api_base=p.api_base or "https://api.openai.com/v1",
+                default_model=bare_model,
+            )
+        else:
+            from nanobot.providers.custom_provider import CustomProvider
+            provider = CustomProvider(
+                api_key=p.api_key,
+                api_base=p.api_base or "http://localhost:8000/v1",
+                default_model=bare_model,
+            )
     # OpenAI Codex (OAuth)
     elif provider_name == "openai_codex" or model.startswith("openai-codex/"):
         provider = OpenAICodexProvider(default_model=model)
