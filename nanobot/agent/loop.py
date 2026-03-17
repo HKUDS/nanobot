@@ -183,6 +183,7 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        model: str | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop."""
         messages = initial_messages
@@ -198,7 +199,7 @@ class AgentLoop:
             response = await self.provider.chat_with_retry(
                 messages=messages,
                 tools=tool_defs,
-                model=self.model,
+                model=model or self.model,
             )
 
             if response.has_tool_calls:
@@ -362,9 +363,15 @@ class AgentLoop:
             history = session.get_history(max_messages=0)
             messages = self.context.build_messages(
                 history=history,
-                current_message=msg.content, channel=channel, chat_id=chat_id,
+                current_message=msg.content,
+                channel=channel,
+                chat_id=chat_id,
+                session_metadata=session.metadata,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, _, all_msgs = await self._run_agent_loop(
+                messages,
+                model=self._session_model(session.metadata),
+            )
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
@@ -423,7 +430,9 @@ class AgentLoop:
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
-            channel=msg.channel, chat_id=msg.chat_id,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            session_metadata=session.metadata,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -435,7 +444,9 @@ class AgentLoop:
             ))
 
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages,
+            on_progress=on_progress or _bus_progress,
+            model=self._session_model(session.metadata),
         )
 
         if final_content is None:
@@ -503,3 +514,14 @@ class AgentLoop:
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
         return response.content if response else ""
+
+    @staticmethod
+    def _session_model(session_metadata: dict[str, Any] | None) -> str | None:
+        """Resolve a per-session model override from stored assistant metadata."""
+        if not session_metadata:
+            return None
+        assistant = session_metadata.get("assistant")
+        if not isinstance(assistant, dict):
+            return None
+        model = assistant.get("model")
+        return model.strip() if isinstance(model, str) and model.strip() else None

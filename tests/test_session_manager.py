@@ -29,3 +29,18 @@ def test_rename_session_rejects_existing_target(tmp_path: Path) -> None:
 
     with pytest.raises(FileExistsError):
         manager.rename_session("web:alpha", "web:beta")
+
+
+def test_session_metadata_round_trips(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    session = Session(
+        key="web:pgx",
+        metadata={"template_id": "pharmacogenomics", "template": {"name": "Pharmacogenomics Analyst"}},
+    )
+    manager.save(session)
+    manager.invalidate("web:pgx")
+
+    reloaded = manager.get_or_create("web:pgx")
+
+    assert reloaded.metadata["template_id"] == "pharmacogenomics"
+    assert reloaded.metadata["template"]["name"] == "Pharmacogenomics Analyst"

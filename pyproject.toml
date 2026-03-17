@@ -87,6 +87,7 @@ allow-direct-references = true
 include = [
     "nanobot/**/*.py",
     "nanobot/templates/**/*.md",
+    "nanobot/web/presets/**/*.json",
     "nanobot/skills/**/*.md",
     "nanobot/skills/**/*.sh",
 ]

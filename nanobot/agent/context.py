@@ -24,13 +24,21 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        session_metadata: dict[str, Any] | None = None,
+    ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
 
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
             parts.append(bootstrap)
+
+        template_context = self._build_template_context(session_metadata)
+        if template_context:
+            parts.append(template_context)
 
         memory = self.memory.get_memory_context()
         if memory:
@@ -52,6 +60,46 @@ Skills with available="false" need dependencies installed first - you can try in
 {skills_summary}""")
 
         return "\n\n---\n\n".join(parts)
+
+    @staticmethod
+    def _build_template_context(session_metadata: dict[str, Any] | None) -> str:
+        """Render structured session template metadata into the system prompt."""
+        if not session_metadata:
+            return ""
+
+        template = session_metadata.get("assistant") or session_metadata.get("template")
+        if not isinstance(template, dict):
+            return ""
+
+        sections: list[str] = []
+        name = template.get("name")
+        if isinstance(name, str) and name.strip():
+            sections.append(f"## Template\n\n{name.strip()}")
+
+        agent_identity = template.get("agent_identity")
+        if isinstance(agent_identity, str) and agent_identity.strip():
+            sections.append(f"## Agent Identity\n\n{agent_identity.strip()}")
+
+        user_identity = template.get("user_identity")
+        if isinstance(user_identity, str) and user_identity.strip():
+            sections.append(f"## User Identity\n\n{user_identity.strip()}")
+
+        system_prompt = template.get("system_prompt")
+        if isinstance(system_prompt, str) and system_prompt.strip():
+            sections.append(f"## Session Instructions\n\n{system_prompt.strip()}")
+
+        required_mcps = template.get("required_mcps")
+        if isinstance(required_mcps, list) and required_mcps:
+            sections.append("## Required MCP Servers\n\n" + "\n".join(f"- {item}" for item in required_mcps))
+
+        required_tools = template.get("required_tools")
+        if isinstance(required_tools, list) and required_tools:
+            sections.append("## Required Tools\n\n" + "\n".join(f"- {item}" for item in required_tools))
+
+        if not sections:
+            return ""
+
+        return "# Session Template\n\n" + "\n\n".join(sections)
 
     def _get_identity(self) -> str:
         """Get the core identity section."""
@@ -124,6 +172,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        session_metadata: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id)
@@ -137,7 +186,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, session_metadata=session_metadata)},
             *history,
             {"role": "user", "content": merged},
         ]

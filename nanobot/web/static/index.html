@@ -6,275 +6,571 @@
   <title>nanobot</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
   <style>
-    /* Custom scrollbar */
-    ::-webkit-scrollbar { width: 4px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 2px; }
-
-    /* Markdown content styles */
-    .md-content pre { background: #1e293b; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin: 0.5rem 0; }
-    .md-content code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.85em; }
-    .md-content p:not(:last-child) { margin-bottom: 0.5rem; }
-    .md-content ul, .md-content ol { padding-left: 1.25rem; margin: 0.5rem 0; }
-    .md-content li { margin-bottom: 0.25rem; }
-    .md-content h1, .md-content h2, .md-content h3 { font-weight: 600; margin: 0.75rem 0 0.5rem; }
-    .md-content h1 { font-size: 1.25rem; }
-    .md-content h2 { font-size: 1.1rem; }
-    .md-content h3 { font-size: 1rem; }
-    .md-content blockquote { border-left: 3px solid #4b5563; padding-left: 0.75rem; color: #9ca3af; margin: 0.5rem 0; }
-    .md-content a { color: #60a5fa; text-decoration: underline; }
-    .md-content table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
-    .md-content th, .md-content td { border: 1px solid #374151; padding: 0.4rem 0.75rem; }
-    .md-content th { background: #1f2937; }
-
-    /* Blinking cursor for streaming */
-    .streaming-cursor::after {
-      content: '▋';
-      animation: blink 1s step-end infinite;
-      color: #60a5fa;
+    :root {
+      --bg: #08111f;
+      --bg-elevated: rgba(15, 23, 42, 0.82);
+      --bg-soft: rgba(15, 23, 42, 0.58);
+      --panel: rgba(15, 23, 42, 0.9);
+      --panel-strong: #0f172a;
+      --border: rgba(148, 163, 184, 0.16);
+      --border-strong: rgba(148, 163, 184, 0.24);
+      --text: #e5eefb;
+      --text-muted: #8fa3bf;
+      --text-faint: #5d7291;
+      --primary: #4f8cff;
+      --accent: #22c55e;
+      --accent-soft: rgba(34, 197, 94, 0.14);
+      --danger: #ef4444;
+      --warning: #f59e0b;
+      --shadow: 0 24px 80px rgba(2, 6, 23, 0.32);
+      --code-bg: #0b1220;
+      --code-inline: rgba(79, 140, 255, 0.14);
+      --bubble-agent: rgba(15, 23, 42, 0.82);
+      --bubble-user: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+      --surface-gradient:
+        radial-gradient(circle at top left, rgba(79, 140, 255, 0.16), transparent 28%),
+        radial-gradient(circle at top right, rgba(34, 197, 94, 0.14), transparent 24%),
+        linear-gradient(180deg, #08111f 0%, #0b1220 100%);
     }
-    @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
 
-    /* Session item hover */
-    .session-item:hover .session-action { opacity: 1; }
-    .session-action { opacity: 0; transition: opacity 0.15s; }
+    body[data-theme="light"] {
+      --bg: #eef4fb;
+      --bg-elevated: rgba(255, 255, 255, 0.88);
+      --bg-soft: rgba(255, 255, 255, 0.68);
+      --panel: rgba(255, 255, 255, 0.92);
+      --panel-strong: #ffffff;
+      --border: rgba(15, 23, 42, 0.1);
+      --border-strong: rgba(15, 23, 42, 0.14);
+      --text: #102033;
+      --text-muted: #53657d;
+      --text-faint: #7c8da4;
+      --primary: #2563eb;
+      --accent: #15803d;
+      --accent-soft: rgba(21, 128, 61, 0.1);
+      --danger: #dc2626;
+      --warning: #d97706;
+      --shadow: 0 18px 64px rgba(15, 23, 42, 0.12);
+      --code-bg: #f4f8fd;
+      --code-inline: rgba(37, 99, 235, 0.1);
+      --bubble-agent: rgba(255, 255, 255, 0.9);
+      --bubble-user: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+      --surface-gradient:
+        radial-gradient(circle at top left, rgba(37, 99, 235, 0.12), transparent 32%),
+        radial-gradient(circle at top right, rgba(21, 128, 61, 0.1), transparent 24%),
+        linear-gradient(180deg, #eef4fb 0%, #e3edf7 100%);
+    }
+
+    * { scrollbar-width: thin; scrollbar-color: rgba(127, 140, 158, 0.55) transparent; }
+    *::-webkit-scrollbar { width: 6px; height: 6px; }
+    *::-webkit-scrollbar-track { background: transparent; }
+    *::-webkit-scrollbar-thumb { background: rgba(127, 140, 158, 0.5); border-radius: 999px; }
+
+    body {
+      background: var(--surface-gradient);
+      color: var(--text);
+      font-family: "SF Pro Display", "Helvetica Neue", sans-serif;
+    }
+
+    .glass-panel {
+      background: var(--panel);
+      backdrop-filter: blur(18px);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+    }
+
+    .hairline { border-color: var(--border); }
+
+    .surface-input {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .surface-input::placeholder { color: var(--text-faint); }
+
+    .nav-item, .topic-item, .agent-row {
+      transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+    }
+
+    .agent-row:hover .agent-row-action,
+    .preset-row:hover .preset-row-action,
+    .topic-item:hover .topic-item-action {
+      opacity: 1;
+    }
+
+    .agent-row-action, .preset-row-action, .topic-item-action {
+      opacity: 0;
+      transition: opacity 0.18s ease;
+    }
+
+    .settings-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 1rem;
+    }
+
+    .md-content pre {
+      background: var(--code-bg);
+      padding: 1rem;
+      border-radius: 0.95rem;
+      overflow-x: auto;
+      margin: 0.75rem 0;
+      border: 1px solid var(--border);
+    }
+
+    .md-content :not(pre) > code {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.85em;
+      background: var(--code-inline);
+      border-radius: 0.45rem;
+      padding: 0.15rem 0.4rem;
+    }
+
+    .md-content p:not(:last-child) { margin-bottom: 0.55rem; }
+    .md-content ul, .md-content ol { padding-left: 1.3rem; margin: 0.55rem 0; }
+    .md-content h1, .md-content h2, .md-content h3 { font-weight: 650; margin: 0.8rem 0 0.45rem; }
+    .md-content blockquote {
+      border-left: 3px solid rgba(79, 140, 255, 0.45);
+      padding-left: 0.8rem;
+      color: var(--text-muted);
+      margin: 0.6rem 0;
+    }
+    .md-content a { color: var(--primary); text-decoration: underline; }
+
+    .streaming-cursor::after {
+      content: "▋";
+      animation: blink 1s step-end infinite;
+      color: var(--primary);
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+
+    .overlay {
+      background: rgba(2, 6, 23, 0.46);
+      backdrop-filter: blur(14px);
+    }
+
+    .status-dot {
+      width: 0.55rem;
+      height: 0.55rem;
+      border-radius: 999px;
+      display: inline-block;
+    }
   </style>
 </head>
-<body class="h-full bg-gray-950 text-gray-100 flex">
+<body class="h-full overflow-hidden" data-theme="dark">
+  <div class="h-full flex p-3 gap-3">
+    <aside class="hidden lg:flex w-72 flex-shrink-0 flex-col glass-panel rounded-[1.75rem] overflow-hidden">
+      <div class="p-4 border-b hairline flex items-center justify-between gap-3">
+        <div>
+          <div class="text-[11px] uppercase tracking-[0.3em]" style="color: var(--text-faint);">Agents</div>
+          <div class="font-semibold tracking-wide flex items-center gap-2" style="color: var(--primary);"><span>🐈</span><span>nanobot</span></div>
+        </div>
+        <button id="btn-new-agent" class="text-xs px-3 py-1.5 rounded-full transition-colors font-medium" style="background: var(--bg-soft); color: var(--text); border: 1px solid var(--border);">
+          add agents
+        </button>
+      </div>
+      <div class="p-3 space-y-2 overflow-y-auto" id="agent-list"></div>
+    </aside>
 
-  <!-- Sidebar -->
-  <aside class="w-64 flex-shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col">
-    <div class="p-4 border-b border-gray-800 flex items-center justify-between">
-      <span class="font-semibold text-blue-400 tracking-wide">🐈 nanobot</span>
-      <button id="btn-new-session"
-        class="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 transition-colors"
-        title="New session">+ New</button>
-    </div>
+    <aside class="hidden md:flex w-80 flex-shrink-0 flex-col glass-panel rounded-[1.75rem] overflow-hidden">
+      <div class="p-4 border-b hairline">
+        <div class="flex items-start gap-3">
+            <div id="topics-header-icon" class="h-12 w-12 rounded-2xl flex items-center justify-center text-2xl" style="background: var(--bg-soft); border: 1px solid var(--border);">🐈</div>
+          <div class="min-w-0 flex-1">
+            <div class="text-[11px] uppercase tracking-[0.24em]" style="color: var(--text-faint);">Agent</div>
+            <div id="topics-header-name" class="text-base font-semibold truncate">Default Agent</div>
+            <div id="topics-header-model" class="text-xs font-mono truncate mt-1" style="color: var(--text-muted);"></div>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-2 mt-4">
+          <button id="btn-new-topic" class="px-3 py-2 rounded-2xl text-xs font-medium" style="background: var(--panel-strong); color: var(--text); border: 1px solid var(--border);">add topics</button>
+          <button id="btn-agent-settings" class="px-3 py-2 rounded-2xl text-xs font-medium" style="background: var(--bg-soft); color: var(--text); border: 1px solid var(--border);">Agent Settings</button>
+        </div>
+      </div>
+      <div class="px-4 py-3 border-b hairline">
+        <div class="text-xs uppercase tracking-[0.24em]" style="color: var(--text-faint);">Topics</div>
+      </div>
+      <div class="p-3 space-y-2 overflow-y-auto" id="topic-list"></div>
+    </aside>
 
-    <div class="flex-1 overflow-y-auto p-2" id="session-list">
-      <!-- populated by JS -->
-    </div>
-  </aside>
+    <main class="flex-1 min-w-0 flex flex-col glass-panel rounded-[1.75rem] overflow-hidden">
+      <header class="px-5 py-4 border-b hairline flex items-center gap-3">
+        <button id="btn-mobile-agents" class="lg:hidden h-10 w-10 rounded-2xl border" style="border-color: var(--border); color: var(--text-muted);">≡</button>
+        <div class="min-w-0">
+          <div class="text-[11px] uppercase tracking-[0.26em]" style="color: var(--text-faint);">Active Topic</div>
+          <div id="header-topic" class="text-sm font-mono truncate">No topic selected</div>
+          <div id="header-assistant" class="text-xs mt-1 truncate" style="color: var(--text-muted);">No agent selected</div>
+        </div>
+        <span class="ml-auto"></span>
+        <span id="status-indicator" class="text-xs hidden sm:inline" style="color: var(--text-faint);"></span>
+        <button id="btn-theme" class="h-10 px-3 rounded-2xl border text-sm transition-colors font-medium" style="border-color: var(--border); color: var(--text-muted);">
+          Dark
+        </button>
+        <button id="btn-runtime-settings" class="h-10 px-4 rounded-2xl text-sm font-medium transition-colors" style="background: rgba(79, 140, 255, 0.12); color: var(--text); border: 1px solid rgba(79, 140, 255, 0.18);">
+          ⚙️ Settings
+        </button>
+      </header>
 
-  <!-- Main chat area -->
-  <main class="flex-1 flex flex-col min-w-0">
+      <div class="flex-1 overflow-y-auto px-4 py-6 space-y-4" id="messages">
+        <div class="text-center text-sm mt-16 select-none" id="empty-hint" style="color: var(--text-faint);">
+          Select or create a topic to start chatting
+        </div>
+      </div>
 
-    <!-- Header -->
-    <header class="px-6 py-3 border-b border-gray-800 flex items-center gap-3">
-      <span id="header-session" class="text-sm text-gray-400 font-mono truncate">web:default</span>
-      <span class="ml-auto text-xs text-gray-600" id="status-indicator"></span>
-    </header>
+      <div class="px-4 pb-4 pt-2 border-t hairline">
+        <div class="max-w-4xl mx-auto flex gap-2 items-end">
+          <textarea
+            id="input"
+            rows="1"
+            placeholder="Message nanobot... (Enter to send, Shift+Enter for newline)"
+            class="surface-input flex-1 resize-none rounded-[1.35rem] px-4 py-3 text-sm focus:outline-none transition-colors max-h-48 overflow-y-auto"
+          ></textarea>
+          <button
+            id="btn-send"
+            class="px-4 py-3 rounded-[1.2rem] text-sm font-medium flex-shrink-0 transition-colors"
+            style="background: var(--primary); color: white;"
+          >Send</button>
+          <button
+            id="btn-stop"
+            class="hidden px-4 py-3 rounded-[1.2rem] text-sm font-medium flex-shrink-0 transition-colors"
+            style="background: var(--danger); color: white;"
+          >Stop</button>
+        </div>
+      </div>
+    </main>
+  </div>
 
-    <!-- Messages -->
-    <div class="flex-1 overflow-y-auto px-4 py-6 space-y-4" id="messages">
-      <div class="text-center text-gray-600 text-sm mt-16 select-none" id="empty-hint">
-        Send a message to start chatting
+  <div id="mobile-navigation" class="hidden fixed inset-0 z-40 overlay lg:hidden">
+    <div class="absolute inset-y-0 left-0 w-[22rem] glass-panel rounded-r-[1.75rem] overflow-hidden flex">
+      <div class="w-[10rem] border-r hairline flex flex-col">
+        <div class="p-4 border-b hairline flex items-center justify-between">
+          <div class="font-semibold flex items-center gap-2" style="color: var(--primary);"><span>🐈</span><span>Agents</span></div>
+          <button id="btn-close-mobile-nav" class="text-lg" style="color: var(--text-muted);">×</button>
+        </div>
+        <div class="p-3 space-y-2 overflow-y-auto" id="mobile-agent-list"></div>
+      </div>
+      <div class="flex-1 flex flex-col">
+        <div class="p-4 border-b hairline">
+          <div class="font-semibold">Topics</div>
+        </div>
+        <div class="p-3 space-y-2 overflow-y-auto" id="mobile-topic-list"></div>
       </div>
     </div>
+  </div>
 
-    <!-- Input area -->
-    <div class="px-4 pb-4 pt-2 border-t border-gray-800">
-      <div class="flex gap-2 items-end max-w-4xl mx-auto">
-        <textarea
-          id="input"
-          rows="1"
-          placeholder="Message nanobot… (Enter to send, Shift+Enter for newline)"
-          class="flex-1 resize-none bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors max-h-48 overflow-y-auto"
-        ></textarea>
-        <button id="btn-send"
-          class="px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-sm font-medium flex-shrink-0"
-        >Send</button>
-        <button id="btn-stop"
-          class="hidden px-4 py-3 rounded-xl bg-red-600 hover:bg-red-500 transition-colors text-sm font-medium flex-shrink-0"
-          title="Stop response">Stop</button>
+  <div id="runtime-modal" class="hidden fixed inset-0 z-50 overlay p-3 md:p-6">
+    <div class="glass-panel h-full w-full max-w-6xl mx-auto rounded-[2rem] overflow-hidden flex flex-col">
+      <div class="px-5 py-4 border-b hairline flex items-center gap-3">
+        <div>
+          <div class="text-[11px] uppercase tracking-[0.26em]" style="color: var(--text-faint);">Settings</div>
+          <div class="text-lg font-semibold">Presets, tools, and runtime state</div>
+        </div>
+        <div class="ml-auto text-xs hidden md:block" id="settings-workspace" style="color: var(--text-faint);"></div>
+        <button id="btn-close-runtime" class="h-10 w-10 rounded-2xl border text-lg" style="border-color: var(--border); color: var(--text-muted);">×</button>
+      </div>
+      <div class="flex-1 min-h-0 flex flex-col md:flex-row">
+        <aside class="w-full md:w-72 border-b md:border-b-0 md:border-r hairline p-4 flex-shrink-0">
+          <div class="grid grid-cols-2 md:grid-cols-1 gap-2" id="runtime-nav"></div>
+        </aside>
+        <section class="flex-1 min-h-0 overflow-y-auto p-4 md:p-6">
+          <div class="space-y-6" id="runtime-content"></div>
+        </section>
       </div>
     </div>
-  </main>
+  </div>
+
+  <div id="new-agent-modal" class="hidden fixed inset-0 z-50 overlay p-3 md:p-6">
+    <div class="glass-panel w-full max-w-xl mx-auto rounded-[2rem] overflow-hidden flex flex-col">
+      <div class="px-5 py-4 border-b hairline flex items-center gap-3">
+        <div>
+          <div class="text-[11px] uppercase tracking-[0.26em]" style="color: var(--text-faint);">Add Agent</div>
+          <div class="text-lg font-semibold">Create an agent from an existing template</div>
+        </div>
+        <button id="btn-close-new-agent" class="ml-auto h-10 w-10 rounded-2xl border text-lg" style="border-color: var(--border); color: var(--text-muted);">×</button>
+      </div>
+      <div class="p-5 space-y-4">
+        <div>
+          <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);" for="new-agent-template-search">Template</label>
+          <input id="new-agent-template-search" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" placeholder="Search templates by name" />
+          <div id="new-agent-template-list" class="mt-2 max-h-72 overflow-y-auto space-y-2"></div>
+        </div>
+        <div class="settings-card">
+          <div class="text-xs uppercase tracking-[0.24em]" style="color: var(--text-faint);">Selected template</div>
+          <div id="new-agent-selected-template" class="mt-2 text-sm font-medium">No template selected</div>
+          <div id="new-agent-selected-description" class="mt-2 text-sm" style="color: var(--text-muted);">Choose one of the existing templates to create an agent instance.</div>
+        </div>
+        <button id="btn-create-agent" class="w-full px-4 py-3 rounded-2xl text-sm font-medium transition-colors" style="background: var(--primary); color: white;">Create Agent</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="agent-settings-modal" class="hidden fixed inset-0 z-50 overlay p-3 md:p-6">
+    <div class="glass-panel h-full w-full max-w-4xl mx-auto rounded-[2rem] overflow-hidden flex flex-col">
+      <div class="px-5 py-4 border-b hairline flex items-center gap-3">
+        <div>
+          <div class="text-[11px] uppercase tracking-[0.26em]" style="color: var(--text-faint);">Agent Settings</div>
+          <div class="text-lg font-semibold">Model, MCP, skills, and cron for this agent</div>
+        </div>
+        <button id="btn-close-agent-settings" class="ml-auto h-10 w-10 rounded-2xl border text-lg" style="border-color: var(--border); color: var(--text-muted);">×</button>
+      </div>
+      <div class="flex-1 min-h-0 flex flex-col md:flex-row">
+        <aside class="w-full md:w-56 border-b md:border-b-0 md:border-r hairline p-4 flex-shrink-0">
+          <div class="space-y-2" id="agent-settings-nav"></div>
+        </aside>
+        <section class="flex-1 min-h-0 overflow-y-auto p-5">
+          <div id="agent-settings-content"></div>
+        </section>
+      </div>
+      <div class="px-5 py-4 border-t hairline">
+        <button id="btn-save-agent-settings" class="w-full md:w-auto px-6 py-3 rounded-2xl text-sm font-medium transition-colors" style="background: var(--primary); color: white;">Save Agent Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="preset-editor-modal" class="hidden fixed inset-0 z-50 overlay p-3 md:p-6">
+    <div class="glass-panel h-full w-full max-w-4xl mx-auto rounded-[2rem] overflow-hidden flex flex-col">
+      <div class="px-5 py-4 border-b hairline flex items-center gap-3">
+        <div>
+          <div class="text-[11px] uppercase tracking-[0.26em]" style="color: var(--text-faint);">Preset Editor</div>
+          <div class="text-lg font-semibold">Create or edit an agent preset</div>
+        </div>
+        <button id="btn-close-preset-editor" class="ml-auto h-10 w-10 rounded-2xl border text-lg" style="border-color: var(--border); color: var(--text-muted);">×</button>
+      </div>
+      <div class="flex-1 overflow-y-auto p-5 grid gap-4">
+        <div>
+          <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Agent Name</label>
+          <input id="preset-editor-name" class="surface-input rounded-2xl px-4 py-3 text-sm focus:outline-none w-full" placeholder="Preset name" />
+        </div>
+        <div>
+          <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">About the User</label>
+          <textarea id="preset-editor-user" rows="3" class="surface-input w-full resize-none rounded-2xl px-4 py-3 text-sm focus:outline-none" placeholder="About the user"></textarea>
+        </div>
+        <div>
+          <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">About the Agent</label>
+          <textarea id="preset-editor-agent" rows="3" class="surface-input w-full resize-none rounded-2xl px-4 py-3 text-sm focus:outline-none" placeholder="About the agent"></textarea>
+        </div>
+        <div>
+          <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">System Prompt</label>
+          <textarea id="preset-editor-system" rows="8" class="surface-input w-full resize-none rounded-2xl px-4 py-3 text-sm focus:outline-none" placeholder="System prompt"></textarea>
+        </div>
+        <button id="btn-save-preset-editor" class="px-4 py-3 rounded-2xl text-sm font-medium transition-colors" style="background: var(--primary); color: white;">Save Preset</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="prompt-settings-modal" class="hidden fixed inset-0 z-50 overlay p-3 md:p-6">
+    <div class="glass-panel h-full w-full max-w-4xl mx-auto rounded-[2rem] overflow-hidden flex flex-col">
+      <div class="px-5 py-4 border-b hairline flex items-center gap-3">
+        <div>
+          <div class="text-[11px] uppercase tracking-[0.26em]" style="color: var(--text-faint);">Prompt Settings</div>
+          <div class="text-lg font-semibold">Editable agent prompt layers</div>
+        </div>
+        <button id="btn-close-prompt-settings" class="ml-auto h-10 w-10 rounded-2xl border text-lg" style="border-color: var(--border); color: var(--text-muted);">×</button>
+      </div>
+      <div class="flex-1 overflow-y-auto p-5 grid gap-4">
+        <div>
+          <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);" for="prompt-user-identity">About the User</label>
+          <textarea id="prompt-user-identity" rows="4" class="surface-input w-full resize-none rounded-2xl px-4 py-3 text-sm focus:outline-none" placeholder="Describe the user profile, goals, and background."></textarea>
+        </div>
+        <div>
+          <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);" for="prompt-agent-identity">About the Agent</label>
+          <textarea id="prompt-agent-identity" rows="4" class="surface-input w-full resize-none rounded-2xl px-4 py-3 text-sm focus:outline-none" placeholder="Describe the agent role and specialization."></textarea>
+        </div>
+        <div>
+          <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);" for="prompt-system-prompt">System Prompt</label>
+          <textarea id="prompt-system-prompt" rows="10" class="surface-input w-full resize-none rounded-2xl px-4 py-3 text-sm focus:outline-none" placeholder="Write the agent's system instructions."></textarea>
+        </div>
+        <button id="btn-save-prompt-settings" class="px-4 py-3 rounded-2xl text-sm font-medium transition-colors" style="background: var(--primary); color: white;">Save Prompt Settings</button>
+      </div>
+    </div>
+  </div>
 
   <script>
-    // ──────────────────────────────────────────────────────────
-    // State
-    // ──────────────────────────────────────────────────────────
-    let currentSession = 'web:default';
+    let agentsData = [];
+    let currentAgentId = null;
+    let currentSession = null;
+    let currentTopicName = '';
     let isStreaming = false;
     let abortController = null;
+    let activeTheme = localStorage.getItem('nanobot-theme') || 'dark';
+    let runtimeData = null;
+    let activeRuntimeTab = 'templates';
+    let selectedPresetId = 'default';
+    let presetEditorSourceId = null;
+    let currentToolCard = null;
+    let activeAgentSettingsTab = 'model';
+    let selectedNewAgentTemplateId = 'default';
+
+    const AGENT_SETTINGS_TABS = [
+      { id: 'model', icon: '📝', label: 'Model / Prompt' },
+      { id: 'mcp', icon: '🔧', label: 'MCP Servers' },
+      { id: 'skills', icon: '⚡', label: 'Skills' },
+      { id: 'cron', icon: '⏰', label: 'Cron Jobs' },
+    ];
+
+    const DEFAULT_PRESET = {
+      id: 'default',
+      name: 'Default',
+      description: 'No additional system prompt will be attached.',
+      system_prompt: '',
+      user_identity: '',
+      agent_identity: '',
+      required_mcps: [],
+      required_tools: [],
+      example_query: '',
+      icon: '🐈',
+      is_bundled: true,
+    };
+
+    const RUNTIME_TABS = [
+      { id: 'templates', icon: '📋', label: 'Presets' },
+      { id: 'cron_jobs', icon: '⏰', label: 'Cron Jobs' },
+      { id: 'mcp_servers', icon: '🔧', label: 'MCP Servers' },
+      { id: 'skills', icon: '⚡', label: 'Skills' },
+      { id: 'appearance', icon: '🎨', label: 'Appearance' },
+    ];
 
     const messagesEl = document.getElementById('messages');
+    const emptyHint = document.getElementById('empty-hint');
     const inputEl = document.getElementById('input');
     const btnSend = document.getElementById('btn-send');
-    const sessionList = document.getElementById('session-list');
-    const headerSession = document.getElementById('header-session');
-    const statusIndicator = document.getElementById('status-indicator');
-    const emptyHint = document.getElementById('empty-hint');
     const btnStop = document.getElementById('btn-stop');
+    const statusIndicator = document.getElementById('status-indicator');
+    const agentList = document.getElementById('agent-list');
+    const topicList = document.getElementById('topic-list');
+    const mobileAgentList = document.getElementById('mobile-agent-list');
+    const mobileTopicList = document.getElementById('mobile-topic-list');
+    const topicsHeaderIcon = document.getElementById('topics-header-icon');
+    const topicsHeaderName = document.getElementById('topics-header-name');
+    const topicsHeaderModel = document.getElementById('topics-header-model');
+    const headerTopic = document.getElementById('header-topic');
+    const headerAssistant = document.getElementById('header-assistant');
+    const runtimeModal = document.getElementById('runtime-modal');
+    const runtimeNav = document.getElementById('runtime-nav');
+    const runtimeContent = document.getElementById('runtime-content');
+    const settingsWorkspace = document.getElementById('settings-workspace');
+    const mobileNavigation = document.getElementById('mobile-navigation');
+    const newAssistantModal = document.getElementById('new-agent-modal');
+    const newAgentTemplateSearchInput = document.getElementById('new-agent-template-search');
+    const newAgentTemplateList = document.getElementById('new-agent-template-list');
+    const newAgentSelectedTemplate = document.getElementById('new-agent-selected-template');
+    const newAgentSelectedDescription = document.getElementById('new-agent-selected-description');
+    const presetList = document.getElementById('preset-list');
+    const presetName = document.getElementById('preset-name');
+    const presetDescription = document.getElementById('preset-description');
+    const presetAgentIdentity = document.getElementById('preset-agent-identity');
+    const presetUserIdentity = document.getElementById('preset-user-identity');
+    const presetSystemPrompt = document.getElementById('preset-system-prompt');
+    const modelSettingsModal = document.getElementById('agent-settings-modal');
+    const agentSettingsNav = document.getElementById('agent-settings-nav');
+    const agentSettingsContent = document.getElementById('agent-settings-content');
+    const promptSettingsModal = document.getElementById('prompt-settings-modal');
+    const promptUserIdentity = document.getElementById('prompt-user-identity');
+    const promptAgentIdentity = document.getElementById('prompt-agent-identity');
+    const promptSystemPrompt = document.getElementById('prompt-system-prompt');
+    const presetEditorModal = document.getElementById('preset-editor-modal');
+    const presetEditorName = document.getElementById('preset-editor-name');
+    const presetEditorUser = document.getElementById('preset-editor-user');
+    const presetEditorAgent = document.getElementById('preset-editor-agent');
+    const presetEditorSystem = document.getElementById('preset-editor-system');
 
     marked.setOptions({ breaks: true, gfm: true });
+    Prism.manual = true;
+    Prism.plugins.autoloader.languages_path = 'https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/';
 
-    // ──────────────────────────────────────────────────────────
-    // Sessions
-    // ──────────────────────────────────────────────────────────
-    async function loadSessions() {
-      try {
-        const res = await fetch('/api/sessions');
-        const sessions = await res.json();
-        renderSessionList(sessions);
-      } catch (_) {}
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text || '';
+      return div.innerHTML;
     }
 
-    function renderSessionList(sessions) {
-      sessionList.innerHTML = '';
-
-      // Always include current session at top if not in list
-      const keys = sessions.map(s => s.key);
-      if (!keys.includes(currentSession)) {
-        sessions.unshift({ key: currentSession });
-      }
-
-      sessions.forEach(s => {
-        const div = document.createElement('div');
-        div.className = 'session-item flex items-center gap-1 rounded-lg px-3 py-2 cursor-pointer text-sm mb-1 ' +
-          (s.key === currentSession ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200');
-        div.dataset.key = s.key;
-
-        const label = document.createElement('span');
-        label.className = 'flex-1 truncate';
-        label.textContent = s.key.replace(/^web:/, '');
-
-        const rename = document.createElement('button');
-        rename.className = 'session-action text-gray-600 hover:text-blue-400 transition-colors ml-1 flex-shrink-0';
-        rename.innerHTML = '✎';
-        rename.title = 'Rename session';
-        rename.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          await renameSession(s.key);
-        });
-
-        const del = document.createElement('button');
-        del.className = 'session-action text-gray-600 hover:text-red-400 transition-colors ml-1 flex-shrink-0';
-        del.innerHTML = '×';
-        del.title = 'Delete session';
-        del.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          if (!confirm(`Delete session "${s.key}"?`)) return;
-          await fetch(`/api/sessions/${encodeURIComponent(s.key)}`, { method: 'DELETE' });
-          if (s.key === currentSession) {
-            switchSession('web:default');
-          }
-          loadSessions();
-        });
-
-        div.appendChild(label);
-        div.appendChild(rename);
-        div.appendChild(del);
-        div.addEventListener('click', () => switchSession(s.key));
-        sessionList.appendChild(div);
-      });
+    function renderMarkdown(container, content, { streaming = false } = {}) {
+      container.innerHTML = content ? marked.parse(content) : '';
+      if (streaming) container.classList.add('streaming-cursor');
+      else container.classList.remove('streaming-cursor');
+      container.querySelectorAll('pre code').forEach((block) => Prism.highlightElement(block));
     }
 
-    function clearMessages() {
-      Array.from(messagesEl.children).forEach(child => {
-        if (child.id !== 'empty-hint') child.remove();
-      });
+    function applyTheme(theme) {
+      activeTheme = theme === 'light' ? 'light' : 'dark';
+      document.body.dataset.theme = activeTheme;
+      localStorage.setItem('nanobot-theme', activeTheme);
+      updateThemeButton();
+      renderRuntime();
+    }
+
+    function toggleTheme() {
+      applyTheme(activeTheme === 'dark' ? 'light' : 'dark');
+    }
+
+    function updateThemeButton() {
+      const themeButton = document.getElementById('btn-theme');
+      if (!themeButton) return;
+      const icon = activeTheme === 'light' ? '☀️' : '🌙';
+      themeButton.textContent = `${icon} ${activeTheme === 'light' ? 'Light' : 'Dark'}`;
+      themeButton.setAttribute('aria-pressed', String(activeTheme === 'light'));
+      themeButton.style.background = activeTheme === 'light' ? 'rgba(79, 140, 255, 0.12)' : 'var(--bg-soft)';
+      themeButton.style.color = activeTheme === 'light' ? 'var(--text)' : 'var(--text-muted)';
+      themeButton.style.borderColor = activeTheme === 'light' ? 'rgba(79, 140, 255, 0.18)' : 'var(--border)';
     }
 
     function setEmptyState(empty) {
       emptyHint.style.display = empty ? 'block' : 'none';
     }
 
-    function switchSession(key) {
-      currentSession = key;
-      headerSession.textContent = key;
-      clearMessages();
-      setEmptyState(true);
-      loadSessions();
-      loadHistory();
+    function clearMessages() {
+      Array.from(messagesEl.children).forEach((child) => {
+        if (child.id !== 'empty-hint') child.remove();
+      });
+      currentToolCard = null;
     }
 
-    async function renameSession(oldKey) {
-      const currentName = oldKey.replace(/^web:/, '');
-      const input = prompt('Rename session:', currentName);
-      if (input === null) return;
-
-      const trimmed = input.trim();
-      if (!trimmed) {
-        alert('Session name cannot be empty.');
-        return;
-      }
-
-      const newKey = trimmed.startsWith('web:') ? trimmed : `web:${trimmed}`;
-      if (newKey === oldKey) return;
-
-      try {
-        const res = await fetch(`/api/sessions/${encodeURIComponent(oldKey)}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ new_session_id: newKey }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          throw new Error(data.detail || 'Failed to rename session');
-        }
-        if (currentSession === oldKey) {
-          currentSession = newKey;
-          headerSession.textContent = newKey;
-        }
-        await loadSessions();
-        if (currentSession === newKey) {
-          await loadHistory();
-        }
-      } catch (err) {
-        alert(err.message || 'Failed to rename session');
-      }
+    function scrollToBottom() {
+      messagesEl.scrollTop = messagesEl.scrollHeight;
     }
 
-    async function loadHistory() {
-      try {
-        const res = await fetch(`/api/sessions/${encodeURIComponent(currentSession)}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        clearMessages();
-        const msgs = data.messages || [];
-        if (msgs.length === 0) {
-          setEmptyState(true);
-          return;
-        }
-        setEmptyState(false);
-        msgs.forEach(m => {
-          if (m.role === 'user') appendMessage('user', m.content);
-          else if (m.role === 'assistant' && m.content) appendMessage('assistant', m.content);
-        });
-        scrollToBottom();
-      } catch (_) {}
+    function autoResize() {
+      inputEl.style.height = 'auto';
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 192) + 'px';
     }
 
-    document.getElementById('btn-new-session').addEventListener('click', () => {
-      const id = prompt('Session name (will be prefixed with "web:"):', Date.now().toString());
-      if (!id) return;
-      const key = id.startsWith('web:') ? id : `web:${id}`;
-      switchSession(key);
-    });
+    function setStreaming(value) {
+      isStreaming = value;
+      btnSend.disabled = value;
+      btnSend.classList.toggle('hidden', value);
+      btnStop.classList.toggle('hidden', !value);
+      statusIndicator.textContent = value ? 'thinking...' : '';
+    }
 
-    // ──────────────────────────────────────────────────────────
-    // Messages
-    // ──────────────────────────────────────────────────────────
+    function getStatusTone(status) {
+      if (status === 'ok' || status === 'done') return 'background: var(--accent-soft); color: var(--accent);';
+      if (status === 'error') return 'background: rgba(239, 68, 68, 0.12); color: var(--danger);';
+      return 'background: rgba(245, 158, 11, 0.12); color: var(--warning);';
+    }
+
     function appendMessage(role, content, { streaming = false } = {}) {
       setEmptyState(false);
-
       const wrap = document.createElement('div');
-      wrap.className = 'flex ' + (role === 'user' ? 'justify-end' : 'justify-start') + ' max-w-4xl mx-auto w-full';
+      wrap.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'} max-w-4xl mx-auto w-full`;
 
       const bubble = document.createElement('div');
       bubble.className = role === 'user'
-        ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[75%] text-sm leading-relaxed'
-        : 'bg-gray-800 text-gray-100 rounded-2xl rounded-tl-sm px-4 py-2.5 max-w-[85%] text-sm leading-relaxed md-content';
+        ? 'rounded-[1.45rem] rounded-tr-md px-4 py-3 max-w-[75%] text-sm leading-relaxed'
+        : 'rounded-[1.45rem] rounded-tl-md px-4 py-3 max-w-[88%] text-sm leading-relaxed md-content';
+      bubble.style.background = role === 'user' ? 'var(--bubble-user)' : 'var(--bubble-agent)';
+      bubble.style.color = role === 'user' ? '#fff' : 'var(--text)';
+      bubble.style.border = role === 'user' ? 'none' : '1px solid var(--border)';
 
-      if (role === 'user') {
-        bubble.textContent = content;
-      } else {
-        bubble.innerHTML = content ? marked.parse(content) : '';
-        if (streaming) bubble.classList.add('streaming-cursor');
-      }
+      if (role === 'user') bubble.textContent = content;
+      else renderMarkdown(bubble, content, { streaming });
 
       wrap.appendChild(bubble);
       messagesEl.appendChild(wrap);
@@ -284,13 +580,14 @@
 
     function appendProgressLine(text) {
       const existing = document.getElementById('progress-line');
-      if (existing) { existing.remove(); }
-
+      if (existing) existing.remove();
       const div = document.createElement('div');
       div.id = 'progress-line';
       div.className = 'flex justify-start max-w-4xl mx-auto w-full';
       const inner = document.createElement('div');
-      inner.className = 'text-gray-500 text-xs italic px-1 py-0.5';
+      inner.className = 'text-xs italic px-2 py-1 rounded-full';
+      inner.style.color = 'var(--text-muted)';
+      inner.style.background = 'var(--bg-soft)';
       inner.textContent = '↳ ' + text;
       div.appendChild(inner);
       messagesEl.appendChild(div);
@@ -301,128 +598,1202 @@
       document.getElementById('progress-line')?.remove();
     }
 
-    function scrollToBottom() {
-      messagesEl.scrollTop = messagesEl.scrollHeight;
+    function appendToolCard(toolHint) {
+      const wrap = document.createElement('div');
+      wrap.className = 'flex justify-start max-w-4xl mx-auto w-full';
+      const card = document.createElement('div');
+      card.className = 'w-full max-w-[88%] rounded-2xl px-4 py-3';
+      card.style.background = 'var(--bg-elevated)';
+      card.style.border = '1px solid var(--border)';
+      card.innerHTML = `
+        <div class="flex items-center gap-2 text-xs mb-2" style="color: var(--text-muted);">
+          <span class="status-dot" style="background: var(--warning);"></span>
+          <span class="font-mono">tool-call</span>
+          <span class="ml-auto px-2 py-0.5 rounded-full" style="${getStatusTone('running')}">running</span>
+        </div>
+        <div class="text-sm font-mono break-all" style="color: var(--text);">${escapeHtml(toolHint)}</div>
+      `;
+      wrap.appendChild(card);
+      messagesEl.appendChild(wrap);
+      scrollToBottom();
+      currentToolCard = card;
+      return card;
     }
 
-    // ──────────────────────────────────────────────────────────
-    // Send
-    // ──────────────────────────────────────────────────────────
-    async function sendMessage() {
-      const text = inputEl.value.trim();
-      if (!text || isStreaming) return;
+    function finalizeToolCard(status) {
+      if (!currentToolCard) return;
+      const dot = currentToolCard.querySelector('.status-dot');
+      const pill = currentToolCard.querySelector('.rounded-full');
+      if (dot) dot.style.background = status === 'error' ? 'var(--danger)' : 'var(--accent)';
+      if (pill) {
+        pill.textContent = status === 'error' ? 'error' : 'done';
+        pill.style = getStatusTone(status === 'error' ? 'error' : 'done');
+      }
+      currentToolCard = null;
+    }
 
-      inputEl.value = '';
-      autoResize();
-      setStreaming(true);
+    function slugify(value) {
+      return (value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    }
 
-      appendMessage('user', text);
+    function uniqueAssistantName(baseName) {
+      const fallback = (baseName || '').trim() || 'Agent';
+      const taken = new Set((agentsData || []).map((assistant) => assistant.name));
+      if (!taken.has(fallback)) return fallback;
+      for (let index = 2; index < 1000; index += 1) {
+        const candidate = `${fallback} ${index}`;
+        if (!taken.has(candidate)) return candidate;
+      }
+      return `${fallback} ${Date.now()}`;
+    }
 
-      const assistantBubble = appendMessage('assistant', '', { streaming: true });
+    function getAvailablePresets() {
+      const templates = (runtimeData && runtimeData.templates) || [];
+      const savedDefault = templates.find((template) => template.id === DEFAULT_PRESET.id);
+      const mergedDefault = {
+        ...DEFAULT_PRESET,
+        ...(savedDefault || {}),
+        id: DEFAULT_PRESET.id,
+        is_bundled: true,
+      };
+      const others = templates.filter((template) => template.id !== DEFAULT_PRESET.id);
+      return [mergedDefault, ...others];
+    }
 
-      let responseText = '';
-      abortController = new AbortController();
+    function getPresetById(presetId) {
+      return getAvailablePresets().find((item) => item.id === presetId) || null;
+    }
 
-      try {
-        const res = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text, session_id: currentSession }),
-          signal: abortController.signal,
-        });
-
-        if (!res.ok) {
-          const err = await res.text();
-          throw new Error(err);
-        }
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop(); // keep incomplete line
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const raw = line.slice(6).trim();
-            if (!raw) continue;
-
-            let event;
-            try { event = JSON.parse(raw); } catch { continue; }
-
-            if (event.type === 'progress') {
-              appendProgressLine(event.content);
-            } else if (event.type === 'done') {
-              removeProgressLine();
-              responseText = event.content || '';
-              assistantBubble.classList.remove('streaming-cursor');
-              assistantBubble.innerHTML = responseText ? marked.parse(responseText) : '<em class="text-gray-500">No response</em>';
-              scrollToBottom();
-            } else if (event.type === 'error') {
-              removeProgressLine();
-              assistantBubble.classList.remove('streaming-cursor');
-              assistantBubble.innerHTML = `<span class="text-red-400">Error: ${event.content}</span>`;
-              scrollToBottom();
-            }
-          }
-        }
-      } catch (err) {
-        removeProgressLine();
-        assistantBubble.classList.remove('streaming-cursor');
-        if (err.name === 'AbortError') {
-          assistantBubble.innerHTML = (responseText ? marked.parse(responseText) : '') +
-            '<p class="text-gray-500 text-sm mt-2 italic">(Stopped)</p>';
-        } else {
-          assistantBubble.innerHTML = `<span class="text-red-400">Error: ${err.message}</span>`;
-        }
-        scrollToBottom();
-      } finally {
-        setStreaming(false);
-        loadSessions();
+    function syncNewAgentTemplateSummary(template) {
+      const current = template || getPresetById(selectedNewAgentTemplateId) || DEFAULT_PRESET;
+      if (newAgentSelectedTemplate) {
+        newAgentSelectedTemplate.textContent = `${current.icon || '○'} ${current.name || current.id || 'Unnamed template'}`;
+      }
+      if (newAgentSelectedDescription) {
+        newAgentSelectedDescription.textContent = current.description || 'This template will be instantiated directly without exposing or editing its prompt fields here.';
       }
     }
 
-    function setStreaming(val) {
-      isStreaming = val;
-      btnSend.disabled = val;
-      btnSend.classList.toggle('hidden', val);
-      btnStop.classList.toggle('hidden', !val);
-      statusIndicator.textContent = val ? 'thinking…' : '';
+    function renderNewAgentTemplatePicker() {
+      if (!newAgentTemplateList) return;
+      const keyword = (newAgentTemplateSearchInput?.value || '').trim().toLowerCase();
+      const templates = getAvailablePresets().filter((template) => {
+        if (!keyword) return true;
+        return [template.name, template.id, template.description].some((value) => (value || '').toLowerCase().includes(keyword));
+      });
+      newAgentTemplateList.innerHTML = '';
+      if (!templates.length) {
+        newAgentTemplateList.innerHTML = `<div class="settings-card text-sm" style="color: var(--text-muted);">No templates found.</div>`;
+        return;
+      }
+      templates.forEach((template) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'w-full text-left rounded-2xl px-3 py-2 border transition-colors';
+        button.style.background = template.id === selectedNewAgentTemplateId ? 'rgba(79, 140, 255, 0.1)' : 'var(--bg-soft)';
+        button.style.borderColor = template.id === selectedNewAgentTemplateId ? 'rgba(79, 140, 255, 0.22)' : 'var(--border)';
+        button.innerHTML = `
+          <div class="flex items-center gap-2">
+            <span class="text-base">${escapeHtml(template.icon || '○')}</span>
+            <span class="text-sm font-medium truncate">${escapeHtml(template.name || template.id)}</span>
+            ${template.id === selectedNewAgentTemplateId ? '<span class="ml-auto text-xs" style="color: var(--primary);">selected</span>' : ''}
+          </div>
+        `;
+        button.addEventListener('click', () => {
+          selectedNewAgentTemplateId = template.id;
+          renderNewAgentTemplatePicker();
+          syncNewAgentTemplateSummary(template);
+        });
+        newAgentTemplateList.appendChild(button);
+      });
+    }
+
+    function getAssistantById(assistantId) {
+      return agentsData.find((assistant) => assistant.id === assistantId) || null;
+    }
+
+    function getActiveAssistant() {
+      return getAssistantById(currentAgentId);
+    }
+
+    function getActiveTopics() {
+      const assistant = getActiveAssistant();
+      return assistant?.topics || [];
+    }
+
+    function getActiveTopic() {
+      return getActiveTopics().find((topic) => topic.session_id === currentSession) || null;
+    }
+
+    function refreshHeaders() {
+      const assistant = getActiveAssistant();
+      const topic = getActiveTopic();
+      topicsHeaderIcon.textContent = assistant?.icon || '○';
+      topicsHeaderName.textContent = assistant?.name || 'No agent selected';
+      topicsHeaderModel.textContent = '';
+      headerAssistant.textContent = assistant ? `${assistant.icon || '🐈'} ${assistant.name}` : 'No agent selected';
+      headerTopic.textContent = topic ? topic.name : 'No topic selected';
+    }
+
+    function renderAssistantList() {
+      const targets = [agentList, mobileAgentList];
+      targets.forEach((container) => {
+        container.innerHTML = '';
+        agentsData.forEach((assistant) => {
+          const item = document.createElement('div');
+          item.className = 'agent-row rounded-[1.1rem] px-3 py-3 cursor-pointer border mb-2';
+          item.style.background = assistant.id === currentAgentId ? 'rgba(79, 140, 255, 0.1)' : 'transparent';
+          item.style.borderColor = assistant.id === currentAgentId ? 'rgba(79, 140, 255, 0.22)' : 'var(--border)';
+          item.innerHTML = `
+            <div class="flex items-start gap-3">
+              <div class="h-11 w-11 rounded-2xl flex items-center justify-center text-xl flex-shrink-0" style="background: var(--bg-soft); border: 1px solid var(--border);">${escapeHtml(assistant.icon || '🐈')}</div>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2">
+                  <div class="text-sm font-semibold truncate">${escapeHtml(assistant.name)}</div>
+                  <div class="ml-auto flex gap-1">
+                    <button class="agent-row-action h-7 w-7 rounded-xl border text-xs" style="border-color: var(--border); color: var(--text-muted);" title="Rename agent">✎</button>
+                    ${assistant.id === 'default' ? '' : '<button class="agent-row-action h-7 w-7 rounded-xl border text-xs" style="border-color: var(--border); color: var(--text-muted);" title="Delete agent">×</button>'}
+                    <button class="agent-row-action h-7 w-7 rounded-xl border text-xs" style="border-color: var(--border); color: var(--text-muted);" title="Agent Settings">⚙</button>
+                  </div>
+                </div>
+                <div class="text-xs mt-2" style="color: var(--text-muted);">${assistant.topic_count || 0} topic${assistant.topic_count === 1 ? '' : 's'}</div>
+              </div>
+            </div>
+          `;
+          item.addEventListener('click', () => setActiveAssistant(assistant.id));
+          const actionButtons = item.querySelectorAll('.agent-row-action');
+          const renameButton = actionButtons[0];
+          const deleteButton = assistant.id === 'default' ? null : actionButtons[1];
+          const settingsButton = assistant.id === 'default' ? actionButtons[1] : actionButtons[2];
+          renameButton.addEventListener('click', async (event) => {
+            event.stopPropagation();
+            const nextName = prompt('Rename agent:', assistant.name);
+            if (nextName === null) return;
+            const trimmed = nextName.trim();
+            if (!trimmed) return alert('Agent name cannot be empty.');
+            await fetch(`/api/agents/${encodeURIComponent(assistant.id)}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: trimmed }),
+            });
+            await loadAssistants();
+          });
+          if (deleteButton) {
+            deleteButton.addEventListener('click', async (event) => {
+              event.stopPropagation();
+              if (!confirm(`Delete agent "${assistant.name}"?`)) return;
+              const res = await fetch(`/api/agents/${encodeURIComponent(assistant.id)}`, { method: 'DELETE' });
+              if (!res.ok) {
+                const d = await res.json().catch(() => ({}));
+                return alert(d.detail || 'Failed to delete agent.');
+              }
+              if (currentAgentId === assistant.id) {
+                currentAgentId = null;
+                currentSession = null;
+                clearMessages();
+                setEmptyState(true);
+              }
+              await loadAssistants();
+            });
+          }
+          settingsButton.addEventListener('click', (event) => {
+            event.stopPropagation();
+            setActiveAssistant(assistant.id);
+            openModelSettings('model');
+          });
+          container.appendChild(item);
+        });
+      });
+    }
+
+    function renderTopics() {
+      const topics = getActiveTopics();
+      const targets = [topicList, mobileTopicList];
+      targets.forEach((container) => {
+        container.innerHTML = '';
+        if (!topics.length) {
+          const empty = document.createElement('div');
+          empty.className = 'settings-card text-sm';
+          empty.style.color = 'var(--text-muted)';
+          empty.textContent = 'No topics yet. Create a topic under this agent.';
+          container.appendChild(empty);
+          return;
+        }
+        topics.forEach((topic) => {
+          const item = document.createElement('div');
+          item.className = 'topic-item rounded-[1.1rem] px-3 py-3 cursor-pointer border mb-2';
+          item.style.background = topic.session_id === currentSession ? 'rgba(79, 140, 255, 0.1)' : 'transparent';
+          item.style.borderColor = topic.session_id === currentSession ? 'rgba(79, 140, 255, 0.22)' : 'var(--border)';
+          item.innerHTML = `
+            <div class="flex items-start gap-2">
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-semibold truncate">${escapeHtml(topic.name)}</div>
+                <div class="text-xs mt-1 truncate" style="color: var(--text-faint);">${escapeHtml(topic.updated_at)}</div>
+              </div>
+              <div class="flex gap-1">
+                <button class="topic-item-action h-7 w-7 rounded-xl border text-xs" style="border-color: var(--border); color: var(--text-muted);" title="Rename topic">✎</button>
+                <button class="topic-item-action h-7 w-7 rounded-xl border text-xs" style="border-color: var(--border); color: var(--text-muted);" title="Delete topic">×</button>
+              </div>
+            </div>
+          `;
+          item.addEventListener('click', () => setActiveTopic(topic.session_id));
+          const [renameButton, deleteButton] = item.querySelectorAll('.topic-item-action');
+          renameButton.addEventListener('click', async (event) => {
+            event.stopPropagation();
+            const nextName = prompt('Rename topic:', topic.name);
+            if (nextName === null) return;
+            const trimmed = nextName.trim();
+            if (!trimmed) return alert('Topic name cannot be empty.');
+            await fetch(`/api/topics/${encodeURIComponent(topic.session_id)}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: trimmed }),
+            });
+            await loadAssistants();
+          });
+          deleteButton.addEventListener('click', async (event) => {
+            event.stopPropagation();
+            if (!confirm(`Delete topic "${topic.name}"?`)) return;
+            await fetch(`/api/sessions/${encodeURIComponent(topic.session_id)}`, { method: 'DELETE' });
+            if (currentSession === topic.session_id) {
+              currentSession = null;
+              currentTopicName = '';
+              clearMessages();
+              setEmptyState(true);
+            }
+            await loadAssistants();
+          });
+          container.appendChild(item);
+        });
+      });
+      refreshHeaders();
+    }
+
+    async function loadAssistants() {
+      const response = await fetch('/api/agents');
+      if (!response.ok) return;
+      agentsData = await response.json();
+      if (!agentsData.length) {
+        currentAgentId = null;
+        currentSession = null;
+        renderAssistantList();
+        renderTopics();
+        return;
+      }
+      if (!getAssistantById(currentAgentId)) currentAgentId = agentsData[0].id;
+      const topics = getActiveTopics();
+      if (topics.length && !topics.find((topic) => topic.session_id === currentSession)) {
+        currentSession = topics[0].session_id;
+      }
+      if (!topics.length) currentSession = null;
+      renderAssistantList();
+      renderTopics();
+      if (currentSession) await loadHistory();
+      else {
+        clearMessages();
+        setEmptyState(true);
+      }
+    }
+
+    async function setActiveAssistant(assistantId) {
+      currentAgentId = assistantId;
+      const topics = getActiveTopics();
+      currentSession = topics[0]?.session_id || null;
+      renderAssistantList();
+      renderTopics();
+      if (window.innerWidth < 1024) closeMobileNavigation();
+      if (currentSession) await loadHistory();
+      else {
+        clearMessages();
+        setEmptyState(true);
+      }
+    }
+
+    async function setActiveTopic(sessionId) {
+      currentSession = sessionId;
+      renderTopics();
+      if (window.innerWidth < 1024) closeMobileNavigation();
+      await loadHistory();
+    }
+
+    async function loadHistory() {
+      if (!currentSession) {
+        clearMessages();
+        setEmptyState(true);
+        refreshHeaders();
+        return;
+      }
+      const response = await fetch(`/api/sessions/${encodeURIComponent(currentSession)}`);
+      if (!response.ok) return;
+      const data = await response.json();
+      currentTopicName = data.metadata?.topic_name || currentTopicName;
+      clearMessages();
+      const messages = data.messages || [];
+      if (!messages.length) {
+        setEmptyState(true);
+      } else {
+        setEmptyState(false);
+        messages.forEach((message) => {
+          if (message.role === 'user') appendMessage('user', message.content);
+          else if (message.role === 'assistant' && message.content) appendMessage('assistant', message.content);
+        });
+      }
+      const topic = getActiveTopic();
+      if (topic) topic.name = currentTopicName || topic.name;
+      refreshHeaders();
+      scrollToBottom();
+    }
+
+    async function ensureTopic() {
+      if (currentSession) return currentSession;
+      const assistant = getActiveAssistant();
+      if (!assistant) {
+        await openNewAssistantModal();
+        throw new Error('Create an agent first.');
+      }
+      const response = await fetch(`/api/agents/${encodeURIComponent(assistant.id)}/topics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'New Topic' }),
+      });
+      const topic = await response.json();
+      await loadAssistants();
+      currentSession = topic.session_id;
+      return currentSession;
+    }
+
+    async function createTopic() {
+      const assistant = getActiveAssistant();
+      if (!assistant) return alert('Select or create an agent first.');
+      const topicName = prompt('Topic name:', 'New Topic');
+      if (topicName === null) return;
+      const response = await fetch(`/api/agents/${encodeURIComponent(assistant.id)}/topics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: topicName.trim() || 'New Topic' }),
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        return alert(error.detail || 'Failed to create topic.');
+      }
+      const topic = await response.json();
+      await loadAssistants();
+      await setActiveTopic(topic.session_id);
+    }
+
+    function formatRelativeTime(value) {
+      if (!value) return 'Not scheduled';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString();
+    }
+
+    async function loadRuntime() {
+      const response = await fetch('/api/settings');
+      if (!response.ok) return;
+      runtimeData = await response.json();
+      settingsWorkspace.textContent = runtimeData.workspace || '';
+      selectPreset(selectedPresetId);
+      renderRuntime();
+    }
+
+    function renderRuntime() {
+      if (!runtimeData) return;
+      runtimeNav.innerHTML = '';
+      RUNTIME_TABS.forEach((tab) => {
+        const button = document.createElement('button');
+        button.className = 'rounded-2xl px-4 py-3 text-left border';
+        button.style.borderColor = tab.id === activeRuntimeTab ? 'rgba(79, 140, 255, 0.22)' : 'transparent';
+        button.style.background = tab.id === activeRuntimeTab ? 'rgba(79, 140, 255, 0.1)' : 'transparent';
+        button.innerHTML = `
+          <div class="text-sm font-medium">${tab.icon} ${tab.label}</div>
+          <div class="text-xs mt-1" style="color: var(--text-faint);">${runtimeTabDescription(tab.id)}</div>
+        `;
+        button.addEventListener('click', () => {
+          activeRuntimeTab = tab.id;
+          renderRuntime();
+        });
+        runtimeNav.appendChild(button);
+      });
+      runtimeContent.innerHTML = renderRuntimeTab();
+      runtimeContent.querySelectorAll('[data-runtime-preset-id]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const rawId = button.getAttribute('data-runtime-preset-id') || '';
+          selectedPresetId = rawId || DEFAULT_PRESET.id;
+          renderRuntime();
+        });
+      });
+      runtimeContent.querySelectorAll('[data-delete-preset-id]').forEach((button) => {
+        button.addEventListener('click', async (event) => {
+          event.stopPropagation();
+          const presetId = button.getAttribute('data-delete-preset-id');
+          if (!presetId) return;
+          const preset = (runtimeData.templates || []).find((t) => t.id === presetId);
+          if (!confirm(`Delete preset "${preset?.name || presetId}"? This cannot be undone.`)) return;
+          const res = await fetch(`/api/templates/${encodeURIComponent(presetId)}`, { method: 'DELETE' });
+          if (!res.ok) {
+            const d = await res.json().catch(() => ({}));
+            return alert(d.detail || 'Failed to delete preset.');
+          }
+          if (selectedPresetId === presetId) selectedPresetId = DEFAULT_PRESET.id;
+          await loadRuntime();
+        });
+      });
+      const savePresetLibBtn = runtimeContent.querySelector('#btn-save-preset-lib');
+      if (savePresetLibBtn) savePresetLibBtn.addEventListener('click', savePresetFromLibrary);
+      runtimeContent.querySelectorAll('pre code').forEach((block) => Prism.highlightElement(block));
+    }
+
+    async function savePresetFromLibrary() {
+      const preset = getPresetById(selectedPresetId) || DEFAULT_PRESET;
+      const name = document.getElementById('preset-lib-name')?.value?.trim() || preset?.name || 'Unnamed';
+      const userIdentity = document.getElementById('preset-lib-user')?.value ?? '';
+      const agentIdentity = document.getElementById('preset-lib-agent')?.value ?? '';
+      const systemPrompt = document.getElementById('preset-lib-system')?.value ?? '';
+      const presetId = preset?.id || DEFAULT_PRESET.id;
+      const payload = { id: presetId, name, description: preset.description || '', system_prompt: systemPrompt, user_identity: userIdentity, agent_identity: agentIdentity, required_mcps: preset.required_mcps || [], required_tools: preset.required_tools || [], example_query: preset.example_query || '', icon: preset.icon || '○' };
+      const res = await fetch(`/api/templates/${encodeURIComponent(presetId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); return alert(d.detail || 'Failed to save.'); }
+      selectedPresetId = presetId;
+      await loadRuntime();
+    }
+
+    function runtimeTabDescription(tabId) {
+      if (tabId === 'templates') return 'Preset library';
+      if (tabId === 'cron_jobs') return 'Live scheduler state';
+      if (tabId === 'mcp_servers') return 'External tool connections';
+      if (tabId === 'skills') return 'Available runtime skills';
+      return 'Theme and rendering';
+    }
+
+    function renderRuntimeTab() {
+      if (activeRuntimeTab === 'templates') return renderPresetLibrary();
+      if (activeRuntimeTab === 'cron_jobs') return renderCronPanel();
+      if (activeRuntimeTab === 'mcp_servers') return renderMcpPanel();
+      if (activeRuntimeTab === 'skills') return renderSkillsPanel();
+      return renderAppearancePanel();
+    }
+
+    function renderPresetLibrary() {
+      const presets = getAvailablePresets();
+      return `
+        <div>
+          <div class="text-xs uppercase tracking-[0.22em]" style="color: var(--text-faint);">Presets</div>
+          <h2 class="text-2xl font-semibold mt-1">Agent preset library</h2>
+          <p class="text-sm mt-2" style="color: var(--text-muted);">Presets are role definitions. They become editable agents when instantiated.</p>
+          <div class="mt-4 flex gap-2">
+            <button class="px-4 py-2 rounded-2xl text-sm font-medium" style="background: rgba(79, 140, 255, 0.12); color: var(--text); border: 1px solid rgba(79, 140, 255, 0.18);" onclick="window.__openPresetEditor()">add template</button>
+          </div>
+        </div>
+        <div class="grid xl:grid-cols-[300px_minmax(0,1fr)] gap-4">
+          <div class="settings-card p-2">
+            <div class="space-y-2">
+              ${presets.map((preset) => `
+                <div class="preset-row rounded-2xl px-3 py-3 border cursor-pointer" data-runtime-preset-id="${escapeHtml(preset.id || '')}" style="${preset.id === selectedPresetId ? 'background: rgba(79, 140, 255, 0.1); border-color: rgba(79, 140, 255, 0.22);' : 'background: transparent; border-color: transparent;'}">
+                  <div class="flex items-center gap-3">
+                    <div class="h-11 w-11 rounded-2xl flex items-center justify-center text-xl flex-shrink-0" style="background: var(--bg-soft); border: 1px solid var(--border);">${escapeHtml(preset.icon || '○')}</div>
+                    <div class="min-w-0 flex-1">
+                      <div class="text-sm font-semibold truncate">${escapeHtml(preset.name)}</div>
+                    </div>
+                    ${preset.id && !preset.is_bundled ? `<button type="button" class="preset-row-action flex-shrink-0 h-8 w-8 rounded-xl border text-xs" data-delete-preset-id="${escapeHtml(preset.id)}" style="border-color: var(--border); color: var(--text-muted);" title="Delete preset">×</button>` : ''}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          ${renderPresetEditor(getPresetById(selectedPresetId) || DEFAULT_PRESET)}
+        </div>
+      `;
+    }
+
+    function renderPresetEditor(preset) {
+      return `
+        <article class="settings-card">
+          <div class="flex items-start gap-4 mb-4">
+            <div class="h-14 w-14 rounded-[1.25rem] flex items-center justify-center text-3xl flex-shrink-0" style="background: var(--bg-soft); border: 1px solid var(--border);">${escapeHtml(preset.icon || '○')}</div>
+            <div class="min-w-0 flex-1">
+              <div class="text-base font-semibold truncate">${escapeHtml(preset.name || 'Default')}</div>
+              ${preset.is_bundled ? `<div class="mt-1"><span class="text-xs px-2 py-0.5 rounded-full" style="background: var(--bg-soft); color: var(--text-faint);">bundled</span></div>` : ''}
+            </div>
+          </div>
+          <div class="space-y-4">
+            <div>
+              <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Agent Name</label>
+              <input id="preset-lib-name" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(preset?.name || '')}" placeholder="Agent display name" />
+            </div>
+            <div>
+              <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">About the User</label>
+              <textarea id="preset-lib-user" rows="4" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none resize-none" placeholder="Describe the user profile">${escapeHtml(preset?.user_identity || '')}</textarea>
+            </div>
+            <div>
+              <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">About the Agent</label>
+              <textarea id="preset-lib-agent" rows="4" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none resize-none" placeholder="Describe the agent role">${escapeHtml(preset?.agent_identity || '')}</textarea>
+            </div>
+            <div>
+              <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">System Prompt</label>
+              <textarea id="preset-lib-system" rows="8" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none resize-none" placeholder="System instructions">${escapeHtml(preset?.system_prompt || '')}</textarea>
+            </div>
+            <button type="button" id="btn-save-preset-lib" class="px-4 py-3 rounded-2xl text-sm font-medium" style="background: var(--primary); color: white;">Save</button>
+          </div>
+        </article>
+      `;
+    }
+
+    function renderCronPanel() {
+      const jobs = runtimeData.cron_jobs || [];
+      return `
+        <div>
+          <div class="text-xs uppercase tracking-[0.22em]" style="color: var(--text-faint);">Cron</div>
+          <h2 class="text-2xl font-semibold mt-1">Cron jobs</h2>
+        </div>
+        <div class="space-y-4">
+          ${jobs.length ? jobs.map((job) => `
+            <article class="settings-card">
+              <div class="flex flex-wrap items-center gap-2">
+                <h3 class="text-lg font-semibold">${escapeHtml(job.name)}</h3>
+                <span class="px-2 py-1 rounded-full text-xs" style="${getStatusTone(job.enabled ? (job.last_status || 'running') : 'error')}">${job.enabled ? 'enabled' : 'disabled'}</span>
+              </div>
+              <div class="grid md:grid-cols-3 gap-3 mt-4 text-sm">
+                <div class="rounded-2xl px-3 py-3" style="background: var(--bg-soft);">
+                  <div style="color: var(--text-faint);">Schedule</div>
+                  <div class="mt-1 font-mono">${escapeHtml(job.schedule)}</div>
+                </div>
+                <div class="rounded-2xl px-3 py-3" style="background: var(--bg-soft);">
+                  <div style="color: var(--text-faint);">Next Run</div>
+                  <div class="mt-1">${escapeHtml(formatRelativeTime(job.next_run_at))}</div>
+                </div>
+                <div class="rounded-2xl px-3 py-3" style="background: var(--bg-soft);">
+                  <div style="color: var(--text-faint);">Last Status</div>
+                  <div class="mt-1">${escapeHtml(job.last_status || 'Not run yet')}</div>
+                </div>
+              </div>
+            </article>
+          `).join('') : `<div class="settings-card text-sm" style="color: var(--text-muted);">No cron jobs found.</div>`}
+        </div>
+      `;
+    }
+
+    function renderMcpPanel() {
+      const servers = runtimeData.mcp_servers || [];
+      return `
+        <div>
+          <div class="text-xs uppercase tracking-[0.22em]" style="color: var(--text-faint);">MCP</div>
+          <h2 class="text-2xl font-semibold mt-1">MCP servers</h2>
+        </div>
+        <div class="grid lg:grid-cols-2 gap-4">
+          ${servers.length ? servers.map((server) => `
+            <article class="settings-card">
+              <div class="flex items-center gap-3">
+                <div class="text-2xl">🔧</div>
+                <div>
+                  <h3 class="text-lg font-semibold">${escapeHtml(server.name)}</h3>
+                  <div class="text-xs uppercase tracking-[0.2em] mt-1" style="color: var(--text-faint);">${escapeHtml(server.type)}</div>
+                </div>
+              </div>
+              <div class="mt-4 rounded-2xl px-3 py-3 text-sm font-mono break-all" style="background: var(--code-bg); color: var(--text-muted);">
+                ${escapeHtml(server.target || 'No target configured')}
+              </div>
+            </article>
+          `).join('') : `<div class="settings-card text-sm" style="color: var(--text-muted);">No MCP servers configured.</div>`}
+        </div>
+      `;
+    }
+
+    function renderSkillsPanel() {
+      const skills = runtimeData.skills || [];
+      return `
+        <div>
+          <div class="text-xs uppercase tracking-[0.22em]" style="color: var(--text-faint);">Skills</div>
+          <h2 class="text-2xl font-semibold mt-1">Available skills</h2>
+        </div>
+        <div class="grid lg:grid-cols-2 gap-4">
+          ${skills.map((skill) => `
+            <article class="settings-card">
+              <div class="flex items-center gap-2">
+                <div class="text-xl">⚡</div>
+                <h3 class="text-lg font-semibold">${escapeHtml(skill.name)}</h3>
+                <span class="ml-auto px-2 py-1 rounded-full text-xs" style="background: var(--bg-soft); color: var(--text-muted);">${escapeHtml(skill.source)}</span>
+              </div>
+              <div class="mt-4 text-sm font-mono break-all" style="color: var(--text-faint);">${escapeHtml(skill.path)}</div>
+            </article>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    function renderAppearancePanel() {
+      return `
+        <div>
+          <div class="text-xs uppercase tracking-[0.22em]" style="color: var(--text-faint);">Appearance</div>
+          <h2 class="text-2xl font-semibold mt-1">Theme and code highlighting</h2>
+        </div>
+        <div class="grid lg:grid-cols-2 gap-4">
+          <article class="settings-card">
+            <h3 class="text-lg font-semibold">Theme mode</h3>
+            <div class="mt-4">
+              <button type="button" class="px-4 py-3 rounded-2xl text-sm font-medium" style="${activeTheme === 'light' ? 'background: rgba(79, 140, 255, 0.12); color: var(--text); border: 1px solid rgba(79, 140, 255, 0.18);' : 'background: var(--bg-soft); color: var(--text-muted); border: 1px solid var(--border);'}" onclick="window.__toggleTheme()">${activeTheme === 'light' ? 'Light' : 'Dark'}</button>
+            </div>
+          </article>
+          <article class="settings-card">
+            <h3 class="text-lg font-semibold">Code sample</h3>
+            <div class="md-content mt-4">
+              <pre><code class="language-python">def greet(name: str) -> str:
+    return f"hello, {name}"</code></pre>
+            </div>
+          </article>
+        </div>
+      `;
+    }
+
+    function selectPreset(presetId) {
+      selectedPresetId = presetId || DEFAULT_PRESET.id;
+      const preset = getPresetById(selectedPresetId) || DEFAULT_PRESET;
+      if (!presetName || !presetDescription || !presetAgentIdentity || !presetUserIdentity || !presetSystemPrompt || !presetList) return;
+      presetName.textContent = `${preset.icon || '○'} ${preset.name}`;
+      presetDescription.textContent = preset.description || 'No description';
+      presetAgentIdentity.textContent = preset.agent_identity || 'Use the default agent identity.';
+      presetUserIdentity.textContent = preset.user_identity || 'No extra user identity.';
+      presetSystemPrompt.textContent = preset.system_prompt || 'Default agents do not inject any additional system prompt.';
+      presetList.innerHTML = '';
+      getAvailablePresets().forEach((item) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'settings-card text-left w-full';
+        if ((item.id || null) === selectedPresetId) {
+          button.style.borderColor = 'rgba(79, 140, 255, 0.36)';
+          button.style.background = 'rgba(79, 140, 255, 0.1)';
+        }
+        button.innerHTML = `
+          <div class="flex items-start gap-3">
+            <div class="h-12 w-12 rounded-2xl flex items-center justify-center text-2xl" style="background: var(--bg-soft); border: 1px solid var(--border);">${escapeHtml(item.icon || '○')}</div>
+            <div class="min-w-0 flex-1">
+              <div class="text-base font-semibold">${escapeHtml(item.name)}</div>
+              <div class="text-sm mt-2" style="color: var(--text-muted);">${escapeHtml(item.description || '')}</div>
+            </div>
+          </div>
+        `;
+        button.addEventListener('click', () => selectPreset(item.id || DEFAULT_PRESET.id));
+        presetList.appendChild(button);
+      });
+    }
+
+    function openRuntimeModal() {
+      runtimeModal.classList.remove('hidden');
+      renderRuntime();
+    }
+
+    function closeRuntimeModal() {
+      runtimeModal.classList.add('hidden');
+    }
+
+    async function openNewAssistantModal({ presetId = null } = {}) {
+      newAssistantModal.classList.remove('hidden');
+      selectedNewAgentTemplateId = presetId || selectedPresetId || DEFAULT_PRESET.id;
+      if (newAgentTemplateSearchInput) newAgentTemplateSearchInput.value = '';
+      renderNewAgentTemplatePicker();
+      syncNewAgentTemplateSummary(getPresetById(selectedNewAgentTemplateId) || DEFAULT_PRESET);
+      newAgentTemplateSearchInput?.focus();
+    }
+
+    function closeNewAssistantModal() {
+      newAssistantModal.classList.add('hidden');
+    }
+
+    async function createAssistant() {
+      const selectedTemplate = getPresetById(selectedNewAgentTemplateId) || DEFAULT_PRESET;
+      const name = uniqueAssistantName(selectedTemplate.name || 'Agent');
+      const rawId = slugify(name) || 'agent-' + Date.now();
+      const exists = (id) => getAvailablePresets().some((p) => (p.id || null) === id) || (agentsData && agentsData.some((a) => a.id === id));
+      let id = rawId;
+      for (let i = 2; exists(id); i++) id = rawId + '-' + i;
+      const hasSavedDefault = !!((runtimeData?.templates || []).find((template) => template.id === DEFAULT_PRESET.id));
+      const templateIdForAgent = selectedTemplate.id === DEFAULT_PRESET.id && !hasSavedDefault ? null : selectedTemplate.id;
+      const response = await fetch('/api/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assistant_id: id, template_id: templateIdForAgent, name }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) return alert(data.detail || 'Failed to create agent.');
+      closeNewAssistantModal();
+      await loadRuntime();
+      await loadAssistants();
+      await setActiveAssistant(data.id);
+      // Create a starter topic immediately after the agent is instantiated.
+      const topicRes = await fetch(`/api/agents/${encodeURIComponent(data.id)}/topics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'New Conversation' }),
+      });
+      if (topicRes.ok) {
+        const topicData = await topicRes.json();
+        await setActiveTopic(topicData.session_id);
+      }
+    }
+
+    function renderAgentSettings(assistant, overrides) {
+      const prev = window.__agentSettingsStore;
+      const skills = assistant?.agent_settings?.skills || assistant?.enabled_skills || [];
+      const mcps = assistant?.agent_settings?.mcps || assistant?.enabled_mcps || [];
+      const cronJobs = assistant?.agent_settings?.cron_jobs || assistant?.enabled_cron_jobs || [];
+      const enabledSkills = overrides?.enabledSkills ?? prev?.enabledSkills ?? new Set(skills);
+      const enabledMcps = overrides?.enabledMcps ?? prev?.enabledMcps ?? new Set(mcps);
+      const enabledCron = overrides?.enabledCron ?? prev?.enabledCron ?? new Set(cronJobs);
+      const globalMcps = runtimeData?.mcp_servers || [];
+      const globalSkills = runtimeData?.skills || [];
+      const globalCrons = runtimeData?.cron_jobs || [];
+      const customSkills = [...enabledSkills].filter((s) => !globalSkills.some((gs) => gs.name === s));
+      const customMcps = [...enabledMcps].filter((m) => !globalMcps.some((gm) => gm.name === m));
+      const customCrons = [...enabledCron].filter((c) => !globalCrons.some((gj) => gj.id === c));
+
+      agentSettingsNav.innerHTML = '';
+      AGENT_SETTINGS_TABS.forEach((tab) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'w-full rounded-2xl px-3 py-2.5 text-left text-sm';
+        btn.style.background = tab.id === activeAgentSettingsTab ? 'rgba(79, 140, 255, 0.1)' : 'transparent';
+        btn.style.border = tab.id === activeAgentSettingsTab ? '1px solid rgba(79, 140, 255, 0.22)' : '1px solid transparent';
+        btn.innerHTML = `${tab.icon} ${tab.label}`;
+        btn.addEventListener('click', () => {
+          activeAgentSettingsTab = tab.id;
+          renderAgentSettings(getActiveAssistant());
+        });
+        agentSettingsNav.appendChild(btn);
+      });
+
+      function chip(isOn, label, toggle) {
+        return `<button type="button" class="px-3 py-1.5 rounded-xl text-xs border transition-colors agent-settings-chip" data-value="${escapeHtml(label)}" data-toggle="${toggle}" style="${isOn ? 'background: rgba(79, 140, 255, 0.15); border-color: rgba(79, 140, 255, 0.3);' : 'background: var(--bg-soft); border-color: var(--border);'}">${escapeHtml(label)} ${isOn ? '✓' : ''}</button>`;
+      }
+
+      const modelHtml = `
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">About the User</label>
+            <textarea id="agent-settings-user-identity" rows="4" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none">${escapeHtml(assistant?.user_identity || '')}</textarea>
+          </div>
+          <div>
+            <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">About the Agent</label>
+            <textarea id="agent-settings-agent-identity" rows="4" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none">${escapeHtml(assistant?.agent_identity || '')}</textarea>
+          </div>
+          <div>
+            <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">System Prompt</label>
+            <textarea id="agent-settings-system-prompt" rows="8" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none">${escapeHtml(assistant?.system_prompt || '')}</textarea>
+          </div>
+        </div>
+      `;
+      const mcpHtml = `
+        <div class="space-y-4">
+          <p class="text-sm" style="color: var(--text-muted);">Globally configured MCP servers. Toggle to enable for this agent.</p>
+          <div class="flex flex-wrap gap-2" id="agent-settings-mcp-chips"></div>
+          <div>
+            <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Add custom MCP names</label>
+            <input id="agent-settings-mcp-custom" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" placeholder="Comma separated, e.g. context7, cursor-ide-browser" value="${escapeHtml(customMcps.join(', '))}" />
+          </div>
+        </div>
+      `;
+      const skillsHtml = `
+        <div class="space-y-4">
+          <p class="text-sm" style="color: var(--text-muted);">Globally configured skills. Toggle to enable for this agent.</p>
+          <div class="flex flex-wrap gap-2" id="agent-settings-skills-chips"></div>
+          <div>
+            <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Add custom skill names</label>
+            <input id="agent-settings-skills-custom" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" placeholder="Comma separated skill names" value="${escapeHtml(customSkills.join(', '))}" />
+          </div>
+        </div>
+      `;
+      const cronHtml = `
+        <div class="space-y-4">
+          <p class="text-sm" style="color: var(--text-muted);">Cron jobs bound to this agent. Select from global jobs or add by ID.</p>
+          <div class="flex flex-wrap gap-2" id="agent-settings-cron-chips"></div>
+          <div>
+            <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Add custom cron job IDs</label>
+            <input id="agent-settings-cron-custom" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" placeholder="Comma separated cron job ids" value="${escapeHtml(customCrons.join(', '))}" />
+          </div>
+          ${globalCrons.filter((j) => enabledCron.has(j.id)).length ? `
+          <div class="rounded-2xl p-4 mt-4" style="background: var(--bg-soft); border: 1px solid var(--border);">
+            <div class="text-xs uppercase tracking-[0.18em] mb-2" style="color: var(--text-faint);">This agent's cron jobs</div>
+            <div class="space-y-2">
+              ${globalCrons.filter((j) => enabledCron.has(j.id)).map((j) => `
+                <div class="flex items-center justify-between text-sm">
+                  <span class="font-medium">${escapeHtml(j.name)}</span>
+                  <span class="text-xs font-mono" style="color: var(--text-faint);">${escapeHtml(j.schedule)}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          ` : ''}
+        </div>
+      `;
+
+      const panels = {
+        model: modelHtml,
+        mcp: mcpHtml,
+        skills: skillsHtml,
+        cron: cronHtml,
+      };
+      agentSettingsContent.innerHTML = AGENT_SETTINGS_TABS.map((t) => {
+        const show = t.id === activeAgentSettingsTab;
+        return `<div id="agent-settings-tab-${t.id}" data-tab="${t.id}" style="display:${show ? 'block' : 'none'}">${panels[t.id] || ''}</div>`;
+      }).join('');
+
+      const mcpChips = document.getElementById('agent-settings-mcp-chips');
+      const skillsChips = document.getElementById('agent-settings-skills-chips');
+      const cronChips = document.getElementById('agent-settings-cron-chips');
+      if (mcpChips) {
+        globalMcps.forEach((s) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'px-3 py-1.5 rounded-xl text-xs border transition-colors agent-settings-chip agent-settings-mcp-chip';
+          b.dataset.value = s.name;
+          b.textContent = s.name + (enabledMcps.has(s.name) ? ' ✓' : '');
+          b.style.background = enabledMcps.has(s.name) ? 'rgba(79, 140, 255, 0.15)' : 'var(--bg-soft)';
+          b.style.borderColor = enabledMcps.has(s.name) ? 'rgba(79, 140, 255, 0.3)' : 'var(--border)';
+          b.addEventListener('click', () => {
+            if (enabledMcps.has(s.name)) enabledMcps.delete(s.name);
+            else enabledMcps.add(s.name);
+            renderAgentSettings(getActiveAssistant());
+          });
+          mcpChips.appendChild(b);
+        });
+      }
+      if (skillsChips) {
+        globalSkills.forEach((s) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'px-3 py-1.5 rounded-xl text-xs border transition-colors agent-settings-chip agent-settings-skills-chip';
+          b.dataset.value = s.name;
+          b.textContent = s.name + (enabledSkills.has(s.name) ? ' ✓' : '');
+          b.style.background = enabledSkills.has(s.name) ? 'rgba(79, 140, 255, 0.15)' : 'var(--bg-soft)';
+          b.style.borderColor = enabledSkills.has(s.name) ? 'rgba(79, 140, 255, 0.3)' : 'var(--border)';
+          b.addEventListener('click', () => {
+            if (enabledSkills.has(s.name)) enabledSkills.delete(s.name);
+            else enabledSkills.add(s.name);
+            renderAgentSettings(getActiveAssistant());
+          });
+          skillsChips.appendChild(b);
+        });
+      }
+      if (cronChips) {
+        globalCrons.forEach((j) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'px-3 py-1.5 rounded-xl text-xs border transition-colors agent-settings-chip agent-settings-cron-chip';
+          b.dataset.value = j.id;
+          b.textContent = j.name + (enabledCron.has(j.id) ? ' ✓' : '');
+          b.style.background = enabledCron.has(j.id) ? 'rgba(79, 140, 255, 0.15)' : 'var(--bg-soft)';
+          b.style.borderColor = enabledCron.has(j.id) ? 'rgba(79, 140, 255, 0.3)' : 'var(--border)';
+          b.addEventListener('click', () => {
+            if (enabledCron.has(j.id)) enabledCron.delete(j.id);
+            else enabledCron.add(j.id);
+            renderAgentSettings(getActiveAssistant());
+          });
+          cronChips.appendChild(b);
+        });
+      }
+
+      const store = { enabledSkills, enabledMcps, enabledCron };
+      agentSettingsContent.dataset.agentSettingsStore = JSON.stringify({
+        enabledSkills: [...store.enabledSkills],
+        enabledMcps: [...store.enabledMcps],
+        enabledCron: [...store.enabledCron],
+      });
+      window.__agentSettingsStore = store;
+    }
+
+    async function openModelSettings(initialTab) {
+      const assistant = getActiveAssistant();
+      if (!assistant) return alert('Select an agent first.');
+      if (!runtimeData) await loadRuntime();
+      activeAgentSettingsTab = initialTab || 'model';
+      renderAgentSettings(assistant);
+      modelSettingsModal.classList.remove('hidden');
+      const panel = document.getElementById('agent-settings-tab-' + activeAgentSettingsTab);
+      const firstInput = panel?.querySelector('textarea, input:not([type="button"]):not([type="submit"])');
+      if (firstInput && typeof firstInput.focus === 'function') firstInput.focus();
+    }
+
+    function closeModelSettings() {
+      modelSettingsModal.classList.add('hidden');
+    }
+
+    function collectAgentSettingsFromDOM() {
+      const store = window.__agentSettingsStore || { enabledSkills: new Set(), enabledMcps: new Set(), enabledCron: new Set() };
+      const userIdentity = document.getElementById('agent-settings-user-identity')?.value ?? '';
+      const agentIdentity = document.getElementById('agent-settings-agent-identity')?.value ?? '';
+      const systemPrompt = document.getElementById('agent-settings-system-prompt')?.value ?? '';
+      const mcpCustom = document.getElementById('agent-settings-mcp-custom')?.value?.split(',')?.map((s) => s.trim())?.filter(Boolean) ?? [];
+      const skillsCustom = document.getElementById('agent-settings-skills-custom')?.value?.split(',')?.map((s) => s.trim())?.filter(Boolean) ?? [];
+      const cronCustom = document.getElementById('agent-settings-cron-custom')?.value?.split(',')?.map((s) => s.trim())?.filter(Boolean) ?? [];
+      const enabled_skills = [...store.enabledSkills, ...skillsCustom];
+      const enabled_mcps = [...store.enabledMcps, ...mcpCustom];
+      const enabled_cron_jobs = [...store.enabledCron, ...cronCustom];
+      return { user_identity: userIdentity, agent_identity: agentIdentity, system_prompt: systemPrompt, enabled_skills, enabled_mcps, enabled_cron_jobs };
+    }
+
+    async function saveModelSettings() {
+      const assistant = getActiveAssistant();
+      if (!assistant) return;
+      const payload = collectAgentSettingsFromDOM();
+      const response = await fetch(`/api/agents/${encodeURIComponent(assistant.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) return alert(data.detail || 'Failed to save agent settings.');
+      closeModelSettings();
+      await loadAssistants();
+    }
+
+    function openPromptSettings() {
+      const assistant = getActiveAssistant();
+      if (!assistant) return alert('Select an agent first.');
+      promptUserIdentity.value = assistant.user_identity || '';
+      promptAgentIdentity.value = assistant.agent_identity || '';
+      promptSystemPrompt.value = assistant.system_prompt || '';
+      promptSettingsModal.classList.remove('hidden');
+      promptUserIdentity.focus();
+    }
+
+    function closePromptSettings() {
+      promptSettingsModal.classList.add('hidden');
+    }
+
+    async function savePromptSettings() {
+      const assistant = getActiveAssistant();
+      if (!assistant) return;
+      const response = await fetch(`/api/agents/${encodeURIComponent(assistant.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_identity: promptUserIdentity.value,
+          agent_identity: promptAgentIdentity.value,
+          system_prompt: promptSystemPrompt.value,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) return alert(data.detail || 'Failed to save prompt settings.');
+      closePromptSettings();
+      await loadAssistants();
+    }
+
+    function openPresetEditor(template = null) {
+      const preset = template || {
+        name: '',
+        user_identity: '',
+        agent_identity: '',
+        system_prompt: '',
+      };
+      presetEditorSourceId = template?.id || null;
+      presetEditorName.value = preset.name || '';
+      presetEditorUser.value = preset.user_identity || '';
+      presetEditorAgent.value = preset.agent_identity || '';
+      presetEditorSystem.value = preset.system_prompt || '';
+      presetEditorModal.classList.remove('hidden');
+      presetEditorName.focus();
+    }
+
+    function closePresetEditor() {
+      presetEditorSourceId = null;
+      presetEditorModal.classList.add('hidden');
+    }
+
+    async function savePresetEditor() {
+      const name = presetEditorName.value.trim();
+      if (!name) return alert('Agent name cannot be empty.');
+      const id = slugify(name);
+      if (!id) return alert('Agent name must contain letters or numbers.');
+      const existingPreset = presetEditorSourceId ? getAvailablePresets().find((item) => item.id === presetEditorSourceId) : null;
+      const payload = {
+        id,
+        name,
+        description: existingPreset?.description || '',
+        system_prompt: presetEditorSystem.value,
+        user_identity: presetEditorUser.value,
+        agent_identity: presetEditorAgent.value,
+        required_mcps: existingPreset?.required_mcps || [],
+        required_tools: existingPreset?.required_tools || [],
+        example_query: existingPreset?.example_query || '',
+        icon: existingPreset?.icon || '🐈',
+      };
+      const response = await fetch(`/api/templates/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) return alert(data.detail || 'Failed to save preset.');
+      selectedPresetId = id;
+      closePresetEditor();
+      await loadRuntime();
+    }
+
+    function editSelectedPreset() {
+      const preset = getAvailablePresets().find((item) => item.id === selectedPresetId);
+      if (!preset) return alert('Select a preset first.');
+      openPresetEditor(preset);
+    }
+
+    function openMobileNavigation() {
+      mobileNavigation.classList.remove('hidden');
+    }
+
+    function closeMobileNavigation() {
+      mobileNavigation.classList.add('hidden');
     }
 
     function stopResponse() {
       if (abortController) abortController.abort();
     }
 
-    // ──────────────────────────────────────────────────────────
-    // Input auto-resize
-    // ──────────────────────────────────────────────────────────
-    function autoResize() {
-      inputEl.style.height = 'auto';
-      inputEl.style.height = Math.min(inputEl.scrollHeight, 192) + 'px';
+    async function sendMessage() {
+      const text = inputEl.value.trim();
+      if (!text || isStreaming) return;
+
+      try {
+        await ensureTopic();
+      } catch (error) {
+        return;
+      }
+
+      inputEl.value = '';
+      autoResize();
+      setStreaming(true);
+      appendMessage('user', text);
+      const assistantBubble = appendMessage('assistant', '', { streaming: true });
+      abortController = new AbortController();
+      let responseText = '';
+
+      try {
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text, session_id: currentSession }),
+          signal: abortController.signal,
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const raw = line.slice(6).trim();
+            if (!raw) continue;
+            let event;
+            try { event = JSON.parse(raw); } catch { continue; }
+            if (event.type === 'progress') {
+              if (event.tool_hint) appendToolCard(event.content);
+              else appendProgressLine(event.content);
+            } else if (event.type === 'done') {
+              removeProgressLine();
+              finalizeToolCard('done');
+              responseText = event.content || '';
+              assistantBubble.classList.remove('streaming-cursor');
+              renderMarkdown(assistantBubble, responseText);
+            } else if (event.type === 'error') {
+              removeProgressLine();
+              finalizeToolCard('error');
+              assistantBubble.classList.remove('streaming-cursor');
+              assistantBubble.innerHTML = `<span style="color: var(--danger);">Error: ${escapeHtml(event.content)}</span>`;
+            }
+          }
+        }
+      } catch (error) {
+        removeProgressLine();
+        finalizeToolCard(error.name === 'AbortError' ? 'done' : 'error');
+        assistantBubble.classList.remove('streaming-cursor');
+        if (error.name === 'AbortError') {
+          renderMarkdown(assistantBubble, responseText || '');
+          assistantBubble.innerHTML += '<p class="text-sm mt-2 italic" style="color: var(--text-faint);">(Stopped)</p>';
+        } else {
+          assistantBubble.innerHTML = `<span style="color: var(--danger);">Error: ${escapeHtml(error.message)}</span>`;
+        }
+      } finally {
+        setStreaming(false);
+        await loadAssistants();
+      }
     }
 
-    inputEl.addEventListener('input', autoResize);
-    inputEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-        e.preventDefault();
-        sendMessage();
-      }
-    });
+    document.getElementById('btn-new-agent').addEventListener('click', openNewAssistantModal);
+    document.getElementById('btn-new-topic').addEventListener('click', createTopic);
+    document.getElementById('btn-agent-settings').addEventListener('click', () => openModelSettings('model'));
+    document.getElementById('btn-runtime-settings').addEventListener('click', openRuntimeModal);
+    document.getElementById('btn-theme').addEventListener('click', toggleTheme);
+    document.getElementById('btn-mobile-agents').addEventListener('click', openMobileNavigation);
+    document.getElementById('btn-close-mobile-nav').addEventListener('click', closeMobileNavigation);
+    document.getElementById('btn-close-runtime').addEventListener('click', closeRuntimeModal);
+    document.getElementById('btn-close-new-agent').addEventListener('click', closeNewAssistantModal);
+    document.getElementById('btn-create-agent').addEventListener('click', createAssistant);
+    document.getElementById('btn-close-agent-settings').addEventListener('click', closeModelSettings);
+    document.getElementById('btn-save-agent-settings').addEventListener('click', saveModelSettings);
+    document.getElementById('btn-close-prompt-settings').addEventListener('click', closePromptSettings);
+    document.getElementById('btn-save-prompt-settings').addEventListener('click', savePromptSettings);
+    document.getElementById('btn-close-preset-editor').addEventListener('click', closePresetEditor);
+    document.getElementById('btn-save-preset-editor').addEventListener('click', savePresetEditor);
     btnSend.addEventListener('click', sendMessage);
     btnStop.addEventListener('click', stopResponse);
+    if (newAgentTemplateSearchInput) {
+      newAgentTemplateSearchInput.addEventListener('input', renderNewAgentTemplatePicker);
+    }
 
-    // ──────────────────────────────────────────────────────────
-    // Init
-    // ──────────────────────────────────────────────────────────
-    loadSessions();
-    loadHistory();
+    mobileNavigation.addEventListener('click', (event) => {
+      if (event.target === mobileNavigation) closeMobileNavigation();
+    });
+    runtimeModal.addEventListener('click', (event) => {
+      if (event.target === runtimeModal) closeRuntimeModal();
+    });
+    newAssistantModal.addEventListener('click', (event) => {
+      if (event.target === newAssistantModal) closeNewAssistantModal();
+    });
+    modelSettingsModal.addEventListener('click', (event) => {
+      if (event.target === modelSettingsModal) closeModelSettings();
+    });
+    promptSettingsModal.addEventListener('click', (event) => {
+      if (event.target === promptSettingsModal) closePromptSettings();
+    });
+    presetEditorModal.addEventListener('click', (event) => {
+      if (event.target === presetEditorModal) closePresetEditor();
+    });
+
+    inputEl.addEventListener('input', autoResize);
+    inputEl.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        sendMessage();
+      }
+      if (event.key === 'Escape') {
+        closeMobileNavigation();
+        closeRuntimeModal();
+        closeNewAssistantModal();
+        closeModelSettings();
+        closePromptSettings();
+        closePresetEditor();
+      }
+    });
+
+    window.__setTheme = applyTheme;
+    window.__toggleTheme = toggleTheme;
+    window.__openPresetEditor = () => openPresetEditor();
+
+    applyTheme(activeTheme);
+    loadRuntime();
+    loadAssistants();
   </script>
 </body>
 </html>

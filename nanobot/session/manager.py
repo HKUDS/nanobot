@@ -234,3 +234,11 @@ class SessionManager:
                 continue
 
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)
+
+    def update_session_metadata(self, key: str, updates: dict[str, Any]) -> Session:
+        """Merge metadata updates into an existing session and persist it."""
+        session = self.get_or_create(key)
+        session.metadata.update(updates)
+        session.updated_at = datetime.now()
+        self.save(session)
+        return session
