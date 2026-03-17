@@ -224,6 +224,7 @@ Before every commit, review documentation affected by the changes: READMEs, CHAN
 - **ADR-006**: Configuration strategy
 - **ADR-007**: Channel adapter model
 - **ADR-008**: Prompt management
+- **ADR-009**: Capability registry — unified tool/skill/role availability + health tracking
 
 ### Prompt Files
 
