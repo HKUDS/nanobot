@@ -8,6 +8,22 @@ description: >
   "when is go-live", "show me the milestones", "who is working on this", "how many FTE days",
   or any question about a file that has columns named Schedule Start, Schedule Finish, Milestone,
   Gate, Duration, Status, WBS, or similar project scheduling terminology.
+triggers:
+  - project plan
+  - summarize project
+  - project summary
+  - project status
+  - when is go-live
+  - go live date
+  - show milestones
+  - milestone summary
+  - gate review
+  - gate approved
+  - schedule plan
+  - fte days
+  - resource plan
+  - wbs
+  - project schedule
 ---
 
 # Project Plan Skill
