@@ -112,8 +112,9 @@ When you need the user's location (weather, directions, nearby places), use the 
         """Build untrusted runtime metadata block for injection before the user message."""
         lines = [f"Current Time: {current_time_str()}"]
         if channel and chat_id:
-            lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
-        if channel == "alexa":
+            display_channel = "voice" if channel in ("alexa", "esphome") else channel
+            lines += [f"Channel: {display_channel}", f"Chat ID: {chat_id}"]
+        if channel in ("alexa", "esphome"):
             lines.append(ContextBuilder._VOICE_CHANNEL_HINT)
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
 

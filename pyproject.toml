@@ -59,6 +59,11 @@ matrix = [
     "mistune>=3.0.0,<4.0.0",
     "nh3>=0.2.17,<1.0.0",
 ]
+voice = [
+    "aioesphomeapi>=29.0.0",
+    "faster-whisper>=1.0.0",
+    "piper-tts>=1.4.0",
+]
 langsmith = [
     "langsmith>=0.1.0",
 ]
