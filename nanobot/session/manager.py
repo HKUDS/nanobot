@@ -1,6 +1,7 @@
 """Session management for conversation history."""
 
 import json
+import re
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -11,6 +12,44 @@ from loguru import logger
 
 from nanobot.config.paths import get_legacy_sessions_dir
 from nanobot.utils.helpers import ensure_dir, safe_filename
+
+
+def _clean_message_base64(msg: dict[str, Any]) -> dict[str, Any]:
+    """Remove base64 data from a message's content before saving to disk.
+    
+    This keeps the structure intact but replaces base64 data with a placeholder
+    to avoid bloating the session file.
+    """
+    msg = dict(msg)
+    content = msg.get("content")
+
+    if isinstance(content, str):
+        pattern = r'(data:(?:image/|application/|audio/|video/)[^;]+;base64,)([A-Za-z0-9+/=]+)'
+        msg["content"] = re.sub(pattern, r'\1[BASE64_DATA_REMOVED]', content)
+    elif isinstance(content, list):
+        cleaned_blocks = []
+        for block in content:
+            if isinstance(block, dict):
+                block = dict(block)
+                block_type = block.get("type")
+                if block_type == "image_url":
+                    image_url = block.get("image_url", {})
+                    url = image_url.get("url", "")
+                    if url.startswith("data:"):
+                        pattern = r'(data:(?:image/|application/|audio/|video/)[^;]+;base64,)([A-Za-z0-9+/=]+)'
+                        cleaned_url = re.sub(pattern, r'\1[BASE64_DATA_REMOVED]', url)
+                        block["image_url"] = {"url": cleaned_url}
+                elif block_type == "text":
+                    text = block.get("text", "")
+                    if isinstance(text, str):
+                        pattern = r'(data:(?:image/|application/|audio/|video/)[^;]+;base64,)([A-Za-z0-9+/=]+)'
+                        block["text"] = re.sub(pattern, r'\1[BASE64_DATA_REMOVED]', text)
+                cleaned_blocks.append(block)
+            else:
+                cleaned_blocks.append(block)
+        msg["content"] = cleaned_blocks
+
+    return msg
 
 
 @dataclass
@@ -203,7 +242,8 @@ class SessionManager:
             }
             f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
             for msg in session.messages:
-                f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+                cleaned_msg = _clean_message_base64(msg)
+                f.write(json.dumps(cleaned_msg, ensure_ascii=False) + "\n")
 
         self._cache[session.key] = session
 

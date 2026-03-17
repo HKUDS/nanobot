@@ -120,6 +120,16 @@ class LLMProvider(ABC):
         for msg in messages:
             content = msg.get("content")
 
+            if content is None:
+                clean = dict(msg)
+                clean["content"] = (
+                    None
+                    if (msg.get("role") == "assistant" and msg.get("tool_calls"))
+                    else "(empty)"
+                )
+                result.append(clean)
+                continue
+
             if isinstance(content, str) and not content:
                 clean = dict(msg)
                 clean["content"] = (
