@@ -38,29 +38,52 @@ class Session:
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
+    @staticmethod
+    def _find_legal_start(messages: list[dict[str, Any]]) -> int:
+        """Find first index where every tool result has a matching assistant tool_call."""
+        declared: set[str] = set()
+        start = 0
+        for i, msg in enumerate(messages):
+            role = msg.get("role")
+            if role == "assistant":
+                for tc in msg.get("tool_calls") or []:
+                    if isinstance(tc, dict) and tc.get("id"):
+                        declared.add(str(tc["id"]))
+            elif role == "tool":
+                tid = msg.get("tool_call_id")
+                if tid and str(tid) not in declared:
+                    start = i + 1
+                    declared.clear()
+                    for prev in messages[start:i + 1]:
+                        if prev.get("role") == "assistant":
+                            for tc in prev.get("tool_calls") or []:
+                                if isinstance(tc, dict) and tc.get("id"):
+                                    declared.add(str(tc["id"]))
+        return start
+
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
-        """Return unconsolidated messages for LLM input, aligned to a user turn."""
+        """Return unconsolidated messages for LLM input, aligned to a legal tool-call boundary."""
         unconsolidated = self.messages[self.last_consolidated :]
         sliced = unconsolidated[-max_messages:]
 
-        # Drop leading non-user messages to avoid orphaned tool_result blocks
-        for i, m in enumerate(sliced):
-            if m.get("role") == "user":
+        # Drop leading non-user messages to avoid starting mid-turn when possible.
+        for i, message in enumerate(sliced):
+            if message.get("role") == "user":
                 sliced = sliced[i:]
                 break
 
+        # Some providers reject orphan tool results if the matching assistant
+        # tool_calls message fell outside the fixed-size history window.
+        start = self._find_legal_start(sliced)
+        if start:
+            sliced = sliced[start:]
+
         out: list[dict[str, Any]] = []
-        for m in sliced:
-            content = m.get("content", "")
-
-            # Truncate large tool results to avoid excessive token usage
-            if m.get("role") == "tool" and len(content) > 10000:
-                content = content[:10000] + "\n\n[Content truncated due to size]"
-
-            entry: dict[str, Any] = {"role": m["role"], "content": content}
-            for k in ("tool_calls", "tool_call_id", "name"):
-                if k in m:
-                    entry[k] = m[k]
+        for message in sliced:
+            entry: dict[str, Any] = {"role": message["role"], "content": message.get("content", "")}
+            for key in ("tool_calls", "tool_call_id", "name"):
+                if key in message:
+                    entry[key] = message[key]
             out.append(entry)
         return out
 
