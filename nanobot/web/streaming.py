@@ -18,29 +18,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
-import uuid
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from nanobot.channels.web import WebChannel
-
-# ---------------------------------------------------------------------------
-# Tool hint parser  (agent publishes "🔧 Calling `tool_name` …" progress)
-# ---------------------------------------------------------------------------
-
-_TOOL_HINT_PATTERN = re.compile(
-    r"🔧\s*(?:Calling|Running)\s+`?(\w+)`?\s*(?:with\s*(.*?))?$",
-    re.IGNORECASE | re.DOTALL,
-)
-
-
-def _parse_tool_hint(text: str) -> dict | None:
-    m = _TOOL_HINT_PATTERN.search(text)
-    if m:
-        return {"tool_name": m.group(1), "args_hint": m.group(2) or ""}
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +60,7 @@ async def stream_agent_response(
 
         # Consume outbound messages until complete
         streamed_text_len = 0
+        streamed_text = ""  # actual content — used to detect verifier rewrites
         last_msg = None
         while True:
             try:
@@ -92,44 +75,80 @@ async def stream_agent_response(
 
             meta = msg.metadata or {}
             is_progress = meta.get("_progress", False)
-            is_tool_hint = meta.get("_tool_hint", False)
             is_streaming = meta.get("_streaming", False)
 
             text = msg.content or ""
 
-            if is_tool_hint and text:
-                parsed = _parse_tool_hint(text)
-                if parsed:
-                    call_id = f"call_{uuid.uuid4().hex[:12]}"
-                    tool_calls_active[call_id] = parsed["tool_name"]
-                    event = {
-                        "toolCallId": call_id,
-                        "toolName": parsed["tool_name"],
-                        "args": {},
-                    }
-                    yield f"9:{json.dumps(event)}\n"
-                else:
-                    yield f'0:"{_escape_text(text)}"\n'
+            if meta.get("_tool_call"):
+                tc = meta["_tool_call"]
+                call_id = tc["toolCallId"]
+                tool_calls_active[call_id] = tc["toolName"]
+                event = {
+                    "toolCallId": call_id,
+                    "toolName": tc["toolName"],
+                    "args": tc.get("args", {}),
+                }
+                yield f"9:{json.dumps(event)}\n"
+                # Tool-call boundary — next LLM response starts fresh.
+                streamed_text_len = 0
+                streamed_text = ""
+
+            elif meta.get("_tool_result"):
+                tr = meta["_tool_result"]
+                call_id = tr["toolCallId"]
+                result_event = {
+                    "toolCallId": call_id,
+                    "result": tr.get("result", ""),
+                }
+                yield f"a:{json.dumps(result_event)}\n"
+                tool_calls_active.pop(call_id, None)
 
             elif is_streaming and text:
-                # Streaming delta — agent sends cumulative text; emit only new part
+                # Streaming delta — agent sends cumulative text; emit only new part.
+                # Detect a new LLM call (cumulative text restarted shorter).
+                if streamed_text_len and len(text) < streamed_text_len:
+                    streamed_text_len = 0
+                    streamed_text = ""
                 if len(text) > streamed_text_len:
                     delta = text[streamed_text_len:]
                     streamed_text_len = len(text)
+                    streamed_text = text
                     yield f'0:"{_escape_text(delta)}"\n'
 
             elif is_progress and text:
-                # Generic progress text — emit as text delta
-                yield f'0:"{_escape_text(text)}"\n'
+                # The agent loop may re-send already-streamed text as a
+                # non-streaming progress flush (e.g. before a tool call).
+                # Deduplicate against what was already streamed.
+                if streamed_text and text.startswith(streamed_text):
+                    if len(text) > streamed_text_len:
+                        delta = text[streamed_text_len:]
+                        streamed_text_len = len(text)
+                        streamed_text = text
+                        yield f'0:"{_escape_text(delta)}"\n'
+                elif streamed_text and streamed_text.startswith(text):
+                    pass  # subset of already-streamed content
+                else:
+                    yield f'0:"{_escape_text(text)}"\n'
 
             elif not is_progress:
                 # Final response from agent
                 last_msg = msg
                 if text:
-                    yield f'0:"{_escape_text(text)}"\n'
+                    if not streamed_text:
+                        # Nothing streamed yet — emit full text
+                        yield f'0:"{_escape_text(text)}"\n'
+                    elif text.startswith(streamed_text):
+                        # Text continues from what was streamed — emit tail
+                        if len(text) > streamed_text_len:
+                            delta = text[streamed_text_len:]
+                            yield f'0:"{_escape_text(delta)}"\n'
+                    # else: verifier revised the answer — text diverges from
+                    # already-streamed content.  The final streaming flush
+                    # ensures the user received the complete original text,
+                    # so we keep what they already saw.
                 break
 
-        # Close any open tool calls
+        # Safety: close any tool calls that didn't get an explicit result
         for call_id in tool_calls_active:
             result_event = {"toolCallId": call_id, "result": "completed"}
             yield f"a:{json.dumps(result_event)}\n"

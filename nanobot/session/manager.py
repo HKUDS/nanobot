@@ -69,11 +69,28 @@ class Session:
 
         out: list[dict[str, Any]] = []
         id_remap: dict[str, str] = {}  # long ID → deterministic short ID
+
+        # Collect all tool_call_ids that have a matching tool-result message.
+        tool_result_ids: set[str] = {
+            m["tool_call_id"] for m in sliced if m.get("role") == "tool" and "tool_call_id" in m
+        }
+
         for m in sliced:
             entry: dict[str, Any] = {"role": m["role"], "content": m.get("content", "")}
             for k in ("tool_calls", "tool_call_id", "name"):
                 if k in m:
                     entry[k] = m[k]
+
+            # Repair orphaned tool_calls: strip any that lack a matching tool result.
+            # This can happen when a crash interrupts tool execution mid-batch.
+            if "tool_calls" in entry:
+                valid = [tc for tc in entry["tool_calls"] if tc.get("id") in tool_result_ids]
+                if len(valid) < len(entry["tool_calls"]):
+                    if valid:
+                        entry["tool_calls"] = valid
+                    else:
+                        del entry["tool_calls"]
+
             # Remap oversized tool_call IDs (OpenAI max 40 chars).
             # Uses a deterministic hash so the same raw ID always maps to the
             # same short ID, preserving the assistant↔tool_result pairing.

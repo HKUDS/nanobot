@@ -210,3 +210,42 @@ class TestSummarizeAndCompress:
         # Should still return something valid (system + tail)
         assert result[0]["role"] == "system"
         assert result[-1]["content"] == "last"
+
+    @pytest.mark.asyncio
+    async def test_none_content_in_middle_messages(self):
+        """Messages with content=None (e.g. assistant tool_calls) must not crash."""
+        from nanobot.agent.context import _summary_cache
+
+        _summary_cache.clear()
+
+        provider = MockProvider("Summary with none content.")
+        msgs = [
+            {"role": "system", "content": "sys"},
+        ]
+        for i in range(10):
+            msgs.append({"role": "user", "content": f"msg {i} " * 200})
+            # assistant messages with tool_calls often have content=None
+            msgs.append(
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": f"tc_{i}",
+                            "type": "function",
+                            "function": {"name": "some_tool", "arguments": "{}"},
+                        }
+                    ],
+                }
+            )
+        msgs.append({"role": "user", "content": "last"})
+
+        result = await summarize_and_compress(
+            msgs,
+            50,
+            provider,
+            "m",
+            preserve_recent=1,
+        )
+        assert result[0]["role"] == "system"
+        assert result[-1]["content"] == "last"

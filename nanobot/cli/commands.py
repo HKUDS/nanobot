@@ -547,19 +547,63 @@ def gateway(
 
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
+    # Resolve web UI parameters if enabled
+    web_cfg = config.channels.web
+    web_app = None
+    if web_cfg.enabled:
+        from pathlib import Path as _Path
+
+        from nanobot.channels.web import WebChannel
+        from nanobot.web.app import create_app
+
+        web_channel = channels.get_channel("web")
+        assert isinstance(web_channel, WebChannel)
+        frontend_dist = _Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+        web_app = create_app(
+            agent,
+            session_manager,
+            web_channel,
+            static_dir=frontend_dist if frontend_dist.is_dir() else None,
+        )
+        if frontend_dist.is_dir():
+            console.print(f"[green]✓[/green] Web UI: http://{web_cfg.host}:{web_cfg.port}")
+        else:
+            console.print(
+                f"[green]✓[/green] Web API: http://{web_cfg.host}:{web_cfg.port} (no frontend)"
+            )
+
     async def run():
         health_server: asyncio.Server | None = None
+        uvi_server = None
         try:
-            # Start lightweight health endpoint for Docker HEALTHCHECK
-            from nanobot.web.health import start_health_server
+            if web_app is not None:
+                # Web channel enabled: FastAPI serves health + web UI
+                import uvicorn
 
-            health_server = await start_health_server(agent, port=port)
+                uvi_config = uvicorn.Config(
+                    web_app,
+                    host=web_cfg.host,
+                    port=web_cfg.port,
+                    log_level="warning",
+                )
+                uvi_server = uvicorn.Server(uvi_config)
+                # Also start bare health server on the gateway port for Docker HEALTHCHECK
+                from nanobot.web.health import start_health_server
+
+                health_server = await start_health_server(agent, port=port)
+            else:
+                # No web channel: lightweight health endpoint only
+                from nanobot.web.health import start_health_server
+
+                health_server = await start_health_server(agent, port=port)
+
             await cron.start()
             await heartbeat.start()
-            await asyncio.gather(
-                agent.run(),
-                channels.start_all(),
-            )
+
+            coros = [agent.run(), channels.start_all()]
+            if uvi_server is not None:
+                coros.append(uvi_server.serve())
+            await asyncio.gather(*coros)
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         finally:
@@ -649,6 +693,7 @@ def ui(
         session_manager,
         web_channel,
         static_dir=frontend_dist if frontend_dist.is_dir() else None,
+        owns_lifecycle=True,
     )
 
     console.print(f"[green]✓[/green] Agent initialized (model: {agent_loop.model})")

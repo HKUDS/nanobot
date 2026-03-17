@@ -24,6 +24,7 @@ def create_app(
     *,
     static_dir: Path | None = None,
     uploads_dir: Path | None = None,
+    owns_lifecycle: bool = False,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -33,17 +34,19 @@ def create_app(
         web_channel: The WebChannel bridging HTTP to the message bus.
         static_dir: Optional path to built frontend static files to serve.
         uploads_dir: Directory for saving uploaded file attachments.
+        owns_lifecycle: If True, the app lifespan shuts down the agent on exit.
+            Set to False when the gateway manages shutdown externally.
     """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         yield
-        # Shutdown: clean up agent resources
-        try:
-            agent_loop.stop()
-            await agent_loop.close_mcp()
-        except Exception:  # noqa: BLE001  # crash-barrier: shutdown cleanup
-            pass
+        if owns_lifecycle:
+            try:
+                agent_loop.stop()
+                await agent_loop.close_mcp()
+            except Exception:  # noqa: BLE001  # crash-barrier: shutdown cleanup
+                pass
 
     app = FastAPI(
         title="Nanobot Web UI",
@@ -73,6 +76,7 @@ def create_app(
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Thread-Id"],
     )
 
     # Health check routes (outside /api — used by Docker HEALTHCHECK & probes)

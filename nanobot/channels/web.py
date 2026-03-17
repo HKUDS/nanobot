@@ -28,24 +28,34 @@ class WebChannel(BaseChannel):
     by incoming HTTP requests.  ``start()``/``stop()`` manage only the
     outbound dispatcher task which routes agent responses to per-request
     SSE streams.
+
+    When *managed* is ``True`` the channel is owned by :class:`ChannelManager`
+    which runs its own bus consumer.  In that case ``start()`` is a no-op
+    (no private dispatcher) and messages arrive directly via ``send()``.
     """
 
     name: str = "web"
 
-    def __init__(self, config: Any, bus: MessageBus) -> None:
+    def __init__(self, config: Any, bus: MessageBus, *, managed: bool = False) -> None:
         super().__init__(config, bus)
         # chat_id → queue of outbound messages for that thread's SSE stream
         self._streams: dict[str, asyncio.Queue[OutboundMessage | None]] = {}
         self._dispatcher_task: asyncio.Task[None] | None = None
+        self._managed = managed
 
     # ------------------------------------------------------------------
     # BaseChannel interface
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        """Start the outbound dispatcher that routes responses to SSE streams."""
+        """Start the outbound dispatcher that routes responses to SSE streams.
+
+        In managed mode the ChannelManager dispatcher calls ``send()``
+        directly, so we skip the private dispatcher.
+        """
         self._running = True
-        self._dispatcher_task = asyncio.create_task(self._dispatch_outbound())
+        if not self._managed:
+            self._dispatcher_task = asyncio.create_task(self._dispatch_outbound())
 
     async def stop(self) -> None:
         """Stop the outbound dispatcher."""

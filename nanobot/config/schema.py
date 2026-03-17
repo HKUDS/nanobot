@@ -107,6 +107,14 @@ class SlackConfig(Base):
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
 
 
+class WebChannelConfig(Base):
+    """Web UI channel configuration."""
+
+    enabled: bool = False
+    host: str = "127.0.0.1"  # Bind address for the web UI server
+    port: int = 8000  # Web UI port (separate from gateway health port)
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -117,6 +125,7 @@ class ChannelsConfig(Base):
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
+    web: WebChannelConfig = Field(default_factory=WebChannelConfig)
 
 
 class Mem0Config(Base):

@@ -24,6 +24,13 @@ _SUPPORTED_SUFFIXES = _EXCEL_SUFFIXES | {".csv"}
 # Row threshold above which the tool adds a hint to use query_data / describe_data
 _LARGE_DATASET_ROWS = 50
 
+# Large text values are represented as cache-backed references instead of being
+# inlined into tool output. This keeps the model from ingesting prompt-like data
+# embedded in spreadsheet cells while still exposing the field size and a way to
+# inspect the raw content.
+_INLINE_VALUE_MAX_CHARS = 1000
+_INLINE_PREVIEW_CHARS = 280
+
 
 class ReadSpreadsheetTool(Tool):
     """Read an Excel workbook or CSV file and return structured data.
@@ -151,7 +158,11 @@ class ReadSpreadsheetTool(Tool):
         reader = csv.reader(io.StringIO(text), dialect)
         rows_iter = iter(reader)
 
+        # Skip leading blank rows (e.g. files starting with an empty line)
         header_row = next(rows_iter, None)
+        while header_row is not None and not header_row:
+            header_row = next(rows_iter, None)
+
         if header_row is None:
             sname = file_path.stem
             empty_data: dict[str, Any] = {"headers": [], "rows": [], "total_rows": 0}
@@ -206,7 +217,8 @@ class ReadSpreadsheetTool(Tool):
             import openpyxl
         except ImportError:
             return ToolResult.fail(
-                "openpyxl is not installed. Run: pip install openpyxl",
+                "openpyxl is not available. Excel files (.xlsx) cannot be read. "
+                "Only CSV files are supported in this environment.",
                 error_type="missing_dependency",
             )
 
@@ -451,6 +463,86 @@ def _serialize(val: Any) -> Any:
     return val
 
 
+def _cache_large_text(
+    cache: ToolResultCache | None,
+    *,
+    source_cache_key: str,
+    row_index: int,
+    column: str,
+    text: str,
+) -> str | None:
+    """Store a large cell value in the tool cache and return its cache key."""
+    if cache is None:
+        return None
+    return cache.store(
+        "spreadsheet_large_text",
+        {
+            "source_cache_key": source_cache_key,
+            "row_index": row_index,
+            "column": column,
+        },
+        text,
+        "",
+        token_estimate=len(text) // 4,
+    )
+
+
+def _sanitize_cell_value(
+    value: Any,
+    *,
+    cache: ToolResultCache | None,
+    source_cache_key: str,
+    row_index: int,
+    column: str,
+) -> Any:
+    """Replace oversized string values with explicit cache-backed references."""
+    if not isinstance(value, str) or len(value) <= _INLINE_VALUE_MAX_CHARS:
+        return value
+
+    cached_key = _cache_large_text(
+        cache,
+        source_cache_key=source_cache_key,
+        row_index=row_index,
+        column=column,
+        text=value,
+    )
+    preview = value[:_INLINE_PREVIEW_CHARS]
+    ref: dict[str, Any] = {
+        "kind": "large_text_ref",
+        "length": len(value),
+        "preview": preview,
+        "truncated_preview": len(value) > len(preview),
+        "note": "Untrusted cell data omitted from inline output; inspect via cache_get_slice.",
+    }
+    if cached_key:
+        ref["cache_key"] = cached_key
+    return ref
+
+
+def _sanitize_row_for_output(
+    row: dict[str, Any],
+    *,
+    cache: ToolResultCache | None,
+    source_cache_key: str,
+    row_index: int,
+) -> tuple[dict[str, Any], bool]:
+    """Sanitize a row for tool output, returning the row and whether it changed."""
+    changed = False
+    sanitized: dict[str, Any] = {}
+    for column, value in row.items():
+        sanitized_value = _sanitize_cell_value(
+            value,
+            cache=cache,
+            source_cache_key=source_cache_key,
+            row_index=row_index,
+            column=column,
+        )
+        if sanitized_value is not value:
+            changed = True
+        sanitized[column] = sanitized_value
+    return sanitized, changed
+
+
 def _summarize_allocations(pairs: list[tuple[str, Any]]) -> str | None:
     """Collapse date-allocation column values into a compact summary.
 
@@ -570,13 +662,6 @@ def _get_cached_sheet_rows(
 # ---------------------------------------------------------------------------
 
 
-def _duckdb_available() -> bool:
-    """Return True if the ``duckdb`` package is importable."""
-    from importlib.util import find_spec
-
-    return find_spec("duckdb") is not None
-
-
 def _load_rows_to_duckdb(
     rows: list[dict[str, Any]],
 ) -> Any:
@@ -675,12 +760,6 @@ class QueryDataTool(Tool):
         if not rows:
             return ToolResult.fail(f"Sheet '{sname}' has no data rows.", error_type="not_found")
 
-        if not _duckdb_available():
-            return ToolResult.fail(
-                "duckdb is not installed. Run: pip install duckdb",
-                error_type="missing_dependency",
-            )
-
         try:
             conn = _load_rows_to_duckdb(rows)
             result = conn.execute(query)
@@ -690,14 +769,51 @@ class QueryDataTool(Tool):
         except Exception as exc:
             return ToolResult.fail(f"SQL error: {exc}")
 
-        result_rows = [dict(zip(columns, row)) for row in fetched]
-        output = json.dumps(
-            {"columns": columns, "row_count": len(result_rows), "rows": result_rows},
-            ensure_ascii=False,
-            default=str,
-        )
-        if len(output) > 200_000:
-            output = output[:200_000] + "\n... (output truncated)"
+        all_rows = [dict(zip(columns, row)) for row in fetched]
+        total_result_rows = len(all_rows)
+
+        # Serialize rows until the output budget is exhausted
+        result_rows: list[dict[str, Any]] = []
+        budget = _MAX_OUTPUT_CHARS
+        sanitized_fields = 0
+        for row_index, row in enumerate(all_rows):
+            safe_row, changed = _sanitize_row_for_output(
+                row,
+                cache=self._cache,
+                source_cache_key=cache_key,
+                row_index=row_index,
+            )
+            if changed:
+                sanitized_fields += 1
+            encoded = json.dumps(safe_row, ensure_ascii=False, default=str)
+            budget -= len(encoded)
+            if budget < 0 and result_rows:
+                break
+            result_rows.append(safe_row)
+
+        result_data: dict[str, Any] = {
+            "columns": columns,
+            "row_count": total_result_rows,
+            "returned": len(result_rows),
+            "rows": result_rows,
+        }
+        if sanitized_fields:
+            result_data["sanitized_rows"] = sanitized_fields
+            result_data["note"] = (
+                "Oversized text fields were replaced with cache-backed references to avoid "
+                "injecting raw prompt-like data into the model context."
+            )
+        if len(result_rows) < total_result_rows:
+            size_limit_note = (
+                f"Showing {len(result_rows)} of {total_result_rows} result rows (output size limit). "
+                "Refine your SQL with LIMIT/OFFSET or WHERE clauses to page through more."
+            )
+            if "note" in result_data:
+                result_data["note"] += " " + size_limit_note
+            else:
+                result_data["note"] = size_limit_note
+
+        output = json.dumps(result_data, ensure_ascii=False, default=str)
         return ToolResult.ok(output)
 
 
@@ -750,12 +866,6 @@ class DescribeDataTool(Tool):
             return ToolResult.fail(err, error_type="not_found")
         if not rows:
             return ToolResult.fail(f"Sheet '{sname}' has no data rows.", error_type="not_found")
-
-        if not _duckdb_available():
-            return ToolResult.fail(
-                "duckdb is not installed. Run: pip install duckdb",
-                error_type="missing_dependency",
-            )
 
         try:
             conn = _load_rows_to_duckdb(rows)
@@ -811,6 +921,12 @@ class DescribeDataTool(Tool):
 # ---------------------------------------------------------------------------
 
 
+# Output budget (chars) per excel_get_rows / excel_find / query_data call.
+# Not truncation — the agent can page through with start_row/end_row.
+# ~30 KB ≈ ~8K tokens — adapts naturally: simple rows → many, huge rows → few.
+_MAX_OUTPUT_CHARS = 30_000
+
+
 class ExcelGetRowsTool(Tool):
     """Retrieve a row range from a previously cached Excel result."""
 
@@ -828,7 +944,8 @@ class ExcelGetRowsTool(Tool):
     def description(self) -> str:
         return (
             "Retrieve a range of rows from a previously cached read_spreadsheet result. "
-            "Use the cache_key from the read_spreadsheet summary."
+            "Use the cache_key from the read_spreadsheet summary. "
+            "Output is size-limited per call — use start_row/end_row to page through large data."
         )
 
     @property
@@ -870,13 +987,45 @@ class ExcelGetRowsTool(Tool):
         if err:
             return ToolResult.fail(err, error_type="not_found")
 
-        sliced = rows[start_row:end_row]
         total = len(rows)
-        output = json.dumps(
-            {"rows": sliced, "range": f"{start_row}-{min(end_row, total)}", "total_rows": total},
-            ensure_ascii=False,
-            default=str,
-        )
+        actual_end = min(end_row, total)
+
+        # Serialize rows until the output budget is exhausted
+        included: list[dict[str, Any]] = []
+        budget = _MAX_OUTPUT_CHARS
+        sanitized_rows = 0
+        for row_index in range(start_row, actual_end):
+            safe_row, changed = _sanitize_row_for_output(
+                rows[row_index],
+                cache=self._cache,
+                source_cache_key=cache_key,
+                row_index=row_index,
+            )
+            if changed:
+                sanitized_rows += 1
+            encoded = json.dumps(safe_row, ensure_ascii=False, default=str)
+            budget -= len(encoded)
+            if budget < 0 and included:
+                break
+            included.append(safe_row)
+
+        rows_end = start_row + len(included)
+        result: dict[str, Any] = {
+            "rows": included,
+            "range": f"{start_row}-{rows_end}",
+            "total_rows": total,
+        }
+        if sanitized_rows:
+            result["sanitized_rows"] = sanitized_rows
+            result["note"] = (
+                "Oversized text fields were replaced with cache-backed references to avoid "
+                "injecting raw prompt-like data into the model context."
+            )
+        if rows_end < total:
+            result["next_page"] = f"start_row={rows_end}, end_row={min(rows_end + 25, total)}"
+            result["remaining_rows"] = total - rows_end
+
+        output = json.dumps(result, ensure_ascii=False, default=str)
         return ToolResult.ok(output)
 
 
@@ -938,20 +1087,58 @@ class ExcelFindTool(Tool):
             return ToolResult.fail(err, error_type="not_found")
 
         q = query.lower()
-        matches: list[dict[str, Any]] = []
+        matches: list[tuple[int, dict[str, Any]]] = []
 
-        for row in rows:
+        for i, row in enumerate(rows):
             if column:
                 val = row.get(column, "")
                 if q in str(val).lower():
-                    matches.append(row)
+                    matches.append((i, row))
             else:
                 if any(q in str(v).lower() for v in row.values()):
-                    matches.append(row)
+                    matches.append((i, row))
 
-        output = json.dumps(
-            {"query": query, "matches": len(matches), "rows": matches[:50]},
-            ensure_ascii=False,
-            default=str,
-        )
+        # Serialize matches until the output budget is exhausted
+        page: list[dict[str, Any]] = []
+        budget = _MAX_OUTPUT_CHARS
+        sanitized_rows = 0
+        for idx, row in matches:
+            safe_row, changed = _sanitize_row_for_output(
+                row,
+                cache=self._cache,
+                source_cache_key=cache_key,
+                row_index=idx,
+            )
+            if changed:
+                sanitized_rows += 1
+            entry = {"row_index": idx, **safe_row}
+            encoded = json.dumps(entry, ensure_ascii=False, default=str)
+            budget -= len(encoded)
+            if budget < 0 and page:
+                break
+            page.append(entry)
+
+        result: dict[str, Any] = {
+            "query": query,
+            "total_matches": len(matches),
+            "returned": len(page),
+            "rows": page,
+        }
+        if sanitized_rows:
+            result["sanitized_rows"] = sanitized_rows
+            result["note"] = (
+                "Oversized text fields were replaced with cache-backed references to avoid "
+                "injecting raw prompt-like data into the model context."
+            )
+        if len(page) < len(matches):
+            size_limit_note = (
+                f"Showing {len(page)} of {len(matches)} matches (output size limit). "
+                "Use excel_get_rows with specific row indices to retrieve more."
+            )
+            if "note" in result:
+                result["note"] += " " + size_limit_note
+            else:
+                result["note"] = size_limit_note
+
+        output = json.dumps(result, ensure_ascii=False, default=str)
         return ToolResult.ok(output)

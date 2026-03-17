@@ -898,10 +898,16 @@ class AgentLoop:
                     clean = self._strip_think(response.content)
                     if clean:
                         await on_progress(clean)
-                    await on_progress(
-                        ToolExecutor.format_hint(response.tool_calls),
-                        tool_hint=True,
-                    )
+                    # Emit structured tool-call events with real IDs and args
+                    for tc in response.tool_calls:
+                        await on_progress(
+                            "",
+                            tool_call={
+                                "toolCallId": tc.id,
+                                "toolName": tc.name,
+                                "args": tc.arguments,
+                            },
+                        )
 
                 tool_call_dicts = [
                     {
@@ -942,6 +948,15 @@ class AgentLoop:
                         args_str[:200],
                         tools_elapsed_ms,
                     )
+                    # Emit structured tool-result event with real output
+                    if on_progress:
+                        await on_progress(
+                            "",
+                            tool_result={
+                                "toolCallId": tool_call.id,
+                                "result": result.to_llm_string(),
+                            },
+                        )
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result.to_llm_string()
                     )
@@ -1771,12 +1786,21 @@ class AgentLoop:
         )
 
         async def _bus_progress(
-            content: str, *, tool_hint: bool = False, streaming: bool = False
+            content: str,
+            *,
+            tool_hint: bool = False,
+            streaming: bool = False,
+            tool_call: dict | None = None,
+            tool_result: dict | None = None,
         ) -> None:
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
             meta["_tool_hint"] = tool_hint
             meta["_streaming"] = streaming
+            if tool_call:
+                meta["_tool_call"] = tool_call
+            if tool_result:
+                meta["_tool_result"] = tool_result
             await self.bus.publish_outbound(
                 OutboundMessage(
                     channel=msg.channel,
@@ -1860,10 +1884,18 @@ class AgentLoop:
         )
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
-        """Save new-turn messages into session, truncating large tool results."""
+        """Save new-turn messages into session, truncating large tool results.
+
+        Ephemeral system messages (reflect, progress, self-check, delegation
+        nudges) injected during the tool loop are **not** persisted — they are
+        loop-control signals that would pollute conversation history and cause
+        the LLM to infer false workflow patterns on future turns.
+        """
 
         max_chars = self.config.tool_result_max_chars
         for m in messages[skip:]:
+            if m.get("role") == "system":
+                continue  # ephemeral loop-control prompt — do not persist
             entry = {k: v for k, v in m.items() if k != "reasoning_content"}
             if entry.get("role") == "tool" and isinstance(entry.get("content"), str):
                 content = entry["content"]

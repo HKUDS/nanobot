@@ -401,7 +401,7 @@ class TestExcelFindTool:
         result = await tool.execute(cache_key=key, query="Task 3")
         assert result.success
         parsed = json.loads(result.output)
-        assert parsed["matches"] == 1
+        assert parsed["total_matches"] == 1
         assert parsed["rows"][0]["Name"] == "Task 3"
 
     async def test_find_specific_column(self, cache: ToolResultCache):
@@ -410,7 +410,7 @@ class TestExcelFindTool:
         result = await tool.execute(cache_key=key, query="Active", column="Status")
         assert result.success
         parsed = json.loads(result.output)
-        assert parsed["matches"] == 5  # Tasks 0, 2, 4, 6, 8
+        assert parsed["total_matches"] == 5  # Tasks 0, 2, 4, 6, 8
 
     async def test_find_case_insensitive(self, cache: ToolResultCache):
         tool = ExcelFindTool(cache=cache)
@@ -418,7 +418,7 @@ class TestExcelFindTool:
         result = await tool.execute(cache_key=key, query="active", column="Status")
         assert result.success
         parsed = json.loads(result.output)
-        assert parsed["matches"] == 5
+        assert parsed["total_matches"] == 5
 
     async def test_find_no_matches(self, cache: ToolResultCache):
         tool = ExcelFindTool(cache=cache)
@@ -426,7 +426,7 @@ class TestExcelFindTool:
         result = await tool.execute(cache_key=key, query="nonexistent")
         assert result.success
         parsed = json.loads(result.output)
-        assert parsed["matches"] == 0
+        assert parsed["total_matches"] == 0
 
     async def test_find_missing_key(self, tmp_path: Path):
         cache = ToolResultCache(workspace=tmp_path)

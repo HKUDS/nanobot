@@ -235,17 +235,6 @@ class TestStreamingFormat:
         assert _escape_text("line\nnew") == "line\\nnew"
         assert _escape_text("back\\slash") == "back\\\\slash"
 
-    def test_parse_tool_hint(self):
-        """Should parse tool hint format from on_progress."""
-        from nanobot.web.streaming import _parse_tool_hint
-
-        result = _parse_tool_hint("🔧 Calling `read_file` with path=/etc/hosts")
-        assert result is not None
-        assert result["tool_name"] == "read_file"
-
-        # Non-tool text should return None
-        assert _parse_tool_hint("Just regular text") is None
-
 
 class TestModels:
     """Tests for Pydantic request/response models."""
@@ -304,3 +293,64 @@ class TestAppFactory:
         )
         # CORS preflight should be handled
         assert response.status_code in (200, 405)
+
+
+class TestStripAttachments:
+    """Tests for _strip_attachments — extract file content and save to disk."""
+
+    def test_quoted_name(self, tmp_path):
+        from nanobot.web.routes import _strip_attachments
+
+        text = 'Please read this: <attachment name="data.csv">col1,col2\n1,2</attachment>'
+        result = _strip_attachments(text, tmp_path)
+        assert "<attachment" not in result
+        assert (tmp_path / "data.csv").read_text() == "col1,col2\n1,2"
+        assert "data.csv" in result
+
+    def test_unquoted_name(self, tmp_path):
+        from nanobot.web.routes import _strip_attachments
+
+        text = "<attachment name=report.xlsx>binary data here</attachment>"
+        result = _strip_attachments(text, tmp_path)
+        assert "<attachment" not in result
+        assert (tmp_path / "report.xlsx").read_text() == "binary data here"
+        assert "report.xlsx" in result
+
+    def test_single_quoted_name(self, tmp_path):
+        from nanobot.web.routes import _strip_attachments
+
+        text = "<attachment name='notes.txt'>some notes</attachment>"
+        result = _strip_attachments(text, tmp_path)
+        assert "<attachment" not in result
+        assert (tmp_path / "notes.txt").read_text() == "some notes"
+
+    def test_no_attachments(self, tmp_path):
+        from nanobot.web.routes import _strip_attachments
+
+        text = "Just a normal message"
+        assert _strip_attachments(text, tmp_path) == text
+
+    def test_multiple_attachments(self, tmp_path):
+        from nanobot.web.routes import _strip_attachments
+
+        text = (
+            '<attachment name="a.txt">aaa</attachment> and <attachment name=b.txt>bbb</attachment>'
+        )
+        result = _strip_attachments(text, tmp_path)
+        assert "<attachment" not in result
+        assert (tmp_path / "a.txt").read_text() == "aaa"
+        assert (tmp_path / "b.txt").read_text() == "bbb"
+
+    def test_duplicate_name_gets_suffix(self, tmp_path):
+        from nanobot.web.routes import _strip_attachments
+
+        (tmp_path / "dup.txt").write_text("original")
+        text = '<attachment name="dup.txt">new content</attachment>'
+        result = _strip_attachments(text, tmp_path)
+        assert "<attachment" not in result
+        # Original should be untouched
+        assert (tmp_path / "dup.txt").read_text() == "original"
+        # A new file with uuid suffix should exist
+        saved = [f for f in tmp_path.iterdir() if f.name.startswith("dup_")]
+        assert len(saved) == 1
+        assert saved[0].read_text() == "new content"
