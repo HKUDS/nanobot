@@ -285,8 +285,284 @@ Bind me as your owner and DM me on MoChat.
 
 ### 添加新 Provider 只需 2 步
 
+## 继续：Provider 系统详解
+
+### 添加新 Provider 只需 2 步（续）
+
 **步骤 1**：在 `registry.py` 添加 `ProviderSpec`：
 ```python
 ProviderSpec(
-    name="
+    name="my_provider",           # 提供商名称
+    env_var="MY_PROVIDER_KEY",    # 环境变量名
+    model_prefix="my_provider/",  # 模型前缀（litellm 路由用）
+    default_model="my_provider/gpt-4o",  # 默认模型
+)
 ```
+
+**步骤 2**：在 `.env` 中配置 API Key：
+```bash
+MY_PROVIDER_KEY=sk-xxxxxxxxxxxx
+```
+
+> **为什么这么简单**：底层统一使用 `litellm` 库，它已经兼容了 100+ 模型 API 格式，nanobot 只需做一层薄薄的注册映射。
+
+---
+
+## 八、频道系统（Channels）
+
+文档中支持的频道（即用户交互渠道）：
+
+```
+┌──────────────┬──────────────────────────────────────┐
+│ 类别          │ 支持的频道                             │
+├──────────────┼──────────────────────────────────────┤
+│ 即时通讯      │ Telegram, Discord, Slack,             │
+│              │ 飞书(Feishu), 企业微信(WeCom),         │
+│              │ WhatsApp, Matrix, QQ                  │
+├──────────────┼──────────────────────────────────────┤
+│ 终端          │ CLI（命令行交互）                       │
+├──────────────┼──────────────────────────────────────┤
+│ Web API      │ Gateway HTTP 接口                      │
+└──────────────┴──────────────────────────────────────┘
+```
+
+### 频道的统一架构
+
+```
+用户消息 → Channel Adapter → MessageBus → Agent → MessageBus → Channel Adapter → 回复用户
+```
+
+每个频道只需实现一个 **Adapter（适配器）**：
+- `on_message()` — 接收消息，发布到消息总线
+- `send_reply()` — 从消息总线订阅回复，发送给用户
+
+> **设计亮点**：所有频道共享同一个 Agent 内核，新增频道不影响核心逻辑。
+
+---
+
+## 九、MCP 协议支持
+
+```
+MCP = Model Context Protocol（模型上下文协议）
+```
+
+这是 Anthropic 提出的**工具调用标准协议**，让 AI 可以调用外部工具：
+
+```
+┌─────────┐     MCP协议      ┌─────────────────┐
+│  Agent   │ ←──────────────→ │  MCP Server      │
+│ (nanobot)│   stdio / SSE    │ (外部工具服务)     │
+└─────────┘                   │ - 文件系统操作     │
+                              │ - 数据库查询       │
+                              │ - 网页浏览         │
+                              │ - 代码执行         │
+                              └─────────────────┘
+```
+
+### 配置方式
+
+在 `nanobot.yaml` 中：
+```yaml
+mcp:
+  servers:
+    filesystem:
+      command: "npx"
+      args: ["-y", "@anthropic/mcp-filesystem"]
+    browser:
+      command: "npx"
+      args: ["-y", "@anthropic/mcp-browser"]
+```
+
+> nanobot 支持两种 MCP 传输方式：**stdio**（本地进程通信）和 **SSE**（远程 HTTP 流式通信）。
+
+---
+
+## 十、技能系统（Skills）
+
+```yaml
+skills:
+  - name: "web_search"
+    description: "搜索互联网获取最新信息"
+  - name: "code_interpreter"
+    description: "执行 Python 代码"
+```
+
+Skills 与 MCP Tools 的区别：
+
+| 对比项 | Skills | MCP Tools |
+|--------|--------|-----------|
+| 定义位置 | nanobot 内置 | 外部 MCP Server |
+| 调用方式 | 直接函数调用 | 通过 MCP 协议 |
+| 适用场景 | 简单、高频操作 | 复杂、需要隔离的操作 |
+
+---
+
+## 十一、定时任务（Cron）
+
+```yaml
+cron:
+  tasks:
+    - name: "daily_summary"
+      schedule: "0 9 * * *"        # 每天早上9点
+      action: "总结昨天的重要新闻"
+    - name: "weather_reminder"
+      schedule: "0 8 * * *"        # 每天早上8点
+      action: "查看今天天气并提醒"
+```
+
+> 使用标准 **cron 表达式**，支持 AI 自主执行定时任务。
+
+---
+
+## 十二、安装与快速启动
+
+### 安装方式
+
+```bash
+# 方式一：pip 安装（推荐）
+pip install nanobot-ai
+
+# 方式二：源码安装（开发用）
+git clone https://github.com/HKUDS/nanobot.git
+cd nanobot
+pip install -e ".[all]"
+```
+
+### 初始化
+
+```bash
+nanobot onboard
+```
+
+这个命令会：
+```
+1. 创建 ~/.nanobot/ 工作空间目录
+2. 生成 nanobot.yaml 配置文件模板
+3. 生成 .env 环境变量文件模板
+4. 复制默认的 system prompt 模板
+```
+
+### 启动对话
+
+```bash
+# CLI 直接对话
+nanobot agent
+
+# 启动网关服务器（供频道接入）
+nanobot gateway
+```
+
+---
+
+## 十三、配置文件结构
+
+```
+~/.nanobot/                      # 工作空间根目录
+├── nanobot.yaml                 # 主配置文件
+├── .env                         # API Keys 等敏感信息
+├── templates/                   # 系统 prompt 模板
+│   └── system_prompt.md
+├── memory/                      # 持久化记忆存储
+│   └── *.json
+├── sessions/                    # 会话历史
+│   └── *.json
+└── logs/                        # 运行日志
+    └── nanobot.log
+```
+
+### `nanobot.yaml` 核心配置项
+
+```yaml
+# AI 提供商配置
+provider:
+  name: openai                   # 使用哪个提供商
+  model: gpt-4o                  # 默认模型
+
+# 频道配置
+channels:
+  telegram:
+    enabled: true
+    token: ${TELEGRAM_BOT_TOKEN}  # 引用 .env 变量
+  discord:
+    enabled: false
+
+# Agent 行为配置
+agent:
+  max_turns: 20                  # 单次对话最大轮数
+  temperature: 0.7               # 生成温度
+  streaming: true                # 是否流式输出
+
+# MCP 工具
+mcp:
+  servers: { ... }
+
+# 定时任务
+cron:
+  tasks: [ ... ]
+```
+
+---
+
+## 十四、与 OpenClaw 的对比
+
+这是文档反复强调的核心卖点：
+
+```
+┌─────────────────┬────────────┬────────────────┐
+│ 对比维度         │ OpenClaw   │ nanobot        │
+├─────────────────┼────────────┼────────────────┤
+│ 核心代码行数     │ ~数万行     │ ~数百行         │
+│ 代码精简比       │ 100%       │ ~1%            │
+│ 功能覆盖         │ 企业级全面  │ 核心功能完整    │
+│ 上手难度         │ 较高       │ 极低            │
+│ 适合场景         │ 生产部署   │ 学习/研究/个人  │
+│ 依赖复杂度       │ 高         │ 低              │
+│ 启动速度         │ 较慢       │ 极快            │
+└─────────────────┴────────────┴────────────────┘
+```
+
+> **核心理念**：用 99% 更少的代码实现 80% 的核心功能。
+
+---
+
+## 十五、项目元信息
+
+### 许可证
+
+```
+MIT License — 最宽松的开源协议
+✓ 可商用  ✓ 可修改  ✓ 可分发  ✓ 无需开源衍生作品
+```
+
+### 目标受众
+
+```
+📚 学生/研究者  — 学习 AI Agent 架构
+🔧 开发者      — 快速搭建个人 AI 助手
+🧪 实验者      — 测试各种 LLM 提供商和工具
+```
+
+### Star History
+
+```
+文档底部的 Star History 图表展示 GitHub star 数量的增长趋势，
+用于体现项目热度和社区关注度。
+```
+
+---
+
+## 十六、总结：文档的写作技巧
+
+这份 README 是**开源项目文档的优秀范例**，值得学习的技巧：
+
+| 技巧 | 体现 |
+|------|------|
+| **一句话定位** | "Ultra-Lightweight Personal AI Assistant" |
+| **数字说话** | "99% fewer lines of code" |
+| **可验证** | 提供 `core_agent_lines.sh` 脚本 |
+| **渐进式信息** | 徽章 → 简介 → 特性 → 架构 → 安装 → 配置 → 高级用法 |
+| **视觉化** | Logo、架构图、表格、emoji |
+| **活跃度展示** | 密集的 News 更新日志 |
+| **社区引导** | 飞书/微信/Discord 多渠道 |
+| **折叠长内容** | `<details>` 标签隐藏历史新闻 |
+| **免责声明** | "for educational, research purposes only" |
