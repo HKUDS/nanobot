@@ -402,7 +402,7 @@
     let abortController = null;
     let activeTheme = localStorage.getItem('nanobot-theme') || 'dark';
     let runtimeData = null;
-    let activeRuntimeTab = 'templates';
+    let activeRuntimeTab = 'model_config';
     let selectedPresetId = 'default';
     let presetEditorSourceId = null;
     let currentToolCard = null;
@@ -410,7 +410,7 @@
     let selectedNewAgentTemplateId = 'default';
 
     const AGENT_SETTINGS_TABS = [
-      { id: 'model', icon: '📝', label: 'Model / Prompt' },
+      { id: 'model', icon: '📝', label: 'Prompt' },
       { id: 'mcp', icon: '🔧', label: 'MCP Servers' },
       { id: 'skills', icon: '⚡', label: 'Skills' },
       { id: 'cron', icon: '⏰', label: 'Cron Jobs' },
@@ -431,6 +431,8 @@
     };
 
     const RUNTIME_TABS = [
+      { id: 'model_config', icon: '🧠', label: 'Global Model Config' },
+      { id: 'prompt_config', icon: '👤', label: 'Global Prompt Config' },
       { id: 'templates', icon: '📋', label: 'Presets' },
       { id: 'cron_jobs', icon: '⏰', label: 'Cron Jobs' },
       { id: 'mcp_servers', icon: '🔧', label: 'MCP Servers' },
@@ -554,6 +556,55 @@
       if (status === 'ok' || status === 'done') return 'background: var(--accent-soft); color: var(--accent);';
       if (status === 'error') return 'background: rgba(239, 68, 68, 0.12); color: var(--danger);';
       return 'background: rgba(245, 158, 11, 0.12); color: var(--warning);';
+    }
+
+    function setButtonBusy(button, busyLabel = 'Saving...') {
+      if (!button) return;
+      if (!button.dataset.defaultLabel) button.dataset.defaultLabel = button.textContent.trim();
+      button.disabled = true;
+      button.dataset.busy = 'true';
+      button.textContent = busyLabel;
+      button.style.opacity = '0.72';
+      button.style.cursor = 'wait';
+    }
+
+    function setButtonResult(button, { label, tone = 'ok', resetAfterMs = 1600 } = {}) {
+      if (!button) return;
+      const defaultLabel = button.dataset.defaultLabel || button.textContent.trim();
+      button.disabled = false;
+      delete button.dataset.busy;
+      button.textContent = label || defaultLabel;
+      button.style.opacity = '1';
+      button.style.cursor = '';
+      if (tone === 'error') {
+        button.style.background = 'rgba(239, 68, 68, 0.14)';
+        button.style.color = 'var(--danger)';
+      } else if (tone === 'ok') {
+        button.style.background = 'var(--accent)';
+        button.style.color = 'white';
+      } else {
+        button.style.background = 'var(--primary)';
+        button.style.color = 'white';
+      }
+      window.clearTimeout(button._resetTimer);
+      button._resetTimer = window.setTimeout(() => {
+        button.textContent = defaultLabel;
+        button.style.background = 'var(--primary)';
+        button.style.color = 'white';
+      }, resetAfterMs);
+    }
+
+    async function withSaveFeedback(button, action, { busyLabel = 'Saving...', successLabel = 'Saved', errorLabel = 'Retry' } = {}) {
+      if (!button || button.dataset.busy === 'true') return;
+      setButtonBusy(button, busyLabel);
+      try {
+        const result = await action();
+        setButtonResult(button, { label: successLabel, tone: 'ok' });
+        return result;
+      } catch (error) {
+        setButtonResult(button, { label: errorLabel, tone: 'error', resetAfterMs: 2200 });
+        throw error;
+      }
     }
 
     function appendMessage(role, content, { streaming = false } = {}) {
@@ -1043,12 +1094,18 @@
           await loadRuntime();
         });
       });
+      const saveModelConfigBtn = runtimeContent.querySelector('#btn-save-model-config');
+      if (saveModelConfigBtn) saveModelConfigBtn.addEventListener('click', saveModelConfig);
+      const savePromptConfigBtn = runtimeContent.querySelector('#btn-save-prompt-config');
+      if (savePromptConfigBtn) savePromptConfigBtn.addEventListener('click', savePromptConfig);
       const savePresetLibBtn = runtimeContent.querySelector('#btn-save-preset-lib');
       if (savePresetLibBtn) savePresetLibBtn.addEventListener('click', savePresetFromLibrary);
       runtimeContent.querySelectorAll('pre code').forEach((block) => Prism.highlightElement(block));
     }
 
     async function savePresetFromLibrary() {
+      const button = document.getElementById('btn-save-preset-lib');
+      return withSaveFeedback(button, async () => {
       const preset = getPresetById(selectedPresetId) || DEFAULT_PRESET;
       const name = document.getElementById('preset-lib-name')?.value?.trim() || preset?.name || 'Unnamed';
       const userIdentity = document.getElementById('preset-lib-user')?.value ?? '';
@@ -1057,12 +1114,15 @@
       const presetId = preset?.id || DEFAULT_PRESET.id;
       const payload = { id: presetId, name, description: preset.description || '', system_prompt: systemPrompt, user_identity: userIdentity, agent_identity: agentIdentity, required_mcps: preset.required_mcps || [], required_tools: preset.required_tools || [], example_query: preset.example_query || '', icon: preset.icon || '○' };
       const res = await fetch(`/api/templates/${encodeURIComponent(presetId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); return alert(d.detail || 'Failed to save.'); }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || 'Failed to save.'); }
       selectedPresetId = presetId;
       await loadRuntime();
+      }).catch((error) => alert(error.message));
     }
 
     function runtimeTabDescription(tabId) {
+      if (tabId === 'model_config') return 'LLM and search runtime config';
+      if (tabId === 'prompt_config') return 'Workspace USER.md profile defaults';
       if (tabId === 'templates') return 'Preset library';
       if (tabId === 'cron_jobs') return 'Live scheduler state';
       if (tabId === 'mcp_servers') return 'External tool connections';
@@ -1071,11 +1131,160 @@
     }
 
     function renderRuntimeTab() {
+      if (activeRuntimeTab === 'model_config') return renderModelConfigPanel();
+      if (activeRuntimeTab === 'prompt_config') return renderPromptConfigPanel();
       if (activeRuntimeTab === 'templates') return renderPresetLibrary();
       if (activeRuntimeTab === 'cron_jobs') return renderCronPanel();
       if (activeRuntimeTab === 'mcp_servers') return renderMcpPanel();
       if (activeRuntimeTab === 'skills') return renderSkillsPanel();
       return renderAppearancePanel();
+    }
+
+    function renderModelConfigPanel() {
+      const runtimeConfig = runtimeData?.model_config || {};
+      const searchProviderOptions = runtimeData?.search_provider_options || [];
+      return `
+        <div>
+          <div class="text-xs uppercase tracking-[0.22em]" style="color: var(--text-faint);">Global Model Config</div>
+          <h2 class="text-2xl font-semibold mt-1">Global model configuration</h2>
+          <p class="text-sm mt-2" style="color: var(--text-muted);">These fields map directly to <code>~/.nanobot/config.json</code>.</p>
+        </div>
+        <article class="settings-card">
+          <div class="space-y-4">
+            <div>
+              <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Workspace</label>
+              <input id="runtime-model-config-workspace" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(runtimeConfig.workspace || '')}" />
+              <p class="text-xs mt-2" style="color: var(--text-faint);">Changing workspace is saved to config but requires restarting the web app to fully take effect.</p>
+            </div>
+            <div class="grid md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Model</label>
+                <input id="runtime-model-config-model" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(runtimeConfig.model || '')}" />
+              </div>
+              <div>
+                <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Provider</label>
+                <input id="runtime-model-config-provider" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(runtimeConfig.provider || '')}" />
+              </div>
+            </div>
+            <div class="rounded-2xl p-4" style="background: var(--bg-soft); border: 1px solid var(--border);">
+              <div class="text-xs uppercase tracking-[0.24em] mb-3" style="color: var(--text-faint);">Custom Provider</div>
+              <div class="space-y-4">
+                <div>
+                  <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">API Key</label>
+                  <input id="runtime-model-config-custom-api-key" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(runtimeConfig.custom?.api_key || '')}" />
+                </div>
+                <div>
+                  <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">API Base</label>
+                  <input id="runtime-model-config-custom-api-base" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(runtimeConfig.custom?.api_base || '')}" />
+                </div>
+              </div>
+            </div>
+            <div class="rounded-2xl p-4" style="background: var(--bg-soft); border: 1px solid var(--border);">
+              <div class="text-xs uppercase tracking-[0.24em] mb-3" style="color: var(--text-faint);">Web Search</div>
+              <div class="grid md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Provider</label>
+                  <select id="runtime-model-config-search-provider" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none">
+                    ${searchProviderOptions.map((provider) => `<option value="${escapeHtml(provider)}" ${provider === runtimeConfig.search?.provider ? 'selected' : ''}>${escapeHtml(provider)}</option>`).join('')}
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Max Results</label>
+                  <input id="runtime-model-config-search-max-results" type="number" min="1" max="10" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(String(runtimeConfig.search?.max_results ?? 5))}" />
+                </div>
+              </div>
+              <div class="mt-4">
+                <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Search API Key</label>
+                <input id="runtime-model-config-search-api-key" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(runtimeConfig.search?.api_key || '')}" />
+              </div>
+            </div>
+            <button type="button" id="btn-save-model-config" class="px-4 py-3 rounded-2xl text-sm font-medium" style="background: var(--primary); color: white;">Save Model Config</button>
+          </div>
+        </article>
+      `;
+    }
+
+    function renderPromptConfigPanel() {
+      const promptConfig = runtimeData?.prompt_config || {};
+      const topics = Array.isArray(promptConfig.topics_of_interest) ? promptConfig.topics_of_interest : [];
+      return `
+        <div>
+          <div class="text-xs uppercase tracking-[0.22em]" style="color: var(--text-faint);">Global Prompt Config</div>
+          <h2 class="text-2xl font-semibold mt-1">Global prompt configuration</h2>
+          <p class="text-sm mt-2" style="color: var(--text-muted);">These fields render into <code>USER.md</code> in the configured workspace.</p>
+        </div>
+        <article class="settings-card">
+          <div class="space-y-4">
+            <div class="grid md:grid-cols-3 gap-4">
+              <div>
+                <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Name</label>
+                <input id="runtime-prompt-config-name" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(promptConfig.name || '')}" />
+              </div>
+              <div>
+                <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Timezone</label>
+                <input id="runtime-prompt-config-timezone" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(promptConfig.timezone || '')}" />
+              </div>
+              <div>
+                <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Language</label>
+                <input id="runtime-prompt-config-language" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(promptConfig.language || '')}" />
+              </div>
+            </div>
+            <div class="grid md:grid-cols-3 gap-4">
+              <div>
+                <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Communication Style</label>
+                <select id="runtime-prompt-config-communication-style" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none">
+                  ${['', 'Casual', 'Professional', 'Technical'].map((value) => `<option value="${escapeHtml(value)}" ${value === (promptConfig.communication_style || '') ? 'selected' : ''}>${escapeHtml(value || 'Select')}</option>`).join('')}
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Response Length</label>
+                <select id="runtime-prompt-config-response-length" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none">
+                  ${['', 'Brief and concise', 'Detailed explanations', 'Adaptive based on question'].map((value) => `<option value="${escapeHtml(value)}" ${value === (promptConfig.response_length || '') ? 'selected' : ''}>${escapeHtml(value || 'Select')}</option>`).join('')}
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Technical Level</label>
+                <select id="runtime-prompt-config-technical-level" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none">
+                  ${['', 'Beginner', 'Intermediate', 'Expert'].map((value) => `<option value="${escapeHtml(value)}" ${value === (promptConfig.technical_level || '') ? 'selected' : ''}>${escapeHtml(value || 'Select')}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            <div class="grid md:grid-cols-3 gap-4">
+              <div>
+                <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Primary Role</label>
+                <input id="runtime-prompt-config-primary-role" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(promptConfig.primary_role || '')}" />
+              </div>
+              <div>
+                <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Main Projects</label>
+                <input id="runtime-prompt-config-main-projects" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(promptConfig.main_projects || '')}" />
+              </div>
+              <div>
+                <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Tools You Use</label>
+                <input id="runtime-prompt-config-tools" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(promptConfig.tools_you_use || '')}" />
+              </div>
+            </div>
+            <div class="grid md:grid-cols-3 gap-4">
+              <div>
+                <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Topic 1</label>
+                <input id="runtime-prompt-config-topic-1" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(topics[0] || '')}" />
+              </div>
+              <div>
+                <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Topic 2</label>
+                <input id="runtime-prompt-config-topic-2" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(topics[1] || '')}" />
+              </div>
+              <div>
+                <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Topic 3</label>
+                <input id="runtime-prompt-config-topic-3" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(topics[2] || '')}" />
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Special Instructions</label>
+              <textarea id="runtime-prompt-config-special-instructions" rows="6" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none resize-none">${escapeHtml(promptConfig.special_instructions || '')}</textarea>
+            </div>
+            <button type="button" id="btn-save-prompt-config" class="px-4 py-3 rounded-2xl text-sm font-medium" style="background: var(--primary); color: white;">Save Prompt Config</button>
+          </div>
+        </article>
+      `;
     }
 
     function renderPresetLibrary() {
@@ -1346,10 +1555,6 @@
       const globalMcps = runtimeData?.mcp_servers || [];
       const globalSkills = runtimeData?.skills || [];
       const globalCrons = runtimeData?.cron_jobs || [];
-      const customSkills = [...enabledSkills].filter((s) => !globalSkills.some((gs) => gs.name === s));
-      const customMcps = [...enabledMcps].filter((m) => !globalMcps.some((gm) => gm.name === m));
-      const customCrons = [...enabledCron].filter((c) => !globalCrons.some((gj) => gj.id === c));
-
       agentSettingsNav.innerHTML = '';
       AGENT_SETTINGS_TABS.forEach((tab) => {
         const btn = document.createElement('button');
@@ -1389,30 +1594,18 @@
         <div class="space-y-4">
           <p class="text-sm" style="color: var(--text-muted);">Globally configured MCP servers. Toggle to enable for this agent.</p>
           <div class="flex flex-wrap gap-2" id="agent-settings-mcp-chips"></div>
-          <div>
-            <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Add custom MCP names</label>
-            <input id="agent-settings-mcp-custom" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" placeholder="Comma separated, e.g. context7, cursor-ide-browser" value="${escapeHtml(customMcps.join(', '))}" />
-          </div>
         </div>
       `;
       const skillsHtml = `
         <div class="space-y-4">
           <p class="text-sm" style="color: var(--text-muted);">Globally configured skills. Toggle to enable for this agent.</p>
           <div class="flex flex-wrap gap-2" id="agent-settings-skills-chips"></div>
-          <div>
-            <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Add custom skill names</label>
-            <input id="agent-settings-skills-custom" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" placeholder="Comma separated skill names" value="${escapeHtml(customSkills.join(', '))}" />
-          </div>
         </div>
       `;
       const cronHtml = `
         <div class="space-y-4">
-          <p class="text-sm" style="color: var(--text-muted);">Cron jobs bound to this agent. Select from global jobs or add by ID.</p>
+          <p class="text-sm" style="color: var(--text-muted);">Cron jobs bound to this agent. Select from global jobs.</p>
           <div class="flex flex-wrap gap-2" id="agent-settings-cron-chips"></div>
-          <div>
-            <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Add custom cron job IDs</label>
-            <input id="agent-settings-cron-custom" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" placeholder="Comma separated cron job ids" value="${escapeHtml(customCrons.join(', '))}" />
-          </div>
           ${globalCrons.filter((j) => enabledCron.has(j.id)).length ? `
           <div class="rounded-2xl p-4 mt-4" style="background: var(--bg-soft); border: 1px solid var(--border);">
             <div class="text-xs uppercase tracking-[0.18em] mb-2" style="color: var(--text-faint);">This agent's cron jobs</div>
@@ -1522,31 +1715,112 @@
 
     function collectAgentSettingsFromDOM() {
       const store = window.__agentSettingsStore || { enabledSkills: new Set(), enabledMcps: new Set(), enabledCron: new Set() };
+      const globalMcpNames = (runtimeData?.mcp_servers || []).map((item) => item.name);
+      const globalSkillNames = (runtimeData?.skills || []).map((item) => item.name);
+      const globalCronIds = (runtimeData?.cron_jobs || []).map((item) => item.id);
       const userIdentity = document.getElementById('agent-settings-user-identity')?.value ?? '';
       const agentIdentity = document.getElementById('agent-settings-agent-identity')?.value ?? '';
       const systemPrompt = document.getElementById('agent-settings-system-prompt')?.value ?? '';
-      const mcpCustom = document.getElementById('agent-settings-mcp-custom')?.value?.split(',')?.map((s) => s.trim())?.filter(Boolean) ?? [];
-      const skillsCustom = document.getElementById('agent-settings-skills-custom')?.value?.split(',')?.map((s) => s.trim())?.filter(Boolean) ?? [];
-      const cronCustom = document.getElementById('agent-settings-cron-custom')?.value?.split(',')?.map((s) => s.trim())?.filter(Boolean) ?? [];
-      const enabled_skills = [...store.enabledSkills, ...skillsCustom];
-      const enabled_mcps = [...store.enabledMcps, ...mcpCustom];
-      const enabled_cron_jobs = [...store.enabledCron, ...cronCustom];
+      const enabled_skills = [...store.enabledSkills].filter((value) => globalSkillNames.includes(value));
+      const enabled_mcps = [...store.enabledMcps].filter((value) => globalMcpNames.includes(value));
+      const enabled_cron_jobs = [...store.enabledCron].filter((value) => globalCronIds.includes(value));
       return { user_identity: userIdentity, agent_identity: agentIdentity, system_prompt: systemPrompt, enabled_skills, enabled_mcps, enabled_cron_jobs };
+    }
+
+    function collectRuntimeConfigFromDOM() {
+      const current = runtimeData?.model_config || {};
+      const rawMaxResults = Number(document.getElementById('runtime-model-config-search-max-results')?.value ?? current.search?.max_results ?? 5);
+      return {
+        workspace: document.getElementById('runtime-model-config-workspace')?.value?.trim() || current.workspace || '',
+        model: document.getElementById('runtime-model-config-model')?.value?.trim() || current.model || '',
+        provider: document.getElementById('runtime-model-config-provider')?.value?.trim() || current.provider || 'auto',
+        custom: {
+          api_key: document.getElementById('runtime-model-config-custom-api-key')?.value ?? current.custom?.api_key ?? '',
+          api_base: document.getElementById('runtime-model-config-custom-api-base')?.value?.trim() || current.custom?.api_base || '',
+        },
+        search: {
+          provider: document.getElementById('runtime-model-config-search-provider')?.value || current.search?.provider || 'brave',
+          api_key: document.getElementById('runtime-model-config-search-api-key')?.value ?? current.search?.api_key ?? '',
+          max_results: Math.min(10, Math.max(1, Number.isFinite(rawMaxResults) ? rawMaxResults : 5)),
+        },
+      };
+    }
+
+    function collectPromptConfigFromDOM() {
+      return {
+        name: document.getElementById('runtime-prompt-config-name')?.value?.trim() || '',
+        timezone: document.getElementById('runtime-prompt-config-timezone')?.value?.trim() || '',
+        language: document.getElementById('runtime-prompt-config-language')?.value?.trim() || '',
+        communication_style: document.getElementById('runtime-prompt-config-communication-style')?.value || '',
+        response_length: document.getElementById('runtime-prompt-config-response-length')?.value || '',
+        technical_level: document.getElementById('runtime-prompt-config-technical-level')?.value || '',
+        primary_role: document.getElementById('runtime-prompt-config-primary-role')?.value?.trim() || '',
+        main_projects: document.getElementById('runtime-prompt-config-main-projects')?.value?.trim() || '',
+        tools_you_use: document.getElementById('runtime-prompt-config-tools')?.value?.trim() || '',
+        topics_of_interest: [
+          document.getElementById('runtime-prompt-config-topic-1')?.value?.trim() || '',
+          document.getElementById('runtime-prompt-config-topic-2')?.value?.trim() || '',
+          document.getElementById('runtime-prompt-config-topic-3')?.value?.trim() || '',
+        ].filter(Boolean),
+        special_instructions: document.getElementById('runtime-prompt-config-special-instructions')?.value?.trim() || '',
+      };
     }
 
     async function saveModelSettings() {
       const assistant = getActiveAssistant();
       if (!assistant) return;
-      const payload = collectAgentSettingsFromDOM();
-      const response = await fetch(`/api/agents/${encodeURIComponent(assistant.id)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) return alert(data.detail || 'Failed to save agent settings.');
-      closeModelSettings();
-      await loadAssistants();
+      const button = document.getElementById('btn-save-agent-settings');
+      return withSaveFeedback(button, async () => {
+        const payload = collectAgentSettingsFromDOM();
+        const response = await fetch(`/api/agents/${encodeURIComponent(assistant.id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || 'Failed to save agent settings.');
+        closeModelSettings();
+        await loadAssistants();
+      }).catch((error) => alert(error.message));
+    }
+
+    async function saveModelConfig() {
+      const button = document.getElementById('btn-save-model-config');
+      return withSaveFeedback(button, async () => {
+        const runtimePayload = collectRuntimeConfigFromDOM();
+        const runtimeResponse = await fetch('/api/settings/model-config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(runtimePayload),
+        });
+        const runtimeResult = await runtimeResponse.json().catch(() => ({}));
+        if (!runtimeResponse.ok) throw new Error(runtimeResult.detail || 'Failed to save runtime config.');
+        if (runtimeResult.model_config) {
+          runtimeData = { ...(runtimeData || {}), model_config: runtimeResult.model_config };
+        }
+        await loadRuntime();
+        if (runtimeResult.restart_required) {
+          alert(`Runtime config saved. Restart the web app to apply the new workspace.\nCurrent workspace: ${runtimeResult.active_workspace}`);
+        }
+      }).catch((error) => alert(error.message));
+    }
+
+    async function savePromptConfig() {
+      const button = document.getElementById('btn-save-prompt-config');
+      return withSaveFeedback(button, async () => {
+        const payload = collectPromptConfigFromDOM();
+        const response = await fetch('/api/settings/prompt-config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.detail || 'Failed to save prompt config.');
+        if (result.prompt_config) {
+          runtimeData = { ...(runtimeData || {}), prompt_config: result.prompt_config };
+        }
+        await loadRuntime();
+      }).catch((error) => alert(error.message));
     }
 
     function openPromptSettings() {
@@ -1566,19 +1840,22 @@
     async function savePromptSettings() {
       const assistant = getActiveAssistant();
       if (!assistant) return;
-      const response = await fetch(`/api/agents/${encodeURIComponent(assistant.id)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_identity: promptUserIdentity.value,
-          agent_identity: promptAgentIdentity.value,
-          system_prompt: promptSystemPrompt.value,
-        }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) return alert(data.detail || 'Failed to save prompt settings.');
-      closePromptSettings();
-      await loadAssistants();
+      const button = document.getElementById('btn-save-prompt-settings');
+      return withSaveFeedback(button, async () => {
+        const response = await fetch(`/api/agents/${encodeURIComponent(assistant.id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_identity: promptUserIdentity.value,
+            agent_identity: promptAgentIdentity.value,
+            system_prompt: promptSystemPrompt.value,
+          }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || 'Failed to save prompt settings.');
+        closePromptSettings();
+        await loadAssistants();
+      }).catch((error) => alert(error.message));
     }
 
     function openPresetEditor(template = null) {
@@ -1620,16 +1897,19 @@
         example_query: existingPreset?.example_query || '',
         icon: existingPreset?.icon || '🐈',
       };
-      const response = await fetch(`/api/templates/${encodeURIComponent(id)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) return alert(data.detail || 'Failed to save preset.');
-      selectedPresetId = id;
-      closePresetEditor();
-      await loadRuntime();
+      const button = document.getElementById('btn-save-preset-editor');
+      return withSaveFeedback(button, async () => {
+        const response = await fetch(`/api/templates/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || 'Failed to save preset.');
+        selectedPresetId = id;
+        closePresetEditor();
+        await loadRuntime();
+      }).catch((error) => alert(error.message));
     }
 
     function editSelectedPreset() {

@@ -4,15 +4,15 @@ Information about the user to help personalize interactions.
 
 ## Basic Information
 
-- **Name**: (your name)
-- **Timezone**: (your timezone, e.g., UTC+8)
+- **Name**: 大哥
+- **Timezone**: Asia/Shanghai
 - **Language**: (preferred language)
 
 ## Preferences
 
 ### Communication Style
 
-- [ ] Casual
+- [x] Casual
 - [ ] Professional
 - [ ] Technical
 

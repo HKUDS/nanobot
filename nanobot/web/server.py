@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,9 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from nanobot.agent.tools.web import SEARCH_PROVIDERS, WebSearchTool
+from nanobot.config.loader import get_config_path, save_config
+from nanobot.config.schema import ProviderConfig
 from nanobot.web.assistant_store import AssistantConfig, AssistantStore, AssistantUpdate, serialize_assistant_prompt
 from nanobot.web.template_store import TemplateConfig, TemplateStore
 
@@ -52,6 +56,39 @@ class UpsertTemplateRequest(TemplateConfig):
     pass
 
 
+class ModelProviderConfigRequest(BaseModel):
+    api_key: str = ""
+    api_base: str = ""
+
+
+class SearchConfigRequest(BaseModel):
+    provider: str
+    api_key: str = ""
+    max_results: int = 5
+
+
+class ModelConfigRequest(BaseModel):
+    workspace: str
+    model: str
+    provider: str
+    custom: ModelProviderConfigRequest
+    search: SearchConfigRequest
+
+
+class PromptConfigRequest(BaseModel):
+    name: str = ""
+    timezone: str = ""
+    language: str = ""
+    communication_style: str = ""
+    response_length: str = ""
+    technical_level: str = ""
+    primary_role: str = ""
+    main_projects: str = ""
+    tools_you_use: str = ""
+    topics_of_interest: list[str] = []
+    special_instructions: str = ""
+
+
 def _serialize_template(template: TemplateConfig, *, is_bundled: bool = False) -> dict[str, Any]:
     """Convert a template model into API-friendly JSON."""
     payload = template.model_dump()
@@ -73,6 +110,151 @@ def _serialize_assistant(assistant: AssistantConfig) -> dict[str, Any]:
         "system_prompt": assistant.system_prompt,
     }
     return payload
+
+
+def _serialize_model_config(cfg: Any) -> dict[str, Any]:
+    return {
+        "workspace": cfg.agents.defaults.workspace,
+        "model": cfg.agents.defaults.model,
+        "provider": cfg.agents.defaults.provider,
+        "custom": {
+            "api_key": cfg.providers.custom.api_key,
+            "api_base": cfg.providers.custom.api_base or "",
+        },
+        "search": {
+            "provider": cfg.tools.web.search.provider,
+            "api_key": cfg.tools.web.search.api_key,
+            "max_results": cfg.tools.web.search.max_results,
+        },
+    }
+
+
+def _extract_field(content: str, label: str) -> str:
+    pattern = rf"- \*\*{re.escape(label)}\*\*: ?(.*)"
+    match = re.search(pattern, content)
+    return (match.group(1) if match else "").strip()
+
+
+def _extract_checked_option(content: str, heading: str, options: list[str]) -> str:
+    section_match = re.search(
+        rf"### {re.escape(heading)}\n\n(?P<body>.*?)(?:\n## |\n### |\n---)",
+        content,
+        flags=re.S,
+    )
+    body = section_match.group("body") if section_match else ""
+    for option in options:
+        if re.search(rf"- \[x\] {re.escape(option)}", body):
+            return option
+    return ""
+
+
+def _extract_topics(content: str) -> list[str]:
+    section_match = re.search(
+        r"## Topics of Interest\n\n(?P<body>.*?)(?:\n## |\n---)",
+        content,
+        flags=re.S,
+    )
+    body = section_match.group("body") if section_match else ""
+    topics = []
+    for line in body.splitlines():
+        if line.startswith("- "):
+            value = line[2:].strip()
+            if value:
+                topics.append(value)
+    return topics
+
+
+def _extract_special_instructions(content: str) -> str:
+    match = re.search(
+        r"## Special Instructions\n\n(?P<body>.*?)(?:\n---)",
+        content,
+        flags=re.S,
+    )
+    return (match.group("body") if match else "").strip()
+
+
+def _prompt_config_path(cfg: Any) -> Path:
+    return cfg.workspace_path / "USER.md"
+
+
+def _serialize_prompt_config(cfg: Any) -> dict[str, Any]:
+    path = _prompt_config_path(cfg)
+    content = path.read_text(encoding="utf-8") if path.exists() else ""
+    return {
+        "name": _extract_field(content, "Name"),
+        "timezone": _extract_field(content, "Timezone"),
+        "language": _extract_field(content, "Language"),
+        "communication_style": _extract_checked_option(content, "Communication Style", ["Casual", "Professional", "Technical"]),
+        "response_length": _extract_checked_option(content, "Response Length", ["Brief and concise", "Detailed explanations", "Adaptive based on question"]),
+        "technical_level": _extract_checked_option(content, "Technical Level", ["Beginner", "Intermediate", "Expert"]),
+        "primary_role": _extract_field(content, "Primary Role"),
+        "main_projects": _extract_field(content, "Main Projects"),
+        "tools_you_use": _extract_field(content, "Tools You Use"),
+        "topics_of_interest": _extract_topics(content),
+        "special_instructions": _extract_special_instructions(content),
+    }
+
+
+def _render_checked(option: str, selected: str) -> str:
+    return f"- [{'x' if option == selected else ' '}] {option}"
+
+
+def _render_prompt_config(payload: PromptConfigRequest) -> str:
+    topics = [item.strip() for item in payload.topics_of_interest if item.strip()]
+    while len(topics) < 3:
+        topics.append("")
+    topics = topics[:3]
+    special_instructions = (payload.special_instructions or "").strip() or "(Any specific instructions for how the assistant should behave)"
+    return f"""# User Profile
+
+Information about the user to help personalize interactions.
+
+## Basic Information
+
+- **Name**: {payload.name.strip()}
+- **Timezone**: {payload.timezone.strip()}
+- **Language**: {payload.language.strip()}
+
+## Preferences
+
+### Communication Style
+
+{_render_checked("Casual", payload.communication_style)}
+{_render_checked("Professional", payload.communication_style)}
+{_render_checked("Technical", payload.communication_style)}
+
+### Response Length
+
+{_render_checked("Brief and concise", payload.response_length)}
+{_render_checked("Detailed explanations", payload.response_length)}
+{_render_checked("Adaptive based on question", payload.response_length)}
+
+### Technical Level
+
+{_render_checked("Beginner", payload.technical_level)}
+{_render_checked("Intermediate", payload.technical_level)}
+{_render_checked("Expert", payload.technical_level)}
+
+## Work Context
+
+- **Primary Role**: {payload.primary_role.strip()}
+- **Main Projects**: {payload.main_projects.strip()}
+- **Tools You Use**: {payload.tools_you_use.strip()}
+
+## Topics of Interest
+
+- {topics[0]}
+- {topics[1]}
+- {topics[2]}
+
+## Special Instructions
+
+{special_instructions}
+
+---
+
+*Edit this file to customize nanobot's behavior for your needs.*
+"""
 
 
 def _iso_from_ms(timestamp_ms: int | None) -> str | None:
@@ -124,6 +306,64 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
     )
 
     app = FastAPI(title="nanobot web", docs_url=None, redoc_url=None)
+
+    def _apply_runtime_config(payload: ModelConfigRequest) -> tuple[dict[str, Any], bool]:
+        workspace_value = payload.workspace.strip()
+        model_value = payload.model.strip()
+        provider_name = payload.provider.strip()
+        search_provider = payload.search.provider.strip().lower()
+
+        if not workspace_value:
+            raise HTTPException(status_code=400, detail="Workspace cannot be empty")
+        if not model_value:
+            raise HTTPException(status_code=400, detail="Model cannot be empty")
+        if not provider_name:
+            raise HTTPException(status_code=400, detail="Provider cannot be empty")
+        if search_provider not in SEARCH_PROVIDERS:
+            allowed = ", ".join(SEARCH_PROVIDERS)
+            raise HTTPException(status_code=400, detail=f"Invalid search provider. Allowed: {allowed}")
+
+        if not hasattr(cfg.providers, provider_name):
+            raise HTTPException(status_code=400, detail=f"Unknown provider '{provider_name}'")
+
+        restart_required = cfg.agents.defaults.workspace != workspace_value
+
+        cfg.agents.defaults.workspace = workspace_value
+        cfg.agents.defaults.model = model_value
+        cfg.agents.defaults.provider = provider_name
+        cfg.providers.custom = ProviderConfig(
+            api_key=payload.custom.api_key.strip(),
+            api_base=payload.custom.api_base.strip() or None,
+        )
+        cfg.tools.web.search.provider = search_provider
+        cfg.tools.web.search.api_key = payload.search.api_key.strip()
+        cfg.tools.web.search.max_results = min(max(payload.search.max_results, 1), 10)
+
+        save_config(cfg, get_config_path())
+
+        new_provider = _make_provider(cfg)
+        agent.provider = new_provider
+        agent.model = cfg.agents.defaults.model
+        agent.web_search_config = cfg.tools.web.search
+        agent.subagents.provider = new_provider
+        agent.subagents.model = cfg.agents.defaults.model
+        agent.subagents.web_search_config = cfg.tools.web.search
+        agent.memory_consolidator.provider = new_provider
+        agent.memory_consolidator.model = cfg.agents.defaults.model
+        agent.memory_consolidator.context_window_tokens = cfg.agents.defaults.context_window_tokens
+        assistant_store.default_model = cfg.agents.defaults.model
+
+        web_search_tool = agent.tools.get("web_search")
+        if isinstance(web_search_tool, WebSearchTool):
+            web_search_tool.config = cfg.tools.web.search
+
+        return _serialize_model_config(cfg), restart_required
+
+    def _apply_prompt_config(payload: PromptConfigRequest) -> dict[str, Any]:
+        path = _prompt_config_path(cfg)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_render_prompt_config(payload), encoding="utf-8")
+        return _serialize_prompt_config(cfg)
 
     @app.on_event("startup")
     async def _startup() -> None:
@@ -494,13 +734,35 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
             )
 
         return {
-            "workspace": str(cfg.workspace_path),
+            "workspace": str(agent.workspace),
             "theme": "dark",
+            "model_config": _serialize_model_config(cfg),
+            "prompt_config": _serialize_prompt_config(cfg),
+            "search_provider_options": list(SEARCH_PROVIDERS),
             "templates": templates,
             "preset_library_editable": True,
             "cron_jobs": cron_jobs,
             "skills": skills,
             "mcp_servers": mcp_servers,
+        }
+
+    @app.put("/api/settings/model-config")
+    async def update_model_config(request: ModelConfigRequest) -> dict[str, Any]:
+        updated, restart_required = _apply_runtime_config(request)
+        return {
+            "status": "ok",
+            "model_config": updated,
+            "restart_required": restart_required,
+            "active_workspace": str(agent.workspace),
+        }
+
+    @app.put("/api/settings/prompt-config")
+    async def update_prompt_config(request: PromptConfigRequest) -> dict[str, Any]:
+        updated = _apply_prompt_config(request)
+        return {
+            "status": "ok",
+            "prompt_config": updated,
+            "path": str(_prompt_config_path(cfg)),
         }
 
     @app.put("/api/templates/{template_id}")
