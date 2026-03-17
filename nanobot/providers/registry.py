@@ -148,7 +148,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("aicodewith-gpt", "aicodewith_gpt"),
         env_key="OPENAI_API_KEY",
         display_name="AICodewith GPT",
-        litellm_prefix="",  # gpt-* recognized natively by LiteLLM
+        litellm_prefix="",
         skip_prefixes=(),
         env_extras=(),
         is_gateway=True,
@@ -158,6 +158,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://api.aicodewith.com/chatgpt/v1",
         strip_model_prefix=True,  # aicodewith-gpt/gpt-5.3-codex → gpt-5.3-codex
         model_overrides=(),
+        is_direct=True,  # Responses API format — bypass LiteLLM, use CustomProvider
         config_key="aicodewith",
         model_list=(
             "aicodewith-gpt/gpt-5.4",
@@ -177,34 +178,15 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_local=False,
         detect_by_key_prefix="",
         detect_by_base_keyword="",
-        default_api_base="https://api.aicodewith.com",
+        default_api_base="https://api.aicodewith.com",  # SDK appends /v1/messages
         strip_model_prefix=True,  # aicodewith-claude/claude-opus-4-6 → claude-opus-4-6
         model_overrides=(),
         supports_prompt_caching=True,
         config_key="aicodewith",
         model_list=(
-            "aicodewith-claude/claude-opus-4-6-20260205",
-            "aicodewith-claude/claude-sonnet-4-5-20250929",
-        ),
-    ),
-    ProviderSpec(
-        name="aicodewith_gemini",
-        keywords=("aicodewith-gemini", "aicodewith_gemini"),
-        env_key="GEMINI_API_KEY",
-        display_name="AICodewith Gemini",
-        litellm_prefix="gemini",  # gemini-3-pro → gemini/gemini-3-pro
-        skip_prefixes=(),
-        env_extras=(),
-        is_gateway=True,
-        is_local=False,
-        detect_by_key_prefix="",
-        detect_by_base_keyword="",
-        default_api_base="https://api.aicodewith.com/gemini_cli",
-        strip_model_prefix=True,  # aicodewith-gemini/gemini-3-pro → gemini-3-pro → gemini/gemini-3-pro
-        model_overrides=(),
-        config_key="aicodewith",
-        model_list=(
-            "aicodewith-gemini/gemini-3-pro",
+            "aicodewith-claude/claude-opus-4-6",
+            "aicodewith-claude/claude-sonnet-4-6",
+            "aicodewith-claude/claude-haiku-4-5-20251001",
         ),
     ),
     # SiliconFlow (硅基流动): OpenAI-compatible gateway, model names keep org prefix

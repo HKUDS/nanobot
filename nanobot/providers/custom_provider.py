@@ -13,9 +13,11 @@ from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 class CustomProvider(LLMProvider):
 
-    def __init__(self, api_key: str = "no-key", api_base: str = "http://localhost:8000/v1", default_model: str = "default"):
+    def __init__(self, api_key: str = "no-key", api_base: str = "http://localhost:8000/v1",
+                 default_model: str = "default", strip_model_prefix: bool = False):
         super().__init__(api_key, api_base)
         self.default_model = default_model
+        self._strip_model_prefix = strip_model_prefix
         # Keep affinity stable for this provider instance to improve backend cache locality.
         self._client = AsyncOpenAI(
             api_key=api_key,
@@ -27,8 +29,11 @@ class CustomProvider(LLMProvider):
                    model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
                    reasoning_effort: str | None = None,
                    tool_choice: str | dict[str, Any] | None = None) -> LLMResponse:
+        effective_model = model or self.default_model
+        if self._strip_model_prefix and "/" in effective_model:
+            effective_model = effective_model.split("/", 1)[-1]
         kwargs: dict[str, Any] = {
-            "model": model or self.default_model,
+            "model": effective_model,
             "messages": self._sanitize_empty_content(messages),
             "max_tokens": max(1, max_tokens),
             "temperature": temperature,
@@ -38,9 +43,52 @@ class CustomProvider(LLMProvider):
         if tools:
             kwargs.update(tools=tools, tool_choice=tool_choice or "auto")
         try:
-            return self._parse(await self._client.chat.completions.create(**kwargs))
+            raw = await self._client.chat.completions.with_raw_response.create(**kwargs)
+            import json
+            data = json.loads(raw.text)
+            # Some gateways (e.g. AICodewith) return OpenAI Responses API format
+            # at the /chat/completions path. Detect and convert.
+            if data.get("object") == "response" and data.get("output"):
+                return self._parse_responses_api(data)
+            return self._parse(raw.parse())
         except Exception as e:
             return LLMResponse(content=f"Error: {e}", finish_reason="error")
+
+    @staticmethod
+    def _parse_responses_api(data: dict[str, Any]) -> LLMResponse:
+        """Parse OpenAI Responses API format into LLMResponse."""
+        content = None
+        tool_calls: list[ToolCallRequest] = []
+        for item in data.get("output", []):
+            if item.get("type") == "message":
+                for block in item.get("content", []):
+                    if block.get("type") == "output_text" and block.get("text"):
+                        content = (content or "") + block["text"]
+            elif item.get("type") == "function_call":
+                args = item.get("arguments", "{}")
+                if isinstance(args, str):
+                    args = json_repair.loads(args)
+                tool_calls.append(ToolCallRequest(
+                    id=item.get("call_id", item.get("id", "")),
+                    name=item.get("name", ""),
+                    arguments=args,
+                ))
+
+        usage = {}
+        if data.get("usage"):
+            u = data["usage"]
+            usage = {
+                "prompt_tokens": u.get("input_tokens", 0),
+                "completion_tokens": u.get("output_tokens", 0),
+                "total_tokens": u.get("total_tokens", 0),
+            }
+
+        return LLMResponse(
+            content=content,
+            tool_calls=tool_calls,
+            finish_reason="tool_calls" if tool_calls else "stop",
+            usage=usage,
+        )
 
     def _parse(self, response: Any) -> LLMResponse:
         choice = response.choices[0]
@@ -59,4 +107,3 @@ class CustomProvider(LLMProvider):
 
     def get_default_model(self) -> str:
         return self.default_model
-
