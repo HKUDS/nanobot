@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
@@ -67,8 +69,16 @@ class HeartbeatService:
         self.on_notify = on_notify
         self.interval_s = interval_s
         self.enabled = enabled
+        # Base silent mode flag from config. The final behavior can be
+        # overridden by the HEARTBEAT_SILENT environment variable or
+        # a special directive inside HEARTBEAT.md.
+        self.silent = False
         self._running = False
         self._task: asyncio.Task | None = None
+
+    def set_silent(self, silent: bool) -> None:
+        """Set base silent mode from configuration."""
+        self.silent = bool(silent)
 
     @property
     def heartbeat_file(self) -> Path:
@@ -81,6 +91,30 @@ class HeartbeatService:
             except Exception:
                 return None
         return None
+
+    def _effective_silent(self, content: str) -> bool:
+        """Compute effective silent mode.
+
+        Precedence (lowest → highest):
+        - HeartbeatService.silent (from config)
+        - HEARTBEAT_SILENT environment variable
+        - ``<!-- SILENT: true/false -->`` directive in HEARTBEAT.md
+        """
+        silent = self.silent
+
+        env = os.getenv("HEARTBEAT_SILENT")
+        if env is not None:
+            value = env.strip().lower()
+            if value in {"1", "true", "yes", "on"}:
+                silent = True
+            elif value in {"0", "false", "no", "off"}:
+                silent = False
+
+        match = re.search(r"<!--\s*SILENT:\s*(true|false)\s*-->", content, re.IGNORECASE)
+        if match:
+            silent = match.group(1).lower() == "true"
+
+        return silent
 
     async def _decide(self, content: str) -> tuple[str, str]:
         """Phase 1: ask LLM to decide skip/run via virtual tool call.
@@ -166,11 +200,12 @@ class HeartbeatService:
                     should_notify = await evaluate_response(
                         response, tasks, self.provider, self.model,
                     )
-                    if should_notify and self.on_notify:
+                    silent = self._effective_silent(content)
+                    if should_notify and self.on_notify and not silent:
                         logger.info("Heartbeat: completed, delivering response")
                         await self.on_notify(response)
                     else:
-                        logger.info("Heartbeat: silenced by post-run evaluation")
+                        logger.info("Heartbeat: silenced by post-run evaluation or config")
         except Exception:
             logger.exception("Heartbeat execution failed")
 

@@ -94,6 +94,11 @@ class HeartbeatConfig(Base):
 
     enabled: bool = True
     interval_s: int = 30 * 60  # 30 minutes
+    # When true, the heartbeat will still run tasks but will not
+    # deliver results back to chat channels. This is intended for
+    # users who want heartbeat checks to run silently in the
+    # background without generating notifications.
+    silent: bool = False
 
 
 class GatewayConfig(Base):
