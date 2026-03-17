@@ -35,14 +35,13 @@ jobs:
 
       - name: Copy bridge dist to VPS
         if: steps.bridge.outputs.changed == 'true'
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: root
-          key: ${{ secrets.VPS_SSH_KEY }}
-          source: bridge/dist/*.js
-          target: /home/homer/.nanobot/bridge/
-          strip_components: 1
+        run: |
+          echo "${{ secrets.VPS_SSH_KEY }}" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+          scp -i /tmp/deploy_key -o StrictHostKeyChecking=no \
+            bridge/dist/*.js \
+            root@${{ secrets.VPS_HOST }}:/home/homer/.nanobot/bridge/dist/
+          rm /tmp/deploy_key
 
       - name: Reinstall nanobot + restart on Homer VPS
         uses: appleboy/ssh-action@v1.0.3
