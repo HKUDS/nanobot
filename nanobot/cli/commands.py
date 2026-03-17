@@ -1,6 +1,7 @@
 """CLI commands for nanobot."""
 
 import asyncio
+from contextlib import contextmanager, nullcontext
 import os
 import select
 import signal
@@ -167,6 +168,51 @@ async def _print_interactive_response(response: str, render_markdown: bool) -> N
         print_formatted_text(ANSI(ansi), end="")
 
     await run_in_terminal(_write)
+
+
+class _ThinkingSpinner:
+    """Spinner wrapper with pause support for clean progress output."""
+
+    def __init__(self, enabled: bool):
+        self._spinner = console.status(
+            "[dim]nanobot is thinking...[/dim]", spinner="dots"
+        ) if enabled else None
+        self._active = False
+
+    def __enter__(self):
+        if self._spinner:
+            self._spinner.start()
+        self._active = True
+        return self
+
+    def __exit__(self, *exc):
+        self._active = False
+        if self._spinner:
+            self._spinner.stop()
+        return False
+
+    @contextmanager
+    def pause(self):
+        """Temporarily stop spinner while printing progress."""
+        if self._spinner and self._active:
+            self._spinner.stop()
+        try:
+            yield
+        finally:
+            if self._spinner and self._active:
+                self._spinner.start()
+
+
+def _print_cli_progress_line(text: str, thinking: _ThinkingSpinner | None) -> None:
+    """Print a CLI progress line, pausing the spinner if needed."""
+    with thinking.pause() if thinking else nullcontext():
+        console.print(f"  [dim]↳ {text}[/dim]")
+
+
+async def _print_interactive_progress_line(text: str, thinking: _ThinkingSpinner | None) -> None:
+    """Print an interactive progress line, pausing the spinner if needed."""
+    with thinking.pause() if thinking else nullcontext():
+        await _print_interactive_line(text)
 
 
 def _is_exit_command(command: str) -> bool:
@@ -415,7 +461,7 @@ def gateway(
     _print_deprecated_memory_window_notice(config)
     port = port if port is not None else config.gateway.port
 
-    console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
+    console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
@@ -666,13 +712,8 @@ def agent(
         channels_config=config.channels,
     )
 
-    # Show spinner when logs are off (no output to miss); skip when logs are on
-    def _thinking_ctx():
-        if logs:
-            from contextlib import nullcontext
-            return nullcontext()
-        # Animated spinner is safe to use with prompt_toolkit input handling
-        return console.status("[dim]nanobot is thinking...[/dim]", spinner="dots")
+    # Shared reference for progress callbacks
+    _thinking: _ThinkingSpinner | None = None
 
     async def _cli_progress(content: str, *, tool_hint: bool = False) -> None:
         ch = agent_loop.channels_config
@@ -680,13 +721,16 @@ def agent(
             return
         if ch and not tool_hint and not ch.send_progress:
             return
-        console.print(f"  [dim]↳ {content}[/dim]")
+        _print_cli_progress_line(content, _thinking)
 
     if message:
         # Single message mode — direct call, no bus needed
         async def run_once():
-            with _thinking_ctx():
+            nonlocal _thinking
+            _thinking = _ThinkingSpinner(enabled=not logs)
+            with _thinking:
                 response = await agent_loop.process_direct(message, session_id, on_progress=_cli_progress)
+            _thinking = None
             _print_agent_response(response, render_markdown=markdown)
             await agent_loop.close_mcp()
 
@@ -736,7 +780,7 @@ def agent(
                             elif ch and not is_tool_hint and not ch.send_progress:
                                 pass
                             else:
-                                await _print_interactive_line(msg.content)
+                                await _print_interactive_progress_line(msg.content, _thinking)
 
                         elif not turn_done.is_set():
                             if msg.content:
@@ -776,8 +820,11 @@ def agent(
                             content=user_input,
                         ))
 
-                        with _thinking_ctx():
+                        nonlocal _thinking
+                        _thinking = _ThinkingSpinner(enabled=not logs)
+                        with _thinking:
                             await turn_done.wait()
+                        _thinking = None
 
                         if turn_response:
                             _print_agent_response(turn_response[0], render_markdown=markdown)
