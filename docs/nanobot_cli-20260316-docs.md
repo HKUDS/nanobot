@@ -1377,3 +1377,342 @@ if __name__ == "__main__":
 - **文件总数:** 2
 - **代码总行数:** 1176
 - **物理总大小:** 42.00 KB
+
+
+# `commands.py` 代码详解
+
+这是 **nanobot**（个人 AI 助手）的 **CLI 命令行界面** 模块，基于 `typer` 框架构建。代码量很大，我将按模块逐层解析。
+
+---
+
+## 一、文件总体架构
+
+```
+commands.py
+├── 1. 导入与初始化（编码修复、库导入）
+├── 2. 终端输入/输出工具函数（prompt_toolkit 相关）
+├── 3. 命令：onboard（初始化配置）
+├── 4. 命令：gateway（启动网关服务器）
+├── 5. 命令：agent（与 AI 对话）
+├── 6. 命令：channels（频道管理）
+├── 7. 命令：plugins（插件管理）
+├── 8. 命令：status（状态查看）
+├── 9. 命令：provider login（OAuth 登录）
+└── 10. 入口点
+```
+
+---
+
+## 二、导入与初始化
+
+```python
+import asyncio
+import os
+import select
+import signal
+import sys
+from pathlib import Path
+from typing import Any
+import json
+import time
+```
+
+### Windows UTF-8 编码修复
+
+```python
+if sys.platform == "win32":
+    if sys.stdout.encoding != "utf-8":
+        os.environ["PYTHONIOENCODING"] = "utf-8"
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+```
+
+> **目的**：Windows 控制台默认编码可能不是 UTF-8，这会导致中文/emoji 等字符输出乱码。这里**强制将 stdout/stderr 设为 UTF-8**。
+
+### 关键第三方库
+
+```python
+import typer                    # CLI 框架（类似 argparse 但更现代）
+from prompt_toolkit import ...  # 高级终端输入库（支持历史、粘贴、语法高亮）
+from rich.console import Console # 终端美化输出库
+from rich.markdown import Markdown
+```
+
+### 全局对象
+
+```python
+app = typer.Typer(
+    name="nanobot",
+    help=f"{__logo__} nanobot - Personal AI Assistant",
+    no_args_is_help=True,  # 无参数时显示帮助
+)
+
+console = Console()
+EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}  # 退出命令集合
+```
+
+---
+
+## 三、终端输入/输出工具函数
+
+这部分解决的是**交互式终端的复杂问题**：
+
+### 3.1 清空残留输入
+
+```python
+def _flush_pending_tty_input() -> None:
+    """丢弃模型生成输出期间用户意外敲击的按键"""
+```
+
+> **场景**：AI 在思考时，用户可能无意按了键盘。这个函数在显示提示符前清空这些"垃圾输入"。
+
+实现原理：
+```
+1. 优先用 termios.tcflush()（Unix 原生刷新）
+2. 降级用 select + os.read 循环读取并丢弃
+```
+
+### 3.2 终端状态保存/恢复
+
+```python
+_SAVED_TERM_ATTRS = None  # 保存原始终端设置
+
+def _restore_terminal() -> None:
+    """恢复终端到原始状态（回显、行缓冲等）"""
+    if _SAVED_TERM_ATTRS is None:
+        return
+    try:
+        import termios
+        termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
+    except Exception:
+        pass
+```
+
+> **为什么需要**：`prompt_toolkit` 会修改终端的 raw mode。如果程序异常退出，终端可能变得不可用（不回显、不换行）。这里在退出时恢复原状。
+
+### 3.3 初始化 prompt_toolkit 会话
+
+```python
+def _init_prompt_session() -> None:
+    global _PROMPT_SESSION, _SAVED_TERM_ATTRS
+    
+    # 保存终端状态
+    _SAVED_TERM_ATTRS = termios.tcgetattr(sys.stdin.fileno())
+    
+    # 创建带历史记录的输入会话
+    _PROMPT_SESSION = PromptSession(
+        history=FileHistory(str(history_file)),  # 持久化历史到文件
+        enable_open_in_editor=False,
+        multiline=False,   # Enter 直接提交（单行模式）
+    )
+```
+
+> **功能**：支持 ↑↓ 翻阅历史、粘贴多行文本、持久化历史记录。
+
+### 3.4 渲染输出
+
+```python
+def _render_interactive_ansi(render_fn) -> str:
+    """将 Rich 输出渲染为 ANSI 字符串，供 prompt_toolkit 安全显示"""
+```
+
+> **问题**：Rich（输出库）和 prompt_toolkit（输入库）都想控制终端。直接混用会显示错乱。
+>
+> **解决**：Rich 先渲染成 ANSI 字符串 → 再交给 prompt_toolkit 输出。
+
+```python
+def _print_agent_response(response: str, render_markdown: bool) -> None:
+    """渲染 AI 回复"""
+    body = Markdown(content) if render_markdown else Text(content)
+    console.print(f"[cyan]{__logo__} nanobot[/cyan]")  # 蓝色 logo
+    console.print(body)                                  # Markdown 或纯文本
+```
+
+### 3.5 异步读取用户输入
+
+```python
+async def _read_interactive_input_async() -> str:
+    with patch_stdout():  # 防止异步输出干扰输入行
+        return await _PROMPT_SESSION.prompt_async(
+            HTML("<b fg='ansiblue'>You:</b> "),  # 蓝色粗体 "You: " 提示符
+        )
+```
+
+---
+
+## 四、版本号回调
+
+```python
+def version_callback(value: bool):
+    if value:
+        console.print(f"{__logo__} nanobot v{__version__}")
+        raise typer.Exit()
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        None, "--version", "-v", callback=version_callback, is_eager=True
+    ),
+):
+    """nanobot - Personal AI Assistant."""
+    pass
+```
+
+> 运行 `nanobot --version` 或 `nanobot -v` 时打印版本号并退出。
+> `is_eager=True` 表示此选项优先于子命令处理。
+
+---
+
+## 五、`onboard` 命令 —— 初始化配置
+
+```bash
+$ nanobot onboard
+```
+
+```python
+@app.command()
+def onboard():
+    """Initialize nanobot configuration and workspace."""
+```
+
+### 工作流程：
+
+```
+1. 检查配置文件是否存在
+   ├── 存在 → 询问用户：
+   │   ├── y → 覆盖为默认值
+   │   └── N → 保留现有值，补充新字段
+   └── 不存在 → 创建默认配置
+
+2. 调用 _onboard_plugins() 注入所有频道的默认配置
+
+3. 创建工作空间目录
+
+4. 同步模板文件到工作空间
+
+5. 打印引导信息（API key 设置等）
+```
+
+### 插件配置注入
+
+```python
+def _onboard_plugins(config_path: Path) -> None:
+    """为所有发现的频道注入默认配置"""
+    all_channels = discover_all()        # 发现所有频道（内置 + 插件）
+    for name, cls in all_channels.items():
+        if name not in channels:
+            channels[name] = cls.default_config()  # 新频道 → 添加默认配置
+        else:
+            channels[name] = _merge_missing_defaults(...)  # 已有 → 合并缺失字段
+```
+
+### 递归合并函数
+
+```python
+def _merge_missing_defaults(existing, defaults):
+    """递归填充缺失值，不覆盖用户已设置的值"""
+    merged = dict(existing)
+    for key, value in defaults.items():
+        if key not in merged:
+            merged[key] = value          # 缺失 → 用默认值
+        else:
+            merged[key] = _merge_missing_defaults(merged[key], value)  # 递归
+    return merged
+```
+
+> 例如：用户配置了 `{"api_key": "xxx"}`，默认有 `{"api_key": "", "timeout": 30}`，合并后得到 `{"api_key": "xxx", "timeout": 30}`。
+
+---
+
+## 六、Provider 创建 —— `_make_provider()`
+
+```python
+def _make_provider(config: Config):
+    """根据配置创建相应的 LLM 提供商"""
+```
+
+这是一个**工厂函数**，根据模型名/配置选择不同的 AI 提供商：
+
+```
+模型判断逻辑：
+├── openai_codex/...        → OpenAICodexProvider（OAuth 认证）
+├── custom                  → CustomProvider（自定义 OpenAI 兼容端点）
+├── azure_openai            → AzureOpenAIProvider（Azure 部署）
+└── 其他（默认）             → LiteLLMProvider（通用 LLM 路由）
+    ├── bedrock/...         → AWS Bedrock（无需显式 API key）
+    ├── OAuth 提供商         → 无需 API key
+    ├── 本地模型             → 无需 API key
+    └── 其他                → 需要 API key
+```
+
+最后设置生成参数：
+
+```python
+provider.generation = GenerationSettings(
+    temperature=defaults.temperature,
+    max_tokens=defaults.max_tokens,
+    reasoning_effort=defaults.reasoning_effort,
+)
+```
+
+---
+
+## 七、`gateway` 命令 —— 启动网关服务器
+
+```bash
+$ nanobot gateway --port 8080
+```
+
+这是**最复杂的命令**，启动一个完整的后台服务：
+
+```python
+@app.command()
+def gateway(
+    port: int | None = ...,
+    workspace: str | None = ...,
+    verbose: bool = ...,
+    config: str | None = ...,
+):
+```
+
+### 架构图
+
+```
+┌─────────────────────────────────────────────────┐
+│                  Gateway Server                  │
+├─────────────────────────────────────────────────┤
+│                                                  │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │
+│  │ AgentLoop│  │ MessageBus│  │SessionManager│  │
+│  │ (AI引擎) │←→│ (消息总线) │←→│ (会话管理)   │  │
+│  └──────────┘  └──────────┘  └──────────────┘  │
+│       ↕              ↕                           │
+│  ┌──────────┐  ┌──────────────┐                 │
+│  │CronService│ │ChannelManager│                 │
+│  │(定时任务) │  │(频道管理)    │                 │
+│  └──────────┘  ├──────────────┤                 │
+│       ↕        │ - Telegram   │                 │
+│  ┌──────────┐  │ - WhatsApp   │                 │
+│  │Heartbeat │  │ - Discord    │                 │
+│  │(心跳服务)│  │ - ...        │                 │
+│  └──────────┘  └──────────────┘                 │
+│       ↕                                          │
+│  ┌──────────────────────┐                       │
+│  │ HTTP API (aiohttp)   │                       │
+│  │ POST /api/message    │                       │
+│  │ GET  /api/health     │                       │
+│  └──────────────────────┘                       │
+└─────────────────────────────────────────────────┘
+```
+
+### 核心组件初始化
+
+```python
+bus = MessageBus()                          # 消息总线（发布-订阅模式）
+provider = _make_provider(config)           # AI 提供商
+session_manager = SessionManager(...)       # 会话管理
+cron = CronService(c
+```
