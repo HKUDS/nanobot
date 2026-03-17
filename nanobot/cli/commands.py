@@ -506,12 +506,17 @@ def gateway(
         cron_token = None
         if isinstance(cron_tool, CronTool):
             cron_token = cron_tool.set_cron_context(True)
+
+        async def _noop_progress(content: str, **kwargs) -> None:
+            pass  # Suppress progress messages for cron jobs
+
         try:
             response = await agent.process_direct(
                 reminder_note,
                 session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
+                on_progress=_noop_progress,
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
