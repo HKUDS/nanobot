@@ -1,0 +1,152 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "~/.nanobot/workspace",
+      "model": "anthropic/claude-opus-4-5",
+      "provider": "auto",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536,
+      "temperature": 0.1,
+      "maxToolIterations": 40,
+      "reasoningEffort": null
+    }
+  },
+  "channels": {
+    "sendProgress": true,
+    "sendToolHints": false
+  },
+  "providers": {
+    "custom": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "azureOpenai": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "anthropic": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "openai": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "openrouter": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "deepseek": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "groq": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "zhipu": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "dashscope": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "vllm": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "ollama": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "gemini": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "moonshot": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "minimax": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "aihubmix": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "siliconflow": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "volcengine": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "volcengineCodingPlan": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "byteplus": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "byteplusCodingPlan": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "openaiCodex": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "githubCopilot": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    }
+  },
+  "gateway": {
+    "host": "0.0.0.0",
+    "port": 18790,
+    "heartbeat": {
+      "enabled": true,
+      "intervalS": 1800
+    }
+  },
+  "tools": {
+    "web": {
+      "provider": "brave",
+      "apiKey": "",
+      "baseUrl": "",
+      "maxResults": 5
+    },
+    "exec": {
+      "timeout": 60,
+      "pathAppend": ""
+    },
+    "restrictToWorkspace": false,
+    "mcpServers": {}
+  }
+}

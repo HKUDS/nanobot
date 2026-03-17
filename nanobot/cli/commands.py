@@ -2,8 +2,10 @@
 
 import asyncio
 from contextlib import contextmanager, nullcontext
+import json
 import os
 import select
+import shutil
 import signal
 import sys
 from pathlib import Path
@@ -335,6 +337,23 @@ def _merge_missing_defaults(existing: Any, defaults: Any) -> Any:
         else:
             merged[key] = _merge_missing_defaults(merged[key], value)
     return merged
+
+
+def _show_diff(old: dict, new: dict, console: Console, path: str = "") -> None:
+    """Show differences between old and new config."""
+    for key in sorted(set(old.keys()) | set(new.keys())):
+        current_path = f"{path}.{key}" if path else key
+        old_val = old.get(key)
+        new_val = new.get(key)
+
+        if key not in old:
+            console.print(f"  [green]+ {current_path}[/green]: {json.dumps(new_val, default=str)[:100]}")
+        elif key not in new:
+            console.print(f"  [red]- {current_path}[/red]: {json.dumps(old_val, default=str)[:100]}")
+        elif isinstance(old_val, dict) and isinstance(new_val, dict):
+            _show_diff(old_val, new_val, console, current_path)
+        elif old_val != new_val:
+            console.print(f"  [yellow]~ {current_path}[/yellow]: {json.dumps(old_val, default=str)[:50]} → {json.dumps(new_val, default=str)[:50]}")
 
 
 def _onboard_plugins(config_path: Path) -> None:
@@ -838,6 +857,196 @@ def agent(
 
 channels_app = typer.Typer(help="Manage channels")
 app.add_typer(channels_app, name="channels")
+
+
+# ============================================================================
+# Config Commands
+# ============================================================================
+
+
+config_app = typer.Typer(help="Manage configuration")
+app.add_typer(config_app, name="config")
+
+
+@config_app.command("template")
+def config_template(
+    output: Path | None = typer.Option(None, "--output", "-o", help="Output file path (default: stdout)"),
+    include_channels: bool = typer.Option(False, "--include-channels", "-c", help="Include default channel configs"),
+):
+    """Output the default configuration template.
+
+    This command outputs the current default config structure, which can be used
+    as a reference for manual config updates or to compare against your existing config.
+
+    Use 'nanobot config template > config.template.json' to save to a file.
+    """
+    from nanobot.config.schema import Config
+
+    config = Config()
+    data = config.model_dump(by_alias=True)
+
+    if not include_channels:
+        # Remove channel-specific configs, keep only core settings
+        data.pop("channels", None)
+
+    output_text = json.dumps(data, indent=2, ensure_ascii=False)
+
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(output_text, encoding="utf-8")
+        console.print(f"[green]✓[/green] Template written to {output}")
+    else:
+        console.print(output_text)
+
+
+@config_app.command("diff")
+def config_diff(
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show all differences, including unchanged fields"),
+):
+    """Compare current config against defaults.
+
+    Shows which fields are missing from your config compared to the default template.
+    Useful for identifying new fields added in recent versions.
+    """
+    from nanobot.config.loader import get_config_path, load_config
+    from nanobot.config.schema import Config
+
+    path = Path(config_path).expanduser().resolve() if config_path else get_config_path()
+
+    if not path.exists():
+        console.print(f"[red]Error: Config file not found: {path}[/red]")
+        raise typer.Exit(1)
+
+    # Load user config
+    user_config = load_config(path)
+    user_data = user_config.model_dump(by_alias=True)
+
+    # Get defaults
+    default_config = Config()
+    default_data = default_config.model_dump(by_alias=True)
+
+    # Find differences
+    missing = _find_missing_fields(user_data, default_data)
+    extra = _find_extra_fields(user_data, default_data)
+
+    if not missing and not extra:
+        console.print("[green]✓[/green] Config is up to date with defaults")
+        return
+
+    if missing:
+        console.print("\n[yellow]Missing fields (exist in defaults but not in your config):[/yellow]")
+        for path_str in missing:
+            console.print(f"  [dim]-[/dim] {path_str}")
+
+    if extra and verbose:
+        console.print("\n[cyan]Extra fields (in your config but not in defaults):[/cyan]")
+        for path_str in extra:
+            console.print(f"  [dim]+[/dim] {path_str}")
+
+
+@config_app.command("migrate")
+def config_migrate(
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Show what would change without modifying"),
+    backup: bool = typer.Option(True, "--backup/--no-backup", help="Create backup before migration"),
+    preserve_sections: bool = typer.Option(True, "--preserve-sections/--add-all", help="Only merge into existing sections, don't add new top-level sections"),
+):
+    """Migrate config to include new fields from defaults.
+
+    This command intelligently merges new default fields into your config while:
+    - Preserving all your existing values
+    - Optionally preserving your choice to omit unused sections (e.g., if you removed
+      unused provider configs, they won't be added back)
+    - Creating a backup before making changes
+
+    Use --dry-run to preview changes without modifying your config.
+    """
+    from nanobot.config.loader import get_config_path, load_config, save_config
+
+    path = Path(config_path).expanduser().resolve() if config_path else get_config_path()
+
+    if not path.exists():
+        console.print(f"[red]Error: Config file not found: {path}[/red]")
+        console.print("Run 'nanobot onboard' to create a new config.")
+        raise typer.Exit(1)
+
+    # Load current config as dict (to preserve structure)
+    with open(path, encoding="utf-8") as f:
+        user_data = json.load(f)
+
+    # Get defaults
+    default_config = Config()
+    default_data = default_config.model_dump(by_alias=True)
+
+    # Merge
+    if preserve_sections:
+        merged = _merge_existing_sections(user_data, default_data)
+    else:
+        merged = _merge_missing_defaults(user_data, default_data)
+
+    # Check if there are any changes
+    if merged == user_data:
+        console.print("[green]✓[/green] Config is already up to date")
+        return
+
+    # Show diff
+    console.print("\n[cyan]Changes to be made:[/cyan]")
+    _show_diff(user_data, merged, console)
+
+    if dry_run:
+        console.print("\n[yellow]Dry run: no changes made[/yellow]")
+        return
+
+    # Backup
+    if backup:
+        backup_path = path.with_suffix(path.suffix + ".bak")
+        shutil.copy(path, backup_path)
+        console.print(f"[dim]Backup saved to {backup_path}[/dim]")
+
+    # Write merged config
+    path.write_text(json.dumps(merged, indent=2, ensure_ascii=False), encoding="utf-8")
+    console.print(f"[green]✓[/green] Config migrated: {path}")
+
+
+def _find_missing_fields(user: dict, default: dict, path: str = "") -> list[str]:
+    """Find fields that exist in defaults but not in user config."""
+    missing = []
+    for key, value in default.items():
+        current_path = f"{path}.{key}" if path else key
+        if key not in user:
+            missing.append(current_path)
+        elif isinstance(value, dict) and isinstance(user.get(key), dict):
+            missing.extend(_find_missing_fields(user[key], value, current_path))
+    return missing
+
+
+def _find_extra_fields(user: dict, default: dict, path: str = "") -> list[str]:
+    """Find fields that exist in user config but not in defaults."""
+    extra = []
+    for key, value in user.items():
+        current_path = f"{path}.{key}" if path else key
+        if key not in default:
+            extra.append(current_path)
+        elif isinstance(value, dict) and isinstance(default.get(key), dict):
+            extra.extend(_find_extra_fields(value, default[key], current_path))
+    return extra
+
+
+def _merge_existing_sections(user: dict, default: dict) -> dict:
+    """Merge defaults into user config, but only for sections that exist in user config.
+
+    This respects users who have intentionally removed unused sections (e.g., unused providers).
+    """
+    result = dict(user)
+    for key, value in default.items():
+        if key not in result:
+            # Skip adding new top-level sections
+            continue
+        elif isinstance(value, dict) and isinstance(result.get(key), dict):
+            # Recursively merge nested dicts
+            result[key] = _merge_missing_defaults(result[key], value)
+    return result
 
 
 @channels_app.command("status")

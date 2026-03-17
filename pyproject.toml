@@ -86,6 +86,7 @@ include = [
     "nanobot/templates/**/*.md",
     "nanobot/skills/**/*.md",
     "nanobot/skills/**/*.sh",
+    "nanobot/config/template.json",
 ]
 
 [tool.hatch.build.targets.wheel]
