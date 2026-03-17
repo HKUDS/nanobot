@@ -75,7 +75,7 @@ def test_onboard_refresh_rewrites_legacy_config_template(tmp_path, monkeypatch) 
     from typer.testing import CliRunner
     from nanobot.cli.commands import app
     runner = CliRunner()
-    result = runner.invoke(app, ["onboard"], input="n\n")
+    result = runner.invoke(app, ["onboard", "--no-interactive"], input="n\n")
 
     assert result.exit_code == 0
     assert "contextWindowTokens" in result.stdout
@@ -127,7 +127,7 @@ def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch)
     from typer.testing import CliRunner
     from nanobot.cli.commands import app
     runner = CliRunner()
-    result = runner.invoke(app, ["onboard"], input="n\n")
+    result = runner.invoke(app, ["onboard", "--no-interactive"], input="n\n")
 
     assert result.exit_code == 0
     saved = json.loads(config_path.read_text(encoding="utf-8"))
