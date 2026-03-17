@@ -5,7 +5,7 @@ from nanobot.session.manager import Session
 
 def _mk_loop() -> AgentLoop:
     loop = AgentLoop.__new__(AgentLoop)
-    loop._TOOL_RESULT_MAX_CHARS = 500
+    loop._TOOL_RESULT_MAX_CHARS = AgentLoop._TOOL_RESULT_MAX_CHARS
     return loop
 
 
@@ -39,3 +39,17 @@ def test_save_turn_keeps_image_placeholder_after_runtime_strip() -> None:
         skip=0,
     )
     assert session.messages[0]["content"] == [{"type": "text", "text": "[image]"}]
+
+
+def test_save_turn_keeps_tool_results_under_16k() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:tool-result")
+    content = "x" * 12_000
+
+    loop._save_turn(
+        session,
+        [{"role": "tool", "tool_call_id": "call_1", "name": "read_file", "content": content}],
+        skip=0,
+    )
+
+    assert session.messages[0]["content"] == content
