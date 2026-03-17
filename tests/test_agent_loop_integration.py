@@ -13,9 +13,7 @@ class TestAgentLoopBrowserIntegration:
     """Integration tests for agent loop with browser tool."""
 
     @pytest.mark.asyncio
-    async def test_browser_tool_registered(
-        self, mock_workspace, mock_message_bus
-    ):
+    async def test_browser_tool_registered(self, mock_workspace, mock_message_bus):
         """Test that browser tool is registered."""
         mock_provider = Mock()
         mock_provider.chat = AsyncMock()

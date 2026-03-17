@@ -264,9 +264,13 @@ class LLMProvider(ABC):
             reasoning_effort = self.generation.reasoning_effort
 
         kw: dict[str, Any] = dict(
-            messages=messages, tools=tools, model=model,
-            max_tokens=max_tokens, temperature=temperature,
-            reasoning_effort=reasoning_effort, tool_choice=tool_choice,
+            messages=messages,
+            tools=tools,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+            tool_choice=tool_choice,
         )
 
         for attempt, delay in enumerate(self._CHAT_RETRY_DELAYS, start=1):
@@ -279,13 +283,17 @@ class LLMProvider(ABC):
                 if self._is_image_unsupported_error(response.content):
                     stripped = self._strip_image_content(messages)
                     if stripped is not None:
-                        logger.warning("Model does not support image input, retrying without images")
+                        logger.warning(
+                            "Model does not support image input, retrying without images"
+                        )
                         return await self._safe_chat(**{**kw, "messages": stripped})
                 return response
 
             logger.warning(
                 "LLM transient error (attempt {}/{}), retrying in {}s: {}",
-                attempt, len(self._CHAT_RETRY_DELAYS), delay,
+                attempt,
+                len(self._CHAT_RETRY_DELAYS),
+                delay,
                 (response.content or "")[:120].lower(),
             )
             await asyncio.sleep(delay)

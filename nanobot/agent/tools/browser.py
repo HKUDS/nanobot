@@ -633,20 +633,20 @@ Screenshot returns base64-encoded image data."""
             return ToolResult(content="Error: No active session", images=None)
 
         path = kwargs.get("path")
-        
+
         # Determine image type from path extension
         image_type = "png"
         if path:
             ext = os.path.splitext(path)[1].lower()
             if ext in [".jpeg", ".jpg"]:
                 image_type = "jpeg"
-        
+
         # Capture screenshot
         screenshot_bytes = await session.page.screenshot(type=image_type)
-        
+
         # Encode to base64
         b64 = base64.b64encode(screenshot_bytes).decode()
-        
+
         # Save to file if path is provided
         if path:
             # Create directory if needed
@@ -658,7 +658,7 @@ Screenshot returns base64-encoded image data."""
             content = f"Screenshot captured and saved to: {path}"
         else:
             content = "Screenshot captured"
-        
+
         # Return image data as base64
         return ToolResult(
             content=content,
