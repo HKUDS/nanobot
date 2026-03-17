@@ -764,7 +764,7 @@ nanobot gateway
 **1. Install the optional dependency**
 
 ```bash
-pip install nanobot-ai[wecom]
+pip install wecom-app-svr
 ```
 
 **2. Create a WeCom AI Bot**
@@ -789,11 +789,11 @@ In the WeCom app configuration:
   "channels": {
     "wecom_app": {
       "enabled": true,
-      "corp_id": "your_corp_id",
-      "agentid": "your_agent_id",
-      "secret": "your_secret",
       "token": "your_token",
-      "aes_key": "your_aes_key",
+      "corpId": "your_corp_id",
+      "secret": "your_secret",
+      "agentid": "your_agent_id",
+      "aesKey": "your_aes_key",
       "host": "0.0.0.0",
       "port": 18791,
       "path": "/wecom_app",
@@ -809,8 +809,8 @@ In the WeCom app configuration:
 | `port` | `18791` | Server listen port (must match WeCom callback URL) |
 | `path` | `/wecom_app` | Callback path |
 | `token` | - | Verification token from WeCom admin |
-| `aes_key` | - | AES key from WeCom admin |
-| `corp_id` | - | Your WeCom Corp ID |
+| `aesKey` | - | AES key from WeCom admin |
+| `corpId` | - | Your WeCom Corp ID |
 | `agentid` | - | Your WeCom App Agent ID |
 | `secret` | - | Your WeCom App Secret |
 | `welcome_message` | - | Message sent when user enters the chat |
