@@ -8,6 +8,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from nanobot.agent.skills import SkillsLoader
 from nanobot.utils.helpers import ensure_dir
 from nanobot.web.template_store import TemplateConfig
 
@@ -22,7 +23,6 @@ class AssistantConfig(BaseModel):
     model: str
     enabled_skills: list[str] = Field(default_factory=list)
     enabled_mcps: list[str] = Field(default_factory=list)
-    enabled_cron_jobs: list[str] = Field(default_factory=list)
     user_identity: str = ""
     agent_identity: str = ""
     system_prompt: str = ""
@@ -43,7 +43,6 @@ class AssistantUpdate(BaseModel):
     model: str | None = None
     enabled_skills: list[str] | None = None
     enabled_mcps: list[str] | None = None
-    enabled_cron_jobs: list[str] | None = None
     user_identity: str | None = None
     agent_identity: str | None = None
     system_prompt: str | None = None
@@ -59,7 +58,6 @@ def serialize_assistant_prompt(assistant: AssistantConfig) -> dict[str, object]:
         "model": assistant.model,
         "enabled_skills": assistant.enabled_skills,
         "enabled_mcps": assistant.enabled_mcps,
-        "enabled_cron_jobs": assistant.enabled_cron_jobs,
         "user_identity": assistant.user_identity,
         "agent_identity": assistant.agent_identity,
         "system_prompt": assistant.system_prompt,
@@ -78,6 +76,11 @@ class AssistantStore:
         self.default_model = default_model
         self.store_dir = ensure_dir(self.workspace / "web")
         self.store_path = self.store_dir / "assistants.json"
+
+    def _default_enabled_skills(self) -> list[str]:
+        """Enable all globally available skills for newly created agents by default."""
+        loader = SkillsLoader(self.workspace)
+        return [item["name"] for item in loader.list_skills(filter_unavailable=False)]
 
     def list_assistants(self) -> list[AssistantConfig]:
         assistants = self._load()
@@ -98,6 +101,7 @@ class AssistantStore:
             description="A blank agent with no additional prompt instructions.",
             icon="🐈",
             model=self.default_model,
+            enabled_skills=self._default_enabled_skills(),
             created_at=now,
             updated_at=now,
         )
@@ -121,6 +125,7 @@ class AssistantStore:
             description=template.description if template else "",
             icon=template.icon if template else "🐈",
             model=self.default_model,
+            enabled_skills=self._default_enabled_skills(),
             user_identity=template.user_identity if template else "",
             agent_identity=template.agent_identity if template else "",
             system_prompt=template.system_prompt if template else "",

@@ -104,6 +104,8 @@ class CronService:
                         payload=CronPayload(
                             kind=j["payload"].get("kind", "agent_turn"),
                             message=j["payload"].get("message", ""),
+                            assistant_id=j["payload"].get("assistantId"),
+                            topic_session_id=j["payload"].get("topicSessionId"),
                             deliver=j["payload"].get("deliver", False),
                             channel=j["payload"].get("channel"),
                             to=j["payload"].get("to"),
@@ -151,6 +153,8 @@ class CronService:
                     "payload": {
                         "kind": j.payload.kind,
                         "message": j.payload.message,
+                        "assistantId": j.payload.assistant_id,
+                        "topicSessionId": j.payload.topic_session_id,
                         "deliver": j.payload.deliver,
                         "channel": j.payload.channel,
                         "to": j.payload.to,
@@ -288,6 +292,8 @@ class CronService:
         name: str,
         schedule: CronSchedule,
         message: str,
+        assistant_id: str | None = None,
+        topic_session_id: str | None = None,
         deliver: bool = False,
         channel: str | None = None,
         to: str | None = None,
@@ -306,6 +312,8 @@ class CronService:
             payload=CronPayload(
                 kind="agent_turn",
                 message=message,
+                assistant_id=assistant_id,
+                topic_session_id=topic_session_id,
                 deliver=deliver,
                 channel=channel,
                 to=to,
@@ -322,6 +330,37 @@ class CronService:
 
         logger.info("Cron: added job '{}' ({})", name, job.id)
         return job
+
+    def update_job(
+        self,
+        job_id: str,
+        *,
+        name: str,
+        schedule: CronSchedule,
+        message: str,
+        assistant_id: str | None = None,
+        topic_session_id: str | None = None,
+        enabled: bool = True,
+    ) -> CronJob | None:
+        """Update an existing job."""
+        store = self._load_store()
+        _validate_schedule_for_add(schedule)
+        now = _now_ms()
+        for job in store.jobs:
+            if job.id != job_id:
+                continue
+            job.name = name
+            job.schedule = schedule
+            job.payload.message = message
+            job.payload.assistant_id = assistant_id
+            job.payload.topic_session_id = topic_session_id
+            job.enabled = enabled
+            job.updated_at_ms = now
+            job.state.next_run_at_ms = _compute_next_run(schedule, now) if enabled else None
+            self._save_store()
+            self._arm_timer()
+            return job
+        return None
 
     def remove_job(self, job_id: str) -> bool:
         """Remove a job by ID."""

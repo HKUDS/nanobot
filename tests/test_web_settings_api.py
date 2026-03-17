@@ -11,6 +11,7 @@ from nanobot.web.server import create_app
 
 class _FakeAgentLoop:
     def __init__(self, *args, **kwargs) -> None:
+        self.workspace = kwargs["workspace"]
         self.context = ContextBuilder(kwargs["workspace"])
 
     async def _connect_mcp(self) -> None:
@@ -30,13 +31,29 @@ class _FakeCronService:
                     name="Daily review",
                     enabled=True,
                     schedule=CronSchedule(kind="cron", expr="0 9 * * *", tz="Asia/Shanghai"),
-                    payload=CronPayload(kind="agent_turn", message="Review HEARTBEAT"),
+                    payload=CronPayload(
+                        kind="agent_turn",
+                        message="Review HEARTBEAT",
+                        assistant_id="default",
+                        topic_session_id="web:default:topic-1",
+                    ),
                     state=CronJobState(next_run_at_ms=1_800_000_000_000, last_status="ok"),
                     created_at_ms=1_700_000_000_000,
                     updated_at_ms=1_700_000_000_000,
                 )
             ]
         )
+
+    async def start(self) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
+
+    def remove_job(self, job_id: str) -> bool:
+        before = len(self._store.jobs)
+        self._store.jobs = [job for job in self._store.jobs if job.id != job_id]
+        return len(self._store.jobs) < before
 
     def list_jobs(self, include_disabled: bool = False) -> list[CronJob]:
         return self._store.jobs
@@ -83,9 +100,15 @@ def test_settings_endpoint_returns_workspace_templates_skills_and_runtime_state(
     assert pharmacogenomics["name"] == "Pharmacogenomics Analyst"
     assert pharmacogenomics["required_mcps"] == ["exa"]
 
-    assert any(item["name"] == "local-skill" and item["source"] == "workspace" for item in data["skills"])
+    assert any(
+        item["name"] == "local-skill"
+        and item["source"] == "workspace"
+        and item["description"] == "local skill"
+        for item in data["skills"]
+    )
     assert data["cron_jobs"][0]["name"] == "Daily review"
-    assert data["cron_jobs"][0]["schedule"] == "0 9 * * *"
+    assert data["cron_jobs"][0]["topic_id"] == "web:default:topic-1"
+    assert data["cron_jobs"][0]["cron_expr"] == "0 9 * * *"
     assert data["mcp_servers"][0]["name"] == "github"
 
 
@@ -164,7 +187,6 @@ def test_agent_topic_flow_and_agent_updates_propagate(tmp_path: Path) -> None:
             json={
                 "enabled_skills": ["literature-review", "citation-check"],
                 "enabled_mcps": ["exa"],
-                "enabled_cron_jobs": ["daily-review"],
                 "agent_identity": "You are a stricter pharmacogenomics reviewer.",
                 "user_identity": "The user is a clinical pharmacologist.",
                 "system_prompt": "Always produce a literature-backed summary.",

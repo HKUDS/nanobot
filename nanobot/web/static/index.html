@@ -317,7 +317,7 @@
       <div class="px-5 py-4 border-b hairline flex items-center gap-3">
         <div>
           <div class="text-[11px] uppercase tracking-[0.26em]" style="color: var(--text-faint);">Agent Settings</div>
-          <div class="text-lg font-semibold">Model, MCP, skills, and cron for this agent</div>
+          <div class="text-lg font-semibold">Prompt, MCP, and skills for this agent</div>
         </div>
         <button id="btn-close-agent-settings" class="ml-auto h-10 w-10 rounded-2xl border text-lg" style="border-color: var(--border); color: var(--text-muted);">×</button>
       </div>
@@ -332,6 +332,20 @@
       <div class="px-5 py-4 border-t hairline">
         <button id="btn-save-agent-settings" class="w-full md:w-auto px-6 py-3 rounded-2xl text-sm font-medium transition-colors" style="background: var(--primary); color: white;">Save Agent Settings</button>
       </div>
+    </div>
+  </div>
+
+  <div id="topic-cron-modal" class="hidden fixed inset-0 z-50 overlay p-3 md:p-6">
+    <div class="glass-panel h-full w-full max-w-5xl mx-auto rounded-[2rem] overflow-hidden flex flex-col">
+      <div class="px-5 py-4 border-b hairline flex items-center gap-3">
+        <div>
+          <div class="text-[11px] uppercase tracking-[0.26em]" style="color: var(--text-faint);">Topic Settings</div>
+          <div id="topic-cron-title" class="text-lg font-semibold">Cron Jobs</div>
+          <div id="topic-cron-subtitle" class="text-sm mt-1" style="color: var(--text-muted);">Schedule reminders for this topic only.</div>
+        </div>
+        <button id="btn-close-topic-cron" class="ml-auto h-10 w-10 rounded-2xl border text-lg" style="border-color: var(--border); color: var(--text-muted);">×</button>
+      </div>
+      <div id="topic-cron-content" class="flex-1 overflow-y-auto p-5"></div>
     </div>
   </div>
 
@@ -408,12 +422,14 @@
     let currentToolCard = null;
     let activeAgentSettingsTab = 'model';
     let selectedNewAgentTemplateId = 'default';
+    let currentTopicCronSessionId = null;
+    let currentTopicCronJobs = [];
+    let expandedTopicCronKeys = new Set();
 
     const AGENT_SETTINGS_TABS = [
       { id: 'model', icon: '📝', label: 'Prompt' },
       { id: 'mcp', icon: '🔧', label: 'MCP Servers' },
       { id: 'skills', icon: '⚡', label: 'Skills' },
-      { id: 'cron', icon: '⏰', label: 'Cron Jobs' },
     ];
 
     const DEFAULT_PRESET = {
@@ -433,8 +449,8 @@
     const RUNTIME_TABS = [
       { id: 'model_config', icon: '🧠', label: 'Global Model Config' },
       { id: 'prompt_config', icon: '👤', label: 'Global Prompt Config' },
-      { id: 'templates', icon: '📋', label: 'Presets' },
       { id: 'cron_jobs', icon: '⏰', label: 'Cron Jobs' },
+      { id: 'templates', icon: '📋', label: 'Presets' },
       { id: 'mcp_servers', icon: '🔧', label: 'MCP Servers' },
       { id: 'skills', icon: '⚡', label: 'Skills' },
       { id: 'appearance', icon: '🎨', label: 'Appearance' },
@@ -474,6 +490,10 @@
     const modelSettingsModal = document.getElementById('agent-settings-modal');
     const agentSettingsNav = document.getElementById('agent-settings-nav');
     const agentSettingsContent = document.getElementById('agent-settings-content');
+    const topicCronModal = document.getElementById('topic-cron-modal');
+    const topicCronTitle = document.getElementById('topic-cron-title');
+    const topicCronSubtitle = document.getElementById('topic-cron-subtitle');
+    const topicCronContent = document.getElementById('topic-cron-content');
     const promptSettingsModal = document.getElementById('prompt-settings-modal');
     const promptUserIdentity = document.getElementById('prompt-user-identity');
     const promptAgentIdentity = document.getElementById('prompt-agent-identity');
@@ -776,6 +796,14 @@
       return assistant?.topics || [];
     }
 
+    function getTopicBySessionId(sessionId) {
+      for (const assistant of agentsData || []) {
+        const topic = (assistant.topics || []).find((item) => item.session_id === sessionId);
+        if (topic) return topic;
+      }
+      return null;
+    }
+
     function getActiveTopic() {
       return getActiveTopics().find((topic) => topic.session_id === currentSession) || null;
     }
@@ -886,13 +914,18 @@
                 <div class="text-xs mt-1 truncate" style="color: var(--text-faint);">${escapeHtml(topic.updated_at)}</div>
               </div>
               <div class="flex gap-1">
+                <button class="topic-item-action h-7 w-7 rounded-xl border text-xs" style="border-color: var(--border); color: var(--text-muted);" title="Topic cron settings">⚙</button>
                 <button class="topic-item-action h-7 w-7 rounded-xl border text-xs" style="border-color: var(--border); color: var(--text-muted);" title="Rename topic">✎</button>
                 <button class="topic-item-action h-7 w-7 rounded-xl border text-xs" style="border-color: var(--border); color: var(--text-muted);" title="Delete topic">×</button>
               </div>
             </div>
           `;
           item.addEventListener('click', () => setActiveTopic(topic.session_id));
-          const [renameButton, deleteButton] = item.querySelectorAll('.topic-item-action');
+          const [settingsButton, renameButton, deleteButton] = item.querySelectorAll('.topic-item-action');
+          settingsButton.addEventListener('click', async (event) => {
+            event.stopPropagation();
+            await openTopicCronSettings(topic.session_id);
+          });
           renameButton.addEventListener('click', async (event) => {
             event.stopPropagation();
             const nextName = prompt('Rename topic:', topic.name);
@@ -965,6 +998,10 @@
     }
 
     async function setActiveTopic(sessionId) {
+      const topic = getTopicBySessionId(sessionId);
+      if (topic?.assistant_id && topic.assistant_id !== currentAgentId) {
+        currentAgentId = topic.assistant_id;
+      }
       currentSession = sessionId;
       renderTopics();
       if (window.innerWidth < 1024) closeMobileNavigation();
@@ -1043,6 +1080,166 @@
       return date.toLocaleString();
     }
 
+    function currentTopicCronField(job, field) {
+      const kind = job.schedule_kind || 'cron';
+      if (field === 'cron') return kind === 'cron';
+      if (field === 'timezone') return kind === 'cron';
+      if (field === 'every') return kind === 'every';
+      if (field === 'at') return kind === 'at';
+      return true;
+    }
+
+    function renderTopicCronModal() {
+      const topic = getActiveTopics().find((item) => item.session_id === currentTopicCronSessionId);
+      const assistant = topic ? getAssistantById(topic.assistant_id) : getActiveAssistant();
+      topicCronTitle.textContent = topic ? `Cron Jobs · ${topic.name}` : 'Cron Jobs';
+      topicCronSubtitle.textContent = assistant
+        ? `Only this topic will receive the scheduled message under ${assistant.name}.`
+        : 'Schedule reminders for this topic only.';
+      topicCronContent.innerHTML = `
+        <div class="space-y-4">
+          <div class="flex items-center justify-between gap-3">
+            <div class="text-sm" style="color: var(--text-muted);">All cron jobs here belong to this topic only. Click a row to expand and edit details.</div>
+            <button type="button" id="btn-add-topic-cron-job" class="px-3 py-2 rounded-2xl text-sm font-medium" style="background: var(--bg-soft); border: 1px solid var(--border); color: var(--text);">Add Cron Job</button>
+          </div>
+          <div class="space-y-4">
+            ${currentTopicCronJobs.length ? currentTopicCronJobs.map((job, index) => `
+              <details class="settings-card" data-cron-index="${index}" data-job-id="${escapeHtml(job.id || '')}" data-cron-key="${escapeHtml(job.id || `draft-${index}`)}" ${expandedTopicCronKeys.has(job.id || `draft-${index}`) || !job.id ? 'open' : ''}>
+                <summary class="cursor-pointer list-none">
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                      <div class="text-sm font-semibold truncate">${escapeHtml(job.name || 'New Cron Job')}</div>
+                      <div class="text-xs mt-1" style="color: var(--text-faint);">${escapeHtml(cronScheduleHint(job))}</div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 text-xs text-right flex-shrink-0" style="color: var(--text-faint);">
+                      <div>
+                        <div>Next</div>
+                        <div class="mt-1" style="color: var(--text);">${escapeHtml(formatRelativeTime(job.next_run_at))}</div>
+                      </div>
+                      <div>
+                        <div>Last</div>
+                        <div class="mt-1" style="color: var(--text);">${escapeHtml(formatRelativeTime(job.last_run_at))}</div>
+                      </div>
+                      <div>
+                        <div>Status</div>
+                        <div class="mt-1" style="color: var(--text);">${escapeHtml(job.last_status || (job.enabled !== false ? 'Enabled' : 'Disabled'))}</div>
+                      </div>
+                    </div>
+                  </div>
+                </summary>
+                <div class="pt-4 border-t hairline mt-4">
+                  <div class="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Job Name</label>
+                      <input data-field="name" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(job.name || '')}" placeholder="Daily summary" />
+                    </div>
+                    <div>
+                      <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Enabled</label>
+                      <select data-field="enabled" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none">
+                        <option value="true" ${job.enabled !== false ? 'selected' : ''}>Enabled</option>
+                        <option value="false" ${job.enabled === false ? 'selected' : ''}>Disabled</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="grid md:grid-cols-2 gap-4 mt-4">
+                    <div>
+                      <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Schedule Type</label>
+                      <select data-field="schedule_kind" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none">
+                        <option value="cron" ${job.schedule_kind === 'cron' ? 'selected' : ''}>Cron Expression</option>
+                        <option value="every" ${job.schedule_kind === 'every' ? 'selected' : ''}>Every N Minutes</option>
+                        <option value="at" ${job.schedule_kind === 'at' ? 'selected' : ''}>Run Once</option>
+                      </select>
+                    </div>
+                    <div style="display:${currentTopicCronField(job, 'timezone') ? 'block' : 'none'}">
+                      <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Timezone</label>
+                      <input data-field="timezone" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(job.timezone || 'Asia/Shanghai')}" placeholder="Asia/Shanghai" />
+                    </div>
+                  </div>
+                  <div class="grid md:grid-cols-2 gap-4 mt-4">
+                    <div style="display:${currentTopicCronField(job, 'cron') ? 'block' : 'none'}">
+                      <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Cron Expression</label>
+                      <input data-field="cron_expr" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(job.cron_expr || '')}" placeholder="0 9 * * *" />
+                    </div>
+                    <div style="display:${currentTopicCronField(job, 'every') ? 'block' : 'none'}">
+                      <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Every Minutes</label>
+                      <input data-field="every_minutes" type="number" min="1" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml(String(job.every_minutes || ''))}" placeholder="30" />
+                    </div>
+                    <div style="display:${currentTopicCronField(job, 'at') ? 'block' : 'none'}">
+                      <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Run At</label>
+                      <input data-field="run_at" type="datetime-local" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none" value="${escapeHtml((job.run_at || '').slice(0, 16))}" />
+                    </div>
+                  </div>
+                  <div class="mt-4">
+                    <label class="block text-xs uppercase tracking-[0.24em] mb-2" style="color: var(--text-faint);">Optional Instruction</label>
+                    <textarea data-field="message" rows="3" class="surface-input w-full rounded-2xl px-4 py-3 text-sm focus:outline-none resize-none" placeholder="If empty, the job name will be used.">${escapeHtml(job.message || '')}</textarea>
+                  </div>
+                  ${job.last_error ? `<div class="text-xs mt-3" style="color: var(--danger);">${escapeHtml(job.last_error)}</div>` : ''}
+                  <div class="flex items-center justify-end gap-2 mt-4">
+                    <button type="button" class="agent-cron-save px-3 py-2 rounded-xl text-xs font-medium" style="background: var(--primary); color: white;">Save</button>
+                    <button type="button" class="agent-cron-delete px-3 py-2 rounded-xl text-xs font-medium" style="background: rgba(239, 68, 68, 0.12); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.18);">Delete</button>
+                  </div>
+                </div>
+              </details>
+            `).join('') : `<div class="settings-card text-sm" style="color: var(--text-muted);">No cron jobs for this topic yet.</div>`}
+          </div>
+        </div>
+      `;
+      topicCronContent.querySelector('#btn-add-topic-cron-job')?.addEventListener('click', () => {
+        currentTopicCronJobs = [...currentTopicCronJobs, createEmptyTopicCronJobDraft()];
+        renderTopicCronModal();
+      });
+      topicCronContent.querySelectorAll('details[data-cron-key]').forEach((detail) => {
+        detail.addEventListener('toggle', (event) => {
+          const key = event.currentTarget.dataset.cronKey;
+          if (!key) return;
+          if (event.currentTarget.open) expandedTopicCronKeys.add(key);
+          else expandedTopicCronKeys.delete(key);
+        });
+      });
+      topicCronContent.querySelectorAll('[data-field="schedule_kind"]').forEach((select) => {
+        select.addEventListener('change', (event) => {
+          const card = event.currentTarget.closest('[data-cron-index]');
+          const index = Number(card?.dataset.cronIndex || -1);
+          if (!Number.isInteger(index) || index < 0 || !currentTopicCronJobs[index]) return;
+          currentTopicCronJobs[index] = { ...collectTopicCronJobCard(card), schedule_kind: event.currentTarget.value };
+          renderTopicCronModal();
+        });
+      });
+      topicCronContent.querySelectorAll('.agent-cron-save').forEach((button) => {
+        button.addEventListener('click', (event) => saveTopicCronJob(event.currentTarget.closest('[data-cron-index]')));
+      });
+      topicCronContent.querySelectorAll('.agent-cron-delete').forEach((button) => {
+        button.addEventListener('click', (event) => deleteTopicCronJob(event.currentTarget.closest('[data-cron-index]')));
+      });
+    }
+
+    async function loadTopicCronJobs(sessionId) {
+      const response = await fetch(`/api/topics/${encodeURIComponent(sessionId)}/cron-jobs`);
+      const data = await response.json().catch(() => ([]));
+      if (!response.ok) throw new Error(data.detail || 'Failed to load topic cron jobs.');
+      currentTopicCronJobs = Array.isArray(data) ? data : [];
+      await loadAssistants();
+      if (runtimeData) await loadRuntime();
+      renderTopicCronModal();
+    }
+
+    async function openTopicCronSettings(sessionId) {
+      currentTopicCronSessionId = sessionId;
+      topicCronModal.classList.remove('hidden');
+      try {
+        await loadTopicCronJobs(sessionId);
+      } catch (error) {
+        topicCronModal.classList.add('hidden');
+        alert(error.message);
+      }
+    }
+
+    function closeTopicCronSettings() {
+      topicCronModal.classList.add('hidden');
+      currentTopicCronSessionId = null;
+      currentTopicCronJobs = [];
+    }
+
     async function loadRuntime() {
       const response = await fetch('/api/settings');
       if (!response.ok) return;
@@ -1100,6 +1297,21 @@
       if (savePromptConfigBtn) savePromptConfigBtn.addEventListener('click', savePromptConfig);
       const savePresetLibBtn = runtimeContent.querySelector('#btn-save-preset-lib');
       if (savePresetLibBtn) savePresetLibBtn.addEventListener('click', savePresetFromLibrary);
+      runtimeContent.querySelectorAll('.runtime-cron-edit').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const sessionId = button.getAttribute('data-topic-session-id') || '';
+          if (!sessionId) return;
+          await openTopicCronSettings(sessionId);
+        });
+      });
+      runtimeContent.querySelectorAll('.runtime-cron-open-topic').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const sessionId = button.getAttribute('data-topic-session-id') || '';
+          if (!sessionId) return;
+          await setActiveTopic(sessionId);
+          closeRuntimeModal();
+        });
+      });
       runtimeContent.querySelectorAll('pre code').forEach((block) => Prism.highlightElement(block));
     }
 
@@ -1123,8 +1335,8 @@
     function runtimeTabDescription(tabId) {
       if (tabId === 'model_config') return 'LLM and search runtime config';
       if (tabId === 'prompt_config') return 'Workspace USER.md profile defaults';
+      if (tabId === 'cron_jobs') return 'All scheduled jobs mapped to topics';
       if (tabId === 'templates') return 'Preset library';
-      if (tabId === 'cron_jobs') return 'Live scheduler state';
       if (tabId === 'mcp_servers') return 'External tool connections';
       if (tabId === 'skills') return 'Available runtime skills';
       return 'Theme and rendering';
@@ -1133,8 +1345,8 @@
     function renderRuntimeTab() {
       if (activeRuntimeTab === 'model_config') return renderModelConfigPanel();
       if (activeRuntimeTab === 'prompt_config') return renderPromptConfigPanel();
+      if (activeRuntimeTab === 'cron_jobs') return renderCronJobsOverviewPanel();
       if (activeRuntimeTab === 'templates') return renderPresetLibrary();
-      if (activeRuntimeTab === 'cron_jobs') return renderCronPanel();
       if (activeRuntimeTab === 'mcp_servers') return renderMcpPanel();
       if (activeRuntimeTab === 'skills') return renderSkillsPanel();
       return renderAppearancePanel();
@@ -1287,6 +1499,76 @@
       `;
     }
 
+    function renderCronJobsOverviewPanel() {
+      const jobs = runtimeData?.cron_jobs || [];
+      return `
+        <div>
+          <div class="text-xs uppercase tracking-[0.22em]" style="color: var(--text-faint);">Cron Jobs</div>
+          <h2 class="text-2xl font-semibold mt-1">Scheduled jobs overview</h2>
+          <p class="text-sm mt-2" style="color: var(--text-muted);">Only topic-level cron jobs are supported. Each job is bound to exactly one topic.</p>
+        </div>
+        <div class="grid md:grid-cols-3 gap-4">
+          <article class="settings-card">
+            <div class="text-xs uppercase tracking-[0.22em]" style="color: var(--text-faint);">Total Jobs</div>
+            <div class="text-3xl font-semibold mt-2">${jobs.length}</div>
+          </article>
+          <article class="settings-card">
+            <div class="text-xs uppercase tracking-[0.22em]" style="color: var(--text-faint);">Enabled</div>
+            <div class="text-3xl font-semibold mt-2">${jobs.filter((job) => job.enabled !== false).length}</div>
+          </article>
+          <article class="settings-card">
+            <div class="text-xs uppercase tracking-[0.22em]" style="color: var(--text-faint);">Topics Covered</div>
+            <div class="text-3xl font-semibold mt-2">${new Set(jobs.map((job) => job.topic_id).filter(Boolean)).size}</div>
+          </article>
+        </div>
+        <div class="space-y-4 mt-4">
+          ${jobs.length ? jobs.map((job) => `
+            <article class="settings-card">
+              <div class="flex items-start justify-between gap-4">
+                <div class="min-w-0">
+                  <div class="text-base font-semibold truncate">${escapeHtml(job.name || 'Untitled Cron Job')}</div>
+                  <div class="text-sm mt-1" style="color: var(--text-muted);">${escapeHtml(job.topic_name || 'Unknown Topic')} · ${escapeHtml(job.assistant_name || 'Unknown Agent')}</div>
+                </div>
+                <div class="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    type="button"
+                    class="runtime-cron-edit px-3 py-2 rounded-xl text-xs font-medium"
+                    data-topic-session-id="${escapeHtml(job.topic_id || '')}"
+                    style="background: rgba(79, 140, 255, 0.12); color: var(--text); border: 1px solid rgba(79, 140, 255, 0.18);"
+                  >Edit</button>
+                  <button
+                    type="button"
+                    class="runtime-cron-open-topic px-3 py-2 rounded-xl text-xs font-medium"
+                    data-topic-session-id="${escapeHtml(job.topic_id || '')}"
+                    style="background: var(--bg-soft); color: var(--text); border: 1px solid var(--border);"
+                  >Open Topic</button>
+                  <span class="px-2 py-1 rounded-full text-xs" style="${job.enabled !== false ? getStatusTone(job.last_status || 'done') : getStatusTone('error')}">${job.enabled !== false ? 'enabled' : 'disabled'}</span>
+                </div>
+              </div>
+              <div class="grid md:grid-cols-4 gap-3 mt-4 text-sm">
+                <div class="rounded-2xl px-3 py-3" style="background: var(--bg-soft);">
+                  <div style="color: var(--text-faint);">Schedule</div>
+                  <div class="mt-1 font-mono">${escapeHtml(cronScheduleHint(job))}</div>
+                </div>
+                <div class="rounded-2xl px-3 py-3" style="background: var(--bg-soft);">
+                  <div style="color: var(--text-faint);">Topic</div>
+                  <div class="mt-1">${escapeHtml(job.topic_name || 'Unknown Topic')}</div>
+                </div>
+                <div class="rounded-2xl px-3 py-3" style="background: var(--bg-soft);">
+                  <div style="color: var(--text-faint);">Next Run</div>
+                  <div class="mt-1">${escapeHtml(formatRelativeTime(job.next_run_at))}</div>
+                </div>
+                <div class="rounded-2xl px-3 py-3" style="background: var(--bg-soft);">
+                  <div style="color: var(--text-faint);">Last Status</div>
+                  <div class="mt-1">${escapeHtml(job.last_status || 'Not run yet')}${job.last_error ? ` · ${escapeHtml(job.last_error)}` : ''}</div>
+                </div>
+              </div>
+            </article>
+          `).join('') : `<div class="settings-card text-sm" style="color: var(--text-muted);">No cron jobs found.</div>`}
+        </div>
+      `;
+    }
+
     function renderPresetLibrary() {
       const presets = getAvailablePresets();
       return `
@@ -1352,40 +1634,6 @@
       `;
     }
 
-    function renderCronPanel() {
-      const jobs = runtimeData.cron_jobs || [];
-      return `
-        <div>
-          <div class="text-xs uppercase tracking-[0.22em]" style="color: var(--text-faint);">Cron</div>
-          <h2 class="text-2xl font-semibold mt-1">Cron jobs</h2>
-        </div>
-        <div class="space-y-4">
-          ${jobs.length ? jobs.map((job) => `
-            <article class="settings-card">
-              <div class="flex flex-wrap items-center gap-2">
-                <h3 class="text-lg font-semibold">${escapeHtml(job.name)}</h3>
-                <span class="px-2 py-1 rounded-full text-xs" style="${getStatusTone(job.enabled ? (job.last_status || 'running') : 'error')}">${job.enabled ? 'enabled' : 'disabled'}</span>
-              </div>
-              <div class="grid md:grid-cols-3 gap-3 mt-4 text-sm">
-                <div class="rounded-2xl px-3 py-3" style="background: var(--bg-soft);">
-                  <div style="color: var(--text-faint);">Schedule</div>
-                  <div class="mt-1 font-mono">${escapeHtml(job.schedule)}</div>
-                </div>
-                <div class="rounded-2xl px-3 py-3" style="background: var(--bg-soft);">
-                  <div style="color: var(--text-faint);">Next Run</div>
-                  <div class="mt-1">${escapeHtml(formatRelativeTime(job.next_run_at))}</div>
-                </div>
-                <div class="rounded-2xl px-3 py-3" style="background: var(--bg-soft);">
-                  <div style="color: var(--text-faint);">Last Status</div>
-                  <div class="mt-1">${escapeHtml(job.last_status || 'Not run yet')}</div>
-                </div>
-              </div>
-            </article>
-          `).join('') : `<div class="settings-card text-sm" style="color: var(--text-muted);">No cron jobs found.</div>`}
-        </div>
-      `;
-    }
-
     function renderMcpPanel() {
       const servers = runtimeData.mcp_servers || [];
       return `
@@ -1427,7 +1675,7 @@
                 <h3 class="text-lg font-semibold">${escapeHtml(skill.name)}</h3>
                 <span class="ml-auto px-2 py-1 rounded-full text-xs" style="background: var(--bg-soft); color: var(--text-muted);">${escapeHtml(skill.source)}</span>
               </div>
-              <div class="mt-4 text-sm font-mono break-all" style="color: var(--text-faint);">${escapeHtml(skill.path)}</div>
+              <div class="mt-4 text-sm leading-6" style="color: var(--text-muted);">${escapeHtml(skill.description || `Source: ${skill.source}`)}</div>
             </article>
           `).join('')}
         </div>
@@ -1544,17 +1792,35 @@
       }
     }
 
+    function createEmptyTopicCronJobDraft() {
+      return {
+        id: '',
+        name: '',
+        enabled: true,
+        schedule_kind: 'cron',
+        cron_expr: '0 9 * * *',
+        timezone: 'Asia/Shanghai',
+        every_minutes: 30,
+        run_at: '',
+        message: '',
+        is_new: true,
+      };
+    }
+
+    function cronScheduleHint(job) {
+      if (job.schedule_kind === 'every') return `Every ${job.every_minutes || 0} minute(s)`;
+      if (job.schedule_kind === 'at') return job.run_at || 'One-shot';
+      return job.cron_expr || 'Cron';
+    }
+
     function renderAgentSettings(assistant, overrides) {
       const prev = window.__agentSettingsStore;
       const skills = assistant?.agent_settings?.skills || assistant?.enabled_skills || [];
       const mcps = assistant?.agent_settings?.mcps || assistant?.enabled_mcps || [];
-      const cronJobs = assistant?.agent_settings?.cron_jobs || assistant?.enabled_cron_jobs || [];
       const enabledSkills = overrides?.enabledSkills ?? prev?.enabledSkills ?? new Set(skills);
       const enabledMcps = overrides?.enabledMcps ?? prev?.enabledMcps ?? new Set(mcps);
-      const enabledCron = overrides?.enabledCron ?? prev?.enabledCron ?? new Set(cronJobs);
       const globalMcps = runtimeData?.mcp_servers || [];
       const globalSkills = runtimeData?.skills || [];
-      const globalCrons = runtimeData?.cron_jobs || [];
       agentSettingsNav.innerHTML = '';
       AGENT_SETTINGS_TABS.forEach((tab) => {
         const btn = document.createElement('button');
@@ -1602,31 +1868,11 @@
           <div class="flex flex-wrap gap-2" id="agent-settings-skills-chips"></div>
         </div>
       `;
-      const cronHtml = `
-        <div class="space-y-4">
-          <p class="text-sm" style="color: var(--text-muted);">Cron jobs bound to this agent. Select from global jobs.</p>
-          <div class="flex flex-wrap gap-2" id="agent-settings-cron-chips"></div>
-          ${globalCrons.filter((j) => enabledCron.has(j.id)).length ? `
-          <div class="rounded-2xl p-4 mt-4" style="background: var(--bg-soft); border: 1px solid var(--border);">
-            <div class="text-xs uppercase tracking-[0.18em] mb-2" style="color: var(--text-faint);">This agent's cron jobs</div>
-            <div class="space-y-2">
-              ${globalCrons.filter((j) => enabledCron.has(j.id)).map((j) => `
-                <div class="flex items-center justify-between text-sm">
-                  <span class="font-medium">${escapeHtml(j.name)}</span>
-                  <span class="text-xs font-mono" style="color: var(--text-faint);">${escapeHtml(j.schedule)}</span>
-                </div>
-              `).join('')}
-            </div>
-          </div>
-          ` : ''}
-        </div>
-      `;
 
       const panels = {
         model: modelHtml,
         mcp: mcpHtml,
         skills: skillsHtml,
-        cron: cronHtml,
       };
       agentSettingsContent.innerHTML = AGENT_SETTINGS_TABS.map((t) => {
         const show = t.id === activeAgentSettingsTab;
@@ -1635,7 +1881,6 @@
 
       const mcpChips = document.getElementById('agent-settings-mcp-chips');
       const skillsChips = document.getElementById('agent-settings-skills-chips');
-      const cronChips = document.getElementById('agent-settings-cron-chips');
       if (mcpChips) {
         globalMcps.forEach((s) => {
           const b = document.createElement('button');
@@ -1670,29 +1915,10 @@
           skillsChips.appendChild(b);
         });
       }
-      if (cronChips) {
-        globalCrons.forEach((j) => {
-          const b = document.createElement('button');
-          b.type = 'button';
-          b.className = 'px-3 py-1.5 rounded-xl text-xs border transition-colors agent-settings-chip agent-settings-cron-chip';
-          b.dataset.value = j.id;
-          b.textContent = j.name + (enabledCron.has(j.id) ? ' ✓' : '');
-          b.style.background = enabledCron.has(j.id) ? 'rgba(79, 140, 255, 0.15)' : 'var(--bg-soft)';
-          b.style.borderColor = enabledCron.has(j.id) ? 'rgba(79, 140, 255, 0.3)' : 'var(--border)';
-          b.addEventListener('click', () => {
-            if (enabledCron.has(j.id)) enabledCron.delete(j.id);
-            else enabledCron.add(j.id);
-            renderAgentSettings(getActiveAssistant());
-          });
-          cronChips.appendChild(b);
-        });
-      }
-
-      const store = { enabledSkills, enabledMcps, enabledCron };
+      const store = { enabledSkills, enabledMcps };
       agentSettingsContent.dataset.agentSettingsStore = JSON.stringify({
         enabledSkills: [...store.enabledSkills],
         enabledMcps: [...store.enabledMcps],
-        enabledCron: [...store.enabledCron],
       });
       window.__agentSettingsStore = store;
     }
@@ -1714,17 +1940,70 @@
     }
 
     function collectAgentSettingsFromDOM() {
-      const store = window.__agentSettingsStore || { enabledSkills: new Set(), enabledMcps: new Set(), enabledCron: new Set() };
+      const store = window.__agentSettingsStore || { enabledSkills: new Set(), enabledMcps: new Set() };
       const globalMcpNames = (runtimeData?.mcp_servers || []).map((item) => item.name);
       const globalSkillNames = (runtimeData?.skills || []).map((item) => item.name);
-      const globalCronIds = (runtimeData?.cron_jobs || []).map((item) => item.id);
       const userIdentity = document.getElementById('agent-settings-user-identity')?.value ?? '';
       const agentIdentity = document.getElementById('agent-settings-agent-identity')?.value ?? '';
       const systemPrompt = document.getElementById('agent-settings-system-prompt')?.value ?? '';
       const enabled_skills = [...store.enabledSkills].filter((value) => globalSkillNames.includes(value));
       const enabled_mcps = [...store.enabledMcps].filter((value) => globalMcpNames.includes(value));
-      const enabled_cron_jobs = [...store.enabledCron].filter((value) => globalCronIds.includes(value));
-      return { user_identity: userIdentity, agent_identity: agentIdentity, system_prompt: systemPrompt, enabled_skills, enabled_mcps, enabled_cron_jobs };
+      return { user_identity: userIdentity, agent_identity: agentIdentity, system_prompt: systemPrompt, enabled_skills, enabled_mcps };
+    }
+
+    function collectTopicCronJobCard(card) {
+      return {
+        id: card?.dataset.jobId || '',
+        name: card?.querySelector('[data-field="name"]')?.value?.trim() || '',
+        enabled: (card?.querySelector('[data-field="enabled"]')?.value || 'true') === 'true',
+        schedule_kind: card?.querySelector('[data-field="schedule_kind"]')?.value || 'cron',
+        cron_expr: card?.querySelector('[data-field="cron_expr"]')?.value?.trim() || '',
+        timezone: card?.querySelector('[data-field="timezone"]')?.value?.trim() || '',
+        every_minutes: Number(card?.querySelector('[data-field="every_minutes"]')?.value || 0) || null,
+        run_at: card?.querySelector('[data-field="run_at"]')?.value || '',
+        message: card?.querySelector('[data-field="message"]')?.value?.trim() || '',
+      };
+    }
+
+    async function saveTopicCronJob(card) {
+      if (!currentTopicCronSessionId || !card) return;
+      const payload = collectTopicCronJobCard(card);
+      const button = card.querySelector('.agent-cron-save');
+      return withSaveFeedback(button, async () => {
+        const isNew = !payload.id;
+        const endpoint = isNew
+          ? `/api/topics/${encodeURIComponent(currentTopicCronSessionId)}/cron-jobs`
+          : `/api/topics/${encodeURIComponent(currentTopicCronSessionId)}/cron-jobs/${encodeURIComponent(payload.id)}`;
+        const response = await fetch(endpoint, {
+          method: isNew ? 'POST' : 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || 'Failed to save cron job.');
+        await loadTopicCronJobs(currentTopicCronSessionId);
+      }).catch((error) => alert(error.message));
+    }
+
+    async function deleteTopicCronJob(card) {
+      if (!currentTopicCronSessionId || !card) return;
+      const payload = collectTopicCronJobCard(card);
+      const index = Number(card?.dataset.cronIndex || -1);
+      if (!payload.id) {
+        currentTopicCronJobs = currentTopicCronJobs.filter((_, itemIndex) => itemIndex !== index);
+        renderTopicCronModal();
+        return;
+      }
+      if (!confirm(`Delete cron job "${payload.name || payload.id}"?`)) return;
+      const button = card.querySelector('.agent-cron-delete');
+      return withSaveFeedback(button, async () => {
+        const response = await fetch(`/api/topics/${encodeURIComponent(currentTopicCronSessionId)}/cron-jobs/${encodeURIComponent(payload.id)}`, {
+          method: 'DELETE',
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || 'Failed to delete cron job.');
+        await loadTopicCronJobs(currentTopicCronSessionId);
+      }, { busyLabel: 'Deleting...', successLabel: 'Deleted' }).catch((error) => alert(error.message));
     }
 
     function collectRuntimeConfigFromDOM() {
@@ -2022,6 +2301,7 @@
     document.getElementById('btn-create-agent').addEventListener('click', createAssistant);
     document.getElementById('btn-close-agent-settings').addEventListener('click', closeModelSettings);
     document.getElementById('btn-save-agent-settings').addEventListener('click', saveModelSettings);
+    document.getElementById('btn-close-topic-cron').addEventListener('click', closeTopicCronSettings);
     document.getElementById('btn-close-prompt-settings').addEventListener('click', closePromptSettings);
     document.getElementById('btn-save-prompt-settings').addEventListener('click', savePromptSettings);
     document.getElementById('btn-close-preset-editor').addEventListener('click', closePresetEditor);
@@ -2044,6 +2324,9 @@
     modelSettingsModal.addEventListener('click', (event) => {
       if (event.target === modelSettingsModal) closeModelSettings();
     });
+    topicCronModal.addEventListener('click', (event) => {
+      if (event.target === topicCronModal) closeTopicCronSettings();
+    });
     promptSettingsModal.addEventListener('click', (event) => {
       if (event.target === promptSettingsModal) closePromptSettings();
     });
@@ -2062,6 +2345,7 @@
         closeRuntimeModal();
         closeNewAssistantModal();
         closeModelSettings();
+        closeTopicCronSettings();
         closePromptSettings();
         closePresetEditor();
       }

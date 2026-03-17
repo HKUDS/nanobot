@@ -51,14 +51,16 @@ class ContextBuilder:
                 parts.append(f"# Active Skills\n\n{always_content}")
 
         enabled_skills = self._get_enabled_skills(session_metadata)
+        visible_skills: list[str] | None = None
         if enabled_skills:
             always_set = set(always_skills or [])
             selected_skills = [name for name in enabled_skills if name not in always_set]
             selected_content = self.skills.load_skills_for_context(selected_skills)
             if selected_content:
                 parts.append(f"# Enabled Skills\n\n{selected_content}")
+            visible_skills = list(dict.fromkeys([*(always_skills or []), *enabled_skills]))
 
-        skills_summary = self.skills.build_skills_summary()
+        skills_summary = self.skills.build_skills_summary(visible_skills)
         if skills_summary:
             parts.append(f"""# Skills
 

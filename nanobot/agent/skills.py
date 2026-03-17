@@ -31,7 +31,7 @@ class SkillsLoader:
             filter_unavailable: If True, filter out skills with unmet requirements.
 
         Returns:
-            List of skill info dicts with 'name', 'path', 'source'.
+            List of skill info dicts with 'name', 'path', 'source', 'description'.
         """
         skills = []
 
@@ -41,7 +41,14 @@ class SkillsLoader:
                 if skill_dir.is_dir():
                     skill_file = skill_dir / "SKILL.md"
                     if skill_file.exists():
-                        skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "workspace"})
+                        skills.append(
+                            {
+                                "name": skill_dir.name,
+                                "path": str(skill_file),
+                                "source": "workspace",
+                                "description": self._get_skill_description(skill_dir.name),
+                            }
+                        )
 
         # Built-in skills
         if self.builtin_skills and self.builtin_skills.exists():
@@ -49,7 +56,14 @@ class SkillsLoader:
                 if skill_dir.is_dir():
                     skill_file = skill_dir / "SKILL.md"
                     if skill_file.exists() and not any(s["name"] == skill_dir.name for s in skills):
-                        skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "builtin"})
+                        skills.append(
+                            {
+                                "name": skill_dir.name,
+                                "path": str(skill_file),
+                                "source": "builtin",
+                                "description": self._get_skill_description(skill_dir.name),
+                            }
+                        )
 
         # Filter by requirements
         if filter_unavailable:
@@ -98,7 +112,7 @@ class SkillsLoader:
 
         return "\n\n---\n\n".join(parts) if parts else ""
 
-    def build_skills_summary(self) -> str:
+    def build_skills_summary(self, skill_names: list[str] | None = None) -> str:
         """
         Build a summary of all skills (name, description, path, availability).
 
@@ -109,6 +123,9 @@ class SkillsLoader:
             XML-formatted skills summary.
         """
         all_skills = self.list_skills(filter_unavailable=False)
+        if skill_names is not None:
+            allowed = {name.strip() for name in skill_names if isinstance(name, str) and name.strip()}
+            all_skills = [skill for skill in all_skills if skill["name"] in allowed]
         if not all_skills:
             return ""
 

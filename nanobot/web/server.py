@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from nanobot.agent.tools.cron import build_schedule, create_scoped_job, remove_topic_job, topic_jobs
 from nanobot.agent.tools.web import SEARCH_PROVIDERS, WebSearchTool
 from nanobot.config.loader import get_config_path, save_config
 from nanobot.config.schema import ProviderConfig
@@ -89,6 +90,18 @@ class PromptConfigRequest(BaseModel):
     special_instructions: str = ""
 
 
+class AgentCronJobRequest(BaseModel):
+    name: str
+    enabled: bool = True
+    schedule_kind: str
+    cron_expr: str | None = None
+    timezone: str | None = None
+    every_minutes: int | None = None
+    run_at: str | None = None
+    message: str = ""
+    topic_session_id: str | None = None
+
+
 def _serialize_template(template: TemplateConfig, *, is_bundled: bool = False) -> dict[str, Any]:
     """Convert a template model into API-friendly JSON."""
     payload = template.model_dump()
@@ -102,7 +115,6 @@ def _serialize_assistant(assistant: AssistantConfig) -> dict[str, Any]:
     payload["agent_settings"] = {
         "skills": assistant.enabled_skills,
         "mcps": assistant.enabled_mcps,
-        "cron_jobs": assistant.enabled_cron_jobs,
     }
     payload["prompt_settings"] = {
         "user_identity": assistant.user_identity,
@@ -271,6 +283,7 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
     from nanobot.cli.commands import _load_runtime_config, _make_provider
     from nanobot.config.paths import get_cron_dir
     from nanobot.cron.service import CronService
+    from nanobot.cron.types import CronJob, CronSchedule
     from nanobot.session.manager import SessionManager
     from nanobot.utils.helpers import sync_workspace_templates
 
@@ -365,13 +378,116 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
         path.write_text(_render_prompt_config(payload), encoding="utf-8")
         return _serialize_prompt_config(cfg)
 
+    def _serialize_cron_job(job: CronJob) -> dict[str, Any]:
+        return {
+            "id": job.id,
+            "name": job.name,
+            "enabled": job.enabled,
+            "assistant_id": job.payload.assistant_id,
+            "topic_session_id": job.payload.topic_session_id,
+            "schedule_kind": job.schedule.kind,
+            "cron_expr": job.schedule.expr,
+            "timezone": job.schedule.tz,
+            "every_minutes": (job.schedule.every_ms // 60000) if job.schedule.every_ms else None,
+            "run_at": _iso_from_ms(job.schedule.at_ms),
+            "message": job.payload.message,
+            "next_run_at": _iso_from_ms(job.state.next_run_at_ms),
+            "last_run_at": _iso_from_ms(job.state.last_run_at_ms),
+            "last_status": job.state.last_status,
+            "last_error": job.state.last_error,
+        }
+
+    def _jobs_for_topic(session_id: str) -> list[dict[str, Any]]:
+        session = session_manager.get_or_create(session_id)
+        if session.metadata.get("assistant_id") is None:
+            raise HTTPException(status_code=404, detail="Topic not found")
+        return [
+            _serialize_cron_job(job)
+            for job in topic_jobs(cron, session_id)
+        ]
+
+    def _all_topic_cron_jobs() -> list[dict[str, Any]]:
+        topics_by_id = {
+            topic["session_id"]: topic
+            for assistant in assistant_store.list_assistants()
+            for topic in _topics_for_assistant(assistant.id)
+        }
+        jobs: list[dict[str, Any]] = []
+        for job in cron.list_jobs(include_disabled=True):
+            if not job.payload.topic_session_id:
+                continue
+            payload = _serialize_cron_job(job)
+            topic = topics_by_id.get(job.payload.topic_session_id)
+            payload["topic_id"] = job.payload.topic_session_id
+            payload["topic_name"] = topic["name"] if topic else "Unknown Topic"
+            assistant = assistant_store.get_assistant(job.payload.assistant_id or "default")
+            payload["assistant_name"] = assistant.name if assistant else (job.payload.assistant_id or "Unknown Agent")
+            jobs.append(payload)
+        return jobs
+
+    def _purge_agent_level_cron_jobs() -> None:
+        for job in list(cron.list_jobs(include_disabled=True)):
+            if not job.payload.topic_session_id:
+                cron.remove_job(job.id)
+
+    def _build_cron_schedule(payload: AgentCronJobRequest) -> tuple[CronSchedule, bool]:
+        kind = (payload.schedule_kind or "").strip().lower()
+        try:
+            if kind == "cron":
+                return build_schedule(
+                    cron_expr=(payload.cron_expr or "").strip(),
+                    tz=(payload.timezone or "").strip() or None,
+                )
+            if kind == "every":
+                minutes = payload.every_minutes or 0
+                if minutes <= 0:
+                    raise HTTPException(status_code=400, detail="Every minutes must be greater than 0")
+                return build_schedule(every_seconds=minutes * 60)
+            if kind == "at":
+                raw = (payload.run_at or "").strip()
+                if not raw:
+                    raise HTTPException(status_code=400, detail="Run at time is required")
+                return build_schedule(at=raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="Invalid schedule kind")
+
+    async def _on_cron_job(job: CronJob) -> str | None:
+        assistant_id = job.payload.assistant_id or "default"
+        assistant = assistant_store.get_assistant(assistant_id)
+        session_key = job.payload.topic_session_id
+        if not session_key:
+            return None
+        session = session_manager.get_or_create(session_key)
+        if assistant:
+            session.metadata["assistant_id"] = assistant.id
+            session.metadata["assistant"] = serialize_assistant_prompt(assistant)
+            session.metadata["template_id"] = assistant.source_template_id
+            session_manager.save(session)
+        reminder_note = (
+            "[Scheduled Task] Timer finished.\n\n"
+            f"Task '{job.name}' has been triggered.\n"
+            f"Scheduled instruction: {job.payload.message}"
+        )
+        return await agent.process_direct(
+            reminder_note,
+            session_key=session_key,
+            channel="web",
+            chat_id="browser",
+        )
+
+    cron.on_job = _on_cron_job
+
     @app.on_event("startup")
     async def _startup() -> None:
         await agent._connect_mcp()
+        await cron.start()
+        _purge_agent_level_cron_jobs()
 
     @app.on_event("shutdown")
     async def _shutdown() -> None:
         await agent.close_mcp()
+        cron.stop()
 
     # ------------------------------------------------------------------
     # Chat endpoint — SSE streaming
@@ -471,7 +587,6 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
                 "model": assistant.model,
                 "enabled_skills": assistant.enabled_skills,
                 "enabled_mcps": assistant.enabled_mcps,
-                "enabled_cron_jobs": assistant.enabled_cron_jobs,
                 "system_prompt": assistant.system_prompt,
                 "user_identity": assistant.user_identity,
                 "agent_identity": assistant.agent_identity,
@@ -559,6 +674,9 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
 
     @app.delete("/api/agents/{assistant_id}")
     async def delete_agent(assistant_id: str) -> dict[str, str]:
+        for job in list(cron.list_jobs(include_disabled=True)):
+            if job.payload.assistant_id == assistant_id:
+                cron.remove_job(job.id)
         try:
             assistant_store.delete_assistant(assistant_id)
         except PermissionError as exc:
@@ -599,6 +717,77 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
     @app.post("/api/assistants/{assistant_id}/topics")
     async def create_assistant_topic(assistant_id: str, request: CreateTopicRequest) -> dict[str, Any]:
         return await create_topic(assistant_id, request)
+
+    @app.get("/api/topics/{session_id:path}/cron-jobs")
+    async def list_topic_cron_jobs(session_id: str) -> list[dict[str, Any]]:
+        return _jobs_for_topic(session_id)
+
+    @app.post("/api/topics/{session_id:path}/cron-jobs")
+    async def create_topic_cron_job(session_id: str, request: AgentCronJobRequest) -> dict[str, Any]:
+        session = session_manager.get_or_create(session_id)
+        assistant_id = session.metadata.get("assistant_id")
+        if assistant_id is None or assistant_store.get_assistant(assistant_id) is None:
+            raise HTTPException(status_code=404, detail="Topic not found")
+        name = request.name.strip()
+        message = request.message.strip() or name
+        if not name:
+            raise HTTPException(status_code=400, detail="Job name cannot be empty")
+        schedule, delete_after = _build_cron_schedule(request)
+        job = create_scoped_job(
+            cron,
+            message=message,
+            name=name,
+            channel="web",
+            chat_id="browser",
+            schedule=schedule,
+            assistant_id=assistant_id,
+            topic_session_id=session_id,
+            delete_after_run=delete_after,
+        )
+        if not request.enabled:
+            cron.enable_job(job.id, False)
+            job = next((item for item in cron.list_jobs(include_disabled=True) if item.id == job.id), job)
+        return _serialize_cron_job(job)
+
+    @app.patch("/api/topics/{session_id:path}/cron-jobs/{job_id}")
+    async def update_topic_cron_job(session_id: str, job_id: str, request: AgentCronJobRequest) -> dict[str, Any]:
+        session = session_manager.get_or_create(session_id)
+        assistant_id = session.metadata.get("assistant_id")
+        if assistant_id is None or assistant_store.get_assistant(assistant_id) is None:
+            raise HTTPException(status_code=404, detail="Topic not found")
+        existing = next((job for job in cron.list_jobs(include_disabled=True) if job.id == job_id), None)
+        if existing is None or existing.payload.assistant_id != assistant_id or existing.payload.topic_session_id != session_id:
+            raise HTTPException(status_code=404, detail="Cron job not found")
+        name = request.name.strip()
+        message = request.message.strip() or name
+        if not name:
+            raise HTTPException(status_code=400, detail="Job name cannot be empty")
+        schedule, _ = _build_cron_schedule(request)
+        updated = cron.update_job(
+            job_id,
+            name=name,
+            schedule=schedule,
+            message=message,
+            assistant_id=assistant_id,
+            topic_session_id=session_id,
+            enabled=request.enabled,
+        )
+        if updated is None:
+            raise HTTPException(status_code=404, detail="Cron job not found")
+        return _serialize_cron_job(updated)
+
+    @app.delete("/api/topics/{session_id:path}/cron-jobs/{job_id}")
+    async def delete_topic_cron_job(session_id: str, job_id: str) -> dict[str, str]:
+        session = session_manager.get_or_create(session_id)
+        assistant_id = session.metadata.get("assistant_id")
+        if assistant_id is None or assistant_store.get_assistant(assistant_id) is None:
+            raise HTTPException(status_code=404, detail="Topic not found")
+        existing = next((job for job in cron.list_jobs(include_disabled=True) if job.id == job_id), None)
+        if existing is None or existing.payload.assistant_id != assistant_id or existing.payload.topic_session_id != session_id:
+            raise HTTPException(status_code=404, detail="Cron job not found")
+        if not remove_topic_job(cron, session_id, job_id):
+            raise HTTPException(status_code=404, detail="Cron job not found")
+        return {"status": "deleted"}
 
     @app.post("/api/sessions")
     async def create_session(request: CreateSessionRequest) -> dict[str, Any]:
@@ -692,34 +881,11 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
             {
                 "name": item["name"],
                 "source": item["source"],
+                "description": item["description"],
                 "path": item["path"],
             }
             for item in skills_loader.list_skills(filter_unavailable=False)
         ]
-
-        cron_jobs = []
-        for job in cron.list_jobs(include_disabled=True):
-            schedule = job.schedule
-            if schedule.kind == "cron":
-                schedule_label = schedule.expr or "cron"
-            elif schedule.kind == "every":
-                schedule_label = f"every {schedule.every_ms or 0} ms"
-            else:
-                schedule_label = _iso_from_ms(schedule.at_ms) or "one-shot"
-
-            cron_jobs.append(
-                {
-                    "id": job.id,
-                    "name": job.name,
-                    "enabled": job.enabled,
-                    "schedule": schedule_label,
-                    "message": job.payload.message,
-                    "next_run_at": _iso_from_ms(job.state.next_run_at_ms),
-                    "last_run_at": _iso_from_ms(job.state.last_run_at_ms),
-                    "last_status": job.state.last_status,
-                    "last_error": job.state.last_error,
-                }
-            )
 
         mcp_servers = []
         for name, server_cfg in cfg.tools.mcp_servers.items():
@@ -741,7 +907,7 @@ def create_app(config_path: str | None = None, workspace: str | None = None) -> 
             "search_provider_options": list(SEARCH_PROVIDERS),
             "templates": templates,
             "preset_library_editable": True,
-            "cron_jobs": cron_jobs,
+            "cron_jobs": _all_topic_cron_jobs(),
             "skills": skills,
             "mcp_servers": mcp_servers,
         }
