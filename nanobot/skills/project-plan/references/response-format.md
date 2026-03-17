@@ -8,8 +8,8 @@
 ### Gates
 | Gate | Date | Status |
 |------|------|--------|
-| Gate C Approved | 2026-03-02 | Upcoming |
-| Gate B Approved | 2026-03-31 | Upcoming |
+| Gate B Approved | 2026-03-02 | Upcoming |
+| Gate C Approved | 2026-03-31 | Upcoming |
 | Gate D — Go-Live | 2026-04-10 | Upcoming |
 | Gate E Approved | 2026-10-13 | Future |
 
