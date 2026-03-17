@@ -103,7 +103,6 @@ class WebFetchTool(Tool):
     """Fetch and extract content from a URL using Readability."""
 
     name = "web_fetch"
-    description = "Fetch URL and extract readable content (HTML → markdown/text). Only URLs provided by the user can be fetched."
     parameters = {
         "type": "object",
         "properties": {
@@ -126,6 +125,15 @@ class WebFetchTool(Tool):
         self.restrict_to_user_urls = restrict_to_user_urls
         self._allowed_urls: set[str] = set()
         self._allowed_domains: list[str] = allowed_domains or []
+
+    @property
+    def description(self) -> str:
+        base = "Fetch URL and extract readable content (HTML → markdown/text)."
+        if self.restrict_to_user_urls:
+            base += " Only URLs provided by the user can be fetched."
+            if self._allowed_domains:
+                base += f" Pre-approved domains: {', '.join(self._allowed_domains)}."
+        return base
 
     def add_user_urls(self, text: str) -> None:
         """Extract and register URLs from a user message."""
