@@ -1,14 +1,21 @@
 """QQ channel implementation using botpy SDK."""
 
 import asyncio
+import mimetypes
+import shutil
+import subprocess
 from collections import deque
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
+from urllib.parse import urlparse
 
+import httpx
 from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from pydantic import Field
 
@@ -22,6 +29,14 @@ except ImportError:
     botpy = None
     C2CMessage = None
     GroupMessage = None
+
+try:
+    import pilk
+
+    PILK_AVAILABLE = True
+except ImportError:
+    PILK_AVAILABLE = False
+    pilk = None
 
 if TYPE_CHECKING:
     from botpy.message import C2CMessage, GroupMessage
@@ -66,6 +81,12 @@ class QQChannel(BaseChannel):
 
     name = "qq"
     display_name = "QQ"
+    _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
+    _AUDIO_EXTS = {
+        ".aac", ".amr", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".silk", ".slk", ".wav", ".webm",
+    }
+    _SILK_HEADER = b"\x02#!SILK_V3"
+    _TRANSCRIBE_READY_EXTS = {".m4a", ".mp3", ".wav", ".webm"}
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -152,6 +173,100 @@ class QQChannel(BaseChannel):
         except Exception as e:
             logger.error("Error sending QQ message: {}", e)
 
+    @staticmethod
+    def _attachment_extension(attachment: Any) -> str:
+        filename = (getattr(attachment, "filename", None) or "").strip()
+        ext = Path(filename).suffix.lower()
+        if ext:
+            return ext
+        content_type = (getattr(attachment, "content_type", None) or "").split(";", 1)[0].strip().lower()
+        return (mimetypes.guess_extension(content_type) or "").lower()
+
+    @classmethod
+    def _attachment_kind(cls, attachment: Any) -> str:
+        content_type = (getattr(attachment, "content_type", None) or "").split(";", 1)[0].strip().lower()
+        ext = cls._attachment_extension(attachment)
+        if content_type.startswith("audio/") or ext in cls._AUDIO_EXTS:
+            return "audio"
+        if content_type.startswith("image/") or ext in cls._IMAGE_EXTS:
+            return "image"
+        return "file"
+
+    @staticmethod
+    def _attachment_url(attachment: Any) -> str:
+        url = (getattr(attachment, "url", None) or "").strip()
+        if not url:
+            return ""
+        if url.startswith("//"):
+            return f"https:{url}"
+        parsed = urlparse(url)
+        if parsed.scheme:
+            return url
+        return f"https://{url.lstrip('/')}"
+
+    async def _download_attachment(self, attachment: Any, message_id: str) -> str | None:
+        url = self._attachment_url(attachment)
+        if not url:
+            return None
+
+        filename = Path((getattr(attachment, "filename", None) or "").strip()).name
+        ext = self._attachment_extension(attachment)
+        suffix = ext or ".bin"
+        stem = filename[: -(len(ext))] if filename and ext and filename.lower().endswith(ext) else filename
+        stem = stem or getattr(attachment, "id", None) or "attachment"
+        save_path = get_media_dir("qq") / f"{message_id}-{stem}{suffix}"
+
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            save_path.write_bytes(response.content)
+        return str(save_path)
+
+    async def _prepare_audio_for_transcription(self, file_path: str) -> str:
+        path = Path(file_path)
+        if path.suffix.lower() in self._TRANSCRIBE_READY_EXTS:
+            return str(path)
+
+        if self._is_silk_audio(path):
+            converted = path.with_suffix(".wav")
+            if not PILK_AVAILABLE:
+                logger.warning("QQ audio is SILK but pilk is not installed: {}", path.name)
+                return str(path)
+            try:
+                await asyncio.to_thread(pilk.silk_to_wav, str(path), str(converted))
+                return str(converted)
+            except Exception as e:
+                logger.warning("QQ SILK decode failed for {}: {}", path.name, e)
+                return str(path)
+
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            return str(path)
+
+        converted = path.with_suffix(".wav")
+        try:
+            await asyncio.to_thread(
+                subprocess.run,
+                [ffmpeg, "-y", "-i", str(path), str(converted)],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return str(converted)
+        except Exception as e:
+            logger.warning("QQ audio conversion failed for {}: {}", path.name, e)
+            return str(path)
+
+    @classmethod
+    def _is_silk_audio(cls, path: Path) -> bool:
+        if path.suffix.lower() in {".silk", ".slk"}:
+            return True
+        try:
+            with path.open("rb") as f:
+                return f.read(len(cls._SILK_HEADER)) == cls._SILK_HEADER
+        except OSError:
+            return False
+
     async def _on_message(self, data: "C2CMessage | GroupMessage", is_group: bool = False) -> None:
         """Handle incoming message from QQ."""
         try:
@@ -160,8 +275,48 @@ class QQChannel(BaseChannel):
                 return
             self._processed_ids.append(data.id)
 
-            content = (data.content or "").strip()
-            if not content:
+            content_parts: list[str] = []
+            if (data.content or "").strip():
+                content_parts.append(data.content.strip())
+
+            media_paths: list[str] = []
+            attachments_meta: list[dict[str, Any]] = []
+            for attachment in getattr(data, "attachments", []) or []:
+                kind = self._attachment_kind(attachment)
+                path: str | None = None
+                try:
+                    path = await self._download_attachment(attachment, data.id)
+                except Exception as e:
+                    logger.warning("QQ attachment download failed: {}", e)
+
+                filename = getattr(attachment, "filename", None) or getattr(attachment, "id", None) or "attachment"
+                if path:
+                    media_paths.append(path)
+                    attachments_meta.append(
+                        {
+                            "type": kind,
+                            "path": path,
+                            "filename": filename,
+                            "content_type": getattr(attachment, "content_type", None),
+                            "size_bytes": getattr(attachment, "size", None),
+                            "url": self._attachment_url(attachment),
+                        }
+                    )
+                    if kind == "audio":
+                        transcription = await self.transcribe_audio(
+                            await self._prepare_audio_for_transcription(path)
+                        )
+                        if transcription:
+                            content_parts.append(f"[transcription: {transcription}]")
+                        else:
+                            content_parts.append(f"[audio: {path}]")
+                    else:
+                        content_parts.append(f"[{kind}: {path}]")
+                else:
+                    content_parts.append(f"[{kind}: {filename} - download failed]")
+
+            content = "\n".join(part for part in content_parts if part).strip()
+            if not content and not media_paths:
                 return
 
             if is_group:
@@ -177,7 +332,11 @@ class QQChannel(BaseChannel):
                 sender_id=user_id,
                 chat_id=chat_id,
                 content=content,
-                metadata={"message_id": data.id},
+                media=media_paths,
+                metadata={
+                    "message_id": data.id,
+                    "attachments": attachments_meta,
+                },
             )
         except Exception:
             logger.exception("Error handling QQ message")
