@@ -54,7 +54,10 @@ class LiteLLMProvider(LLMProvider):
         if api_key:
             self._setup_env(api_key, api_base, default_model)
 
-        if api_base:
+        # Only set global litellm.api_base for OpenAI-compatible gateways.
+        # Non-OpenAI gateways (e.g. aicodewith_claude using native Anthropic format)
+        # pass api_base per-call in chat() kwargs instead to avoid interference.
+        if api_base and not (self._gateway and self._gateway.litellm_prefix != "openai"):
             litellm.api_base = api_base
 
         # Disable LiteLLM logging noise

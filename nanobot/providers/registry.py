@@ -61,6 +61,13 @@ class ProviderSpec:
     # Provider supports cache_control on content blocks (e.g. Anthropic prompt caching)
     supports_prompt_caching: bool = False
 
+    # Config field name override — when multiple specs share one config entry
+    # (e.g. aicodewith_gpt, aicodewith_claude, aicodewith_gemini all read "aicodewith").
+    config_key: str = ""  # defaults to self.name when empty
+
+    # Known model IDs for this provider (used by /model list command)
+    model_list: tuple[str, ...] = ()
+
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
@@ -128,6 +135,77 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://aihubmix.com/v1",
         strip_model_prefix=True,  # anthropic/claude-3 → claude-3 → openai/claude-3
         model_overrides=(),
+    ),
+    # AICodewith: three gateways — each routes to a different provider API.
+    #   GPT   → https://api.aicodewith.com/chatgpt/v1   (OpenAI format)
+    #   Claude → https://api.aicodewith.com/v1           (Anthropic format)
+    #   Gemini → https://api.aicodewith.com/gemini_cli   (Google GenAI format)
+    # Usage: model = "aicodewith-gpt/gpt-5.3-codex"
+    #        model = "aicodewith-claude/claude-opus-4-6-20260205"
+    #        model = "aicodewith-gemini/gemini-3-pro"
+    ProviderSpec(
+        name="aicodewith_gpt",
+        keywords=("aicodewith-gpt", "aicodewith_gpt"),
+        env_key="OPENAI_API_KEY",
+        display_name="AICodewith GPT",
+        litellm_prefix="",  # gpt-* recognized natively by LiteLLM
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="https://api.aicodewith.com/chatgpt/v1",
+        strip_model_prefix=True,  # aicodewith-gpt/gpt-5.3-codex → gpt-5.3-codex
+        model_overrides=(),
+        config_key="aicodewith",
+        model_list=(
+            "aicodewith-gpt/gpt-5.4",
+            "aicodewith-gpt/gpt-5.3-codex",
+            "aicodewith-gpt/gpt-5.2",
+        ),
+    ),
+    ProviderSpec(
+        name="aicodewith_claude",
+        keywords=("aicodewith-claude", "aicodewith_claude"),
+        env_key="ANTHROPIC_API_KEY",
+        display_name="AICodewith Claude",
+        litellm_prefix="",  # claude-* recognized natively by LiteLLM
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="https://api.aicodewith.com",
+        strip_model_prefix=True,  # aicodewith-claude/claude-opus-4-6 → claude-opus-4-6
+        model_overrides=(),
+        supports_prompt_caching=True,
+        config_key="aicodewith",
+        model_list=(
+            "aicodewith-claude/claude-opus-4-6-20260205",
+            "aicodewith-claude/claude-sonnet-4-5-20250929",
+        ),
+    ),
+    ProviderSpec(
+        name="aicodewith_gemini",
+        keywords=("aicodewith-gemini", "aicodewith_gemini"),
+        env_key="GEMINI_API_KEY",
+        display_name="AICodewith Gemini",
+        litellm_prefix="gemini",  # gemini-3-pro → gemini/gemini-3-pro
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="https://api.aicodewith.com/gemini_cli",
+        strip_model_prefix=True,  # aicodewith-gemini/gemini-3-pro → gemini-3-pro → gemini/gemini-3-pro
+        model_overrides=(),
+        config_key="aicodewith",
+        model_list=(
+            "aicodewith-gemini/gemini-3-pro",
+        ),
     ),
     # SiliconFlow (硅基流动): OpenAI-compatible gateway, model names keep org prefix
     ProviderSpec(

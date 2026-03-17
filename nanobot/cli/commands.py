@@ -1011,8 +1011,13 @@ def status():
         console.print(f"Model: {config.agents.defaults.model}")
 
         # Check API keys from registry
+        seen_config_keys: set[str] = set()
         for spec in PROVIDERS:
-            p = getattr(config.providers, spec.name, None)
+            cfg_field = spec.config_key or spec.name
+            if cfg_field in seen_config_keys:
+                continue
+            seen_config_keys.add(cfg_field)
+            p = getattr(config.providers, cfg_field, None)
             if p is None:
                 continue
             if spec.is_oauth:

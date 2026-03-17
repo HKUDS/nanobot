@@ -318,6 +318,40 @@ class AgentLoop:
 
         asyncio.create_task(_do_restart())
 
+    def _handle_model_command(self, msg: InboundMessage) -> OutboundMessage:
+        """Handle /model [list | <model_id>] command."""
+        from nanobot.config.loader import load_config, save_config
+        from nanobot.providers.registry import PROVIDERS
+
+        parts = msg.content.strip().split(maxsplit=1)
+        arg = parts[1].strip() if len(parts) > 1 else ""
+
+        if not arg or arg == "list":
+            config = load_config()
+            lines = [f"Current model: {self.model}\n"]
+            lines.append("Available models:")
+            for spec in PROVIDERS:
+                cfg_field = spec.config_key or spec.name
+                p = getattr(config.providers, cfg_field, None)
+                if not p or not (p.api_key or spec.is_oauth or spec.is_local):
+                    continue
+                if spec.model_list:
+                    for m in spec.model_list:
+                        marker = " ✓" if m == self.model else ""
+                        lines.append(f"  {m}{marker}")
+            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines))
+
+        # Switch model
+        new_model = arg
+        config = load_config()
+        config.agents.defaults.model = new_model
+        save_config(config)
+        self.model = new_model
+        return OutboundMessage(
+            channel=msg.channel, chat_id=msg.chat_id,
+            content=f"Model switched to: {new_model}\nRestart (/restart) to fully apply.",
+        )
+
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message under the global lock."""
         async with self._processing_lock:
@@ -415,12 +449,16 @@ class AgentLoop:
                 "🐈 nanobot commands:",
                 "/new — Start a new conversation",
                 "/stop — Stop the current task",
+                "/model — List available models",
+                "/model <id> — Switch model",
                 "/restart — Restart the bot",
                 "/help — Show available commands",
             ]
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
             )
+        if cmd == "/model" or cmd.startswith("/model "):
+            return self._handle_model_command(msg)
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
