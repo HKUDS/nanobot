@@ -21,5 +21,6 @@ poetry.lock
 .pytest_cache/
 botpy.log
 nano.*.save
-
 bridge/node_modules/
+.DS_Store
+uv.lock

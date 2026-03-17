@@ -13,14 +13,25 @@ from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 class CustomProvider(LLMProvider):
 
-    def __init__(self, api_key: str = "no-key", api_base: str = "http://localhost:8000/v1", default_model: str = "default"):
+    def __init__(
+        self,
+        api_key: str = "no-key",
+        api_base: str = "http://localhost:8000/v1",
+        default_model: str = "default",
+        extra_headers: dict[str, str] | None = None,
+    ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
-        # Keep affinity stable for this provider instance to improve backend cache locality.
+        # Keep affinity stable for this provider instance to improve backend cache locality,
+        # while still letting users attach provider-specific headers for custom gateways.
+        default_headers = {
+            "x-session-affinity": uuid.uuid4().hex,
+            **(extra_headers or {}),
+        }
         self._client = AsyncOpenAI(
             api_key=api_key,
             base_url=api_base,
-            default_headers={"x-session-affinity": uuid.uuid4().hex},
+            default_headers=default_headers,
         )
 
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
