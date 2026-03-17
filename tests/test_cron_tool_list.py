@@ -2,12 +2,101 @@
 
 from nanobot.agent.tools.cron import CronTool
 from nanobot.cron.service import CronService
-from nanobot.cron.types import CronSchedule
+from nanobot.cron.types import CronJobState, CronSchedule
 
 
 def _make_tool(tmp_path) -> CronTool:
     service = CronService(tmp_path / "cron" / "jobs.json")
     return CronTool(service)
+
+
+# -- _format_timing tests --
+
+
+def test_format_timing_cron_with_tz() -> None:
+    s = CronSchedule(kind="cron", expr="0 9 * * 1-5", tz="America/Denver")
+    assert CronTool._format_timing(s) == "cron: 0 9 * * 1-5 (America/Denver)"
+
+
+def test_format_timing_cron_without_tz() -> None:
+    s = CronSchedule(kind="cron", expr="*/5 * * * *")
+    assert CronTool._format_timing(s) == "cron: */5 * * * *"
+
+
+def test_format_timing_every_hours() -> None:
+    s = CronSchedule(kind="every", every_ms=7_200_000)
+    assert CronTool._format_timing(s) == "every 2h"
+
+
+def test_format_timing_every_minutes() -> None:
+    s = CronSchedule(kind="every", every_ms=1_800_000)
+    assert CronTool._format_timing(s) == "every 30m"
+
+
+def test_format_timing_every_seconds() -> None:
+    s = CronSchedule(kind="every", every_ms=30_000)
+    assert CronTool._format_timing(s) == "every 30s"
+
+
+def test_format_timing_at() -> None:
+    s = CronSchedule(kind="at", at_ms=1773684000000)
+    result = CronTool._format_timing(s)
+    assert result.startswith("at 2026-")
+
+
+def test_format_timing_fallback() -> None:
+    s = CronSchedule(kind="every")  # no every_ms
+    assert CronTool._format_timing(s) == "every"
+
+
+# -- _format_state tests --
+
+
+def test_format_state_empty() -> None:
+    state = CronJobState()
+    assert CronTool._format_state(state) == []
+
+
+def test_format_state_last_run_ok() -> None:
+    state = CronJobState(last_run_at_ms=1773673200000, last_status="ok")
+    lines = CronTool._format_state(state)
+    assert len(lines) == 1
+    assert "Last run:" in lines[0]
+    assert "ok" in lines[0]
+
+
+def test_format_state_last_run_with_error() -> None:
+    state = CronJobState(last_run_at_ms=1773673200000, last_status="error", last_error="timeout")
+    lines = CronTool._format_state(state)
+    assert len(lines) == 1
+    assert "error" in lines[0]
+    assert "timeout" in lines[0]
+
+
+def test_format_state_next_run_only() -> None:
+    state = CronJobState(next_run_at_ms=1773684000000)
+    lines = CronTool._format_state(state)
+    assert len(lines) == 1
+    assert "Next run:" in lines[0]
+
+
+def test_format_state_both() -> None:
+    state = CronJobState(
+        last_run_at_ms=1773673200000, last_status="ok", next_run_at_ms=1773684000000
+    )
+    lines = CronTool._format_state(state)
+    assert len(lines) == 2
+    assert "Last run:" in lines[0]
+    assert "Next run:" in lines[1]
+
+
+def test_format_state_unknown_status() -> None:
+    state = CronJobState(last_run_at_ms=1773673200000, last_status=None)
+    lines = CronTool._format_state(state)
+    assert "unknown" in lines[0]
+
+
+# -- _list_jobs integration tests --
 
 
 def test_list_empty(tmp_path) -> None:
