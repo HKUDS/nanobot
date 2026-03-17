@@ -18,6 +18,8 @@ class ContextBuilder:
 
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
+    _MAX_INPUT_IMAGES = 3
+    _MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
     def __init__(self, workspace: Path):
         self.workspace = workspace
@@ -149,21 +151,44 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             return text
 
         images = []
-        for path in media:
+        notes: list[str] = []
+        extra_count = max(0, len(media) - self._MAX_INPUT_IMAGES)
+        if extra_count:
+            noun = "image" if extra_count == 1 else "images"
+            notes.append(
+                f"[Skipped {extra_count} {noun}: "
+                f"only the first {self._MAX_INPUT_IMAGES} images are included]"
+            )
+
+        for path in media[:self._MAX_INPUT_IMAGES]:
             p = Path(path)
             if not p.is_file():
+                notes.append(f"[Skipped image: file not found ({p.name or path})]")
+                continue
+            try:
+                size = p.stat().st_size
+            except OSError:
+                notes.append(f"[Skipped image: unable to read ({p.name or path})]")
+                continue
+            if size > self._MAX_IMAGE_BYTES:
+                size_mb = self._MAX_IMAGE_BYTES // (1024 * 1024)
+                notes.append(f"[Skipped image: file too large ({p.name}, limit {size_mb} MB)]")
                 continue
             raw = p.read_bytes()
             # Detect real MIME type from magic bytes; fallback to filename guess
             mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
             if not mime or not mime.startswith("image/"):
+                notes.append(f"[Skipped image: unsupported or invalid image format ({p.name})]")
                 continue
             b64 = base64.b64encode(raw).decode()
             images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
 
+        note_text = "\n".join(notes).strip()
+        text_block = text if not note_text else (f"{note_text}\n\n{text}" if text else note_text)
+
         if not images:
-            return text
-        return images + [{"type": "text", "text": text}]
+            return text_block
+        return images + [{"type": "text", "text": text_block}]
 
     def add_tool_result(
         self, messages: list[dict[str, Any]],
