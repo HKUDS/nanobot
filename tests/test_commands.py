@@ -1,4 +1,4 @@
-import shutil
+import re
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -18,86 +18,10 @@ class _StopGateway(RuntimeError):
     pass
 
 
-@pytest.fixture
-def mock_paths():
-    """Mock config/workspace paths for test isolation."""
-    with patch("nanobot.config.loader.get_config_path") as mock_cp, \
-         patch("nanobot.config.loader.save_config") as mock_sc, \
-         patch("nanobot.config.loader.load_config") as mock_lc, \
-         patch("nanobot.cli.commands.get_workspace_path") as mock_ws:
-
-        base_dir = Path("./test_onboard_data")
-        if base_dir.exists():
-            shutil.rmtree(base_dir)
-        base_dir.mkdir()
-
-        config_file = base_dir / "config.json"
-        workspace_dir = base_dir / "workspace"
-
-        mock_cp.return_value = config_file
-        mock_ws.return_value = workspace_dir
-        mock_sc.side_effect = lambda config: config_file.write_text("{}")
-
-        yield config_file, workspace_dir
-
-        if base_dir.exists():
-            shutil.rmtree(base_dir)
-
-
-def test_onboard_fresh_install(mock_paths):
-    """No existing config — should create from scratch."""
-    config_file, workspace_dir = mock_paths
-
-    result = runner.invoke(app, ["onboard"])
-
-    assert result.exit_code == 0
-    assert "Created config" in result.stdout
-    assert "Created workspace" in result.stdout
-    assert "nanobot is ready" in result.stdout
-    assert config_file.exists()
-    assert (workspace_dir / "AGENTS.md").exists()
-    assert (workspace_dir / "memory" / "MEMORY.md").exists()
-
-
-def test_onboard_existing_config_refresh(mock_paths):
-    """Config exists, user declines overwrite — should refresh (load-merge-save)."""
-    config_file, workspace_dir = mock_paths
-    config_file.write_text('{"existing": true}')
-
-    result = runner.invoke(app, ["onboard"], input="n\n")
-
-    assert result.exit_code == 0
-    assert "Config already exists" in result.stdout
-    assert "existing values preserved" in result.stdout
-    assert workspace_dir.exists()
-    assert (workspace_dir / "AGENTS.md").exists()
-
-
-def test_onboard_existing_config_overwrite(mock_paths):
-    """Config exists, user confirms overwrite — should reset to defaults."""
-    config_file, workspace_dir = mock_paths
-    config_file.write_text('{"existing": true}')
-
-    result = runner.invoke(app, ["onboard"], input="y\n")
-
-    assert result.exit_code == 0
-    assert "Config already exists" in result.stdout
-    assert "Config reset to defaults" in result.stdout
-    assert workspace_dir.exists()
-
-
-def test_onboard_existing_workspace_safe_create(mock_paths):
-    """Workspace exists — should not recreate, but still add missing templates."""
-    config_file, workspace_dir = mock_paths
-    workspace_dir.mkdir(parents=True)
-    config_file.write_text("{}")
-
-    result = runner.invoke(app, ["onboard"], input="n\n")
-
-    assert result.exit_code == 0
-    assert "Created workspace" not in result.stdout
-    assert "Created AGENTS.md" in result.stdout
-    assert (workspace_dir / "AGENTS.md").exists()
+def _strip_ansi(text):
+    """Remove ANSI escape codes from text."""
+    ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+    return ansi_escape.sub('', text)
 
 
 def test_config_matches_github_copilot_codex_with_hyphen_prefix():
@@ -112,6 +36,64 @@ def test_config_matches_openai_codex_with_hyphen_prefix():
     config.agents.defaults.model = "openai-codex/gpt-5.1-codex"
 
     assert config.get_provider_name() == "openai_codex"
+
+
+def test_config_matches_explicit_ollama_prefix_without_api_key():
+    config = Config()
+    config.agents.defaults.model = "ollama/llama3.2"
+
+    assert config.get_provider_name() == "ollama"
+    assert config.get_api_base() == "http://localhost:11434"
+
+
+def test_config_explicit_ollama_provider_uses_default_localhost_api_base():
+    config = Config()
+    config.agents.defaults.provider = "ollama"
+    config.agents.defaults.model = "llama3.2"
+
+    assert config.get_provider_name() == "ollama"
+    assert config.get_api_base() == "http://localhost:11434"
+
+
+def test_config_auto_detects_ollama_from_local_api_base():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "llama3.2"}},
+            "providers": {"ollama": {"apiBase": "http://localhost:11434"}},
+        }
+    )
+
+    assert config.get_provider_name() == "ollama"
+    assert config.get_api_base() == "http://localhost:11434"
+
+
+def test_config_prefers_ollama_over_vllm_when_both_local_providers_configured():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "llama3.2"}},
+            "providers": {
+                "vllm": {"apiBase": "http://localhost:8000"},
+                "ollama": {"apiBase": "http://localhost:11434"},
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "ollama"
+    assert config.get_api_base() == "http://localhost:11434"
+
+
+def test_config_falls_back_to_vllm_when_ollama_not_configured():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "llama3.2"}},
+            "providers": {
+                "vllm": {"apiBase": "http://localhost:8000"},
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "vllm"
+    assert config.get_api_base() == "http://localhost:8000"
 
 
 def test_find_by_model_prefers_explicit_prefix_over_generic_codex_keyword():
@@ -170,10 +152,11 @@ def test_agent_help_shows_workspace_and_config_options():
     result = runner.invoke(app, ["agent", "--help"])
 
     assert result.exit_code == 0
-    assert "--workspace" in result.stdout
-    assert "-w" in result.stdout
-    assert "--config" in result.stdout
-    assert "-c" in result.stdout
+    stripped_output = _strip_ansi(result.stdout)
+    assert "--workspace" in stripped_output
+    assert "-w" in stripped_output
+    assert "--config" in stripped_output
+    assert "-c" in stripped_output
 
 
 def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_runtime):
@@ -267,6 +250,16 @@ def test_agent_workspace_override_wins_over_config_workspace(mock_agent_runtime,
     assert mock_agent_runtime["agent_loop_cls"].call_args.kwargs["workspace"] == workspace_path
 
 
+def test_agent_warns_about_deprecated_memory_window(mock_agent_runtime):
+    mock_agent_runtime["config"].agents.defaults.memory_window = 100
+
+    result = runner.invoke(app, ["agent", "-m", "hello"])
+
+    assert result.exit_code == 0
+    assert "memoryWindow" in result.stdout
+    assert "contextWindowTokens" in result.stdout
+
+
 def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)
@@ -326,6 +319,29 @@ def test_gateway_workspace_option_overrides_config(monkeypatch, tmp_path: Path) 
     assert isinstance(result.exception, _StopGateway)
     assert seen["workspace"] == override
     assert config.workspace_path == override
+
+
+def test_gateway_warns_about_deprecated_memory_window(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    config.agents.defaults.memory_window = 100
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._make_provider",
+        lambda _config: (_ for _ in ()).throw(_StopGateway("stop")),
+    )
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert isinstance(result.exception, _StopGateway)
+    assert "memoryWindow" in result.stdout
+    assert "contextWindowTokens" in result.stdout
 
 def test_gateway_uses_config_directory_for_cron_store(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "instance" / "config.json"

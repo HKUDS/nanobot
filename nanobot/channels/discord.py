@@ -3,9 +3,10 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
+from pydantic import Field
 import websockets
 from loguru import logger
 
@@ -13,7 +14,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import DiscordConfig
+from nanobot.config.schema import Base
 from nanobot.utils.helpers import split_message
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
@@ -21,12 +22,31 @@ MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
 
 
+class DiscordConfig(Base):
+    """Discord channel configuration."""
+
+    enabled: bool = False
+    token: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+    gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
+    intents: int = 37377
+    group_policy: Literal["mention", "open"] = "mention"
+    reply_to_message: bool = False
+
+
 class DiscordChannel(BaseChannel):
     """Discord channel using Gateway websocket."""
 
     name = "discord"
+    display_name = "Discord"
 
-    def __init__(self, config: DiscordConfig, bus: MessageBus):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return DiscordConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = DiscordConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: DiscordConfig = config
         self._ws: websockets.WebSocketClientProtocol | None = None
@@ -174,9 +194,7 @@ class DiscordChannel(BaseChannel):
                     data: dict[str, Any] = {}
                     if payload_json:
                         data["payload_json"] = json.dumps(payload_json)
-                    response = await self._http.post(
-                        url, headers=headers, files=files, data=data
-                    )
+                    response = await self._http.post(url, headers=headers, files=files, data=data)
                 if response.status_code == 429:
                     resp_data = response.json()
                     retry_after = float(resp_data.get("retry_after", 1.0))
@@ -308,7 +326,9 @@ class DiscordChannel(BaseChannel):
                 continue
             try:
                 media_dir.mkdir(parents=True, exist_ok=True)
-                file_path = media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
+                file_path = (
+                    media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
+                )
                 resp = await self._http.get(url)
                 resp.raise_for_status()
                 file_path.write_bytes(resp.content)
@@ -350,7 +370,9 @@ class DiscordChannel(BaseChannel):
                 # Also check content for mention format <@USER_ID>
                 if f"<@{self._bot_user_id}>" in content or f"<@!{self._bot_user_id}>" in content:
                     return True
-            logger.debug("Discord message in {} ignored (bot not mentioned)", payload.get("channel_id"))
+            logger.debug(
+                "Discord message in {} ignored (bot not mentioned)", payload.get("channel_id")
+            )
             return False
 
         return True

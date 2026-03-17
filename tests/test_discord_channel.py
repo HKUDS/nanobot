@@ -4,8 +4,7 @@ import pytest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.discord import DiscordChannel
-from nanobot.config.schema import DiscordConfig
+from nanobot.channels.discord import DiscordChannel, DiscordConfig
 
 
 def _make_channel(*, reply_to_message: bool = False) -> DiscordChannel:
