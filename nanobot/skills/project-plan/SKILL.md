@@ -1,29 +1,8 @@
 ---
 name: project-plan
 description: >
-  Analyze, summarize, and answer questions about project plans uploaded as Excel or CSV files.
-  Use when the user uploads a spreadsheet that contains project management data — tasks, milestones,
-  schedule dates, gates (A/B/C/D/E), WBS codes, resource allocations, durations, or status fields.
-  Triggers on phrases like "summarize this project plan", "what is the status of this project",
-  "when is go-live", "show me the milestones", "who is working on this", "how many FTE days",
-  or any question about a file that has columns named Schedule Start, Schedule Finish, Milestone,
-  Gate, Duration, Status, WBS, or similar project scheduling terminology.
-triggers:
-  - project plan
-  - summarize project
-  - project summary
-  - project status
-  - when is go-live
-  - go live date
-  - show milestones
-  - milestone summary
-  - gate review
-  - gate approved
-  - schedule plan
-  - fte days
-  - resource plan
-  - wbs
-  - project schedule
+  Project plan summary and analysis. Analyze or summarize project schedule
+  milestones, gates, WBS, tasks, resources from Excel or CSV files.
 ---
 
 # Project Plan Skill
