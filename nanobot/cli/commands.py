@@ -265,6 +265,12 @@ def onboard(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     non_interactive: bool = typer.Option(False, "--non-interactive", help="Skip interactive wizard"),
+    preserve_sections: bool = typer.Option(
+        False,
+        "--preserve-sections",
+        "-p",
+        help="Only merge new fields into existing sections; don't add removed channels/providers back.",
+    ),
 ):
     """Initialize nanobot configuration and workspace."""
     from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
@@ -323,7 +329,7 @@ def onboard(
             console.print("[yellow]Please run 'nanobot onboard' again to complete setup.[/yellow]")
             raise typer.Exit(1)
 
-    _onboard_plugins(config_path)
+    _onboard_plugins(config_path, preserve_sections=preserve_sections)
 
     # Create workspace, preferring the configured workspace path.
     workspace = get_workspace_path(config.workspace_path)
@@ -363,8 +369,14 @@ def _merge_missing_defaults(existing: Any, defaults: Any) -> Any:
     return merged
 
 
-def _onboard_plugins(config_path: Path) -> None:
-    """Inject default config for all discovered channels (built-in + plugins)."""
+def _onboard_plugins(config_path: Path, preserve_sections: bool = False) -> None:
+    """Inject default config for all discovered channels (built-in + plugins).
+    
+    Args:
+        config_path: Path to the config file
+        preserve_sections: If True, only merge into existing channels, don't add new ones.
+                          Preserves user's choice to maintain a minimal config.
+    """
     import json
 
     from nanobot.channels.registry import discover_all
@@ -379,8 +391,11 @@ def _onboard_plugins(config_path: Path) -> None:
     channels = data.setdefault("channels", {})
     for name, cls in all_channels.items():
         if name not in channels:
-            channels[name] = cls.default_config()
+            # Only add new channels if not preserving sections
+            if not preserve_sections:
+                channels[name] = cls.default_config()
         else:
+            # Always merge missing defaults into existing channels
             channels[name] = _merge_missing_defaults(channels[name], cls.default_config())
 
     with open(config_path, "w", encoding="utf-8") as f:
