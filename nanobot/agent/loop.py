@@ -180,21 +180,23 @@ class AgentLoop:
             
             val = None
             if isinstance(args, dict):
-                if "path" in args and isinstance(args["path"], str):
-                    val = args["path"]
-                elif "query" in args and isinstance(args["query"], str):
-                    val = args["query"]
-                else:
-                    for v in args.values():
-                        if isinstance(v, str):
-                            val = v
-                            break
+                # Iterate through all string values to find the first meaningful one
+                for v in args.values():
+                    if isinstance(v, str):
+                        val = v
+                        break
                             
             if not isinstance(val, str):
                 return tc.name
                 
-            if self.restrict_to_workspace and workspace_str in val:
-                val = val.replace(workspace_str, "").lstrip("\\/")
+            if self.restrict_to_workspace:
+                import os
+                # If it looks like an absolute path, normalize it to resolve '..' and '.'
+                if os.path.isabs(val):
+                    val = os.path.normpath(val)
+                # Replace workspace path with empty string to hide it
+                if workspace_str in val:
+                    val = val.replace(workspace_str, "").lstrip("\\/")
                 
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
             
