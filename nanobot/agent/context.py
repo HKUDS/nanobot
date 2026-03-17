@@ -50,6 +50,14 @@ class ContextBuilder:
             if always_content:
                 parts.append(f"# Active Skills\n\n{always_content}")
 
+        enabled_skills = self._get_enabled_skills(session_metadata)
+        if enabled_skills:
+            always_set = set(always_skills or [])
+            selected_skills = [name for name in enabled_skills if name not in always_set]
+            selected_content = self.skills.load_skills_for_context(selected_skills)
+            if selected_content:
+                parts.append(f"# Enabled Skills\n\n{selected_content}")
+
         skills_summary = self.skills.build_skills_summary()
         if skills_summary:
             parts.append(f"""# Skills
@@ -60,6 +68,32 @@ Skills with available="false" need dependencies installed first - you can try in
 {skills_summary}""")
 
         return "\n\n---\n\n".join(parts)
+
+    @staticmethod
+    def _get_enabled_skills(session_metadata: dict[str, Any] | None) -> list[str]:
+        """Extract per-session enabled skills from assistant/template metadata."""
+        if not session_metadata:
+            return []
+
+        template = session_metadata.get("assistant") or session_metadata.get("template")
+        if not isinstance(template, dict):
+            return []
+
+        raw = template.get("enabled_skills")
+        if not isinstance(raw, list):
+            return []
+
+        seen: set[str] = set()
+        result: list[str] = []
+        for item in raw:
+            if not isinstance(item, str):
+                continue
+            name = item.strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            result.append(name)
+        return result
 
     @staticmethod
     def _build_template_context(session_metadata: dict[str, Any] | None) -> str:
