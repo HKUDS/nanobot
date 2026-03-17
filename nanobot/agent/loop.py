@@ -169,15 +169,33 @@ class AgentLoop:
             return None
         return re.sub(r"<think>[\s\S]*?</think>", "", text).strip() or None
 
-    @staticmethod
-    def _tool_hint(tool_calls: list) -> str:
+    def _tool_hint(self, tool_calls: list) -> str:
         """Format tool calls as concise hint, e.g. 'web_search("query")'."""
+        workspace_str = str(self.workspace)
+        
         def _fmt(tc):
             args = (tc.arguments[0] if isinstance(tc.arguments, list) else tc.arguments) or {}
-            val = next(iter(args.values()), None) if isinstance(args, dict) else None
+            
+            val = None
+            if isinstance(args, dict):
+                if "path" in args and isinstance(args["path"], str):
+                    val = args["path"]
+                elif "query" in args and isinstance(args["query"], str):
+                    val = args["query"]
+                else:
+                    for v in args.values():
+                        if isinstance(v, str):
+                            val = v
+                            break
+                            
             if not isinstance(val, str):
                 return tc.name
+                
+            if self.restrict_to_workspace and workspace_str in val:
+                val = val.replace(workspace_str, "").lstrip("\\/")
+                
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
+            
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
     async def _run_agent_loop(
