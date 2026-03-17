@@ -52,6 +52,11 @@ class DelegateTool(Tool):
         """Wire the dispatch callback (called by AgentLoop during setup)."""
         self._dispatch = fn
 
+    def check_available(self) -> tuple[bool, str | None]:
+        if not self._dispatch:
+            return False, "Delegation not configured"
+        return True, None
+
     @property
     def name(self) -> str:
         return "delegate"
@@ -132,6 +137,11 @@ class DelegateParallelTool(Tool):
 
     def set_dispatch(self, fn: DispatchFn) -> None:
         self._dispatch = fn
+
+    def check_available(self) -> tuple[bool, str | None]:
+        if not self._dispatch:
+            return False, "Delegation not configured"
+        return True, None
 
     @property
     def name(self) -> str:

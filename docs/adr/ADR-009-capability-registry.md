@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted (Phase A implemented)
 
 ## Date
 
@@ -109,13 +109,13 @@ No silent fallback to LLM classification for explicitly-provided role names.
 
 ### 5. Implementation phases
 
-| Phase | Scope | Independently valuable? |
-|-------|-------|------------------------|
-| A | Tool availability protocol on `Tool` ABC + filter `get_definitions()` | **Yes** — prevents LLM from calling unconfigured tools |
-| B | `CapabilityRegistry` core (wraps existing registries) | Yes — unified view |
-| C | Wire into `AgentLoop` (replace `self.tools` + `self.skills` + `self.agent_registry`) | No — requires B |
-| D | Delegation validation (role enum, `UnknownRoleError`) | Yes — can be done on Phase A alone |
-| E | Health tracking (`refresh_health()`, heartbeat integration) | No — requires B |
+| Phase | Scope | Independently valuable? | Status |
+|-------|-------|------------------------|--------|
+| A | Tool availability protocol on `Tool` ABC + filter `get_definitions()` | **Yes** — prevents LLM from calling unconfigured tools | **Done** |
+| B | `CapabilityRegistry` core (wraps existing registries) | Yes — unified view | Planned |
+| C | Wire into `AgentLoop` (replace `self.tools` + `self.skills` + `self.agent_registry`) | No — requires B | Planned |
+| D | Delegation validation (role enum, `UnknownRoleError`) | Yes — can be done on Phase A alone | Planned |
+| E | Health tracking (`refresh_health()`, heartbeat integration) | No — requires B | Planned |
 
 Phase A is the critical first step: it solves the immediate problem with minimal risk.
 

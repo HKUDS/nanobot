@@ -152,6 +152,15 @@ class Tool(ABC):
                 )
         return errors
 
+    def check_available(self) -> tuple[bool, str | None]:
+        """Return (is_available, reason_if_not).
+
+        Override in tools with external dependencies (API keys, services, etc.)
+        to report unavailability.  The registry will hide unavailable tools from
+        the LLM and surface the reasons in the system prompt.
+        """
+        return True, None
+
     def to_schema(self) -> dict[str, Any]:
         """Convert tool to OpenAI function schema format."""
         return {

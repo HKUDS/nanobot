@@ -28,6 +28,11 @@ class CheckEmailTool(Tool):
         self._fetch = fetch_callback
         self._fetch_unread = fetch_unread_callback
 
+    def check_available(self) -> tuple[bool, str | None]:
+        if not self._fetch and not self._fetch_unread:
+            return False, "Email channel not configured"
+        return True, None
+
     @property
     def name(self) -> str:
         return "check_email"

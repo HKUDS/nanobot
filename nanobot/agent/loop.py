@@ -287,6 +287,7 @@ class AgentLoop:
             provider=provider,
             summary_model=config.tool_summary_model or None,
         )
+        self.context.set_unavailable_tools_fn(self.tools._registry.get_unavailable_summary)
         self.missions = MissionManager(
             provider=provider,
             workspace=self.workspace,

@@ -26,7 +26,7 @@ import platform
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from loguru import logger
 
@@ -391,6 +391,11 @@ class ContextBuilder:
         self.memory_md_token_cap = memory_md_token_cap
         self.role_system_prompt = role_system_prompt
         self._contacts_context: str = ""
+        self._unavailable_tools_fn: Callable[[], str] | None = None
+
+    def set_unavailable_tools_fn(self, fn: Callable[[], str]) -> None:
+        """Register a callback that returns the unavailable-tools summary."""
+        self._unavailable_tools_fn = fn
 
     def set_contacts_context(self, contacts: list[str]) -> None:
         """Update the known contacts displayed in the system prompt."""
@@ -475,6 +480,16 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
 
 {skills_summary}""")
+
+        # Unavailable tools — tell the LLM what it cannot use this session
+        if self._unavailable_tools_fn:
+            unavail = self._unavailable_tools_fn()
+            if unavail:
+                parts.append(
+                    "# Unavailable Tools\n\n"
+                    "The following tools are registered but currently unavailable. "
+                    "Do NOT attempt to call them — find an alternative approach.\n\n" + unavail
+                )
 
         # Known contacts (email recipients, populated by channel manager)
         if self._contacts_context:

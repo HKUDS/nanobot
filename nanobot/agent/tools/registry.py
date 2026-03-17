@@ -77,8 +77,22 @@ class ToolRegistry:
         return name in self._tools
 
     def get_definitions(self) -> list[dict[str, Any]]:
-        """Get all tool definitions in OpenAI format."""
-        return [tool.to_schema() for tool in self._tools.values()]
+        """Get tool definitions in OpenAI format, excluding unavailable tools."""
+        defs = []
+        for tool in self._tools.values():
+            available, _reason = tool.check_available()
+            if available:
+                defs.append(tool.to_schema())
+        return defs
+
+    def get_unavailable_summary(self) -> str:
+        """Return a human-readable summary of unavailable tools for the system prompt."""
+        lines: list[str] = []
+        for tool in self._tools.values():
+            available, reason = tool.check_available()
+            if not available:
+                lines.append(f"- {tool.name}: {reason or 'unavailable'}")
+        return "\n".join(lines)
 
     async def execute(self, name: str, params: dict[str, Any]) -> ToolResult:
         """Execute a tool by name with given parameters.
