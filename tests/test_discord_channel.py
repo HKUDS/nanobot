@@ -4,11 +4,12 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
+import discord
 import pytest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.discord import DiscordChannel, DiscordConfig
+from nanobot.channels.discord import DiscordChannel, DiscordConfig, _DiscordClient
 
 
 class _FakeDiscordClient:
@@ -40,6 +41,12 @@ class _FakeDiscordClient:
 
     def get_channel(self, channel_id: int):
         return self.channels.get(channel_id)
+
+    async def send_outbound(self, msg: OutboundMessage) -> None:
+        channel = self.get_channel(int(msg.chat_id))
+        if channel is None:
+            return
+        await channel.send(content=msg.content)
 
 
 class _FakeAttachment:
@@ -302,28 +309,25 @@ async def test_send_warns_when_client_not_ready() -> None:
 
 @pytest.mark.asyncio
 async def test_send_skips_when_channel_not_cached() -> None:
-    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
-    client = _FakeDiscordClient(channel, intents=None)
-    channel._client = client
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = _DiscordClient(owner, intents=discord.Intents.none())
 
-    await channel.send(OutboundMessage(channel="discord", chat_id="123", content="hello"))
+    await client.send_outbound(OutboundMessage(channel="discord", chat_id="123", content="hello"))
 
-    assert client.channels == {}
+    assert client.get_channel(123) is None
 
 
 @pytest.mark.asyncio
-async def test_send_chunks_text_replies_and_uploads_files(tmp_path) -> None:
-    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
-    client = _FakeDiscordClient(channel, intents=None)
+async def test_client_send_outbound_chunks_text_replies_and_uploads_files(tmp_path) -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = _DiscordClient(owner, intents=discord.Intents.none())
     target = _FakeChannel(channel_id=123)
-    client.channels[123] = target
-    channel._client = client
-    channel._running = True
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
 
     file_path = tmp_path / "demo.txt"
     file_path.write_text("hi")
 
-    await channel.send(
+    await client.send_outbound(
         OutboundMessage(
             channel="discord",
             chat_id="123",
@@ -341,16 +345,15 @@ async def test_send_chunks_text_replies_and_uploads_files(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_reports_failed_attachments_when_no_text(tmp_path) -> None:
-    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
-    client = _FakeDiscordClient(channel, intents=None)
+async def test_client_send_outbound_reports_failed_attachments_when_no_text(tmp_path) -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = _DiscordClient(owner, intents=discord.Intents.none())
     target = _FakeChannel(channel_id=123)
-    client.channels[123] = target
-    channel._client = client
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
 
     missing_file = tmp_path / "missing.txt"
 
-    await channel.send(
+    await client.send_outbound(
         OutboundMessage(
             channel="discord",
             chat_id="123",
@@ -366,8 +369,6 @@ async def test_send_reports_failed_attachments_when_no_text(tmp_path) -> None:
 async def test_send_stops_typing_after_send() -> None:
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     client = _FakeDiscordClient(channel, intents=None)
-    target = _FakeChannel(channel_id=123)
-    client.channels[123] = target
     channel._client = client
     channel._running = True
 
@@ -378,9 +379,10 @@ async def test_send_stops_typing_after_send() -> None:
         start.set()
         await release.wait()
 
-    target.trigger_typing = slow_typing
+    typing_channel = _FakeChannel(channel_id=123)
+    typing_channel.trigger_typing = slow_typing
 
-    await channel._start_typing(target)
+    await channel._start_typing(typing_channel)
     await start.wait()
 
     await channel.send(OutboundMessage(channel="discord", chat_id="123", content="hello"))

@@ -50,6 +50,96 @@ class _DiscordClient(discord.Client):
     async def on_message(self, message: discord.Message) -> None:
         await self._owner._on_message(message)
 
+    async def send_outbound(self, msg: OutboundMessage) -> None:
+        """Send a nanobot outbound message using Discord transport rules."""
+        channel = self.get_channel(int(msg.chat_id))
+        if channel is None:
+            logger.warning("Discord channel {} not available in client cache", msg.chat_id)
+            return
+
+        reference = self._build_reference(channel, msg.reply_to)
+        mention_settings = discord.AllowedMentions(replied_user=False)
+        sent_media = False
+        failed_media: list[str] = []
+
+        for index, media_path in enumerate(msg.media or []):
+            if await self._send_file(
+                channel,
+                media_path,
+                reference=reference if index == 0 else None,
+                mention_settings=mention_settings,
+            ):
+                sent_media = True
+            else:
+                failed_media.append(Path(media_path).name)
+
+        for index, chunk in enumerate(self._build_chunks(msg.content or "", failed_media, sent_media)):
+            kwargs: dict[str, Any] = {"content": chunk}
+            if index == 0 and reference is not None and not sent_media:
+                kwargs["reference"] = reference
+                kwargs["allowed_mentions"] = mention_settings
+            await channel.send(**kwargs)
+
+    async def _send_file(
+        self,
+        channel: "Messageable",
+        file_path: str,
+        *,
+        reference: discord.PartialMessage | None,
+        mention_settings: discord.AllowedMentions,
+    ) -> bool:
+        """Send a file attachment via discord.py."""
+        path = Path(file_path)
+        if not path.is_file():
+            logger.warning("Discord file not found, skipping: {}", file_path)
+            return False
+
+        if path.stat().st_size > MAX_ATTACHMENT_BYTES:
+            logger.warning("Discord file too large (>20MB), skipping: {}", path.name)
+            return False
+
+        try:
+            kwargs: dict[str, Any] = {"file": discord.File(path)}
+            if reference is not None:
+                kwargs["reference"] = reference
+                kwargs["allowed_mentions"] = mention_settings
+            await channel.send(**kwargs)
+            logger.info("Discord file sent: {}", path.name)
+            return True
+        except Exception as e:
+            logger.error("Error sending Discord file {}: {}", path.name, e)
+            return False
+
+    @staticmethod
+    def _build_chunks(content: str, failed_media: list[str], sent_media: bool) -> list[str]:
+        """Build outbound text chunks, including attachment-failure fallback text."""
+        chunks = split_message(content, MAX_MESSAGE_LEN)
+        if chunks or not failed_media or sent_media:
+            return chunks
+        fallback = "\n".join(f"[attachment: {name} - send failed]" for name in failed_media)
+        return split_message(fallback, MAX_MESSAGE_LEN)
+
+    @staticmethod
+    def _build_reference(
+        channel: "Messageable",
+        reply_to: str | None,
+    ) -> discord.PartialMessage | None:
+        """Build a lightweight reply reference when supported by the channel type."""
+        if not reply_to:
+            return None
+        try:
+            message_id = int(reply_to)
+        except (TypeError, ValueError):
+            logger.warning("Invalid Discord reply target: {}", reply_to)
+            return None
+
+        get_partial_message = getattr(channel, "get_partial_message", None)
+        if callable(get_partial_message):
+            return get_partial_message(message_id)
+
+        logger.warning("Discord channel {} does not support replies", getattr(channel, "id", "?"))
+        return None
+
 
 class DiscordChannel(BaseChannel):
     """Discord channel using discord.py."""
@@ -127,78 +217,12 @@ class DiscordChannel(BaseChannel):
             logger.warning("Discord client not ready; dropping outbound message")
             return
 
-        channel = client.get_channel(int(msg.chat_id))
-        if channel is None:
-            logger.warning("Discord channel {} not available in client cache", msg.chat_id)
-            await self._stop_typing(msg.chat_id)
-            return
-
-        reference = self._build_reference(channel, msg.reply_to)
-        mention_settings = discord.AllowedMentions(replied_user=False)
-        sent_media = False
-        failed_media: list[str] = []
-
         try:
-            for index, media_path in enumerate(msg.media or []):
-                if await self._send_file(
-                    channel,
-                    media_path,
-                    reference=reference if index == 0 else None,
-                    mention_settings=mention_settings,
-                ):
-                    sent_media = True
-                else:
-                    failed_media.append(Path(media_path).name)
-
-            chunks = split_message(msg.content or "", MAX_MESSAGE_LEN)
-            if not chunks and failed_media and not sent_media:
-                chunks = split_message(
-                    "\n".join(f"[attachment: {name} - send failed]" for name in failed_media),
-                    MAX_MESSAGE_LEN,
-                )
-            if not chunks:
-                return
-
-            for index, chunk in enumerate(chunks):
-                kwargs: dict[str, Any] = {"content": chunk}
-                if index == 0 and reference is not None and not sent_media:
-                    kwargs["reference"] = reference
-                    kwargs["allowed_mentions"] = mention_settings
-                await channel.send(**kwargs)
+            await client.send_outbound(msg)
         except Exception as e:
             logger.error("Error sending Discord message: {}", e)
         finally:
             await self._stop_typing(msg.chat_id)
-
-    async def _send_file(
-        self,
-        channel: "Messageable",
-        file_path: str,
-        *,
-        reference: discord.PartialMessage | None,
-        mention_settings: discord.AllowedMentions,
-    ) -> bool:
-        """Send a file attachment via discord.py."""
-        path = Path(file_path)
-        if not path.is_file():
-            logger.warning("Discord file not found, skipping: {}", file_path)
-            return False
-
-        if path.stat().st_size > MAX_ATTACHMENT_BYTES:
-            logger.warning("Discord file too large (>20MB), skipping: {}", path.name)
-            return False
-
-        try:
-            kwargs: dict[str, Any] = {"file": discord.File(path)}
-            if reference is not None:
-                kwargs["reference"] = reference
-                kwargs["allowed_mentions"] = mention_settings
-            await channel.send(**kwargs)
-            logger.info("Discord file sent: {}", path.name)
-            return True
-        except Exception as e:
-            logger.error("Error sending Discord file {}: {}", path.name, e)
-            return False
 
     async def _on_message(self, message: discord.Message) -> None:
         """Handle incoming Discord messages from discord.py."""
@@ -307,24 +331,3 @@ class DiscordChannel(BaseChannel):
         channel_ids = list(self._typing_tasks)
         for channel_id in channel_ids:
             await self._stop_typing(channel_id)
-
-    @staticmethod
-    def _build_reference(
-        channel: "Messageable",
-        reply_to: str | None,
-    ) -> discord.PartialMessage | None:
-        """Build a lightweight reply reference when supported by the channel type."""
-        if not reply_to:
-            return None
-        try:
-            message_id = int(reply_to)
-        except (TypeError, ValueError):
-            logger.warning("Invalid Discord reply target: {}", reply_to)
-            return None
-
-        get_partial_message = getattr(channel, "get_partial_message", None)
-        if callable(get_partial_message):
-            return get_partial_message(message_id)
-
-        logger.warning("Discord channel {} does not support replies", getattr(channel, "id", "?"))
-        return None
