@@ -39,6 +39,13 @@ def _resolve_path(path: str, workspace: Path | None = None, allowed_dir: Path | 
     return resolved
 
 
+def _check_protected(resolved: Path, protected_patterns: list[str]) -> None:
+    """Raise PermissionError if the resolved path matches any protected pattern."""
+    for pattern in protected_patterns:
+        if resolved.match(pattern):
+            raise PermissionError(f"File is protected and cannot be modified: {resolved.name}")
+
+
 class ReadFileTool(Tool):
     """Tool to read file contents."""
 
@@ -92,9 +99,15 @@ class ReadFileTool(Tool):
 class WriteFileTool(Tool):
     """Tool to write content to a file."""
 
-    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
+    def __init__(
+        self,
+        workspace: Path | None = None,
+        allowed_dir: Path | None = None,
+        protected_patterns: list[str] | None = None,
+    ):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
+        self._protected_patterns = protected_patterns or []
 
     @property
     def name(self) -> str:
@@ -124,6 +137,7 @@ class WriteFileTool(Tool):
     async def execute(self, path: str, content: str, **kwargs: Any) -> str:
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
+            _check_protected(file_path, self._protected_patterns)
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(content, encoding="utf-8")
             return f"Successfully wrote {len(content)} bytes to {file_path}"
@@ -136,9 +150,15 @@ class WriteFileTool(Tool):
 class EditFileTool(Tool):
     """Tool to edit a file by replacing text."""
 
-    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
+    def __init__(
+        self,
+        workspace: Path | None = None,
+        allowed_dir: Path | None = None,
+        protected_patterns: list[str] | None = None,
+    ):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
+        self._protected_patterns = protected_patterns or []
 
     @property
     def name(self) -> str:
@@ -172,6 +192,7 @@ class EditFileTool(Tool):
     async def execute(self, path: str, old_text: str, new_text: str, **kwargs: Any) -> str:
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
+            _check_protected(file_path, self._protected_patterns)
             if not file_path.exists():
                 return f"Error: File not found: {path}"
 

@@ -109,11 +109,21 @@ class AgentLoop:
         self._processing_lock = asyncio.Lock()
         self._register_default_tools()
 
+    _PROTECTED_FILES = [
+        "AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md", "HEARTBEAT.md",
+    ]
+
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
         allowed_dir = self.workspace if self.restrict_to_workspace else None
-        for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
+        self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
+        self.tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
+        for cls in (WriteFileTool, EditFileTool):
+            self.tools.register(cls(
+                workspace=self.workspace,
+                allowed_dir=allowed_dir,
+                protected_patterns=self._PROTECTED_FILES,
+            ))
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,

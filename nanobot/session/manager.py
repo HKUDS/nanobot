@@ -76,11 +76,14 @@ class SessionManager:
     Sessions are stored as JSONL files in the sessions directory.
     """
 
-    def __init__(self, workspace: Path):
+    _MAX_SESSION_MESSAGES = 2000
+
+    def __init__(self, workspace: Path, max_messages: int | None = None):
         self.workspace = workspace
         self.sessions_dir = ensure_dir(self.workspace / "sessions")
         self.legacy_sessions_dir = Path.home() / ".nanobot" / "sessions"
         self._cache: dict[str, Session] = {}
+        self._max_messages = max_messages or self._MAX_SESSION_MESSAGES
     
     def _get_session_path(self, key: str) -> Path:
         """Get the file path for a session."""
@@ -160,7 +163,13 @@ class SessionManager:
             return None
     
     def save(self, session: Session) -> None:
-        """Save a session to disk."""
+        """Save a session to disk, trimming if it exceeds the message limit."""
+        if len(session.messages) > self._max_messages:
+            trimmed = len(session.messages) - self._max_messages
+            session.messages = session.messages[-self._max_messages :]
+            session.last_consolidated = max(0, session.last_consolidated - trimmed)
+            logger.info("Session {} trimmed: dropped {} oldest messages", session.key, trimmed)
+
         path = self._get_session_path(session.key)
 
         with open(path, "w", encoding="utf-8") as f:

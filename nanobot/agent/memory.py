@@ -45,6 +45,9 @@ _SAVE_MEMORY_TOOL = [
 class MemoryStore:
     """Two-layer memory: MEMORY.md (long-term facts) + HISTORY.md (grep-searchable log)."""
 
+    _MAX_MEMORY_LINES = 200
+    _MAX_HISTORY_LINES = 500
+
     def __init__(self, workspace: Path):
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
@@ -56,11 +59,26 @@ class MemoryStore:
         return ""
 
     def write_long_term(self, content: str) -> None:
+        lines = content.splitlines()
+        if len(lines) > self._MAX_MEMORY_LINES:
+            logger.warning(
+                "Memory truncated: {} lines exceeds limit of {}", len(lines), self._MAX_MEMORY_LINES
+            )
+            content = "\n".join(lines[: self._MAX_MEMORY_LINES]) + "\n\n[Truncated — memory exceeds limit]"
         self.memory_file.write_text(content, encoding="utf-8")
 
     def append_history(self, entry: str) -> None:
         with open(self.history_file, "a", encoding="utf-8") as f:
             f.write(entry.rstrip() + "\n\n")
+        # Trim oldest entries if history exceeds limit
+        if self.history_file.exists():
+            lines = self.history_file.read_text(encoding="utf-8").splitlines()
+            if len(lines) > self._MAX_HISTORY_LINES:
+                logger.warning(
+                    "History trimmed: {} lines exceeds limit of {}", len(lines), self._MAX_HISTORY_LINES
+                )
+                trimmed = "\n".join(lines[-self._MAX_HISTORY_LINES :])
+                self.history_file.write_text(trimmed + "\n", encoding="utf-8")
 
     def get_memory_context(self) -> str:
         long_term = self.read_long_term()
