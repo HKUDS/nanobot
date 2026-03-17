@@ -1,3 +1,4 @@
+import json
 import re
 import shutil
 from pathlib import Path
@@ -43,9 +44,16 @@ def mock_paths():
 
         mock_cp.return_value = config_file
         mock_ws.return_value = workspace_dir
-        mock_sc.side_effect = lambda config: config_file.write_text("{}")
+        mock_lc.side_effect = lambda _config_path=None: Config()
 
-        yield config_file, workspace_dir
+        def _save_config(config: Config, config_path: Path | None = None):
+            target = config_path or config_file
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(config.model_dump(by_alias=True)), encoding="utf-8")
+
+        mock_sc.side_effect = _save_config
+
+        yield config_file, workspace_dir, mock_ws
 
         if base_dir.exists():
             shutil.rmtree(base_dir)
@@ -53,7 +61,7 @@ def mock_paths():
 
 def test_onboard_fresh_install(mock_paths):
     """No existing config — should create from scratch."""
-    config_file, workspace_dir = mock_paths
+    config_file, workspace_dir, mock_ws = mock_paths
 
     result = runner.invoke(app, ["onboard"])
 
@@ -64,11 +72,13 @@ def test_onboard_fresh_install(mock_paths):
     assert config_file.exists()
     assert (workspace_dir / "AGENTS.md").exists()
     assert (workspace_dir / "memory" / "MEMORY.md").exists()
+    expected_workspace = Config().workspace_path
+    assert mock_ws.call_args.args == (expected_workspace,)
 
 
 def test_onboard_existing_config_refresh(mock_paths):
     """Config exists, user declines overwrite — should refresh (load-merge-save)."""
-    config_file, workspace_dir = mock_paths
+    config_file, workspace_dir, _ = mock_paths
     config_file.write_text('{"existing": true}')
 
     result = runner.invoke(app, ["onboard"], input="n\n")
@@ -82,7 +92,7 @@ def test_onboard_existing_config_refresh(mock_paths):
 
 def test_onboard_existing_config_overwrite(mock_paths):
     """Config exists, user confirms overwrite — should reset to defaults."""
-    config_file, workspace_dir = mock_paths
+    config_file, workspace_dir, _ = mock_paths
     config_file.write_text('{"existing": true}')
 
     result = runner.invoke(app, ["onboard"], input="y\n")
@@ -95,7 +105,7 @@ def test_onboard_existing_config_overwrite(mock_paths):
 
 def test_onboard_existing_workspace_safe_create(mock_paths):
     """Workspace exists — should not recreate, but still add missing templates."""
-    config_file, workspace_dir = mock_paths
+    config_file, workspace_dir, _ = mock_paths
     workspace_dir.mkdir(parents=True)
     config_file.write_text("{}")
 
@@ -105,6 +115,40 @@ def test_onboard_existing_workspace_safe_create(mock_paths):
     assert "Created workspace" not in result.stdout
     assert "Created AGENTS.md" in result.stdout
     assert (workspace_dir / "AGENTS.md").exists()
+
+
+def test_onboard_help_shows_workspace_and_config_options():
+    result = runner.invoke(app, ["onboard", "--help"])
+
+    assert result.exit_code == 0
+    stripped_output = _strip_ansi(result.stdout)
+    assert "--workspace" in stripped_output
+    assert "-w" in stripped_output
+    assert "--config" in stripped_output
+    assert "-c" in stripped_output
+    assert "--dir" not in stripped_output
+
+
+def test_onboard_uses_explicit_config_and_workspace_paths(tmp_path, monkeypatch):
+    config_path = tmp_path / "instance" / "config.json"
+    workspace_path = tmp_path / "workspace"
+
+    monkeypatch.setattr("nanobot.channels.registry.discover_all", lambda: {})
+
+    result = runner.invoke(
+        app,
+        ["onboard", "--config", str(config_path), "--workspace", str(workspace_path)],
+    )
+
+    assert result.exit_code == 0
+    saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
+    assert saved.workspace_path == workspace_path
+    assert (workspace_path / "AGENTS.md").exists()
+    stripped_output = _strip_ansi(result.stdout)
+    compact_output = stripped_output.replace("\n", "")
+    resolved_config = str(config_path.resolve())
+    assert resolved_config in compact_output
+    assert f"--config {resolved_config}" in compact_output
 
 
 def test_config_matches_github_copilot_codex_with_hyphen_prefix():
