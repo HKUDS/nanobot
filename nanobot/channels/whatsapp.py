@@ -29,6 +29,7 @@ class WhatsAppChannel(BaseChannel):
         self._ws = None
         self._connected = False
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
+        self._typing_tasks: dict[str, asyncio.Task] = {}
 
     async def start(self) -> None:
         """Start the WhatsApp channel by connecting to the bridge."""
@@ -73,15 +74,40 @@ class WhatsAppChannel(BaseChannel):
         self._running = False
         self._connected = False
 
+        for chat_id in list(self._typing_tasks):
+            self._stop_typing(chat_id)
+
         if self._ws:
             await self._ws.close()
             self._ws = None
+
+    def _start_typing(self, chat_id: str) -> None:
+        self._stop_typing(chat_id)
+        self._typing_tasks[chat_id] = asyncio.create_task(self._typing_loop(chat_id))
+
+    def _stop_typing(self, chat_id: str) -> None:
+        task = self._typing_tasks.pop(chat_id, None)
+        if task and not task.done():
+            task.cancel()
+
+    async def _typing_loop(self, chat_id: str) -> None:
+        """Send 'composing' presence every 10 seconds until cancelled."""
+        try:
+            while self._ws and self._connected:
+                await self._ws.send(json.dumps({"type": "typing", "to": chat_id, "composing": True}))
+                await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.debug("WhatsApp typing indicator stopped for {}: {}", chat_id, e)
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through WhatsApp."""
         if not self._ws or not self._connected:
             logger.warning("WhatsApp bridge not connected")
             return
+
+        self._stop_typing(msg.chat_id)
 
         try:
             if msg.media:
@@ -149,6 +175,8 @@ class WhatsAppChannel(BaseChannel):
                     media_type = "image" if mime and mime.startswith("image/") else "file"
                     media_tag = f"[{media_type}: {p}]"
                     content = f"{content}\n{media_tag}" if content else media_tag
+
+            self._start_typing(sender)
 
             await self._handle_message(
                 sender_id=sender_id,

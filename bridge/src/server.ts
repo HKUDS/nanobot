@@ -19,6 +19,12 @@ interface SendMediaCommand {
   caption?: string;
 }
 
+interface TypingCommand {
+  type: 'typing';
+  to: string;
+  composing: boolean;
+}
+
 interface BridgeMessage {
   type: 'message' | 'status' | 'qr' | 'error';
   [key: string]: unknown;
@@ -99,11 +105,13 @@ export class BridgeServer {
     });
   }
 
-  private async handleCommand(cmd: SendCommand | SendMediaCommand): Promise<void> {
+  private async handleCommand(cmd: SendCommand | SendMediaCommand | TypingCommand): Promise<void> {
     if (cmd.type === 'send' && this.wa) {
       await this.wa.sendMessage(cmd.to, cmd.text);
     } else if (cmd.type === 'send_media' && this.wa) {
       await this.wa.sendMediaMessage(cmd.to, cmd.path, cmd.caption);
+    } else if (cmd.type === 'typing' && this.wa) {
+      await this.wa.sendTyping(cmd.to, cmd.composing);
     }
   }
 

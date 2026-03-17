@@ -9,7 +9,42 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Reinstall nanobot on Homer VPS
+      - name: Checkout nanobot fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect bridge changes
+        id: bridge
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            changed:
+              - 'bridge/src/**'
+
+      - name: Set up Node.js
+        if: steps.bridge.outputs.changed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build WhatsApp bridge
+        if: steps.bridge.outputs.changed == 'true'
+        working-directory: bridge
+        run: npm ci --silent && npm run build
+
+      - name: Copy bridge dist to VPS
+        if: steps.bridge.outputs.changed == 'true'
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: bridge/dist/*.js
+          target: /home/homer/.nanobot/bridge/
+          strip_components: 1
+
+      - name: Reinstall nanobot + restart on Homer VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -21,5 +56,10 @@ jobs:
             echo "[deploy] Reinstalling nanobot fork (commit: ${{ github.sha }})"
             /opt/homer/.venv/bin/pip install --force-reinstall "$NANOBOT_FORK" -q
             echo "${{ github.sha }}" | cut -c1-8 > /opt/homer/context/.nanobot_workspace/NANOBOT_FORK_COMMIT
+            if [[ "${{ steps.bridge.outputs.changed }}" == "true" ]]; then
+              chown -R homer:homer /home/homer/.nanobot/bridge
+              systemctl restart homer-bridge 2>/dev/null || true
+              echo "[deploy] Bridge redeployed"
+            fi
             systemctl restart homer
             echo "✅ Nanobot updated to ${{ github.sha }}"
