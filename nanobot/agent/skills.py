@@ -361,19 +361,47 @@ class SkillsLoader:
         return None
 
     def detect_relevant_skills(self, message: str, max_skills: int = 4) -> list[str]:
-        """Select skills that match the user message via trigger phrases."""
+        """Select skills that match the user message via triggers or description."""
         text = self._normalize_text(message)
         if not text:
             return []
 
         matches: list[str] = []
+        remaining: list[dict[str, str]] = []
+
+        # Pass 1: exact trigger matching (high confidence)
         for skill in self.list_skills(filter_unavailable=True):
             name = skill["name"]
             triggers = self._skill_triggers(name)
             if any(t in text for t in triggers):
                 matches.append(name)
                 if len(matches) >= max_skills:
+                    return matches
+            else:
+                remaining.append(skill)
+
+        # Pass 2: description keyword matching (lower confidence, fills remaining slots)
+        if remaining and len(matches) < max_skills:
+            text_words = set(text.split())
+            scored: list[tuple[float, str]] = []
+            for skill in remaining:
+                name = skill["name"]
+                desc = self._get_skill_description(name)
+                keywords = self._description_keywords(desc)
+                if len(keywords) < 2:
+                    continue
+                hits = sum(1 for kw in keywords if kw in text_words)
+                if hits < 2:
+                    continue
+                score = hits / len(keywords)
+                if score >= 0.2:
+                    scored.append((score, name))
+            scored.sort(reverse=True)
+            for _score, name in scored:
+                matches.append(name)
+                if len(matches) >= max_skills:
                     break
+
         return matches
 
     def _skill_triggers(self, name: str) -> list[str]:
@@ -406,3 +434,26 @@ class SkillsLoader:
         text = re.sub(r"[^a-z0-9\s_-]+", " ", text)
         text = text.replace("-", " ").replace("_", " ")
         return re.sub(r"\s+", " ", text).strip()
+
+    # Stopwords filtered out of skill descriptions for keyword matching
+    _STOPWORDS: frozenset[str] = frozenset(
+        "a an the and or but is are was were be been being "
+        "do does did have has had will would shall should may might can could "
+        "to for of in on at by from with as it its this that these those "
+        "not no nor so if when how what which who whom whose where why "
+        "use using used any all each every some such than then also very "
+        "about into through during before after above below between out up down "
+        "own only just more most other another need needs".split()
+    )
+
+    @classmethod
+    def _description_keywords(cls, description: str) -> list[str]:
+        """Extract unique significant keywords from a skill description."""
+        text = cls._normalize_text(description)
+        seen: set[str] = set()
+        keywords: list[str] = []
+        for w in text.split():
+            if w not in cls._STOPWORDS and len(w) > 2 and w not in seen:
+                seen.add(w)
+                keywords.append(w)
+        return keywords
