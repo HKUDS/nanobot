@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import base64
+import mimetypes
 import re
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from loguru import logger
 from starlette.responses import StreamingResponse
 
 from nanobot.web.models import (
@@ -95,6 +97,15 @@ _MIME_EXT: dict[str, str] = {
 }
 
 
+def _decode_data_uri(data_str: str) -> bytes:
+    """Decode a data URI (or raw base64) to bytes."""
+    if data_str.startswith("data:"):
+        _, _, raw = data_str.partition(",")
+    else:
+        raw = data_str
+    return base64.b64decode(raw)
+
+
 def _extract_images(message: ChatMessage, uploads_dir: Path) -> list[str]:
     """Extract image content parts from a multimodal message and save to disk.
 
@@ -112,21 +123,77 @@ def _extract_images(message: ChatMessage, uploads_dir: Path) -> list[str]:
         if part.media_type not in _IMAGE_MIMES:
             continue
 
-        # part.data is a data URI like "data:image/jpeg;base64,/9j/..."
-        data_str = part.data
-        if data_str.startswith("data:"):
-            # Strip the data URI prefix to get raw base64
-            _, _, raw = data_str.partition(",")
-        else:
-            raw = data_str
-
         ext = _MIME_EXT.get(part.media_type, ".bin")
         filename = f"img_{uuid.uuid4().hex[:12]}{ext}"
         dest = uploads_dir / filename
-        dest.write_bytes(base64.b64decode(raw))
+        dest.write_bytes(_decode_data_uri(part.data))
         paths.append(str(dest))
 
     return paths
+
+
+# Regex to extract the original filename from the companion text marker
+# e.g. "[Attached binary file: Copy of DS09247 - 08 - Project Financials.xlsm]"
+_ATTACHED_NAME_RE = re.compile(r"\[Attached binary file:\s*(.+?)\]")
+
+
+def _guess_extension(mime: str) -> str:
+    """Map a MIME type to a file extension, using stdlib as fallback."""
+    ext = mimetypes.guess_extension(mime, strict=False)
+    if ext:
+        return ext
+    return ".bin"
+
+
+def _extract_binary_files(message: ChatMessage, uploads_dir: Path) -> list[str]:
+    """Extract non-image binary file parts and save to disk.
+
+    Returns a list of ``[Attached file saved: path]`` notes to append to the
+    user message so the agent knows where to find the files.
+    """
+    if isinstance(message.content, str):
+        return []
+
+    # Collect original filenames from companion text markers
+    original_names: list[str] = []
+    for part in message.content:
+        if part.type == "text" and part.text:
+            m = _ATTACHED_NAME_RE.search(part.text)
+            if m:
+                original_names.append(m.group(1).strip())
+
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    notes: list[str] = []
+    name_idx = 0
+
+    for part in message.content:
+        if part.type != "file" or not part.data or not part.media_type:
+            continue
+        if part.media_type in _IMAGE_MIMES:
+            continue  # handled by _extract_images
+
+        # Use the original filename if available, otherwise generate one
+        if name_idx < len(original_names):
+            orig = original_names[name_idx]
+            name_idx += 1
+            # Sanitise: keep only the filename, no path separators
+            safe_name = Path(orig).name
+            if not safe_name:
+                safe_name = f"upload_{uuid.uuid4().hex[:12]}{_guess_extension(part.media_type)}"
+            # Avoid overwrites
+            dest = uploads_dir / safe_name
+            if dest.exists():
+                stem = dest.stem
+                dest = uploads_dir / f"{stem}_{uuid.uuid4().hex[:8]}{dest.suffix}"
+        else:
+            ext = _guess_extension(part.media_type)
+            filename = f"upload_{uuid.uuid4().hex[:12]}{ext}"
+            dest = uploads_dir / filename
+
+        dest.write_bytes(_decode_data_uri(part.data))
+        notes.append(f"[Attached file saved: {dest}]")
+
+    return notes
 
 
 @router.post("/chat")
@@ -140,13 +207,33 @@ async def chat(request: Request, body: ChatRequest):
         return JSONResponse(status_code=400, content={"error": "No user message provided"})
 
     last_user = user_messages[-1]
+
+    # Debug: log the raw content structure to diagnose attachment issues
+    if isinstance(last_user.content, list):
+        logger.debug(
+            "chat: content is list with {} parts: {}",
+            len(last_user.content),
+            [(p.type, p.media_type, bool(p.data)) for p in last_user.content],
+        )
+    else:
+        logger.debug("chat: content is str (len={})", len(last_user.content))
+
     content = last_user.get_text()
 
     # Strip inline <attachment> blocks — save files to disk instead
     content = _strip_attachments(content, uploads_dir)
 
+    # Remove frontend-injected binary file markers (replaced by saved-path notes below)
+    content = _ATTACHED_NAME_RE.sub("", content).strip()
+
     # Extract image attachments from multimodal content parts
     media = _extract_images(last_user, uploads_dir)
+
+    # Extract binary file attachments (xlsx, pdf, etc.) and append notes
+    binary_notes = _extract_binary_files(last_user, uploads_dir)
+    logger.debug("chat: binary_notes={}", binary_notes)
+    if binary_notes:
+        content = content + "\n" + "\n".join(binary_notes) if content else "\n".join(binary_notes)
 
     thread_id = body.thread_id or str(uuid.uuid4())
 

@@ -62,13 +62,23 @@ async def stream_agent_response(
         streamed_text_len = 0
         streamed_text = ""  # actual content — used to detect verifier rewrites
         last_msg = None
+        idle_intervals = 0
+        max_idle_intervals = 20  # 20 * 15s = 300s total idle time before giving up
         while True:
             try:
-                msg = await asyncio.wait_for(queue.get(), timeout=300)
+                msg = await asyncio.wait_for(queue.get(), timeout=15)
             except asyncio.TimeoutError:
-                # Safety: don't hang forever if agent stalls
-                yield f'0:"{_escape_text("[timeout — no response from agent]")}"\n'
-                break
+                idle_intervals += 1
+                if idle_intervals >= max_idle_intervals:
+                    yield f'0:"{_escape_text("[timeout — no response from agent]")}"\n'
+                    break
+                # Send empty text delta to keep proxy/browser connection alive.
+                # The Data Stream Protocol format is "type:json\n"; SSE comments
+                # are not supported by the decoder.
+                yield '0:""\n'
+                continue
+
+            idle_intervals = 0  # reset on any message
 
             if msg is None:
                 break
