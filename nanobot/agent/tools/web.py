@@ -130,11 +130,11 @@ class WebFetchTool(Tool):
 
     @property
     def description(self) -> str:
-        base = "Fetch URL and extract readable content (HTML → markdown/text)."
+        base = "Fetch URL and extract readable content (HTML → markdown/text). Supports PDF."
         if self.restrict_to_user_urls:
-            base += " Only URLs provided by the user can be fetched."
+            base += " You can fetch any URL the user includes in their message."
             if self._allowed_domains:
-                base += f" Pre-approved domains: {', '.join(self._allowed_domains)}."
+                base += f" You can also fetch from these domains without a user-provided URL: {', '.join(self._allowed_domains)}."
         return base
 
     def add_user_urls(self, text: str) -> None:
