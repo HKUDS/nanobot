@@ -10,6 +10,9 @@ class ChatMessageContent(BaseModel):
 
     type: str = "text"
     text: str = ""
+    # Fields for file/image content parts (Vercel AI SDK LanguageModelV2 format)
+    data: str | None = None
+    media_type: str | None = Field(default=None, alias="mediaType")
 
 
 class ChatMessage(BaseModel):

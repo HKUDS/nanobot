@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import re
 import uuid
 from pathlib import Path
@@ -11,6 +12,7 @@ from fastapi.responses import JSONResponse
 from starlette.responses import StreamingResponse
 
 from nanobot.web.models import (
+    ChatMessage,
     ChatRequest,
     HistoryMessage,
     HistoryResponse,
@@ -82,6 +84,51 @@ def _strip_attachments(text: str, uploads_dir: Path) -> str:
     return cleaned
 
 
+_IMAGE_MIMES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"})
+
+_MIME_EXT: dict[str, str] = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "image/svg+xml": ".svg",
+}
+
+
+def _extract_images(message: ChatMessage, uploads_dir: Path) -> list[str]:
+    """Extract image content parts from a multimodal message and save to disk.
+
+    Returns a list of saved file paths suitable for the ``media`` pipeline.
+    """
+    if isinstance(message.content, str):
+        return []
+
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    paths: list[str] = []
+
+    for part in message.content:
+        if part.type != "file" or not part.data or not part.media_type:
+            continue
+        if part.media_type not in _IMAGE_MIMES:
+            continue
+
+        # part.data is a data URI like "data:image/jpeg;base64,/9j/..."
+        data_str = part.data
+        if data_str.startswith("data:"):
+            # Strip the data URI prefix to get raw base64
+            _, _, raw = data_str.partition(",")
+        else:
+            raw = data_str
+
+        ext = _MIME_EXT.get(part.media_type, ".bin")
+        filename = f"img_{uuid.uuid4().hex[:12]}{ext}"
+        dest = uploads_dir / filename
+        dest.write_bytes(base64.b64decode(raw))
+        paths.append(str(dest))
+
+    return paths
+
+
 @router.post("/chat")
 async def chat(request: Request, body: ChatRequest):
     """Stream a chat response using the Vercel AI SDK Data Stream Protocol."""
@@ -92,15 +139,21 @@ async def chat(request: Request, body: ChatRequest):
     if not user_messages:
         return JSONResponse(status_code=400, content={"error": "No user message provided"})
 
-    content = user_messages[-1].get_text()
+    last_user = user_messages[-1]
+    content = last_user.get_text()
 
     # Strip inline <attachment> blocks — save files to disk instead
     content = _strip_attachments(content, uploads_dir)
 
+    # Extract image attachments from multimodal content parts
+    media = _extract_images(last_user, uploads_dir)
+
     thread_id = body.thread_id or str(uuid.uuid4())
 
     async def event_generator():
-        async for event in stream_agent_response(web_channel, thread_id, content):
+        async for event in stream_agent_response(
+            web_channel, thread_id, content, media=media or None
+        ):
             yield event
 
     return StreamingResponse(
