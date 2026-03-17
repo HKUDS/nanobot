@@ -76,6 +76,7 @@ def create_app(
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Thread-Id"],
     )
 
     # Health check routes (outside /api — used by Docker HEALTHCHECK & probes)

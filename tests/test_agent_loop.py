@@ -557,3 +557,34 @@ class TestToolCallTrackerIntegration:
         assert "both files" in result.content.lower()
         # All 3 provider calls should have been made (no premature cutoff)
         assert len(provider.call_log) == 3
+
+
+class TestSaveTurnFiltering:
+    """Verify _save_turn excludes ephemeral system messages."""
+
+    @pytest.mark.asyncio
+    async def test_system_messages_not_persisted(self, tmp_path: Path):
+        """Ephemeral system messages (reflect/progress) must not be saved to session."""
+        provider = ScriptedProvider(
+            [
+                LLMResponse(
+                    content=None,
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="c1",
+                            name="read_file",
+                            arguments={"path": str(tmp_path / "f.txt")},
+                        )
+                    ],
+                ),
+                LLMResponse(content="Done."),
+            ]
+        )
+        (tmp_path / "f.txt").write_text("hello")
+        loop = _make_loop(tmp_path, provider)
+        msg = _make_inbound("Read f.txt")
+        await loop._process_message(msg)
+
+        session = loop.sessions.get_or_create("cli:test-user")
+        roles = [m["role"] for m in session.messages]
+        assert "system" not in roles, "Ephemeral system messages should not be persisted in session"

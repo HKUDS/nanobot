@@ -149,6 +149,13 @@ class StreamingLLMCaller:
         full_content = "".join(content_parts) or None
         full_reasoning = "".join(reasoning_parts) or None
 
+        # Final flush: ensure the channel has the complete text before
+        # post-processing (e.g. self-check/verifier) might alter it.
+        if full_content:
+            clean = strip_think(full_content)
+            if clean:
+                await on_progress(clean, streaming=True)
+
         from nanobot.providers.base import LLMResponse
 
         latency_ms = (time.monotonic() - t0) * 1000

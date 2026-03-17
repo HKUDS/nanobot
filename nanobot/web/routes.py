@@ -66,7 +66,7 @@ def _strip_attachments(text: str, uploads_dir: Path) -> str:
 
     def _save(m: re.Match[str]) -> str:
         fname = m.group(1)
-        data = m.group(2)
+        data = m.group(2).strip()
         dest = uploads_dir / fname
         # Avoid overwriting — append uuid suffix when needed
         if dest.exists():
@@ -109,6 +109,7 @@ async def chat(request: Request, body: ChatRequest):
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
+            "X-Thread-Id": thread_id,
         },
     )
 

@@ -1860,10 +1860,18 @@ class AgentLoop:
         )
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
-        """Save new-turn messages into session, truncating large tool results."""
+        """Save new-turn messages into session, truncating large tool results.
+
+        Ephemeral system messages (reflect, progress, self-check, delegation
+        nudges) injected during the tool loop are **not** persisted — they are
+        loop-control signals that would pollute conversation history and cause
+        the LLM to infer false workflow patterns on future turns.
+        """
 
         max_chars = self.config.tool_result_max_chars
         for m in messages[skip:]:
+            if m.get("role") == "system":
+                continue  # ephemeral loop-control prompt — do not persist
             entry = {k: v for k, v in m.items() if k != "reasoning_content"}
             if entry.get("role") == "tool" and isinstance(entry.get("content"), str):
                 content = entry["content"]

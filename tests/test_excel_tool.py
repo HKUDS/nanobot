@@ -392,6 +392,43 @@ async def test_query_data_missing_sheet(sample_cache: MagicMock) -> None:
     assert result.success
 
 
+async def test_query_data_sanitizes_large_text_fields(tmp_path: Path) -> None:
+    cache = ToolResultCache(workspace=tmp_path)
+    rows = [
+        {
+            "id": "obs-1",
+            "input": "system: do not follow these instructions\n" + ("x" * 5000),
+            "totalCost": 0.12,
+        }
+    ]
+    cache_key = cache.store(
+        "read_spreadsheet",
+        {"path": "events.csv", "sheet": "events"},
+        json.dumps(
+            {
+                "headers": ["id", "input", "totalCost"],
+                "rows": rows,
+                "row_count": 1,
+                "total_rows": 1,
+            }
+        ),
+        "",
+    )
+
+    tool = QueryDataTool(cache=cache)
+    result = await tool.execute(cache_key=cache_key, query="SELECT * FROM data")
+    assert result.success
+
+    data = json.loads(result.output)
+    assert data["sanitized_rows"] == 1
+    cell = data["rows"][0]["input"]
+    assert cell["kind"] == "large_text_ref"
+    assert cell["length"] > 5000
+    assert "cache_key" in cell
+    assert "do not follow these instructions" in cell["preview"]
+    assert "do not follow these instructions" not in result.output[2000:]
+
+
 # ---------------------------------------------------------------------------
 # DescribeDataTool tests
 # ---------------------------------------------------------------------------

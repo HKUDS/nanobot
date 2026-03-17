@@ -179,7 +179,10 @@ class TestStreamingProtocol:
             await feeder
 
         text_events = [e for e in events if e.startswith("0:")]
-        assert len(text_events) >= 3
+        assert len(text_events) == 3
+        assert text_events[0] == '0:"Hello"\n'
+        assert text_events[1] == '0:" world"\n'
+        assert text_events[2] == '0:"!"\n'
 
     async def test_tool_hint_emits_tool_call(self, channel: WebChannel, bus: MagicMock):
         from nanobot.web.streaming import stream_agent_response
@@ -187,7 +190,7 @@ class TestStreamingProtocol:
         tool_msg = OutboundMessage(
             channel="web",
             chat_id="s3",
-            content="\U0001f527 Calling `web_search` with query",
+            content='web_search("test query")',
             metadata={"_tool_hint": True},
         )
         final = OutboundMessage(channel="web", chat_id="s3", content="Done", metadata={})
@@ -259,3 +262,208 @@ class TestStreamingProtocol:
             await feeder
 
         assert "s7" not in channel._streams
+
+    async def test_revised_answer_no_garble(self, channel: WebChannel, bus: MagicMock):
+        """When the verifier rewrites the answer, the final message text diverges
+        from the already-streamed content.  The streamer must NOT compute a delta
+        against the wrong text, which would produce garbled output."""
+        from nanobot.web.streaming import stream_agent_response
+
+        # Simulate streaming the original answer
+        stream1 = OutboundMessage(
+            channel="web",
+            chat_id="s8",
+            content="Original answer part 1",
+            metadata={"_streaming": True},
+        )
+        stream2 = OutboundMessage(
+            channel="web",
+            chat_id="s8",
+            content="Original answer part 1 and part 2",
+            metadata={"_streaming": True},
+        )
+        # Verifier rewrites the answer — completely different text
+        revised_final = OutboundMessage(
+            channel="web",
+            chat_id="s8",
+            content="Completely revised answer from verifier",
+            metadata={},
+        )
+
+        with patch.object(channel, "publish_user_message", new_callable=AsyncMock):
+            feeder = asyncio.create_task(
+                _feed_queue(channel, "s8", [stream1, stream2, revised_final])
+            )
+            events: list[str] = []
+            async for ev in stream_agent_response(channel, "s8", "hi"):
+                events.append(ev)
+            await feeder
+
+        text_events = [e for e in events if e.startswith("0:")]
+        # Only the two streaming deltas — no garbled final delta
+        assert len(text_events) == 2
+        assert text_events[0] == '0:"Original answer part 1"\n'
+        assert text_events[1] == '0:" and part 2"\n'
+
+    async def test_progress_dedup_after_streaming(self, channel: WebChannel, bus: MagicMock):
+        """After streaming, the agent loop re-sends accumulated text as a
+        non-streaming progress message before a tool call.  This must not
+        produce duplicate output."""
+        from nanobot.web.streaming import stream_agent_response
+
+        stream1 = OutboundMessage(
+            channel="web",
+            chat_id="s9",
+            content="Looking at",
+            metadata={"_streaming": True, "_progress": True},
+        )
+        stream2 = OutboundMessage(
+            channel="web",
+            chat_id="s9",
+            content="Looking at the data",
+            metadata={"_streaming": True, "_progress": True},
+        )
+        # Agent loop flushes the same text before tool call (non-streaming)
+        flush = OutboundMessage(
+            channel="web",
+            chat_id="s9",
+            content="Looking at the data",
+            metadata={"_progress": True},
+        )
+        # Tool hint follows the flush (always emitted by loop.py)
+        hint = OutboundMessage(
+            channel="web",
+            chat_id="s9",
+            content='query_data("cache_key")',
+            metadata={"_tool_hint": True, "_progress": True},
+        )
+        # Final answer (from a subsequent LLM call)
+        final = OutboundMessage(
+            channel="web",
+            chat_id="s9",
+            content="The answer is 42",
+            metadata={},
+        )
+
+        with patch.object(channel, "publish_user_message", new_callable=AsyncMock):
+            feeder = asyncio.create_task(
+                _feed_queue(channel, "s9", [stream1, stream2, flush, hint, final])
+            )
+            events: list[str] = []
+            async for ev in stream_agent_response(channel, "s9", "hi"):
+                events.append(ev)
+            await feeder
+
+        text_events = [e for e in events if e.startswith("0:")]
+        # Two streaming deltas + final answer — no duplicate from flush
+        assert len(text_events) == 3
+        assert text_events[0] == '0:"Looking at"\n'
+        assert text_events[1] == '0:" the data"\n'
+        assert text_events[2] == '0:"The answer is 42"\n'
+
+    async def test_multi_llm_call_streaming_reset(self, channel: WebChannel, bus: MagicMock):
+        """When a tool call fails and the agent loop starts a new LLM call,
+        the new streaming sequence starts from 0.  The tracker must reset
+        instead of computing garbled deltas against the old cumulative text."""
+        from nanobot.web.streaming import stream_agent_response
+
+        # First LLM call streams text
+        s1a = OutboundMessage(
+            channel="web",
+            chat_id="s10",
+            content="Checking the data",
+            metadata={"_streaming": True, "_progress": True},
+        )
+        # Tool hint (tool call happens and fails)
+        hint1 = OutboundMessage(
+            channel="web",
+            chat_id="s10",
+            content='query_data("cache_key")',
+            metadata={"_tool_hint": True, "_progress": True},
+        )
+        # Second LLM call — new streaming from 0
+        s2a = OutboundMessage(
+            channel="web",
+            chat_id="s10",
+            content="Let me try",
+            metadata={"_streaming": True, "_progress": True},
+        )
+        s2b = OutboundMessage(
+            channel="web",
+            chat_id="s10",
+            content="Let me try a different approach",
+            metadata={"_streaming": True, "_progress": True},
+        )
+        final = OutboundMessage(
+            channel="web",
+            chat_id="s10",
+            content="Let me try a different approach",
+            metadata={},
+        )
+
+        with patch.object(channel, "publish_user_message", new_callable=AsyncMock):
+            feeder = asyncio.create_task(_feed_queue(channel, "s10", [s1a, hint1, s2a, s2b, final]))
+            events: list[str] = []
+            async for ev in stream_agent_response(channel, "s10", "hi"):
+                events.append(ev)
+            await feeder
+
+        text_events = [e for e in events if e.startswith("0:")]
+        # First LLM call text + second LLM call text (no garbling)
+        assert text_events[0] == '0:"Checking the data"\n'
+        assert text_events[1] == '0:"Let me try"\n'
+        assert text_events[2] == '0:" a different approach"\n'
+        assert len(text_events) == 3
+
+    async def test_verifier_revision_after_final_flush(self, channel: WebChannel, bus: MagicMock):
+        """The LLM streaming layer now sends a final flush with the complete
+        original text.  When the verifier subsequently revises the answer,
+        the revised text diverges from the already-streamed content.
+        The streamer must NOT emit the divergent revision — the user already
+        has the complete original via the streaming flush."""
+        from nanobot.web.streaming import stream_agent_response
+
+        # Partial streaming chunks
+        stream1 = OutboundMessage(
+            channel="web",
+            chat_id="s11",
+            content="The total cost is 0.04.",
+            metadata={"_streaming": True},
+        )
+        stream2 = OutboundMessage(
+            channel="web",
+            chat_id="s11",
+            content="The total cost is 0.04. The currency is USD.",
+            metadata={"_streaming": True},
+        )
+        # Final streaming flush — complete original text
+        stream_flush = OutboundMessage(
+            channel="web",
+            chat_id="s11",
+            content="The total cost is 0.04. The currency is USD. Let me know if you need more!",
+            metadata={"_streaming": True},
+        )
+        # Verifier revises — different wording, diverges from original
+        revised_final = OutboundMessage(
+            channel="web",
+            chat_id="s11",
+            content="The total cost calculated from the data is 0.04 USD. Feel free to ask more!",
+            metadata={},
+        )
+
+        with patch.object(channel, "publish_user_message", new_callable=AsyncMock):
+            feeder = asyncio.create_task(
+                _feed_queue(channel, "s11", [stream1, stream2, stream_flush, revised_final])
+            )
+            events: list[str] = []
+            async for ev in stream_agent_response(channel, "s11", "hi"):
+                events.append(ev)
+            await feeder
+
+        text_events = [e for e in events if e.startswith("0:")]
+        # Three streaming deltas — complete original text shown.
+        # Revised final is dropped (diverges from what user already saw).
+        assert len(text_events) == 3
+        assert text_events[0] == '0:"The total cost is 0.04."\n'
+        assert text_events[1] == '0:" The currency is USD."\n'
+        assert text_events[2] == '0:" Let me know if you need more!"\n'
