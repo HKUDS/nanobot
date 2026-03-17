@@ -437,8 +437,10 @@ class FeishuChannel(BaseChannel):
 
     _CODE_BLOCK_RE = re.compile(r"(```[\s\S]*?```)", re.MULTILINE)
 
-    # Markdown bold/italic patterns that need to be stripped for table cells
+    # Markdown formatting patterns that should be stripped from plain-text
+    # surfaces like table cells and heading text.
     _MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+    _MD_BOLD_UNDERSCORE_RE = re.compile(r"__(.+?)__")
     _MD_ITALIC_RE = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
     _MD_STRIKE_RE = re.compile(r"~~(.+?)~~")
 
@@ -451,6 +453,7 @@ class FeishuChannel(BaseChannel):
         """
         # Remove bold markers
         text = cls._MD_BOLD_RE.sub(r"\1", text)
+        text = cls._MD_BOLD_UNDERSCORE_RE.sub(r"\1", text)
         # Remove italic markers
         text = cls._MD_ITALIC_RE.sub(r"\1", text)
         # Remove strikethrough markers
@@ -532,12 +535,8 @@ class FeishuChannel(BaseChannel):
             before = protected[last_end:m.start()].strip()
             if before:
                 elements.append({"tag": "markdown", "content": before})
-            text = m.group(2).strip()
-            # Avoid double bold markers if text already contains them
-            if text.startswith("**") and text.endswith("**"):
-                display_text = text
-            else:
-                display_text = f"**{text}**"
+            text = self._strip_md_formatting(m.group(2).strip())
+            display_text = f"**{text}**" if text else ""
             elements.append({
                 "tag": "div",
                 "text": {
