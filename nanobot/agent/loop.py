@@ -335,6 +335,17 @@ class AgentLoop:
                 lines.append(f"  {i}. {m}{marker}")
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines))
 
+        # Reset to provider default
+        if arg == "reset":
+            default = self.provider.get_default_model()
+            config.agents.defaults.model = default
+            save_config(config)
+            self.model = default
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content=f"Model reset to: {default}\nRestart (/restart) to fully apply.",
+            )
+
         # Switch model — by index or by name
         new_model = arg
         if arg.isdigit():
