@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import jwt
 from loguru import logger
 from pydantic import Field
 
