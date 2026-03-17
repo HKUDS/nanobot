@@ -6,6 +6,7 @@ tracks availability, health, and metadata for every capability the
 agent can use.
 
 Phase B: core dataclass + registry with register/query/execute API.
+Phase E: health tracking with transition detection + heartbeat integration.
 """
 
 from __future__ import annotations
@@ -26,6 +27,29 @@ logger = logging.getLogger(__name__)
 
 CapabilityKind = Literal["tool", "skill", "delegate_role"]
 CapabilityHealth = Literal["healthy", "degraded", "unavailable"]
+
+
+@dataclass(slots=True)
+class HealthChange:
+    """Records a single health transition detected during refresh."""
+
+    name: str
+    kind: CapabilityKind
+    old_health: CapabilityHealth
+    new_health: CapabilityHealth
+    reason: str | None = None
+
+
+@dataclass(slots=True)
+class HealthRefreshResult:
+    """Structured result from a health refresh cycle."""
+
+    health: dict[str, CapabilityHealth]
+    changes: list[HealthChange] = field(default_factory=list)
+
+    @property
+    def has_changes(self) -> bool:
+        return len(self.changes) > 0
 
 
 @dataclass(slots=True)
@@ -241,16 +265,60 @@ class CapabilityRegistry:
     # Health refresh
     # ------------------------------------------------------------------
 
-    def refresh_health(self) -> dict[str, CapabilityHealth]:
-        """Re-check availability of all capabilities and return updated health map."""
-        result: dict[str, CapabilityHealth] = {}
+    def refresh_health(self) -> HealthRefreshResult:
+        """Re-check availability of all capabilities and return structured result.
+
+        Detects health transitions (e.g. healthy→unavailable) and logs them.
+        Returns a ``HealthRefreshResult`` with the current health map and
+        a list of any changes observed since the last check.
+        """
+        health_map: dict[str, CapabilityHealth] = {}
+        changes: list[HealthChange] = []
         for cap in self._capabilities.values():
+            old_health = cap.health
             if cap.kind == "tool" and cap.tool is not None:
                 available, reason = cap.tool.check_available()
                 cap.health = "healthy" if available else "unavailable"
                 cap.unavailability_reason = reason
-            result[cap.name] = cap.health
-        return result
+            if cap.health != old_health:
+                change = HealthChange(
+                    name=cap.name,
+                    kind=cap.kind,
+                    old_health=old_health,
+                    new_health=cap.health,
+                    reason=cap.unavailability_reason,
+                )
+                changes.append(change)
+                self._log_transition(change)
+            health_map[cap.name] = cap.health
+        return HealthRefreshResult(health=health_map, changes=changes)
+
+    @staticmethod
+    def _log_transition(change: HealthChange) -> None:
+        """Emit a log message for a health transition."""
+        if change.new_health == "unavailable":
+            logger.warning(
+                "Capability '%s' (%s): %s → unavailable: %s",
+                change.name,
+                change.kind,
+                change.old_health,
+                change.reason or "unknown reason",
+            )
+        elif change.old_health == "unavailable":
+            logger.info(
+                "Capability '%s' (%s) recovered: unavailable → %s",
+                change.name,
+                change.kind,
+                change.new_health,
+            )
+        else:
+            logger.info(
+                "Capability '%s' (%s): %s → %s",
+                change.name,
+                change.kind,
+                change.old_health,
+                change.new_health,
+            )
 
     # ------------------------------------------------------------------
     # Introspection

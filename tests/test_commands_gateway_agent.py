@@ -49,6 +49,7 @@ class _AgentLoop:
         self.channels_config = SimpleNamespace(send_tool_hints=True, send_progress=True)
         self._stopped = False
         self.context = SimpleNamespace(set_contacts_context=lambda contacts: None)
+        self._capabilities = SimpleNamespace(refresh_health=lambda: None)
 
     def set_deliver_callback(self, callback):
         pass
@@ -103,7 +104,7 @@ class _CronService:
 
 
 class _HeartbeatService:
-    def __init__(self, *, on_execute, on_notify, **kwargs):
+    def __init__(self, *, on_execute, on_notify, on_health_refresh=None, **kwargs):
         self._on_execute = on_execute
         self._on_notify = on_notify
 

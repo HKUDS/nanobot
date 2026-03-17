@@ -57,6 +57,7 @@ class HeartbeatService:
         model: str,
         on_execute: Callable[[str], Coroutine[Any, Any, str]] | None = None,
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
+        on_health_refresh: Callable[[], Any] | None = None,
         interval_s: int = 30 * 60,
         enabled: bool = True,
     ):
@@ -65,6 +66,7 @@ class HeartbeatService:
         self.model = model
         self.on_execute = on_execute
         self.on_notify = on_notify
+        self.on_health_refresh = on_health_refresh
         self.interval_s = interval_s
         self.enabled = enabled
         self._running = False
@@ -145,6 +147,13 @@ class HeartbeatService:
 
     async def _tick(self) -> None:
         """Execute a single heartbeat tick."""
+        # Refresh capability health (logs transitions internally)
+        if self.on_health_refresh:
+            try:
+                self.on_health_refresh()
+            except Exception:  # crash-barrier: health refresh must not block heartbeat
+                logger.exception("Health refresh failed during heartbeat tick")
+
         content = self._read_heartbeat_file()
         if not content:
             logger.debug("Heartbeat: HEARTBEAT.md missing or empty")

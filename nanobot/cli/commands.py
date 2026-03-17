@@ -532,6 +532,7 @@ def gateway(
         model=hb_cfg.model or agent.model,
         on_execute=on_heartbeat_execute,
         on_notify=on_heartbeat_notify,
+        on_health_refresh=agent._capabilities.refresh_health,
         interval_s=hb_cfg.interval_s,
         enabled=hb_cfg.enabled,
     )

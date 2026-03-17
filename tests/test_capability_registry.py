@@ -328,8 +328,8 @@ class TestHealthRefresh:
         assert reg.get("toggle").health == "healthy"  # type: ignore[union-attr]
 
         tool._available = False
-        health = reg.refresh_health()
-        assert health["toggle"] == "unavailable"
+        result = reg.refresh_health()
+        assert result.health["toggle"] == "unavailable"
         assert reg.get("toggle").health == "unavailable"  # type: ignore[union-attr]
 
     def test_refresh_recovers_health(self) -> None:
@@ -341,8 +341,8 @@ class TestHealthRefresh:
         assert reg.get("toggle").health == "unavailable"  # type: ignore[union-attr]
 
         tool._available = True
-        reg.refresh_health()
-        assert reg.get("toggle").health == "healthy"  # type: ignore[union-attr]
+        result = reg.refresh_health()
+        assert result.health["toggle"] == "healthy"  # type: ignore[union-attr]
 
 
 # ---------------------------------------------------------------------------
