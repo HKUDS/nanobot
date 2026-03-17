@@ -137,10 +137,17 @@ class WebFetchTool(Tool):
                 base += f" You can also fetch from these domains without a user-provided URL: {', '.join(self._allowed_domains)}."
         return base
 
+    @staticmethod
+    def _base_url(url: str) -> str:
+        """Strip query string and fragment to get scheme + netloc + path."""
+        p = urlparse(url)
+        return f"{p.scheme}://{p.netloc}{p.path}".rstrip("/")
+
     def add_user_urls(self, text: str) -> None:
         """Extract and register URLs from a user message."""
         for url in self._URL_RE.findall(text):
-            self._allowed_urls.add(url.rstrip(".,;:!?)]}"))
+            clean = url.rstrip(".,;:!?)]}\"'")
+            self._allowed_urls.add(self._base_url(clean))
 
     def _is_allowed(self, url: str) -> bool:
         """Check if the URL was provided by the user or matches an allowed domain."""
@@ -153,7 +160,8 @@ class WebFetchTool(Tool):
                 return True
         except Exception:
             pass
-        return any(url.startswith(allowed) for allowed in self._allowed_urls)
+        base = self._base_url(url)
+        return any(base.startswith(allowed) for allowed in self._allowed_urls)
 
     async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
         from readability import Document
