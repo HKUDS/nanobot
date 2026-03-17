@@ -329,7 +329,7 @@ class TestStreamingProtocol:
             events: list[str] = []
             async for ev in stream_agent_response(channel, "s8", "hi"):
                 events.append(ev)
-            await feeder
+            _ = await feeder
 
         text_events = [e for e in events if e.startswith("0:")]
         # Only the two streaming deltas — no garbled final delta
@@ -406,7 +406,7 @@ class TestStreamingProtocol:
             events: list[str] = []
             async for ev in stream_agent_response(channel, "s9", "hi"):
                 events.append(ev)
-            await feeder
+            _ = await feeder
 
         text_events = [e for e in events if e.startswith("0:")]
         # Two streaming deltas + final answer — no duplicate from flush
@@ -481,7 +481,7 @@ class TestStreamingProtocol:
             events: list[str] = []
             async for ev in stream_agent_response(channel, "s10", "hi"):
                 events.append(ev)
-            await feeder
+            _ = await feeder
 
         text_events = [e for e in events if e.startswith("0:")]
         # First LLM call text + second LLM call text (no garbling)
@@ -533,7 +533,7 @@ class TestStreamingProtocol:
             events: list[str] = []
             async for ev in stream_agent_response(channel, "s11", "hi"):
                 events.append(ev)
-            await feeder
+            _ = await feeder
 
         text_events = [e for e in events if e.startswith("0:")]
         # Three streaming deltas — complete original text shown.
