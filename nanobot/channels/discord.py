@@ -3,16 +3,18 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
+from pydantic import Field
 import websockets
 from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import DiscordConfig
+from nanobot.config.paths import get_media_dir
+from nanobot.config.schema import Base
 from nanobot.utils.helpers import split_message
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
@@ -20,12 +22,30 @@ MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
 
 
+class DiscordConfig(Base):
+    """Discord channel configuration."""
+
+    enabled: bool = False
+    token: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+    gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
+    intents: int = 37377
+    group_policy: Literal["mention", "open"] = "mention"
+
+
 class DiscordChannel(BaseChannel):
     """Discord channel using Gateway websocket."""
 
     name = "discord"
+    display_name = "Discord"
 
-    def __init__(self, config: DiscordConfig, bus: MessageBus):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return DiscordConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = DiscordConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: DiscordConfig = config
         self._ws: websockets.WebSocketClientProtocol | None = None
@@ -289,7 +309,7 @@ class DiscordChannel(BaseChannel):
 
         content_parts = [content] if content else []
         media_paths: list[str] = []
-        media_dir = Path.home() / ".nanobot" / "media"
+        media_dir = get_media_dir("discord")
 
         for attachment in payload.get("attachments") or []:
             url = attachment.get("url")

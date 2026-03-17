@@ -36,6 +36,7 @@ class MCPToolWrapper(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types
+
         try:
             result = await asyncio.wait_for(
                 self._session.call_tool(self._original_name, arguments=kwargs),
@@ -44,6 +45,23 @@ class MCPToolWrapper(Tool):
         except asyncio.TimeoutError:
             logger.warning("MCP tool '{}' timed out after {}s", self._name, self._tool_timeout)
             return f"(MCP tool call timed out after {self._tool_timeout}s)"
+        except asyncio.CancelledError:
+            # MCP SDK's anyio cancel scopes can leak CancelledError on timeout/failure.
+            # Re-raise only if our task was externally cancelled (e.g. /stop).
+            task = asyncio.current_task()
+            if task is not None and task.cancelling() > 0:
+                raise
+            logger.warning("MCP tool '{}' was cancelled by server/SDK", self._name)
+            return "(MCP tool call was cancelled)"
+        except Exception as exc:
+            logger.exception(
+                "MCP tool '{}' failed: {}: {}",
+                self._name,
+                type(exc).__name__,
+                exc,
+            )
+            return f"(MCP tool call failed: {type(exc).__name__})"
+
         parts = []
         for block in result.content:
             if isinstance(block, types.TextContent):
@@ -120,11 +138,47 @@ async def connect_mcp_servers(
             await session.initialize()
 
             tools = await session.list_tools()
+            enabled_tools = set(cfg.enabled_tools)
+            allow_all_tools = "*" in enabled_tools
+            registered_count = 0
+            matched_enabled_tools: set[str] = set()
+            available_raw_names = [tool_def.name for tool_def in tools.tools]
+            available_wrapped_names = [f"mcp_{name}_{tool_def.name}" for tool_def in tools.tools]
             for tool_def in tools.tools:
+                wrapped_name = f"mcp_{name}_{tool_def.name}"
+                if (
+                    not allow_all_tools
+                    and tool_def.name not in enabled_tools
+                    and wrapped_name not in enabled_tools
+                ):
+                    logger.debug(
+                        "MCP: skipping tool '{}' from server '{}' (not in enabledTools)",
+                        wrapped_name,
+                        name,
+                    )
+                    continue
                 wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
                 registry.register(wrapper)
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
+                registered_count += 1
+                if enabled_tools:
+                    if tool_def.name in enabled_tools:
+                        matched_enabled_tools.add(tool_def.name)
+                    if wrapped_name in enabled_tools:
+                        matched_enabled_tools.add(wrapped_name)
 
-            logger.info("MCP server '{}': connected, {} tools registered", name, len(tools.tools))
+            if enabled_tools and not allow_all_tools:
+                unmatched_enabled_tools = sorted(enabled_tools - matched_enabled_tools)
+                if unmatched_enabled_tools:
+                    logger.warning(
+                        "MCP server '{}': enabledTools entries not found: {}. Available raw names: {}. "
+                        "Available wrapped names: {}",
+                        name,
+                        ", ".join(unmatched_enabled_tools),
+                        ", ".join(available_raw_names) or "(none)",
+                        ", ".join(available_wrapped_names) or "(none)",
+                    )
+
+            logger.info("MCP server '{}': connected, {} tools registered", name, registered_count)
         except Exception as e:
             logger.error("MCP server '{}': failed to connect: {}", name, e)

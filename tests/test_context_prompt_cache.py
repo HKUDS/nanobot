@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime as real_datetime
+from importlib.resources import files as pkg_files
 from pathlib import Path
 import datetime as datetime_module
 
@@ -21,6 +22,13 @@ def _make_workspace(tmp_path: Path) -> Path:
     workspace = tmp_path / "workspace"
     workspace.mkdir(parents=True)
     return workspace
+
+
+def test_bootstrap_files_are_backed_by_templates() -> None:
+    template_dir = pkg_files("nanobot") / "templates"
+
+    for filename in ContextBuilder.BOOTSTRAP_FILES:
+        assert (template_dir / filename).is_file(), f"missing bootstrap template: {filename}"
 
 
 def test_system_prompt_stays_stable_when_clock_changes(tmp_path, monkeypatch) -> None:
