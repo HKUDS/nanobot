@@ -10,6 +10,7 @@ from nanobot.utils.helpers import current_time_str
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
+from nanobot.config.schema import InputLimitsConfig
 from nanobot.utils.helpers import build_assistant_message, detect_image_mime
 
 
@@ -18,13 +19,12 @@ class ContextBuilder:
 
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
-    _MAX_INPUT_IMAGES = 3
-    _MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, input_limits: InputLimitsConfig | None = None):
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
+        self.input_limits = input_limits or InputLimitsConfig()
 
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
@@ -152,15 +152,18 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 
         images = []
         notes: list[str] = []
-        extra_count = max(0, len(media) - self._MAX_INPUT_IMAGES)
+        max_images = self.input_limits.max_input_images
+        max_image_bytes = self.input_limits.max_input_image_bytes
+
+        extra_count = max(0, len(media) - max_images)
         if extra_count:
             noun = "image" if extra_count == 1 else "images"
             notes.append(
                 f"[Skipped {extra_count} {noun}: "
-                f"only the first {self._MAX_INPUT_IMAGES} images are included]"
+                f"only the first {max_images} images are included]"
             )
 
-        for path in media[:self._MAX_INPUT_IMAGES]:
+        for path in media[:max_images]:
             p = Path(path)
             if not p.is_file():
                 notes.append(f"[Skipped image: file not found ({p.name or path})]")
@@ -170,8 +173,8 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             except OSError:
                 notes.append(f"[Skipped image: unable to read ({p.name or path})]")
                 continue
-            if size > self._MAX_IMAGE_BYTES:
-                size_mb = self._MAX_IMAGE_BYTES // (1024 * 1024)
+            if size > max_image_bytes:
+                size_mb = max_image_bytes // (1024 * 1024)
                 notes.append(f"[Skipped image: file too large ({p.name}, limit {size_mb} MB)]")
                 continue
             raw = p.read_bytes()
