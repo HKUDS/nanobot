@@ -2,6 +2,7 @@
 
 import json
 import shutil
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -138,6 +139,8 @@ class SessionManager:
         session = self._load(key)
         if session is None:
             session = Session(key=key)
+            # Generate trace id for new session
+            session.metadata['trace_id'] = str(uuid.uuid4())
 
         self._cache[key] = session
         return session
