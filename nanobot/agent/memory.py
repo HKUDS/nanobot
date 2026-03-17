@@ -105,26 +105,19 @@ class MemoryStore:
     # ------------------------------------------------------------------
 
     async def get_viking_memory_context(
-        self,
-        current_message: str,
-        viking_client: VikingClient,
-        sender_id: str | None = None,
+        self, current_message: str, viking_client: VikingClient,
     ) -> str:
         """Fetch relevant memories from OpenViking for the current message."""
         try:
-            return await viking_client.get_viking_memory_context(
-                current_message, sender_id=sender_id
-            )
+            return await viking_client.get_viking_memory_context(current_message)
         except Exception as e:
             logger.warning("OpenViking memory context failed: {}", e)
             return ""
 
-    async def get_viking_user_profile(
-        self, viking_client: VikingClient, sender_id: str | None = None
-    ) -> str:
+    async def get_viking_user_profile(self, viking_client: VikingClient) -> str:
         """Fetch user profile from OpenViking."""
         try:
-            return await viking_client.get_viking_user_profile(sender_id=sender_id)
+            return await viking_client.get_viking_user_profile()
         except Exception as e:
             logger.warning("OpenViking user profile failed: {}", e)
             return ""

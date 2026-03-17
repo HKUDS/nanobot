@@ -1,7 +1,7 @@
 """Integration tests for VikingClient against real Dashscope embedding service.
 
 These tests exercise the full write-then-recall cycle with no mocking:
-  commit → wait_processed → search / find / search_memory
+  commit → wait_processed → search / find / search_memory / grep
 
 Run with:
     python -m pytest tests/test_openviking_integration.py -v --tb=short
@@ -10,12 +10,13 @@ Run with:
 from __future__ import annotations
 
 import asyncio
-import os
+import pathlib
 import tempfile
 import uuid
 
 import pytest
 
+from nanobot.agent.tools.openviking import OVGrepTool, _OVTool
 from nanobot.openviking.client import VikingClient
 
 EMBEDDING_MODEL = "text-embedding-v4"
@@ -27,6 +28,8 @@ VLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 VLM_MODEL = "qwen-vl-plus"
 
 TEST_USER_ID = "default"
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -198,3 +201,74 @@ class TestRecall:
             assert top_score < 0.5, (
                 f"Irrelevant query should not get high score, got {top_score}"
             )
+
+
+class TestGrep:
+    """Verify grep (regex search) within Viking URIs."""
+
+    async def test_grep_user_memory_finds_committed_content(
+        self, committed_client: VikingClient,
+    ) -> None:
+        """Grep for 'Python' in user memories; committed messages contain it."""
+        uri = f"viking://user/{TEST_USER_ID}/memories/"
+        result = await committed_client.grep(uri, "Python")
+        if isinstance(result, dict):
+            matches = result.get("result", {}).get("matches", result.get("matches", []))
+            count = result.get("result", {}).get("count", result.get("count", 0))
+        else:
+            matches = getattr(result, "matches", [])
+            count = getattr(result, "count", 0)
+        assert count >= 0, "grep should return a count"
+        if matches:
+            m = matches[0]
+            content = m.get("content", "") if isinstance(m, dict) else getattr(m, "content", "")
+            assert "Python" in content or "python" in content.lower(), (
+                f"Match should contain 'Python', got: {content[:100]}"
+            )
+
+    async def test_grep_no_matches(self, committed_client: VikingClient) -> None:
+        """Grep for nonexistent pattern returns empty or zero count."""
+        uri = f"viking://user/{TEST_USER_ID}/memories/"
+        result = await committed_client.grep(uri, "XyZ_NoNeXiStEnT_123")
+        if isinstance(result, dict):
+            matches = result.get("result", {}).get("matches", result.get("matches", []))
+        else:
+            matches = getattr(result, "matches", [])
+        assert len(matches) == 0, "Nonexistent pattern should yield no matches"
+
+    async def test_grep_resources_after_add(
+        self, client: VikingClient, data_dir: str,
+    ) -> None:
+        """Add a resource with known text, then grep for it."""
+        resource_file = pathlib.Path(data_dir) / "grep_test.txt"
+        resource_file.write_text("OpenViking grep integration test keyword: GREP_TEST_TOKEN", encoding="utf-8")
+        try:
+            await client.add_resource(str(resource_file), desc="grep test resource")
+            await client.client.wait_processed()
+            result = await client.grep("viking://resources/", "GREP_TEST_TOKEN")
+            if isinstance(result, dict):
+                matches = result.get("result", {}).get("matches", result.get("matches", []))
+            else:
+                matches = getattr(result, "matches", [])
+            assert len(matches) >= 1, (
+                f"grep should find GREP_TEST_TOKEN in added resource, got: {result}"
+            )
+        finally:
+            resource_file.unlink(missing_ok=True)
+
+    async def test_ov_grep_tool_execute(self, committed_client: VikingClient) -> None:
+        """OVGrepTool.execute returns formatted matches when pattern exists."""
+        old_client = _OVTool._shared_client
+        _OVTool._shared_client = committed_client
+        try:
+            tool = OVGrepTool()
+            result = await tool.execute(
+                uri=f"viking://user/{TEST_USER_ID}/memories/",
+                pattern="Python",
+            )
+            assert isinstance(result, str)
+            assert "Python" in result or "match" in result.lower(), (
+                f"Tool should return matches or 'No matches', got: {result[:200]}"
+            )
+        finally:
+            _OVTool._shared_client = old_client

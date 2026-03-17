@@ -284,19 +284,12 @@ class VikingClient:
         result = await self.client.search(query, target_uri=uri)
         return [self._matched_to_dict(m) for m in getattr(result, "memories", [])]
 
-    async def search_memory(
-        self, query: str, limit: int = 10, sender_id: str | None = None
-    ) -> dict[str, list[Any]]:
-        """Search both user and agent memories.
-
-        When sender_id is provided, user memory is searched for that user;
-        otherwise uses config user_id.
-        """
-        uid = (sender_id or self.user_id) or self.user_id
-        if not await self._ensure_user(uid):
+    async def search_memory(self, query: str, limit: int = 10) -> dict[str, list[Any]]:
+        """Search both user and agent memories."""
+        if not await self._ensure_user(self.user_id):
             return {"user_memory": [], "agent_memory": []}
 
-        uri_user = f"viking://user/{uid}/memories/"
+        uri_user = f"viking://user/{self.user_id}/memories/"
         user_result = await self.client.find(query=query, target_uri=uri_user, limit=limit)
 
         uri_agent = f"viking://agent/{self.agent_space_name}/memories/"
@@ -487,9 +480,7 @@ class VikingClient:
             [m for m in (agent_memory or []) if keep(m)],
         )
 
-    async def get_viking_memory_context(
-        self, current_message: str, sender_id: str | None = None
-    ) -> str:
+    async def get_viking_memory_context(self, current_message: str) -> str:
         """Return formatted Viking memory context for the system prompt.
 
         Only injects memories when:
@@ -497,7 +488,7 @@ class VikingClient:
         - URI is not schema/overview (.overview.md, .abstract.md)
         """
         start = time.perf_counter()
-        result = await self.search_memory(current_message, limit=5, sender_id=sender_id)
+        result = await self.search_memory(current_message, limit=5)
         if not result:
             logger.debug("[READ_USER_MEMORY]: cost {:.2f}s, search failed", time.perf_counter() - start)
             return ""
@@ -524,13 +515,12 @@ class VikingClient:
             f"### Agent Memories\n{agent_text or '(none)'}"
         )
 
-    async def get_viking_user_profile(self, sender_id: str | None = None) -> str:
+    async def get_viking_user_profile(self) -> str:
         start = time.perf_counter()
-        uid = (sender_id or self.user_id) or self.user_id
-        if not await self._ensure_user(uid):
+        if not await self._ensure_user(self.user_id):
             return ""
         content = await self.read_content(
-            uri=f"viking://user/{uid}/memories/profile.md", level="read"
+            uri=f"viking://user/{self.user_id}/memories/profile.md", level="read"
         )
         cost = time.perf_counter() - start
         logger.info("[READ_USER_PROFILE]: cost {:.2f}s, profile={}", cost, "yes" if content else "none")

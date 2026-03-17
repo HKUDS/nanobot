@@ -39,16 +39,13 @@ class ContextBuilder:
         self,
         skill_names: list[str] | None = None,
         current_message: str = "",
-        sender_id: str | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
 
         # Semantic user profile
         if self._viking_client:
-            profile = await self.memory.get_viking_user_profile(
-                self._viking_client, sender_id=sender_id
-            )
+            profile = await self.memory.get_viking_user_profile(self._viking_client)
             if profile:
                 parts.append(profile)
 
@@ -178,12 +175,12 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         system_prompt = await self.build_system_prompt(
-            skill_names, current_message=current_message, sender_id=sender_id
+            skill_names, current_message=current_message,
         )
 
         if self._viking_client and current_message:
             viking_mem = await self.memory.get_viking_memory_context(
-                current_message, self._viking_client, sender_id=sender_id
+                current_message, self._viking_client
             )
             if viking_mem:
                 system_prompt += (
