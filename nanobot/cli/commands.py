@@ -266,8 +266,19 @@ def onboard():
     from nanobot.config.loader import get_config_path, load_config, save_config
     from nanobot.config.schema import Config
 
-    config_path = get_config_path()
+    if config:
+        config_path = Path(config).expanduser().resolve()
+        set_config_path(config_path)
+        console.print(f"[dim]Using config: {config_path}[/dim]")
+    else:
+        config_path = get_config_path()
 
+    def _apply_workspace_override(loaded: Config) -> Config:
+        if workspace:
+            loaded.agents.defaults.workspace = workspace
+        return loaded
+
+    # Create or update config
     if config_path.exists():
         config = load_config()
     else:
@@ -289,14 +300,17 @@ def onboard():
 
     _onboard_plugins(config_path)
 
-    # Create workspace
-    workspace = get_workspace_path()
-
+    # Create workspace, preferring the configured workspace path.
+    workspace = get_workspace_path(config.workspace_path)
     if not workspace.exists():
         workspace.mkdir(parents=True, exist_ok=True)
         console.print(f"[green]✓[/green] Created workspace at {workspace}")
 
     sync_workspace_templates(workspace)
+
+    agent_cmd = 'nanobot agent -m "Hello!"'
+    if config:
+        agent_cmd += f" --config {config_path}"
 
     console.print(f"\n{__logo__} nanobot is ready!")
     console.print("\nNext steps:")
@@ -363,6 +377,7 @@ def _make_provider(config: Config):
             api_key=p.api_key if p else "no-key",
             api_base=config.get_api_base(model) or "http://localhost:8000/v1",
             default_model=model,
+            extra_headers=p.extra_headers if p else None,
         )
     # Azure OpenAI: direct Azure OpenAI endpoint with deployment name
     elif provider_name == "azure_openai":
@@ -623,6 +638,102 @@ def gateway(
     asyncio.run(run())
 
 
+
+
+# ============================================================================
+# TUI Command
+# ============================================================================
+
+
+@app.command()
+def tui(
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs"),
+):
+    """Start nanobot in interactive TUI mode."""
+    from loguru import logger
+
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.channels.tui import TuiChannel, TuiConfig
+    from nanobot.config.paths import get_cron_dir
+    from nanobot.cron.service import CronService
+    from nanobot.session.manager import SessionManager
+
+    if logs:
+        logger.enable("nanobot")
+    else:
+        logger.disable("nanobot")
+
+    cfg = _load_runtime_config(config, workspace)
+    _print_deprecated_memory_window_notice(cfg)
+    sync_workspace_templates(cfg.workspace_path)
+
+    bus = MessageBus()
+    provider = _make_provider(cfg)
+    session_manager = SessionManager(cfg.workspace_path)
+
+    cron_store_path = get_cron_dir() / "jobs.json"
+    cron = CronService(cron_store_path)
+
+    agent_loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=cfg.workspace_path,
+        model=cfg.agents.defaults.model,
+        max_iterations=cfg.agents.defaults.max_tool_iterations,
+        context_window_tokens=cfg.agents.defaults.context_window_tokens,
+        web_search_config=cfg.tools.web.search,
+        web_proxy=cfg.tools.web.proxy or None,
+        exec_config=cfg.tools.exec,
+        cron_service=cron,
+        restrict_to_workspace=cfg.tools.restrict_to_workspace,
+        session_manager=session_manager,
+        mcp_servers=cfg.tools.mcp_servers,
+        channels_config=cfg.channels,
+    )
+
+    tui_cfg = TuiConfig(enabled=True, allow_from=["*"])
+    channel = TuiChannel(tui_cfg, bus)
+
+    async def dispatch_outbound() -> None:
+        while True:
+            try:
+                msg = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+                if msg.metadata.get("_progress"):
+                    if msg.metadata.get("_tool_hint") and not cfg.channels.send_tool_hints:
+                        continue
+                    if not msg.metadata.get("_tool_hint") and not cfg.channels.send_progress:
+                        continue
+                try:
+                    await channel.send(msg)
+                except Exception as e:
+                    logger.error("TUI send error: {}", e)
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                break
+
+    async def run() -> None:
+        await cron.start()
+        agent_task = asyncio.create_task(agent_loop.run())
+        dispatch_task = asyncio.create_task(dispatch_outbound())
+        try:
+            await channel.start()
+        except KeyboardInterrupt:
+            pass
+        except Exception as e:
+            logger.error("TUI error: {}", e)
+        finally:
+            agent_loop.stop()
+            agent_task.cancel()
+            dispatch_task.cancel()
+            await asyncio.gather(agent_task, dispatch_task, return_exceptions=True)
+            cron.stop()
+            await agent_loop.close_mcp()
+
+    asyncio.run(run())
 
 
 # ============================================================================

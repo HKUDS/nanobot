@@ -1,6 +1,7 @@
 """Tests for Feishu message reply (quote) feature."""
 import asyncio
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -184,6 +185,48 @@ def test_reply_message_sync_returns_false_on_exception() -> None:
     ok = channel._reply_message_sync("om_parent", "text", '{"text":"hi"}')
 
     assert ok is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("filename", "expected_msg_type"),
+    [
+        ("voice.opus", "audio"),
+        ("clip.mp4", "video"),
+        ("report.pdf", "file"),
+    ],
+)
+async def test_send_uses_expected_feishu_msg_type_for_uploaded_files(
+    tmp_path: Path, filename: str, expected_msg_type: str
+) -> None:
+    channel = _make_feishu_channel()
+    file_path = tmp_path / filename
+    file_path.write_bytes(b"demo")
+
+    send_calls: list[tuple[str, str, str, str]] = []
+
+    def _record_send(receive_id_type: str, receive_id: str, msg_type: str, content: str) -> None:
+        send_calls.append((receive_id_type, receive_id, msg_type, content))
+
+    with patch.object(channel, "_upload_file_sync", return_value="file-key"), patch.object(
+        channel, "_send_message_sync", side_effect=_record_send
+    ):
+        await channel.send(
+            OutboundMessage(
+                channel="feishu",
+                chat_id="oc_test",
+                content="",
+                media=[str(file_path)],
+                metadata={},
+            )
+        )
+
+    assert len(send_calls) == 1
+    receive_id_type, receive_id, msg_type, content = send_calls[0]
+    assert receive_id_type == "chat_id"
+    assert receive_id == "oc_test"
+    assert msg_type == expected_msg_type
+    assert json.loads(content) == {"file_key": "file-key"}
 
 
 # ---------------------------------------------------------------------------
