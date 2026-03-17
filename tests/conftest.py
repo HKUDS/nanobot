@@ -43,7 +43,6 @@ def mock_llm_provider():
     provider.chat = AsyncMock()
     provider.chat_with_retry = AsyncMock()
     provider.get_default_model = Mock(return_value="test-model")
-    provider.supports_vision = Mock(return_value=True)
     return provider
 
 
@@ -299,7 +298,6 @@ def mock_provider_spec():
         env_key="TEST_API_KEY",
         display_name="Test Provider",
         litellm_prefix="test",
-        supports_vision=True,
     )
 
 

@@ -134,16 +134,9 @@ class AgentLoop:
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
 
-        # Register browser tool with vision support based on provider capability
-        # This ensures that screenshot images are only sent to models that support vision
-        if self.provider.supports_vision():
-            self.tools.register(BrowserActionTool(enable_vision=True))
-            logger.info("Browser tool registered with vision support (screenshot returns images)")
-        else:
-            self.tools.register(BrowserActionTool(enable_vision=False))
-            logger.info(
-                "Browser tool registered without vision support (screenshot returns text only)"
-            )
+        # Register browser tool
+        self.tools.register(BrowserActionTool())
+        logger.info("Browser tool registered")
 
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))

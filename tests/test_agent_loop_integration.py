@@ -13,16 +13,14 @@ class TestAgentLoopBrowserIntegration:
     """Integration tests for agent loop with browser tool."""
 
     @pytest.mark.asyncio
-    async def test_browser_tool_registered_with_vision_support(
+    async def test_browser_tool_registered(
         self, mock_workspace, mock_message_bus
     ):
-        """Test that browser tool is registered when provider supports vision."""
-        # Create a mock provider that supports vision
+        """Test that browser tool is registered."""
         mock_provider = Mock()
         mock_provider.chat = AsyncMock()
         mock_provider.chat_with_retry = AsyncMock()
         mock_provider.get_default_model = Mock(return_value="test-model")
-        mock_provider.supports_vision = Mock(return_value=True)
 
         with patch("nanobot.agent.tools.browser.PLAYWRIGHT_AVAILABLE", True):
             agent = AgentLoop(
@@ -32,35 +30,9 @@ class TestAgentLoopBrowserIntegration:
                 model="test-model",
             )
 
-            # Check that browser tool is registered with vision enabled
+            # Check that browser tool is registered
             browser_tool = agent.tools.get("browser_action")
             assert browser_tool is not None
-            assert browser_tool._enable_vision is True
-
-    @pytest.mark.asyncio
-    async def test_browser_tool_registered_without_vision_support(
-        self, mock_workspace, mock_message_bus
-    ):
-        """Test that browser tool is registered without vision when provider doesn't support it."""
-        # Create a mock provider that doesn't support vision
-        mock_provider = Mock()
-        mock_provider.chat = AsyncMock()
-        mock_provider.chat_with_retry = AsyncMock()
-        mock_provider.get_default_model = Mock(return_value="test-model")
-        mock_provider.supports_vision = Mock(return_value=False)
-
-        with patch("nanobot.agent.tools.browser.PLAYWRIGHT_AVAILABLE", True):
-            agent = AgentLoop(
-                bus=mock_message_bus,
-                provider=mock_provider,
-                workspace=mock_workspace,
-                model="test-model",
-            )
-
-            # Check that browser tool is registered with vision disabled
-            browser_tool = agent.tools.get("browser_action")
-            assert browser_tool is not None
-            assert browser_tool._enable_vision is False
 
     @pytest.mark.asyncio
     async def test_browser_tool_not_registered_without_playwright(
@@ -71,7 +43,6 @@ class TestAgentLoopBrowserIntegration:
         mock_provider.chat = AsyncMock()
         mock_provider.chat_with_retry = AsyncMock()
         mock_provider.get_default_model = Mock(return_value="test-model")
-        mock_provider.supports_vision = Mock(return_value=True)
 
         with patch("nanobot.agent.tools.browser.PLAYWRIGHT_AVAILABLE", False):
             agent = AgentLoop(
@@ -94,7 +65,6 @@ class TestAgentLoopBrowserIntegration:
         mock_provider.chat = AsyncMock()
         mock_provider.chat_with_retry = AsyncMock()
         mock_provider.get_default_model = Mock(return_value="test-model")
-        mock_provider.supports_vision = Mock(return_value=True)
 
         # Mock response with tool call
         from nanobot.providers.base import LLMResponse, ToolCallRequest
@@ -136,45 +106,14 @@ class TestAgentLoopBrowserIntegration:
         assert mock_provider.chat_with_retry.called
 
     @pytest.mark.asyncio
-    async def test_vision_disabled_screenshot_returns_text(
+    async def test_screenshot_returns_image(
         self, mock_workspace, mock_message_bus, mock_playwright
     ):
-        """Test that screenshot returns text when vision is disabled."""
+        """Test that screenshot returns image."""
         mock_provider = Mock()
         mock_provider.chat = AsyncMock()
         mock_provider.chat_with_retry = AsyncMock()
         mock_provider.get_default_model = Mock(return_value="test-model")
-        mock_provider.supports_vision = Mock(return_value=False)
-
-        agent = AgentLoop(
-            bus=mock_message_bus,
-            provider=mock_provider,
-            workspace=mock_workspace,
-            model="test-model",
-        )
-
-        # Get browser tool
-        browser_tool = agent.tools.get("browser_action")
-        assert browser_tool is not None
-
-        # Execute screenshot
-        result = await browser_tool.execute(action="screenshot")
-
-        # Should return text description, not image
-        assert isinstance(result, ToolResult)
-        assert "vision disabled" in result.content
-        assert result.images is None
-
-    @pytest.mark.asyncio
-    async def test_vision_enabled_screenshot_returns_image(
-        self, mock_workspace, mock_message_bus, mock_playwright
-    ):
-        """Test that screenshot returns image when vision is enabled."""
-        mock_provider = Mock()
-        mock_provider.chat = AsyncMock()
-        mock_provider.chat_with_retry = AsyncMock()
-        mock_provider.get_default_model = Mock(return_value="test-model")
-        mock_provider.supports_vision = Mock(return_value=True)
 
         # Get the mock page from the fixture
         mock_page = mock_playwright["page"]
@@ -209,7 +148,6 @@ class TestAgentLoopBrowserIntegration:
         mock_provider.chat = AsyncMock()
         mock_provider.chat_with_retry = AsyncMock()
         mock_provider.get_default_model = Mock(return_value="test-model")
-        mock_provider.supports_vision = Mock(return_value=True)
 
         with patch("nanobot.agent.tools.browser.PLAYWRIGHT_AVAILABLE", True):
             agent = AgentLoop(
@@ -246,7 +184,6 @@ class TestAgentLoopBrowserIntegration:
         mock_provider.chat = AsyncMock()
         mock_provider.chat_with_retry = AsyncMock()
         mock_provider.get_default_model = Mock(return_value="test-model")
-        mock_provider.supports_vision = Mock(return_value=True)
 
         with patch("nanobot.agent.tools.browser.PLAYWRIGHT_AVAILABLE", True):
             agent = AgentLoop(
@@ -270,7 +207,6 @@ class TestAgentLoopBrowserIntegration:
         mock_provider.chat = AsyncMock()
         mock_provider.chat_with_retry = AsyncMock()
         mock_provider.get_default_model = Mock(return_value="test-model")
-        mock_provider.supports_vision = Mock(return_value=True)
 
         with patch("nanobot.agent.tools.browser.PLAYWRIGHT_AVAILABLE", True):
             agent = AgentLoop(
@@ -296,49 +232,6 @@ class TestAgentLoopBrowserIntegration:
             assert "parameters" in browser_def["function"]
 
     @pytest.mark.asyncio
-    async def test_browser_tool_description_varies_with_vision(
-        self, mock_workspace, mock_message_bus
-    ):
-        """Test that browser tool description varies based on vision support."""
-        # Test with vision enabled
-        mock_provider_vision = Mock()
-        mock_provider_vision.chat = AsyncMock()
-        mock_provider_vision.chat_with_retry = AsyncMock()
-        mock_provider_vision.get_default_model = Mock(return_value="test-model")
-        mock_provider_vision.supports_vision = Mock(return_value=True)
-
-        with patch("nanobot.agent.tools.browser.PLAYWRIGHT_AVAILABLE", True):
-            agent_vision = AgentLoop(
-                bus=mock_message_bus,
-                provider=mock_provider_vision,
-                workspace=mock_workspace,
-                model="test-model",
-            )
-
-            browser_tool_vision = agent_vision.tools.get("browser_action")
-            desc_vision = browser_tool_vision.description
-            assert "Screenshot returns image for multimodal models" in desc_vision
-
-        # Test with vision disabled
-        mock_provider_no_vision = Mock()
-        mock_provider_no_vision.chat = AsyncMock()
-        mock_provider_no_vision.chat_with_retry = AsyncMock()
-        mock_provider_no_vision.get_default_model = Mock(return_value="test-model")
-        mock_provider_no_vision.supports_vision = Mock(return_value=False)
-
-        with patch("nanobot.agent.tools.browser.PLAYWRIGHT_AVAILABLE", True):
-            agent_no_vision = AgentLoop(
-                bus=mock_message_bus,
-                provider=mock_provider_no_vision,
-                workspace=mock_workspace,
-                model="test-model",
-            )
-
-            browser_tool_no_vision = agent_no_vision.tools.get("browser_action")
-            desc_no_vision = browser_tool_no_vision.description
-            assert "Screenshot returns text description only" in desc_no_vision
-
-    @pytest.mark.asyncio
     async def test_multiple_tool_results_with_images(
         self, mock_workspace, mock_message_bus, sample_image_b64
     ):
@@ -347,7 +240,6 @@ class TestAgentLoopBrowserIntegration:
         mock_provider.chat = AsyncMock()
         mock_provider.chat_with_retry = AsyncMock()
         mock_provider.get_default_model = Mock(return_value="test-model")
-        mock_provider.supports_vision = Mock(return_value=True)
 
         # Create multiple tool results with images
         result1 = ToolResult(
@@ -387,7 +279,6 @@ class TestAgentLoopBrowserIntegration:
         mock_provider.chat = AsyncMock()
         mock_provider.chat_with_retry = AsyncMock()
         mock_provider.get_default_model = Mock(return_value="test-model")
-        mock_provider.supports_vision = Mock(return_value=True)
 
         # Create mixed results
         result_with_image = ToolResult(
@@ -417,7 +308,6 @@ class TestAgentLoopBrowserIntegration:
         mock_provider.chat = AsyncMock()
         mock_provider.chat_with_retry = AsyncMock()
         mock_provider.get_default_model = Mock(return_value="test-model")
-        mock_provider.supports_vision = Mock(return_value=True)
 
         with patch("nanobot.agent.tools.browser.PLAYWRIGHT_AVAILABLE", True):
             agent = AgentLoop(
@@ -445,7 +335,6 @@ class TestAgentLoopBrowserIntegration:
         mock_provider.chat = AsyncMock()
         mock_provider.chat_with_retry = AsyncMock()
         mock_provider.get_default_model = Mock(return_value="test-model")
-        mock_provider.supports_vision = Mock(return_value=True)
 
         agent = AgentLoop(
             bus=mock_message_bus,
@@ -479,7 +368,6 @@ class TestAgentLoopBrowserIntegration:
         mock_provider.chat = AsyncMock()
         mock_provider.chat_with_retry = AsyncMock()
         mock_provider.get_default_model = Mock(return_value="test-model")
-        mock_provider.supports_vision = Mock(return_value=True)
 
         agent = AgentLoop(
             bus=mock_message_bus,

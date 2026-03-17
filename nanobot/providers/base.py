@@ -296,23 +296,3 @@ class LLMProvider(ABC):
     def get_default_model(self) -> str:
         """Get the default model for this provider."""
         pass
-
-    def supports_vision(self) -> bool:
-        """Check if this provider supports vision/image input.
-
-        Default implementation returns False. Subclasses should override
-        this method to return True if the provider supports multimodal input
-        (e.g., can process images in tool results).
-
-        This is used to conditionally enable vision-dependent features like
-        browser screenshot tools that return image data.
-
-        Returns:
-            True if the provider supports vision, False otherwise.
-
-        Note:
-            - Returns False by default for safety (assume no vision support)
-            - Subclasses should override based on their actual capabilities
-            - Used by AgentLoop to decide whether to register vision-enabled tools
-        """
-        return False

@@ -43,7 +43,6 @@ class ProviderSpec:
         is_oauth: Whether this provider uses OAuth instead of API key.
         is_direct: Whether this provider bypasses LiteLLM entirely.
         supports_prompt_caching: Whether provider supports cache_control blocks.
-        supports_vision: Whether provider supports image input (multimodal).
     """
 
     # identity
@@ -82,10 +81,6 @@ class ProviderSpec:
     # Provider supports cache_control on content blocks (e.g. Anthropic prompt caching)
     supports_prompt_caching: bool = False
 
-    # Provider supports vision/image input (multimodal capability)
-    # When True, tools can return images (e.g., screenshots) that the model can process
-    supports_vision: bool = False
-
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
@@ -117,7 +112,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     # === Gateways (detected by api_key / api_base, not model name) =========
     # Gateways can route any model, so they win in fallback.
     # OpenRouter: global gateway, keys start with "sk-or-"
-    # Supports vision when routing to vision-capable models (Claude, GPT-4o, etc.)
     ProviderSpec(
         name="openrouter",
         keywords=("openrouter",),
@@ -134,7 +128,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
         supports_prompt_caching=True,
-        supports_vision=True,  # Can route to vision-capable models
     ),
     # AiHubMix: global gateway, OpenAI-compatible interface.
     # strip_model_prefix=True: it doesn't understand "anthropic/claude-3",
@@ -258,7 +251,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
         supports_prompt_caching=True,
-        supports_vision=True,  # Claude 3+ supports image input
     ),
     # OpenAI: LiteLLM recognizes "gpt-*" natively, no prefix needed.
     ProviderSpec(
@@ -276,7 +268,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="",
         strip_model_prefix=False,
         model_overrides=(),
-        supports_vision=True,  # GPT-4o/4-turbo support image input
     ),
     # OpenAI Codex: uses OAuth, not API key.
     ProviderSpec(
@@ -295,7 +286,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
         is_oauth=True,  # OAuth-based authentication
-        supports_vision=True,  # GPT-4o class models support vision
     ),
     # Github Copilot: uses OAuth, not API key.
     ProviderSpec(
@@ -348,7 +338,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="",
         strip_model_prefix=False,
         model_overrides=(),
-        supports_vision=True,  # Gemini models support image input
     ),
     # Zhipu: LiteLLM uses "zai/" prefix.
     # Also mirrors key to ZHIPUAI_API_KEY (some LiteLLM paths check that).

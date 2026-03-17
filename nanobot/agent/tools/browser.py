@@ -336,22 +336,17 @@ class BrowserActionTool(Tool):
     def __init__(
         self,
         manager: BrowserManager | None = None,
-        enable_vision: bool = True,
         session_timeout: int = 1800,
     ):
         """Initialize the browser action tool.
 
         Args:
             manager: Optional BrowserManager instance. If not provided, creates a new one.
-            enable_vision: Whether to enable vision capabilities (screenshot returns images).
-                          If False, screenshots return text descriptions only.
-                          This should be set based on whether the LLM provider supports vision.
             session_timeout: Session timeout in seconds (default: 1800 = 30 minutes).
         """
         self._manager = manager or BrowserManager(session_timeout=session_timeout)
         self._console_logs: dict[str, list[dict]] = {}
         self._network_logs: dict[str, list[dict]] = {}
-        self._enable_vision = enable_vision
         self._current_session_id: str | None = None
         # Generate a random default session ID for security
         self._default_session_id = str(uuid.uuid4())[:8]
@@ -362,18 +357,8 @@ class BrowserActionTool(Tool):
 
     @property
     def description(self) -> str:
-        """Get the tool description for the LLM.
-
-        The description varies based on whether vision is enabled, to inform
-        the LLM about the screenshot behavior.
-        """
-        vision_note = (
-            "Screenshot returns image for multimodal models."
-            if self._enable_vision
-            else "Screenshot returns text description only (vision disabled)."
-        )
-
-        return f"""Control browser for automation testing.
+        """Get the tool description for the LLM."""
+        return """Control browser for automation testing.
 
 Session Management:
 - Default session is auto-created on first use with a random ID
@@ -392,14 +377,14 @@ Actions:
 - click: Click element (required: selector, optional: session)
 - type: Type text (required: selector, text, optional: session)
 - check: Toggle checkbox (required: selector, checked, optional: session)
-- screenshot: Capture screenshot (optional: session)
+- screenshot: Capture screenshot (optional: session, path)
 - evaluate: Execute JS (required: script, optional: session)
 - console: Get console logs (optional: session)
 - network: Get network requests (optional: session)
 - wait: Wait for element (required: selector, optional: session, timeout)
 - close: Close browser
 
-{vision_note}"""
+Screenshot returns base64-encoded image data."""
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -448,6 +433,10 @@ Actions:
                     "type": "integer",
                     "description": "Timeout in milliseconds (for wait action)",
                     "default": 30000,
+                },
+                "path": {
+                    "type": "string",
+                    "description": "File path to save screenshot (for screenshot action). Supports .png and .jpeg/.jpg extensions. If not provided, screenshot is only returned as base64 data.",
                 },
             },
             "required": ["action"],
@@ -538,7 +527,7 @@ Actions:
                 case "check":
                     result = await self._handle_check(session, **action_kwargs)
                 case "screenshot":
-                    result = await self._handle_screenshot(session)
+                    result = await self._handle_screenshot(session, **action_kwargs)
                 case "evaluate":
                     result = await self._handle_evaluate(session, **action_kwargs)
                 case "console":
@@ -628,32 +617,55 @@ Actions:
         state = "checked" if checked else "unchecked"
         return ToolResult(content=f"Set {selector} to {state}", images=None)
 
-    async def _handle_screenshot(self, session: BrowserSession) -> ToolResult:
+    async def _handle_screenshot(self, session: BrowserSession, **kwargs) -> ToolResult:
         """Capture a screenshot.
 
+        Args:
+            session: The browser session to capture from.
+            **kwargs: Optional parameters including:
+                - path: File path to save the screenshot. If not provided, screenshot is only
+                        returned as base64 data. Supports .png and .jpeg/.jpg extensions.
+
         Returns:
-            ToolResult with image data if vision is enabled, otherwise text description.
+            ToolResult with base64-encoded image data.
         """
         if not session:
             return ToolResult(content="Error: No active session", images=None)
 
-        screenshot_bytes = await session.page.screenshot()
-
-        if self._enable_vision:
-            # Return image data for multimodal models
-            b64 = base64.b64encode(screenshot_bytes).decode()
-            return ToolResult(
-                content="Screenshot captured",
-                images=[
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
-                ],
-            )
+        path = kwargs.get("path")
+        
+        # Determine image type from path extension
+        image_type = "png"
+        if path:
+            ext = os.path.splitext(path)[1].lower()
+            if ext in [".jpeg", ".jpg"]:
+                image_type = "jpeg"
+        
+        # Capture screenshot
+        screenshot_bytes = await session.page.screenshot(type=image_type)
+        
+        # Encode to base64
+        b64 = base64.b64encode(screenshot_bytes).decode()
+        
+        # Save to file if path is provided
+        if path:
+            # Create directory if needed
+            dir_path = os.path.dirname(path)
+            if dir_path:
+                os.makedirs(dir_path, exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(screenshot_bytes)
+            content = f"Screenshot captured and saved to: {path}"
         else:
-            # Return text description when vision is disabled
-            return ToolResult(
-                content="Screenshot captured (vision disabled - image not sent to model)",
-                images=None,
-            )
+            content = "Screenshot captured"
+        
+        # Return image data as base64
+        return ToolResult(
+            content=content,
+            images=[
+                {"type": "image_url", "image_url": {"url": f"data:image/{image_type};base64,{b64}"}}
+            ],
+        )
 
     async def _handle_evaluate(self, session: BrowserSession, **kwargs) -> ToolResult:
         """Execute JavaScript."""
