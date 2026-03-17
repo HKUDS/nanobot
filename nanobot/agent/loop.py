@@ -1418,8 +1418,10 @@ class AgentLoop:
         )
 
     def _wire_delegate_tools(self) -> None:
-        """Set the dispatch callback on all registered delegate tools."""
-        self._dispatcher.wire_delegate_tools()
+        """Set the dispatch callback and role validation on delegate tools."""
+        self._dispatcher.wire_delegate_tools(
+            available_roles_fn=self._capabilities.role_names,
+        )
 
     def _record_route_trace(self, event: str, **kwargs: Any) -> None:
         """Forward to dispatcher."""

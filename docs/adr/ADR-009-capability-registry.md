@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (Phase A + B + C implemented)
+Accepted (Phase A + B + C + D implemented)
 
 ## Date
 
@@ -114,7 +114,7 @@ No silent fallback to LLM classification for explicitly-provided role names.
 | A | Tool availability protocol on `Tool` ABC + filter `get_definitions()` | **Yes** — prevents LLM from calling unconfigured tools | **Done** |
 | B | `CapabilityRegistry` core (wraps existing registries) | Yes — unified view | **Done** |
 | C | Wire into `AgentLoop` (replace `self.tools` + `self.skills` + `self.agent_registry`) | No — requires B | **Done** |
-| D | Delegation validation (role enum, `UnknownRoleError`) | Yes — can be done on Phase A alone | Planned |
+| D | Delegation validation (role enum, `UnknownRoleError`) | Yes — can be done on Phase A alone | **Done** |
 | E | Health tracking (`refresh_health()`, heartbeat integration) | No — requires B | Planned |
 
 Phase A is the critical first step: it solves the immediate problem with minimal risk.

@@ -19,7 +19,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
@@ -183,14 +183,26 @@ class DelegationDispatcher:
     # Wiring
     # ------------------------------------------------------------------
 
-    def wire_delegate_tools(self) -> None:
-        """Set the dispatch callback on all registered delegate tools."""
+    def wire_delegate_tools(
+        self,
+        available_roles_fn: Callable[[], list[str]] | None = None,
+    ) -> None:
+        """Set the dispatch callback on all registered delegate tools.
+
+        Parameters
+        ----------
+        available_roles_fn:
+            Optional callback returning known role names for pre-dispatch
+            validation (Phase D).
+        """
         if not self.tools:
             return
         for name in ("delegate", "delegate_parallel"):
             tool = self.tools.get(name)
             if isinstance(tool, (DelegateTool, DelegateParallelTool)):
                 tool.set_dispatch(self.dispatch)
+                if available_roles_fn is not None:
+                    tool.set_available_roles_fn(available_roles_fn)
 
     # ------------------------------------------------------------------
     # Tracing
