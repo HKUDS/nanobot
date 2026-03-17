@@ -18,24 +18,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
-import uuid
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from nanobot.channels.web import WebChannel
-
-# ---------------------------------------------------------------------------
-# Tool hint parser  (format_hint output: ``tool("arg"), tool2("arg2")``)
-# ---------------------------------------------------------------------------
-
-_TOOL_NAME_PATTERN = re.compile(r"(\w+)\(")
-
-
-def _parse_tool_hints(text: str) -> list[str]:
-    """Extract tool names from a format_hint string."""
-    return _TOOL_NAME_PATTERN.findall(text)
 
 
 # ---------------------------------------------------------------------------
@@ -88,28 +75,33 @@ async def stream_agent_response(
 
             meta = msg.metadata or {}
             is_progress = meta.get("_progress", False)
-            is_tool_hint = meta.get("_tool_hint", False)
             is_streaming = meta.get("_streaming", False)
 
             text = msg.content or ""
 
-            if is_tool_hint and text:
-                tool_names = _parse_tool_hints(text)
-                if tool_names:
-                    for name in tool_names:
-                        call_id = f"call_{uuid.uuid4().hex[:12]}"
-                        tool_calls_active[call_id] = name
-                        event = {
-                            "toolCallId": call_id,
-                            "toolName": name,
-                            "args": {},
-                        }
-                        yield f"9:{json.dumps(event)}\n"
-                else:
-                    yield f'0:"{_escape_text(text)}"\n'
+            if meta.get("_tool_call"):
+                tc = meta["_tool_call"]
+                call_id = tc["toolCallId"]
+                tool_calls_active[call_id] = tc["toolName"]
+                event = {
+                    "toolCallId": call_id,
+                    "toolName": tc["toolName"],
+                    "args": tc.get("args", {}),
+                }
+                yield f"9:{json.dumps(event)}\n"
                 # Tool-call boundary — next LLM response starts fresh.
                 streamed_text_len = 0
                 streamed_text = ""
+
+            elif meta.get("_tool_result"):
+                tr = meta["_tool_result"]
+                call_id = tr["toolCallId"]
+                result_event = {
+                    "toolCallId": call_id,
+                    "result": tr.get("result", ""),
+                }
+                yield f"a:{json.dumps(result_event)}\n"
+                tool_calls_active.pop(call_id, None)
 
             elif is_streaming and text:
                 # Streaming delta — agent sends cumulative text; emit only new part.
@@ -156,7 +148,7 @@ async def stream_agent_response(
                     # so we keep what they already saw.
                 break
 
-        # Close any open tool calls
+        # Safety: close any tool calls that didn't get an explicit result
         for call_id in tool_calls_active:
             result_event = {"toolCallId": call_id, "result": "completed"}
             yield f"a:{json.dumps(result_event)}\n"

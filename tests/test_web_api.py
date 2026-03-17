@@ -235,17 +235,6 @@ class TestStreamingFormat:
         assert _escape_text("line\nnew") == "line\\nnew"
         assert _escape_text("back\\slash") == "back\\\\slash"
 
-    def test_parse_tool_hint(self):
-        """Should parse tool hint format from on_progress."""
-        from nanobot.web.streaming import _parse_tool_hint
-
-        result = _parse_tool_hint("🔧 Calling `read_file` with path=/etc/hosts")
-        assert result is not None
-        assert result["tool_name"] == "read_file"
-
-        # Non-tool text should return None
-        assert _parse_tool_hint("Just regular text") is None
-
 
 class TestModels:
     """Tests for Pydantic request/response models."""

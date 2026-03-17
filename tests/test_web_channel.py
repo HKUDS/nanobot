@@ -184,27 +184,59 @@ class TestStreamingProtocol:
         assert text_events[1] == '0:" world"\n'
         assert text_events[2] == '0:"!"\n'
 
-    async def test_tool_hint_emits_tool_call(self, channel: WebChannel, bus: MagicMock):
+    async def test_tool_call_emits_real_events(self, channel: WebChannel, bus: MagicMock):
         from nanobot.web.streaming import stream_agent_response
 
-        tool_msg = OutboundMessage(
+        tool_call_msg = OutboundMessage(
             channel="web",
             chat_id="s3",
-            content='web_search("test query")',
-            metadata={"_tool_hint": True},
+            content="",
+            metadata={
+                "_progress": True,
+                "_tool_call": {
+                    "toolCallId": "call_abc123",
+                    "toolName": "web_search",
+                    "args": {"query": "test query"},
+                },
+            },
+        )
+        tool_result_msg = OutboundMessage(
+            channel="web",
+            chat_id="s3",
+            content="",
+            metadata={
+                "_progress": True,
+                "_tool_result": {
+                    "toolCallId": "call_abc123",
+                    "result": '{"text": "search results"}',
+                },
+            },
         )
         final = OutboundMessage(channel="web", chat_id="s3", content="Done", metadata={})
 
         with patch.object(channel, "publish_user_message", new_callable=AsyncMock):
-            feeder = asyncio.create_task(_feed_queue(channel, "s3", [tool_msg, final]))
+            feeder = asyncio.create_task(
+                _feed_queue(channel, "s3", [tool_call_msg, tool_result_msg, final])
+            )
             events: list[str] = []
             async for ev in stream_agent_response(channel, "s3", "hi"):
                 events.append(ev)
             await feeder
 
-        assert any(e.startswith("9:") for e in events)
-        assert any(e.startswith("a:") for e in events)
-        assert any(e.startswith("d:") for e in events)
+        tool_call_events = [e for e in events if e.startswith("9:")]
+        tool_result_events = [e for e in events if e.startswith("a:")]
+        assert len(tool_call_events) == 1
+        assert len(tool_result_events) == 1
+        # Verify real args and result are forwarded
+        import json
+
+        tc = json.loads(tool_call_events[0][2:])
+        assert tc["toolCallId"] == "call_abc123"
+        assert tc["toolName"] == "web_search"
+        assert tc["args"] == {"query": "test query"}
+        tr = json.loads(tool_result_events[0][2:])
+        assert tr["toolCallId"] == "call_abc123"
+        assert tr["result"] == '{"text": "search results"}'
 
     async def test_progress_text_emitted(self, channel: WebChannel, bus: MagicMock):
         from nanobot.web.streaming import stream_agent_response
@@ -330,12 +362,32 @@ class TestStreamingProtocol:
             content="Looking at the data",
             metadata={"_progress": True},
         )
-        # Tool hint follows the flush (always emitted by loop.py)
-        hint = OutboundMessage(
+        # Tool call event follows the flush
+        tool_call_ev = OutboundMessage(
             channel="web",
             chat_id="s9",
-            content='query_data("cache_key")',
-            metadata={"_tool_hint": True, "_progress": True},
+            content="",
+            metadata={
+                "_progress": True,
+                "_tool_call": {
+                    "toolCallId": "call_q1",
+                    "toolName": "query_data",
+                    "args": {"sql": "SELECT 42"},
+                },
+            },
+        )
+        # Tool result event
+        tool_result_ev = OutboundMessage(
+            channel="web",
+            chat_id="s9",
+            content="",
+            metadata={
+                "_progress": True,
+                "_tool_result": {
+                    "toolCallId": "call_q1",
+                    "result": "42",
+                },
+            },
         )
         # Final answer (from a subsequent LLM call)
         final = OutboundMessage(
@@ -347,7 +399,9 @@ class TestStreamingProtocol:
 
         with patch.object(channel, "publish_user_message", new_callable=AsyncMock):
             feeder = asyncio.create_task(
-                _feed_queue(channel, "s9", [stream1, stream2, flush, hint, final])
+                _feed_queue(
+                    channel, "s9", [stream1, stream2, flush, tool_call_ev, tool_result_ev, final]
+                )
             )
             events: list[str] = []
             async for ev in stream_agent_response(channel, "s9", "hi"):
@@ -374,12 +428,31 @@ class TestStreamingProtocol:
             content="Checking the data",
             metadata={"_streaming": True, "_progress": True},
         )
-        # Tool hint (tool call happens and fails)
-        hint1 = OutboundMessage(
+        # Tool call event (tool executes and fails)
+        tc1 = OutboundMessage(
             channel="web",
             chat_id="s10",
-            content='query_data("cache_key")',
-            metadata={"_tool_hint": True, "_progress": True},
+            content="",
+            metadata={
+                "_progress": True,
+                "_tool_call": {
+                    "toolCallId": "call_t1",
+                    "toolName": "query_data",
+                    "args": {"sql": "SELECT *"},
+                },
+            },
+        )
+        tr1 = OutboundMessage(
+            channel="web",
+            chat_id="s10",
+            content="",
+            metadata={
+                "_progress": True,
+                "_tool_result": {
+                    "toolCallId": "call_t1",
+                    "result": "Error: table not found",
+                },
+            },
         )
         # Second LLM call — new streaming from 0
         s2a = OutboundMessage(
@@ -402,7 +475,9 @@ class TestStreamingProtocol:
         )
 
         with patch.object(channel, "publish_user_message", new_callable=AsyncMock):
-            feeder = asyncio.create_task(_feed_queue(channel, "s10", [s1a, hint1, s2a, s2b, final]))
+            feeder = asyncio.create_task(
+                _feed_queue(channel, "s10", [s1a, tc1, tr1, s2a, s2b, final])
+            )
             events: list[str] = []
             async for ev in stream_agent_response(channel, "s10", "hi"):
                 events.append(ev)
