@@ -78,6 +78,8 @@ def test_init_from_dict():
     assert ch._session_counter == 0
     assert ch._loading_task is None
     assert ch._response_done.is_set()
+    assert ch._session_order == ["tui"]
+    assert "tui" in ch._sessions
 
 
 def test_init_from_config_object():
@@ -172,6 +174,20 @@ async def test_dispatch_clear_returns_false():
 
 
 @pytest.mark.asyncio
+async def test_dispatch_sessions_returns_false():
+    ch = _make_channel()
+    with patch("nanobot.channels.tui.run_in_terminal", new_callable=AsyncMock):
+        assert await ch._dispatch_command("/sessions") is False
+
+
+@pytest.mark.asyncio
+async def test_dispatch_switch_returns_false():
+    ch = _make_channel()
+    with patch("nanobot.channels.tui.run_in_terminal", new_callable=AsyncMock):
+        assert await ch._dispatch_command("/switch tui") is False
+
+
+@pytest.mark.asyncio
 async def test_dispatch_unknown_returns_false():
     ch = _make_channel()
     with patch("nanobot.channels.tui.run_in_terminal", new_callable=AsyncMock):
@@ -210,6 +226,33 @@ async def test_dispatch_new_chat_id_format():
     assert ch._chat_id == f"tui-{ch._session_counter}"
 
 
+@pytest.mark.asyncio
+async def test_dispatch_new_registers_session():
+    ch = _make_channel()
+    with patch("nanobot.channels.tui.run_in_terminal", new_callable=AsyncMock):
+        await ch._dispatch_command("/new")
+    assert "tui-1" in ch._sessions
+    assert ch._session_order == ["tui", "tui-1"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_switch_changes_chat_id():
+    ch = _make_channel()
+    with patch("nanobot.channels.tui.run_in_terminal", new_callable=AsyncMock):
+        await ch._dispatch_command("/new")
+        await ch._dispatch_command("/switch tui")
+    assert ch._chat_id == "tui"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_switch_unknown_keeps_current_chat_id():
+    ch = _make_channel()
+    with patch("nanobot.channels.tui.run_in_terminal", new_callable=AsyncMock):
+        await ch._dispatch_command("/new")
+        await ch._dispatch_command("/switch missing")
+    assert ch._chat_id == "tui-1"
+
+
 # ---------------------------------------------------------------------------
 # _dispatch_command — run_in_terminal is called for rendering commands
 # ---------------------------------------------------------------------------
@@ -235,6 +278,22 @@ async def test_dispatch_clear_calls_run_in_terminal():
     ch = _make_channel()
     with patch("nanobot.channels.tui.run_in_terminal", new_callable=AsyncMock) as mock_rit:
         await ch._dispatch_command("/clear")
+    mock_rit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_sessions_calls_run_in_terminal():
+    ch = _make_channel()
+    with patch("nanobot.channels.tui.run_in_terminal", new_callable=AsyncMock) as mock_rit:
+        await ch._dispatch_command("/sessions")
+    mock_rit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_switch_calls_run_in_terminal():
+    ch = _make_channel()
+    with patch("nanobot.channels.tui.run_in_terminal", new_callable=AsyncMock) as mock_rit:
+        await ch._dispatch_command("/switch tui")
     mock_rit.assert_called_once()
 
 
@@ -276,7 +335,7 @@ async def test_send_progress_non_tool_calls_run_in_terminal():
 
 @pytest.mark.asyncio
 async def test_send_renders_correct_ansi_for_final_response():
-    """Final response callback should produce a Panel with Markdown content."""
+    """Final response callback should include session context and Markdown content."""
     ch = _make_channel()
     captured_callbacks: list = []
 
@@ -293,11 +352,15 @@ async def test_send_renders_correct_ansi_for_final_response():
     ansi_arg = mock_pft.call_args[0][0]
     assert hasattr(ansi_arg, "value")  # prompt_toolkit ANSI object
     assert "bold" in ansi_arg.value or "\x1b[" in ansi_arg.value
+    plain = _strip_ansi(ansi_arg.value)
+    assert "Session:" in plain
+    assert "Status:" in plain
+    assert "nanobot:" in plain
 
 
 @pytest.mark.asyncio
 async def test_send_renders_correct_ansi_for_progress_tool_hint():
-    """Tool-hint callback should print with '>' prefix."""
+    """Tool-hint callback should include session info and Tool label."""
     ch = _make_channel()
     captured_callbacks: list = []
 
@@ -312,7 +375,34 @@ async def test_send_renders_correct_ansi_for_progress_tool_hint():
     ansi_str = mock_pft.call_args[0][0].value
     plain = _strip_ansi(ansi_str)
     assert "read_file(foo.txt)" in plain
-    assert ">" in plain
+    assert "Tool:" in plain
+    assert "Session:" in plain
+
+
+@pytest.mark.asyncio
+async def test_send_progress_updates_session_status():
+    ch = _make_channel()
+    with patch("nanobot.channels.tui.run_in_terminal", new_callable=AsyncMock):
+        await ch.send(_outbound("Thinking...", _progress=True))
+    assert ch._sessions["tui"]["status"] == "thinking"
+
+
+@pytest.mark.asyncio
+async def test_send_tool_hint_records_tool_event():
+    ch = _make_channel()
+    with patch("nanobot.channels.tui.run_in_terminal", new_callable=AsyncMock):
+        await ch.send(_outbound("read_file(foo.txt)", _progress=True, _tool_hint=True))
+    assert ch._sessions["tui"]["status"] == "tool"
+    assert ch._sessions["tui"]["tool_events"] == ["read_file(foo.txt)"]
+
+
+@pytest.mark.asyncio
+async def test_send_final_response_updates_session_preview():
+    ch = _make_channel()
+    with patch("nanobot.channels.tui.run_in_terminal", new_callable=AsyncMock):
+        await ch.send(_outbound("Hello from agent"))
+    assert ch._sessions["tui"]["status"] == "done"
+    assert ch._sessions["tui"]["last_agent_preview"] == "Hello from agent"
 
 
 @pytest.mark.asyncio
@@ -434,6 +524,8 @@ async def test_start_regular_message_calls_handle_message():
         await asyncio.wait_for(ch.start(), timeout=2.0)
 
     assert received == ["hello agent"]
+    assert ch._sessions["tui"]["last_user_message"] == "hello agent"
+    assert ch._sessions["tui"]["status"] == "queued"
 
 
 @pytest.mark.asyncio
@@ -526,6 +618,29 @@ async def test_start_new_command_changes_chat_id_for_subsequent_messages():
 
     assert len(received_chat_ids) == 1
     assert received_chat_ids[0] == "tui-1"
+
+
+@pytest.mark.asyncio
+async def test_start_switch_command_changes_chat_id_for_subsequent_messages():
+    ch = _make_channel()
+    ch._session = MagicMock(
+        prompt_async=AsyncMock(side_effect=["/new", "/switch tui", "hello", "exit"])
+    )
+
+    received_chat_ids: list[str] = []
+
+    async def fake_handle(sender_id, chat_id, content, **kwargs):
+        received_chat_ids.append(chat_id)
+        ch._response_done.set()
+
+    ch._handle_message = fake_handle
+
+    p_console, p_stdout, p_rit = _patch_start_env()
+    with p_console, p_stdout, p_rit, \
+         patch.object(ch, "_start_loading"):
+        await asyncio.wait_for(ch.start(), timeout=2.0)
+
+    assert received_chat_ids == ["tui"]
 
 
 # ---------------------------------------------------------------------------
@@ -623,3 +738,13 @@ async def test_start_calls_start_loading_after_message():
         await asyncio.wait_for(ch.start(), timeout=2.0)
 
     assert loading_called is True
+
+
+@pytest.mark.asyncio
+async def test_clear_does_not_remove_session_registry():
+    ch = _make_channel()
+    with patch("nanobot.channels.tui.run_in_terminal", new_callable=AsyncMock):
+        await ch._dispatch_command("/new")
+        await ch._dispatch_command("/clear")
+    assert ch._session_order == ["tui", "tui-1"]
+    assert ch._chat_id == "tui-1"

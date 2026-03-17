@@ -38,6 +38,8 @@ _BRAILLE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"
 _COMMANDS: dict[str, str] = {
     "/help": "Show this help message",
     "/new": "Start a new conversation (clears session history)",
+    "/sessions": "List active TUI conversations",
+    "/switch <session>": "Switch to an existing conversation",
     "/clear": "Clear the terminal screen",
     "/stop": "Exit TUI mode",
 }
@@ -70,6 +72,54 @@ class TuiChannel(BaseChannel):
         self._session: PromptSession = PromptSession(
             history=InMemoryHistory(),
         )
+        self._sessions: dict[str, dict[str, Any]] = {}
+        self._session_order: list[str] = []
+        self._ensure_session(self._chat_id)
+
+    def _ensure_session(self, chat_id: str) -> dict[str, Any]:
+        """Create in-memory state for *chat_id* if missing and return it."""
+        if chat_id not in self._sessions:
+            self._sessions[chat_id] = {
+                "status": "idle",
+                "last_user_message": "",
+                "last_agent_preview": "",
+                "tool_events": [],
+            }
+            self._session_order.append(chat_id)
+        return self._sessions[chat_id]
+
+    def _update_session_status(self, chat_id: str, status: str) -> None:
+        self._ensure_session(chat_id)["status"] = status
+
+    def _record_user_message(self, chat_id: str, content: str) -> None:
+        self._ensure_session(chat_id)["last_user_message"] = content.strip()
+        self._update_session_status(chat_id, "queued")
+
+    def _record_agent_message(self, chat_id: str, content: str) -> None:
+        self._ensure_session(chat_id)["last_agent_preview"] = content.strip()
+        self._update_session_status(chat_id, "done")
+
+    def _record_tool_event(self, chat_id: str, content: str) -> None:
+        session = self._ensure_session(chat_id)
+        events = session["tool_events"]
+        events.append(content.strip())
+        del events[:-8]
+        self._update_session_status(chat_id, "tool")
+
+    def _session_summary(self, chat_id: str) -> str:
+        session = self._ensure_session(chat_id)
+        return session["last_agent_preview"] or session["last_user_message"] or "(empty)"
+
+    def _render_overview(self, chat_id: str, console: Console, *, include_tools: bool) -> None:
+        session = self._ensure_session(chat_id)
+        console.print(
+            f"[dim]Session:[/dim] [cyan]{chat_id}[/cyan]  "
+            f"[dim]Status:[/dim] [green]{session['status']}[/green]"
+        )
+        if include_tools and session["tool_events"]:
+            console.print("[dim]Activity:[/dim]")
+            for event in session["tool_events"][-3:]:
+                console.print(f"  [dim]- {event}[/dim]")
 
     async def _animate_loading(self) -> None:
         """Print a Braille spinner directly to the real terminal until cancelled."""
@@ -107,7 +157,9 @@ class TuiChannel(BaseChannel):
 
     async def _dispatch_command(self, text: str) -> bool:
         """Handle a slash command. Returns True if the TUI should exit."""
-        cmd = text.strip().split()[0].lower()
+        parts = text.strip().split(maxsplit=1)
+        cmd = parts[0].lower()
+        arg = parts[1].strip() if len(parts) > 1 else ""
 
         if cmd in {"/stop", "/exit", "/quit"}:
             return True
@@ -127,6 +179,7 @@ class TuiChannel(BaseChannel):
         elif cmd == "/new":
             self._session_counter += 1
             self._chat_id = f"tui-{self._session_counter}"
+            self._ensure_session(self._chat_id)
             n = self._session_counter
 
             def _print_new() -> None:
@@ -141,13 +194,61 @@ class TuiChannel(BaseChannel):
 
             await run_in_terminal(_print_new)
 
+        elif cmd == "/sessions":
+
+            def _print_sessions() -> None:
+                t = Table(show_header=True, header_style="bold cyan", border_style="dim")
+                t.add_column("Current", style="cyan", no_wrap=True)
+                t.add_column("Session", style="cyan", no_wrap=True)
+                t.add_column("Status", style="green", no_wrap=True)
+                t.add_column("Summary")
+                for chat_id in self._session_order:
+                    session = self._ensure_session(chat_id)
+                    t.add_row(
+                        "*" if chat_id == self._chat_id else "",
+                        chat_id,
+                        session["status"],
+                        self._session_summary(chat_id),
+                    )
+                print_formatted_text(ANSI(_to_ansi(lambda c: c.print(t))), end="")
+
+            await run_in_terminal(_print_sessions)
+
+        elif cmd == "/switch":
+
+            def _print_switch(message: str) -> None:
+                print_formatted_text(
+                    ANSI(_to_ansi(lambda c: c.print(message))),
+                    end="",
+                )
+
+            if not arg:
+                await run_in_terminal(lambda: _print_switch("[yellow]Usage:[/yellow] /switch <session>"))
+            elif arg not in self._sessions:
+                await run_in_terminal(
+                    lambda: _print_switch(
+                        f"[yellow]Unknown session:[/yellow] {arg}  "
+                        "Type [cyan]/sessions[/cyan] to list active sessions."
+                    )
+                )
+            else:
+                self._chat_id = arg
+                await run_in_terminal(
+                    lambda: _print_switch(f"[dim]Switched to session [cyan]{arg}[/cyan].[/dim]")
+                )
+
         elif cmd == "/clear":
 
             def _do_clear() -> None:
                 out = sys.__stdout__
                 out.write("\033[2J\033[H")
                 out.flush()
-                rule = _to_ansi(lambda c: c.rule("[bold cyan]nanobot TUI[/bold cyan]"))
+                rule = _to_ansi(
+                    lambda c: (
+                        c.rule("[bold cyan]nanobot TUI[/bold cyan]"),
+                        self._render_overview(self._chat_id, c, include_tools=True),
+                    )
+                )
                 out.write(rule)
                 out.flush()
 
@@ -200,6 +301,7 @@ class TuiChannel(BaseChannel):
                             break
                         continue
 
+                    self._record_user_message(self._chat_id, text)
                     self._response_done.clear()
                     await self._handle_message(
                         sender_id=self.config.user_id,
@@ -226,7 +328,16 @@ class TuiChannel(BaseChannel):
         """Display a message in the TUI."""
         is_progress = msg.metadata.get("_progress", False)
         is_tool_hint = msg.metadata.get("_tool_hint", False)
+        chat_id = msg.chat_id or self._chat_id
         content = msg.content or ""
+        session = self._ensure_session(chat_id)
+
+        if is_progress and is_tool_hint:
+            self._record_tool_event(chat_id, content)
+        elif is_progress:
+            self._update_session_status(chat_id, "thinking")
+        else:
+            self._record_agent_message(chat_id, content)
 
         if not is_progress:
             await self._stop_loading()
@@ -234,12 +345,23 @@ class TuiChannel(BaseChannel):
 
         def _render() -> None:
             if is_progress and is_tool_hint:
-                ansi = _to_ansi(lambda c: c.print(f"  [dim]> {content}[/dim]"))
+                ansi = _to_ansi(
+                    lambda c: (
+                        self._render_overview(chat_id, c, include_tools=False),
+                        c.print(f"  [dim]Tool: {content}[/dim]"),
+                    )
+                )
             elif is_progress:
-                ansi = _to_ansi(lambda c: c.print(f"  [dim]{content}[/dim]"))
+                ansi = _to_ansi(
+                    lambda c: (
+                        self._render_overview(chat_id, c, include_tools=False),
+                        c.print(f"  [dim]Status: {content}[/dim]"),
+                    )
+                )
             else:
                 ansi = _to_ansi(
                     lambda c: (
+                        self._render_overview(chat_id, c, include_tools=True),
                         c.print("[bold cyan]nanobot:[/bold cyan]"),
                         c.print(Markdown(content)),
                     )
