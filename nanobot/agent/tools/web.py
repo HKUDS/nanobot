@@ -4,6 +4,8 @@ import html
 import json
 import os
 import re
+import tempfile
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -179,9 +181,19 @@ class WebFetchTool(Tool):
                 r.raise_for_status()
             
             ctype = r.headers.get("content-type", "")
-            
+
+            # PDF
+            if "application/pdf" in ctype or url.lower().endswith(".pdf"):
+                from nanobot.agent.tools.filesystem import _read_pdf
+                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                    tmp.write(r.content)
+                    tmp_path = Path(tmp.name)
+                try:
+                    text, extractor = _read_pdf(tmp_path), "pdf"
+                finally:
+                    tmp_path.unlink(missing_ok=True)
             # JSON
-            if "application/json" in ctype:
+            elif "application/json" in ctype:
                 text, extractor = json.dumps(r.json(), indent=2, ensure_ascii=False), "json"
             # HTML
             elif "text/html" in ctype or r.text[:256].lower().startswith(("<!doctype", "<html")):
