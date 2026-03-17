@@ -480,7 +480,9 @@ class AgentLoop:
                             continue  # Strip runtime context from multimodal messages
                         if (c.get("type") == "image_url"
                                 and c.get("image_url", {}).get("url", "").startswith("data:image/")):
-                            filtered.append({"type": "text", "text": "[image]"})
+                            path = (c.get("_meta") or {}).get("path", "")
+                            placeholder = f"[image: {path}]" if path else "[image]"
+                            filtered.append({"type": "text", "text": placeholder})
                         else:
                             filtered.append(c)
                     if not filtered:
