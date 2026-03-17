@@ -938,14 +938,21 @@ def _show_summary(config: Config) -> None:
 # --- Main Entry Point ---
 
 
-def run_onboard() -> Config:
-    """Run the interactive onboarding questionnaire."""
-    config_path = get_config_path()
+def run_onboard(initial_config: Config | None = None) -> Config:
+    """Run the interactive onboarding questionnaire.
 
-    if config_path.exists():
-        config = load_config()
+    Args:
+        initial_config: Optional pre-loaded config to use as starting point.
+                       If None, loads from config file or creates new default.
+    """
+    if initial_config is not None:
+        config = initial_config
     else:
-        config = Config()
+        config_path = get_config_path()
+        if config_path.exists():
+            config = load_config()
+        else:
+            config = Config()
 
     while True:
         try:
@@ -956,6 +963,7 @@ def run_onboard() -> Config:
                 choices=[
                     "🔌 Configure LLM Provider",
                     "💬 Configure Chat Channel",
+                    "⚙️ Configure Channel Common",
                     "🤖 Configure Agent Settings",
                     "🌐 Configure Gateway",
                     "🔧 Configure Tools",
@@ -969,6 +977,8 @@ def run_onboard() -> Config:
                 _configure_providers(config)
             elif answer == "💬 Configure Chat Channel":
                 _configure_channels(config)
+            elif answer == "⚙️ Configure Channel Common":
+                _configure_general_settings(config, "Channel Common")
             elif answer == "🤖 Configure Agent Settings":
                 _configure_agents(config)
             elif answer == "🌐 Configure Gateway":
