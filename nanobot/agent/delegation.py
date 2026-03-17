@@ -19,7 +19,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
@@ -178,6 +178,8 @@ class DelegationDispatcher:
         self.tools: ToolExecutor | None = None  # for wire_delegate_tools
         # MCP tools injected lazily by AgentLoop after _connect_mcp()
         self.mcp_tools: list[Tool] = []
+        # Per-turn progress callback — set by AgentLoop._process_message, cleared after turn.
+        self.on_progress: Callable[..., Awaitable[None]] | None = None
 
     # ------------------------------------------------------------------
     # Wiring
@@ -565,6 +567,22 @@ class DelegationDispatcher:
             message_excerpt=task,
         )
 
+        delegation_id = f"del_{self.delegation_count + 1:03d}"
+
+        # Emit canonical delegation start event if a progress callback is wired.
+        if self.on_progress:
+            try:
+                await self.on_progress(
+                    "",
+                    delegate_start={
+                        "delegation_id": delegation_id,
+                        "child_role": role.name,
+                        "task_title": task[:120],
+                    },
+                )
+            except Exception:  # crash-barrier: never let event emission block delegation
+                pass
+
         t0 = time.monotonic()
         self.delegation_count += 1
         token = _delegation_ancestry.set((*ancestry, role.name))
@@ -589,6 +607,18 @@ class DelegationDispatcher:
                 message_excerpt=task,
                 tools_used=used_tools,
             )
+            # Emit canonical delegation end event.
+            if self.on_progress:
+                try:
+                    await self.on_progress(
+                        "",
+                        delegate_end={
+                            "delegation_id": delegation_id,
+                            "success": True,
+                        },
+                    )
+                except Exception:  # crash-barrier: never let event emission block delegation
+                    pass
             return DelegationResult(content=result, tools_used=used_tools)
         except Exception:  # crash-barrier: delegation must record trace on any error
             latency_ms = (time.monotonic() - t0) * 1000
@@ -600,6 +630,17 @@ class DelegationDispatcher:
                 success=False,
                 message_excerpt=task,
             )
+            if self.on_progress:
+                try:
+                    await self.on_progress(
+                        "",
+                        delegate_end={
+                            "delegation_id": delegation_id,
+                            "success": False,
+                        },
+                    )
+                except Exception:  # crash-barrier: never let event emission block delegation
+                    pass
             raise
         finally:
             _delegation_ancestry.reset(token)

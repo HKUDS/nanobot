@@ -161,7 +161,8 @@ const MobileSidebar: FC = () => {
 const Header: FC<{
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
-}> = ({ sidebarCollapsed, onToggleSidebar }) => {
+  agentStatus?: string;
+}> = ({ sidebarCollapsed, onToggleSidebar, agentStatus }) => {
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 px-4">
       <MobileSidebar />
@@ -174,15 +175,62 @@ const Header: FC<{
       >
         <PanelLeftIcon className="size-4" />
       </TooltipIconButton>
+      {agentStatus && (
+        <span className="ml-2 text-xs text-muted-foreground animate-pulse">
+          {agentStatus}
+        </span>
+      )}
     </header>
   );
 };
 
+/** Parse SSE lines from a ReadableStream and call onStatus for each status event. */
+async function readStatusEvents(
+  stream: ReadableStream<Uint8Array>,
+  onStatus: (label: string) => void,
+) {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.type === "status") {
+            onStatus(data.label || data.code || "");
+          } else if (data.type === "finish" || data.type === "error") {
+            onStatus("");
+          }
+        } catch {
+          // ignore parse errors on non-JSON data lines (e.g. [DONE])
+        }
+      }
+    }
+  } finally {
+    onStatus("");
+    reader.releaseLock();
+  }
+}
+
 export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [agentStatus, setAgentStatus] = useState("");
+
   const runtime = useDataStreamRuntime({
     api: "/api/chat",
-    protocol: "data-stream",
+    protocol: "ui-message-stream",
+    /** Clone the response so we can read status events without disturbing the runtime. */
+    onResponse: (response) => {
+      if (!response.body) return;
+      readStatusEvents(response.clone().body!, setAgentStatus);
+    },
     adapters: {
       attachments: new CompositeAttachmentAdapter([
         new SimpleImageAttachmentAdapter(),
@@ -202,6 +250,7 @@ export default function App() {
           <Header
             sidebarCollapsed={sidebarCollapsed}
             onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
+            agentStatus={agentStatus}
           />
           <main className="flex-1 overflow-hidden">
             <Thread />

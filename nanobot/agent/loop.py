@@ -27,6 +27,7 @@ import asyncio
 import hashlib
 import json
 import time
+import uuid
 from contextlib import AsyncExitStack
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -79,6 +80,7 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.agent.tracing import TraceContext, bind_trace
 from nanobot.agent.verifier import AnswerVerifier
+from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import DeliveryResult, InboundMessage, OutboundMessage, ReactionEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig, AgentRoleConfig
@@ -779,6 +781,9 @@ class AgentLoop:
             active_tools = tools_def if not nudged_for_final else None
 
             # --- LLM call (streaming when a progress callback exists) ------
+            if on_progress and iteration > 1:
+                # Emit "thinking" status on subsequent iterations (first is implicit from run.start)
+                await on_progress("", status_code="thinking")
             response = await self._call_llm(
                 messages,
                 active_tools,
@@ -802,6 +807,8 @@ class AgentLoop:
                     )
                     messages = self.context.add_assistant_message(messages, final_content)
                     break
+                if on_progress:
+                    await on_progress("", status_code="retrying")
                 await asyncio.sleep(min(2**consecutive_errors, 10))
                 continue
 
@@ -906,9 +913,9 @@ class AgentLoop:
                 )
 
                 if on_progress:
-                    clean = self._strip_think(response.content)
-                    if clean:
-                        await on_progress(clean)
+                    # Note: StreamingLLMCaller already routed response.content as
+                    # a status event (Option B) — do NOT re-emit here as text.
+                    await on_progress("", status_code="calling_tool")
                     # Emit structured tool-call events with real IDs and args
                     for tc in response.tool_calls:
                         await on_progress(
@@ -1744,7 +1751,9 @@ class AgentLoop:
 
         memory_store = self.context.memory
 
-        conflict_reply = memory_store.handle_user_conflict_reply(msg.content)
+        conflict_reply = await asyncio.to_thread(
+            memory_store.handle_user_conflict_reply, msg.content
+        )
         if conflict_reply.get("handled"):
             return OutboundMessage(
                 channel=msg.channel,
@@ -1753,7 +1762,8 @@ class AgentLoop:
             )
 
         try:
-            correction_result = memory_store.apply_live_user_correction(
+            correction_result = await asyncio.to_thread(
+                memory_store.apply_live_user_correction,
                 msg.content,
                 channel=msg.channel,
                 chat_id=msg.chat_id,
@@ -1816,6 +1826,17 @@ class AgentLoop:
             verify_before_answer=verify_before_answer,
         )
 
+        # Build a canonical event builder scoped to this request.
+        # turn_id is derived from the number of complete turns already in session.
+        _turn_num = len(session.messages) // 2
+        _canonical_message_id = "msg_asst_" + uuid.uuid4().hex[:12]
+        _canonical_builder = CanonicalEventBuilder(
+            run_id=TraceContext.get()["request_id"] or key,
+            session_id=key,
+            turn_id=f"turn_{_turn_num:05d}",
+            actor_id=self.role_name,
+        )
+
         async def _bus_progress(
             content: str,
             *,
@@ -1823,6 +1844,10 @@ class AgentLoop:
             streaming: bool = False,
             tool_call: dict | None = None,
             tool_result: dict | None = None,
+            delegate_start: dict | None = None,
+            delegate_end: dict | None = None,
+            status_code: str = "",
+            status_label: str = "",
         ) -> None:
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
@@ -1830,8 +1855,36 @@ class AgentLoop:
             meta["_streaming"] = streaming
             if tool_call:
                 meta["_tool_call"] = tool_call
-            if tool_result:
+                meta["_canonical"] = _canonical_builder.tool_call(
+                    tool_call_id=tool_call["toolCallId"],
+                    tool_name=tool_call["toolName"],
+                    args=tool_call.get("args", {}),
+                )
+            elif tool_result:
                 meta["_tool_result"] = tool_result
+                meta["_canonical"] = _canonical_builder.tool_result(
+                    tool_call_id=tool_result["toolCallId"],
+                    tool_name=tool_result.get("toolName", ""),
+                    result=tool_result.get("result", ""),
+                )
+            elif delegate_start:
+                meta["_canonical"] = _canonical_builder.delegate_start(
+                    delegation_id=delegate_start["delegation_id"],
+                    child_role=delegate_start["child_role"],
+                    task_title=delegate_start.get("task_title", ""),
+                )
+            elif delegate_end:
+                meta["_canonical"] = _canonical_builder.delegate_end(
+                    delegation_id=delegate_end["delegation_id"],
+                    success=delegate_end.get("success", True),
+                )
+            elif status_code:
+                meta["_canonical"] = _canonical_builder.status(status_code, label=status_label)
+            elif content:
+                # on_progress always delivers cumulative text (the full text
+                # assembled so far), regardless of the streaming flag.
+                # text_flush() deduplicates against what was already sent.
+                meta["_canonical"] = _canonical_builder.text_flush(content)
             await self.bus.publish_outbound(
                 OutboundMessage(
                     channel=msg.channel,
@@ -1841,10 +1894,31 @@ class AgentLoop:
                 )
             )
 
+        # Emit run.start + message.start before the agent loop begins.
+        for _start_event in (
+            _canonical_builder.run_start(),
+            _canonical_builder.message_start(_canonical_message_id),
+        ):
+            await self.bus.publish_outbound(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="",
+                    metadata={"_progress": True, "_canonical": _start_event},
+                )
+            )
+
+        # Wire the per-turn progress callback into the delegation dispatcher
+        # so delegation lifecycle events surface to the web stream.
+        self._dispatcher.on_progress = _bus_progress
+
         final_content, tools_used, all_msgs = await self._run_agent_loop(
             initial_messages,
             on_progress=(on_progress or _bus_progress) if self.config.streaming_enabled else None,
         )
+
+        # Clear the per-turn callback to prevent cross-turn leakage.
+        self._dispatcher.on_progress = None
 
         if final_content is None:
             final_content = await self._attempt_recovery(msg, all_msgs)
@@ -1907,6 +1981,13 @@ class AgentLoop:
             "prompt_tokens": self._turn_tokens_prompt,
             "completion_tokens": self._turn_tokens_completion,
         }
+        # message.end carries the authoritative usage and signals the end of the
+        # assistant turn. SSE projection treats message.end the same as run.end.
+        response_meta["_canonical"] = _canonical_builder.message_end(
+            _canonical_message_id,
+            input_tokens=self._turn_tokens_prompt,
+            output_tokens=self._turn_tokens_completion,
+        )
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,

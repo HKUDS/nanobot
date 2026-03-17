@@ -2252,16 +2252,22 @@ class MemoryStore:
         return {"auto_resolved": auto_resolved, "needs_user": needs_user}
 
     def get_next_user_conflict(self) -> dict[str, Any] | None:
+        """Return the most-recently-asked conflict, or None.
+
+        Only conflicts that have been explicitly presented to the user
+        (``asked_at`` set) are eligible — this prevents ambiguous short
+        replies like "1" from being silently hijacked as conflict resolutions
+        when no conflict question was shown in the current conversation.
+        """
         conflicts = self.list_conflicts(include_closed=False)
         if not conflicts:
             return None
 
         asked = [c for c in conflicts if isinstance(c.get("asked_at"), str) and c.get("asked_at")]
-        pool = asked or conflicts
-        if not pool:
+        if not asked:
             return None
-        pool.sort(key=lambda c: str(c.get("asked_at", "")))
-        return pool[0]
+        asked.sort(key=lambda c: str(c.get("asked_at", "")))
+        return asked[0]
 
     def _conflict_relevant_to(self, conflict: dict[str, Any], user_message: str) -> bool:
         """Return True if the conflict topic overlaps with the user's message."""

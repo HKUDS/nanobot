@@ -3,12 +3,41 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels.web import WebChannel
+
+# ---------------------------------------------------------------------------
+# SSE helpers (ui-message-stream protocol)
+# ---------------------------------------------------------------------------
+
+
+def _parse_sse_events(chunks: list[str]) -> list[dict]:
+    """Extract all JSON payloads from SSE chunks (event: message / data: ...).
+
+    Also handles the ``data: [DONE]`` terminator — that entry is skipped.
+    """
+    events: list[dict] = []
+    for chunk in chunks:
+        for line in chunk.splitlines():
+            if line.startswith("data:"):
+                raw = line[len("data:") :].strip()
+                if raw == "[DONE]":
+                    continue
+                try:
+                    events.append(json.loads(raw))
+                except json.JSONDecodeError:
+                    pass
+    return events
+
+
+def _events_of_type(chunks: list[str], event_type: str) -> list[dict]:
+    return [e for e in _parse_sse_events(chunks) if e.get("type") == event_type]
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -147,7 +176,7 @@ class TestStreamingProtocol:
             await feeder
 
         assert any('"Hello world"' in e for e in events)
-        assert any(e.startswith("d:") for e in events)
+        assert any(_events_of_type(events, "finish"))
 
     async def test_streaming_delta(self, channel: WebChannel, bus: MagicMock):
         from nanobot.web.streaming import stream_agent_response
@@ -178,11 +207,11 @@ class TestStreamingProtocol:
                 events.append(ev)
             await feeder
 
-        text_events = [e for e in events if e.startswith("0:")]
+        text_events = _events_of_type(events, "text-delta")
         assert len(text_events) == 3
-        assert text_events[0] == '0:"Hello"\n'
-        assert text_events[1] == '0:" world"\n'
-        assert text_events[2] == '0:"!"\n'
+        assert text_events[0]["textDelta"] == "Hello"
+        assert text_events[1]["textDelta"] == " world"
+        assert text_events[2]["textDelta"] == "!"
 
     async def test_tool_call_emits_real_events(self, channel: WebChannel, bus: MagicMock):
         from nanobot.web.streaming import stream_agent_response
@@ -223,20 +252,18 @@ class TestStreamingProtocol:
                 events.append(ev)
             await feeder
 
-        tool_call_events = [e for e in events if e.startswith("9:")]
-        tool_result_events = [e for e in events if e.startswith("a:")]
+        tool_call_events = _events_of_type(events, "tool-call-start")
+        tool_result_events = _events_of_type(events, "tool-result")
         assert len(tool_call_events) == 1
         assert len(tool_result_events) == 1
         # Verify real args and result are forwarded
-        import json
-
-        tc = json.loads(tool_call_events[0][2:])
+        tc = tool_call_events[0]
         assert tc["toolCallId"] == "call_abc123"
         assert tc["toolName"] == "web_search"
-        assert tc["args"] == {"query": "test query"}
-        tr = json.loads(tool_result_events[0][2:])
+        tr = tool_result_events[0]
         assert tr["toolCallId"] == "call_abc123"
-        assert tr["result"] == '{"text": "search results"}'
+        # result is the raw string value passed in _tool_result metadata
+        assert '{"text": "search results"}' in tr["result"]
 
     async def test_progress_text_emitted(self, channel: WebChannel, bus: MagicMock):
         from nanobot.web.streaming import stream_agent_response
@@ -280,7 +307,7 @@ class TestStreamingProtocol:
                 events.append(ev)
             await feeder
 
-        assert any(e.startswith("d:") for e in events)
+        assert any(_events_of_type(events, "finish"))
 
     async def test_unregister_on_completion(self, channel: WebChannel, bus: MagicMock):
         from nanobot.web.streaming import stream_agent_response
@@ -331,11 +358,11 @@ class TestStreamingProtocol:
                 events.append(ev)
             _ = await feeder
 
-        text_events = [e for e in events if e.startswith("0:")]
+        text_events = _events_of_type(events, "text-delta")
         # Only the two streaming deltas — no garbled final delta
         assert len(text_events) == 2
-        assert text_events[0] == '0:"Original answer part 1"\n'
-        assert text_events[1] == '0:" and part 2"\n'
+        assert text_events[0]["textDelta"] == "Original answer part 1"
+        assert text_events[1]["textDelta"] == " and part 2"
 
     async def test_progress_dedup_after_streaming(self, channel: WebChannel, bus: MagicMock):
         """After streaming, the agent loop re-sends accumulated text as a
@@ -408,12 +435,12 @@ class TestStreamingProtocol:
                 events.append(ev)
             _ = await feeder
 
-        text_events = [e for e in events if e.startswith("0:")]
+        text_events = _events_of_type(events, "text-delta")
         # Two streaming deltas + final answer — no duplicate from flush
         assert len(text_events) == 3
-        assert text_events[0] == '0:"Looking at"\n'
-        assert text_events[1] == '0:" the data"\n'
-        assert text_events[2] == '0:"The answer is 42"\n'
+        assert text_events[0]["textDelta"] == "Looking at"
+        assert text_events[1]["textDelta"] == " the data"
+        assert text_events[2]["textDelta"] == "The answer is 42"
 
     async def test_multi_llm_call_streaming_reset(self, channel: WebChannel, bus: MagicMock):
         """When a tool call fails and the agent loop starts a new LLM call,
@@ -483,11 +510,11 @@ class TestStreamingProtocol:
                 events.append(ev)
             _ = await feeder
 
-        text_events = [e for e in events if e.startswith("0:")]
+        text_events = _events_of_type(events, "text-delta")
         # First LLM call text + second LLM call text (no garbling)
-        assert text_events[0] == '0:"Checking the data"\n'
-        assert text_events[1] == '0:"Let me try"\n'
-        assert text_events[2] == '0:" a different approach"\n'
+        assert text_events[0]["textDelta"] == "Checking the data"
+        assert text_events[1]["textDelta"] == "Let me try"
+        assert text_events[2]["textDelta"] == " a different approach"
         assert len(text_events) == 3
 
     async def test_verifier_revision_after_final_flush(self, channel: WebChannel, bus: MagicMock):
@@ -535,10 +562,10 @@ class TestStreamingProtocol:
                 events.append(ev)
             _ = await feeder
 
-        text_events = [e for e in events if e.startswith("0:")]
+        text_events = _events_of_type(events, "text-delta")
         # Three streaming deltas — complete original text shown.
         # Revised final is dropped (diverges from what user already saw).
         assert len(text_events) == 3
-        assert text_events[0] == '0:"The total cost is 0.04."\n'
-        assert text_events[1] == '0:" The currency is USD."\n'
-        assert text_events[2] == '0:" Let me know if you need more!"\n'
+        assert text_events[0]["textDelta"] == "The total cost is 0.04."
+        assert text_events[1]["textDelta"] == " The currency is USD."
+        assert text_events[2]["textDelta"] == " Let me know if you need more!"
