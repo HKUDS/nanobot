@@ -24,7 +24,11 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        session_metadata: dict[str, Any] | None = None,
+    ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
 
@@ -32,26 +36,123 @@ class ContextBuilder:
         if bootstrap:
             parts.append(bootstrap)
 
+        template_context = self._build_template_context(session_metadata)
+        if template_context:
+            parts.append(template_context)
+
         memory = self.memory.get_memory_context()
         if memory:
             parts.append(f"# Memory\n\n{memory}")
 
         always_skills = self.skills.get_always_skills()
+        enabled_skills = self._get_enabled_skills(session_metadata)
+        visible_skills = list(dict.fromkeys([*(always_skills or []), *enabled_skills]))
+
         if always_skills:
             always_content = self.skills.load_skills_for_context(always_skills)
             if always_content:
                 parts.append(f"# Active Skills\n\n{always_content}")
 
-        skills_summary = self.skills.build_skills_summary()
+        if enabled_skills:
+            always_set = set(always_skills or [])
+            selected_skills = [name for name in enabled_skills if name not in always_set]
+            selected_content = self.skills.load_skills_for_context(selected_skills)
+            if selected_content:
+                parts.append(f"# Enabled Skills\n\n{selected_content}")
+
+        if visible_skills:
+            always_label = ", ".join(always_skills) if always_skills else "none"
+            enabled_label = ", ".join(enabled_skills) if enabled_skills else "none"
+            parts.append(
+                "# Skill Activation State\n\n"
+                f"- Always-loaded skills: {always_label}\n"
+                f"- Enabled for this agent: {enabled_label}\n"
+                "- Only the skills listed above are active in this session.\n"
+                "- `runtime_available=true` means the skill's dependencies are installed; it does not mean the skill is enabled."
+            )
+
+        skills_summary = self.skills.build_skills_summary(
+            visible_skills,
+            enabled_skills=enabled_skills,
+            always_skills=always_skills,
+        )
         if skills_summary:
             parts.append(f"""# Skills
 
-The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
-Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
+The following skills are active in this session. To use a skill, read its SKILL.md file using the read_file tool.
+Use `enabled="true"` to determine which skills this agent has enabled.
+Use `always="true"` to determine which skills are loaded for every agent.
+Use `runtime_available="false"` to identify skills whose dependencies are missing.
 
 {skills_summary}""")
 
         return "\n\n---\n\n".join(parts)
+
+    @staticmethod
+    def _get_enabled_skills(session_metadata: dict[str, Any] | None) -> list[str]:
+        """Extract per-session enabled skills from assistant/template metadata."""
+        if not session_metadata:
+            return []
+
+        template = session_metadata.get("assistant") or session_metadata.get("template")
+        if not isinstance(template, dict):
+            return []
+
+        raw = template.get("enabled_skills")
+        if not isinstance(raw, list):
+            return []
+
+        seen: set[str] = set()
+        result: list[str] = []
+        for item in raw:
+            if not isinstance(item, str):
+                continue
+            name = item.strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            result.append(name)
+        return result
+
+    @staticmethod
+    def _build_template_context(session_metadata: dict[str, Any] | None) -> str:
+        """Render structured session template metadata into the system prompt."""
+        if not session_metadata:
+            return ""
+
+        template = session_metadata.get("assistant") or session_metadata.get("template")
+        if not isinstance(template, dict):
+            return ""
+
+        sections: list[str] = []
+        name = template.get("name")
+        if isinstance(name, str) and name.strip():
+            sections.append(f"## Template\n\n{name.strip()}")
+
+        agent_identity = template.get("agent_identity")
+        if isinstance(agent_identity, str) and agent_identity.strip():
+            sections.append(f"## Agent Identity\n\n{agent_identity.strip()}")
+
+        user_identity = template.get("user_identity")
+        if isinstance(user_identity, str) and user_identity.strip():
+            sections.append(f"## User Identity\n\n{user_identity.strip()}")
+
+        system_prompt = template.get("system_prompt")
+        if isinstance(system_prompt, str) and system_prompt.strip():
+            sections.append(f"## Session Instructions\n\n{system_prompt.strip()}")
+
+        required_mcps = template.get("required_mcps")
+        if isinstance(required_mcps, list) and required_mcps:
+            sections.append("## Required MCP Servers\n\n" + "\n".join(f"- {item}" for item in required_mcps))
+
+        required_tools = template.get("required_tools")
+        if isinstance(required_tools, list) and required_tools:
+            sections.append("## Required Tools\n\n" + "\n".join(f"- {item}" for item in required_tools))
+
+        if not sections:
+            return ""
+
+        return "# Session Template\n\n" + "\n\n".join(sections)
 
     def _get_identity(self) -> str:
         """Get the core identity section."""
@@ -125,6 +226,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        session_metadata: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id)
@@ -138,7 +240,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, session_metadata=session_metadata)},
             *history,
             {"role": "user", "content": merged},
         ]

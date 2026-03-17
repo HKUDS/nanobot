@@ -71,3 +71,31 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     assert "Channel: cli" in user_content
     assert "Chat ID: direct" in user_content
     assert "Return exactly: OK" in user_content
+
+
+def test_session_template_is_injected_into_system_prompt(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = builder.build_messages(
+        history=[],
+        current_message="Analyze CYP2C19",
+        channel="web",
+        chat_id="pgx",
+        session_metadata={
+            "template": {
+                "name": "Pharmacogenomics Analyst",
+                "agent_identity": "You are a pharmacogenomics analysis assistant.",
+                "user_identity": "The user is a pharmacogenomics researcher.",
+                "system_prompt": "Analyze drug response evidence and return a structured report.",
+                "required_mcps": ["exa"],
+                "required_tools": ["web_search"],
+            }
+        },
+    )
+
+    system_prompt = messages[0]["content"]
+    assert "# Session Template" in system_prompt
+    assert "Pharmacogenomics Analyst" in system_prompt
+    assert "Analyze drug response evidence and return a structured report." in system_prompt
+    assert "- exa" in system_prompt

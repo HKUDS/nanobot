@@ -155,12 +155,30 @@ class AgentLoop:
         finally:
             self._mcp_connecting = False
 
-    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
+    def _set_tool_context(
+        self,
+        channel: str,
+        chat_id: str,
+        message_id: str | None = None,
+        *,
+        session_key: str | None = None,
+        session_metadata: dict[str, Any] | None = None,
+    ) -> None:
         """Update context for all tools that need routing info."""
         for name in ("message", "spawn", "cron"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
-                    tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+                    if name == "message":
+                        tool.set_context(channel, chat_id, message_id)
+                    elif name == "cron":
+                        tool.set_context(
+                            channel,
+                            chat_id,
+                            session_key if channel == "web" else None,
+                            (session_metadata or {}).get("assistant_id") if channel == "web" else None,
+                        )
+                    else:
+                        tool.set_context(channel, chat_id)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -184,6 +202,7 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        model: str | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop."""
         messages = initial_messages
@@ -199,7 +218,7 @@ class AgentLoop:
             response = await self.provider.chat_with_retry(
                 messages=messages,
                 tools=tool_defs,
-                model=self.model,
+                model=model or self.model,
             )
 
             if response.has_tool_calls:
@@ -368,13 +387,25 @@ class AgentLoop:
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+            self._set_tool_context(
+                channel,
+                chat_id,
+                msg.metadata.get("message_id"),
+                session_key=key,
+                session_metadata=session.metadata,
+            )
             history = session.get_history(max_messages=0)
             messages = self.context.build_messages(
                 history=history,
-                current_message=msg.content, channel=channel, chat_id=chat_id,
+                current_message=msg.content,
+                channel=channel,
+                chat_id=chat_id,
+                session_metadata=session.metadata,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, _, all_msgs = await self._run_agent_loop(
+                messages,
+                model=self._session_model(session.metadata),
+            )
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
@@ -413,7 +444,13 @@ class AgentLoop:
             )
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        self._set_tool_context(
+            msg.channel,
+            msg.chat_id,
+            msg.metadata.get("message_id"),
+            session_key=key,
+            session_metadata=session.metadata,
+        )
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
@@ -423,7 +460,9 @@ class AgentLoop:
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
-            channel=msg.channel, chat_id=msg.chat_id,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            session_metadata=session.metadata,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -435,7 +474,9 @@ class AgentLoop:
             ))
 
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages,
+            on_progress=on_progress or _bus_progress,
+            model=self._session_model(session.metadata),
         )
 
         if final_content is None:
@@ -503,3 +544,14 @@ class AgentLoop:
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
         return response.content if response else ""
+
+    @staticmethod
+    def _session_model(session_metadata: dict[str, Any] | None) -> str | None:
+        """Resolve a per-session model override from stored assistant metadata."""
+        if not session_metadata:
+            return None
+        assistant = session_metadata.get("assistant")
+        if not isinstance(assistant, dict):
+            return None
+        model = assistant.get("model")
+        return model.strip() if isinstance(model, str) and model.strip() else None

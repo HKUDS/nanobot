@@ -23,7 +23,7 @@ class SkillsLoader:
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
 
-    def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
+    def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str | bool]]:
         """
         List all available skills.
 
@@ -31,7 +31,7 @@ class SkillsLoader:
             filter_unavailable: If True, filter out skills with unmet requirements.
 
         Returns:
-            List of skill info dicts with 'name', 'path', 'source'.
+            List of skill info dicts with 'name', 'path', 'source', 'description', 'always'.
         """
         skills = []
 
@@ -41,7 +41,15 @@ class SkillsLoader:
                 if skill_dir.is_dir():
                     skill_file = skill_dir / "SKILL.md"
                     if skill_file.exists():
-                        skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "workspace"})
+                        skills.append(
+                            {
+                                "name": skill_dir.name,
+                                "path": str(skill_file),
+                                "source": "workspace",
+                                "description": self._get_skill_description(skill_dir.name),
+                                "always": self._is_skill_always(skill_dir.name),
+                            }
+                        )
 
         # Built-in skills
         if self.builtin_skills and self.builtin_skills.exists():
@@ -49,7 +57,15 @@ class SkillsLoader:
                 if skill_dir.is_dir():
                     skill_file = skill_dir / "SKILL.md"
                     if skill_file.exists() and not any(s["name"] == skill_dir.name for s in skills):
-                        skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "builtin"})
+                        skills.append(
+                            {
+                                "name": skill_dir.name,
+                                "path": str(skill_file),
+                                "source": "builtin",
+                                "description": self._get_skill_description(skill_dir.name),
+                                "always": self._is_skill_always(skill_dir.name),
+                            }
+                        )
 
         # Filter by requirements
         if filter_unavailable:
@@ -98,9 +114,15 @@ class SkillsLoader:
 
         return "\n\n---\n\n".join(parts) if parts else ""
 
-    def build_skills_summary(self) -> str:
+    def build_skills_summary(
+        self,
+        skill_names: list[str] | None = None,
+        *,
+        enabled_skills: list[str] | None = None,
+        always_skills: list[str] | None = None,
+    ) -> str:
         """
-        Build a summary of all skills (name, description, path, availability).
+        Build a summary of skills with activation state and runtime availability.
 
         This is used for progressive loading - the agent can read the full
         skill content using read_file when needed.
@@ -109,27 +131,39 @@ class SkillsLoader:
             XML-formatted skills summary.
         """
         all_skills = self.list_skills(filter_unavailable=False)
+        if skill_names is not None:
+            allowed = {name.strip() for name in skill_names if isinstance(name, str) and name.strip()}
+            all_skills = [skill for skill in all_skills if skill["name"] in allowed]
         if not all_skills:
             return ""
 
         def escape_xml(s: str) -> str:
             return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
+        enabled_set = {name.strip() for name in (enabled_skills or []) if isinstance(name, str) and name.strip()}
+        always_set = {name.strip() for name in (always_skills or []) if isinstance(name, str) and name.strip()}
         lines = ["<skills>"]
         for s in all_skills:
             name = escape_xml(s["name"])
             path = s["path"]
             desc = escape_xml(self._get_skill_description(s["name"]))
             skill_meta = self._get_skill_meta(s["name"])
-            available = self._check_requirements(skill_meta)
+            runtime_available = self._check_requirements(skill_meta)
+            enabled = s["name"] in enabled_set
+            always = s["name"] in always_set
 
-            lines.append(f"  <skill available=\"{str(available).lower()}\">")
+            lines.append(
+                "  <skill"
+                f" enabled=\"{str(enabled).lower()}\""
+                f" always=\"{str(always).lower()}\""
+                f" runtime_available=\"{str(runtime_available).lower()}\">"
+            )
             lines.append(f"    <name>{name}</name>")
             lines.append(f"    <description>{desc}</description>")
             lines.append(f"    <location>{path}</location>")
 
             # Show missing requirements for unavailable skills
-            if not available:
+            if not runtime_available:
                 missing = self._get_missing_requirements(skill_meta)
                 if missing:
                     lines.append(f"    <requires>{escape_xml(missing)}</requires>")
@@ -194,11 +228,15 @@ class SkillsLoader:
         """Get skills marked as always=true that meet requirements."""
         result = []
         for s in self.list_skills(filter_unavailable=True):
-            meta = self.get_skill_metadata(s["name"]) or {}
-            skill_meta = self._parse_nanobot_metadata(meta.get("metadata", ""))
-            if skill_meta.get("always") or meta.get("always"):
+            if self._is_skill_always(s["name"]):
                 result.append(s["name"])
         return result
+
+    def _is_skill_always(self, name: str) -> bool:
+        """Check whether a skill is marked as always=true."""
+        meta = self.get_skill_metadata(name) or {}
+        skill_meta = self._parse_nanobot_metadata(meta.get("metadata", ""))
+        return bool(skill_meta.get("always") or meta.get("always"))
 
     def get_skill_metadata(self, name: str) -> dict | None:
         """
