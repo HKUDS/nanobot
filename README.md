@@ -788,7 +788,8 @@ Config file: `~/.nanobot/config.json`
 | `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
-| `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
+| `gemini` | LLM (Gemini direct via AI Studio) | [aistudio.google.com](https://aistudio.google.com) |
+| `vertex_ai` | LLM (Google Vertex AI via Google Cloud ADC) | [cloud.google.com/vertex-ai](https://cloud.google.com/vertex-ai) |
 | `minimax` | LLM (MiniMax direct) | [platform.minimaxi.com](https://platform.minimaxi.com) |
 | `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
 | `siliconflow` | LLM (SiliconFlow/硅基流动) | [siliconflow.cn](https://siliconflow.cn) |

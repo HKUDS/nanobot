@@ -121,6 +121,19 @@ def test_config_matches_openai_codex_with_hyphen_prefix():
     assert config.get_provider_name() == "openai_codex"
 
 
+def test_config_matches_vertex_ai_with_hyphen_prefix():
+    config = Config()
+    config.agents.defaults.model = "vertex_ai/gemini-2.5-flash-lite"
+
+    assert config.get_provider_name() == "vertex_ai"
+
+def test_config_matches_vertex_ai_with_dash_prefix():
+    config = Config()
+    config.agents.defaults.model = "vertex-ai/gemini-2.5-flash-lite"
+
+    assert config.get_provider_name() == "vertex_ai"
+
+
 def test_config_matches_explicit_ollama_prefix_without_api_key():
     config = Config()
     config.agents.defaults.model = "ollama/llama3.2"
