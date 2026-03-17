@@ -186,7 +186,10 @@ class WebFetchTool(Tool):
                 timeout=30.0
             ) as client:
                 r = await client.get(url, headers={"User-Agent": USER_AGENT})
-                r.raise_for_status()
+                if r.status_code == 403:
+                    r = await self._curl_fallback(url)
+                else:
+                    r.raise_for_status()
             
             ctype = r.headers.get("content-type", "")
 
@@ -221,6 +224,21 @@ class WebFetchTool(Tool):
         except Exception as e:
             return json.dumps({"error": str(e), "url": url}, ensure_ascii=False)
     
+    @staticmethod
+    async def _curl_fallback(url: str) -> httpx.Response:
+        """Fall back to curl when httpx is blocked (TLS fingerprinting)."""
+        import asyncio
+        proc = await asyncio.create_subprocess_exec(
+            "curl", "-sL", "-A", USER_AGENT, "-m", "30", url,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            raise httpx.HTTPStatusError("curl fallback failed", request=None, response=None)
+        r = httpx.Response(200, content=stdout, headers={"content-type": "text/html"})
+        r._request = httpx.Request("GET", url)
+        return r
+
     def _to_markdown(self, html: str) -> str:
         """Convert HTML to markdown."""
         # Convert links, headings, lists before stripping tags
