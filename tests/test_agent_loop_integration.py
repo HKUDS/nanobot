@@ -379,6 +379,6 @@ class TestAgentLoopBrowserIntegration:
         # Navigate without creating session first
         result = await browser_tool.execute(action="navigate", url="https://example.com")
 
-        # Should auto-create default session
-        assert "Session: default" in result.content
+        # Should auto-create default session with UUID
+        assert "Session:" in result.content
         assert "Navigated to https://example.com" in result.content

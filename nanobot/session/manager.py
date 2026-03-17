@@ -16,7 +16,7 @@ from nanobot.utils.helpers import ensure_dir, safe_filename
 
 def _clean_message_base64(msg: dict[str, Any]) -> dict[str, Any]:
     """Remove base64 data from a message's content before saving to disk.
-    
+
     This keeps the structure intact but replaces base64 data with a placeholder
     to avoid bloating the session file.
     """
@@ -24,8 +24,8 @@ def _clean_message_base64(msg: dict[str, Any]) -> dict[str, Any]:
     content = msg.get("content")
 
     if isinstance(content, str):
-        pattern = r'(data:(?:image/|application/|audio/|video/)[^;]+;base64,)([A-Za-z0-9+/=]+)'
-        msg["content"] = re.sub(pattern, r'\1[BASE64_DATA_REMOVED]', content)
+        pattern = r"(data:(?:image/|application/|audio/|video/)[^;]+;base64,)([A-Za-z0-9+/=]+)"
+        msg["content"] = re.sub(pattern, r"\1[BASE64_DATA_REMOVED]", content)
     elif isinstance(content, list):
         cleaned_blocks = []
         for block in content:
@@ -36,14 +36,14 @@ def _clean_message_base64(msg: dict[str, Any]) -> dict[str, Any]:
                     image_url = block.get("image_url", {})
                     url = image_url.get("url", "")
                     if url.startswith("data:"):
-                        pattern = r'(data:(?:image/|application/|audio/|video/)[^;]+;base64,)([A-Za-z0-9+/=]+)'
-                        cleaned_url = re.sub(pattern, r'\1[BASE64_DATA_REMOVED]', url)
+                        pattern = r"(data:(?:image/|application/|audio/|video/)[^;]+;base64,)([A-Za-z0-9+/=]+)"
+                        cleaned_url = re.sub(pattern, r"\1[BASE64_DATA_REMOVED]", url)
                         block["image_url"] = {"url": cleaned_url}
                 elif block_type == "text":
                     text = block.get("text", "")
                     if isinstance(text, str):
-                        pattern = r'(data:(?:image/|application/|audio/|video/)[^;]+;base64,)([A-Za-z0-9+/=]+)'
-                        block["text"] = re.sub(pattern, r'\1[BASE64_DATA_REMOVED]', text)
+                        pattern = r"(data:(?:image/|application/|audio/|video/)[^;]+;base64,)([A-Za-z0-9+/=]+)"
+                        block["text"] = re.sub(pattern, r"\1[BASE64_DATA_REMOVED]", text)
                 cleaned_blocks.append(block)
             else:
                 cleaned_blocks.append(block)
@@ -80,11 +80,15 @@ class Session:
     @staticmethod
     def _find_legal_start(messages: list[dict[str, Any]]) -> int:
         """Find first index where every tool result has a matching assistant tool_call."""
+        if not messages:
+            return 0
         declared: set[str] = set()
         start = 0
+        has_assistant = False
         for i, msg in enumerate(messages):
             role = msg.get("role")
             if role == "assistant":
+                has_assistant = True
                 for tc in msg.get("tool_calls") or []:
                     if isinstance(tc, dict) and tc.get("id"):
                         declared.add(str(tc["id"]))
@@ -93,14 +97,19 @@ class Session:
                 if tid and str(tid) not in declared:
                     start = i + 1
                     declared.clear()
-                    for prev in messages[start:i + 1]:
+                    for prev in messages[start : i + 1]:
                         if prev.get("role") == "assistant":
                             for tc in prev.get("tool_calls") or []:
                                 if isinstance(tc, dict) and tc.get("id"):
                                     declared.add(str(tc["id"]))
-        return start
+        # If there's no assistant message in the list, don't skip any messages
+        if not has_assistant:
+            return 0
+        return min(start, len(messages))
 
-    def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
+    def get_history(
+        self, max_messages: int = 500, max_content_length: int = 15000
+    ) -> list[dict[str, Any]]:
         """Return unconsolidated messages for LLM input, aligned to a legal tool-call boundary."""
         unconsolidated = self.messages[self.last_consolidated :]
         sliced = unconsolidated[-max_messages:]
@@ -119,7 +128,10 @@ class Session:
 
         out: list[dict[str, Any]] = []
         for message in sliced:
-            entry: dict[str, Any] = {"role": message["role"], "content": message.get("content", "")}
+            content = message.get("content", "")
+            if isinstance(content, str) and len(content) > max_content_length:
+                content = content[:max_content_length] + "\n[truncated]"
+            entry: dict[str, Any] = {"role": message["role"], "content": content}
             for key in ("tool_calls", "tool_call_id", "name"):
                 if key in message:
                     entry[key] = message[key]

@@ -241,21 +241,22 @@ class TestBrowserActionTool:
 
     def test_browser_action_tool_init(self):
         """Test BrowserActionTool initialization."""
-        tool = BrowserActionTool(enable_vision=True)
+        tool = BrowserActionTool()
 
         assert tool.name == "browser_action"
-        assert tool._enable_vision is True
         assert tool._current_session_id is None
 
     def test_browser_action_tool_init_without_vision(self):
-        """Test BrowserActionTool initialization without vision."""
-        tool = BrowserActionTool(enable_vision=False)
+        """Test BrowserActionTool initialization."""
+        tool = BrowserActionTool()
 
-        assert tool._enable_vision is False
+        assert tool._manager is not None
 
     def test_browser_action_tool_default_session_id(self):
-        """Test default session ID constant."""
-        assert BrowserActionTool.DEFAULT_SESSION_ID == "default"
+        """Test default session ID is generated dynamically."""
+        tool = BrowserActionTool()
+        assert tool._default_session_id is not None
+        assert len(tool._default_session_id) == 8
 
     def test_browser_action_tool_name(self):
         """Test tool name property."""
@@ -263,18 +264,18 @@ class TestBrowserActionTool:
         assert tool.name == "browser_action"
 
     def test_browser_action_tool_description_with_vision(self):
-        """Test tool description with vision enabled."""
-        tool = BrowserActionTool(enable_vision=True)
+        """Test tool description contains session info."""
+        tool = BrowserActionTool()
         description = tool.description
 
-        assert "Screenshot returns image for multimodal models" in description
+        assert "Session Management" in description
 
     def test_browser_action_tool_description_without_vision(self):
-        """Test tool description without vision."""
-        tool = BrowserActionTool(enable_vision=False)
+        """Test tool description contains session info."""
+        tool = BrowserActionTool()
         description = tool.description
 
-        assert "Screenshot returns text description only" in description
+        assert "Session Management" in description
 
     def test_browser_action_tool_parameters(self):
         """Test tool parameters schema."""
@@ -466,7 +467,7 @@ class TestBrowserActionTool:
     @pytest.mark.asyncio
     async def test_execute_screenshot_with_vision(self, mock_playwright):
         """Test screenshot action with vision enabled."""
-        tool = BrowserActionTool(enable_vision=True)
+        tool = BrowserActionTool()
         await tool.execute(action="new_session", session="test_session")
 
         result = await tool.execute(action="screenshot", session="test_session")
@@ -481,15 +482,14 @@ class TestBrowserActionTool:
     @pytest.mark.asyncio
     async def test_execute_screenshot_without_vision(self, mock_playwright):
         """Test screenshot action without vision."""
-        tool = BrowserActionTool(enable_vision=False)
+        tool = BrowserActionTool()
         await tool.execute(action="new_session", session="test_session")
 
         result = await tool.execute(action="screenshot", session="test_session")
 
         assert isinstance(result, ToolResult)
         assert "Screenshot captured" in result.content
-        assert "vision disabled" in result.content
-        assert result.images is None
+        assert result.images is not None
 
     @pytest.mark.asyncio
     async def test_execute_evaluate(self, mock_playwright):
@@ -568,7 +568,7 @@ class TestBrowserActionTool:
         result = await tool.execute(action="navigate", url="https://example.com")
 
         assert isinstance(result, ToolResult)
-        assert "Session: default" in result.content
+        assert "Session:" in result.content
         assert "Navigated to https://example.com" in result.content
 
     @pytest.mark.asyncio
@@ -643,7 +643,7 @@ class TestBrowserActionTool:
     @pytest.mark.asyncio
     async def test_screenshot_image_format(self, mock_playwright):
         """Test that screenshot returns proper image format."""
-        tool = BrowserActionTool(enable_vision=True)
+        tool = BrowserActionTool()
         await tool.execute(action="new_session", session="test_session")
 
         result = await tool.execute(action="screenshot", session="test_session")
@@ -703,7 +703,7 @@ class TestBrowserActionTool:
     @pytest.mark.asyncio
     async def test_multiple_screenshots(self, mock_playwright):
         """Test taking multiple screenshots."""
-        tool = BrowserActionTool(enable_vision=True)
+        tool = BrowserActionTool()
         await tool.execute(action="new_session", session="test_session")
 
         result1 = await tool.execute(action="screenshot", session="test_session")
