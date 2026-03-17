@@ -1,8 +1,10 @@
 ---
 name: project-plan
 description: >
-  Project plan summary and analysis. Analyze or summarize project schedule
-  milestones, gates, WBS, tasks, resources from Excel or CSV files.
+  Analyze, summarize, and answer questions about project plans in Excel or CSV files.
+  Use when a user uploads a spreadsheet containing project management data: tasks,
+  milestones, schedule dates, gates (A/B/C/D/E), WBS codes, resource allocations,
+  durations, go-live dates, or status fields.
 ---
 
 # Project Plan Skill
