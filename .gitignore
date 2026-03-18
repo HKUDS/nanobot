@@ -1,5 +1,6 @@
 .assets
 .env
+.full-review/
 deploy/production/.env
 deploy/staging/.env
 *.pyc
