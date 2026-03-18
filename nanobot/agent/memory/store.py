@@ -3652,10 +3652,6 @@ class MemoryStore:
         # ── Phase 1: build raw (untruncated) content for every section ──
 
         long_term_text = long_term.strip() if long_term else ""
-        if long_term_text and memory_md_token_cap > 0:
-            long_term_text = self._cap_long_term_text(
-                long_term_text, memory_md_token_cap, query or ""
-            )
 
         profile_lines = self._profile_section_lines(profile)
         profile_text = "\n".join(profile_lines).strip() if profile_lines else ""
@@ -3693,8 +3689,15 @@ class MemoryStore:
 
         # ── Phase 2: measure raw sizes and allocate budget ──
 
+        raw_long_term_tokens = self._estimate_tokens(long_term_text)
+        capped_long_term_tokens = (
+            min(raw_long_term_tokens, memory_md_token_cap)
+            if memory_md_token_cap > 0
+            else raw_long_term_tokens
+        )
+
         section_sizes: dict[str, int] = {
-            "long_term": self._estimate_tokens(long_term_text),
+            "long_term": capped_long_term_tokens,
             "profile": self._estimate_tokens(profile_text),
             "semantic": self._estimate_tokens("\n".join(raw_semantic)),
             "episodic": self._estimate_tokens("\n".join(raw_episodic)) if include_episodic else 0,
