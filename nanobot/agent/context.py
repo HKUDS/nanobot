@@ -104,7 +104,7 @@ IMPORTANT: If the User's message starts with '[AUDIO ANSWER]', the user will rec
 This is just a tag, and the process is transparent to the user, so DO NOT EVER mention the tag or the process in your response.
 (You can, however, tell the user you can answer with audio if speech is enabled on config.json and they send a voice message or set alwaysAnswerWithAudio to true.)
 
-Don't use symbols or emojis and be concise if you receive one of these messages, but without losing your personality or leaving any information out.
+Don't use symbols, emojis or markdown formatting and be concise if you receive one of these messages, but without losing your personality or leaving any information out.
 
 ### Sending auxiliary text
 You can use the 'message' tool to send **AUXILIARY** text when there is some content that genuinely doesn't work in audio (e.g. a URL, a code snippet, a table, technical terms in another language), or when the user explicitly requests it. Do not send auxiliary text just to be thorough.
