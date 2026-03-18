@@ -198,3 +198,22 @@ def test_classify_failure_parametrized(
     assert fc == expected, (
         f"classify_failure({message!r}, error_type={error_type!r}) = {fc}, want {expected}"
     )
+
+
+def test_key_stability() -> None:
+    """_key() must produce the same digest for the same (name, args) regardless of dict insertion order."""
+    k1 = ToolCallTracker._key("my_tool", {"b": 2, "a": 1})
+    k2 = ToolCallTracker._key("my_tool", {"a": 1, "b": 2})
+    assert k1 == k2, "_key() must be order-independent (sort_keys=True)"
+
+    # Different args -> different key
+    k3 = ToolCallTracker._key("my_tool", {"a": 1, "b": 3})
+    assert k1 != k3
+
+    # Different tool names -> different key even with same args
+    k4 = ToolCallTracker._key("other_tool", {"a": 1, "b": 2})
+    assert k1 != k4
+
+    # Non-serialisable values should not raise (default=str fallback)
+    k5 = ToolCallTracker._key("t", {"path": object()})
+    assert k5.startswith("t:")

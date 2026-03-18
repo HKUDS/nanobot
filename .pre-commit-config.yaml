@@ -15,3 +15,17 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy type check
+        entry: python3 -m mypy nanobot/
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: import-check
+        name: import boundary check
+        entry: make import-check
+        language: system
+        pass_filenames: false
