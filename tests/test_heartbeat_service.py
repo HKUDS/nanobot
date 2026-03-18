@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from nanobot.heartbeat.service import HeartbeatService
+from nanobot.heartbeat.service import DueTask, HeartbeatService
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 
@@ -25,6 +25,25 @@ class DummyProvider(LLMProvider):
     def get_default_model(self) -> str:
         return "test-model"
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _make_heartbeat(
+    tasks_section: str = "",
+    announcements_section: str = "",
+) -> str:
+    parts = ["# Heartbeat Tasks\n"]
+    parts.append(f"## Announcements\n{announcements_section}")
+    parts.append(f"## User Tasks\n{tasks_section}")
+    parts.append("## Completed\n")
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Service lifecycle
+# ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_start_is_idempotent(tmp_path) -> None:
@@ -47,6 +66,10 @@ async def test_start_is_idempotent(tmp_path) -> None:
     service.stop()
     await asyncio.sleep(0)
 
+
+# ---------------------------------------------------------------------------
+# LLM path (last_run_tracking=False)
+# ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_decide_returns_skip_when_no_tool_call(tmp_path) -> None:
@@ -145,16 +168,14 @@ async def test_decide_prompt_includes_current_datetime(tmp_path) -> None:
     user_content = next(
         m["content"] for m in provider.last_messages if m["role"] == "user"
     )
-    # The prompt must contain a date string matching YYYY-MM-DD HH:MM
     date_match = re.search(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", user_content)
     assert date_match, "prompt does not contain a date/time string"
-    # The extracted timestamp must be within the before/after window
     assert before <= date_match.group() <= after
 
 
 @pytest.mark.asyncio
 async def test_decide_prompt_requires_due_now(tmp_path) -> None:
-    """Phase 1 prompt must tell the LLM to only trigger for tasks due NOW, not future ones."""
+    """Phase 1 prompt must tell the LLM to only trigger for tasks due NOW."""
     provider = DummyProvider([LLMResponse(content="", tool_calls=[])])
     service = HeartbeatService(
         workspace=tmp_path,
@@ -167,30 +188,8 @@ async def test_decide_prompt_requires_due_now(tmp_path) -> None:
     user_content = next(
         m["content"] for m in provider.last_messages if m["role"] == "user"
     )
-    # Must instruct the LLM to check whether tasks are due now
     assert "due" in user_content.lower()
     assert "future" in user_content.lower() or "skip" in user_content.lower()
-
-
-@pytest.mark.asyncio
-async def test_decide_prompt_includes_last_run_awareness_when_enabled(tmp_path) -> None:
-    """Phase 1 prompt includes Last-run instruction when last_run_tracking=True."""
-    provider = DummyProvider([LLMResponse(content="", tool_calls=[])])
-    service = HeartbeatService(
-        workspace=tmp_path,
-        provider=provider,
-        model="openai/gpt-4o-mini",
-        last_run_tracking=True,
-    )
-
-    await service._decide("some heartbeat content")
-
-    user_content = next(
-        m["content"] for m in provider.last_messages if m["role"] == "user"
-    )
-    assert "last-run" in user_content.lower()
-    today = datetime.now().strftime("%Y-%m-%d")
-    assert today in user_content
 
 
 @pytest.mark.asyncio
@@ -215,8 +214,7 @@ async def test_decide_prompt_omits_last_run_when_disabled(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_trigger_now_returns_none_for_future_recurring_task(tmp_path) -> None:
     """A recurring task scheduled for tomorrow must not trigger execution today."""
-    tomorrow = (datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-                .replace(day=datetime.now().day + 1)).strftime("%Y-%m-%d")
+    tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
     heartbeat_content = f"""# Heartbeat Tasks
 
 ## User Tasks
@@ -224,14 +222,13 @@ async def test_trigger_now_returns_none_for_future_recurring_task(tmp_path) -> N
 ### Remind: complete Taxes
 Schedule: {tomorrow}
 Recur: every 1 day
-Until: 2026-03-13
+Until: 2099-12-31
 Added: 2026-03-09
 
 ## Completed
 """
     (tmp_path / "HEARTBEAT.md").write_text(heartbeat_content, encoding="utf-8")
 
-    # Phase 1 correctly recognises tomorrow's date is not due and returns skip
     provider = DummyProvider([
         LLMResponse(
             content="",
@@ -257,123 +254,6 @@ Added: 2026-03-09
     result = await service.trigger_now()
     assert result is None
     assert executed == [], "Phase 2 must not run for a future-dated task"
-
-
-@pytest.mark.asyncio
-async def test_trigger_now_skips_task_already_run_today(tmp_path) -> None:
-    """A task whose Last-run matches today must not trigger execution again."""
-    today = datetime.now().strftime("%Y-%m-%d")
-    today_run = datetime.now().strftime("%Y-%m-%d %H:%M")
-    heartbeat_content = f"""# Heartbeat Tasks
-
-## User Tasks
-
-### Remind: complete Taxes
-Schedule: {today}
-Last-run: {today_run}
-Recur: every 1 day
-Until: 2026-03-13
-Added: 2026-03-09
-
-## Completed
-"""
-    (tmp_path / "HEARTBEAT.md").write_text(heartbeat_content, encoding="utf-8")
-
-    # Phase 1 sees Last-run matches today and returns skip
-    provider = DummyProvider([
-        LLMResponse(
-            content="",
-            tool_calls=[
-                ToolCallRequest(id="hb_1", name="heartbeat", arguments={"action": "skip"})
-            ],
-        )
-    ])
-
-    executed: list[str] = []
-
-    async def _on_execute(tasks: str) -> str:
-        executed.append(tasks)
-        return "done"
-
-    service = HeartbeatService(
-        workspace=tmp_path,
-        provider=provider,
-        model="openai/gpt-4o-mini",
-        on_execute=_on_execute,
-        last_run_tracking=True,
-    )
-
-    result = await service.trigger_now()
-    assert result is None
-    assert executed == [], "Phase 2 must not run when Last-run matches today"
-
-
-@pytest.mark.asyncio
-async def test_two_same_day_tasks_fire_independently(tmp_path) -> None:
-    """12pm task already ran (Last-run today) must not suppress the 6pm task."""
-    today = datetime.now().strftime("%Y-%m-%d")
-    today_run = datetime.now().strftime("%Y-%m-%d %H:%M")
-    # Simulate state at 5:50pm: 12pm task has Last-run today, 6pm task has not run yet
-    heartbeat_content = f"""# Heartbeat Tasks
-
-## User Tasks
-
-### Remind: bla (12pm)
-Schedule: {today} 12:00
-Last-run: {today_run}
-Recur: every 1 day
-Until: 2026-03-13
-Added: 2026-03-10
-
-### Remind: bla (6pm)
-Schedule: {today} 18:00
-Recur: every 1 day
-Until: 2026-03-13
-Added: 2026-03-10
-
-## Completed
-"""
-    (tmp_path / "HEARTBEAT.md").write_text(heartbeat_content, encoding="utf-8")
-
-    # Phase 1 should say "run" because the 6pm task is due (no Last-run)
-    provider = DummyProvider([
-        LLMResponse(
-            content="",
-            tool_calls=[
-                ToolCallRequest(
-                    id="hb_1",
-                    name="heartbeat",
-                    arguments={"action": "run", "tasks": "Remind: bla (6pm) is due"},
-                )
-            ],
-        )
-    ])
-
-    executed: list[str] = []
-
-    async def _on_execute(tasks: str) -> str:
-        executed.append(tasks)
-        return "done"
-
-    service = HeartbeatService(
-        workspace=tmp_path,
-        provider=provider,
-        model="openai/gpt-4o-mini",
-        on_execute=_on_execute,
-        last_run_tracking=True,
-    )
-
-    result = await service.trigger_now()
-    assert result == "done"
-    assert executed == ["Remind: bla (6pm) is due"], "6pm task must fire even though 12pm task already ran"
-
-    # Also verify the prompt contains both tasks so the LLM has full context
-    user_content = next(
-        m["content"] for m in provider.last_messages if m["role"] == "user"
-    )
-    assert "12pm" in user_content
-    assert "6pm" in user_content
-    assert "Last-run" in user_content
 
 
 @pytest.mark.asyncio
@@ -413,107 +293,222 @@ async def test_decide_retries_transient_error_then_succeeds(tmp_path, monkeypatc
     assert delays == [1]
 
 
+@pytest.mark.asyncio
+async def test_decide_falls_back_to_llm_when_tracking_disabled(tmp_path) -> None:
+    """With last_run_tracking=False, LLM is always called regardless of task due state."""
+    past = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    content = _make_heartbeat(
+        f"\n### Remind: something\nSchedule: {past}\nRecipients: abc:whatsapp\nAdded: 2026-03-01\n"
+    )
+
+    provider = DummyProvider([LLMResponse(content="", tool_calls=[])])
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        last_run_tracking=False,
+    )
+
+    await service._decide(content)
+    assert provider.calls == 1
+
+
 # ---------------------------------------------------------------------------
-# _compute_task_statuses unit tests
+# _compute_due_tasks — announcements
 # ---------------------------------------------------------------------------
 
-def _make_heartbeat(tasks_section: str) -> str:
-    return f"# Heartbeat Tasks\n\n## User Tasks\n{tasks_section}\n## Completed\n"
+def test_compute_due_tasks_announcement_always_due() -> None:
+    content = _make_heartbeat(
+        announcements_section="\n### New Homer update\nMessage: v2 is live.\n"
+    )
+    due = HeartbeatService._compute_due_tasks(content, datetime(2026, 3, 12, 10, 0))
+    assert len(due) == 1
+    assert due[0].name == "New Homer update"
+    assert due[0].task_type == "announcement"
+    assert due[0].schedule is None
 
 
-def test_compute_task_statuses_due_when_schedule_passed() -> None:
-    """Task with Schedule 1 hour ago appears as DUE NOW."""
+def test_compute_due_tasks_empty_announcements_section() -> None:
+    content = _make_heartbeat(announcements_section="\n")
+    due = HeartbeatService._compute_due_tasks(content, datetime(2026, 3, 12, 10, 0))
+    assert due == []
+
+
+def test_compute_due_tasks_multiple_announcements() -> None:
+    content = _make_heartbeat(
+        announcements_section="\n### Announcement A\n\n### Announcement B\n"
+    )
+    due = HeartbeatService._compute_due_tasks(content, datetime(2026, 3, 12, 10, 0))
+    names = [t.name for t in due]
+    assert "Announcement A" in names
+    assert "Announcement B" in names
+    assert all(t.task_type == "announcement" for t in due)
+
+
+# ---------------------------------------------------------------------------
+# _compute_due_tasks — reminder tasks
+# ---------------------------------------------------------------------------
+
+def test_compute_due_tasks_reminder_due_when_schedule_passed() -> None:
     now = datetime(2026, 3, 12, 10, 0)
-    schedule_dt = now - timedelta(hours=1)
-    schedule_str = schedule_dt.strftime("%Y-%m-%d %H:%M")
+    past = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
     content = _make_heartbeat(
-        f"\n### Gmail scan\nSchedule: {schedule_str}\nRecur: every 1 day\nAdded: 2026-03-01\n"
+        f"\n### Remind: call dentist\nSchedule: {past}\nRecipients: abc:whatsapp\nAdded: 2026-03-01\n"
     )
-    result = HeartbeatService._compute_task_statuses(content, now)
-    assert "IS DUE NOW" in result
-    assert "Gmail scan" in result
+    due = HeartbeatService._compute_due_tasks(content, now)
+    assert len(due) == 1
+    assert due[0].name == "Remind: call dentist"
+    assert due[0].task_type == "reminder"
+    assert due[0].schedule == past
 
 
-def test_compute_task_statuses_not_due_when_schedule_future() -> None:
-    """Task with Schedule 1 hour from now appears as NOT due."""
+def test_compute_due_tasks_reminder_not_due_when_schedule_future() -> None:
     now = datetime(2026, 3, 12, 10, 0)
-    schedule_dt = now + timedelta(hours=1)
-    schedule_str = schedule_dt.strftime("%Y-%m-%d %H:%M")
+    future = (now + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
     content = _make_heartbeat(
-        f"\n### Daily morning briefing\nSchedule: {schedule_str}\nRecur: every 1 day\nAdded: 2026-03-01\n"
+        f"\n### Remind: call dentist\nSchedule: {future}\nRecipients: abc:whatsapp\nAdded: 2026-03-01\n"
     )
-    result = HeartbeatService._compute_task_statuses(content, now)
-    assert "is NOT due" in result
-    assert "Daily morning briefing" in result
-    assert "IS DUE NOW" not in result
+    due = HeartbeatService._compute_due_tasks(content, now)
+    assert due == []
 
 
-def test_compute_task_statuses_expired_task_excluded() -> None:
-    """Task with Until yesterday is excluded from output entirely."""
+def test_compute_due_tasks_reminder_due_exactly_on_schedule() -> None:
     now = datetime(2026, 3, 12, 10, 0)
-    yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
-    schedule_str = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
     content = _make_heartbeat(
-        f"\n### Old task\nSchedule: {schedule_str}\nUntil: {yesterday}\nRecur: every 1 day\nAdded: 2026-03-01\n"
+        "\n### On-time reminder\nSchedule: 2026-03-12 10:00\nRecipients: abc:whatsapp\nAdded: 2026-03-01\n"
     )
-    result = HeartbeatService._compute_task_statuses(content, now)
-    assert result == ""
+    due = HeartbeatService._compute_due_tasks(content, now)
+    assert len(due) == 1
 
 
-def test_compute_task_statuses_datetime_precision() -> None:
-    """Task at 10:00: NOT due at 09:59, DUE NOW at exactly 10:00."""
-    content = _make_heartbeat(
-        "\n### Precise task\nSchedule: 2026-03-12 10:00\nRecur: every 1 day\nAdded: 2026-03-01\n"
-    )
-    # One minute before: not due
+def test_compute_due_tasks_reminder_not_due_one_minute_before() -> None:
     before = datetime(2026, 3, 12, 9, 59)
-    result_before = HeartbeatService._compute_task_statuses(content, before)
-    assert "is NOT due" in result_before
-    assert "IS DUE NOW" not in result_before
-
-    # Exactly on time: due now
-    on_time = datetime(2026, 3, 12, 10, 0)
-    result_on_time = HeartbeatService._compute_task_statuses(content, on_time)
-    assert "IS DUE NOW" in result_on_time
-
-
-def test_compute_task_statuses_empty_when_no_schedule_fields() -> None:
-    """HEARTBEAT.md with tasks but no Schedule fields → returns ''."""
     content = _make_heartbeat(
-        "\n### Some task\nAdded: 2026-03-01\n"
+        "\n### 10am reminder\nSchedule: 2026-03-12 10:00\nRecipients: abc:whatsapp\nAdded: 2026-03-01\n"
     )
-    result = HeartbeatService._compute_task_statuses(content, datetime(2026, 3, 12, 10, 0))
-    assert result == ""
+    due = HeartbeatService._compute_due_tasks(content, before)
+    assert due == []
 
 
-def test_compute_task_statuses_multiple_tasks_mixed() -> None:
-    """One due task and one future task both appear with correct labels."""
+def test_compute_due_tasks_date_only_schedule_fires_on_day() -> None:
+    """Date-only schedule (no time) fires at any point on that date."""
+    content = _make_heartbeat(
+        "\n### Daily reminder\nSchedule: 2026-03-12\nRecur: every 1 day\nRecipients: abc:whatsapp\nAdded: 2026-03-01\n"
+    )
+    assert HeartbeatService._compute_due_tasks(content, datetime(2026, 3, 12, 9, 0))
+    assert not HeartbeatService._compute_due_tasks(content, datetime(2026, 3, 11, 23, 59))
+
+
+# ---------------------------------------------------------------------------
+# _compute_due_tasks — system tasks
+# ---------------------------------------------------------------------------
+
+def test_compute_due_tasks_system_task_type() -> None:
     now = datetime(2026, 3, 12, 10, 0)
-    past_str = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
-    future_str = (now + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+    past = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
     content = _make_heartbeat(
-        f"\n### Past task\nSchedule: {past_str}\nRecur: every 1 day\nAdded: 2026-03-01\n\n"
-        f"### Future task\nSchedule: {future_str}\nRecur: every 1 day\nAdded: 2026-03-01\n"
+        f"\n### Gmail scan\nType: system\nSchedule: {past}\nRecur: every 1 hour\nRecipients: primary:whatsapp\n"
     )
-    result = HeartbeatService._compute_task_statuses(content, now)
-    assert "Past task" in result
-    assert "IS DUE NOW" in result
-    assert "Future task" in result
-    assert "is NOT due" in result
+    due = HeartbeatService._compute_due_tasks(content, now)
+    assert len(due) == 1
+    assert due[0].task_type == "system"
+    assert due[0].name == "Gmail scan"
 
+
+def test_compute_due_tasks_system_task_not_due() -> None:
+    now = datetime(2026, 3, 12, 10, 0)
+    future = (now + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    content = _make_heartbeat(
+        f"\n### Morning briefing\nType: system\nSchedule: {future}\nRecur: every 1 day\nRecipients: primary:whatsapp\n"
+    )
+    due = HeartbeatService._compute_due_tasks(content, now)
+    assert due == []
+
+
+# ---------------------------------------------------------------------------
+# _compute_due_tasks — Until / expiry
+# ---------------------------------------------------------------------------
+
+def test_compute_due_tasks_expired_task_excluded() -> None:
+    now = datetime(2026, 3, 12, 10, 0)
+    past_sched = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    content = _make_heartbeat(
+        f"\n### Old reminder\nSchedule: {past_sched}\nUntil: {yesterday}\nRecipients: abc:whatsapp\nAdded: 2026-03-01\n"
+    )
+    due = HeartbeatService._compute_due_tasks(content, now)
+    assert due == []
+
+
+def test_compute_due_tasks_task_not_expired_until_tomorrow() -> None:
+    now = datetime(2026, 3, 12, 10, 0)
+    past_sched = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+    content = _make_heartbeat(
+        f"\n### Active reminder\nSchedule: {past_sched}\nUntil: {tomorrow}\nRecipients: abc:whatsapp\nAdded: 2026-03-01\n"
+    )
+    due = HeartbeatService._compute_due_tasks(content, now)
+    assert len(due) == 1
+
+
+# ---------------------------------------------------------------------------
+# _compute_due_tasks — mixed / edge cases
+# ---------------------------------------------------------------------------
+
+def test_compute_due_tasks_mixed_due_and_future() -> None:
+    """Only past-scheduled tasks appear in the due list."""
+    now = datetime(2026, 3, 12, 15, 0)
+    content = _make_heartbeat(
+        "\n### Past task\nSchedule: 2026-03-12 14:00\nRecipients: abc:whatsapp\nAdded: 2026-03-01\n\n"
+        "### Future task\nSchedule: 2026-03-12 18:00\nRecipients: abc:whatsapp\nAdded: 2026-03-01\n"
+    )
+    due = HeartbeatService._compute_due_tasks(content, now)
+    names = [t.name for t in due]
+    assert "Past task" in names
+    assert "Future task" not in names
+
+
+def test_compute_due_tasks_all_three_types() -> None:
+    """Announcement + system + reminder all appear when due."""
+    now = datetime(2026, 3, 12, 15, 0)
+    content = _make_heartbeat(
+        announcements_section="\n### Deploy complete\n",
+        tasks_section=(
+            "\n### Gmail scan\nType: system\nSchedule: 2026-03-12 14:00\nRecur: every 1 hour\nRecipients: primary:whatsapp\n\n"
+            "### Remind: pick up kids\nSchedule: 2026-03-12 14:30\nRecipients: abc:whatsapp\nAdded: 2026-03-01\n"
+        ),
+    )
+    due = HeartbeatService._compute_due_tasks(content, now)
+    assert len(due) == 3
+    assert {t.task_type for t in due} == {"announcement", "system", "reminder"}
+
+
+def test_compute_due_tasks_no_user_tasks_section() -> None:
+    content = "# Heartbeat Tasks\n\n## Announcements\n\n## Completed\n"
+    due = HeartbeatService._compute_due_tasks(content, datetime(2026, 3, 12, 10, 0))
+    assert due == []
+
+
+def test_compute_due_tasks_no_schedule_field_skipped() -> None:
+    """Tasks without a Schedule field are ignored."""
+    content = _make_heartbeat("\n### Some task\nAdded: 2026-03-01\n")
+    due = HeartbeatService._compute_due_tasks(content, datetime(2026, 3, 12, 10, 0))
+    assert due == []
+
+
+# ---------------------------------------------------------------------------
+# Deterministic _decide (last_run_tracking=True)
+# ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_decide_prompt_includes_computed_statuses_when_tracking_enabled(tmp_path) -> None:
-    """When last_run_tracking=True and there's a past-schedule task, prompt contains
-    'IS DUE NOW' and 'authoritative'."""
-    now = datetime.now()
-    past_str = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
-    heartbeat_content = _make_heartbeat(
-        f"\n### Gmail scan\nSchedule: {past_str}\nRecur: every 1 day\nAdded: 2026-03-01\n"
+async def test_decide_skips_without_llm_when_no_due_tasks(tmp_path) -> None:
+    """With last_run_tracking=True and no due tasks, LLM is NOT called."""
+    future = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+    content = _make_heartbeat(
+        f"\n### Future task\nSchedule: {future}\nRecipients: abc:whatsapp\nAdded: 2026-03-01\n"
     )
-    (tmp_path / "HEARTBEAT.md").write_text(heartbeat_content, encoding="utf-8")
 
-    provider = DummyProvider([LLMResponse(content="", tool_calls=[])])
+    provider = DummyProvider([])  # would raise if called
     service = HeartbeatService(
         workspace=tmp_path,
         provider=provider,
@@ -521,24 +516,21 @@ async def test_decide_prompt_includes_computed_statuses_when_tracking_enabled(tm
         last_run_tracking=True,
     )
 
-    await service._decide(heartbeat_content)
-
-    user_content = next(
-        m["content"] for m in provider.last_messages if m["role"] == "user"
-    )
-    assert "IS DUE NOW" in user_content
-    assert "authoritative" in user_content
+    action, tasks = await service._decide(content)
+    assert action == "skip"
+    assert tasks == ""
+    assert provider.calls == 0
 
 
 @pytest.mark.asyncio
-async def test_decide_prompt_uses_fallback_when_no_scheduled_tasks(tmp_path) -> None:
-    """When last_run_tracking=True but no Schedule fields, prompt still contains 'Last-run'."""
-    heartbeat_content = _make_heartbeat(
-        "\n### Some task\nAdded: 2026-03-01\n"
+async def test_decide_runs_without_llm_when_task_due(tmp_path) -> None:
+    """With last_run_tracking=True and a due task, action is 'run' with no LLM call."""
+    past = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    content = _make_heartbeat(
+        f"\n### Remind: pick up groceries\nSchedule: {past}\nRecipients: abc:whatsapp\nAdded: 2026-03-01\n"
     )
-    (tmp_path / "HEARTBEAT.md").write_text(heartbeat_content, encoding="utf-8")
 
-    provider = DummyProvider([LLMResponse(content="", tool_calls=[])])
+    provider = DummyProvider([])  # would raise if called
     service = HeartbeatService(
         workspace=tmp_path,
         provider=provider,
@@ -546,10 +538,107 @@ async def test_decide_prompt_uses_fallback_when_no_scheduled_tasks(tmp_path) -> 
         last_run_tracking=True,
     )
 
-    await service._decide(heartbeat_content)
+    action, tasks = await service._decide(content)
+    assert action == "run"
+    assert "Remind: pick up groceries" in tasks
+    assert provider.calls == 0
 
-    user_content = next(
-        m["content"] for m in provider.last_messages if m["role"] == "user"
+
+@pytest.mark.asyncio
+async def test_decide_summary_includes_task_type(tmp_path) -> None:
+    """The tasks summary includes the type of each due task."""
+    past = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    content = _make_heartbeat(
+        announcements_section="\n### Big announcement\n",
+        tasks_section=f"\n### Gmail scan\nType: system\nSchedule: {past}\nRecur: every 1 hour\nRecipients: primary:whatsapp\n",
     )
-    assert "Last-run" in user_content
-    assert "IS DUE NOW" not in user_content
+
+    provider = DummyProvider([])
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        last_run_tracking=True,
+    )
+
+    action, tasks = await service._decide(content)
+    assert action == "run"
+    assert "announcement" in tasks
+    assert "system" in tasks
+    assert provider.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_decide_deterministic_skip_then_execute_on_due(tmp_path) -> None:
+    """trigger_now fires Phase 2 when a task is due, without touching LLM in Phase 1."""
+    past = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    heartbeat_content = _make_heartbeat(
+        f"\n### Remind: medication\nSchedule: {past}\nRecipients: abc:whatsapp\nAdded: 2026-03-01\n"
+    )
+    (tmp_path / "HEARTBEAT.md").write_text(heartbeat_content, encoding="utf-8")
+
+    provider = DummyProvider([])  # no LLM responses needed
+    executed: list[str] = []
+
+    async def _on_execute(tasks: str) -> str:
+        executed.append(tasks)
+        return "reminded"
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        on_execute=_on_execute,
+        last_run_tracking=True,
+    )
+
+    result = await service.trigger_now()
+    assert result == "reminded"
+    assert len(executed) == 1
+    assert "Remind: medication" in executed[0]
+    assert provider.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_decide_deterministic_skips_future_task(tmp_path) -> None:
+    """trigger_now returns None for a future task without calling LLM."""
+    future = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+    heartbeat_content = _make_heartbeat(
+        f"\n### Remind: dinner\nSchedule: {future}\nRecipients: abc:whatsapp\nAdded: 2026-03-01\n"
+    )
+    (tmp_path / "HEARTBEAT.md").write_text(heartbeat_content, encoding="utf-8")
+
+    provider = DummyProvider([])
+    executed: list[str] = []
+
+    async def _on_execute(tasks: str) -> str:
+        executed.append(tasks)
+        return "done"
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        on_execute=_on_execute,
+        last_run_tracking=True,
+    )
+
+    result = await service.trigger_now()
+    assert result is None
+    assert executed == []
+    assert provider.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_two_tasks_only_past_one_fires(tmp_path) -> None:
+    """With two tasks at different times, only the past-scheduled one is due."""
+    now_fixed = datetime(2026, 3, 12, 15, 0)
+    heartbeat_content = _make_heartbeat(
+        "\n### Remind: lunch (12pm)\nSchedule: 2026-03-12 12:00\nRecipients: abc:whatsapp\nAdded: 2026-03-10\n\n"
+        "### Remind: dinner (6pm)\nSchedule: 2026-03-12 18:00\nRecipients: abc:whatsapp\nAdded: 2026-03-10\n"
+    )
+
+    due = HeartbeatService._compute_due_tasks(heartbeat_content, now_fixed)
+    names = [t.name for t in due]
+    assert "Remind: lunch (12pm)" in names
+    assert "Remind: dinner (6pm)" not in names
