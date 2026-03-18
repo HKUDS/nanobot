@@ -455,23 +455,23 @@ class AgentLoop:
         config = load_config()
         thinkingToolUseStreamingConfig = config.tools.thinkingToolUseStreaming
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
-            # if thinkingToolUseStreamingConfig.enabled:
-            #     posibleToolName = content.split("(")[0]
-            #     tool = self.tools.get(posibleToolName)
-            #     if tool:
-            #         content = thinkingToolUseStreamingConfig.toolUsageTemplate.replace("{{tool}}", content)
-            #         if msg.channel in thinkingToolUseStreamingConfig.channelsBlacklist or tool.name in thinkingToolUseStreamingConfig.toolsBlacklist or "*" in thinkingToolUseStreamingConfig.toolsBlacklist:
-            #             return
-            #     else:
-            #         content = thinkingToolUseStreamingConfig.thinkingTemplate.replace("{{thought}}", content)
-            #         if msg.channel in thinkingToolUseStreamingConfig.channelsBlacklist or "thinking" in thinkingToolUseStreamingConfig.toolsBlacklist:
-            #             return
+            if thinkingToolUseStreamingConfig.enabled:
+                posibleToolName = content.split("(")[0]
+                tool = self.tools.get(posibleToolName)
+                if tool:
+                    content = thinkingToolUseStreamingConfig.toolUsageTemplate.replace("{{tool}}", content)
+                    if msg.channel in thinkingToolUseStreamingConfig.channelsBlacklist or tool.name in thinkingToolUseStreamingConfig.toolsBlacklist or "*" in thinkingToolUseStreamingConfig.toolsBlacklist:
+                        return
+                else:
+                    content = thinkingToolUseStreamingConfig.thinkingTemplate.replace("{{thought}}", content)
+                    if msg.channel in thinkingToolUseStreamingConfig.channelsBlacklist or "thinking" in thinkingToolUseStreamingConfig.toolsBlacklist:
+                        return
 
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
             meta["_tool_hint"] = tool_hint
             await self.bus.publish_outbound(OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
+                channel=msg.channel, chat_id=msg.chat_id, content=content, metadata={**meta, "thinkingToolUseStreamingEnabled": thinkingToolUseStreamingConfig.enabled},
             ))
 
         final_content, _, all_msgs = await self._run_agent_loop(
