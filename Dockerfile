@@ -17,8 +17,13 @@ RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
 COPY nanobot/ nanobot/
 RUN mkdir -p bridge && uv pip install --system --no-cache .
 
-# Create config directory
-RUN mkdir -p /root/.nanobot
+# Create a non-root user and config directory
+RUN groupadd --gid 1001 nanobot && \
+    useradd --uid 1001 --gid nanobot --shell /bin/bash --create-home nanobot && \
+    mkdir -p /home/nanobot/.nanobot && \
+    chown -R nanobot:nanobot /home/nanobot /app
+
+USER nanobot
 
 # Health check for orchestrators (Docker, Compose, Kubernetes)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
