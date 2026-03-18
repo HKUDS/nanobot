@@ -1,3 +1,4 @@
+import json
 import re
 import shutil
 from pathlib import Path
@@ -6,23 +7,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from nanobot.cli.commands import app
+from nanobot.cli.commands import _make_provider, app
 from nanobot.config.schema import Config
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_model
-
-
-def _strip_ansi(text):
-    """Remove ANSI escape codes from text."""
-    ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
-    return ansi_escape.sub('', text)
 
 runner = CliRunner()
 
 
 class _StopGateway(RuntimeError):
     pass
+
+
+def _strip_ansi(text):
+    """Remove ANSI escape codes from text."""
+    ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+    return ansi_escape.sub('', text)
 
 
 @pytest.fixture
@@ -43,19 +44,26 @@ def mock_paths():
 
         mock_cp.return_value = config_file
         mock_ws.return_value = workspace_dir
-        mock_sc.side_effect = lambda config: config_file.write_text("{}")
+        mock_lc.side_effect = lambda _config_path=None: Config()
 
-        yield config_file, workspace_dir
+        def _save_config(config: Config, config_path: Path | None = None):
+            target = config_path or config_file
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(config.model_dump(by_alias=True)), encoding="utf-8")
+
+        mock_sc.side_effect = _save_config
+
+        yield config_file, workspace_dir, mock_ws
 
         if base_dir.exists():
             shutil.rmtree(base_dir)
 
 
-def test_onboard_fresh_install(mock_paths):
-    """No existing config — should create from scratch."""
-    config_file, workspace_dir = mock_paths
+def test_onboard_fresh_install_non_interactive(mock_paths):
+    """No existing config — should create from scratch in non-interactive mode."""
+    config_file, workspace_dir, mock_ws = mock_paths
 
-    result = runner.invoke(app, ["onboard"])
+    result = runner.invoke(app, ["onboard", "--non-interactive"])
 
     assert result.exit_code == 0
     assert "Created config" in result.stdout
@@ -64,14 +72,16 @@ def test_onboard_fresh_install(mock_paths):
     assert config_file.exists()
     assert (workspace_dir / "AGENTS.md").exists()
     assert (workspace_dir / "memory" / "MEMORY.md").exists()
+    expected_workspace = Config().workspace_path
+    assert mock_ws.call_args.args == (expected_workspace,)
 
 
-def test_onboard_existing_config_refresh(mock_paths):
+def test_onboard_existing_config_refresh_non_interactive(mock_paths):
     """Config exists, user declines overwrite — should refresh (load-merge-save)."""
-    config_file, workspace_dir = mock_paths
+    config_file, workspace_dir, _ = mock_paths
     config_file.write_text('{"existing": true}')
 
-    result = runner.invoke(app, ["onboard"], input="n\n")
+    result = runner.invoke(app, ["onboard", "--non-interactive"], input="n\n")
 
     assert result.exit_code == 0
     assert "Config already exists" in result.stdout
@@ -80,12 +90,12 @@ def test_onboard_existing_config_refresh(mock_paths):
     assert (workspace_dir / "AGENTS.md").exists()
 
 
-def test_onboard_existing_config_overwrite(mock_paths):
+def test_onboard_existing_config_overwrite_non_interactive(mock_paths):
     """Config exists, user confirms overwrite — should reset to defaults."""
-    config_file, workspace_dir = mock_paths
+    config_file, workspace_dir, _ = mock_paths
     config_file.write_text('{"existing": true}')
 
-    result = runner.invoke(app, ["onboard"], input="y\n")
+    result = runner.invoke(app, ["onboard", "--non-interactive"], input="y\n")
 
     assert result.exit_code == 0
     assert "Config already exists" in result.stdout
@@ -93,18 +103,53 @@ def test_onboard_existing_config_overwrite(mock_paths):
     assert workspace_dir.exists()
 
 
-def test_onboard_existing_workspace_safe_create(mock_paths):
+def test_onboard_existing_workspace_safe_create_non_interactive(mock_paths):
     """Workspace exists — should not recreate, but still add missing templates."""
-    config_file, workspace_dir = mock_paths
+    config_file, workspace_dir, _ = mock_paths
     workspace_dir.mkdir(parents=True)
     config_file.write_text("{}")
 
-    result = runner.invoke(app, ["onboard"], input="n\n")
+    result = runner.invoke(app, ["onboard", "--non-interactive"], input="n\n")
 
     assert result.exit_code == 0
     assert "Created workspace" not in result.stdout
     assert "Created AGENTS.md" in result.stdout
     assert (workspace_dir / "AGENTS.md").exists()
+
+
+def test_onboard_help_shows_workspace_and_config_options():
+    result = runner.invoke(app, ["onboard", "--help"])
+
+    assert result.exit_code == 0
+    stripped_output = _strip_ansi(result.stdout)
+    assert "--workspace" in stripped_output
+    assert "-w" in stripped_output
+    assert "--config" in stripped_output
+    assert "-c" in stripped_output
+    assert "--non-interactive" in stripped_output
+    assert "--dir" not in stripped_output
+
+
+def test_onboard_uses_explicit_config_and_workspace_paths(tmp_path, monkeypatch):
+    config_path = tmp_path / "instance" / "config.json"
+    workspace_path = tmp_path / "workspace"
+
+    monkeypatch.setattr("nanobot.channels.registry.discover_all", lambda: {})
+
+    result = runner.invoke(
+        app,
+        ["onboard", "--config", str(config_path), "--workspace", str(workspace_path), "--non-interactive"],
+    )
+
+    assert result.exit_code == 0
+    saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
+    assert saved.workspace_path == workspace_path
+    assert (workspace_path / "AGENTS.md").exists()
+    stripped_output = _strip_ansi(result.stdout)
+    compact_output = stripped_output.replace("\n", "")
+    resolved_config = str(config_path.resolve())
+    assert resolved_config in compact_output
+    assert f"--config {resolved_config}" in compact_output
 
 
 def test_config_matches_github_copilot_codex_with_hyphen_prefix():
@@ -197,6 +242,33 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+
+
+def test_make_provider_passes_extra_headers_to_custom_provider():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "custom", "model": "gpt-4o-mini"}},
+            "providers": {
+                "custom": {
+                    "apiKey": "test-key",
+                    "apiBase": "https://example.com/v1",
+                    "extraHeaders": {
+                        "APP-Code": "demo-app",
+                        "x-session-affinity": "sticky-session",
+                    },
+                }
+            },
+        }
+    )
+
+    with patch("nanobot.providers.custom_provider.AsyncOpenAI") as mock_async_openai:
+        _make_provider(config)
+
+    kwargs = mock_async_openai.call_args.kwargs
+    assert kwargs["api_key"] == "test-key"
+    assert kwargs["base_url"] == "https://example.com/v1"
+    assert kwargs["default_headers"]["APP-Code"] == "demo-app"
+    assert kwargs["default_headers"]["x-session-affinity"] == "sticky-session"
 
 
 @pytest.fixture

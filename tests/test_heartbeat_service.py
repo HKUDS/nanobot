@@ -250,3 +250,40 @@ async def test_decide_retries_transient_error_then_succeeds(tmp_path, monkeypatc
     assert tasks == "check open tasks"
     assert provider.calls == 2
     assert delays == [1]
+
+
+@pytest.mark.asyncio
+async def test_decide_prompt_includes_current_time(tmp_path) -> None:
+    """Phase 1 user prompt must contain current time so the LLM can judge task urgency."""
+
+    captured_messages: list[dict] = []
+
+    class CapturingProvider(LLMProvider):
+        async def chat(self, *, messages=None, **kwargs) -> LLMResponse:
+            if messages:
+                captured_messages.extend(messages)
+            return LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="hb_1", name="heartbeat",
+                        arguments={"action": "skip"},
+                    )
+                ],
+            )
+
+        def get_default_model(self) -> str:
+            return "test-model"
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=CapturingProvider(),
+        model="test-model",
+    )
+
+    await service._decide("- [ ] check servers at 10:00 UTC")
+
+    user_msg = captured_messages[1]
+    assert user_msg["role"] == "user"
+    assert "Current Time:" in user_msg["content"]
+

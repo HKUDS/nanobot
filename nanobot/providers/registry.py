@@ -399,6 +399,23 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
+    # Mistral AI: OpenAI-compatible API at api.mistral.ai/v1.
+    ProviderSpec(
+        name="mistral",
+        keywords=("mistral",),
+        env_key="MISTRAL_API_KEY",
+        display_name="Mistral",
+        litellm_prefix="mistral",  # mistral-large-latest → mistral/mistral-large-latest
+        skip_prefixes=("mistral/",),  # avoid double-prefix
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="https://api.mistral.ai/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
     # === Local deployment (matched by config key, NOT by api_base) =========
     # vLLM / any OpenAI-compatible local server.
     # Detected when config key is "vllm" (provider_name="vllm").
@@ -434,6 +451,17 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="http://localhost:11434",
         strip_model_prefix=False,
         model_overrides=(),
+    ),
+    # === OpenVINO Model Server (direct, local, OpenAI-compatible at /v3) ===
+    ProviderSpec(
+        name="ovms",
+        keywords=("openvino", "ovms"),
+        env_key="",
+        display_name="OpenVINO Model Server",
+        litellm_prefix="",
+        is_direct=True,
+        is_local=True,
+        default_api_base="http://localhost:8000/v3",
     ),
     # === Auxiliary (not a primary LLM provider) ============================
     # Groq: mainly used for Whisper voice transcription, also usable for LLM.

@@ -18,6 +18,7 @@ from nanobot.agent.hooks import HookEvent
 from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
+from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -30,7 +31,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, InputLimitsConfig, WebSearchConfig
     from nanobot.cron.service import CronService
 
 
@@ -59,13 +60,14 @@ class AgentLoop:
         web_search_config: WebSearchConfig | None = None,
         web_proxy: str | None = None,
         exec_config: ExecToolConfig | None = None,
+        input_limits: InputLimitsConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig, WebSearchConfig
+        from nanobot.config.schema import ExecToolConfig, InputLimitsConfig, WebSearchConfig
 
         self.bus = bus
         self.channels_config = channels_config
@@ -77,10 +79,11 @@ class AgentLoop:
         self.web_search_config = web_search_config or WebSearchConfig()
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
+        self.input_limits = input_limits or InputLimitsConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
-        self.context = ContextBuilder(workspace)
+        self.context = ContextBuilder(workspace, input_limits=self.input_limits)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -100,6 +103,7 @@ class AgentLoop:
         self._mcp_connected = False
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
+        self._background_tasks: list[asyncio.Task] = []
         self._processing_lock = asyncio.Lock()
         self.memory_consolidator = MemoryConsolidator(
             workspace=workspace,
@@ -115,7 +119,9 @@ class AgentLoop:
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
         allowed_dir = self.workspace if self.restrict_to_workspace else None
-        for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
+        extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
+        self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
+        for cls in (WriteFileTool, EditFileTool, ListDirTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
@@ -166,15 +172,35 @@ class AgentLoop:
             return None
         return re.sub(r"<think>[\s\S]*?</think>", "", text).strip() or None
 
-    @staticmethod
-    def _tool_hint(tool_calls: list) -> str:
+    def _tool_hint(self, tool_calls: list) -> str:
         """Format tool calls as concise hint, e.g. 'web_search("query")'."""
+        workspace_str = str(self.workspace)
+        
         def _fmt(tc):
             args = (tc.arguments[0] if isinstance(tc.arguments, list) else tc.arguments) or {}
-            val = next(iter(args.values()), None) if isinstance(args, dict) else None
+            
+            val = None
+            if isinstance(args, dict):
+                # Iterate through all string values to find the first meaningful one
+                for v in args.values():
+                    if isinstance(v, str):
+                        val = v
+                        break
+                            
             if not isinstance(val, str):
                 return tc.name
+                
+            if self.restrict_to_workspace:
+                import os
+                # If it looks like an absolute path, normalize it to resolve '..' and '.'
+                if os.path.isabs(val):
+                    val = os.path.normpath(val)
+                # Replace workspace path with empty string to hide it
+                if workspace_str in val:
+                    val = val.replace(workspace_str, "").lstrip("\\/")
+                
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
+            
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
     async def _run_agent_loop(
@@ -345,13 +371,22 @@ class AgentLoop:
                 ))
 
     async def close_mcp(self) -> None:
-        """Close MCP connections."""
+        """Drain pending background archives, then close MCP connections."""
+        if self._background_tasks:
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
+            self._background_tasks.clear()
         if self._mcp_stack:
             try:
                 await self._mcp_stack.aclose()
             except (RuntimeError, BaseExceptionGroup):
                 pass  # MCP SDK cancel scope cleanup is noisy but harmless
             self._mcp_stack = None
+
+    def _schedule_background(self, coro) -> None:
+        """Schedule a coroutine as a tracked background task (drained on shutdown)."""
+        task = asyncio.create_task(coro)
+        self._background_tasks.append(task)
+        task.add_done_callback(self._background_tasks.remove)
 
     def stop(self) -> None:
         """Stop the agent loop."""
@@ -376,14 +411,17 @@ class AgentLoop:
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
+            # Subagent results should be assistant role, other system messages use user role
+            current_role = "assistant" if msg.sender_id == "subagent" else "user"
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
+                current_role=current_role,
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
-            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+            self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
 
@@ -396,24 +434,14 @@ class AgentLoop:
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
-            try:
-                if not await self.memory_consolidator.archive_unconsolidated(session):
-                    return OutboundMessage(
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        content="Memory archival failed, session not cleared. Please try again.",
-                    )
-            except Exception:
-                logger.exception("/new archival failed for {}", session.key)
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content="Memory archival failed, session not cleared. Please try again.",
-                )
-
+            snapshot = session.messages[session.last_consolidated:]
             session.clear()
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
+
+            if snapshot:
+                self._schedule_background(self.memory_consolidator.archive_messages(snapshot))
+
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
         if cmd == "/help":
@@ -466,7 +494,7 @@ class AgentLoop:
 
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
-        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+        self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
@@ -503,7 +531,9 @@ class AgentLoop:
                             continue  # Strip runtime context from multimodal messages
                         if (c.get("type") == "image_url"
                                 and c.get("image_url", {}).get("url", "").startswith("data:image/")):
-                            filtered.append({"type": "text", "text": "[image]"})
+                            path = (c.get("_meta") or {}).get("path", "")
+                            placeholder = f"[image: {path}]" if path else "[image]"
+                            filtered.append({"type": "text", "text": placeholder})
                         else:
                             filtered.append(c)
                     if not filtered:
