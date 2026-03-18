@@ -13,7 +13,6 @@ class Base(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-
 class ChannelsConfig(Base):
     """Configuration for chat channels.
 
@@ -132,6 +131,13 @@ class ExecToolConfig(Base):
     path_append: str = ""
 
 
+class InputLimitsConfig(Base):
+    """Limits for user-provided multimodal inputs."""
+
+    max_input_images: int = 3
+    max_input_image_bytes: int = 10 * 1024 * 1024
+
+
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
 
@@ -149,6 +155,7 @@ class ToolsConfig(Base):
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    input_limits: InputLimitsConfig = Field(default_factory=InputLimitsConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 

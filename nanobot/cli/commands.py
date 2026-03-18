@@ -261,47 +261,91 @@ def main(
 
 
 @app.command()
-def onboard():
-    """Initialize nanobot configuration and workspace with interactive wizard."""
-    from nanobot.config.loader import get_config_path, load_config, save_config
+def onboard(
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    non_interactive: bool = typer.Option(False, "--non-interactive", help="Skip interactive wizard"),
+):
+    """Initialize nanobot configuration and workspace."""
+    from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
     from nanobot.config.schema import Config
 
-    config_path = get_config_path()
-
-    if config_path.exists():
-        config = load_config()
+    if config:
+        config_path = Path(config).expanduser().resolve()
+        set_config_path(config_path)
+        console.print(f"[dim]Using config: {config_path}[/dim]")
     else:
-        config = Config()
-        save_config(config)
-        console.print(f"[green]✓[/green] Created config at {config_path}")
+        config_path = get_config_path()
 
-    # Run interactive wizard
-    from nanobot.cli.onboard_wizard import run_onboard
+    def _apply_workspace_override(loaded: Config) -> Config:
+        if workspace:
+            loaded.agents.defaults.workspace = workspace
+        return loaded
 
-    try:
-        config = run_onboard()
-        save_config(config)
-        console.print(f"[green]✓[/green] Config saved at {config_path}")
-    except Exception as e:
-        console.print(f"[red]✗[/red] Error during configuration: {e}")
-        console.print("[yellow]Please run 'nanobot onboard' again to complete setup.[/yellow]")
-        raise typer.Exit(1)
+    # Non-interactive mode: simple config creation/update
+    if non_interactive:
+        if config_path.exists():
+            console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
+            console.print("  [bold]y[/bold] = overwrite with defaults (existing values will be lost)")
+            console.print("  [bold]N[/bold] = refresh config, keeping existing values and adding new fields")
+            if typer.confirm("Overwrite?"):
+                config = _apply_workspace_override(Config())
+                save_config(config, config_path)
+                console.print(f"[green]✓[/green] Config reset to defaults at {config_path}")
+            else:
+                config = _apply_workspace_override(load_config(config_path))
+                save_config(config, config_path)
+                console.print(f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)")
+        else:
+            config = _apply_workspace_override(Config())
+            save_config(config, config_path)
+            console.print(f"[green]✓[/green] Created config at {config_path}")
+        console.print("[dim]Config template now uses `maxTokens` + `contextWindowTokens`; `memoryWindow` is no longer a runtime setting.[/dim]")
+    else:
+        # Interactive mode: use wizard
+        if config_path.exists():
+            config = load_config()
+        else:
+            config = Config()
+            save_config(config)
+            console.print(f"[green]✓[/green] Created config at {config_path}")
+
+        # Run interactive wizard
+        from nanobot.cli.onboard_wizard import run_onboard
+
+        try:
+            # Pass the config with workspace override applied as initial config
+            config = run_onboard(initial_config=config)
+            save_config(config, config_path)
+            console.print(f"[green]✓[/green] Config saved at {config_path}")
+        except Exception as e:
+            console.print(f"[red]✗[/red] Error during configuration: {e}")
+            console.print("[yellow]Please run 'nanobot onboard' again to complete setup.[/yellow]")
+            raise typer.Exit(1)
 
     _onboard_plugins(config_path)
 
-    # Create workspace
-    workspace = get_workspace_path()
-
+    # Create workspace, preferring the configured workspace path.
+    workspace = get_workspace_path(config.workspace_path)
     if not workspace.exists():
         workspace.mkdir(parents=True, exist_ok=True)
         console.print(f"[green]✓[/green] Created workspace at {workspace}")
 
     sync_workspace_templates(workspace)
 
+    agent_cmd = 'nanobot agent -m "Hello!"'
+    if config:
+        agent_cmd += f" --config {config_path}"
+
     console.print(f"\n{__logo__} nanobot is ready!")
     console.print("\nNext steps:")
-    console.print("  1. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
-    console.print("  2. Start gateway: [cyan]nanobot gateway[/cyan]")
+    if non_interactive:
+        console.print(f"  1. Add your API key to [cyan]{config_path}[/cyan]")
+        console.print("     Get one at: https://openrouter.ai/keys")
+        console.print(f"  2. Chat: [cyan]{agent_cmd}[/cyan]")
+    else:
+        console.print("  1. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
+        console.print("  2. Start gateway: [cyan]nanobot gateway[/cyan]")
     console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
 
 
@@ -363,6 +407,7 @@ def _make_provider(config: Config):
             api_key=p.api_key if p else "no-key",
             api_base=config.get_api_base(model) or "http://localhost:8000/v1",
             default_model=model,
+            extra_headers=p.extra_headers if p else None,
         )
     # Azure OpenAI: direct Azure OpenAI endpoint with deployment name
     elif provider_name == "azure_openai":
@@ -489,6 +534,7 @@ def gateway(
         web_search_config=config.tools.web.search,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
+        input_limits=config.tools.input_limits,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
@@ -681,6 +727,7 @@ def agent(
         web_search_config=config.tools.web.search,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
+        input_limits=config.tools.input_limits,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,

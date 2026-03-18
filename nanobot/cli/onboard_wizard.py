@@ -938,14 +938,21 @@ def _show_summary(config: Config) -> None:
 # --- Main Entry Point ---
 
 
-def run_onboard() -> Config:
-    """Run the interactive onboarding questionnaire."""
-    config_path = get_config_path()
+def run_onboard(initial_config: Config | None = None) -> Config:
+    """Run the interactive onboarding questionnaire.
 
-    if config_path.exists():
-        config = load_config()
+    Args:
+        initial_config: Optional pre-loaded config to use as starting point.
+                       If None, loads from config file or creates new default.
+    """
+    if initial_config is not None:
+        config = initial_config
     else:
-        config = Config()
+        config_path = get_config_path()
+        if config_path.exists():
+            config = load_config()
+        else:
+            config = Config()
 
     while True:
         try:
