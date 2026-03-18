@@ -7,6 +7,7 @@ from typing import Any
 
 from loguru import logger
 
+from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
@@ -123,23 +124,39 @@ class ChannelManager:
 
                 if msg.metadata.get("_progress"):
                     if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
+                        self._resolve_delivery(msg)
                         continue
                     if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
+                        self._resolve_delivery(msg)
                         continue
 
                 channel = self.channels.get(msg.channel)
                 if channel:
                     try:
                         await channel.send(msg)
+                        self._resolve_delivery(msg)
                     except Exception as e:
+                        self._resolve_delivery(msg, e)
                         logger.error("Error sending to {}: {}", msg.channel, e)
                 else:
+                    error = RuntimeError(f"Unknown channel: {msg.channel}")
+                    self._resolve_delivery(msg, error)
                     logger.warning("Unknown channel: {}", msg.channel)
 
             except asyncio.TimeoutError:
                 continue
             except asyncio.CancelledError:
                 break
+
+    @staticmethod
+    def _resolve_delivery(msg: OutboundMessage, error: Exception | None = None) -> None:
+        future = getattr(msg, "delivery_future", None)
+        if not future or future.done():
+            return
+        if error is None:
+            future.set_result(None)
+            return
+        future.set_exception(error)
 
     def get_channel(self, name: str) -> BaseChannel | None:
         """Get a channel by name."""

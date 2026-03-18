@@ -1,5 +1,7 @@
 """Event types for the message bus."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -34,5 +36,5 @@ class OutboundMessage:
     reply_to: str | None = None
     media: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
-
+    delivery_future: Any | None = field(default=None, repr=False, compare=False)
 

@@ -1,5 +1,6 @@
 """Message tool for sending messages to users."""
 
+import asyncio
 from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool
@@ -97,10 +98,13 @@ class MessageTool(Tool):
             metadata={
                 "message_id": message_id,
             },
+            delivery_future=asyncio.get_running_loop().create_future(),
         )
 
         try:
             await self._send_callback(msg)
+            if msg.delivery_future is not None:
+                await msg.delivery_future
             if channel == self._default_channel and chat_id == self._default_chat_id:
                 self._sent_in_turn = True
             media_info = f" with {len(media)} attachments" if media else ""

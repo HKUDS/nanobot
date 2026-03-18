@@ -19,6 +19,12 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
     return AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
 
 
+async def _ack_and_store(msg: OutboundMessage, sent: list[OutboundMessage]) -> None:
+    sent.append(msg)
+    if msg.delivery_future is not None and not msg.delivery_future.done():
+        msg.delivery_future.set_result(None)
+
+
 class TestMessageToolSuppressLogic:
     """Final reply suppressed only when message tool sends to the same target."""
 
@@ -39,7 +45,10 @@ class TestMessageToolSuppressLogic:
         sent: list[OutboundMessage] = []
         mt = loop.tools.get("message")
         if isinstance(mt, MessageTool):
-            mt.set_send_callback(AsyncMock(side_effect=lambda m: sent.append(m)))
+            async def _send(msg: OutboundMessage) -> None:
+                await _ack_and_store(msg, sent)
+
+            mt.set_send_callback(_send)
 
         msg = InboundMessage(channel="feishu", sender_id="user1", chat_id="chat123", content="Send")
         result = await loop._process_message(msg)
@@ -64,7 +73,10 @@ class TestMessageToolSuppressLogic:
         sent: list[OutboundMessage] = []
         mt = loop.tools.get("message")
         if isinstance(mt, MessageTool):
-            mt.set_send_callback(AsyncMock(side_effect=lambda m: sent.append(m)))
+            async def _send(msg: OutboundMessage) -> None:
+                await _ack_and_store(msg, sent)
+
+            mt.set_send_callback(_send)
 
         msg = InboundMessage(channel="feishu", sender_id="user1", chat_id="chat123", content="Send email")
         result = await loop._process_message(msg)
