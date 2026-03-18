@@ -36,3 +36,4 @@ bridge/node_modules/
 # Local nanobot runtime data — never commit user data or credentials
 ~/.nanobot/
 .nanobot/
+.worktrees/
