@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from nanobot.agent.context import (
     compress_context,
     estimate_messages_tokens,
@@ -119,7 +117,6 @@ class MockProvider:
 
 
 class TestSummarizeAndCompress:
-    @pytest.mark.asyncio
     async def test_under_budget_no_summarization(self):
         provider = MockProvider()
         msgs = [
@@ -130,7 +127,6 @@ class TestSummarizeAndCompress:
         assert result == msgs
         assert not provider.called
 
-    @pytest.mark.asyncio
     async def test_summarization_triggered_on_large_context(self):
         """When messages exceed budget and truncation isn't enough, LLM summary is used."""
         provider = MockProvider("Compressed summary of conversation.")
@@ -159,7 +155,6 @@ class TestSummarizeAndCompress:
         assert any("Compressed Summary" in str(m.get("content", "")) for m in result)
         assert provider.called
 
-    @pytest.mark.asyncio
     async def test_summary_cached(self):
         """Second call with same messages uses cached summary."""
         provider = MockProvider("Cached summary.")
@@ -185,7 +180,6 @@ class TestSummarizeAndCompress:
         # Should not call provider again (cached)
         assert not provider.called
 
-    @pytest.mark.asyncio
     async def test_fallback_on_provider_failure(self):
         """If LLM summary fails, falls back to dropping messages."""
 
@@ -211,7 +205,6 @@ class TestSummarizeAndCompress:
         assert result[0]["role"] == "system"
         assert result[-1]["content"] == "last"
 
-    @pytest.mark.asyncio
     async def test_none_content_in_middle_messages(self):
         """Messages with content=None (e.g. assistant tool_calls) must not crash."""
         from nanobot.agent.context import _summary_cache

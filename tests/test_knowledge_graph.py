@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
-
 from nanobot.agent.memory.graph import KnowledgeGraph
 from nanobot.agent.memory.ontology import (
     Entity,
@@ -41,14 +39,12 @@ class TestGracefulDegradation:
         # Sync methods return safe defaults
         assert g.error is not None or g.enabled is False
 
-    @pytest.mark.asyncio
     async def test_upsert_entity_noop_when_disabled(self) -> None:
         g = KnowledgeGraph()
         g.enabled = False
         entity = Entity(name="Test", entity_type=EntityType.PERSON)
         await g.upsert_entity(entity)  # Should not raise
 
-    @pytest.mark.asyncio
     async def test_add_relationship_noop_when_disabled(self) -> None:
         g = KnowledgeGraph()
         g.enabled = False
@@ -59,64 +55,54 @@ class TestGracefulDegradation:
         )
         await g.add_relationship(rel)  # Should not raise
 
-    @pytest.mark.asyncio
     async def test_get_entity_returns_none_when_disabled(self) -> None:
         g = KnowledgeGraph()
         g.enabled = False
         assert await g.get_entity("anything") is None
 
-    @pytest.mark.asyncio
     async def test_search_entities_returns_empty_when_disabled(self) -> None:
         g = KnowledgeGraph()
         g.enabled = False
         assert await g.search_entities("test") == []
 
-    @pytest.mark.asyncio
     async def test_get_neighbors_returns_empty_when_disabled(self) -> None:
         g = KnowledgeGraph()
         g.enabled = False
         assert await g.get_neighbors("test") == []
 
-    @pytest.mark.asyncio
     async def test_find_paths_returns_empty_when_disabled(self) -> None:
         g = KnowledgeGraph()
         g.enabled = False
         assert await g.find_paths("a", "b") == []
 
-    @pytest.mark.asyncio
     async def test_query_subgraph_returns_empty_when_disabled(self) -> None:
         g = KnowledgeGraph()
         g.enabled = False
         result = await g.query_subgraph(["a", "b"])
         assert result == {"nodes": [], "edges": []}
 
-    @pytest.mark.asyncio
     async def test_resolve_entity_returns_normalized_when_disabled(self) -> None:
         g = KnowledgeGraph()
         g.enabled = False
         assert await g.resolve_entity("Carlos Martinez") == "carlos_martinez"
 
-    @pytest.mark.asyncio
     async def test_ingest_event_triples_noop_when_disabled(self) -> None:
         g = KnowledgeGraph()
         g.enabled = False
         triples = [Triple(subject="A", predicate=RelationType.USES, object="B")]
         await g.ingest_event_triples("e1", triples)  # Should not raise
 
-    @pytest.mark.asyncio
     async def test_verify_connectivity_returns_false_when_disabled(self) -> None:
         g = KnowledgeGraph()
         g.enabled = False
         g._driver = None
         assert await g.verify_connectivity() is False
 
-    @pytest.mark.asyncio
     async def test_ensure_indexes_noop_when_disabled(self) -> None:
         g = KnowledgeGraph()
         g.enabled = False
         await g.ensure_indexes()  # Should not raise
 
-    @pytest.mark.asyncio
     async def test_close_noop_when_no_driver(self) -> None:
         g = KnowledgeGraph()
         g.enabled = False

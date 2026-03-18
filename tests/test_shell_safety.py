@@ -241,26 +241,22 @@ class TestShellWorkspaceRestriction:
 class TestShellExecution:
     """Actually execute commands to verify behavior."""
 
-    @pytest.mark.asyncio
     async def test_simple_echo(self, tmp_path):
         tool = ExecTool(working_dir=str(tmp_path))
         result = await tool.execute(command="echo hello")
         assert result.success
         assert "hello" in result.output
 
-    @pytest.mark.asyncio
     async def test_exit_code_failure(self, tmp_path):
         tool = ExecTool(working_dir=str(tmp_path))
         result = await tool.execute(command="false")
         assert not result.success
 
-    @pytest.mark.asyncio
     async def test_denied_command_raises(self, tmp_path):
         tool = ExecTool(working_dir=str(tmp_path))
         with pytest.raises(ToolPermissionError):
             await tool.execute(command="rm -rf /")
 
-    @pytest.mark.asyncio
     async def test_cmd_alias(self, tmp_path):
         """The 'cmd' parameter works as alias for 'command'."""
         tool = ExecTool(working_dir=str(tmp_path))
@@ -268,7 +264,6 @@ class TestShellExecution:
         assert result.success
         assert "alias-test" in result.output
 
-    @pytest.mark.asyncio
     async def test_timeout(self, tmp_path):
         tool = ExecTool(working_dir=str(tmp_path), timeout=1)
         result = await tool.execute(command='python3 -c "import time; time.sleep(30)"')

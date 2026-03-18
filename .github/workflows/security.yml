@@ -47,13 +47,14 @@ jobs:
         run: docker build -t nanobot-scan:${{ github.sha }} .
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: nanobot-scan:${{ github.sha }}
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
-          exit-code: '0'  # Don't fail CI — report only for now
+          exit-code: '1'
+          trivyignores: '.trivyignore'
 
       - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
@@ -69,10 +70,11 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run Trivy config scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: 'config'
           scan-ref: '.'
           format: 'table'
           severity: 'CRITICAL,HIGH,MEDIUM'
-          exit-code: '0'
+          exit-code: '1'
+          trivyignores: '.trivyignore'

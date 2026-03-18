@@ -170,7 +170,6 @@ def test_cron_tool_add_list_remove_success() -> None:
     assert removed.success
 
 
-@pytest.mark.asyncio
 async def test_cron_tool_execute_dispatch() -> None:
     tool = CronTool(_FakeCron())
     tool.set_context("telegram", "123")

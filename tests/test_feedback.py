@@ -38,7 +38,6 @@ class TestFeedbackTool:
         assert tool.name == "feedback"
         assert "feedback" in tool.description.lower()
 
-    @pytest.mark.asyncio
     async def test_positive_feedback(self, tool: FeedbackTool, events_file: Path) -> None:
         result = await tool.execute(rating="positive", comment="great answer")
         assert result.success
@@ -53,7 +52,6 @@ class TestFeedbackTool:
         assert event["comment"] == "great answer"
         assert event["channel"] == "telegram"
 
-    @pytest.mark.asyncio
     async def test_negative_feedback_with_topic(
         self, tool: FeedbackTool, events_file: Path
     ) -> None:
@@ -65,13 +63,11 @@ class TestFeedbackTool:
         assert event["rating"] == "negative"
         assert event["topic"] == "calendar"
 
-    @pytest.mark.asyncio
     async def test_invalid_rating(self, tool: FeedbackTool) -> None:
         result = await tool.execute(rating="maybe")
         assert not result.success
         assert "positive" in result.output or "negative" in result.output
 
-    @pytest.mark.asyncio
     async def test_minimal_feedback(self, tool: FeedbackTool, events_file: Path) -> None:
         """Only rating is required."""
         result = await tool.execute(rating="positive")
@@ -79,7 +75,6 @@ class TestFeedbackTool:
         event = json.loads(events_file.read_text().strip())
         assert "comment" not in event  # omitted when empty
 
-    @pytest.mark.asyncio
     async def test_multiple_events_appended(self, tool: FeedbackTool, events_file: Path) -> None:
         await tool.execute(rating="positive")
         await tool.execute(rating="negative", comment="fix this")
@@ -87,7 +82,6 @@ class TestFeedbackTool:
         lines = events_file.read_text().strip().splitlines()
         assert len(lines) == 3
 
-    @pytest.mark.asyncio
     async def test_no_events_file(self) -> None:
         """When events_file is None, feedback still succeeds (just not persisted)."""
         tool = FeedbackTool(events_file=None)

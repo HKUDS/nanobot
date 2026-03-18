@@ -117,7 +117,6 @@ def test_reranker_model_load_failure_and_non_dict_reason(monkeypatch: pytest.Mon
     assert isinstance(ranked[0]["retrieval_reason"], dict)
 
 
-@pytest.mark.asyncio
 async def test_extractor_parse_and_fallback_paths() -> None:
     ext = _make_extractor()
     assert ext.parse_tool_args("not-json") is None
@@ -216,7 +215,6 @@ def test_mem0_history_db_fallback(tmp_path: Path) -> None:
     assert out and out[0]["summary"].lower().startswith("oauth2")
 
 
-@pytest.mark.asyncio
 async def test_extractor_llm_tool_call_non_dict_items_and_invalid_source_span() -> None:
     ext = _make_extractor()
 

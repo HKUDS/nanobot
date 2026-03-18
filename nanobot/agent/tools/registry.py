@@ -212,7 +212,7 @@ class ToolRegistry:
                 return ToolResult.fail(str(e) + self._HINT, error_type=e.error_type)
             except Exception as e:  # crash-barrier: user-provided tool execution
                 duration_ms = (time.monotonic() - t0) * 1000
-                bind_trace().debug(
+                bind_trace().exception(
                     "Tool {} error=unknown duration_ms={:.0f}",
                     name,
                     duration_ms,

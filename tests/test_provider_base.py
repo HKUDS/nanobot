@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 
@@ -49,7 +47,6 @@ def test_sanitize_empty_content_variants() -> None:
     assert out[2]["content"][0]["text"] == "keep"
 
 
-@pytest.mark.asyncio
 async def test_stream_chat_default_fallback() -> None:
     provider = _DummyProvider(api_key=None)
     chunks = [
@@ -66,7 +63,6 @@ async def test_stream_chat_default_fallback() -> None:
     assert chunks[0].tool_calls and chunks[0].tool_calls[0].name == "read"
 
 
-@pytest.mark.asyncio
 async def test_aclose_default_noop() -> None:
     provider = _DummyProvider(api_key=None)
     await provider.aclose()

@@ -1,5 +1,6 @@
 """Utility functions for nanobot."""
 
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 
@@ -55,13 +56,26 @@ def truncate_string(s: str, max_len: int = 100, suffix: str = "...") -> str:
     return s[: max_len - len(suffix)] + suffix
 
 
-def safe_filename(name: str) -> str:
-    """Convert a string to a safe filename."""
-    # Replace unsafe characters
-    unsafe = '<>:"/\\|?*'
-    for char in unsafe:
+def safe_filename(name: str, max_len: int = 200) -> str:
+    """Convert a string to a safe filename.
+
+    Hardening applied (SEC-L3):
+    - Null bytes and control characters stripped before any other processing.
+    - NFKC Unicode normalization collapses homoglyphs and compatibility forms.
+    - Result truncated to *max_len* bytes (default 200) to prevent filesystem
+      limits from raising unexpected errors on very long session keys.
+    """
+    # Strip null bytes and ASCII control characters (U+0000–U+001F, U+007F).
+    name = "".join(c for c in name if unicodedata.category(c) != "Cc")
+    # NFKC normalization: collapse Unicode homoglyphs / compatibility variants.
+    name = unicodedata.normalize("NFKC", name)
+    # Replace characters that are unsafe in filenames on common OSes.
+    for char in '<>:"/\\|?*':
         name = name.replace(char, "_")
-    return name.strip()
+    name = name.strip()
+    # Encode to UTF-8 and truncate to byte budget, then decode back safely.
+    encoded = name.encode("utf-8")[:max_len]
+    return encoded.decode("utf-8", errors="ignore")
 
 
 def parse_session_key(key: str) -> tuple[str, str]:

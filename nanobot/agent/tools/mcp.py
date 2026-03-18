@@ -14,7 +14,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 class MCPToolWrapper(Tool):
     """Wraps a single MCP server tool as a nanobot Tool."""
 
-    def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30):
+    def __init__(self, session: Any, server_name: str, tool_def: Any, tool_timeout: int = 30):
         self._session = session
         self._original_name = tool_def.name
         self._name = f"mcp_{server_name}_{tool_def.name}"

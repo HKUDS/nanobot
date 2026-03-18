@@ -93,7 +93,6 @@ class _SyncDriver:
         self.closed = True
 
 
-@pytest.mark.asyncio
 async def test_init_verify_and_close_branches(monkeypatch: pytest.MonkeyPatch) -> None:
     async_driver = _AsyncDriver()
     sync_driver = _SyncDriver()
@@ -127,7 +126,6 @@ async def test_init_verify_and_close_branches(monkeypatch: pytest.MonkeyPatch) -
     assert g2.enabled is False
 
 
-@pytest.mark.asyncio
 async def test_write_and_read_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     responses = [
         _AsyncResult(
@@ -179,7 +177,6 @@ async def test_write_and_read_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     await g.add_relationship(rel)
 
 
-@pytest.mark.asyncio
 async def test_ingest_event_triples_and_resolve_entity(monkeypatch: pytest.MonkeyPatch) -> None:
     g = KnowledgeGraph.__new__(KnowledgeGraph)
     g.enabled = True

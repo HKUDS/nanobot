@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tracing import bind_trace
+from nanobot.errors import ToolExecutionError
 
 if TYPE_CHECKING:
     from nanobot.agent.tools.base import Tool
@@ -106,7 +107,11 @@ class ToolExecutor:
                 coros = [self._registry.execute(t.name, t.arguments) for t in batch]
                 batch_results = await asyncio.gather(*coros, return_exceptions=True)
                 for j, br in enumerate(batch_results):
-                    if isinstance(br, BaseException):
+                    if isinstance(br, ToolExecutionError):
+                        results[batch_start + j] = ToolResult.fail(
+                            str(br), error_type=br.error_type
+                        )
+                    elif isinstance(br, BaseException):
                         results[batch_start + j] = ToolResult.fail(f"Error: {br}")
                     else:
                         results[batch_start + j] = br

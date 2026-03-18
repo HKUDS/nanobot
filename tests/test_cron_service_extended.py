@@ -28,7 +28,6 @@ def test_load_store_invalid_json(tmp_path) -> None:
     assert service.list_jobs(include_disabled=True) == []
 
 
-@pytest.mark.asyncio
 async def test_start_status_stop(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
     await service.start()
@@ -38,7 +37,6 @@ async def test_start_status_stop(tmp_path) -> None:
     assert service.status()["enabled"] is False
 
 
-@pytest.mark.asyncio
 async def test_execute_job_success_and_error_paths(tmp_path) -> None:
     path = tmp_path / "cron" / "jobs.json"
 
@@ -66,7 +64,6 @@ async def test_execute_job_success_and_error_paths(tmp_path) -> None:
     assert found.state.last_status in {"ok", "error"}
 
 
-@pytest.mark.asyncio
 async def test_run_job_force_disabled_and_not_found(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
     job = service.add_job(
@@ -90,7 +87,6 @@ def test_remove_and_enable_job_paths(tmp_path) -> None:
     assert service.remove_job(job.id) is True
 
 
-@pytest.mark.asyncio
 async def test_at_job_delete_after_run(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
     job = service.add_job(

@@ -6,8 +6,6 @@ target_role values with clear error messages before dispatching.
 
 from __future__ import annotations
 
-import pytest
-
 from nanobot.agent.tools.delegate import (
     DelegateParallelTool,
     DelegateTool,
@@ -94,7 +92,6 @@ class TestUnknownRoleError:
 
 
 class TestDelegateToolValidation:
-    @pytest.mark.asyncio
     async def test_unknown_role_rejected(self) -> None:
         tool = _make_delegate_tool()
         result = await tool.execute(task="do work", target_role="web")
@@ -104,14 +101,12 @@ class TestDelegateToolValidation:
         assert "coder" in result.output
         assert "researcher" in result.output
 
-    @pytest.mark.asyncio
     async def test_known_role_accepted(self) -> None:
         tool = _make_delegate_tool()
         result = await tool.execute(task="write code", target_role="coder")
         assert result.success
         assert "Done by coder" in result.output
 
-    @pytest.mark.asyncio
     async def test_empty_role_allowed(self) -> None:
         """Empty target_role skips validation — coordinator classifies."""
         tool = _make_delegate_tool()
@@ -119,27 +114,23 @@ class TestDelegateToolValidation:
         assert result.success
         assert "Done by auto" in result.output
 
-    @pytest.mark.asyncio
     async def test_whitespace_role_treated_as_empty(self) -> None:
         tool = _make_delegate_tool()
         result = await tool.execute(task="do work", target_role="   ")
         assert result.success
 
-    @pytest.mark.asyncio
     async def test_no_roles_fn_skips_validation(self) -> None:
         """When roles callback is not set, validation is skipped."""
         tool = _make_delegate_tool(with_roles=False)
         result = await tool.execute(task="do work", target_role="anything")
         assert result.success
 
-    @pytest.mark.asyncio
     async def test_no_dispatch_returns_config_error(self) -> None:
         tool = _make_delegate_tool(with_dispatch=False)
         result = await tool.execute(task="test", target_role="coder")
         assert not result.success
         assert result.metadata.get("error_type") == "config"
 
-    @pytest.mark.asyncio
     async def test_empty_available_roles_skips_validation(self) -> None:
         """If the roles callback returns [], don't reject (no roles configured yet)."""
         tool = DelegateTool()
@@ -155,7 +146,6 @@ class TestDelegateToolValidation:
 
 
 class TestDelegateParallelToolValidation:
-    @pytest.mark.asyncio
     async def test_unknown_role_in_subtask_rejected(self) -> None:
         tool = _make_parallel_tool()
         result = await tool.execute(
@@ -169,7 +159,6 @@ class TestDelegateParallelToolValidation:
         assert "web" in result.output
         assert "Available roles" in result.output
 
-    @pytest.mark.asyncio
     async def test_multiple_unknown_roles_all_reported(self) -> None:
         tool = _make_parallel_tool()
         result = await tool.execute(
@@ -185,7 +174,6 @@ class TestDelegateParallelToolValidation:
         # Valid role "coder" should NOT appear as invalid
         assert "Subtask [2]" not in result.output
 
-    @pytest.mark.asyncio
     async def test_all_valid_roles_accepted(self) -> None:
         tool = _make_parallel_tool()
         result = await tool.execute(
@@ -196,7 +184,6 @@ class TestDelegateParallelToolValidation:
         )
         assert result.success
 
-    @pytest.mark.asyncio
     async def test_empty_roles_in_subtasks_allowed(self) -> None:
         tool = _make_parallel_tool()
         result = await tool.execute(
@@ -207,13 +194,11 @@ class TestDelegateParallelToolValidation:
         )
         assert result.success
 
-    @pytest.mark.asyncio
     async def test_no_roles_fn_skips_validation(self) -> None:
         tool = _make_parallel_tool(with_roles=False)
         result = await tool.execute(subtasks=[{"task": "work", "target_role": "bogus"}])
         assert result.success
 
-    @pytest.mark.asyncio
     async def test_no_dispatch_blocked(self) -> None:
         tool = _make_parallel_tool(with_dispatch=False)
         result = await tool.execute(subtasks=[{"task": "work"}])

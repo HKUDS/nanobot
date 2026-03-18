@@ -42,6 +42,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.config.schema import AgentRoleConfig
+from nanobot.errors import NanobotError
 
 if TYPE_CHECKING:
     from nanobot.agent.coordinator import Coordinator
@@ -539,7 +540,7 @@ class DelegationDispatcher:
     ) -> DelegationResult:
         """Route a delegated sub-task through the coordinator and execute it."""
         if not self.coordinator:
-            raise RuntimeError("Coordinator not available for delegation")
+            raise NanobotError("Coordinator not available for delegation")
 
         # Resolve role
         role: AgentRoleConfig | None = None

@@ -8,8 +8,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from nanobot.agent.mission import Mission, MissionManager, MissionStatus
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.mission import (
@@ -79,7 +77,6 @@ def _make_manager(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_start_returns_pending_mission() -> None:
     """start() should return a Mission immediately with PENDING status."""
     mgr = _make_manager()
@@ -92,7 +89,6 @@ async def test_start_returns_pending_mission() -> None:
     assert len(mission.id) == 8
 
 
-@pytest.mark.asyncio
 async def test_mission_completes_with_result() -> None:
     """A mission should run to completion and deliver via OutboundMessage."""
     bus = _make_bus()
@@ -117,7 +113,6 @@ async def test_mission_completes_with_result() -> None:
     bus.publish_outbound.assert_awaited()
 
 
-@pytest.mark.asyncio
 async def test_mission_delivers_on_failure() -> None:
     """If the LLM raises, the mission should FAIL and still deliver a message."""
 
@@ -147,7 +142,6 @@ async def test_mission_delivers_on_failure() -> None:
     bus.publish_outbound.assert_awaited()
 
 
-@pytest.mark.asyncio
 async def test_mission_grounded_when_tools_used() -> None:
     """Grounded flag should be True when the agent used at least one tool."""
     responses = [
@@ -180,7 +174,6 @@ async def test_mission_grounded_when_tools_used() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_resolve_role_falls_back_to_general() -> None:
     """Without a coordinator, _resolve_role should return 'general'."""
     mgr = _make_manager()
@@ -188,7 +181,6 @@ async def test_resolve_role_falls_back_to_general() -> None:
     assert role.name == "general"
 
 
-@pytest.mark.asyncio
 async def test_resolve_role_uses_coordinator_when_available() -> None:
     """When a coordinator is set, _resolve_role should call it."""
     mgr = _make_manager()
@@ -203,7 +195,6 @@ async def test_resolve_role_uses_coordinator_when_available() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_mission_start_tool_returns_confirmation() -> None:
     """MissionStartTool.execute() should return a success ToolResult."""
     mgr = _make_manager()
@@ -254,7 +245,6 @@ def test_list_active_and_get() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_cancel_sets_cancelled_status() -> None:
     """Cancelling a running mission should set CANCELLED and deliver notification."""
 
@@ -321,7 +311,6 @@ def test_cancel_completed_returns_false() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_concurrent_missions_complete_independently() -> None:
     """Multiple missions launched simultaneously should all complete."""
     responses = [LLMResponse(content=f"Result {i}") for i in range(3)]
@@ -344,7 +333,6 @@ async def test_concurrent_missions_complete_independently() -> None:
     assert bus.publish_outbound.await_count == 3
 
 
-@pytest.mark.asyncio
 async def test_result_truncation_in_delivery() -> None:
     """OutboundMessage body should be truncated when result is very long."""
     long_content = "x" * 10000
@@ -372,7 +360,6 @@ async def test_result_truncation_in_delivery() -> None:
     assert "truncated" in call_args.content
 
 
-@pytest.mark.asyncio
 async def test_bus_delivery_failure_does_not_crash() -> None:
     """If bus.publish_outbound raises, mission should still be COMPLETED."""
     bus = _make_bus()
@@ -394,7 +381,6 @@ async def test_bus_delivery_failure_does_not_crash() -> None:
     assert mission.result == "ok"
 
 
-@pytest.mark.asyncio
 async def test_retry_when_no_tools_used() -> None:
     """Agent that uses no tools on first pass should retry and use tools on second."""
     responses = [
@@ -452,7 +438,6 @@ def test_role_allowed_tools_whitelist() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_mission_status_tool_returns_info() -> None:
     """mission_status should return JSON with mission details."""
     mgr = _make_manager()
@@ -477,7 +462,6 @@ async def test_mission_status_tool_returns_info() -> None:
     assert '"grounded": true' in result.output
 
 
-@pytest.mark.asyncio
 async def test_mission_status_tool_not_found() -> None:
     """mission_status should fail for unknown mission ID."""
     mgr = _make_manager()
@@ -492,7 +476,6 @@ async def test_mission_status_tool_not_found() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_mission_list_tool_returns_all() -> None:
     """mission_list should list missions with mixed statuses."""
     mgr = _make_manager()
@@ -517,7 +500,6 @@ async def test_mission_list_tool_returns_all() -> None:
     assert "m2" in result.output
 
 
-@pytest.mark.asyncio
 async def test_mission_list_tool_filters_by_status() -> None:
     """mission_list with status_filter should return only matching missions."""
     mgr = _make_manager()
@@ -550,7 +532,6 @@ async def test_mission_list_tool_filters_by_status() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_mission_cancel_tool_success() -> None:
     """mission_cancel should return ok when cancel signal is sent."""
 
@@ -587,7 +568,6 @@ async def test_mission_cancel_tool_success() -> None:
             pass
 
 
-@pytest.mark.asyncio
 async def test_mission_cancel_tool_not_found() -> None:
     """mission_cancel should fail for unknown mission ID."""
     mgr = _make_manager()
@@ -601,7 +581,6 @@ async def test_mission_cancel_tool_not_found() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_mission_emits_langfuse_span() -> None:
     """_execute_mission should wrap execution in a langfuse span."""
     mgr = _make_manager(responses=[LLMResponse(content="done")])
@@ -622,7 +601,6 @@ async def test_mission_emits_langfuse_span() -> None:
         assert "mission_id" in call_kwargs["metadata"]
 
 
-@pytest.mark.asyncio
 async def test_mission_scores_grounding() -> None:
     """Completed mission should score grounding confidence via langfuse."""
     mgr = _make_manager(
@@ -645,7 +623,6 @@ async def test_mission_scores_grounding() -> None:
         assert call_kwargs["value"] == 1.0
 
 
-@pytest.mark.asyncio
 async def test_mission_sets_trace_context() -> None:
     """Mission execution should set TraceContext with the mission ID."""
     mgr = _make_manager(responses=[LLMResponse(content="ok")])
@@ -731,7 +708,6 @@ def test_mcp_tools_pass_through_allowed() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_max_concurrent_rejects_excess() -> None:
     """Starting a mission beyond max_concurrent should return ToolResult.fail."""
     mgr = _make_manager(
@@ -749,7 +725,6 @@ async def test_max_concurrent_rejects_excess() -> None:
     assert "Maximum concurrent missions" in result.output
 
 
-@pytest.mark.asyncio
 async def test_max_concurrent_allows_after_completion() -> None:
     """Once a mission completes, a new slot opens up."""
     mgr = _make_manager(
@@ -766,7 +741,6 @@ async def test_max_concurrent_allows_after_completion() -> None:
     assert mission.id  # successfully started
 
 
-@pytest.mark.asyncio
 async def test_result_max_chars_configurable() -> None:
     """_deliver_result should respect the configured result_max_chars."""
     mgr = _make_manager()

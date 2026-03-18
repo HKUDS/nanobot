@@ -31,7 +31,6 @@ def _channel() -> TelegramChannel:
     return ch
 
 
-@pytest.mark.asyncio
 async def test_start_validation_and_stop(monkeypatch: pytest.MonkeyPatch) -> None:
     ch = _channel()
     ch.config.token = ""
@@ -105,7 +104,6 @@ async def test_start_validation_and_stop(monkeypatch: pytest.MonkeyPatch) -> Non
     assert ch._app is None
 
 
-@pytest.mark.asyncio
 async def test_send_and_streaming_and_helpers(tmp_path: Path) -> None:
     ch = _channel()
 
@@ -154,7 +152,6 @@ async def test_send_and_streaming_and_helpers(tmp_path: Path) -> None:
     assert ch._sender_id(SimpleNamespace(id=1, username="u")) == "1|u"
 
 
-@pytest.mark.asyncio
 async def test_message_and_command_handlers(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

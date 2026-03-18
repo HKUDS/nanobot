@@ -200,7 +200,6 @@ class _HelperTool(Tool):
         tools = loader.discover_tools(["private-skill"])
         assert len(tools) == 0
 
-    @pytest.mark.asyncio
     async def test_discovered_tool_executes(self, workspace: Path, loader: SkillsLoader) -> None:
         _make_skill(workspace / "skills", "exec-test", tools_py=SIMPLE_TOOLS_PY)
         tools = loader.discover_tools(["exec-test"])

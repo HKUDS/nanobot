@@ -119,7 +119,6 @@ class TestTelegramStreaming:
         ch._app = app
         return ch
 
-    @pytest.mark.asyncio
     async def test_streaming_sends_new_message(self, channel):
         """First streaming chunk sends a new message and stores msg_id."""
         sent_msg = MagicMock()
@@ -132,7 +131,6 @@ class TestTelegramStreaming:
         channel._app.bot.send_message.assert_called_once()
         assert channel._streaming_msg_ids["123"] == 42
 
-    @pytest.mark.asyncio
     async def test_streaming_edits_existing_message(self, channel):
         """Subsequent streaming chunks edit the existing message."""
         channel._streaming_msg_ids["123"] = 42
@@ -145,7 +143,6 @@ class TestTelegramStreaming:
         call_kwargs = channel._app.bot.edit_message_text.call_args
         assert call_kwargs.kwargs["message_id"] == 42
 
-    @pytest.mark.asyncio
     async def test_streaming_edit_not_modified_is_silent(self, channel):
         """'Message is not modified' error is silently ignored."""
         channel._streaming_msg_ids["123"] = 42
@@ -159,7 +156,6 @@ class TestTelegramStreaming:
         # msg_id preserved (not cleared)
         assert channel._streaming_msg_ids.get("123") == 42
 
-    @pytest.mark.asyncio
     async def test_streaming_edit_failure_sends_new(self, channel):
         """If edit fails for a real reason, fall back to sending a new message."""
         channel._streaming_msg_ids["123"] = 42
@@ -176,7 +172,6 @@ class TestTelegramStreaming:
         channel._app.bot.send_message.assert_called_once()
         assert channel._streaming_msg_ids["123"] == 99
 
-    @pytest.mark.asyncio
     async def test_final_message_clears_streaming_id(self, channel):
         """Non-streaming message clears the streaming msg_id."""
         channel._streaming_msg_ids["123"] = 42
@@ -187,7 +182,6 @@ class TestTelegramStreaming:
 
         assert "123" not in channel._streaming_msg_ids
 
-    @pytest.mark.asyncio
     async def test_empty_streaming_content_skipped(self, channel):
         """Empty streaming content is not sent."""
         msg = _make_outbound("", streaming=True, progress=True)
@@ -195,7 +189,6 @@ class TestTelegramStreaming:
 
         channel._app.bot.send_message.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_streaming_msg_ids_initialized(self, channel):
         """Channel initializes the streaming tracker."""
         assert hasattr(channel, "_streaming_msg_ids")

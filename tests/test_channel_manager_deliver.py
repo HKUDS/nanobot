@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -67,7 +65,6 @@ def _msg(channel: str = "test", chat_id: str = "u1") -> OutboundMessage:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_deliver_success(tmp_path: Path) -> None:
     ch = _FakeChannel()
     mgr = _make_manager(tmp_path, {"test": ch})
@@ -78,7 +75,6 @@ async def test_deliver_success(tmp_path: Path) -> None:
     assert len(ch._sent) == 1
 
 
-@pytest.mark.asyncio
 async def test_deliver_unknown_channel(tmp_path: Path) -> None:
     mgr = _make_manager(tmp_path, {})
     result = await mgr.deliver(_msg("nonexistent"))
@@ -86,7 +82,6 @@ async def test_deliver_unknown_channel(tmp_path: Path) -> None:
     assert "Unknown channel" in (result.error or "")
 
 
-@pytest.mark.asyncio
 async def test_deliver_catches_delivery_skipped(tmp_path: Path) -> None:
     """deliver() returns failure when channel raises DeliverySkippedError."""
     ch = _FakeChannel(fail_count=999, error=DeliverySkippedError("consent not granted"))
@@ -96,7 +91,6 @@ async def test_deliver_catches_delivery_skipped(tmp_path: Path) -> None:
     assert "consent not granted" in (result.error or "")
 
 
-@pytest.mark.asyncio
 async def test_deliver_catches_runtime_error(tmp_path: Path) -> None:
     ch = _FakeChannel(fail_count=999, error=RuntimeError("socket closed"))
     mgr = _make_manager(tmp_path, {"test": ch})
@@ -110,7 +104,6 @@ async def test_deliver_catches_runtime_error(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_attempt_send_retries_and_succeeds(tmp_path: Path) -> None:
     """Transient failures are retried and delivery succeeds on 2nd attempt."""
     ch = _FakeChannel(fail_count=1)
@@ -121,7 +114,6 @@ async def test_attempt_send_retries_and_succeeds(tmp_path: Path) -> None:
     assert len(ch._sent) == 1
 
 
-@pytest.mark.asyncio
 async def test_attempt_send_respects_max_attempts(tmp_path: Path) -> None:
     """After max_attempts failures, gives up and returns failure."""
     ch = _FakeChannel(fail_count=999)
@@ -131,7 +123,6 @@ async def test_attempt_send_respects_max_attempts(tmp_path: Path) -> None:
     assert ch._attempts == 2
 
 
-@pytest.mark.asyncio
 async def test_attempt_send_writes_dead_letter_on_exhaust(tmp_path: Path) -> None:
     """Failed delivery writes to dead-letter file."""
     ch = _FakeChannel(fail_count=999)
@@ -143,7 +134,6 @@ async def test_attempt_send_writes_dead_letter_on_exhaust(tmp_path: Path) -> Non
     assert "send error" in content
 
 
-@pytest.mark.asyncio
 async def test_attempt_send_succeeds_on_last_retry(tmp_path: Path) -> None:
     """Fails twice, succeeds on 3rd (last) attempt."""
     ch = _FakeChannel(fail_count=2)
@@ -155,7 +145,6 @@ async def test_attempt_send_succeeds_on_last_retry(tmp_path: Path) -> None:
     assert not mgr._dead_letter_file.exists()
 
 
-@pytest.mark.asyncio
 async def test_attempt_send_single_attempt_success(tmp_path: Path) -> None:
     ch = _FakeChannel(fail_count=0)
     mgr = _make_manager(tmp_path, {"test": ch})

@@ -100,7 +100,6 @@ class TestWorkflowFullPipeline:
     agent uses tool, gets result, formulates answer.
     """
 
-    @pytest.mark.asyncio
     async def test_question_tool_answer_pipeline(self, tmp_path: Path):
         """User asks about workspace → agent lists dir → answers."""
         (tmp_path / "README.md").write_text("# My Project")
@@ -130,7 +129,6 @@ class TestWorkflowFullPipeline:
         assert "README" in result.content or "main" in result.content
         assert len(provider.call_log) == 2
 
-    @pytest.mark.asyncio
     async def test_write_then_read_pipeline(self, tmp_path: Path):
         """Agent writes a file then reads it back to confirm."""
         target = tmp_path / "output.txt"
@@ -178,7 +176,6 @@ class TestWorkflowFullPipeline:
 class TestWorkflowContextAssembly:
     """Verify the agent assembles proper context including system prompt."""
 
-    @pytest.mark.asyncio
     async def test_system_prompt_always_present(self, tmp_path: Path):
         provider = ScriptedProvider([LLMResponse(content="Hi!")])
         loop = _make_loop(tmp_path, provider)
@@ -188,7 +185,6 @@ class TestWorkflowContextAssembly:
         assert messages[0]["role"] == "system"
         assert len(messages[0]["content"]) > 0, "System prompt must not be empty"
 
-    @pytest.mark.asyncio
     async def test_user_message_forwarded(self, tmp_path: Path):
         provider = ScriptedProvider([LLMResponse(content="Response")])
         loop = _make_loop(tmp_path, provider)
@@ -198,7 +194,6 @@ class TestWorkflowContextAssembly:
         user_msgs = [m for m in messages if m["role"] == "user"]
         assert any("2+2" in str(m.get("content", "")) for m in user_msgs)
 
-    @pytest.mark.asyncio
     async def test_tools_offered_to_llm(self, tmp_path: Path):
         provider = ScriptedProvider([LLMResponse(content="Done")])
         loop = _make_loop(tmp_path, provider)
@@ -237,7 +232,6 @@ class TestWorkflowErrorHandling:
         msg = _user_friendly_error(RuntimeError("something unexpected"))
         assert "try again" in msg.lower() or "sorry" in msg.lower()
 
-    @pytest.mark.asyncio
     async def test_provider_exception_propagates_from_process_message(self, tmp_path: Path):
         """_process_message propagates exceptions — the caller (run()) catches them."""
 
@@ -300,7 +294,6 @@ class TestWorkflowMemoryRoundtrip:
 class TestWorkflowMultiTurn:
     """Second message in same session should have access to first message's context."""
 
-    @pytest.mark.asyncio
     async def test_second_message_has_history(self, tmp_path: Path):
         provider = ScriptedProvider(
             [

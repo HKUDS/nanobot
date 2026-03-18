@@ -28,7 +28,6 @@ def _manager_with_dead_file(path: Path) -> ChannelManager:
     return mgr
 
 
-@pytest.mark.asyncio
 async def test_start_channel_error_and_start_all_no_channels() -> None:
     mgr = _manager()
     bad_channel = SimpleNamespace(start=AsyncMock(side_effect=RuntimeError("boom")))
@@ -36,7 +35,6 @@ async def test_start_channel_error_and_start_all_no_channels() -> None:
     await mgr.start_all()
 
 
-@pytest.mark.asyncio
 async def test_stop_all_stops_dispatch_and_channels() -> None:
     mgr = _manager()
 
@@ -53,7 +51,6 @@ async def test_stop_all_stops_dispatch_and_channels() -> None:
     assert bad.stop.await_count == 1
 
 
-@pytest.mark.asyncio
 async def test_dispatch_outbound_unknown_channel_and_timeout() -> None:
     mgr = _manager()
     mgr.channels = {}
@@ -93,7 +90,6 @@ def test_write_and_read_dead_letters(tmp_path: Path) -> None:
     assert entries[0]["channel"] == "telegram"
 
 
-@pytest.mark.asyncio
 async def test_replay_dead_letters_dry_run_and_rewrite(tmp_path: Path) -> None:
     dead = tmp_path / "outbound_failed.jsonl"
     entries = [
@@ -136,7 +132,6 @@ async def test_replay_dead_letters_dry_run_and_rewrite(tmp_path: Path) -> None:
     assert len(persisted) == 2
 
 
-@pytest.mark.asyncio
 async def test_dispatch_outbound_filters_and_retries(tmp_path: Path) -> None:
     mgr = _manager_with_dead_file(tmp_path / "outbound_failed.jsonl")
     mgr.config = SimpleNamespace(

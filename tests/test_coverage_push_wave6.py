@@ -48,7 +48,6 @@ def _make_adapter(tmp_path: Path) -> _Mem0Adapter:
     return adapter
 
 
-@pytest.mark.asyncio
 async def test_loop_process_message_system_help_new_and_conflict_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -97,7 +96,6 @@ async def test_loop_process_message_system_help_new_and_conflict_paths(
     assert "failed" in new_out.content.lower()
 
 
-@pytest.mark.asyncio
 async def test_loop_new_exception_and_fallback_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -285,7 +283,6 @@ def test_graph_entity_helpers_and_disabled_paths() -> None:
     assert graph.get_triples_for_entities_sync(set()) == []
 
 
-@pytest.mark.asyncio
 async def test_extractor_correction_helpers_and_provider_failure() -> None:
     extractor = MemoryExtractor(
         to_str_list=lambda v: [str(x) for x in (v or [])],
@@ -337,7 +334,6 @@ def test_persistence_invalid_json_and_jsonl_skip(tmp_path: Path) -> None:
     assert len(rows) == 2
 
 
-@pytest.mark.asyncio
 async def test_loop_connect_mcp_and_tool_parallel_error_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -415,7 +411,6 @@ def test_store_retrieve_core_router_off_and_rollout_status(tmp_path: Path) -> No
     assert meta2["intent"] == "rollout_status"
 
 
-@pytest.mark.asyncio
 async def test_graph_query_subgraph_dedupe_and_get_entity_none() -> None:
     g = KnowledgeGraph.__new__(KnowledgeGraph)
     g.enabled = True
@@ -462,7 +457,6 @@ async def test_graph_query_subgraph_dedupe_and_get_entity_none() -> None:
     assert await g2.get_entity("Missing") is None
 
 
-@pytest.mark.asyncio
 async def test_loop_run_agent_loop_malformed_then_final_nudge(tmp_path: Path) -> None:
     provider = ScriptedProvider([])
     loop = _make_loop(tmp_path, provider)
@@ -491,7 +485,6 @@ async def test_loop_run_agent_loop_malformed_then_final_nudge(tmp_path: Path) ->
     assert any(m.get("role") == "tool" for m in messages)
 
 
-@pytest.mark.asyncio
 async def test_loop_run_agent_loop_delegation_and_failure_reflection_paths(tmp_path: Path) -> None:
     provider = ScriptedProvider([])
     loop = _make_loop(tmp_path, provider)
@@ -736,7 +729,6 @@ def test_mem0_add_text_and_history_fallback_rejections(
     assert rejected >= 1
 
 
-@pytest.mark.asyncio
 async def test_loop_run_agent_nudge_and_reaction_and_close_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -784,7 +776,6 @@ async def test_loop_run_agent_nudge_and_reaction_and_close_paths(
     assert loop._mcp_stack is None
 
 
-@pytest.mark.asyncio
 async def test_loop_dispatch_delegation_route_and_exception_paths(tmp_path: Path) -> None:
     from nanobot.agent.delegation import DelegationDispatcher
 
@@ -802,7 +793,7 @@ async def test_loop_dispatch_delegation_route_and_exception_paths(tmp_path: Path
     dispatcher.record_route_trace = MagicMock()
     loop._dispatcher = dispatcher
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(Exception):
         await loop._dispatch_delegation("", "task", None)
 
     class _Coord:

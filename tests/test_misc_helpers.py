@@ -37,6 +37,17 @@ def test_utils_paths_and_helpers(tmp_path: Path, monkeypatch) -> None:
     assert truncate_string("hello", 10) == "hello"
     assert truncate_string("abcdefghij", 5, "..") == "abc.."
     assert safe_filename('a<b>:"/\\|?*') == "a_b________"
+    # Null bytes stripped (SEC-L3)
+    assert "\x00" not in safe_filename("foo\x00bar")
+    assert safe_filename("foo\x00bar") == "foobar"
+    # Control characters stripped
+    assert safe_filename("a\x01\x1fb") == "ab"
+    # NFKC normalization
+    assert safe_filename("\uff41") == "a"  # fullwidth 'a' → 'a'
+    # Length cap
+    long_name = "x" * 300
+    result = safe_filename(long_name)
+    assert len(result.encode("utf-8")) <= 200
     assert "T" in timestamp()
 
 

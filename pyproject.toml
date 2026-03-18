@@ -67,7 +67,8 @@ dev = [
     "pytest>=9.0.0,<10.0.0",
     "pytest-asyncio>=1.3.0,<2.0.0",
     "pytest-cov>=6.0.0,<7.0.0",
-    "ruff>=0.1.0",
+    "pytest-timeout>=2.3.0,<3.0.0",
+    "ruff>=0.9.0,<1.0.0",
     "mypy>=1.8",
     "pre-commit>=3.6",
 ]
@@ -108,7 +109,7 @@ include = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
@@ -117,6 +118,7 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+timeout = 60
 markers = [
     "golden: golden regression tests (frozen behavior baselines)",
     "contract: contract tests for core abstractions",
@@ -141,6 +143,25 @@ disallow_untyped_defs = true
 
 [[tool.mypy.overrides]]
 module = "nanobot.agent.tools.base"
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "nanobot.agent.capability",
+    "nanobot.agent.consolidation",
+    "nanobot.agent.delegation",
+    "nanobot.agent.failure",
+    "nanobot.agent.loop",
+    "nanobot.agent.mission",
+    "nanobot.agent.scratchpad",
+    "nanobot.agent.skills",
+    "nanobot.agent.streaming",
+    "nanobot.agent.tool_executor",
+    "nanobot.agent.tool_loop",
+    "nanobot.agent.tracing",
+    "nanobot.agent.verifier",
+    "nanobot.agent.tools.*",
+]
 disallow_untyped_defs = true
 
 [tool.coverage.run]

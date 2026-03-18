@@ -20,27 +20,24 @@ response quality before delivery.
 Streaming is supported: LLM tokens are yielded incrementally to the
 channel for progressive display on platforms that support message editing.
 
-**Failure classification and turn-scoped tool suppression** — ``ToolCallTracker``
-classifies each tool failure via ``FailureClass`` (PERMANENT_CONFIG,
-PERMANENT_AUTH, TRANSIENT_TIMEOUT, TRANSIENT_ERROR, LOGICAL_ERROR, UNKNOWN).
-Permanently failing tools and tools that hit the ``REMOVE_THRESHOLD`` count are
-added to a per-turn ``disabled_tools: set[str]`` local to ``_run_agent_loop``.
-The ``ToolRegistry`` is never mutated; suppressed tools are available again in
-the next turn.  ``_build_failure_prompt()`` generates a structured REFLECT-phase
-prompt from live tracker state rather than a static template.
+**Failure classification and turn-scoped tool suppression** — see
+``nanobot.agent.failure`` for ``ToolCallTracker``, ``FailureClass``, and
+``_build_failure_prompt``.  Permanently failing tools and tools that hit the
+``REMOVE_THRESHOLD`` count are added to a per-turn ``disabled_tools: set[str]``
+local to ``_run_agent_loop``.  The ``ToolRegistry`` is never mutated; suppressed
+tools are available again in the next turn.
 """
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import time
 import uuid
 from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal, Protocol
 
 from loguru import logger
 
@@ -52,6 +49,7 @@ from nanobot.agent.context import (
     summarize_and_compress,
 )
 from nanobot.agent.delegation import DelegationDispatcher
+from nanobot.agent.failure import FailureClass, ToolCallTracker, _build_failure_prompt
 from nanobot.agent.mission import MissionManager
 from nanobot.agent.observability import (
     flush as flush_langfuse,
@@ -65,7 +63,6 @@ from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.scratchpad import Scratchpad
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
 from nanobot.agent.tool_executor import ToolExecutor
-from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool, DelegationResult
 from nanobot.agent.tools.email import CheckEmailTool
@@ -95,19 +92,118 @@ from nanobot.agent.verifier import AnswerVerifier
 from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import DeliveryResult, InboundMessage, OutboundMessage, ReactionEvent
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentConfig, AgentRoleConfig
+from nanobot.config.schema import AgentConfig, AgentRoleConfig, ExecToolConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
     from nanobot.agent.coordinator import Coordinator
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, RoutingConfig
+    from nanobot.config.schema import ChannelsConfig, RoutingConfig
     from nanobot.cron.service import CronService
 
 
 # Per-coroutine delegation ancestry — canonical definition in delegation.py,
 # re-exported here for backward compatibility with tests.
 from nanobot.agent.delegation import _delegation_ancestry  # noqa: F401
+
+# Tools whose arguments may contain sensitive data (file contents, credentials,
+# command strings). Their call arguments are omitted from structured log output
+# to prevent leaking sensitive information into log files or tracing backends.
+_ARGS_REDACT_TOOLS: frozenset[str] = frozenset(
+    {"write_file", "edit_file", "exec", "web_fetch", "web_search"}
+)
+
+# Delegation tool names — hoisted here to avoid rebuilding the set each iteration.
+_DELEGATION_TOOL_NAMES: frozenset[str] = frozenset({"delegate", "delegate_parallel"})
+
+# Named constants for magic numbers used across the agent loop (CQ-L6).
+_GREETING_MAX_LEN: int = 20  # Messages shorter than this are treated as greetings / simple Qs
+_CONTEXT_RESERVE_RATIO: float = (
+    0.80  # Fraction of context window reserved for prompt; ~20% for reply
+)
+_DEFAULT_CONFIDENCE_THRESHOLD: float = (
+    0.6  # Fallback routing confidence threshold (no RoutingConfig)
+)
+
+# Multi-step planning signal substrings for _needs_planning().
+# Defined at module level so the tuple is allocated once, not per call.
+_PLANNING_SIGNALS: tuple[str, ...] = (
+    " and ",
+    " then ",
+    " after that",
+    " also ",
+    " steps",
+    " first ",
+    " second ",
+    " finally ",
+    "\n-",
+    "\n*",
+    "\n1.",
+    "\n2.",
+    " research ",
+    " analyze ",
+    " compare ",
+    " investigate ",
+    " create ",
+    " build ",
+    " implement ",
+    " set up ",
+    " configure ",
+    " plan ",
+    " schedule ",
+    " organize ",
+)
+
+
+class ProgressCallback(Protocol):
+    """Signature for progress callbacks passed through the agent call chain.
+
+    Matches the ``_bus_progress`` closure created in ``_process_message``.
+    External callers may pass a simpler ``async def cb(content: str) -> None``
+    via ``process_direct``; that path does not use keyword arguments.
+    """
+
+    async def __call__(
+        self,
+        content: str,
+        *,
+        tool_hint: bool = ...,
+        streaming: bool = ...,
+        tool_call: dict | None = ...,
+        tool_result: dict | None = ...,
+        delegate_start: dict | None = ...,
+        delegate_end: dict | None = ...,
+        status_code: str = ...,
+        status_label: str = ...,
+    ) -> None:
+        pass
+
+
+@dataclass(slots=True)
+class TurnContext:
+    """Snapshot of agent settings overridden for a single routed turn.
+
+    Created by ``_apply_role_for_turn`` and consumed by ``_reset_role_after_turn``
+    to cleanly restore the original configuration without touching shared state
+    between turns.
+    """
+
+    model: str
+    temperature: float
+    max_iterations: int
+    role_prompt: str
+    tools: dict[str, Any] | None  # None → no tool filtering was applied
+
+
+@dataclass(slots=True)
+class _ToolBatchResult:
+    """Return value of ``_process_tool_results`` — scalar state that changes per batch."""
+
+    any_failed: bool
+    failed_this_batch: list[tuple[str, "FailureClass"]]
+    nudged_for_final: bool
+    last_tool_call_msg_idx: int
+    tool_calls_this_batch: int
 
 
 def _user_friendly_error(exc: Exception) -> str:
@@ -120,44 +216,6 @@ def _user_friendly_error(exc: Exception) -> str:
     if "auth" in msg and ("invalid" in msg or "denied" in msg or "missing" in msg):
         return "There's a configuration issue with the AI provider. Please contact the admin."
     return "Sorry, I couldn't process that. Please try again."
-
-
-def _build_failure_prompt(
-    failed_tools: list[tuple[str, "FailureClass"]],
-    permanent_failures: frozenset[str],
-    available_tools: list[str],
-) -> str:
-    """Build a structured failure-strategy prompt with classification context."""
-    lines: list[str] = ["One or more tool calls failed:"]
-    for name, fc in failed_tools:
-        if fc.is_permanent:
-            lines.append(f"- `{name}`: {fc.value} — permanently disabled for this session")
-        elif fc == FailureClass.TRANSIENT_TIMEOUT:
-            lines.append(
-                f"- `{name}`: {fc.value} — consider retrying with a shorter operation "
-                "or different parameters"
-            )
-        elif fc == FailureClass.LOGICAL_ERROR:
-            lines.append(f"- `{name}`: {fc.value} — fix the parameters before retrying")
-        else:
-            lines.append(f"- `{name}`: {fc.value}")
-
-    if permanent_failures:
-        lines.append(
-            f"\nPermanently removed (do NOT call these again): "
-            f"{', '.join(sorted(permanent_failures))}"
-        )
-
-    remaining = [t for t in available_tools if t not in permanent_failures]
-    if remaining:
-        lines.append(f"\nAvailable alternatives: {', '.join(remaining)}")
-
-    lines.append(
-        "\nAnalyze what went wrong, choose an alternative tool or approach from the "
-        "available tools above, and proceed. If no alternative exists, explain why "
-        "the task cannot be completed."
-    )
-    return "\n".join(lines)
 
 
 def _dynamic_preserve_recent(
@@ -193,126 +251,6 @@ def _dynamic_preserve_recent(
             needed = n - idx
             return max(floor, min(needed, cap))
     return floor
-
-
-class FailureClass(str, Enum):
-    """Classification of a tool call failure for structured replanning.
-
-    Used by ``ToolCallTracker`` to decide whether a failed tool should be
-    removed immediately (permanent) or kept with reduced priority (transient).
-    """
-
-    PERMANENT_CONFIG = "permanent_config"  # missing API key, binary not installed
-    PERMANENT_AUTH = "permanent_auth"  # invalid credentials
-    TRANSIENT_TIMEOUT = "transient_timeout"  # network timeout, rate limit
-    TRANSIENT_ERROR = "transient_error"  # server 500, temporary failure
-    LOGICAL_ERROR = "logical_error"  # wrong arguments, bad input
-    UNKNOWN = "unknown"
-
-    @property
-    def is_permanent(self) -> bool:
-        """True when the failure cannot be resolved by retrying."""
-        return self in (FailureClass.PERMANENT_CONFIG, FailureClass.PERMANENT_AUTH)
-
-
-class ToolCallTracker:
-    """Detect and break infinite identical-failure tool call loops.
-
-    Tracks ``(tool_name, args_hash)`` → failure count.  Escalation levels:
-      - 2nd identical failure  → inject "stop retrying" prompt
-      - 3rd identical failure  → add to ``disabled_tools`` for the rest of the turn
-      - >8 total failures      → force the agent to produce a final answer
-
-    Permanent failures (``FailureClass.is_permanent``) are added to
-    ``disabled_tools`` immediately on the first occurrence via
-    ``_permanent_failures``, regardless of count.
-
-    ``record_failure()`` now returns ``(count, FailureClass)`` — callers must
-    unpack both values.  The tool registry is **never mutated**; suppression is
-    enforced by filtering ``tools_def`` at definition-generation time.
-    """
-
-    WARN_THRESHOLD = 2
-    REMOVE_THRESHOLD = 3
-    GLOBAL_BUDGET = 8
-
-    def __init__(self) -> None:
-        self._counts: dict[str, int] = {}  # key → failure count
-        self._total_failures: int = 0
-        self._permanent_failures: set[str] = set()  # tool names permanently removed
-
-    @staticmethod
-    def _key(name: str, args: dict[str, Any]) -> str:
-        # blake2b is significantly faster than sha256 for short inputs; 8-byte digest
-        # gives 64-bit collision resistance which is ample for a per-turn dedup key.
-        h = hashlib.blake2b(
-            json.dumps(args, sort_keys=True, default=str).encode(), digest_size=8
-        ).hexdigest()
-        return f"{name}:{h}"
-
-    @staticmethod
-    def classify_failure(name: str, result: ToolResult) -> FailureClass:
-        """Classify a tool failure to guide replanning decisions."""
-        error_type = result.metadata.get("error_type", "unknown") if result.metadata else "unknown"
-        error_msg = (result.error or result.output or "").lower()
-
-        if error_type == "validation":
-            return FailureClass.LOGICAL_ERROR
-        if error_type in ("not_found", "permission", "unknown_role"):
-            return FailureClass.PERMANENT_CONFIG
-        if error_type == "timeout":
-            return FailureClass.TRANSIENT_TIMEOUT
-
-        # Keyword-based fallback when error_type is generic.
-        # "no such" / "not found" only indicate a permanent config failure when the
-        # missing thing is a binary/command/module — NOT when a file path is wrong
-        # (which is a logical error the LLM should correct).
-        if any(k in error_msg for k in ("api key", "not configured", "not installed")):
-            return FailureClass.PERMANENT_CONFIG
-        _cmd_ctx = ("command", "binary", "executable", "module", "program")
-        if ("no such" in error_msg or "not found" in error_msg) and any(
-            c in error_msg for c in _cmd_ctx
-        ):
-            return FailureClass.PERMANENT_CONFIG
-        if any(
-            k in error_msg for k in ("invalid key", "unauthorized", "authentication", "forbidden")
-        ):
-            return FailureClass.PERMANENT_AUTH
-        if any(k in error_msg for k in ("timeout", "timed out", "rate limit", "429", "too many")):
-            return FailureClass.TRANSIENT_TIMEOUT
-        if any(k in error_msg for k in ("500", "server error", "service unavailable", "503")):
-            return FailureClass.TRANSIENT_ERROR
-        return FailureClass.UNKNOWN
-
-    def record_failure(
-        self, name: str, args: dict[str, Any], result: ToolResult | None = None
-    ) -> tuple[int, FailureClass]:
-        """Record a tool failure; returns (count, failure_class) for this signature."""
-        k = self._key(name, args)
-        self._counts[k] = self._counts.get(k, 0) + 1
-        self._total_failures += 1
-        fc = self.classify_failure(name, result) if result is not None else FailureClass.UNKNOWN
-        if fc.is_permanent:
-            self._permanent_failures.add(name)
-        return self._counts[k], fc
-
-    def record_success(self, name: str, args: dict[str, Any]) -> None:
-        """Reset the count for a successful tool call signature."""
-        k = self._key(name, args)
-        self._counts.pop(k, None)
-
-    @property
-    def permanent_failures(self) -> frozenset[str]:
-        """Tool names that failed permanently this turn (removed from candidate set)."""
-        return frozenset(self._permanent_failures)
-
-    @property
-    def total_failures(self) -> int:
-        return self._total_failures
-
-    @property
-    def budget_exhausted(self) -> bool:
-        return self._total_failures > self.GLOBAL_BUDGET
 
 
 class AgentLoop:
@@ -351,8 +289,6 @@ class AgentLoop:
         role_config: AgentRoleConfig | None = None,
         routing_config: RoutingConfig | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig
-
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
@@ -376,13 +312,6 @@ class AgentLoop:
             if role_config and role_config.temperature is not None
             else config.temperature
         )
-        self.max_tokens = config.max_tokens
-        self.context_window_tokens = config.context_window_tokens
-        self.memory_window = config.memory_window
-        self.memory_retrieval_k = config.memory_retrieval_k
-        self.memory_token_budget = config.memory_token_budget
-        self.memory_uncertainty_threshold = config.memory_uncertainty_threshold
-        self.memory_enable_contradiction_check = config.memory_enable_contradiction_check
         self.memory_rollout_overrides = {
             "memory_rollout_mode": config.memory_rollout_mode,
             "memory_type_separation_enabled": config.memory_type_separation_enabled,
@@ -418,13 +347,11 @@ class AgentLoop:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
-        self.restrict_to_workspace = config.restrict_to_workspace
-        self.message_timeout = config.message_timeout
 
         self.context = ContextBuilder(
             self.workspace,
-            memory_retrieval_k=self.memory_retrieval_k if config.memory_enabled else 0,
-            memory_token_budget=self.memory_token_budget if config.memory_enabled else 0,
+            memory_retrieval_k=self.config.memory_retrieval_k if config.memory_enabled else 0,
+            memory_token_budget=self.config.memory_token_budget if config.memory_enabled else 0,
             memory_md_token_cap=config.memory_md_token_cap if config.memory_enabled else 0,
             memory_rollout_overrides=self.memory_rollout_overrides,
             role_system_prompt=role_config.system_prompt if role_config else "",
@@ -449,22 +376,24 @@ class AgentLoop:
             bus=bus,
             model=self.model,
             temperature=self.temperature,
-            max_tokens=self.max_tokens,
+            max_tokens=self.config.max_tokens,
             max_iterations=config.mission_max_iterations,
             max_concurrent=config.mission_max_concurrent,
             result_max_chars=config.mission_result_max_chars,
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
-            restrict_to_workspace=self.restrict_to_workspace,
+            restrict_to_workspace=self.config.restrict_to_workspace,
         )
 
         self._running = False
+        self._stop_event: asyncio.Event | None = None  # created lazily in run()
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
-        self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
+        self._consolidation_tasks: set[asyncio.Task[None]] = set()  # Strong refs to in-flight tasks
+        self._consolidation_sem = asyncio.Semaphore(3)  # Cap concurrent consolidation LLM calls
         self._register_default_tools()
         # Cache typed tool references for O(1) context updates in _set_tool_context.
         # Populated once at construction — no per-message isinstance checks needed.
@@ -487,22 +416,15 @@ class AgentLoop:
         self._routing_config = routing_config
         self._coordinator: Coordinator | None = None
 
-        # Per-turn role override save-slots (None → apply was never called / no change)
-        self._saved_model: str | None = None
-        self._saved_temperature: float | None = None
-        self._saved_max_iterations: int | None = None
-        self._saved_role_prompt: str | None = None
-        self._saved_tools: dict[str, Any] | None = None
-
         # Delegation dispatcher (owns delegation state, tracing, contracts)
         self._dispatcher = DelegationDispatcher(
             provider=provider,
             workspace=self.workspace,
             model=self.model,
             temperature=self.temperature,
-            max_tokens=self.max_tokens,
+            max_tokens=self.config.max_tokens,
             max_iterations=self.max_iterations,
-            restrict_to_workspace=self.restrict_to_workspace,
+            restrict_to_workspace=self.config.restrict_to_workspace,
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             role_name=self.role_name,
@@ -518,15 +440,15 @@ class AgentLoop:
             provider=provider,
             model=self.model,
             temperature=self.temperature,
-            max_tokens=self.max_tokens,
+            max_tokens=self.config.max_tokens,
         )
         self._verifier = AnswerVerifier(
             provider=provider,
             model=self.model,
             temperature=self.temperature,
-            max_tokens=self.max_tokens,
+            max_tokens=self.config.max_tokens,
             verification_mode=config.verification_mode,
-            memory_uncertainty_threshold=self.memory_uncertainty_threshold,
+            memory_uncertainty_threshold=self.config.memory_uncertainty_threshold,
             memory_store=self.context.memory,
         )
         self._consolidator = ConsolidationOrchestrator(self.context.memory)
@@ -575,7 +497,7 @@ class AgentLoop:
         role = self.role_config
         allowed = set(role.allowed_tools) if role and role.allowed_tools is not None else None
         denied = set(role.denied_tools) if role and role.denied_tools else set()
-        allowed_dir = self.workspace if self.restrict_to_workspace else None
+        allowed_dir = self.workspace if self.config.restrict_to_workspace else None
 
         def _should_register(name: str) -> bool:
             if allowed is not None and name not in allowed:
@@ -598,7 +520,7 @@ class AgentLoop:
         exec_tool = ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
-            restrict_to_workspace=self.restrict_to_workspace,
+            restrict_to_workspace=self.config.restrict_to_workspace,
             shell_mode=self.config.shell_mode,
         )
         if _should_register(exec_tool.name):
@@ -791,7 +713,7 @@ class AgentLoop:
         self,
         messages: list[dict],
         tools: list[dict[str, Any]] | None,
-        on_progress: Callable[..., Awaitable[None]] | None,
+        on_progress: ProgressCallback | None,
     ) -> LLMResponse:
         """Call the LLM — delegates to StreamingLLMCaller."""
         return await self._llm_caller.call(messages, tools, on_progress)
@@ -817,45 +739,329 @@ class AgentLoop:
             return False
         text_lower = text.strip().lower()
         # Very short messages (< 20 chars) are usually greetings or simple Qs
-        if len(text_lower) < 20:
+        if len(text_lower) < _GREETING_MAX_LEN:
             return False
         # Explicit multi-step indicators
-        multi_step_signals = (
-            " and ",
-            " then ",
-            " after that",
-            " also ",
-            " steps",
-            " first ",
-            " second ",
-            " finally ",
-            "\n-",
-            "\n*",
-            "\n1.",
-            "\n2.",
-            " research ",
-            " analyze ",
-            " compare ",
-            " investigate ",
-            " create ",
-            " build ",
-            " implement ",
-            " set up ",
-            " configure ",
-            " plan ",
-            " schedule ",
-            " organize ",
-        )
-        return any(signal in text_lower for signal in multi_step_signals)
+        return any(signal in text_lower for signal in _PLANNING_SIGNALS)
 
     @staticmethod
     def _has_parallel_structure(text: str) -> bool:
         return DelegationDispatcher.has_parallel_structure(text)
 
+    # ------------------------------------------------------------------
+    # _run_agent_loop helpers (extracted for readability)
+    # ------------------------------------------------------------------
+
+    async def _handle_llm_error(
+        self,
+        response: "LLMResponse",
+        consecutive_errors: int,
+        messages: list[dict],
+        on_progress: ProgressCallback | None,
+    ) -> tuple[Literal["continue", "break", "proceed"], int, str | None]:
+        """Handle LLM-level error finish reasons.
+
+        Returns ``(action, consecutive_errors, final_content)`` where *action*
+        is ``"continue"`` (retry this iteration), ``"break"`` (end the loop),
+        or ``"proceed"`` (no error — continue normal processing).
+        *messages* is mutated in-place when a final answer is injected.
+        """
+        if response.finish_reason == "error":
+            consecutive_errors += 1
+            logger.warning(
+                "LLM returned error (attempt {}): {}", consecutive_errors, response.content
+            )
+            if consecutive_errors >= 3:
+                final_content = (
+                    "I'm having trouble reaching the language model right now. "
+                    "Please try again in a moment."
+                )
+                messages[:] = self.context.add_assistant_message(messages, final_content)
+                return "break", consecutive_errors, final_content
+            if on_progress:
+                await on_progress("", status_code="retrying")
+            await asyncio.sleep(min(2**consecutive_errors, 10))
+            return "continue", consecutive_errors, None
+
+        if response.finish_reason == "content_filter":
+            consecutive_errors += 1
+            logger.warning("Content filter triggered (attempt {})", consecutive_errors)
+            if consecutive_errors >= 2:
+                final_content = (
+                    "The AI provider's content filter blocked my response. "
+                    "Try rephrasing your question."
+                )
+                messages[:] = self.context.add_assistant_message(messages, final_content)
+                return "break", consecutive_errors, final_content
+            await asyncio.sleep(1)
+            return "continue", consecutive_errors, None
+
+        if response.finish_reason == "length" and not response.content:
+            consecutive_errors += 1
+            logger.warning("Response truncated to zero content (attempt {})", consecutive_errors)
+            if consecutive_errors >= 2:
+                final_content = (
+                    "My response was too long and got cut off. Try asking a more specific question."
+                )
+                messages[:] = self.context.add_assistant_message(messages, final_content)
+                return "break", consecutive_errors, final_content
+            await asyncio.sleep(1)
+            return "continue", consecutive_errors, None
+
+        return "proceed", consecutive_errors, None
+
+    async def _process_tool_results(
+        self,
+        response: "LLMResponse",
+        messages: list[dict],
+        tools_used: list[str],
+        disabled_tools: set[str],
+        tracker: "ToolCallTracker",
+        _tools_def_cache: list[dict],
+        on_progress: ProgressCallback | None,
+        nudged_for_final: bool,
+    ) -> _ToolBatchResult:
+        """Execute tool calls and process their results.
+
+        Mutates *messages*, *tools_used*, and *disabled_tools* in-place.
+        Returns a ``_ToolBatchResult`` with the scalar state changes.
+        """
+        _args_json: dict[str, str] = {
+            tc.id: json.dumps(tc.arguments, ensure_ascii=False) for tc in response.tool_calls
+        }
+        tool_call_dicts = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {"name": tc.name, "arguments": _args_json[tc.id]},
+            }
+            for tc in response.tool_calls
+        ]
+        # Suppress draft content when tool calls are present; keep as reasoning.
+        reasoning = response.reasoning_content or response.content
+        new_messages = self.context.add_assistant_message(
+            messages,
+            None,
+            tool_call_dicts,
+            reasoning_content=reasoning,
+        )
+        last_tool_call_msg_idx = len(new_messages) - 1
+        messages[:] = new_messages
+
+        # Execute tools (parallel for readonly, sequential for writes)
+        t0_tools = time.monotonic()
+        tool_results = await self.tools.execute_batch(response.tool_calls)
+        tools_elapsed_ms = (time.monotonic() - t0_tools) * 1000
+
+        any_failed = False
+        failed_this_batch: list[tuple[str, FailureClass]] = []
+        tools_to_remove: list[str] = []
+        tool_calls_this_batch = 0
+        for tool_call, result in zip(response.tool_calls, tool_results):
+            tool_calls_this_batch += 1
+            tools_used.append(tool_call.name)
+            args_str = _args_json[tool_call.id]
+            status = "OK" if result.success else "FAIL"
+            bind_trace().info(
+                "tool_exec | {} | {} | {:.0f}ms batch",
+                status,
+                tool_call.name,
+                tools_elapsed_ms,
+            )
+            if tool_call.name not in _ARGS_REDACT_TOOLS:
+                bind_trace().debug("tool_exec args | {}({})", tool_call.name, args_str[:200])
+            if on_progress:
+                await on_progress(
+                    "",
+                    tool_result={
+                        "toolCallId": tool_call.id,
+                        "result": result.to_llm_string(),
+                    },
+                )
+            messages[:] = self.context.add_tool_result(
+                messages, tool_call.id, tool_call.name, result.to_llm_string()
+            )
+            if not result.success:
+                any_failed = True
+                count, fc = tracker.record_failure(tool_call.name, tool_call.arguments, result)
+                failed_this_batch.append((tool_call.name, fc))
+                remove_now = count >= ToolCallTracker.REMOVE_THRESHOLD or fc.is_permanent
+                if remove_now:
+                    tools_to_remove.append(tool_call.name)
+                    reason = (
+                        f"permanently unavailable ({fc.value})"
+                        if fc.is_permanent
+                        else f"failed {count} times with identical arguments"
+                    )
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                f"TOOL REMOVED: `{tool_call.name}` is {reason} "
+                                "and has been disabled. Use a different approach."
+                            ),
+                        }
+                    )
+                elif count >= ToolCallTracker.WARN_THRESHOLD:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                f"STOP: `{tool_call.name}` has failed {count} "
+                                "times with the same arguments and error. Do NOT "
+                                "call it again with the same arguments. Use a "
+                                "different approach or provide your best answer."
+                            ),
+                        }
+                    )
+            else:
+                tracker.record_success(tool_call.name, tool_call.arguments)
+
+        disabled_tools.update(tools_to_remove)
+
+        # Global failure budget: force final answer
+        if tracker.budget_exhausted:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        f"You have {tracker.total_failures} failed tool calls "
+                        "this turn. Stop calling tools and produce your final "
+                        "answer NOW with whatever information you have."
+                    ),
+                }
+            )
+            nudged_for_final = True
+
+        return _ToolBatchResult(
+            any_failed=any_failed,
+            failed_this_batch=failed_this_batch,
+            nudged_for_final=nudged_for_final,
+            last_tool_call_msg_idx=last_tool_call_msg_idx,
+            tool_calls_this_batch=tool_calls_this_batch,
+        )
+
+    def _evaluate_progress(
+        self,
+        response: "LLMResponse",
+        messages: list[dict],
+        tracker: "ToolCallTracker",
+        _tools_def_cache: list[dict],
+        any_failed: bool,
+        failed_this_batch: list[tuple[str, FailureClass]],
+        has_plan: bool,
+        turn_tool_calls: int,
+        user_text: str,
+        nudged_for_final: bool,
+    ) -> bool:
+        """Append REFLECT-phase system messages based on the current turn state.
+
+        Mutates *messages* in-place; returns the (potentially updated)
+        *nudged_for_final* flag.
+        """
+        had_delegations = any(tc.name in _DELEGATION_TOOL_NAMES for tc in response.tool_calls)
+
+        if had_delegations and self._delegation_count >= self._max_delegations:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "Delegation budget exhausted. You have completed all "
+                        "delegated sub-tasks. Do NOT delegate any more work. "
+                        "Synthesize the results you have and produce your "
+                        "final answer NOW."
+                    ),
+                }
+            )
+        elif any_failed:
+            _permanent = tracker.permanent_failures
+            _available = [
+                t["function"]["name"]
+                for t in _tools_def_cache
+                if t["function"]["name"] not in _permanent
+            ]
+            messages.append(
+                {
+                    "role": "system",
+                    "content": _build_failure_prompt(
+                        failed_this_batch,
+                        _permanent,
+                        _available,
+                    ),
+                }
+            )
+        elif had_delegations:
+            _ungrounded = any(
+                "grounded=False" in (m.get("content") or "")
+                for m in messages[-len(response.tool_calls) :]
+                if m.get("role") == "tool"
+            )
+            nudge = (
+                "Delegation(s) complete. Review the results above. "
+                "If all planned delegations are done, produce your "
+                "final answer synthesizing the results. Do NOT start "
+                "another round of delegations unless the results are "
+                "clearly insufficient (e.g. empty or errored)."
+            )
+            if _ungrounded:
+                nudge += (
+                    "\n\nWARNING: One or more specialists completed their "
+                    "task without using any tools. Those results may be "
+                    "unverified. Consider cross-checking critical claims "
+                    "before including them in your answer."
+                )
+            # If the agent used sequential delegate for an inherently parallel
+            # request, nudge it to switch to delegate_parallel next round.
+            if not any(
+                tc.name == "delegate_parallel" for tc in response.tool_calls
+            ) and self._has_parallel_structure(user_text):
+                nudge += (
+                    "\n\nYou used sequential `delegate` but the user's "
+                    "request lists independent sub-tasks. For the "
+                    "remaining work, switch to `delegate_parallel` "
+                    "to execute them concurrently."
+                )
+            messages.append({"role": "system", "content": nudge})
+        elif (
+            has_plan
+            and not had_delegations
+            and turn_tool_calls >= 5
+            and self._delegation_count == 0
+            and self.tools.get("delegate_parallel")
+        ):
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        f"You have executed {turn_tool_calls} tool calls "
+                        "solo without delegating. STOP doing the work "
+                        "yourself. Use `delegate_parallel` NOW to distribute "
+                        "remaining work to specialist agents. This is "
+                        "required for multi-part tasks."
+                    ),
+                }
+            )
+        elif has_plan and len(response.tool_calls) >= 1:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": prompts.get("progress"),
+                }
+            )
+        elif len(response.tool_calls) >= 3:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": prompts.get("reflect"),
+                }
+            )
+
+        return nudged_for_final
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
-        on_progress: Callable[..., Awaitable[None]] | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the Plan-Act-Observe-Reflect agent loop.
 
@@ -890,7 +1096,7 @@ class AgentLoop:
         self._turn_llm_calls = 0
 
         # Reserve ~20% of context window for the model's response
-        context_budget = int(self.context_window_tokens * 0.80)
+        context_budget = int(self.config.context_window_tokens * _CONTEXT_RESERVE_RATIO)
 
         # Extract the last user message (used by planning + verification)
         user_text = ""
@@ -980,50 +1186,14 @@ class AgentLoop:
             self._turn_tokens_completion += response.usage.get("completion_tokens", 0)
 
             # --- Check for LLM-level errors --------------------------------
-            if response.finish_reason == "error":
-                consecutive_errors += 1
-                logger.warning(
-                    "LLM returned error (attempt {}): {}", consecutive_errors, response.content
-                )
-                if consecutive_errors >= 3:
-                    final_content = (
-                        "I'm having trouble reaching the language model right now. "
-                        "Please try again in a moment."
-                    )
-                    messages = self.context.add_assistant_message(messages, final_content)
-                    break
-                if on_progress:
-                    await on_progress("", status_code="retrying")
-                await asyncio.sleep(min(2**consecutive_errors, 10))
+            _err_action, consecutive_errors, _err_content = await self._handle_llm_error(
+                response, consecutive_errors, messages, on_progress
+            )
+            if _err_action == "continue":
                 continue
-
-            if response.finish_reason == "content_filter":
-                consecutive_errors += 1
-                logger.warning("Content filter triggered (attempt {})", consecutive_errors)
-                if consecutive_errors >= 2:
-                    final_content = (
-                        "The AI provider's content filter blocked my response. "
-                        "Try rephrasing your question."
-                    )
-                    messages = self.context.add_assistant_message(messages, final_content)
-                    break
-                await asyncio.sleep(1)
-                continue
-
-            if response.finish_reason == "length" and not response.content:
-                consecutive_errors += 1
-                logger.warning(
-                    "Response truncated to zero content (attempt {})", consecutive_errors
-                )
-                if consecutive_errors >= 2:
-                    final_content = (
-                        "My response was too long and got cut off. "
-                        "Try asking a more specific question."
-                    )
-                    messages = self.context.add_assistant_message(messages, final_content)
-                    break
-                await asyncio.sleep(1)
-                continue
+            if _err_action == "break":
+                final_content = _err_content
+                break
 
             consecutive_errors = 0
 
@@ -1033,8 +1203,7 @@ class AgentLoop:
                 # straight to tools without producing a plan, nudge it once.
                 # Delegation calls (delegate/delegate_parallel) are exempt
                 # because delegation itself is a form of planning.
-                _delegation_names = {"delegate", "delegate_parallel"}
-                is_delegation = all(tc.name in _delegation_names for tc in response.tool_calls)
+                is_delegation = all(tc.name in _DELEGATION_TOOL_NAMES for tc in response.tool_calls)
                 if (
                     has_plan
                     and not plan_enforced
@@ -1101,7 +1270,6 @@ class AgentLoop:
                     # Note: StreamingLLMCaller already routed response.content as
                     # a status event (Option B) — do NOT re-emit here as text.
                     await on_progress("", status_code="calling_tool")
-                    # Emit structured tool-call events with real IDs and args
                     for tc in response.tool_calls:
                         await on_progress(
                             "",
@@ -1112,230 +1280,34 @@ class AgentLoop:
                             },
                         )
 
-                # Serialize arguments once; reused for message building and logging.
-                _args_json: dict[str, str] = {
-                    tc.id: json.dumps(tc.arguments, ensure_ascii=False)
-                    for tc in response.tool_calls
-                }
-                tool_call_dicts = [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {"name": tc.name, "arguments": _args_json[tc.id]},
-                    }
-                    for tc in response.tool_calls
-                ]
-                # Suppress draft content when tool calls are present; keep as reasoning if useful.
-                reasoning = response.reasoning_content or response.content
-                messages = self.context.add_assistant_message(
+                # --- ACT + OBSERVE: execute tools and process results ------
+                batch = await self._process_tool_results(
+                    response,
                     messages,
-                    None,
-                    tool_call_dicts,
-                    reasoning_content=reasoning,
+                    tools_used,
+                    disabled_tools,
+                    tracker,
+                    _tools_def_cache,
+                    on_progress,
+                    nudged_for_final,
                 )
-                _last_tool_call_msg_idx = len(messages) - 1
+                turn_tool_calls += batch.tool_calls_this_batch
+                nudged_for_final = batch.nudged_for_final
+                _last_tool_call_msg_idx = batch.last_tool_call_msg_idx
 
-                # Execute tools (parallel for readonly, sequential for writes)
-                t0_tools = time.monotonic()
-                tool_results = await self.tools.execute_batch(response.tool_calls)
-                tools_elapsed_ms = (time.monotonic() - t0_tools) * 1000
-
-                any_failed = False
-                failed_this_batch: list[tuple[str, FailureClass]] = []
-                tools_to_remove: list[str] = []
-                for tool_call, result in zip(response.tool_calls, tool_results):
-                    turn_tool_calls += 1
-                    tools_used.append(tool_call.name)
-                    args_str = _args_json[tool_call.id]
-                    status = "OK" if result.success else "FAIL"
-                    # Log tool name and status at INFO; args are gated to DEBUG to
-                    # avoid leaking sensitive data (file contents, credentials, etc.)
-                    # from write_file, exec, web_fetch and similar tools.
-                    bind_trace().info(
-                        "tool_exec | {} | {} | {:.0f}ms batch",
-                        status,
-                        tool_call.name,
-                        tools_elapsed_ms,
-                    )
-                    bind_trace().debug("tool_exec args | {}({})", tool_call.name, args_str[:200])
-                    # Emit structured tool-result event with real output
-                    if on_progress:
-                        await on_progress(
-                            "",
-                            tool_result={
-                                "toolCallId": tool_call.id,
-                                "result": result.to_llm_string(),
-                            },
-                        )
-                    messages = self.context.add_tool_result(
-                        messages, tool_call.id, tool_call.name, result.to_llm_string()
-                    )
-                    if not result.success:
-                        any_failed = True
-                        count, fc = tracker.record_failure(
-                            tool_call.name, tool_call.arguments, result
-                        )
-                        failed_this_batch.append((tool_call.name, fc))
-                        remove_now = count >= ToolCallTracker.REMOVE_THRESHOLD or fc.is_permanent
-                        if remove_now:
-                            tools_to_remove.append(tool_call.name)
-                            reason = (
-                                f"permanently unavailable ({fc.value})"
-                                if fc.is_permanent
-                                else f"failed {count} times with identical arguments"
-                            )
-                            messages.append(
-                                {
-                                    "role": "system",
-                                    "content": (
-                                        f"TOOL REMOVED: `{tool_call.name}` is {reason} "
-                                        "and has been disabled. Use a different approach."
-                                    ),
-                                }
-                            )
-                        elif count >= ToolCallTracker.WARN_THRESHOLD:
-                            messages.append(
-                                {
-                                    "role": "system",
-                                    "content": (
-                                        f"STOP: `{tool_call.name}` has failed {count} "
-                                        "times with the same arguments and error. Do NOT "
-                                        "call it again with the same arguments. Use a "
-                                        "different approach or provide your best answer."
-                                    ),
-                                }
-                            )
-                    else:
-                        tracker.record_success(tool_call.name, tool_call.arguments)
-
-                # Suppress tools that hit the failure threshold for the rest of
-                # this turn. The registry is NOT mutated so tools remain
-                # available in future turns.
-                disabled_tools.update(tools_to_remove)
-
-                # Global failure budget: force final answer
-                if tracker.budget_exhausted:
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": (
-                                f"You have {tracker.total_failures} failed tool calls "
-                                "this turn. Stop calling tools and produce your final "
-                                "answer NOW with whatever information you have."
-                            ),
-                        }
-                    )
-                    nudged_for_final = True
-
-                # --- REFLECT: after tool execution, evaluate progress ------
-                # Check if delegation budget is exhausted
-                _del_names = {"delegate", "delegate_parallel"}
-                had_delegations = any(tc.name in _del_names for tc in response.tool_calls)
-                if had_delegations and self._delegation_count >= self._max_delegations:
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": (
-                                "Delegation budget exhausted. You have completed all "
-                                "delegated sub-tasks. Do NOT delegate any more work. "
-                                "Synthesize the results you have and produce your "
-                                "final answer NOW."
-                            ),
-                        }
-                    )
-                elif any_failed:
-                    # Failure-aware: structured replanning prompt with classification context
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": _build_failure_prompt(
-                                failed_this_batch,
-                                tracker.permanent_failures,
-                                # Use the already-built cache — avoids an extra
-                                # tool_names allocation and correctly excludes
-                                # any tools already in disabled_tools.
-                                [t["function"]["name"] for t in _tools_def_cache],
-                            ),
-                        }
-                    )
-                elif had_delegations:
-                    # After delegation, check if all planned work is done
-                    # Detect ungrounded delegation results
-                    _ungrounded = any(
-                        "grounded=False" in (m.get("content") or "")
-                        for m in messages[-len(response.tool_calls) :]
-                        if m.get("role") == "tool"
-                    )
-                    nudge = (
-                        "Delegation(s) complete. Review the results above. "
-                        "If all planned delegations are done, produce your "
-                        "final answer synthesizing the results. Do NOT start "
-                        "another round of delegations unless the results are "
-                        "clearly insufficient (e.g. empty or errored)."
-                    )
-                    if _ungrounded:
-                        nudge += (
-                            "\n\nWARNING: One or more specialists completed their "
-                            "task without using any tools. Those results may be "
-                            "unverified. Consider cross-checking critical claims "
-                            "before including them in your answer."
-                        )
-                    messages.append({"role": "system", "content": nudge})
-                elif (
-                    has_plan
-                    and not had_delegations
-                    and turn_tool_calls >= 5
-                    and self._delegation_count == 0
-                    and self.tools.get("delegate_parallel")
-                ):
-                    # Delegation nudge: the parent is doing heavy solo work
-                    # despite having delegation tools available.
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": (
-                                f"You have executed {turn_tool_calls} tool calls "
-                                "solo without delegating. STOP doing the work "
-                                "yourself. Use `delegate_parallel` NOW to distribute "
-                                "remaining work to specialist agents. This is "
-                                "required for multi-part tasks."
-                            ),
-                        }
-                    )
-                elif (
-                    had_delegations
-                    and not any(tc.name == "delegate_parallel" for tc in response.tool_calls)
-                    and self._has_parallel_structure(user_text)
-                ):
-                    # Sequential-to-parallel correction: agent used sequential
-                    # delegate but the user's request has parallel structure.
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": (
-                                "You used sequential `delegate` but the user's "
-                                "request lists independent sub-tasks. For the "
-                                "remaining work, switch to `delegate_parallel` "
-                                "to execute them concurrently."
-                            ),
-                        }
-                    )
-                elif has_plan and len(response.tool_calls) >= 1:
-                    # Plan-aware progress check (every tool round when planning)
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": prompts.get("progress"),
-                        }
-                    )
-                elif len(response.tool_calls) >= 3:
-                    # Fallback: general reflection for many concurrent calls
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": prompts.get("reflect"),
-                        }
-                    )
+                # --- REFLECT: evaluate progress and inject guidance ---------
+                nudged_for_final = self._evaluate_progress(
+                    response,
+                    messages,
+                    tracker,
+                    _tools_def_cache,
+                    batch.any_failed,
+                    batch.failed_this_batch,
+                    has_plan,
+                    turn_tool_calls,
+                    user_text,
+                    nudged_for_final,
+                )
 
             else:
                 # --- No tool calls: the model is producing a text answer ---
@@ -1443,6 +1415,7 @@ class AgentLoop:
         behaves exactly as before.
         """
         self._running = True
+        self._stop_event = asyncio.Event()
         await self._connect_mcp()
         self._ensure_coordinator()
 
@@ -1450,8 +1423,24 @@ class AgentLoop:
 
         while self._running:
             try:
-                msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
-                role_applied = False
+                # Race consume_inbound against the stop event so that stop()
+                # wakes the loop immediately instead of waiting up to 5 s.
+                _consume = asyncio.ensure_future(self.bus.consume_inbound())
+                _stop_wait = asyncio.ensure_future(self._stop_event.wait())  # type: ignore[union-attr]
+                done, pending = await asyncio.wait(
+                    {_consume, _stop_wait},
+                    timeout=5.0,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for t in pending:
+                    t.cancel()
+                if not self._running or _stop_wait in done:
+                    break
+                if _consume not in done:
+                    # True timeout — no message, no stop signal
+                    continue
+                msg = _consume.result()
+                turn_ctx: TurnContext | None = None
                 # Set correlation IDs for this request
                 TraceContext.new_request(
                     session_id=msg.session_key,
@@ -1465,7 +1454,6 @@ class AgentLoop:
 
                 try:
                     # Route through coordinator if enabled (skip system messages)
-                    role_applied = False
 
                     # Wrap entire request (classify + process) in a single trace
                     async with trace_request(
@@ -1490,7 +1478,7 @@ class AgentLoop:
                             threshold = (
                                 self._routing_config.confidence_threshold
                                 if self._routing_config
-                                else 0.6
+                                else _DEFAULT_CONFIDENCE_THRESHOLD
                             )
                             if confidence < threshold:
                                 role_name = (
@@ -1516,11 +1504,12 @@ class AgentLoop:
                                 latency_ms=classify_latency_ms,
                                 message_excerpt=msg.content,
                             )
-                            self._apply_role_for_turn(role)
-                            role_applied = True
+                            turn_ctx = self._apply_role_for_turn(role)
 
                         # Wrap with timeout to prevent infinite processing
-                        timeout = self.message_timeout if self.message_timeout > 0 else None
+                        timeout = (
+                            self.config.message_timeout if self.config.message_timeout > 0 else None
+                        )
                         try:
                             if timeout:
                                 response = await asyncio.wait_for(
@@ -1531,13 +1520,13 @@ class AgentLoop:
                         except asyncio.TimeoutError:
                             logger.error(
                                 "Message processing timed out after {}s for {}:{}",
-                                self.message_timeout,
+                                self.config.message_timeout,
                                 msg.channel,
                                 msg.chat_id,
                             )
                             update_current_span(
                                 output="TIMEOUT",
-                                metadata={"timeout_s": str(self.message_timeout)},
+                                metadata={"timeout_s": str(self.config.message_timeout)},
                                 level="ERROR",
                             )
                             response = OutboundMessage(
@@ -1549,8 +1538,7 @@ class AgentLoop:
                                 ),
                             )
 
-                    if role_applied:
-                        self._reset_role_after_turn()
+                    self._reset_role_after_turn(turn_ctx)
 
                     if response is not None:
                         await self.bus.publish_outbound(response)
@@ -1571,9 +1559,8 @@ class AgentLoop:
                     flush_langfuse()
 
                 except Exception as e:  # crash-barrier: message processing
-                    logger.error("Error processing message: {}", e)
-                    if role_applied:
-                        self._reset_role_after_turn()
+                    logger.exception("Error processing message")
+                    self._reset_role_after_turn(turn_ctx)
                     await self.bus.publish_outbound(
                         OutboundMessage(
                             channel=msg.channel,
@@ -1680,20 +1667,23 @@ class AgentLoop:
     # Per-turn role switching (multi-agent routing)
     # ------------------------------------------------------------------
 
-    def _apply_role_for_turn(self, role: AgentRoleConfig) -> None:
-        """Temporarily override agent settings for the current turn."""
-        # Save originals for reset
-        self._saved_model = self.model
-        self._saved_temperature = self.temperature
-        self._saved_max_iterations = self.max_iterations
-        self._saved_role_prompt = self.context.role_system_prompt
+    def _apply_role_for_turn(self, role: AgentRoleConfig) -> TurnContext:
+        """Temporarily override agent settings for the current turn.
+
+        Returns a ``TurnContext`` snapshot that must be passed to
+        ``_reset_role_after_turn`` to restore the original configuration.
+        """
         # Only copy the tool registry when filtering will actually be applied.
         # Roles with no allowed/denied lists leave the registry unchanged, so
-        # copying is wasted allocation.  The save/restore pattern is also not
-        # concurrency-safe (AR-H2); a future TurnContext refactor will eliminate
-        # it entirely.
+        # copying is wasted allocation.
         _will_filter = role.allowed_tools is not None or bool(role.denied_tools)
-        self._saved_tools = self.tools.snapshot() if _will_filter else None
+        ctx = TurnContext(
+            model=self.model,
+            temperature=self.temperature,
+            max_iterations=self.max_iterations,
+            role_prompt=self.context.role_system_prompt,
+            tools=self.tools.snapshot() if _will_filter else None,
+        )
 
         if role.model:
             self.model = role.model
@@ -1707,6 +1697,7 @@ class AgentLoop:
         # Apply role-specific tool filtering
         self._filter_tools_for_role(role)
         logger.debug("Applied role '{}' for turn (model={})", role.name, self.model)
+        return ctx
 
     def _filter_tools_for_role(self, role: AgentRoleConfig) -> None:
         """Remove tools that the role's allowed/denied lists exclude."""
@@ -1720,25 +1711,22 @@ class AgentLoop:
             elif name in denied:
                 self.tools.unregister(name)
 
-    def _reset_role_after_turn(self) -> None:
-        """Restore original agent settings after a routed turn."""
-        if self._saved_model is not None:
-            self.model = self._saved_model
-            self._saved_model = None
-        if self._saved_temperature is not None:
-            self.temperature = self._saved_temperature
-            self._saved_temperature = None
-        if self._saved_max_iterations is not None:
-            self.max_iterations = self._saved_max_iterations
-            self._saved_max_iterations = None
-        if self._saved_role_prompt is not None:
-            self.context.role_system_prompt = self._saved_role_prompt
-            self._saved_role_prompt = None
+    def _reset_role_after_turn(self, ctx: TurnContext | None) -> None:
+        """Restore original agent settings after a routed turn.
+
+        ``ctx`` is the ``TurnContext`` returned by ``_apply_role_for_turn``.
+        Passing ``None`` is a no-op (safe to call when no role was applied).
+        """
+        if ctx is None:
+            return
+        self.model = ctx.model
+        self.temperature = ctx.temperature
+        self.max_iterations = ctx.max_iterations
+        self.context.role_system_prompt = ctx.role_prompt
         self.role_name = self.role_config.name if self.role_config else ""
         # Restore full tool set (only non-None — None means no filtering was applied)
-        if self._saved_tools is not None:
-            self.tools.restore(self._saved_tools)
-            self._saved_tools = None
+        if ctx.tools is not None:
+            self.tools.restore(ctx.tools)
 
     async def close_mcp(self) -> None:
         """Close MCP connections and other async resources."""
@@ -1761,6 +1749,8 @@ class AgentLoop:
     def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
+        if self._stop_event is not None:
+            self._stop_event.set()
         logger.info("Agent loop stopping")
 
     def _get_consolidation_lock(self, session_key: str) -> asyncio.Lock:
@@ -1769,6 +1759,16 @@ class AgentLoop:
     def _prune_consolidation_lock(self, session_key: str, lock: asyncio.Lock) -> None:
         """Drop lock entry if no longer in use."""
         self._consolidator.prune_lock(session_key, lock)
+
+    async def _run_consolidation_task(self, session: Session, lock: asyncio.Lock) -> None:
+        """Run one consolidation pass; holds the semaphore and per-session lock."""
+        try:
+            async with self._consolidation_sem:
+                async with lock:
+                    await self._consolidate_memory(session)
+        finally:
+            self._consolidating.discard(session.key)
+            self._prune_consolidation_lock(session.key, lock)
 
     def _should_force_verification(self, text: str) -> bool:
         return self._verifier.should_force_verification(text)
@@ -1815,7 +1815,7 @@ class AgentLoop:
                 tools=None,
                 model=self.model,
                 temperature=self.temperature,
-                max_tokens=self.max_tokens,
+                max_tokens=self.config.max_tokens,
             )
         except Exception:  # crash-barrier: recovery LLM call
             logger.exception("Recovery LLM call failed")
@@ -1869,6 +1869,82 @@ class AgentLoop:
         primary_reason = reasons[0]
         return f"Sorry, I couldn't answer that just now. {primary_reason} {help_line}"
 
+    def _make_bus_progress(
+        self,
+        channel: str,
+        chat_id: str,
+        base_meta: dict,
+        canonical_builder: CanonicalEventBuilder,
+    ) -> ProgressCallback:
+        """Return a ``ProgressCallback`` that publishes structured progress events onto the bus.
+
+        Each call shallow-copies ``base_meta``, merges per-event fields, and
+        attaches the appropriate canonical event from ``canonical_builder``
+        before publishing an ``OutboundMessage`` with ``_progress=True``.
+
+        The returned coroutine captures ``channel``, ``chat_id``, ``base_meta``,
+        and ``canonical_builder`` by value so it remains valid for the full turn
+        even if the caller rebinds its local variables.
+        """
+
+        async def _progress(
+            content: str,
+            *,
+            tool_hint: bool = False,
+            streaming: bool = False,
+            tool_call: dict | None = None,
+            tool_result: dict | None = None,
+            delegate_start: dict | None = None,
+            delegate_end: dict | None = None,
+            status_code: str = "",
+            status_label: str = "",
+        ) -> None:
+            meta = dict(base_meta)
+            meta["_tool_hint"] = tool_hint
+            meta["_streaming"] = streaming
+            if tool_call:
+                meta["_tool_call"] = tool_call
+                meta["_canonical"] = canonical_builder.tool_call(
+                    tool_call_id=tool_call["toolCallId"],
+                    tool_name=tool_call["toolName"],
+                    args=tool_call.get("args", {}),
+                )
+            elif tool_result:
+                meta["_tool_result"] = tool_result
+                meta["_canonical"] = canonical_builder.tool_result(
+                    tool_call_id=tool_result["toolCallId"],
+                    tool_name=tool_result.get("toolName", ""),
+                    result=tool_result.get("result", ""),
+                )
+            elif delegate_start:
+                meta["_canonical"] = canonical_builder.delegate_start(
+                    delegation_id=delegate_start["delegation_id"],
+                    child_role=delegate_start["child_role"],
+                    task_title=delegate_start.get("task_title", ""),
+                )
+            elif delegate_end:
+                meta["_canonical"] = canonical_builder.delegate_end(
+                    delegation_id=delegate_end["delegation_id"],
+                    success=delegate_end.get("success", True),
+                )
+            elif status_code:
+                meta["_canonical"] = canonical_builder.status(status_code, label=status_label)
+            elif content:
+                # on_progress always delivers cumulative text (the full text
+                # assembled so far), regardless of the streaming flag.
+                # text_flush() deduplicates against what was already sent.
+                meta["_canonical"] = canonical_builder.text_flush(content)
+            await self.bus.publish_outbound(
+                OutboundMessage(
+                    channel=channel,
+                    chat_id=chat_id,
+                    content=content,
+                    metadata=meta,
+                )
+            )
+
+        return _progress  # type: ignore[return-value]
+
     async def _process_message(
         self,
         msg: InboundMessage,
@@ -1887,7 +1963,7 @@ class AgentLoop:
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
-            history = session.get_history(max_messages=self.memory_window)
+            history = session.get_history(max_messages=self.config.memory_window)
             skill_names = self.context.skills.detect_relevant_skills(msg.content)
             messages = self.context.build_messages(
                 history=history,
@@ -1967,7 +2043,7 @@ class AgentLoop:
         _channel = msg.channel
         _chat_id = msg.chat_id
         _content = msg.content
-        _enable_cc = self.memory_enable_contradiction_check
+        _enable_cc = self.config.memory_enable_contradiction_check
 
         def _pre_turn_memory() -> tuple[dict[str, Any], dict[str, Any] | None]:
             cr = memory_store.handle_user_conflict_reply(_content)
@@ -2009,25 +2085,17 @@ class AgentLoop:
         unconsolidated = len(session.messages) - session.last_consolidated
         if (
             self.config.memory_enabled
-            and unconsolidated >= self.memory_window
+            and unconsolidated >= self.config.memory_window
             and session.key not in self._consolidating
         ):
             self._consolidating.add(session.key)
             lock = self._get_consolidation_lock(session.key)
-
-            async def _consolidate_and_unlock():
-                try:
-                    async with lock:
-                        await self._consolidate_memory(session)
-                finally:
-                    self._consolidating.discard(session.key)
-                    self._prune_consolidation_lock(session.key, lock)
-                    _task = asyncio.current_task()
-                    if _task is not None:
-                        self._consolidation_tasks.discard(_task)
-
-            _task = asyncio.create_task(_consolidate_and_unlock())
+            _task = asyncio.create_task(self._run_consolidation_task(session, lock))
             self._consolidation_tasks.add(_task)
+            _task.add_done_callback(self._consolidation_tasks.discard)
+            _task.add_done_callback(
+                lambda t: logger.exception("Consolidation task failed") if t.exception() else None
+            )
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         self._ensure_scratchpad(key)
@@ -2035,7 +2103,7 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(max_messages=self.memory_window)
+        history = session.get_history(max_messages=self.config.memory_window)
         verify_before_answer = self._should_force_verification(msg.content)
         skill_names = self.context.skills.detect_relevant_skills(msg.content)
         initial_messages = self.context.build_messages(
@@ -2064,61 +2132,9 @@ class AgentLoop:
         _base_meta: dict = dict(msg.metadata or {})
         _base_meta["_progress"] = True
 
-        async def _bus_progress(
-            content: str,
-            *,
-            tool_hint: bool = False,
-            streaming: bool = False,
-            tool_call: dict | None = None,
-            tool_result: dict | None = None,
-            delegate_start: dict | None = None,
-            delegate_end: dict | None = None,
-            status_code: str = "",
-            status_label: str = "",
-        ) -> None:
-            meta = dict(_base_meta)
-            meta["_tool_hint"] = tool_hint
-            meta["_streaming"] = streaming
-            if tool_call:
-                meta["_tool_call"] = tool_call
-                meta["_canonical"] = _canonical_builder.tool_call(
-                    tool_call_id=tool_call["toolCallId"],
-                    tool_name=tool_call["toolName"],
-                    args=tool_call.get("args", {}),
-                )
-            elif tool_result:
-                meta["_tool_result"] = tool_result
-                meta["_canonical"] = _canonical_builder.tool_result(
-                    tool_call_id=tool_result["toolCallId"],
-                    tool_name=tool_result.get("toolName", ""),
-                    result=tool_result.get("result", ""),
-                )
-            elif delegate_start:
-                meta["_canonical"] = _canonical_builder.delegate_start(
-                    delegation_id=delegate_start["delegation_id"],
-                    child_role=delegate_start["child_role"],
-                    task_title=delegate_start.get("task_title", ""),
-                )
-            elif delegate_end:
-                meta["_canonical"] = _canonical_builder.delegate_end(
-                    delegation_id=delegate_end["delegation_id"],
-                    success=delegate_end.get("success", True),
-                )
-            elif status_code:
-                meta["_canonical"] = _canonical_builder.status(status_code, label=status_label)
-            elif content:
-                # on_progress always delivers cumulative text (the full text
-                # assembled so far), regardless of the streaming flag.
-                # text_flush() deduplicates against what was already sent.
-                meta["_canonical"] = _canonical_builder.text_flush(content)
-            await self.bus.publish_outbound(
-                OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=content,
-                    metadata=meta,
-                )
-            )
+        _bus_progress = self._make_bus_progress(
+            msg.channel, msg.chat_id, _base_meta, _canonical_builder
+        )
 
         # Emit run.start + message.start before the agent loop begins.
         for _start_event in (
@@ -2140,7 +2156,10 @@ class AgentLoop:
 
         final_content, tools_used, all_msgs = await self._run_agent_loop(
             initial_messages,
-            on_progress=(on_progress or _bus_progress) if self.config.streaming_enabled else None,
+            # External on_progress (e.g. _cli_progress) may only implement the
+            # simplified (content: str) signature; ProgressCallback is the full
+            # internal signature. BP-M2: tracked for a future wrapper.
+            on_progress=(on_progress or _bus_progress) if self.config.streaming_enabled else None,  # type: ignore[arg-type]
         )
 
         # Clear the per-turn callback to prevent cross-turn leakage.
@@ -2243,14 +2262,14 @@ class AgentLoop:
             session.messages.append(entry)
         session.updated_at = datetime.now()
 
-    async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
+    async def _consolidate_memory(self, session: Session, archive_all: bool = False) -> bool:
         """Delegate to ConsolidationOrchestrator."""
         return await self._consolidator.consolidate(
             session,
             self.provider,
             self.model,
-            memory_window=self.memory_window,
-            enable_contradiction_check=self.memory_enable_contradiction_check,
+            memory_window=self.config.memory_window,
+            enable_contradiction_check=self.config.memory_enable_contradiction_check,
             archive_all=archive_all,
         )
 

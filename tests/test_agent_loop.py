@@ -109,7 +109,6 @@ def _make_inbound(text: str, channel: str = "cli", chat_id: str = "test-user") -
 class TestAgentLoopSingleTurn:
     """Test single-turn Q&A without tool use."""
 
-    @pytest.mark.asyncio
     async def test_simple_qa(self, tmp_path: Path):
         """Agent returns the LLM's text response directly."""
         provider = ScriptedProvider(
@@ -125,7 +124,6 @@ class TestAgentLoopSingleTurn:
         assert "Hello" in result.content
         assert provider._index >= 1
 
-    @pytest.mark.asyncio
     async def test_empty_content_fallback(self, tmp_path: Path):
         """When LLM returns None content with no tool calls, agent returns explanation."""
         provider = ScriptedProvider(
@@ -145,7 +143,6 @@ class TestAgentLoopSingleTurn:
 class TestAgentLoopToolUse:
     """Test multi-step tool use."""
 
-    @pytest.mark.asyncio
     async def test_tool_call_then_answer(self, tmp_path: Path):
         """Agent calls a tool, gets result, then produces final answer."""
         # Create a test file for read_file to find
@@ -177,7 +174,6 @@ class TestAgentLoopToolUse:
         assert "file content" in result.content
         assert provider._index == 2
 
-    @pytest.mark.asyncio
     async def test_multiple_tool_calls(self, tmp_path: Path):
         """Agent makes multiple sequential tool calls."""
         (tmp_path / "a.txt").write_text("alpha")
@@ -218,7 +214,6 @@ class TestAgentLoopToolUse:
 class TestAgentLoopToolFailure:
     """Test tool failure, reflection, and retry."""
 
-    @pytest.mark.asyncio
     async def test_tool_not_found(self, tmp_path: Path):
         """Calling a nonexistent tool returns an error, agent continues."""
         provider = ScriptedProvider(
@@ -239,7 +234,6 @@ class TestAgentLoopToolFailure:
         assert result is not None
         assert len(result.content) > 0
 
-    @pytest.mark.asyncio
     async def test_read_missing_file_retry(self, tmp_path: Path):
         """Reading a missing file fails, agent retries with different approach."""
         provider = ScriptedProvider(
@@ -268,7 +262,6 @@ class TestAgentLoopToolFailure:
 class TestAgentLoopMaxIterations:
     """Test max iterations limit."""
 
-    @pytest.mark.asyncio
     async def test_max_iterations_reached(self, tmp_path: Path):
         """Agent stops after max_iterations and returns a fallback message."""
         # All responses are tool calls — agent never produces text
@@ -295,7 +288,6 @@ class TestAgentLoopMaxIterations:
 class TestAgentLoopConsecutiveErrors:
     """Test consecutive LLM errors -> graceful fallback."""
 
-    @pytest.mark.asyncio
     async def test_consecutive_llm_errors(self, tmp_path: Path):
         """Three consecutive LLM errors cause graceful failure."""
         provider = ScriptedProvider(
@@ -315,7 +307,6 @@ class TestAgentLoopConsecutiveErrors:
 class TestAgentLoopNudgeFinalAnswer:
     """Test the nudge for final answer when tool results present but no text."""
 
-    @pytest.mark.asyncio
     async def test_nudge_after_tool_result_no_text(self, tmp_path: Path):
         """When LLM returns tool results with content, then blank, it gets nudged."""
         test_file = tmp_path / "data.txt"
@@ -355,7 +346,6 @@ class TestAgentLoopNudgeFinalAnswer:
 class TestAgentLoopPlanning:
     """Test planning prompt injection."""
 
-    @pytest.mark.asyncio
     async def test_planning_prompt_injected(self, tmp_path: Path):
         """When planning is enabled and task looks complex, planning prompt is injected."""
         provider = ScriptedProvider(
@@ -372,7 +362,6 @@ class TestAgentLoopPlanning:
         # Provider should've received messages — check that a system message with planning was in there
         assert provider._index >= 1
 
-    @pytest.mark.asyncio
     async def test_planning_not_injected_for_simple_query(self, tmp_path: Path):
         """Simple queries don't trigger planning."""
         provider = ScriptedProvider(
@@ -391,7 +380,6 @@ class TestAgentLoopPlanning:
 class TestAgentLoopContextCompression:
     """Test context compression under budget pressure."""
 
-    @pytest.mark.asyncio
     async def test_large_context_triggers_compression(self, tmp_path: Path):
         """Compression doesn't crash or lose the final answer."""
         # Build a long conversation that would overflow
@@ -419,7 +407,6 @@ class TestAgentLoopContextCompression:
         assert result is not None
         assert len(result.content) > 0
 
-    @pytest.mark.asyncio
     async def test_compression_skipped_when_under_budget(self, tmp_path: Path):
         """summarize_and_compress must NOT be called when tokens are well under budget.
 
@@ -443,7 +430,6 @@ class TestAgentLoopContextCompression:
 class TestAgentLoopSlashCommands:
     """Test slash command handling."""
 
-    @pytest.mark.asyncio
     async def test_help_command(self, tmp_path: Path):
         """The /help command returns help text without calling LLM."""
         provider = ScriptedProvider([])
@@ -454,7 +440,6 @@ class TestAgentLoopSlashCommands:
         assert "commands" in result.content.lower()
         assert provider._index == 0  # No LLM call
 
-    @pytest.mark.asyncio
     async def test_new_command(self, tmp_path: Path):
         """The /new command clears session."""
         # Provide a consolidation-compatible response (save_memory tool call)
@@ -491,7 +476,6 @@ class TestAgentLoopSlashCommands:
 class TestAgentLoopProviderCallLog:
     """Verify that the provider receives the expected number and shape of calls."""
 
-    @pytest.mark.asyncio
     async def test_single_provider_call_for_simple_qa(self, tmp_path: Path):
         """Simple Q&A makes exactly 1 provider call (no verification, no planning)."""
         provider = ScriptedProvider(
@@ -509,7 +493,6 @@ class TestAgentLoopProviderCallLog:
 class TestToolCallTrackerIntegration:
     """ToolCallTracker breaks infinite identical-failure loops."""
 
-    @pytest.mark.asyncio
     async def test_stuck_tool_loop_injects_escalation(self, tmp_path: Path):
         """Agent retries the same failing read_file call; tracker injects escalation prompts.
 
@@ -545,7 +528,6 @@ class TestToolCallTrackerIntegration:
         # With tracker injections, we expect significantly more messages
         assert total_messages > 12  # Would be ~2 + (2 * iterations) without tracker
 
-    @pytest.mark.asyncio
     async def test_different_args_do_not_trigger_removal(self, tmp_path: Path):
         """Different arguments for the same tool are tracked independently."""
         file_a = tmp_path / "a.txt"
@@ -579,7 +561,6 @@ class TestToolCallTrackerIntegration:
         # All 3 provider calls should have been made (no premature cutoff)
         assert len(provider.call_log) == 3
 
-    @pytest.mark.asyncio
     async def test_suppressed_tool_available_in_next_turn(self, tmp_path: Path):
         """A tool suppressed within turn N must be available in the registry for turn N+1.
 
@@ -628,7 +609,6 @@ class TestToolCallTrackerIntegration:
             "disabled_tools must be turn-scoped only"
         )
 
-    @pytest.mark.asyncio
     async def test_suppressed_tool_absent_from_tools_def_same_turn(self, tmp_path: Path):
         """After REMOVE_THRESHOLD failures, the tool must not appear in tools_def
         for subsequent LLM calls within the same turn (TEST-H2 regression guard)."""
@@ -669,7 +649,6 @@ class TestToolCallTrackerIntegration:
 class TestSaveTurnFiltering:
     """Verify _save_turn excludes ephemeral system messages."""
 
-    @pytest.mark.asyncio
     async def test_system_messages_not_persisted(self, tmp_path: Path):
         """Ephemeral system messages (reflect/progress) must not be saved to session."""
         provider = ScriptedProvider(
@@ -859,11 +838,11 @@ class TestRoleSwitching:
         orig_temp = loop.temperature
         orig_iters = loop.max_iterations
 
-        loop._apply_role_for_turn(role)
+        ctx = loop._apply_role_for_turn(role)
 
-        assert loop._saved_model == orig_model
-        assert loop._saved_temperature == orig_temp
-        assert loop._saved_max_iterations == orig_iters
+        assert ctx.model == orig_model
+        assert ctx.temperature == orig_temp
+        assert ctx.max_iterations == orig_iters
 
     def test_apply_overrides_settings(self, tmp_path: Path):
         loop, role = self._make_loop_with_role(tmp_path)
@@ -880,22 +859,18 @@ class TestRoleSwitching:
         orig_temp = loop.temperature
         orig_iters = loop.max_iterations
 
-        loop._apply_role_for_turn(role)
-        loop._reset_role_after_turn()
+        ctx = loop._apply_role_for_turn(role)
+        loop._reset_role_after_turn(ctx)
 
         assert loop.model == orig_model
         assert loop.temperature == pytest.approx(orig_temp)
         assert loop.max_iterations == orig_iters
-        # Save slots cleared
-        assert loop._saved_model is None
-        assert loop._saved_temperature is None
-        assert loop._saved_max_iterations is None
 
     def test_reset_without_apply_is_noop(self, tmp_path: Path):
         """_reset_role_after_turn must be safe to call with no prior apply."""
         loop = _make_loop(tmp_path, ScriptedProvider([]))
         orig_model = loop.model
-        loop._reset_role_after_turn()  # must not raise
+        loop._reset_role_after_turn(None)  # must not raise
         assert loop.model == orig_model
 
     def test_apply_tool_filter_saved_and_restored(self, tmp_path: Path):
@@ -907,19 +882,19 @@ class TestRoleSwitching:
         orig_names = set(loop.tools.tool_names)
 
         role = AgentRoleConfig(name="limited", allowed_tools=["read_file"])
-        loop._apply_role_for_turn(role)
+        ctx = loop._apply_role_for_turn(role)
         # After filtering, only read_file should remain
         assert set(loop.tools.tool_names) == {"read_file"}
 
-        loop._reset_role_after_turn()
+        loop._reset_role_after_turn(ctx)
         # Full tool set must be restored
         assert set(loop.tools.tool_names) == orig_names
 
     def test_apply_no_filter_does_not_snapshot(self, tmp_path: Path):
-        """Roles with no allowed/denied lists must leave _saved_tools as None."""
+        """Roles with no allowed/denied lists must leave TurnContext.tools as None."""
         from nanobot.config.schema import AgentRoleConfig
 
         loop = _make_loop(tmp_path, ScriptedProvider([]))
         role = AgentRoleConfig(name="passthrough")
-        loop._apply_role_for_turn(role)
-        assert loop._saved_tools is None
+        ctx = loop._apply_role_for_turn(role)
+        assert ctx.tools is None

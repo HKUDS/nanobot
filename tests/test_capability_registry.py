@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from nanobot.agent.capability import CapabilityRegistry
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.registry import ToolRegistry
@@ -279,7 +277,6 @@ class TestToolExecution:
         assert reg.get_tool("avail_tool") is tool
         assert reg.get_tool("nonexistent") is None
 
-    @pytest.mark.asyncio
     async def test_execute_tool(self) -> None:
         reg = CapabilityRegistry()
         reg.register_tool(_AvailableTool())
@@ -288,7 +285,6 @@ class TestToolExecution:
         assert result.success
         assert result.output == "ok"
 
-    @pytest.mark.asyncio
     async def test_execute_nonexistent_tool(self) -> None:
         reg = CapabilityRegistry()
         result = await reg.execute_tool("nonexistent", {})

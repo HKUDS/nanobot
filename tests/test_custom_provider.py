@@ -3,8 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import pytest
-
 from nanobot.providers.custom_provider import CustomProvider
 
 
@@ -23,7 +21,6 @@ def _fake_response(content: str = "ok", with_usage: bool = True, args: str = "{}
     return SimpleNamespace(choices=[choice], usage=usage)
 
 
-@pytest.mark.asyncio
 async def test_custom_provider_chat_success() -> None:
     provider = CustomProvider(api_key="k", api_base="http://localhost:8000/v1", default_model="m")
     provider._client = SimpleNamespace(
@@ -41,7 +38,6 @@ async def test_custom_provider_chat_success() -> None:
     assert out.usage["total_tokens"] == 3
 
 
-@pytest.mark.asyncio
 async def test_custom_provider_chat_error() -> None:
     provider = CustomProvider(api_key="k", api_base="http://localhost:8000/v1", default_model="m")
     provider._client = SimpleNamespace(

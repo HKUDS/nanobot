@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from nanobot.agent.tool_loop import run_tool_loop
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.registry import ToolRegistry
@@ -36,7 +34,6 @@ class _EchoTool(Tool):
         return ToolResult.ok(kwargs.get("text", ""))
 
 
-@pytest.mark.asyncio
 async def test_run_tool_loop_with_tool_call_then_final_response() -> None:
     provider = _DummyProvider(
         [
@@ -63,7 +60,6 @@ async def test_run_tool_loop_with_tool_call_then_final_response() -> None:
     assert any(m.get("role") == "tool" for m in messages)
 
 
-@pytest.mark.asyncio
 async def test_run_tool_loop_exhaustion_summary_fallback_to_tool_snippets() -> None:
     class _NoSummaryProvider(_DummyProvider):
         async def chat(self, **_kwargs) -> LLMResponse:

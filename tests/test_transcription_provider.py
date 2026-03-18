@@ -35,7 +35,6 @@ class _FakeClient:
         return self._response
 
 
-@pytest.mark.asyncio
 async def test_transcription_no_api_key_returns_empty(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -45,7 +44,6 @@ async def test_transcription_no_api_key_returns_empty(
     assert out == ""
 
 
-@pytest.mark.asyncio
 async def test_transcription_missing_file_returns_empty(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -55,7 +53,6 @@ async def test_transcription_missing_file_returns_empty(
     assert out == ""
 
 
-@pytest.mark.asyncio
 async def test_transcription_wrong_prefix_rejected(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -66,7 +63,6 @@ async def test_transcription_wrong_prefix_rejected(
     assert out == ""
 
 
-@pytest.mark.asyncio
 async def test_transcription_env_var_preferred(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -75,7 +71,6 @@ async def test_transcription_env_var_preferred(
     assert provider.api_key == "gsk_from_env"
 
 
-@pytest.mark.asyncio
 async def test_transcription_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     audio = tmp_path / "a.wav"
@@ -91,7 +86,6 @@ async def test_transcription_success(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert out == "ok text"
 
 
-@pytest.mark.asyncio
 async def test_transcription_exception_returns_empty(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

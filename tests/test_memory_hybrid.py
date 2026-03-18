@@ -5,14 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from nanobot.agent.memory import MemoryStore
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 
 class TestHybridMemoryStore:
-    @pytest.mark.asyncio
     async def test_hybrid_consolidation_writes_events_profile_and_metrics(
         self, tmp_path: Path
     ) -> None:
@@ -274,7 +271,6 @@ class TestHybridMemoryStore:
         assert "Review memory retrieval weights." in open_section
         assert "Migration completed and closed." not in open_section
 
-    @pytest.mark.asyncio
     async def test_observability_kpis_and_user_correction_metrics(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
 

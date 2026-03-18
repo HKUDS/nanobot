@@ -18,7 +18,6 @@ def mock_prompt_session():
         yield mock_session
 
 
-@pytest.mark.asyncio
 async def test_read_interactive_input_async_returns_input(mock_prompt_session):
     """Test that _read_interactive_input_async returns the user input from prompt_session."""
     mock_prompt_session.prompt_async.return_value = "hello world"
@@ -31,7 +30,6 @@ async def test_read_interactive_input_async_returns_input(mock_prompt_session):
     assert isinstance(args[0], HTML)  # Verify HTML prompt is used
 
 
-@pytest.mark.asyncio
 async def test_read_interactive_input_async_handles_eof(mock_prompt_session):
     """Test that EOFError converts to KeyboardInterrupt."""
     mock_prompt_session.prompt_async.side_effect = EOFError()

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from nanobot.agent.tools.message import MessageTool
 from nanobot.bus.events import DeliveryResult, OutboundMessage
 from nanobot.errors import DeliverySkippedError
@@ -26,7 +24,6 @@ def _tool(callback=None) -> MessageTool:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_ok_on_successful_delivery() -> None:
     """MessageTool returns ToolResult.ok when deliver() reports success."""
 
@@ -40,7 +37,6 @@ async def test_ok_on_successful_delivery() -> None:
     assert "telegram:123" in result.output
 
 
-@pytest.mark.asyncio
 async def test_ok_includes_media_info() -> None:
     async def _deliver(msg: OutboundMessage) -> DeliveryResult:
         return DeliveryResult(success=True, channel=msg.channel, chat_id=msg.chat_id)
@@ -56,7 +52,6 @@ async def test_ok_includes_media_info() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_fail_on_delivery_failure() -> None:
     """MessageTool returns ToolResult.fail when deliver() reports failure."""
 
@@ -71,7 +66,6 @@ async def test_fail_on_delivery_failure() -> None:
     assert "SMTP timeout" in result.output
 
 
-@pytest.mark.asyncio
 async def test_fail_on_delivery_skipped_error() -> None:
     """MessageTool returns ToolResult.fail when callback raises DeliverySkippedError."""
 
@@ -84,7 +78,6 @@ async def test_fail_on_delivery_skipped_error() -> None:
     assert "consent not granted" in result.output
 
 
-@pytest.mark.asyncio
 async def test_fail_on_unexpected_exception() -> None:
     """MessageTool catches unexpected exceptions and returns ToolResult.fail."""
 
@@ -102,7 +95,6 @@ async def test_fail_on_unexpected_exception() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_legacy_callback_returns_ok() -> None:
     """Legacy callbacks that return None still report ok (fire-and-forget)."""
 
@@ -120,7 +112,6 @@ async def test_legacy_callback_returns_ok() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_sent_in_turn_set_on_success() -> None:
     async def _deliver(msg: OutboundMessage) -> DeliveryResult:
         return DeliveryResult(success=True, channel=msg.channel, chat_id=msg.chat_id)
@@ -132,7 +123,6 @@ async def test_sent_in_turn_set_on_success() -> None:
     assert tool._sent_in_turn
 
 
-@pytest.mark.asyncio
 async def test_sent_in_turn_not_set_on_failure() -> None:
     async def _deliver(msg: OutboundMessage) -> DeliveryResult:
         return DeliveryResult(success=False, channel=msg.channel, chat_id=msg.chat_id, error="fail")
@@ -148,7 +138,6 @@ async def test_sent_in_turn_not_set_on_failure() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_message_tool_paths() -> None:
     tool = MessageTool()
 
@@ -172,7 +161,6 @@ async def test_message_tool_paths() -> None:
     assert len(sent) == 1
 
 
-@pytest.mark.asyncio
 async def test_message_tool_send_error() -> None:
     async def _bad(_msg):
         raise RuntimeError("boom")

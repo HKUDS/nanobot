@@ -4,8 +4,6 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -50,7 +48,6 @@ def _make_loop(tmp_path: Path, provider: LLMProvider, verification_mode: str) ->
     return AgentLoop(MessageBus(), provider, cfg)
 
 
-@pytest.mark.asyncio
 async def test_verify_answer_revise_and_parse_fallback(tmp_path: Path) -> None:
     provider = _ScriptedProvider(
         [
@@ -77,7 +74,6 @@ async def test_verify_answer_revise_and_parse_fallback(tmp_path: Path) -> None:
     assert kept == "candidate"
 
 
-@pytest.mark.asyncio
 async def test_verify_answer_on_uncertainty_skip(tmp_path: Path) -> None:
     provider = _ScriptedProvider([LLMResponse(content='{"confidence": 5, "issues": []}')])
     loop = _make_loop(tmp_path, provider, verification_mode="on_uncertainty")
@@ -86,7 +82,6 @@ async def test_verify_answer_on_uncertainty_skip(tmp_path: Path) -> None:
     assert out == "candidate"
 
 
-@pytest.mark.asyncio
 async def test_run_timeout_and_none_response_paths(tmp_path: Path) -> None:
     provider = _ScriptedProvider([])
     bus = MessageBus()
@@ -119,7 +114,6 @@ async def test_run_timeout_and_none_response_paths(tmp_path: Path) -> None:
     await asyncio.wait_for(task, timeout=2.0)
 
 
-@pytest.mark.asyncio
 async def test_run_exception_path_publishes_user_friendly_error(tmp_path: Path) -> None:
     provider = _ScriptedProvider([])
     bus = MessageBus()
@@ -149,7 +143,6 @@ async def test_run_exception_path_publishes_user_friendly_error(tmp_path: Path) 
     await asyncio.wait_for(task, timeout=2.0)
 
 
-@pytest.mark.asyncio
 async def test_run_with_routing_low_confidence_and_none_response(tmp_path: Path) -> None:
     provider = _ScriptedProvider([])
     bus = MessageBus()
@@ -185,7 +178,9 @@ async def test_run_with_routing_low_confidence_and_none_response(tmp_path: Path)
     loop._apply_role_for_turn = lambda _r: role_calls.__setitem__(
         "applied", role_calls["applied"] + 1
     )  # type: ignore[method-assign]
-    loop._reset_role_after_turn = lambda: role_calls.__setitem__("reset", role_calls["reset"] + 1)  # type: ignore[method-assign]
+    loop._reset_role_after_turn = lambda _ctx: role_calls.__setitem__(
+        "reset", role_calls["reset"] + 1
+    )  # type: ignore[method-assign]
 
     async def _none_response(_msg):
         return None

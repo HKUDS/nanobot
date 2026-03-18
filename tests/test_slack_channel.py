@@ -35,7 +35,6 @@ def _channel() -> SlackChannel:
     return ch
 
 
-@pytest.mark.asyncio
 async def test_start_validation_and_stop() -> None:
     ch = _channel()
     ch.config.bot_token = ""
@@ -52,7 +51,6 @@ async def test_start_validation_and_stop() -> None:
     assert ch._socket_client is None
 
 
-@pytest.mark.asyncio
 async def test_send_paths() -> None:
     ch = _channel()
     ch._web_client = SimpleNamespace(
@@ -72,7 +70,6 @@ async def test_send_paths() -> None:
     assert ch._web_client.files_upload_v2.await_count == 2
 
 
-@pytest.mark.asyncio
 async def test_socket_request_filters_and_dispatch() -> None:
     ch = _channel()
     ch._web_client = SimpleNamespace(reactions_add=AsyncMock())
