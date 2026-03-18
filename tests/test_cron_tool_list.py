@@ -38,6 +38,16 @@ def test_format_timing_every_seconds() -> None:
     assert CronTool._format_timing(s) == "every 30s"
 
 
+def test_format_timing_every_non_minute_seconds() -> None:
+    s = CronSchedule(kind="every", every_ms=90_000)
+    assert CronTool._format_timing(s) == "every 90s"
+
+
+def test_format_timing_every_milliseconds() -> None:
+    s = CronSchedule(kind="every", every_ms=200)
+    assert CronTool._format_timing(s) == "every 200ms"
+
+
 def test_format_timing_at() -> None:
     s = CronSchedule(kind="at", at_ms=1773684000000)
     result = CronTool._format_timing(s)
@@ -113,7 +123,6 @@ def test_list_cron_job_shows_expression_and_timezone(tmp_path) -> None:
     )
     result = tool._list_jobs()
     assert "cron: 0 9 * * 1-5 (America/Denver)" in result
-    assert "enabled" in result
 
 
 def test_list_every_job_shows_human_interval(tmp_path) -> None:
@@ -147,6 +156,28 @@ def test_list_every_job_seconds(tmp_path) -> None:
     )
     result = tool._list_jobs()
     assert "every 30s" in result
+
+
+def test_list_every_job_non_minute_seconds(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    tool._cron.add_job(
+        name="Ninety-second check",
+        schedule=CronSchedule(kind="every", every_ms=90_000),
+        message="check",
+    )
+    result = tool._list_jobs()
+    assert "every 90s" in result
+
+
+def test_list_every_job_milliseconds(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    tool._cron.add_job(
+        name="Sub-second check",
+        schedule=CronSchedule(kind="every", every_ms=200),
+        message="check",
+    )
+    result = tool._list_jobs()
+    assert "every 200ms" in result
 
 
 def test_list_at_job_shows_iso_timestamp(tmp_path) -> None:

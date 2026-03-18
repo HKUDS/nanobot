@@ -151,12 +151,14 @@ class CronTool(Tool):
             tz = f" ({schedule.tz})" if schedule.tz else ""
             return f"cron: {schedule.expr}{tz}"
         if schedule.kind == "every" and schedule.every_ms:
-            secs = schedule.every_ms // 1000
-            if secs >= 3600:
-                return f"every {secs // 3600}h"
-            if secs >= 60:
-                return f"every {secs // 60}m"
-            return f"every {secs}s"
+            ms = schedule.every_ms
+            if ms % 3_600_000 == 0:
+                return f"every {ms // 3_600_000}h"
+            if ms % 60_000 == 0:
+                return f"every {ms // 60_000}m"
+            if ms % 1000 == 0:
+                return f"every {ms // 1000}s"
+            return f"every {ms}ms"
         if schedule.kind == "at" and schedule.at_ms:
             dt = datetime.fromtimestamp(schedule.at_ms / 1000, tz=timezone.utc)
             return f"at {dt.isoformat()}"
@@ -184,8 +186,7 @@ class CronTool(Tool):
         lines = []
         for j in jobs:
             timing = self._format_timing(j.schedule)
-            status = "enabled" if j.enabled else "disabled"
-            parts = [f"- {j.name} (id: {j.id}, {timing}, {status})"]
+            parts = [f"- {j.name} (id: {j.id}, {timing})"]
             parts.extend(self._format_state(j.state))
             lines.append("\n".join(parts))
         return "Scheduled jobs:\n" + "\n".join(lines)
