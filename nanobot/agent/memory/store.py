@@ -46,6 +46,12 @@ if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session
 
+# Intents that benefit from scanning recent unresolved events.
+# For all other intents (fact_lookup, chitchat, …) the scan is skipped.
+_UNRESOLVED_INTENTS: frozenset[str] = frozenset(
+    {"planning", "debug", "conflict", "reflection", "task"}
+)
+
 
 class MemoryStore:
     """mem0-first memory store with structured profile/events maintenance."""
@@ -3678,7 +3684,11 @@ class MemoryStore:
                 max_tokens=budget,
             )
 
-        unresolved = self._recent_unresolved(self.read_events(limit=60), max_items=6)
+        unresolved: list[dict[str, Any]] = (
+            self._recent_unresolved(self.read_events(limit=60), max_items=6)
+            if intent in _UNRESOLVED_INTENTS
+            else []
+        )
         raw_unresolved: list[str] = []
         if include_episodic and unresolved:
             for item in unresolved:
