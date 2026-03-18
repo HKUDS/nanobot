@@ -109,7 +109,6 @@ class GatewayConfig(Base):
 class ThinkingToolUseStreamingConfig(Base):
     """Thinking tool use streaming configuration."""
 
-    enabled: bool = True
     toolUsageTemplate: str = "⚙️: `{{tool}}`"
     thinkingTemplate: str = "🧠: `{{thought}}`"
     toolsBlacklist: list[str] = ["message"]

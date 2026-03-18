@@ -122,9 +122,9 @@ class ChannelManager:
                 )
 
                 if msg.metadata.get("_progress"):
-                    if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints and not msg.metadata.get("thinkingToolUseStreamingEnabled"):
+                    if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
                         continue
-                    if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress and not msg.metadata.get("thinkingToolUseStreamingEnabled"):
+                    if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
                         continue
 
                 channel = self.channels.get(msg.channel)
