@@ -92,13 +92,13 @@ from nanobot.agent.verifier import AnswerVerifier
 from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import DeliveryResult, InboundMessage, OutboundMessage, ReactionEvent
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentConfig, AgentRoleConfig
+from nanobot.config.schema import AgentConfig, AgentRoleConfig, ExecToolConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
     from nanobot.agent.coordinator import Coordinator
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, RoutingConfig
+    from nanobot.config.schema import ChannelsConfig, RoutingConfig
     from nanobot.cron.service import CronService
 
 
@@ -279,8 +279,6 @@ class AgentLoop:
         role_config: AgentRoleConfig | None = None,
         routing_config: RoutingConfig | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig
-
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
