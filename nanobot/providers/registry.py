@@ -399,6 +399,24 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
+    # Novita AI: OpenAI-compatible API gateway.
+    # Default model: deepseek/deepseek-v3.2; also supports zai-org/glm-5, minimax/minimax-m2.5.
+    ProviderSpec(
+        name="novita",
+        keywords=("novita",),
+        env_key="NOVITA_API_KEY",
+        display_name="Novita AI",
+        litellm_prefix="openai",  # deepseek/deepseek-v3.2 → openai/deepseek/deepseek-v3.2
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="novita",
+        default_api_base="https://api.novita.ai/openai",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
     # === Local deployment (matched by config key, NOT by api_base) =========
     # vLLM / any OpenAI-compatible local server.
     # Detected when config key is "vllm" (provider_name="vllm").
