@@ -7,6 +7,7 @@ import json
 import re
 import weakref
 from contextlib import AsyncExitStack
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -28,7 +29,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig
+    from nanobot.config.schema import AuditConfig, ChannelsConfig, ExecToolConfig
     from nanobot.cron.service import CronService
 
 
@@ -60,13 +61,14 @@ class AgentLoop:
         brave_api_key: str | None = None,
         web_proxy: str | None = None,
         exec_config: ExecToolConfig | None = None,
+        audit_config: AuditConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.config.schema import AuditConfig, ExecToolConfig
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
@@ -80,6 +82,7 @@ class AgentLoop:
         self.brave_api_key = brave_api_key
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
+        self.audit_config = audit_config or AuditConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
@@ -177,10 +180,45 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    def _audit_tool_call(
+        self,
+        name: str,
+        arguments: Any,
+        result: str,
+        tool_call_id: str | None = None,
+        session_key: str | None = None,
+    ) -> None:
+        """Append a full tool call record to the audit log if auditing is enabled.
+
+        The tool_call_id matches the id stored in the session JSONL, allowing
+        audit entries to be joined to session history for debugging.
+        """
+        if not self.audit_config.enabled:
+            return
+        try:
+            audit_path = (
+                Path(self.audit_config.path)
+                if self.audit_config.path
+                else self.workspace / "tool_audit.jsonl"
+            )
+            entry = {
+                "timestamp": datetime.now().isoformat(),
+                "session_key": session_key,
+                "tool_call_id": tool_call_id,
+                "tool": name,
+                "arguments": arguments,
+                "result": result,
+            }
+            with open(audit_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.warning("Failed to write tool audit log: {}", e)
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        session_key: str | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
@@ -229,6 +267,10 @@ class AgentLoop:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    self._audit_tool_call(
+                        tool_call.name, tool_call.arguments, result,
+                        tool_call_id=tool_call.id, session_key=session_key,
+                    )
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -347,7 +389,7 @@ class AgentLoop:
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, _, all_msgs = await self._run_agent_loop(messages, session_key=key)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
@@ -433,7 +475,7 @@ class AgentLoop:
             ))
 
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages, on_progress=on_progress or _bus_progress, session_key=key,
         )
 
         if final_content is None:

@@ -324,11 +324,19 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # seconds before a tool call is cancelled
 
 
+class AuditConfig(Base):
+    """Tool call audit log configuration."""
+
+    enabled: bool = False
+    path: str | None = None  # Absolute path to audit JSONL; defaults to <workspace>/tool_audit.jsonl
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    audit: AuditConfig = Field(default_factory=AuditConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 

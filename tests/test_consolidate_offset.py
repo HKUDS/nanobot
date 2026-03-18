@@ -498,7 +498,7 @@ class TestConsolidationDeduplicationGuard:
             bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10
         )
 
-        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+        loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
         loop.tools.get_definitions = MagicMock(return_value=[])
 
         session = loop.sessions.get_or_create("cli:test")
@@ -542,7 +542,7 @@ class TestConsolidationDeduplicationGuard:
             bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10
         )
 
-        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+        loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
         loop.tools.get_definitions = MagicMock(return_value=[])
 
         session = loop.sessions.get_or_create("cli:test")
@@ -594,7 +594,7 @@ class TestConsolidationDeduplicationGuard:
             bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10
         )
 
-        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+        loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
         loop.tools.get_definitions = MagicMock(return_value=[])
 
         session = loop.sessions.get_or_create("cli:test")
@@ -639,7 +639,7 @@ class TestConsolidationDeduplicationGuard:
             bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10
         )
 
-        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+        loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
         loop.tools.get_definitions = MagicMock(return_value=[])
 
         session = loop.sessions.get_or_create("cli:test")
@@ -697,7 +697,7 @@ class TestConsolidationDeduplicationGuard:
             bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10
         )
 
-        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+        loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
         loop.tools.get_definitions = MagicMock(return_value=[])
 
         session = loop.sessions.get_or_create("cli:test")
@@ -741,7 +741,7 @@ class TestConsolidationDeduplicationGuard:
             bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10
         )
 
-        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+        loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
         loop.tools.get_definitions = MagicMock(return_value=[])
 
         session = loop.sessions.get_or_create("cli:test")
@@ -799,7 +799,7 @@ class TestConsolidationDeduplicationGuard:
         loop = AgentLoop(
             bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10
         )
-        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+        loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
         loop.tools.get_definitions = MagicMock(return_value=[])
 
         session = loop.sessions.get_or_create("cli:test")
