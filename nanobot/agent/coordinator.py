@@ -143,10 +143,12 @@ class Coordinator:
         """Build the classification user prompt listing available roles."""
         roles = self._registry.list_roles()
         role_lines = "\n".join(f"- **{r.name}**: {r.description}" for r in roles)
+        valid_names = ", ".join(f'"{r.name}"' for r in roles)
         return (
             f"Available agents:\n{role_lines}\n\n"
             f"User message:\n{message}\n\n"
-            f'Which agent should handle this? Reply with {{"role": "<name>"}}.'
+            f"Which agent should handle this? "
+            f'The value of "role" must be one of: {valid_names}.'
         )
 
     async def classify(self, message: str) -> tuple[str, float]:
@@ -186,10 +188,13 @@ class Coordinator:
 
                 # Orchestration override: route to "pm" when the classifier
                 # judges the task needs multi-agent coordination.
+                # The relevant_roles heuristic is only applied when confidence
+                # is low (<0.8); at high confidence we trust the classifier's
+                # explicit needs_orchestration=False signal.
                 if (
                     role_name not in ("pm", "general")
                     and "pm" in self._registry
-                    and (needs_orchestration or len(relevant_roles) >= 2)
+                    and (needs_orchestration or (len(relevant_roles) >= 2 and confidence < 0.8))
                 ):
                     logger.info(
                         "Orchestration override: {} → pm "
