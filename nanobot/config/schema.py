@@ -112,7 +112,7 @@ class ThinkingToolUseStreamingConfig(Base):
     enabled: bool = True
     toolUsageTemplate: str = "\u2699\uFE0F: `{{tool}}`"
     thinkingTemplate: str = "\uD83E\uDDE0: `{{thought}}`"
-    toolsBlacklist: list[str] = Field(default_factory=list)
+    toolsBlacklist: list[str] = ["message"]
     channelsBlacklist: list[str] = Field(default_factory=list)
 
 
