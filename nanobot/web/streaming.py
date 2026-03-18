@@ -300,7 +300,6 @@ async def stream_agent_response(
                         if not text_started:
                             yield _sse({"type": "text-start"})
                             text_state["text_started"] = True
-                            text_started = True
                         yield _sse({"type": "text-delta", "textDelta": text})
                     elif text.startswith(streamed_text):
                         # Text continues from what was streamed — emit tail
@@ -309,7 +308,6 @@ async def stream_agent_response(
                             if not text_started:
                                 yield _sse({"type": "text-start"})
                                 text_state["text_started"] = True
-                                text_started = True
                             yield _sse({"type": "text-delta", "textDelta": delta})
                     # else: verifier revised the answer — text diverges from
                     # already-streamed content.  The final streaming flush

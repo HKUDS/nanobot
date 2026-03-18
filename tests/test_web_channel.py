@@ -31,7 +31,7 @@ def _parse_sse_events(chunks: list[str]) -> list[dict]:
                 try:
                     events.append(json.loads(raw))
                 except json.JSONDecodeError:
-                    pass
+                    pass  # skip malformed SSE lines in test helper
     return events
 
 
