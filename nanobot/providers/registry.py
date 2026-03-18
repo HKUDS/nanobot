@@ -452,6 +452,17 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
+    # === OpenVINO Model Server (direct, local, OpenAI-compatible at /v3) ===
+    ProviderSpec(
+        name="ovms",
+        keywords=("openvino", "ovms"),
+        env_key="",
+        display_name="OpenVINO Model Server",
+        litellm_prefix="",
+        is_direct=True,
+        is_local=True,
+        default_api_base="http://localhost:8000/v3",
+    ),
     # === Auxiliary (not a primary LLM provider) ============================
     # Groq: mainly used for Whisper voice transcription, also usable for LLM.
     # Needs "groq/" prefix for LiteLLM routing. Placed last — it rarely wins fallback.

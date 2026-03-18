@@ -376,6 +376,14 @@ def _make_provider(config: Config):
             api_base=p.api_base,
             default_model=model,
         )
+    # OpenVINO Model Server: direct OpenAI-compatible endpoint at /v3
+    elif provider_name == "ovms":
+        from nanobot.providers.custom_provider import CustomProvider
+        provider = CustomProvider(
+            api_key=p.api_key if p else "no-key",
+            api_base=config.get_api_base(model) or "http://localhost:8000/v3",
+            default_model=model,
+        )
     else:
         from nanobot.providers.litellm_provider import LiteLLMProvider
         from nanobot.providers.registry import find_by_name
