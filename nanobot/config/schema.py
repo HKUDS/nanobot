@@ -1,7 +1,7 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -12,6 +12,7 @@ class Base(BaseModel):
     """Base model that accepts both camelCase and snake_case keys."""
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
 
 class ChannelsConfig(Base):
     """Configuration for chat channels.
@@ -45,7 +46,9 @@ class AgentDefaults(Base):
     @property
     def should_warn_deprecated_memory_window(self) -> bool:
         """Return True when old memoryWindow is present without contextWindowTokens."""
-        return self.memory_window is not None and "context_window_tokens" not in self.model_fields_set
+        return (
+            self.memory_window is not None and "context_window_tokens" not in self.model_fields_set
+        )
 
 
 class AgentsConfig(Base):
@@ -66,7 +69,9 @@ class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
-    azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
+    azure_openai: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # Azure OpenAI (model = deployment name)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -84,9 +89,15 @@ class ProvidersConfig(Base):
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎)
-    volcengine_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine Coding Plan
-    byteplus: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus (VolcEngine international)
-    byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
+    volcengine_coding_plan: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # VolcEngine Coding Plan
+    byteplus: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # BytePlus (VolcEngine international)
+    byteplus_coding_plan: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # BytePlus Coding Plan
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
 
@@ -148,7 +159,10 @@ class MCPServerConfig(Base):
     url: str = ""  # HTTP/SSE: endpoint URL
     headers: dict[str, str] = Field(default_factory=dict)  # HTTP/SSE: custom headers
     tool_timeout: int = 30  # seconds before a tool call is cancelled
-    enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
+    enabled_tools: list[str] = Field(
+        default_factory=lambda: ["*"]
+    )  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
+
 
 class ToolsConfig(Base):
     """Tools configuration."""
@@ -172,7 +186,28 @@ class Config(BaseSettings):
     @property
     def workspace_path(self) -> Path:
         """Get expanded workspace path."""
-        return Path(self.agents.defaults.workspace).expanduser()
+        workspace = self._resolve_runtime_value(
+            self.agents.defaults.workspace,
+            "agents.defaults.workspace",
+        )
+        return Path(workspace).expanduser()
+
+    @staticmethod
+    def _resolve_runtime_value(value: Any, field_path: str) -> Any:
+        """Resolve runtime secret refs for a config value."""
+        from nanobot.config.secret_refs import resolve_config_value
+
+        return resolve_config_value(value, field_path=field_path)
+
+    def _resolved_provider_config(self, name: str) -> "ProviderConfig | None":
+        """Return provider config with runtime refs resolved."""
+        provider = getattr(self.providers, name, None)
+        if provider is None:
+            return None
+
+        data = provider.model_dump(mode="python")
+        resolved = self._resolve_runtime_value(data, f"providers.{name}")
+        return ProviderConfig.model_validate(resolved)
 
     def _match_provider(
         self, model: str | None = None
@@ -180,12 +215,33 @@ class Config(BaseSettings):
         """Match provider config and its registry name. Returns (config, spec_name)."""
         from nanobot.providers.registry import PROVIDERS
 
-        forced = self.agents.defaults.provider
-        if forced != "auto":
-            p = getattr(self.providers, forced, None)
-            return (p, forced) if p else (None, None)
+        forced = str(
+            self._resolve_runtime_value(
+                self.agents.defaults.provider,
+                "agents.defaults.provider",
+            )
+        )
 
-        model_lower = (model or self.agents.defaults.model).lower()
+        provider_cache: dict[str, ProviderConfig | None] = {}
+        resolved_cache: dict[str, ProviderConfig | None] = {}
+
+        def _provider(name: str) -> ProviderConfig | None:
+            if name not in provider_cache:
+                provider_cache[name] = getattr(self.providers, name, None)
+            return provider_cache[name]
+
+        def _resolved_provider(name: str) -> ProviderConfig | None:
+            if name not in resolved_cache:
+                resolved_cache[name] = self._resolved_provider_config(name)
+            return resolved_cache[name]
+
+        if forced != "auto":
+            p = _provider(forced)
+            return (_resolved_provider(forced), forced) if p else (None, None)
+
+        model_value = model if model is not None else self.agents.defaults.model
+        model_path = "model" if model is not None else "agents.defaults.model"
+        model_lower = str(self._resolve_runtime_value(model_value, model_path)).lower()
         model_normalized = model_lower.replace("-", "_")
         model_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else ""
         normalized_prefix = model_prefix.replace("-", "_")
@@ -196,44 +252,50 @@ class Config(BaseSettings):
 
         # Explicit provider prefix wins — prevents `github-copilot/...codex` matching openai_codex.
         for spec in PROVIDERS:
-            p = getattr(self.providers, spec.name, None)
+            p = _provider(spec.name)
             if p and model_prefix and normalized_prefix == spec.name:
                 if spec.is_oauth or spec.is_local or p.api_key:
-                    return p, spec.name
+                    return _resolved_provider(spec.name), spec.name
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
-            p = getattr(self.providers, spec.name, None)
+            p = _provider(spec.name)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
                 if spec.is_oauth or spec.is_local or p.api_key:
-                    return p, spec.name
+                    return _resolved_provider(spec.name), spec.name
 
         # Fallback: configured local providers can route models without
         # provider-specific keywords (for example plain "llama3.2" on Ollama).
         # Prefer providers whose detect_by_base_keyword matches the configured api_base
         # (e.g. Ollama's "11434" in "http://localhost:11434") over plain registry order.
-        local_fallback: tuple[ProviderConfig, str] | None = None
+        local_fallback_name: str | None = None
         for spec in PROVIDERS:
             if not spec.is_local:
                 continue
-            p = getattr(self.providers, spec.name, None)
+            p = _provider(spec.name)
             if not (p and p.api_base):
                 continue
-            if spec.detect_by_base_keyword and spec.detect_by_base_keyword in p.api_base:
-                return p, spec.name
-            if local_fallback is None:
-                local_fallback = (p, spec.name)
-        if local_fallback:
-            return local_fallback
+            api_base = str(
+                self._resolve_runtime_value(
+                    p.api_base,
+                    f"providers.{spec.name}.api_base",
+                )
+            )
+            if spec.detect_by_base_keyword and spec.detect_by_base_keyword in api_base:
+                return _resolved_provider(spec.name), spec.name
+            if local_fallback_name is None:
+                local_fallback_name = spec.name
+        if local_fallback_name:
+            return _resolved_provider(local_fallback_name), local_fallback_name
 
         # Fallback: gateways first, then others (follows registry order)
         # OAuth providers are NOT valid fallbacks — they require explicit model selection
         for spec in PROVIDERS:
             if spec.is_oauth:
                 continue
-            p = getattr(self.providers, spec.name, None)
+            p = _provider(spec.name)
             if p and p.api_key:
-                return p, spec.name
+                return _resolved_provider(spec.name), spec.name
         return None, None
 
     def get_provider(self, model: str | None = None) -> ProviderConfig | None:

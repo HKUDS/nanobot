@@ -9,6 +9,7 @@ from loguru import logger
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.config.secret_refs import SecretRefError, resolve_config_value
 
 
 class MCPToolWrapper(Tool):
@@ -80,8 +81,14 @@ async def connect_mcp_servers(
     from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamable_http_client
 
+    from nanobot.config.schema import MCPServerConfig
+
     for name, cfg in mcp_servers.items():
         try:
+            raw_cfg = cfg.model_dump(mode="python") if hasattr(cfg, "model_dump") else dict(cfg)
+            resolved_cfg = resolve_config_value(raw_cfg, field_path=f"tools.mcp_servers.{name}")
+            cfg = MCPServerConfig.model_validate(resolved_cfg)
+
             transport_type = cfg.type
             if not transport_type:
                 if cfg.command:
@@ -101,6 +108,7 @@ async def connect_mcp_servers(
                 )
                 read, write = await stack.enter_async_context(stdio_client(params))
             elif transport_type == "sse":
+
                 def httpx_client_factory(
                     headers: dict[str, str] | None = None,
                     timeout: httpx.Timeout | None = None,
@@ -180,5 +188,7 @@ async def connect_mcp_servers(
                     )
 
             logger.info("MCP server '{}': connected, {} tools registered", name, registered_count)
+        except SecretRefError as e:
+            logger.warning("MCP server '{}': invalid secret ref: {}", name, e)
         except Exception as e:
             logger.error("MCP server '{}': failed to connect: {}", name, e)

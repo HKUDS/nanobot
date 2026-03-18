@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -13,10 +14,10 @@ from nanobot.channels.base import BaseChannel
 from nanobot.channels.manager import ChannelManager
 from nanobot.config.schema import ChannelsConfig
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class _FakePlugin(BaseChannel):
     name = "fakeplugin"
@@ -34,6 +35,7 @@ class _FakePlugin(BaseChannel):
 
 class _FakeTelegram(BaseChannel):
     """Plugin that tries to shadow built-in telegram."""
+
     name = "telegram"
     display_name = "Fake Telegram"
 
@@ -57,10 +59,13 @@ def _make_entry_point(name: str, cls: type):
 # ChannelsConfig extra="allow"
 # ---------------------------------------------------------------------------
 
+
 def test_channels_config_accepts_unknown_keys():
-    cfg = ChannelsConfig.model_validate({
-        "myplugin": {"enabled": True, "token": "abc"},
-    })
+    cfg = ChannelsConfig.model_validate(
+        {
+            "myplugin": {"enabled": True, "token": "abc"},
+        }
+    )
     extra = cfg.model_extra
     assert extra is not None
     assert extra["myplugin"]["enabled"] is True
@@ -117,6 +122,7 @@ def test_discover_plugins_handles_load_error():
 # discover_all — merge & priority
 # ---------------------------------------------------------------------------
 
+
 def test_discover_all_includes_builtins():
     from nanobot.channels.registry import discover_all, discover_channel_names
 
@@ -156,15 +162,18 @@ def test_discover_all_builtin_shadows_plugin():
 # Manager _init_channels with dict config (plugin scenario)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_manager_loads_plugin_from_dict_config():
     """ChannelManager should instantiate a plugin channel from a raw dict config."""
     from nanobot.channels.manager import ChannelManager
 
     fake_config = SimpleNamespace(
-        channels=ChannelsConfig.model_validate({
-            "fakeplugin": {"enabled": True, "allowFrom": ["*"]},
-        }),
+        channels=ChannelsConfig.model_validate(
+            {
+                "fakeplugin": {"enabled": True, "allowFrom": ["*"]},
+            }
+        ),
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
     )
 
@@ -184,11 +193,78 @@ async def test_manager_loads_plugin_from_dict_config():
 
 
 @pytest.mark.asyncio
+async def test_manager_resolves_secret_refs_for_enabled_plugin_config(tmp_path: Path):
+    secret_file = tmp_path / "plugin-token.txt"
+    secret_file.write_text("plugin-secret", encoding="utf-8")
+    config_path = tmp_path / "config.json"
+
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig.model_validate(
+            {
+                "fakeplugin": {
+                    "enabled": True,
+                    "token": "{file:plugin-token.txt}",
+                    "allowFrom": ["*"],
+                }
+            }
+        ),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+
+    with (
+        patch("nanobot.config.loader.get_config_path", return_value=config_path),
+        patch(
+            "nanobot.channels.registry.discover_all",
+            return_value={"fakeplugin": _FakePlugin},
+        ),
+    ):
+        mgr = ChannelManager.__new__(ChannelManager)
+        mgr.config = fake_config
+        mgr.bus = MessageBus()
+        mgr.channels = {}
+        mgr._dispatch_task = None
+        mgr._init_channels()
+
+    assert "fakeplugin" in mgr.channels
+    assert mgr.channels["fakeplugin"].config["token"] == "plugin-secret"
+
+
+@pytest.mark.asyncio
 async def test_manager_skips_disabled_plugin():
     fake_config = SimpleNamespace(
-        channels=ChannelsConfig.model_validate({
-            "fakeplugin": {"enabled": False},
-        }),
+        channels=ChannelsConfig.model_validate(
+            {
+                "fakeplugin": {"enabled": False},
+            }
+        ),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+
+    with patch(
+        "nanobot.channels.registry.discover_all",
+        return_value={"fakeplugin": _FakePlugin},
+    ):
+        mgr = ChannelManager.__new__(ChannelManager)
+        mgr.config = fake_config
+        mgr.bus = MessageBus()
+        mgr.channels = {}
+        mgr._dispatch_task = None
+        mgr._init_channels()
+
+    assert "fakeplugin" not in mgr.channels
+
+
+@pytest.mark.asyncio
+async def test_manager_does_not_resolve_disabled_plugin_refs() -> None:
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig.model_validate(
+            {
+                "fakeplugin": {
+                    "enabled": False,
+                    "token": "{file:missing-secret.txt}",
+                }
+            }
+        ),
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
     )
 
@@ -210,9 +286,11 @@ async def test_manager_skips_disabled_plugin():
 # Built-in channel default_config() and dict->Pydantic conversion
 # ---------------------------------------------------------------------------
 
+
 def test_builtin_channel_default_config():
     """Built-in channels expose default_config() returning a dict with 'enabled': False."""
     from nanobot.channels.telegram import TelegramChannel
+
     cfg = TelegramChannel.default_config()
     assert isinstance(cfg, dict)
     assert cfg["enabled"] is False
@@ -222,6 +300,7 @@ def test_builtin_channel_default_config():
 def test_builtin_channel_init_from_dict():
     """Built-in channels accept a raw dict and convert to Pydantic internally."""
     from nanobot.channels.telegram import TelegramChannel
+
     bus = MessageBus()
     ch = TelegramChannel({"enabled": False, "token": "test-tok", "allowFrom": ["*"]}, bus)
     assert ch.config.token == "test-tok"

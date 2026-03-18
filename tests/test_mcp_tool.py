@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import AsyncExitStack, asynccontextmanager
 import sys
+from contextlib import AsyncExitStack, asynccontextmanager
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -182,6 +183,33 @@ async def test_connect_mcp_servers_enabled_tools_supports_raw_names(
     try:
         await connect_mcp_servers(
             {"test": MCPServerConfig(command="fake", enabled_tools=["demo"])},
+            registry,
+            stack,
+        )
+    finally:
+        await stack.aclose()
+
+    assert registry.tool_names == ["mcp_test_demo"]
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_resolves_secret_ref_command(
+    fake_mcp_runtime: dict[str, object | None],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session(["demo"])
+    config_path = tmp_path / "config.json"
+    secret_cmd = tmp_path / "cmd.txt"
+    secret_cmd.write_text("fake", encoding="utf-8")
+    monkeypatch.setattr("nanobot.config.loader.get_config_path", lambda: config_path)
+
+    registry = ToolRegistry()
+    stack = AsyncExitStack()
+    await stack.__aenter__()
+    try:
+        await connect_mcp_servers(
+            {"test": MCPServerConfig(command="{file:cmd.txt}")},
             registry,
             stack,
         )
