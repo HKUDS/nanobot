@@ -1861,6 +1861,82 @@ class AgentLoop:
         primary_reason = reasons[0]
         return f"Sorry, I couldn't answer that just now. {primary_reason} {help_line}"
 
+    def _make_bus_progress(
+        self,
+        channel: str,
+        chat_id: str,
+        base_meta: dict,
+        canonical_builder: CanonicalEventBuilder,
+    ) -> ProgressCallback:
+        """Return a ``ProgressCallback`` that publishes structured progress events onto the bus.
+
+        Each call shallow-copies ``base_meta``, merges per-event fields, and
+        attaches the appropriate canonical event from ``canonical_builder``
+        before publishing an ``OutboundMessage`` with ``_progress=True``.
+
+        The returned coroutine captures ``channel``, ``chat_id``, ``base_meta``,
+        and ``canonical_builder`` by value so it remains valid for the full turn
+        even if the caller rebinds its local variables.
+        """
+
+        async def _progress(
+            content: str,
+            *,
+            tool_hint: bool = False,
+            streaming: bool = False,
+            tool_call: dict | None = None,
+            tool_result: dict | None = None,
+            delegate_start: dict | None = None,
+            delegate_end: dict | None = None,
+            status_code: str = "",
+            status_label: str = "",
+        ) -> None:
+            meta = dict(base_meta)
+            meta["_tool_hint"] = tool_hint
+            meta["_streaming"] = streaming
+            if tool_call:
+                meta["_tool_call"] = tool_call
+                meta["_canonical"] = canonical_builder.tool_call(
+                    tool_call_id=tool_call["toolCallId"],
+                    tool_name=tool_call["toolName"],
+                    args=tool_call.get("args", {}),
+                )
+            elif tool_result:
+                meta["_tool_result"] = tool_result
+                meta["_canonical"] = canonical_builder.tool_result(
+                    tool_call_id=tool_result["toolCallId"],
+                    tool_name=tool_result.get("toolName", ""),
+                    result=tool_result.get("result", ""),
+                )
+            elif delegate_start:
+                meta["_canonical"] = canonical_builder.delegate_start(
+                    delegation_id=delegate_start["delegation_id"],
+                    child_role=delegate_start["child_role"],
+                    task_title=delegate_start.get("task_title", ""),
+                )
+            elif delegate_end:
+                meta["_canonical"] = canonical_builder.delegate_end(
+                    delegation_id=delegate_end["delegation_id"],
+                    success=delegate_end.get("success", True),
+                )
+            elif status_code:
+                meta["_canonical"] = canonical_builder.status(status_code, label=status_label)
+            elif content:
+                # on_progress always delivers cumulative text (the full text
+                # assembled so far), regardless of the streaming flag.
+                # text_flush() deduplicates against what was already sent.
+                meta["_canonical"] = canonical_builder.text_flush(content)
+            await self.bus.publish_outbound(
+                OutboundMessage(
+                    channel=channel,
+                    chat_id=chat_id,
+                    content=content,
+                    metadata=meta,
+                )
+            )
+
+        return _progress  # type: ignore[return-value]
+
     async def _process_message(
         self,
         msg: InboundMessage,
@@ -2048,61 +2124,9 @@ class AgentLoop:
         _base_meta: dict = dict(msg.metadata or {})
         _base_meta["_progress"] = True
 
-        async def _bus_progress(
-            content: str,
-            *,
-            tool_hint: bool = False,
-            streaming: bool = False,
-            tool_call: dict | None = None,
-            tool_result: dict | None = None,
-            delegate_start: dict | None = None,
-            delegate_end: dict | None = None,
-            status_code: str = "",
-            status_label: str = "",
-        ) -> None:
-            meta = dict(_base_meta)
-            meta["_tool_hint"] = tool_hint
-            meta["_streaming"] = streaming
-            if tool_call:
-                meta["_tool_call"] = tool_call
-                meta["_canonical"] = _canonical_builder.tool_call(
-                    tool_call_id=tool_call["toolCallId"],
-                    tool_name=tool_call["toolName"],
-                    args=tool_call.get("args", {}),
-                )
-            elif tool_result:
-                meta["_tool_result"] = tool_result
-                meta["_canonical"] = _canonical_builder.tool_result(
-                    tool_call_id=tool_result["toolCallId"],
-                    tool_name=tool_result.get("toolName", ""),
-                    result=tool_result.get("result", ""),
-                )
-            elif delegate_start:
-                meta["_canonical"] = _canonical_builder.delegate_start(
-                    delegation_id=delegate_start["delegation_id"],
-                    child_role=delegate_start["child_role"],
-                    task_title=delegate_start.get("task_title", ""),
-                )
-            elif delegate_end:
-                meta["_canonical"] = _canonical_builder.delegate_end(
-                    delegation_id=delegate_end["delegation_id"],
-                    success=delegate_end.get("success", True),
-                )
-            elif status_code:
-                meta["_canonical"] = _canonical_builder.status(status_code, label=status_label)
-            elif content:
-                # on_progress always delivers cumulative text (the full text
-                # assembled so far), regardless of the streaming flag.
-                # text_flush() deduplicates against what was already sent.
-                meta["_canonical"] = _canonical_builder.text_flush(content)
-            await self.bus.publish_outbound(
-                OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=content,
-                    metadata=meta,
-                )
-            )
+        _bus_progress = self._make_bus_progress(
+            msg.channel, msg.chat_id, _base_meta, _canonical_builder
+        )
 
         # Emit run.start + message.start before the agent loop begins.
         for _start_event in (
