@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 from nanobot.agent.hooks import HookEvent, HookRegistry, load_hooks_from_json
+from nanobot.agent.hooks.json_loader import validate_hook_config
 
 
 def test_load_hooks_from_json():
@@ -151,3 +152,123 @@ def test_json_hook_receives_env_vars():
             "tool_args": {}
         })
         assert not result2.proceed
+
+
+def test_validate_hook_config_valid():
+    """Test validation of valid hook configuration."""
+    config = {
+        "name": "test-hook",
+        "event": "PreToolUse",
+        "command": "echo test",
+        "priority": 100,
+        "matcher": "^exec$"
+    }
+    is_valid, error = validate_hook_config(config)
+    assert is_valid
+    assert error == ""
+
+
+def test_validate_hook_config_missing_required_field():
+    """Test validation fails when required field is missing."""
+    config = {
+        "name": "test-hook",
+        "event": "PreToolUse"
+        # missing "command"
+    }
+    is_valid, error = validate_hook_config(config)
+    assert not is_valid
+    assert "Missing required field: command" in error
+
+
+def test_validate_hook_config_invalid_event():
+    """Test validation fails with invalid event name."""
+    config = {
+        "name": "test-hook",
+        "event": "InvalidEvent",
+        "command": "echo test"
+    }
+    is_valid, error = validate_hook_config(config)
+    assert not is_valid
+    assert "Invalid event" in error
+
+
+def test_validate_hook_config_invalid_priority():
+    """Test validation fails with non-integer priority."""
+    config = {
+        "name": "test-hook",
+        "event": "PreToolUse",
+        "command": "echo test",
+        "priority": "high"  # should be int
+    }
+    is_valid, error = validate_hook_config(config)
+    assert not is_valid
+    assert "Priority must be an integer" in error
+
+
+def test_validate_hook_config_invalid_regex():
+    """Test validation fails with invalid regex matcher."""
+    config = {
+        "name": "test-hook",
+        "event": "PreToolUse",
+        "command": "echo test",
+        "matcher": "[invalid(regex"
+    }
+    is_valid, error = validate_hook_config(config)
+    assert not is_valid
+    assert "Invalid matcher regex" in error
+
+
+def test_load_hooks_validate_only():
+    """Test validate_only mode doesn't create hook instances."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        workspace = Path(tmpdir)
+        hooks_dir = workspace / ".nanobot"
+        hooks_dir.mkdir()
+
+        hooks_file = hooks_dir / "hooks.json"
+        hooks_file.write_text("""
+{
+  "hooks": [
+    {
+      "name": "test-hook",
+      "event": "PreToolUse",
+      "command": "echo test"
+    }
+  ]
+}
+""")
+
+        # validate_only should return empty list
+        hooks = load_hooks_from_json(workspace, validate_only=True)
+        assert len(hooks) == 0
+
+
+def test_load_hooks_with_validation_errors():
+    """Test loading hooks with validation errors."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        workspace = Path(tmpdir)
+        hooks_dir = workspace / ".nanobot"
+        hooks_dir.mkdir()
+
+        hooks_file = hooks_dir / "hooks.json"
+        hooks_file.write_text("""
+{
+  "hooks": [
+    {
+      "name": "valid-hook",
+      "event": "PreToolUse",
+      "command": "echo test"
+    },
+    {
+      "name": "invalid-hook",
+      "event": "InvalidEvent",
+      "command": "echo test"
+    }
+  ]
+}
+""")
+
+        # Should only load valid hooks
+        hooks = load_hooks_from_json(workspace)
+        assert len(hooks) == 1
+        assert hooks[0].name == "valid-hook"

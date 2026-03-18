@@ -36,6 +36,23 @@ class ContextBuilder:
         for hook in load_hooks_from_json(self.workspace):
             self.hooks.register(hook)
 
+    def preload_hooks(self) -> None:
+        """Validate all hooks at startup to catch configuration errors early.
+
+        This method validates:
+        - JSON syntax in hooks.json
+        - Required fields presence
+        - Event name validity
+        - Regex matcher syntax
+        - Priority value types
+
+        Validation errors are logged but don't prevent startup.
+        """
+        from nanobot.agent.hooks import load_hooks_from_json
+
+        # Validate hooks configuration without loading
+        load_hooks_from_json(self.workspace, validate_only=True)
+
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]

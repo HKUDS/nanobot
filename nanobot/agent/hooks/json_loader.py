@@ -93,11 +93,49 @@ class JsonConfigHook(Hook):
             return HookResult()
 
 
-def load_hooks_from_json(workspace: Path) -> list[Hook]:
-    """Load user-defined hooks from workspace/.nanobot/hooks.json.
+def validate_hook_config(hook_config: dict) -> tuple[bool, str]:
+    """Validate a single hook configuration.
 
     Returns:
-        List of JsonConfigHook instances.
+        (is_valid, error_message)
+    """
+    required_fields = ["name", "event", "command"]
+    for field in required_fields:
+        if field not in hook_config:
+            return False, f"Missing required field: {field}"
+
+    # Validate event name
+    try:
+        HookEvent(hook_config["event"])
+    except ValueError:
+        valid_events = [e.value for e in HookEvent]
+        return False, f"Invalid event '{hook_config['event']}'. Valid events: {', '.join(valid_events)}"
+
+    # Validate priority if present
+    if "priority" in hook_config:
+        if not isinstance(hook_config["priority"], int):
+            return False, "Priority must be an integer"
+
+    # Validate matcher if present
+    if "matcher" in hook_config:
+        try:
+            import re
+            re.compile(hook_config["matcher"])
+        except re.error as e:
+            return False, f"Invalid matcher regex: {e}"
+
+    return True, ""
+
+
+def load_hooks_from_json(workspace: Path, validate_only: bool = False) -> list[Hook]:
+    """Load user-defined hooks from workspace/.nanobot/hooks.json.
+
+    Args:
+        workspace: Workspace directory
+        validate_only: If True, only validate without creating hook instances
+
+    Returns:
+        List of JsonConfigHook instances (empty if validate_only=True).
     """
     hooks_file = workspace / ".nanobot" / "hooks.json"
     if not hooks_file.exists():
@@ -106,15 +144,34 @@ def load_hooks_from_json(workspace: Path) -> list[Hook]:
     try:
         config = json.loads(hooks_file.read_text(encoding="utf-8"))
         hooks = []
+        validation_errors = []
 
         for hook_config in config.get("hooks", []):
+            hook_name = hook_config.get("name", "unknown")
+
+            # Validate configuration
+            is_valid, error_msg = validate_hook_config(hook_config)
+            if not is_valid:
+                validation_errors.append(f"Hook '{hook_name}': {error_msg}")
+                continue
+
+            if validate_only:
+                logger.debug("Validated hook: {}", hook_name)
+                continue
+
             try:
                 hooks.append(JsonConfigHook(hook_config))
-                logger.debug("Loaded user hook: {}", hook_config["name"])
+                logger.debug("Loaded user hook: {}", hook_name)
             except Exception as e:
-                logger.error("Failed to load hook {}: {}", hook_config.get("name", "unknown"), e)
+                logger.error("Failed to load hook {}: {}", hook_name, e)
+
+        if validation_errors:
+            logger.error("Hook validation errors:\n{}", "\n".join(validation_errors))
 
         return hooks
+    except json.JSONDecodeError as e:
+        logger.error("Invalid JSON in hooks.json: {}", e)
+        return []
     except Exception as e:
         logger.error("Failed to load hooks.json: {}", e)
         return []

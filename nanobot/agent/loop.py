@@ -297,6 +297,11 @@ class AgentLoop:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
         await self._connect_mcp()
+
+        # Preload and validate hooks configuration at startup
+        logger.debug("Validating hooks configuration...")
+        self.context.preload_hooks()
+
         logger.info("Agent loop started")
 
         while self._running:
