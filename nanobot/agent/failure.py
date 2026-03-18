@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 from enum import Enum
-from typing import Any
+from typing import Any, ClassVar
 
 from nanobot.agent.tools.base import ToolResult
 
@@ -33,7 +33,12 @@ class FailureClass(str, Enum):
 
     @property
     def is_permanent(self) -> bool:
-        """True when the failure cannot be resolved by retrying."""
+        """True when the failure cannot be resolved by retrying or fixing arguments.
+
+        Permanent failures (``PERMANENT_CONFIG``, ``PERMANENT_AUTH``) cause
+        the tool to be immediately added to the disabled set for the current
+        turn without waiting for the ``REMOVE_THRESHOLD`` count.
+        """
         return self in (FailureClass.PERMANENT_CONFIG, FailureClass.PERMANENT_AUTH)
 
 
@@ -54,9 +59,9 @@ class ToolCallTracker:
     enforced by filtering ``tools_def`` at definition-generation time.
     """
 
-    WARN_THRESHOLD = 2
-    REMOVE_THRESHOLD = 3
-    GLOBAL_BUDGET = 8
+    WARN_THRESHOLD: ClassVar[int] = 2
+    REMOVE_THRESHOLD: ClassVar[int] = 3
+    GLOBAL_BUDGET: ClassVar[int] = 8
 
     def __init__(self) -> None:
         self._counts: dict[str, int] = {}  # key → failure count
@@ -74,7 +79,25 @@ class ToolCallTracker:
 
     @staticmethod
     def classify_failure(name: str, result: ToolResult) -> FailureClass:
-        """Classify a tool failure to guide replanning decisions."""
+        """Classify a tool failure to guide replanning decisions.
+
+        Classification priority (first match wins):
+
+        1. ``result.metadata["error_type"]`` — explicit structured signal:
+           - ``"validation"`` → ``LOGICAL_ERROR``
+           - ``"not_found"`` / ``"permission"`` / ``"unknown_role"`` → ``PERMANENT_CONFIG``
+           - ``"timeout"`` → ``TRANSIENT_TIMEOUT``
+        2. Keyword scan of ``result.error`` / ``result.output`` message:
+           - API-key / not-configured / not-installed → ``PERMANENT_CONFIG``
+           - Binary/command/module not found → ``PERMANENT_CONFIG``
+           - Unauthorized / invalid-key / forbidden → ``PERMANENT_AUTH``
+           - Timeout / rate-limit / 429 → ``TRANSIENT_TIMEOUT``
+           - 500 / server-error / 503 → ``TRANSIENT_ERROR``
+        3. Fall-through → ``UNKNOWN``
+
+        Note: "file not found" (OS ENOENT) is intentionally ``UNKNOWN``, not
+        ``PERMANENT_CONFIG`` — the LLM should retry with the correct path.
+        """
         error_type = result.metadata.get("error_type", "unknown") if result.metadata else "unknown"
         error_msg = (result.error or result.output or "").lower()
 
@@ -142,7 +165,17 @@ def _build_failure_prompt(
     permanent_failures: frozenset[str],
     available_tools: list[str],
 ) -> str:
-    """Build a structured failure-strategy prompt with classification context."""
+    """Build a structured REFLECT-phase prompt from live ``ToolCallTracker`` state.
+
+    Generates classification-aware guidance for each failed tool:
+    - Permanent failures are flagged as disabled for this session.
+    - Timeouts suggest retrying with a shorter operation or different parameters.
+    - Logical errors instruct the model to fix arguments before retrying.
+
+    ``permanent_failures`` should be pre-filtered at the call site to avoid
+    re-allocating the filtered list inside this function on every failure.
+    ``available_tools`` is the list of non-permanent tools still usable.
+    """
     lines: list[str] = ["One or more tool calls failed:"]
     for name, fc in failed_tools:
         if fc.is_permanent:

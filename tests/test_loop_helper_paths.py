@@ -14,6 +14,7 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
 
     loop = object.__new__(AgentLoop)
     loop.workspace = tmp_path
+    loop.config = SimpleNamespace(memory_uncertainty_threshold=0.6, max_tokens=32)
     dispatcher = object.__new__(DelegationDispatcher)
     dispatcher.active_messages = []
     dispatcher.routing_trace = []
@@ -22,7 +23,6 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
     dispatcher.scratchpad = None
     loop._dispatcher = dispatcher
     loop._scratchpad = None
-    loop.memory_uncertainty_threshold = 0.6
     mem_ns = SimpleNamespace(
         retrieve=lambda *_a, **_k: [],
         append_history=lambda _t: None,
@@ -140,7 +140,7 @@ async def test_attempt_recovery_missing_or_error_paths(tmp_path: Path) -> None:
     loop.provider = SimpleNamespace(chat=None)
     loop.model = "m"
     loop.temperature = 0.0
-    loop.max_tokens = 32
+    loop.config.max_tokens = 32
 
     # Missing system/user pair -> skip recovery.
     assert await loop._attempt_recovery(SimpleNamespace(channel="c", chat_id="id"), []) is None

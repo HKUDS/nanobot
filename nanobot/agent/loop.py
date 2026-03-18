@@ -106,6 +106,16 @@ if TYPE_CHECKING:
 # re-exported here for backward compatibility with tests.
 from nanobot.agent.delegation import _delegation_ancestry  # noqa: F401
 
+# Tools whose arguments may contain sensitive data (file contents, credentials,
+# command strings). Their call arguments are omitted from structured log output
+# to prevent leaking sensitive information into log files or tracing backends.
+_ARGS_REDACT_TOOLS: frozenset[str] = frozenset(
+    {"write_file", "edit_file", "exec", "web_fetch", "web_search"}
+)
+
+# Delegation tool names — hoisted here to avoid rebuilding the set each iteration.
+_DELEGATION_TOOL_NAMES: frozenset[str] = frozenset({"delegate", "delegate_parallel"})
+
 
 class ProgressCallback(Protocol):
     """Signature for progress callbacks passed through the agent call chain.
@@ -265,13 +275,6 @@ class AgentLoop:
             if role_config and role_config.temperature is not None
             else config.temperature
         )
-        self.max_tokens = config.max_tokens
-        self.context_window_tokens = config.context_window_tokens
-        self.memory_window = config.memory_window
-        self.memory_retrieval_k = config.memory_retrieval_k
-        self.memory_token_budget = config.memory_token_budget
-        self.memory_uncertainty_threshold = config.memory_uncertainty_threshold
-        self.memory_enable_contradiction_check = config.memory_enable_contradiction_check
         self.memory_rollout_overrides = {
             "memory_rollout_mode": config.memory_rollout_mode,
             "memory_type_separation_enabled": config.memory_type_separation_enabled,
@@ -307,13 +310,11 @@ class AgentLoop:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
-        self.restrict_to_workspace = config.restrict_to_workspace
-        self.message_timeout = config.message_timeout
 
         self.context = ContextBuilder(
             self.workspace,
-            memory_retrieval_k=self.memory_retrieval_k if config.memory_enabled else 0,
-            memory_token_budget=self.memory_token_budget if config.memory_enabled else 0,
+            memory_retrieval_k=self.config.memory_retrieval_k if config.memory_enabled else 0,
+            memory_token_budget=self.config.memory_token_budget if config.memory_enabled else 0,
             memory_md_token_cap=config.memory_md_token_cap if config.memory_enabled else 0,
             memory_rollout_overrides=self.memory_rollout_overrides,
             role_system_prompt=role_config.system_prompt if role_config else "",
@@ -338,16 +339,17 @@ class AgentLoop:
             bus=bus,
             model=self.model,
             temperature=self.temperature,
-            max_tokens=self.max_tokens,
+            max_tokens=self.config.max_tokens,
             max_iterations=config.mission_max_iterations,
             max_concurrent=config.mission_max_concurrent,
             result_max_chars=config.mission_result_max_chars,
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
-            restrict_to_workspace=self.restrict_to_workspace,
+            restrict_to_workspace=self.config.restrict_to_workspace,
         )
 
         self._running = False
+        self._stop_event: asyncio.Event | None = None  # created lazily in run()
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
@@ -383,9 +385,9 @@ class AgentLoop:
             workspace=self.workspace,
             model=self.model,
             temperature=self.temperature,
-            max_tokens=self.max_tokens,
+            max_tokens=self.config.max_tokens,
             max_iterations=self.max_iterations,
-            restrict_to_workspace=self.restrict_to_workspace,
+            restrict_to_workspace=self.config.restrict_to_workspace,
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             role_name=self.role_name,
@@ -401,15 +403,15 @@ class AgentLoop:
             provider=provider,
             model=self.model,
             temperature=self.temperature,
-            max_tokens=self.max_tokens,
+            max_tokens=self.config.max_tokens,
         )
         self._verifier = AnswerVerifier(
             provider=provider,
             model=self.model,
             temperature=self.temperature,
-            max_tokens=self.max_tokens,
+            max_tokens=self.config.max_tokens,
             verification_mode=config.verification_mode,
-            memory_uncertainty_threshold=self.memory_uncertainty_threshold,
+            memory_uncertainty_threshold=self.config.memory_uncertainty_threshold,
             memory_store=self.context.memory,
         )
         self._consolidator = ConsolidationOrchestrator(self.context.memory)
@@ -458,7 +460,7 @@ class AgentLoop:
         role = self.role_config
         allowed = set(role.allowed_tools) if role and role.allowed_tools is not None else None
         denied = set(role.denied_tools) if role and role.denied_tools else set()
-        allowed_dir = self.workspace if self.restrict_to_workspace else None
+        allowed_dir = self.workspace if self.config.restrict_to_workspace else None
 
         def _should_register(name: str) -> bool:
             if allowed is not None and name not in allowed:
@@ -481,7 +483,7 @@ class AgentLoop:
         exec_tool = ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
-            restrict_to_workspace=self.restrict_to_workspace,
+            restrict_to_workspace=self.config.restrict_to_workspace,
             shell_mode=self.config.shell_mode,
         )
         if _should_register(exec_tool.name):
@@ -855,7 +857,8 @@ class AgentLoop:
                 tool_call.name,
                 tools_elapsed_ms,
             )
-            bind_trace().debug("tool_exec args | {}({})", tool_call.name, args_str[:200])
+            if tool_call.name not in _ARGS_REDACT_TOOLS:
+                bind_trace().debug("tool_exec args | {}({})", tool_call.name, args_str[:200])
             if on_progress:
                 await on_progress(
                     "",
@@ -945,8 +948,7 @@ class AgentLoop:
         Mutates *messages* in-place; returns the (potentially updated)
         *nudged_for_final* flag.
         """
-        _del_names = {"delegate", "delegate_parallel"}
-        had_delegations = any(tc.name in _del_names for tc in response.tool_calls)
+        had_delegations = any(tc.name in _DELEGATION_TOOL_NAMES for tc in response.tool_calls)
 
         if had_delegations and self._delegation_count >= self._max_delegations:
             messages.append(
@@ -1086,7 +1088,7 @@ class AgentLoop:
         self._turn_llm_calls = 0
 
         # Reserve ~20% of context window for the model's response
-        context_budget = int(self.context_window_tokens * 0.80)
+        context_budget = int(self.config.context_window_tokens * 0.80)
 
         # Extract the last user message (used by planning + verification)
         user_text = ""
@@ -1193,8 +1195,7 @@ class AgentLoop:
                 # straight to tools without producing a plan, nudge it once.
                 # Delegation calls (delegate/delegate_parallel) are exempt
                 # because delegation itself is a form of planning.
-                _delegation_names = {"delegate", "delegate_parallel"}
-                is_delegation = all(tc.name in _delegation_names for tc in response.tool_calls)
+                is_delegation = all(tc.name in _DELEGATION_TOOL_NAMES for tc in response.tool_calls)
                 if (
                     has_plan
                     and not plan_enforced
@@ -1406,6 +1407,7 @@ class AgentLoop:
         behaves exactly as before.
         """
         self._running = True
+        self._stop_event = asyncio.Event()
         await self._connect_mcp()
         self._ensure_coordinator()
 
@@ -1413,7 +1415,23 @@ class AgentLoop:
 
         while self._running:
             try:
-                msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
+                # Race consume_inbound against the stop event so that stop()
+                # wakes the loop immediately instead of waiting up to 5 s.
+                _consume = asyncio.ensure_future(self.bus.consume_inbound())
+                _stop_wait = asyncio.ensure_future(self._stop_event.wait())  # type: ignore[union-attr]
+                done, pending = await asyncio.wait(
+                    {_consume, _stop_wait},
+                    timeout=5.0,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for t in pending:
+                    t.cancel()
+                if not self._running or _stop_wait in done:
+                    break
+                if _consume not in done:
+                    # True timeout — no message, no stop signal
+                    continue
+                msg = _consume.result()
                 turn_ctx: TurnContext | None = None
                 # Set correlation IDs for this request
                 TraceContext.new_request(
@@ -1481,7 +1499,9 @@ class AgentLoop:
                             turn_ctx = self._apply_role_for_turn(role)
 
                         # Wrap with timeout to prevent infinite processing
-                        timeout = self.message_timeout if self.message_timeout > 0 else None
+                        timeout = (
+                            self.config.message_timeout if self.config.message_timeout > 0 else None
+                        )
                         try:
                             if timeout:
                                 response = await asyncio.wait_for(
@@ -1492,13 +1512,13 @@ class AgentLoop:
                         except asyncio.TimeoutError:
                             logger.error(
                                 "Message processing timed out after {}s for {}:{}",
-                                self.message_timeout,
+                                self.config.message_timeout,
                                 msg.channel,
                                 msg.chat_id,
                             )
                             update_current_span(
                                 output="TIMEOUT",
-                                metadata={"timeout_s": str(self.message_timeout)},
+                                metadata={"timeout_s": str(self.config.message_timeout)},
                                 level="ERROR",
                             )
                             response = OutboundMessage(
@@ -1721,6 +1741,8 @@ class AgentLoop:
     def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
+        if self._stop_event is not None:
+            self._stop_event.set()
         logger.info("Agent loop stopping")
 
     def _get_consolidation_lock(self, session_key: str) -> asyncio.Lock:
@@ -1785,7 +1807,7 @@ class AgentLoop:
                 tools=None,
                 model=self.model,
                 temperature=self.temperature,
-                max_tokens=self.max_tokens,
+                max_tokens=self.config.max_tokens,
             )
         except Exception:  # crash-barrier: recovery LLM call
             logger.exception("Recovery LLM call failed")
@@ -1857,7 +1879,7 @@ class AgentLoop:
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
-            history = session.get_history(max_messages=self.memory_window)
+            history = session.get_history(max_messages=self.config.memory_window)
             skill_names = self.context.skills.detect_relevant_skills(msg.content)
             messages = self.context.build_messages(
                 history=history,
@@ -1937,7 +1959,7 @@ class AgentLoop:
         _channel = msg.channel
         _chat_id = msg.chat_id
         _content = msg.content
-        _enable_cc = self.memory_enable_contradiction_check
+        _enable_cc = self.config.memory_enable_contradiction_check
 
         def _pre_turn_memory() -> tuple[dict[str, Any], dict[str, Any] | None]:
             cr = memory_store.handle_user_conflict_reply(_content)
@@ -1979,7 +2001,7 @@ class AgentLoop:
         unconsolidated = len(session.messages) - session.last_consolidated
         if (
             self.config.memory_enabled
-            and unconsolidated >= self.memory_window
+            and unconsolidated >= self.config.memory_window
             and session.key not in self._consolidating
         ):
             self._consolidating.add(session.key)
@@ -1997,7 +2019,7 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(max_messages=self.memory_window)
+        history = session.get_history(max_messages=self.config.memory_window)
         verify_before_answer = self._should_force_verification(msg.content)
         skill_names = self.context.skills.detect_relevant_skills(msg.content)
         initial_messages = self.context.build_messages(
@@ -2214,8 +2236,8 @@ class AgentLoop:
             session,
             self.provider,
             self.model,
-            memory_window=self.memory_window,
-            enable_contradiction_check=self.memory_enable_contradiction_check,
+            memory_window=self.config.memory_window,
+            enable_contradiction_check=self.config.memory_enable_contradiction_check,
             archive_all=archive_all,
         )
 
