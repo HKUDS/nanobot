@@ -20,27 +20,24 @@ response quality before delivery.
 Streaming is supported: LLM tokens are yielded incrementally to the
 channel for progressive display on platforms that support message editing.
 
-**Failure classification and turn-scoped tool suppression** — ``ToolCallTracker``
-classifies each tool failure via ``FailureClass`` (PERMANENT_CONFIG,
-PERMANENT_AUTH, TRANSIENT_TIMEOUT, TRANSIENT_ERROR, LOGICAL_ERROR, UNKNOWN).
-Permanently failing tools and tools that hit the ``REMOVE_THRESHOLD`` count are
-added to a per-turn ``disabled_tools: set[str]`` local to ``_run_agent_loop``.
-The ``ToolRegistry`` is never mutated; suppressed tools are available again in
-the next turn.  ``_build_failure_prompt()`` generates a structured REFLECT-phase
-prompt from live tracker state rather than a static template.
+**Failure classification and turn-scoped tool suppression** — see
+``nanobot.agent.failure`` for ``ToolCallTracker``, ``FailureClass``, and
+``_build_failure_prompt``.  Permanently failing tools and tools that hit the
+``REMOVE_THRESHOLD`` count are added to a per-turn ``disabled_tools: set[str]``
+local to ``_run_agent_loop``.  The ``ToolRegistry`` is never mutated; suppressed
+tools are available again in the next turn.
 """
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import time
 import uuid
 from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal, Protocol
 
 from loguru import logger
 
@@ -52,6 +49,7 @@ from nanobot.agent.context import (
     summarize_and_compress,
 )
 from nanobot.agent.delegation import DelegationDispatcher
+from nanobot.agent.failure import FailureClass, ToolCallTracker, _build_failure_prompt
 from nanobot.agent.mission import MissionManager
 from nanobot.agent.observability import (
     flush as flush_langfuse,
@@ -65,7 +63,6 @@ from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.scratchpad import Scratchpad
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
 from nanobot.agent.tool_executor import ToolExecutor
-from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool, DelegationResult
 from nanobot.agent.tools.email import CheckEmailTool
@@ -133,6 +130,33 @@ class ProgressCallback(Protocol):
     ) -> None: ...
 
 
+@dataclass(slots=True)
+class TurnContext:
+    """Snapshot of agent settings overridden for a single routed turn.
+
+    Created by ``_apply_role_for_turn`` and consumed by ``_reset_role_after_turn``
+    to cleanly restore the original configuration without touching shared state
+    between turns.
+    """
+
+    model: str
+    temperature: float
+    max_iterations: int
+    role_prompt: str
+    tools: dict[str, Any] | None  # None → no tool filtering was applied
+
+
+@dataclass(slots=True)
+class _ToolBatchResult:
+    """Return value of ``_process_tool_results`` — scalar state that changes per batch."""
+
+    any_failed: bool
+    failed_this_batch: list[tuple[str, "FailureClass"]]
+    nudged_for_final: bool
+    last_tool_call_msg_idx: int
+    tool_calls_this_batch: int
+
+
 def _user_friendly_error(exc: Exception) -> str:
     """Map exceptions to actionable user-facing messages."""
     msg = str(exc).lower()
@@ -143,43 +167,6 @@ def _user_friendly_error(exc: Exception) -> str:
     if "auth" in msg and ("invalid" in msg or "denied" in msg or "missing" in msg):
         return "There's a configuration issue with the AI provider. Please contact the admin."
     return "Sorry, I couldn't process that. Please try again."
-
-
-def _build_failure_prompt(
-    failed_tools: list[tuple[str, "FailureClass"]],
-    permanent_failures: frozenset[str],
-    available_tools: list[str],
-) -> str:
-    """Build a structured failure-strategy prompt with classification context."""
-    lines: list[str] = ["One or more tool calls failed:"]
-    for name, fc in failed_tools:
-        if fc.is_permanent:
-            lines.append(f"- `{name}`: {fc.value} — permanently disabled for this session")
-        elif fc == FailureClass.TRANSIENT_TIMEOUT:
-            lines.append(
-                f"- `{name}`: {fc.value} — consider retrying with a shorter operation "
-                "or different parameters"
-            )
-        elif fc == FailureClass.LOGICAL_ERROR:
-            lines.append(f"- `{name}`: {fc.value} — fix the parameters before retrying")
-        else:
-            lines.append(f"- `{name}`: {fc.value}")
-
-    if permanent_failures:
-        lines.append(
-            f"\nPermanently removed (do NOT call these again): "
-            f"{', '.join(sorted(permanent_failures))}"
-        )
-
-    if available_tools:
-        lines.append(f"\nAvailable alternatives: {', '.join(available_tools)}")
-
-    lines.append(
-        "\nAnalyze what went wrong, choose an alternative tool or approach from the "
-        "available tools above, and proceed. If no alternative exists, explain why "
-        "the task cannot be completed."
-    )
-    return "\n".join(lines)
 
 
 def _dynamic_preserve_recent(
@@ -215,126 +202,6 @@ def _dynamic_preserve_recent(
             needed = n - idx
             return max(floor, min(needed, cap))
     return floor
-
-
-class FailureClass(str, Enum):
-    """Classification of a tool call failure for structured replanning.
-
-    Used by ``ToolCallTracker`` to decide whether a failed tool should be
-    removed immediately (permanent) or kept with reduced priority (transient).
-    """
-
-    PERMANENT_CONFIG = "permanent_config"  # missing API key, binary not installed
-    PERMANENT_AUTH = "permanent_auth"  # invalid credentials
-    TRANSIENT_TIMEOUT = "transient_timeout"  # network timeout, rate limit
-    TRANSIENT_ERROR = "transient_error"  # server 500, temporary failure
-    LOGICAL_ERROR = "logical_error"  # wrong arguments, bad input
-    UNKNOWN = "unknown"
-
-    @property
-    def is_permanent(self) -> bool:
-        """True when the failure cannot be resolved by retrying."""
-        return self in (FailureClass.PERMANENT_CONFIG, FailureClass.PERMANENT_AUTH)
-
-
-class ToolCallTracker:
-    """Detect and break infinite identical-failure tool call loops.
-
-    Tracks ``(tool_name, args_hash)`` → failure count.  Escalation levels:
-      - 2nd identical failure  → inject "stop retrying" prompt
-      - 3rd identical failure  → add to ``disabled_tools`` for the rest of the turn
-      - >8 total failures      → force the agent to produce a final answer
-
-    Permanent failures (``FailureClass.is_permanent``) are added to
-    ``disabled_tools`` immediately on the first occurrence via
-    ``_permanent_failures``, regardless of count.
-
-    ``record_failure()`` now returns ``(count, FailureClass)`` — callers must
-    unpack both values.  The tool registry is **never mutated**; suppression is
-    enforced by filtering ``tools_def`` at definition-generation time.
-    """
-
-    WARN_THRESHOLD = 2
-    REMOVE_THRESHOLD = 3
-    GLOBAL_BUDGET = 8
-
-    def __init__(self) -> None:
-        self._counts: dict[str, int] = {}  # key → failure count
-        self._total_failures: int = 0
-        self._permanent_failures: set[str] = set()  # tool names permanently removed
-
-    @staticmethod
-    def _key(name: str, args: dict[str, Any]) -> str:
-        # blake2b is significantly faster than sha256 for short inputs; 8-byte digest
-        # gives 64-bit collision resistance which is ample for a per-turn dedup key.
-        h = hashlib.blake2b(
-            json.dumps(args, sort_keys=True, default=str).encode(), digest_size=8
-        ).hexdigest()
-        return f"{name}:{h}"
-
-    @staticmethod
-    def classify_failure(name: str, result: ToolResult) -> FailureClass:
-        """Classify a tool failure to guide replanning decisions."""
-        error_type = result.metadata.get("error_type", "unknown") if result.metadata else "unknown"
-        error_msg = (result.error or result.output or "").lower()
-
-        if error_type == "validation":
-            return FailureClass.LOGICAL_ERROR
-        if error_type in ("not_found", "permission", "unknown_role"):
-            return FailureClass.PERMANENT_CONFIG
-        if error_type == "timeout":
-            return FailureClass.TRANSIENT_TIMEOUT
-
-        # Keyword-based fallback when error_type is generic.
-        # "no such" / "not found" only indicate a permanent config failure when the
-        # missing thing is a binary/command/module — NOT when a file path is wrong
-        # (which is a logical error the LLM should correct).
-        if any(k in error_msg for k in ("api key", "not configured", "not installed")):
-            return FailureClass.PERMANENT_CONFIG
-        _cmd_ctx = ("command", "binary", "executable", "module", "program")
-        if ("no such" in error_msg or "not found" in error_msg) and any(
-            c in error_msg for c in _cmd_ctx
-        ):
-            return FailureClass.PERMANENT_CONFIG
-        if any(
-            k in error_msg for k in ("invalid key", "unauthorized", "authentication", "forbidden")
-        ):
-            return FailureClass.PERMANENT_AUTH
-        if any(k in error_msg for k in ("timeout", "timed out", "rate limit", "429", "too many")):
-            return FailureClass.TRANSIENT_TIMEOUT
-        if any(k in error_msg for k in ("500", "server error", "service unavailable", "503")):
-            return FailureClass.TRANSIENT_ERROR
-        return FailureClass.UNKNOWN
-
-    def record_failure(
-        self, name: str, args: dict[str, Any], result: ToolResult | None = None
-    ) -> tuple[int, FailureClass]:
-        """Record a tool failure; returns (count, failure_class) for this signature."""
-        k = self._key(name, args)
-        self._counts[k] = self._counts.get(k, 0) + 1
-        self._total_failures += 1
-        fc = self.classify_failure(name, result) if result is not None else FailureClass.UNKNOWN
-        if fc.is_permanent:
-            self._permanent_failures.add(name)
-        return self._counts[k], fc
-
-    def record_success(self, name: str, args: dict[str, Any]) -> None:
-        """Reset the count for a successful tool call signature."""
-        k = self._key(name, args)
-        self._counts.pop(k, None)
-
-    @property
-    def permanent_failures(self) -> frozenset[str]:
-        """Tool names that failed permanently this turn (removed from candidate set)."""
-        return frozenset(self._permanent_failures)
-
-    @property
-    def total_failures(self) -> int:
-        return self._total_failures
-
-    @property
-    def budget_exhausted(self) -> bool:
-        return self._total_failures > self.GLOBAL_BUDGET
 
 
 class AgentLoop:
@@ -509,13 +376,6 @@ class AgentLoop:
         # Multi-agent coordinator (initialized lazily in run() if routing enabled)
         self._routing_config = routing_config
         self._coordinator: Coordinator | None = None
-
-        # Per-turn role override save-slots (None → apply was never called / no change)
-        self._saved_model: str | None = None
-        self._saved_temperature: float | None = None
-        self._saved_max_iterations: int | None = None
-        self._saved_role_prompt: str | None = None
-        self._saved_tools: dict[str, Any] | None = None
 
         # Delegation dispatcher (owns delegation state, tracing, contracts)
         self._dispatcher = DelegationDispatcher(
@@ -875,6 +735,319 @@ class AgentLoop:
     def _has_parallel_structure(text: str) -> bool:
         return DelegationDispatcher.has_parallel_structure(text)
 
+    # ------------------------------------------------------------------
+    # _run_agent_loop helpers (extracted for readability)
+    # ------------------------------------------------------------------
+
+    async def _handle_llm_error(
+        self,
+        response: "LLMResponse",
+        consecutive_errors: int,
+        messages: list[dict],
+        on_progress: ProgressCallback | None,
+    ) -> tuple[Literal["continue", "break", "proceed"], int, str | None]:
+        """Handle LLM-level error finish reasons.
+
+        Returns ``(action, consecutive_errors, final_content)`` where *action*
+        is ``"continue"`` (retry this iteration), ``"break"`` (end the loop),
+        or ``"proceed"`` (no error — continue normal processing).
+        *messages* is mutated in-place when a final answer is injected.
+        """
+        if response.finish_reason == "error":
+            consecutive_errors += 1
+            logger.warning(
+                "LLM returned error (attempt {}): {}", consecutive_errors, response.content
+            )
+            if consecutive_errors >= 3:
+                final_content = (
+                    "I'm having trouble reaching the language model right now. "
+                    "Please try again in a moment."
+                )
+                messages[:] = self.context.add_assistant_message(messages, final_content)
+                return "break", consecutive_errors, final_content
+            if on_progress:
+                await on_progress("", status_code="retrying")
+            await asyncio.sleep(min(2**consecutive_errors, 10))
+            return "continue", consecutive_errors, None
+
+        if response.finish_reason == "content_filter":
+            consecutive_errors += 1
+            logger.warning("Content filter triggered (attempt {})", consecutive_errors)
+            if consecutive_errors >= 2:
+                final_content = (
+                    "The AI provider's content filter blocked my response. "
+                    "Try rephrasing your question."
+                )
+                messages[:] = self.context.add_assistant_message(messages, final_content)
+                return "break", consecutive_errors, final_content
+            await asyncio.sleep(1)
+            return "continue", consecutive_errors, None
+
+        if response.finish_reason == "length" and not response.content:
+            consecutive_errors += 1
+            logger.warning("Response truncated to zero content (attempt {})", consecutive_errors)
+            if consecutive_errors >= 2:
+                final_content = (
+                    "My response was too long and got cut off. Try asking a more specific question."
+                )
+                messages[:] = self.context.add_assistant_message(messages, final_content)
+                return "break", consecutive_errors, final_content
+            await asyncio.sleep(1)
+            return "continue", consecutive_errors, None
+
+        return "proceed", consecutive_errors, None
+
+    async def _process_tool_results(
+        self,
+        response: "LLMResponse",
+        messages: list[dict],
+        tools_used: list[str],
+        disabled_tools: set[str],
+        tracker: "ToolCallTracker",
+        _tools_def_cache: list[dict],
+        on_progress: ProgressCallback | None,
+        nudged_for_final: bool,
+    ) -> _ToolBatchResult:
+        """Execute tool calls and process their results.
+
+        Mutates *messages*, *tools_used*, and *disabled_tools* in-place.
+        Returns a ``_ToolBatchResult`` with the scalar state changes.
+        """
+        _args_json: dict[str, str] = {
+            tc.id: json.dumps(tc.arguments, ensure_ascii=False) for tc in response.tool_calls
+        }
+        tool_call_dicts = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {"name": tc.name, "arguments": _args_json[tc.id]},
+            }
+            for tc in response.tool_calls
+        ]
+        # Suppress draft content when tool calls are present; keep as reasoning.
+        reasoning = response.reasoning_content or response.content
+        new_messages = self.context.add_assistant_message(
+            messages,
+            None,
+            tool_call_dicts,
+            reasoning_content=reasoning,
+        )
+        last_tool_call_msg_idx = len(new_messages) - 1
+        messages[:] = new_messages
+
+        # Execute tools (parallel for readonly, sequential for writes)
+        t0_tools = time.monotonic()
+        tool_results = await self.tools.execute_batch(response.tool_calls)
+        tools_elapsed_ms = (time.monotonic() - t0_tools) * 1000
+
+        any_failed = False
+        failed_this_batch: list[tuple[str, FailureClass]] = []
+        tools_to_remove: list[str] = []
+        tool_calls_this_batch = 0
+        for tool_call, result in zip(response.tool_calls, tool_results):
+            tool_calls_this_batch += 1
+            tools_used.append(tool_call.name)
+            args_str = _args_json[tool_call.id]
+            status = "OK" if result.success else "FAIL"
+            bind_trace().info(
+                "tool_exec | {} | {} | {:.0f}ms batch",
+                status,
+                tool_call.name,
+                tools_elapsed_ms,
+            )
+            bind_trace().debug("tool_exec args | {}({})", tool_call.name, args_str[:200])
+            if on_progress:
+                await on_progress(
+                    "",
+                    tool_result={
+                        "toolCallId": tool_call.id,
+                        "result": result.to_llm_string(),
+                    },
+                )
+            messages[:] = self.context.add_tool_result(
+                messages, tool_call.id, tool_call.name, result.to_llm_string()
+            )
+            if not result.success:
+                any_failed = True
+                count, fc = tracker.record_failure(tool_call.name, tool_call.arguments, result)
+                failed_this_batch.append((tool_call.name, fc))
+                remove_now = count >= ToolCallTracker.REMOVE_THRESHOLD or fc.is_permanent
+                if remove_now:
+                    tools_to_remove.append(tool_call.name)
+                    reason = (
+                        f"permanently unavailable ({fc.value})"
+                        if fc.is_permanent
+                        else f"failed {count} times with identical arguments"
+                    )
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                f"TOOL REMOVED: `{tool_call.name}` is {reason} "
+                                "and has been disabled. Use a different approach."
+                            ),
+                        }
+                    )
+                elif count >= ToolCallTracker.WARN_THRESHOLD:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                f"STOP: `{tool_call.name}` has failed {count} "
+                                "times with the same arguments and error. Do NOT "
+                                "call it again with the same arguments. Use a "
+                                "different approach or provide your best answer."
+                            ),
+                        }
+                    )
+            else:
+                tracker.record_success(tool_call.name, tool_call.arguments)
+
+        disabled_tools.update(tools_to_remove)
+
+        # Global failure budget: force final answer
+        if tracker.budget_exhausted:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        f"You have {tracker.total_failures} failed tool calls "
+                        "this turn. Stop calling tools and produce your final "
+                        "answer NOW with whatever information you have."
+                    ),
+                }
+            )
+            nudged_for_final = True
+
+        return _ToolBatchResult(
+            any_failed=any_failed,
+            failed_this_batch=failed_this_batch,
+            nudged_for_final=nudged_for_final,
+            last_tool_call_msg_idx=last_tool_call_msg_idx,
+            tool_calls_this_batch=tool_calls_this_batch,
+        )
+
+    def _evaluate_progress(
+        self,
+        response: "LLMResponse",
+        messages: list[dict],
+        tracker: "ToolCallTracker",
+        _tools_def_cache: list[dict],
+        any_failed: bool,
+        failed_this_batch: list[tuple[str, FailureClass]],
+        has_plan: bool,
+        turn_tool_calls: int,
+        user_text: str,
+        nudged_for_final: bool,
+    ) -> bool:
+        """Append REFLECT-phase system messages based on the current turn state.
+
+        Mutates *messages* in-place; returns the (potentially updated)
+        *nudged_for_final* flag.
+        """
+        _del_names = {"delegate", "delegate_parallel"}
+        had_delegations = any(tc.name in _del_names for tc in response.tool_calls)
+
+        if had_delegations and self._delegation_count >= self._max_delegations:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "Delegation budget exhausted. You have completed all "
+                        "delegated sub-tasks. Do NOT delegate any more work. "
+                        "Synthesize the results you have and produce your "
+                        "final answer NOW."
+                    ),
+                }
+            )
+        elif any_failed:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": _build_failure_prompt(
+                        failed_this_batch,
+                        tracker.permanent_failures,
+                        [
+                            t["function"]["name"]
+                            for t in _tools_def_cache
+                            if t["function"]["name"] not in tracker.permanent_failures
+                        ],
+                    ),
+                }
+            )
+        elif had_delegations:
+            _ungrounded = any(
+                "grounded=False" in (m.get("content") or "")
+                for m in messages[-len(response.tool_calls) :]
+                if m.get("role") == "tool"
+            )
+            nudge = (
+                "Delegation(s) complete. Review the results above. "
+                "If all planned delegations are done, produce your "
+                "final answer synthesizing the results. Do NOT start "
+                "another round of delegations unless the results are "
+                "clearly insufficient (e.g. empty or errored)."
+            )
+            if _ungrounded:
+                nudge += (
+                    "\n\nWARNING: One or more specialists completed their "
+                    "task without using any tools. Those results may be "
+                    "unverified. Consider cross-checking critical claims "
+                    "before including them in your answer."
+                )
+            messages.append({"role": "system", "content": nudge})
+        elif (
+            has_plan
+            and not had_delegations
+            and turn_tool_calls >= 5
+            and self._delegation_count == 0
+            and self.tools.get("delegate_parallel")
+        ):
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        f"You have executed {turn_tool_calls} tool calls "
+                        "solo without delegating. STOP doing the work "
+                        "yourself. Use `delegate_parallel` NOW to distribute "
+                        "remaining work to specialist agents. This is "
+                        "required for multi-part tasks."
+                    ),
+                }
+            )
+        elif (
+            had_delegations
+            and not any(tc.name == "delegate_parallel" for tc in response.tool_calls)
+            and self._has_parallel_structure(user_text)
+        ):
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "You used sequential `delegate` but the user's "
+                        "request lists independent sub-tasks. For the "
+                        "remaining work, switch to `delegate_parallel` "
+                        "to execute them concurrently."
+                    ),
+                }
+            )
+        elif has_plan and len(response.tool_calls) >= 1:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": prompts.get("progress"),
+                }
+            )
+        elif len(response.tool_calls) >= 3:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": prompts.get("reflect"),
+                }
+            )
+
+        return nudged_for_final
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -1003,50 +1176,14 @@ class AgentLoop:
             self._turn_tokens_completion += response.usage.get("completion_tokens", 0)
 
             # --- Check for LLM-level errors --------------------------------
-            if response.finish_reason == "error":
-                consecutive_errors += 1
-                logger.warning(
-                    "LLM returned error (attempt {}): {}", consecutive_errors, response.content
-                )
-                if consecutive_errors >= 3:
-                    final_content = (
-                        "I'm having trouble reaching the language model right now. "
-                        "Please try again in a moment."
-                    )
-                    messages = self.context.add_assistant_message(messages, final_content)
-                    break
-                if on_progress:
-                    await on_progress("", status_code="retrying")
-                await asyncio.sleep(min(2**consecutive_errors, 10))
+            _err_action, consecutive_errors, _err_content = await self._handle_llm_error(
+                response, consecutive_errors, messages, on_progress
+            )
+            if _err_action == "continue":
                 continue
-
-            if response.finish_reason == "content_filter":
-                consecutive_errors += 1
-                logger.warning("Content filter triggered (attempt {})", consecutive_errors)
-                if consecutive_errors >= 2:
-                    final_content = (
-                        "The AI provider's content filter blocked my response. "
-                        "Try rephrasing your question."
-                    )
-                    messages = self.context.add_assistant_message(messages, final_content)
-                    break
-                await asyncio.sleep(1)
-                continue
-
-            if response.finish_reason == "length" and not response.content:
-                consecutive_errors += 1
-                logger.warning(
-                    "Response truncated to zero content (attempt {})", consecutive_errors
-                )
-                if consecutive_errors >= 2:
-                    final_content = (
-                        "My response was too long and got cut off. "
-                        "Try asking a more specific question."
-                    )
-                    messages = self.context.add_assistant_message(messages, final_content)
-                    break
-                await asyncio.sleep(1)
-                continue
+            if _err_action == "break":
+                final_content = _err_content
+                break
 
             consecutive_errors = 0
 
@@ -1124,7 +1261,6 @@ class AgentLoop:
                     # Note: StreamingLLMCaller already routed response.content as
                     # a status event (Option B) — do NOT re-emit here as text.
                     await on_progress("", status_code="calling_tool")
-                    # Emit structured tool-call events with real IDs and args
                     for tc in response.tool_calls:
                         await on_progress(
                             "",
@@ -1135,233 +1271,34 @@ class AgentLoop:
                             },
                         )
 
-                # Serialize arguments once; reused for message building and logging.
-                _args_json: dict[str, str] = {
-                    tc.id: json.dumps(tc.arguments, ensure_ascii=False)
-                    for tc in response.tool_calls
-                }
-                tool_call_dicts = [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {"name": tc.name, "arguments": _args_json[tc.id]},
-                    }
-                    for tc in response.tool_calls
-                ]
-                # Suppress draft content when tool calls are present; keep as reasoning if useful.
-                reasoning = response.reasoning_content or response.content
-                messages = self.context.add_assistant_message(
+                # --- ACT + OBSERVE: execute tools and process results ------
+                batch = await self._process_tool_results(
+                    response,
                     messages,
-                    None,
-                    tool_call_dicts,
-                    reasoning_content=reasoning,
+                    tools_used,
+                    disabled_tools,
+                    tracker,
+                    _tools_def_cache,
+                    on_progress,
+                    nudged_for_final,
                 )
-                _last_tool_call_msg_idx = len(messages) - 1
+                turn_tool_calls += batch.tool_calls_this_batch
+                nudged_for_final = batch.nudged_for_final
+                _last_tool_call_msg_idx = batch.last_tool_call_msg_idx
 
-                # Execute tools (parallel for readonly, sequential for writes)
-                t0_tools = time.monotonic()
-                tool_results = await self.tools.execute_batch(response.tool_calls)
-                tools_elapsed_ms = (time.monotonic() - t0_tools) * 1000
-
-                any_failed = False
-                failed_this_batch: list[tuple[str, FailureClass]] = []
-                tools_to_remove: list[str] = []
-                for tool_call, result in zip(response.tool_calls, tool_results):
-                    turn_tool_calls += 1
-                    tools_used.append(tool_call.name)
-                    args_str = _args_json[tool_call.id]
-                    status = "OK" if result.success else "FAIL"
-                    # Log tool name and status at INFO; args are gated to DEBUG to
-                    # avoid leaking sensitive data (file contents, credentials, etc.)
-                    # from write_file, exec, web_fetch and similar tools.
-                    bind_trace().info(
-                        "tool_exec | {} | {} | {:.0f}ms batch",
-                        status,
-                        tool_call.name,
-                        tools_elapsed_ms,
-                    )
-                    bind_trace().debug("tool_exec args | {}({})", tool_call.name, args_str[:200])
-                    # Emit structured tool-result event with real output
-                    if on_progress:
-                        await on_progress(
-                            "",
-                            tool_result={
-                                "toolCallId": tool_call.id,
-                                "result": result.to_llm_string(),
-                            },
-                        )
-                    messages = self.context.add_tool_result(
-                        messages, tool_call.id, tool_call.name, result.to_llm_string()
-                    )
-                    if not result.success:
-                        any_failed = True
-                        count, fc = tracker.record_failure(
-                            tool_call.name, tool_call.arguments, result
-                        )
-                        failed_this_batch.append((tool_call.name, fc))
-                        remove_now = count >= ToolCallTracker.REMOVE_THRESHOLD or fc.is_permanent
-                        if remove_now:
-                            tools_to_remove.append(tool_call.name)
-                            reason = (
-                                f"permanently unavailable ({fc.value})"
-                                if fc.is_permanent
-                                else f"failed {count} times with identical arguments"
-                            )
-                            messages.append(
-                                {
-                                    "role": "system",
-                                    "content": (
-                                        f"TOOL REMOVED: `{tool_call.name}` is {reason} "
-                                        "and has been disabled. Use a different approach."
-                                    ),
-                                }
-                            )
-                        elif count >= ToolCallTracker.WARN_THRESHOLD:
-                            messages.append(
-                                {
-                                    "role": "system",
-                                    "content": (
-                                        f"STOP: `{tool_call.name}` has failed {count} "
-                                        "times with the same arguments and error. Do NOT "
-                                        "call it again with the same arguments. Use a "
-                                        "different approach or provide your best answer."
-                                    ),
-                                }
-                            )
-                    else:
-                        tracker.record_success(tool_call.name, tool_call.arguments)
-
-                # Suppress tools that hit the failure threshold for the rest of
-                # this turn. The registry is NOT mutated so tools remain
-                # available in future turns.
-                disabled_tools.update(tools_to_remove)
-
-                # Global failure budget: force final answer
-                if tracker.budget_exhausted:
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": (
-                                f"You have {tracker.total_failures} failed tool calls "
-                                "this turn. Stop calling tools and produce your final "
-                                "answer NOW with whatever information you have."
-                            ),
-                        }
-                    )
-                    nudged_for_final = True
-
-                # --- REFLECT: after tool execution, evaluate progress ------
-                # Check if delegation budget is exhausted
-                _del_names = {"delegate", "delegate_parallel"}
-                had_delegations = any(tc.name in _del_names for tc in response.tool_calls)
-                if had_delegations and self._delegation_count >= self._max_delegations:
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": (
-                                "Delegation budget exhausted. You have completed all "
-                                "delegated sub-tasks. Do NOT delegate any more work. "
-                                "Synthesize the results you have and produce your "
-                                "final answer NOW."
-                            ),
-                        }
-                    )
-                elif any_failed:
-                    # Failure-aware: structured replanning prompt with classification context
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": _build_failure_prompt(
-                                failed_this_batch,
-                                tracker.permanent_failures,
-                                # Pre-filter permanent failures at call site — avoids
-                                # an allocation inside _build_failure_prompt per failure.
-                                [
-                                    t["function"]["name"]
-                                    for t in _tools_def_cache
-                                    if t["function"]["name"] not in tracker.permanent_failures
-                                ],
-                            ),
-                        }
-                    )
-                elif had_delegations:
-                    # After delegation, check if all planned work is done
-                    # Detect ungrounded delegation results
-                    _ungrounded = any(
-                        "grounded=False" in (m.get("content") or "")
-                        for m in messages[-len(response.tool_calls) :]
-                        if m.get("role") == "tool"
-                    )
-                    nudge = (
-                        "Delegation(s) complete. Review the results above. "
-                        "If all planned delegations are done, produce your "
-                        "final answer synthesizing the results. Do NOT start "
-                        "another round of delegations unless the results are "
-                        "clearly insufficient (e.g. empty or errored)."
-                    )
-                    if _ungrounded:
-                        nudge += (
-                            "\n\nWARNING: One or more specialists completed their "
-                            "task without using any tools. Those results may be "
-                            "unverified. Consider cross-checking critical claims "
-                            "before including them in your answer."
-                        )
-                    messages.append({"role": "system", "content": nudge})
-                elif (
-                    has_plan
-                    and not had_delegations
-                    and turn_tool_calls >= 5
-                    and self._delegation_count == 0
-                    and self.tools.get("delegate_parallel")
-                ):
-                    # Delegation nudge: the parent is doing heavy solo work
-                    # despite having delegation tools available.
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": (
-                                f"You have executed {turn_tool_calls} tool calls "
-                                "solo without delegating. STOP doing the work "
-                                "yourself. Use `delegate_parallel` NOW to distribute "
-                                "remaining work to specialist agents. This is "
-                                "required for multi-part tasks."
-                            ),
-                        }
-                    )
-                elif (
-                    had_delegations
-                    and not any(tc.name == "delegate_parallel" for tc in response.tool_calls)
-                    and self._has_parallel_structure(user_text)
-                ):
-                    # Sequential-to-parallel correction: agent used sequential
-                    # delegate but the user's request has parallel structure.
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": (
-                                "You used sequential `delegate` but the user's "
-                                "request lists independent sub-tasks. For the "
-                                "remaining work, switch to `delegate_parallel` "
-                                "to execute them concurrently."
-                            ),
-                        }
-                    )
-                elif has_plan and len(response.tool_calls) >= 1:
-                    # Plan-aware progress check (every tool round when planning)
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": prompts.get("progress"),
-                        }
-                    )
-                elif len(response.tool_calls) >= 3:
-                    # Fallback: general reflection for many concurrent calls
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": prompts.get("reflect"),
-                        }
-                    )
+                # --- REFLECT: evaluate progress and inject guidance ---------
+                nudged_for_final = self._evaluate_progress(
+                    response,
+                    messages,
+                    tracker,
+                    _tools_def_cache,
+                    batch.any_failed,
+                    batch.failed_this_batch,
+                    has_plan,
+                    turn_tool_calls,
+                    user_text,
+                    nudged_for_final,
+                )
 
             else:
                 # --- No tool calls: the model is producing a text answer ---
@@ -1477,7 +1414,7 @@ class AgentLoop:
         while self._running:
             try:
                 msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
-                role_applied = False
+                turn_ctx: TurnContext | None = None
                 # Set correlation IDs for this request
                 TraceContext.new_request(
                     session_id=msg.session_key,
@@ -1491,7 +1428,6 @@ class AgentLoop:
 
                 try:
                     # Route through coordinator if enabled (skip system messages)
-                    role_applied = False
 
                     # Wrap entire request (classify + process) in a single trace
                     async with trace_request(
@@ -1542,8 +1478,7 @@ class AgentLoop:
                                 latency_ms=classify_latency_ms,
                                 message_excerpt=msg.content,
                             )
-                            self._apply_role_for_turn(role)
-                            role_applied = True
+                            turn_ctx = self._apply_role_for_turn(role)
 
                         # Wrap with timeout to prevent infinite processing
                         timeout = self.message_timeout if self.message_timeout > 0 else None
@@ -1575,8 +1510,7 @@ class AgentLoop:
                                 ),
                             )
 
-                    if role_applied:
-                        self._reset_role_after_turn()
+                    self._reset_role_after_turn(turn_ctx)
 
                     if response is not None:
                         await self.bus.publish_outbound(response)
@@ -1598,8 +1532,7 @@ class AgentLoop:
 
                 except Exception as e:  # crash-barrier: message processing
                     logger.exception("Error processing message")
-                    if role_applied:
-                        self._reset_role_after_turn()
+                    self._reset_role_after_turn(turn_ctx)
                     await self.bus.publish_outbound(
                         OutboundMessage(
                             channel=msg.channel,
@@ -1706,20 +1639,23 @@ class AgentLoop:
     # Per-turn role switching (multi-agent routing)
     # ------------------------------------------------------------------
 
-    def _apply_role_for_turn(self, role: AgentRoleConfig) -> None:
-        """Temporarily override agent settings for the current turn."""
-        # Save originals for reset
-        self._saved_model = self.model
-        self._saved_temperature = self.temperature
-        self._saved_max_iterations = self.max_iterations
-        self._saved_role_prompt = self.context.role_system_prompt
+    def _apply_role_for_turn(self, role: AgentRoleConfig) -> TurnContext:
+        """Temporarily override agent settings for the current turn.
+
+        Returns a ``TurnContext`` snapshot that must be passed to
+        ``_reset_role_after_turn`` to restore the original configuration.
+        """
         # Only copy the tool registry when filtering will actually be applied.
         # Roles with no allowed/denied lists leave the registry unchanged, so
-        # copying is wasted allocation.  The save/restore pattern is also not
-        # concurrency-safe (AR-H2); a future TurnContext refactor will eliminate
-        # it entirely.
+        # copying is wasted allocation.
         _will_filter = role.allowed_tools is not None or bool(role.denied_tools)
-        self._saved_tools = self.tools.snapshot() if _will_filter else None
+        ctx = TurnContext(
+            model=self.model,
+            temperature=self.temperature,
+            max_iterations=self.max_iterations,
+            role_prompt=self.context.role_system_prompt,
+            tools=self.tools.snapshot() if _will_filter else None,
+        )
 
         if role.model:
             self.model = role.model
@@ -1733,6 +1669,7 @@ class AgentLoop:
         # Apply role-specific tool filtering
         self._filter_tools_for_role(role)
         logger.debug("Applied role '{}' for turn (model={})", role.name, self.model)
+        return ctx
 
     def _filter_tools_for_role(self, role: AgentRoleConfig) -> None:
         """Remove tools that the role's allowed/denied lists exclude."""
@@ -1746,25 +1683,22 @@ class AgentLoop:
             elif name in denied:
                 self.tools.unregister(name)
 
-    def _reset_role_after_turn(self) -> None:
-        """Restore original agent settings after a routed turn."""
-        if self._saved_model is not None:
-            self.model = self._saved_model
-            self._saved_model = None
-        if self._saved_temperature is not None:
-            self.temperature = self._saved_temperature
-            self._saved_temperature = None
-        if self._saved_max_iterations is not None:
-            self.max_iterations = self._saved_max_iterations
-            self._saved_max_iterations = None
-        if self._saved_role_prompt is not None:
-            self.context.role_system_prompt = self._saved_role_prompt
-            self._saved_role_prompt = None
+    def _reset_role_after_turn(self, ctx: TurnContext | None) -> None:
+        """Restore original agent settings after a routed turn.
+
+        ``ctx`` is the ``TurnContext`` returned by ``_apply_role_for_turn``.
+        Passing ``None`` is a no-op (safe to call when no role was applied).
+        """
+        if ctx is None:
+            return
+        self.model = ctx.model
+        self.temperature = ctx.temperature
+        self.max_iterations = ctx.max_iterations
+        self.context.role_system_prompt = ctx.role_prompt
         self.role_name = self.role_config.name if self.role_config else ""
         # Restore full tool set (only non-None — None means no filtering was applied)
-        if self._saved_tools is not None:
-            self.tools.restore(self._saved_tools)
-            self._saved_tools = None
+        if ctx.tools is not None:
+            self.tools.restore(ctx.tools)
 
     async def close_mcp(self) -> None:
         """Close MCP connections and other async resources."""

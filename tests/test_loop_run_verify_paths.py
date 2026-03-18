@@ -178,7 +178,9 @@ async def test_run_with_routing_low_confidence_and_none_response(tmp_path: Path)
     loop._apply_role_for_turn = lambda _r: role_calls.__setitem__(
         "applied", role_calls["applied"] + 1
     )  # type: ignore[method-assign]
-    loop._reset_role_after_turn = lambda: role_calls.__setitem__("reset", role_calls["reset"] + 1)  # type: ignore[method-assign]
+    loop._reset_role_after_turn = lambda _ctx: role_calls.__setitem__(
+        "reset", role_calls["reset"] + 1
+    )  # type: ignore[method-assign]
 
     async def _none_response(_msg):
         return None

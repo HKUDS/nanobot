@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from nanobot.agent.loop import FailureClass, ToolCallTracker
+from nanobot.agent.failure import FailureClass, ToolCallTracker
 from nanobot.agent.tools.base import ToolResult
 
 

@@ -838,11 +838,11 @@ class TestRoleSwitching:
         orig_temp = loop.temperature
         orig_iters = loop.max_iterations
 
-        loop._apply_role_for_turn(role)
+        ctx = loop._apply_role_for_turn(role)
 
-        assert loop._saved_model == orig_model
-        assert loop._saved_temperature == orig_temp
-        assert loop._saved_max_iterations == orig_iters
+        assert ctx.model == orig_model
+        assert ctx.temperature == orig_temp
+        assert ctx.max_iterations == orig_iters
 
     def test_apply_overrides_settings(self, tmp_path: Path):
         loop, role = self._make_loop_with_role(tmp_path)
@@ -859,22 +859,18 @@ class TestRoleSwitching:
         orig_temp = loop.temperature
         orig_iters = loop.max_iterations
 
-        loop._apply_role_for_turn(role)
-        loop._reset_role_after_turn()
+        ctx = loop._apply_role_for_turn(role)
+        loop._reset_role_after_turn(ctx)
 
         assert loop.model == orig_model
         assert loop.temperature == pytest.approx(orig_temp)
         assert loop.max_iterations == orig_iters
-        # Save slots cleared
-        assert loop._saved_model is None
-        assert loop._saved_temperature is None
-        assert loop._saved_max_iterations is None
 
     def test_reset_without_apply_is_noop(self, tmp_path: Path):
         """_reset_role_after_turn must be safe to call with no prior apply."""
         loop = _make_loop(tmp_path, ScriptedProvider([]))
         orig_model = loop.model
-        loop._reset_role_after_turn()  # must not raise
+        loop._reset_role_after_turn(None)  # must not raise
         assert loop.model == orig_model
 
     def test_apply_tool_filter_saved_and_restored(self, tmp_path: Path):
@@ -886,19 +882,19 @@ class TestRoleSwitching:
         orig_names = set(loop.tools.tool_names)
 
         role = AgentRoleConfig(name="limited", allowed_tools=["read_file"])
-        loop._apply_role_for_turn(role)
+        ctx = loop._apply_role_for_turn(role)
         # After filtering, only read_file should remain
         assert set(loop.tools.tool_names) == {"read_file"}
 
-        loop._reset_role_after_turn()
+        loop._reset_role_after_turn(ctx)
         # Full tool set must be restored
         assert set(loop.tools.tool_names) == orig_names
 
     def test_apply_no_filter_does_not_snapshot(self, tmp_path: Path):
-        """Roles with no allowed/denied lists must leave _saved_tools as None."""
+        """Roles with no allowed/denied lists must leave TurnContext.tools as None."""
         from nanobot.config.schema import AgentRoleConfig
 
         loop = _make_loop(tmp_path, ScriptedProvider([]))
         role = AgentRoleConfig(name="passthrough")
-        loop._apply_role_for_turn(role)
-        assert loop._saved_tools is None
+        ctx = loop._apply_role_for_turn(role)
+        assert ctx.tools is None
