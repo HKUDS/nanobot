@@ -130,11 +130,13 @@ def finish_trace(trace: Optional[TraceEvent], output: Optional[str], error: Opti
     
     try:
         if error:
-            add_step(
-                StepType.ERROR,
-                str(error)[:500],
+            # SDK's add_step doesn't accept status parameter, create ExecutionStep directly
+            error_step = ExecutionStep(
+                type=StepType.ERROR,
+                content=str(error)[:500],
                 status=Status.ERROR,
             )
+            trace.add_step(error_step)
             trace.finish(Status.ERROR)
             logger.debug(f"AgentScope: Trace {trace.id} finished with error")
         else:
@@ -173,8 +175,8 @@ def add_llm_call_step(
     tools_count: int,
     response_content: Optional[str],
     tool_calls: List[Dict],
-    tokens_in: int = 0,
-    tokens_out: int = 0,
+    tokens_input: int = 0,
+    tokens_output: int = 0,
     latency_ms: float = 0
 ):
     """Record LLM call step."""
@@ -196,8 +198,8 @@ def add_llm_call_step(
         add_llm_call(
             prompt=f"Messages: {messages_count}",
             completion=content,
-            tokens_input=tokens_in,
-            tokens_output=tokens_out,
+            tokens_input=tokens_input,
+            tokens_output=tokens_output,
             latency_ms=latency_ms,
         )
     except Exception as e:
