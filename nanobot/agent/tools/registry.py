@@ -14,14 +14,17 @@ class ToolRegistry:
 
     def __init__(self):
         self._tools: dict[str, Tool] = {}
+        self._definitions_cache: list[dict[str, Any]] | None = None
 
     def register(self, tool: Tool) -> None:
         """Register a tool."""
         self._tools[tool.name] = tool
+        self._definitions_cache = None
 
     def unregister(self, name: str) -> None:
         """Unregister a tool by name."""
         self._tools.pop(name, None)
+        self._definitions_cache = None
 
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""
@@ -43,24 +46,26 @@ class ToolRegistry:
         return name if isinstance(name, str) else ""
 
     def get_definitions(self) -> list[dict[str, Any]]:
-        """Get tool definitions with stable ordering for cache-friendly prompts.
+        """Get tool definitions with stable ordering (cached until tools change).
 
         Built-in tools are sorted first as a stable prefix, then MCP tools are
-        sorted and appended.
+        sorted and appended. Result is cached and invalidated on register/unregister.
         """
-        definitions = [tool.to_schema() for tool in self._tools.values()]
-        builtins: list[dict[str, Any]] = []
-        mcp_tools: list[dict[str, Any]] = []
-        for schema in definitions:
-            name = self._schema_name(schema)
-            if name.startswith("mcp_"):
-                mcp_tools.append(schema)
-            else:
-                builtins.append(schema)
+        if self._definitions_cache is None:
+            definitions = [tool.to_schema() for tool in self._tools.values()]
+            builtins: list[dict[str, Any]] = []
+            mcp_tools: list[dict[str, Any]] = []
+            for schema in definitions:
+                name = self._schema_name(schema)
+                if name.startswith("mcp_"):
+                    mcp_tools.append(schema)
+                else:
+                    builtins.append(schema)
 
-        builtins.sort(key=self._schema_name)
-        mcp_tools.sort(key=self._schema_name)
-        return builtins + mcp_tools
+            builtins.sort(key=self._schema_name)
+            mcp_tools.sort(key=self._schema_name)
+            self._definitions_cache = builtins + mcp_tools
+        return self._definitions_cache
 
     def prepare_call(
         self,
