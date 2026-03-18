@@ -1238,9 +1238,26 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 ## 🧩 Multiple Instances
 
-Run multiple nanobot instances simultaneously with separate configs and runtime data. Use `--config` as the main entrypoint, and optionally use `--workspace` to override the workspace for a specific run.
+Run multiple nanobot instances simultaneously with separate configs and runtime data. Use `--config` as the main entrypoint. Optionally pass `--workspace` during `onboard` when you want to initialize or update the saved workspace for a specific instance.
 
 ### Quick Start
+
+If you want each instance to have its own dedicated workspace from the start, pass both `--config` and `--workspace` during onboarding.
+
+**Initialize instances:**
+
+```bash
+# Create separate instance configs and workspaces
+nanobot onboard --config ~/.nanobot-telegram/config.json --workspace ~/.nanobot-telegram/workspace
+nanobot onboard --config ~/.nanobot-discord/config.json --workspace ~/.nanobot-discord/workspace
+nanobot onboard --config ~/.nanobot-feishu/config.json --workspace ~/.nanobot-feishu/workspace
+```
+
+**Configure each instance:**
+
+Edit `~/.nanobot-telegram/config.json`, `~/.nanobot-discord/config.json`, etc. with different channel settings. The workspace you passed during `onboard` is saved into each config as that instance's default workspace.
+
+**Run instances:**
 
 ```bash
 # Instance A - Telegram bot
@@ -1341,7 +1358,8 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 
 | Command | Description |
 |---------|-------------|
-| `nanobot onboard` | Initialize config & workspace |
+| `nanobot onboard` | Initialize config & workspace at `~/.nanobot/` |
+| `nanobot onboard -c <config> -w <workspace>` | Initialize or refresh a specific instance config and workspace |
 | `nanobot agent -m "..."` | Chat with the agent |
 | `nanobot agent -w <workspace>` | Chat against a specific workspace |
 | `nanobot agent -w <workspace> -c <config>` | Chat against a specific workspace/config |
