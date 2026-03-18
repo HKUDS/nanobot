@@ -11,9 +11,10 @@ Phase E: health tracking with transition detection + heartbeat integration.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
+
+from loguru import logger
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.registry import ToolRegistry
@@ -22,8 +23,6 @@ if TYPE_CHECKING:
     from nanobot.agent.registry import AgentRegistry
     from nanobot.agent.skills import SkillsLoader
     from nanobot.config.schema import AgentRoleConfig
-
-logger = logging.getLogger(__name__)
 
 CapabilityKind = Literal["tool", "skill", "delegate_role"]
 CapabilityHealth = Literal["healthy", "degraded", "unavailable"]
@@ -173,6 +172,27 @@ class CapabilityRegistry:
             role_config=role,
         )
 
+    def wire_agent_registry(self, registry: "AgentRegistry") -> None:
+        """Attach an already-built AgentRegistry and populate Capability entries.
+
+        Use this instead of directly mutating ``_agents`` and ``_capabilities``
+        from outside the class (fixes CQ-M4 / SEC-M2 / AR-M2).
+        """
+        self._agents = registry
+        for role_name in registry.role_names():
+            role = registry.get(role_name)
+            if role is not None and role.name not in self:
+                health: CapabilityHealth = "healthy" if role.enabled else "unavailable"
+                self._capabilities[role.name] = Capability(
+                    name=role.name,
+                    kind="delegate_role",
+                    description=role.description,
+                    intents=[],
+                    health=health,
+                    unavailability_reason=None if role.enabled else "role disabled",
+                    role_config=role,
+                )
+
     def unregister(self, name: str) -> None:
         """Remove a capability (and its underlying tool if applicable)."""
         cap = self._capabilities.pop(name, None)
@@ -298,7 +318,7 @@ class CapabilityRegistry:
         """Emit a log message for a health transition."""
         if change.new_health == "unavailable":
             logger.warning(
-                "Capability '%s' (%s): %s → unavailable: %s",
+                "Capability '{}' ({}): {} → unavailable: {}",
                 change.name,
                 change.kind,
                 change.old_health,
@@ -306,14 +326,14 @@ class CapabilityRegistry:
             )
         elif change.old_health == "unavailable":
             logger.info(
-                "Capability '%s' (%s) recovered: unavailable → %s",
+                "Capability '{}' ({}) recovered: unavailable → {}",
                 change.name,
                 change.kind,
                 change.new_health,
             )
         else:
             logger.info(
-                "Capability '%s' (%s): %s → %s",
+                "Capability '{}' ({}): {} → {}",
                 change.name,
                 change.kind,
                 change.old_health,

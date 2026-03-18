@@ -38,8 +38,9 @@ class TestResolvePath:
         assert result == target.resolve()
 
     def test_allowed_dir_violation(self, tmp_path: Path):
+        other_dir = tmp_path.parent / "other"
         with pytest.raises(PermissionError, match="outside allowed directory"):
-            _resolve_path("/etc/passwd", allowed_dir=tmp_path)
+            _resolve_path(str(other_dir / "file.txt"), allowed_dir=tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -203,3 +204,47 @@ class TestListDirTool:
         tool = ListDirTool(workspace=tmp_path, allowed_dir=tmp_path)
         result = await tool.execute(path="/etc")
         assert not result.success
+
+
+# ---------------------------------------------------------------------------
+# SEC-M5: sensitive-path denylist
+# ---------------------------------------------------------------------------
+
+
+class TestSensitivePathDenylist:
+    """_resolve_path must reject access to sensitive system paths (SEC-M5)."""
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "~/.ssh/id_rsa",
+            "~/.ssh/authorized_keys",
+            "~/.gnupg/secring.gpg",
+            "~/.nanobot/config.json",
+            "/etc/shadow",
+            "/etc/passwd",
+            "/etc/sudoers",
+        ],
+    )
+    def test_resolve_rejects_sensitive_paths(self, path: str):
+        with pytest.raises(PermissionError, match="sensitive"):
+            _resolve_path(path)
+
+    async def test_read_file_rejects_sensitive(self, tmp_path: Path):
+        """ReadFileTool must return a failure (not raise) for sensitive paths."""
+        tool = ReadFileTool(workspace=tmp_path)
+        result = await tool.execute(path="~/.nanobot/config.json")
+        assert not result.success
+        assert "sensitive" in result.output.lower() or "permitted" in result.output.lower()
+
+    async def test_write_file_rejects_sensitive(self, tmp_path: Path):
+        """WriteFileTool must reject writes to sensitive paths."""
+        tool = WriteFileTool(workspace=tmp_path)
+        result = await tool.execute(path="/etc/shadow", content="evil")
+        assert not result.success
+
+    def test_normal_path_not_blocked(self, tmp_path: Path):
+        """Non-sensitive absolute paths must still resolve normally."""
+        target = tmp_path / "safe.txt"
+        resolved = _resolve_path(str(target))
+        assert resolved == target.resolve()

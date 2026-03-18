@@ -17,16 +17,15 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 from typing import TYPE_CHECKING, Any
+
+from loguru import logger
 
 from nanobot.agent.observability import tool_span
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tracing import bind_trace
 from nanobot.errors import ToolExecutionError, ToolNotFoundError, ToolValidationError
-
-logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from nanobot.agent.tools.result_cache import ToolResultCache, _ChatProvider
@@ -67,6 +66,14 @@ class ToolRegistry:
     def unregister(self, name: str) -> None:
         """Unregister a tool by name."""
         self._tools.pop(name, None)
+
+    def snapshot(self) -> dict[str, Tool]:
+        """Return a shallow copy of the current tool set for later restore."""
+        return dict(self._tools)
+
+    def restore(self, snap: dict[str, Tool]) -> None:
+        """Replace the current tool set with a previously captured snapshot."""
+        self._tools = snap
 
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""

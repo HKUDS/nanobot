@@ -179,6 +179,7 @@ class TestTransitionDetection:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("propagate_loguru_to_caplog")
 class TestTransitionLogging:
     def test_logs_warning_on_unavailable(self, caplog: pytest.LogCaptureFixture) -> None:
         reg = CapabilityRegistry()

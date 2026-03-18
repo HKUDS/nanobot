@@ -1,5 +1,7 @@
 .assets
 .env
+deploy/production/.env
+deploy/staging/.env
 *.pyc
 dist/
 build/

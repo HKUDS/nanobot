@@ -1,10 +1,42 @@
 """File system tools: read, write, edit."""
 
+from __future__ import annotations
+
 import difflib
 from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolResult
+
+# Paths that the agent must never read or write, even when no workspace
+# restriction is active.  These are resolved to absolute paths at module
+# load time so that symlink tricks (e.g. ~/link -> /etc/shadow) are caught.
+_SENSITIVE_PATHS: tuple[Path, ...] = tuple(
+    p.resolve()
+    for raw in (
+        "~/.ssh",
+        "~/.gnupg",
+        "~/.nanobot/config.json",
+        "/etc/shadow",
+        "/etc/passwd",
+        "/etc/sudoers",
+    )
+    for p in [Path(raw).expanduser()]
+    if p.expanduser().parts  # always True — keeps the generator clean
+)
+
+
+def _is_sensitive(resolved: Path) -> bool:
+    """Return True if *resolved* is under any sensitive path prefix."""
+    for sensitive in _SENSITIVE_PATHS:
+        try:
+            resolved.relative_to(sensitive)
+            return True
+        except ValueError:
+            pass
+        if resolved == sensitive:
+            return True
+    return False
 
 
 def _resolve_path(
@@ -15,6 +47,8 @@ def _resolve_path(
     if not p.is_absolute() and workspace:
         p = workspace / p
     resolved = p.resolve()
+    if _is_sensitive(resolved):
+        raise PermissionError(f"Access to sensitive path is not permitted: {path}")
     if allowed_dir:
         try:
             resolved.relative_to(allowed_dir.resolve())

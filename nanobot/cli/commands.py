@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import os
 import select
 import signal
@@ -591,12 +592,30 @@ def gateway(
                 # Also start bare health server on the gateway port for Docker HEALTHCHECK
                 from nanobot.web.health import start_health_server
 
-                health_server = await start_health_server(agent, port=port)
+                try:
+                    health_server = await start_health_server(agent, port=port)
+                except OSError as exc:
+                    if exc.errno != errno.EADDRINUSE:
+                        raise
+                    console.print(
+                        "[yellow]Warning:[/yellow] Gateway health port "
+                        f"{port} is already in use; continuing because the web UI "
+                        f"still exposes /health on http://{web_cfg.host}:{web_cfg.port}"
+                    )
             else:
                 # No web channel: lightweight health endpoint only
                 from nanobot.web.health import start_health_server
 
-                health_server = await start_health_server(agent, port=port)
+                try:
+                    health_server = await start_health_server(agent, port=port)
+                except OSError as exc:
+                    if exc.errno == errno.EADDRINUSE:
+                        console.print(
+                            "[red]Error:[/red] Gateway health port "
+                            f"{port} is already in use. Stop the other process or "
+                            "start nanobot with a different --port."
+                        )
+                    raise
 
             await cron.start()
             await heartbeat.start()

@@ -19,8 +19,9 @@ Architecture
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import Any
+
+from loguru import logger
 
 from .ontology import (
     Entity,
@@ -45,8 +46,6 @@ except Exception:  # pragma: no cover – optional dependency
     AsyncDriver = None  # type: ignore[assignment,misc]
     GraphDatabase = None  # type: ignore[assignment,misc]
     _HAS_NEO4J = False
-
-logger = logging.getLogger(__name__)
 
 
 class KnowledgeGraph:
@@ -89,7 +88,7 @@ class KnowledgeGraph:
             self.enabled = True
         except Exception as exc:  # noqa: BLE001
             self.error = f"Neo4j driver init failed: {exc}"
-            logger.warning("KnowledgeGraph disabled: %s", self.error)
+            logger.warning("KnowledgeGraph disabled: {}", self.error)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -107,7 +106,7 @@ class KnowledgeGraph:
         except Exception as exc:  # noqa: BLE001
             self.enabled = False
             self.error = f"connectivity check failed: {exc}"
-            logger.warning("KnowledgeGraph disabled: %s", self.error)
+            logger.warning("KnowledgeGraph disabled: {}", self.error)
             return False
 
     async def close(self) -> None:
@@ -143,7 +142,7 @@ class KnowledgeGraph:
                 for q in queries:
                     await session.run(q)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("ensure_indexes failed: %s", exc)
+            logger.warning("ensure_indexes failed: {}", exc)
 
     # ------------------------------------------------------------------
     # Write methods
@@ -173,7 +172,7 @@ class KnowledgeGraph:
             async with self._driver.session(database=self._database) as session:
                 await session.run(cypher, canonical_name=canonical, props=props)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("upsert_entity failed for %s: %s", entity.name, exc)
+            logger.warning("upsert_entity failed for {}: {}", entity.name, exc)
 
     async def add_relationship(self, rel: Relationship) -> None:
         """MERGE a directed relationship edge between two entities."""
@@ -209,7 +208,7 @@ class KnowledgeGraph:
             async with self._driver.session(database=self._database) as session:
                 await session.run(cypher, **params)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("add_relationship failed %s->%s: %s", src, tgt, exc)
+            logger.warning("add_relationship failed {}->{}: {}", src, tgt, exc)
 
     async def ingest_event_triples(
         self,
@@ -295,7 +294,7 @@ class KnowledgeGraph:
                 node = record["e"]
                 return self._node_to_entity(dict(node))
         except Exception as exc:  # noqa: BLE001
-            logger.warning("get_entity failed for %s: %s", name, exc)
+            logger.warning("get_entity failed for {}: {}", name, exc)
             return None
 
     async def search_entities(
@@ -323,7 +322,7 @@ class KnowledgeGraph:
                 records = await result.data()
                 return [self._node_to_entity(dict(r["node"])) for r in records]
         except Exception as exc:  # noqa: BLE001
-            logger.warning("search_entities failed: %s", exc)
+            logger.warning("search_entities failed: {}", exc)
             return []
 
     async def get_neighbors(
@@ -358,7 +357,7 @@ class KnowledgeGraph:
                 data: list[dict[str, Any]] = await result.data()
                 return data
         except Exception as exc:  # noqa: BLE001
-            logger.warning("get_neighbors failed for %s: %s", entity_name, exc)
+            logger.warning("get_neighbors failed for {}: {}", entity_name, exc)
             return []
 
     async def find_paths(
@@ -402,7 +401,7 @@ class KnowledgeGraph:
                     paths.append(path_steps)
                 return paths
         except Exception as exc:  # noqa: BLE001
-            logger.warning("find_paths failed %s->%s: %s", source, target, exc)
+            logger.warning("find_paths failed {}->{}: {}", source, target, exc)
             return []
 
     async def query_subgraph(
@@ -475,7 +474,7 @@ class KnowledgeGraph:
                         if n:
                             related.add(n.lower())
         except Exception as exc:  # noqa: BLE001
-            logger.warning("get_related_entity_names_sync failed: %s", exc)
+            logger.warning("get_related_entity_names_sync failed: {}", exc)
         return related
 
     def get_triples_for_entities_sync(
@@ -509,7 +508,7 @@ class KnowledgeGraph:
                         if src and rel and tgt:
                             triples.append((src, rel, tgt))
         except Exception as exc:  # noqa: BLE001
-            logger.warning("get_triples_for_entities_sync failed: %s", exc)
+            logger.warning("get_triples_for_entities_sync failed: {}", exc)
         return triples
 
     async def resolve_entity(self, name: str) -> str:

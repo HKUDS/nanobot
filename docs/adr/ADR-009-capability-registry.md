@@ -92,7 +92,9 @@ A single registry that internally **composes** (not replaces) the existing regis
 - `get_tool_definitions()` — only healthy tools, replaces `ToolRegistry.get_definitions()`
 - `get_unavailable_summary()` — for system prompt injection
 - `get_tool(name)` / `execute_tool(name, params)` — execution path
-- `unregister(name)` — for `ToolCallTracker`'s progressive tool removal
+- `unregister(name)` — removes a capability (tool or role) from the registry
+- `wire_agent_registry(registry)` — attaches an already-built `AgentRegistry` and
+  populates `Capability` entries; replaces direct `_agents`/`_capabilities` mutation
 - `refresh_health()` — periodic re-check of all capabilities
 
 ### 4. Delegation validation

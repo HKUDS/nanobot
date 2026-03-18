@@ -56,6 +56,11 @@ _delegation_ancestry: contextvars.ContextVar[tuple[str, ...]] = contextvars.Cont
     "_delegation_ancestry", default=()
 )
 
+# Maximum number of distinct roles that may be chained in a single delegation path.
+# Prevents runaway recursive delegation: each level runs up to max_iterations LLM
+# calls, so uncapped chains multiply cost exponentially.
+MAX_DELEGATION_DEPTH: int = 3
+
 # ---------------------------------------------------------------------------
 # Task type taxonomy
 # ---------------------------------------------------------------------------
@@ -543,9 +548,20 @@ class DelegationDispatcher:
         if role is None:
             role = await self.coordinator.route(task)
 
-        # Cycle guard
+        # Depth and cycle guard
         ancestry = _delegation_ancestry.get()
         depth = len(ancestry)
+        if depth >= MAX_DELEGATION_DEPTH:
+            chain = " → ".join((*ancestry, role.name))
+            self.record_route_trace(
+                "delegate_depth_blocked",
+                role=role.name,
+                from_role=ancestry[-1] if ancestry else "",
+                depth=depth,
+                success=False,
+                message_excerpt=task,
+            )
+            raise _CycleError(f"Maximum delegation depth ({MAX_DELEGATION_DEPTH}) reached: {chain}")
         if role.name in ancestry:
             chain = " → ".join((*ancestry, role.name))
             self.record_route_trace(
@@ -662,39 +678,67 @@ class DelegationDispatcher:
         task_type = self.classify_task_type(role.name, task)
         logger.debug("Delegation task type: {} (role={})", task_type, role.name)
 
-        # Build isolated tool set
+        # Build isolated tool set.
+        # Privileged tools (exec, write, edit, re-delegation) are default-denied
+        # for delegated agents; only granted when the role's allowed_tools list
+        # explicitly includes them.  This prevents a compromised or misbehaving
+        # sub-agent from running shell commands or further delegating without an
+        # explicit config grant.
+        _explicit_grant: set[str] = (
+            set(role.allowed_tools) if role.allowed_tools is not None else set()
+        )
+        _explicit_deny: set[str] = set(role.denied_tools) if role.denied_tools else set()
+        _no_explicit_allowlist = role.allowed_tools is None
+        _delegated_privilege = frozenset({"exec", "write_file", "edit_file", "delegate"})
+
+        def _grant(name: str) -> bool:
+            """True when the tool should be included in the delegated tool set."""
+            if name in _explicit_deny:
+                return False
+            if name in _delegated_privilege:
+                # Privileged tools require an explicit allowlist grant.
+                return not _no_explicit_allowlist and name in _explicit_grant
+            if not _no_explicit_allowlist:
+                return name in _explicit_grant
+            return True
+
         tools = ToolRegistry()
         allowed_dir = self.workspace if self.restrict_to_workspace else None
-        for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
-            tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
-        tools.register(
-            ExecTool(
-                working_dir=str(self.workspace),
-                timeout=self.exec_config.timeout,
-                restrict_to_workspace=self.restrict_to_workspace,
-            )
+
+        # Read-only filesystem tools always considered (grant() decides inclusion)
+        for ro_cls in (ReadFileTool, ListDirTool):
+            ro_t = ro_cls(workspace=self.workspace, allowed_dir=allowed_dir)
+            if _grant(ro_t.name):
+                tools.register(ro_t)
+
+        # Write filesystem tools — privileged
+        for rw_cls in (WriteFileTool, EditFileTool):
+            rw_t = rw_cls(workspace=self.workspace, allowed_dir=allowed_dir)
+            if _grant(rw_t.name):
+                tools.register(rw_t)
+
+        # Exec — privileged
+        exec_t = ExecTool(
+            working_dir=str(self.workspace),
+            timeout=self.exec_config.timeout,
+            restrict_to_workspace=self.restrict_to_workspace,
         )
+        if _grant(exec_t.name):
+            tools.register(exec_t)
+
         tools.register(WebSearchTool(api_key=self.brave_api_key))
         tools.register(WebFetchTool())
 
-        # Allow further delegation (with shared stack for cycle detection)
+        # Re-delegation — privileged
         child_delegate = DelegateTool()
         child_delegate.set_dispatch(self.dispatch)
-        tools.register(child_delegate)
+        if _grant(child_delegate.name):
+            tools.register(child_delegate)
 
         # MCP tools (shared instances, injected by AgentLoop)
         for tool in self.mcp_tools:
-            tools.register(tool)
-
-        # Apply role-specific tool filters
-        if role.denied_tools:
-            for denied in role.denied_tools:
-                tools.unregister(denied)
-        if role.allowed_tools is not None:
-            allowed = set(role.allowed_tools)
-            for tname in list(tools._tools):
-                if tname not in allowed:
-                    tools.unregister(tname)
+            if _grant(tool.name):
+                tools.register(tool)
 
         # Build delegation contract
         user_content, output_schema = self.build_delegation_contract(

@@ -19,6 +19,15 @@ response quality before delivery.
 
 Streaming is supported: LLM tokens are yielded incrementally to the
 channel for progressive display on platforms that support message editing.
+
+**Failure classification and turn-scoped tool suppression** — ``ToolCallTracker``
+classifies each tool failure via ``FailureClass`` (PERMANENT_CONFIG,
+PERMANENT_AUTH, TRANSIENT_TIMEOUT, TRANSIENT_ERROR, LOGICAL_ERROR, UNKNOWN).
+Permanently failing tools and tools that hit the ``REMOVE_THRESHOLD`` count are
+added to a per-turn ``disabled_tools: set[str]`` local to ``_run_agent_loop``.
+The ``ToolRegistry`` is never mutated; suppressed tools are available again in
+the next turn.  ``_build_failure_prompt()`` generates a structured REFLECT-phase
+prompt from live tracker state rather than a static template.
 """
 
 from __future__ import annotations
@@ -30,6 +39,7 @@ import time
 import uuid
 from contextlib import AsyncExitStack
 from datetime import datetime
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
@@ -38,6 +48,7 @@ from nanobot.agent.capability import CapabilityRegistry
 from nanobot.agent.consolidation import ConsolidationOrchestrator
 from nanobot.agent.context import (
     ContextBuilder,
+    estimate_messages_tokens,
     summarize_and_compress,
 )
 from nanobot.agent.delegation import DelegationDispatcher
@@ -54,6 +65,7 @@ from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.scratchpad import Scratchpad
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
 from nanobot.agent.tool_executor import ToolExecutor
+from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool, DelegationResult
 from nanobot.agent.tools.email import CheckEmailTool
@@ -110,37 +122,114 @@ def _user_friendly_error(exc: Exception) -> str:
     return "Sorry, I couldn't process that. Please try again."
 
 
+def _build_failure_prompt(
+    failed_tools: list[tuple[str, "FailureClass"]],
+    permanent_failures: frozenset[str],
+    available_tools: list[str],
+) -> str:
+    """Build a structured failure-strategy prompt with classification context."""
+    lines: list[str] = ["One or more tool calls failed:"]
+    for name, fc in failed_tools:
+        if fc.is_permanent:
+            lines.append(f"- `{name}`: {fc.value} — permanently disabled for this session")
+        elif fc == FailureClass.TRANSIENT_TIMEOUT:
+            lines.append(
+                f"- `{name}`: {fc.value} — consider retrying with a shorter operation "
+                "or different parameters"
+            )
+        elif fc == FailureClass.LOGICAL_ERROR:
+            lines.append(f"- `{name}`: {fc.value} — fix the parameters before retrying")
+        else:
+            lines.append(f"- `{name}`: {fc.value}")
+
+    if permanent_failures:
+        lines.append(
+            f"\nPermanently removed (do NOT call these again): "
+            f"{', '.join(sorted(permanent_failures))}"
+        )
+
+    remaining = [t for t in available_tools if t not in permanent_failures]
+    if remaining:
+        lines.append(f"\nAvailable alternatives: {', '.join(remaining)}")
+
+    lines.append(
+        "\nAnalyze what went wrong, choose an alternative tool or approach from the "
+        "available tools above, and proceed. If no alternative exists, explain why "
+        "the task cannot be completed."
+    )
+    return "\n".join(lines)
+
+
 def _dynamic_preserve_recent(
-    messages: list[dict[str, Any]], *, floor: int = 6, cap: int = 30
+    messages: list[dict[str, Any]],
+    last_tool_call_idx: int = -1,
+    *,
+    floor: int = 6,
+    cap: int = 30,
 ) -> int:
     """Calculate how many tail messages to preserve during compression.
 
     Ensures the last complete tool-call cycle (assistant with tool_calls →
     all corresponding tool results → next message) is never split.
     Falls back to *floor* when no tool calls are present.
+
+    *last_tool_call_idx* is the index of the last assistant message that
+    contained tool_calls.  When provided (>= 0), the backward scan is skipped
+    entirely, making this function O(1).
     """
     n = len(messages)
     if n <= floor:
         return floor
 
-    # Scan backwards to find the last assistant message with tool_calls
+    if last_tool_call_idx >= 0:
+        needed = n - last_tool_call_idx
+        return max(floor, min(needed, cap))
+
+    # Fallback: scan backwards (O(n), bounded by cap) when index unknown
     for offset in range(1, n):
         idx = n - offset
         m = messages[idx]
         if m.get("role") == "assistant" and m.get("tool_calls"):
-            # preserve from this assistant message to the end
             needed = n - idx
             return max(floor, min(needed, cap))
     return floor
+
+
+class FailureClass(str, Enum):
+    """Classification of a tool call failure for structured replanning.
+
+    Used by ``ToolCallTracker`` to decide whether a failed tool should be
+    removed immediately (permanent) or kept with reduced priority (transient).
+    """
+
+    PERMANENT_CONFIG = "permanent_config"  # missing API key, binary not installed
+    PERMANENT_AUTH = "permanent_auth"  # invalid credentials
+    TRANSIENT_TIMEOUT = "transient_timeout"  # network timeout, rate limit
+    TRANSIENT_ERROR = "transient_error"  # server 500, temporary failure
+    LOGICAL_ERROR = "logical_error"  # wrong arguments, bad input
+    UNKNOWN = "unknown"
+
+    @property
+    def is_permanent(self) -> bool:
+        """True when the failure cannot be resolved by retrying."""
+        return self in (FailureClass.PERMANENT_CONFIG, FailureClass.PERMANENT_AUTH)
 
 
 class ToolCallTracker:
     """Detect and break infinite identical-failure tool call loops.
 
     Tracks ``(tool_name, args_hash)`` → failure count.  Escalation levels:
-      - 2nd identical failure → inject "stop retrying" prompt
-      - 3rd identical failure → remove the tool for the rest of the turn
-      - >8 total failures     → force the agent to produce a final answer
+      - 2nd identical failure  → inject "stop retrying" prompt
+      - 3rd identical failure  → add to ``disabled_tools`` for the rest of the turn
+      - >8 total failures      → force the agent to produce a final answer
+
+    Permanent failures (``FailureClass.is_permanent``) are added to
+    ``disabled_tools`` immediately on the first occurrence via
+    ``_permanent_failures``, regardless of count.
+
+    ``record_failure()`` now returns ``(count, FailureClass)`` — callers must
+    unpack both values.  The tool registry is **never mutated**; suppression is
+    enforced by filtering ``tools_def`` at definition-generation time.
     """
 
     WARN_THRESHOLD = 2
@@ -150,23 +239,72 @@ class ToolCallTracker:
     def __init__(self) -> None:
         self._counts: dict[str, int] = {}  # key → failure count
         self._total_failures: int = 0
+        self._permanent_failures: set[str] = set()  # tool names permanently removed
 
     @staticmethod
     def _key(name: str, args: dict[str, Any]) -> str:
-        h = hashlib.sha256(json.dumps(args, sort_keys=True, default=str).encode()).hexdigest()[:16]
+        # blake2b is significantly faster than sha256 for short inputs; 8-byte digest
+        # gives 64-bit collision resistance which is ample for a per-turn dedup key.
+        h = hashlib.blake2b(
+            json.dumps(args, sort_keys=True, default=str).encode(), digest_size=8
+        ).hexdigest()
         return f"{name}:{h}"
 
-    def record_failure(self, name: str, args: dict[str, Any]) -> int:
-        """Record a tool failure; returns updated count for this signature."""
+    @staticmethod
+    def classify_failure(name: str, result: ToolResult) -> FailureClass:
+        """Classify a tool failure to guide replanning decisions."""
+        error_type = result.metadata.get("error_type", "unknown") if result.metadata else "unknown"
+        error_msg = (result.error or result.output or "").lower()
+
+        if error_type == "validation":
+            return FailureClass.LOGICAL_ERROR
+        if error_type in ("not_found", "permission", "unknown_role"):
+            return FailureClass.PERMANENT_CONFIG
+        if error_type == "timeout":
+            return FailureClass.TRANSIENT_TIMEOUT
+
+        # Keyword-based fallback when error_type is generic.
+        # "no such" / "not found" only indicate a permanent config failure when the
+        # missing thing is a binary/command/module — NOT when a file path is wrong
+        # (which is a logical error the LLM should correct).
+        if any(k in error_msg for k in ("api key", "not configured", "not installed")):
+            return FailureClass.PERMANENT_CONFIG
+        _cmd_ctx = ("command", "binary", "executable", "module", "program")
+        if ("no such" in error_msg or "not found" in error_msg) and any(
+            c in error_msg for c in _cmd_ctx
+        ):
+            return FailureClass.PERMANENT_CONFIG
+        if any(
+            k in error_msg for k in ("invalid key", "unauthorized", "authentication", "forbidden")
+        ):
+            return FailureClass.PERMANENT_AUTH
+        if any(k in error_msg for k in ("timeout", "timed out", "rate limit", "429", "too many")):
+            return FailureClass.TRANSIENT_TIMEOUT
+        if any(k in error_msg for k in ("500", "server error", "service unavailable", "503")):
+            return FailureClass.TRANSIENT_ERROR
+        return FailureClass.UNKNOWN
+
+    def record_failure(
+        self, name: str, args: dict[str, Any], result: ToolResult | None = None
+    ) -> tuple[int, FailureClass]:
+        """Record a tool failure; returns (count, failure_class) for this signature."""
         k = self._key(name, args)
         self._counts[k] = self._counts.get(k, 0) + 1
         self._total_failures += 1
-        return self._counts[k]
+        fc = self.classify_failure(name, result) if result is not None else FailureClass.UNKNOWN
+        if fc.is_permanent:
+            self._permanent_failures.add(name)
+        return self._counts[k], fc
 
     def record_success(self, name: str, args: dict[str, Any]) -> None:
         """Reset the count for a successful tool call signature."""
         k = self._key(name, args)
         self._counts.pop(k, None)
+
+    @property
+    def permanent_failures(self) -> frozenset[str]:
+        """Tool names that failed permanently this turn (removed from candidate set)."""
+        return frozenset(self._permanent_failures)
 
     @property
     def total_failures(self) -> int:
@@ -178,15 +316,24 @@ class ToolCallTracker:
 
 
 class AgentLoop:
-    """
-    The agent loop is the core processing engine.
+    """Core processing engine for the nanobot agent.
 
-    It:
-    1. Receives messages from the bus
-    2. Builds context with history, memory, skills
-    3. Calls the LLM
-    4. Executes tool calls
-    5. Sends responses back
+    Orchestrates the Plan-Act-Observe-Reflect cycle for every conversation turn.
+    Key collaborators wired in ``__init__``:
+
+    - ``ToolExecutor`` / ``ToolRegistry`` — parallel-safe tool batching
+    - ``CapabilityRegistry`` — unified registry for tools, skills, and delegate roles
+    - ``DelegationDispatcher`` — multi-agent delegation with cycle/depth detection
+    - ``ContextBuilder`` — prompt assembly, token budgeting, memory retrieval
+    - ``ToolCallTracker`` — per-turn failure classification and tool suppression
+      (``disabled_tools`` set; registry never mutated)
+    - ``MissionManager`` — async background task execution
+    - ``AnswerVerifier`` — optional self-critique quality gate
+
+    Turn-scoped tool suppression: when a tool hits ``ToolCallTracker.REMOVE_THRESHOLD``
+    failures or classifies as permanently failed, it is added to a local
+    ``disabled_tools: set[str]`` inside ``_run_agent_loop``.  The registry is not
+    mutated, so the tool is available again in the next turn.
     """
 
     def __init__(
@@ -319,10 +466,33 @@ class AgentLoop:
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
         self._register_default_tools()
+        # Cache typed tool references for O(1) context updates in _set_tool_context.
+        # Populated once at construction — no per-message isinstance checks needed.
+        _msg_t = self.tools.get("message")
+        self._ctx_message_tool: MessageTool | None = (
+            _msg_t if isinstance(_msg_t, MessageTool) else None
+        )
+        _fb_t = self.tools.get("feedback")
+        self._ctx_feedback_tool: FeedbackTool | None = (
+            _fb_t if isinstance(_fb_t, FeedbackTool) else None
+        )
+        _ms_t = self.tools.get("mission_start")
+        self._ctx_mission_tool: MissionStartTool | None = (
+            _ms_t if isinstance(_ms_t, MissionStartTool) else None
+        )
+        _cr_t = self.tools.get("cron")
+        self._ctx_cron_tool: CronTool | None = _cr_t if isinstance(_cr_t, CronTool) else None
 
         # Multi-agent coordinator (initialized lazily in run() if routing enabled)
         self._routing_config = routing_config
         self._coordinator: Coordinator | None = None
+
+        # Per-turn role override save-slots (None → apply was never called / no change)
+        self._saved_model: str | None = None
+        self._saved_temperature: float | None = None
+        self._saved_max_iterations: int | None = None
+        self._saved_role_prompt: str | None = None
+        self._saved_tools: dict[str, Any] | None = None
 
         # Delegation dispatcher (owns delegation state, tracing, contracts)
         self._dispatcher = DelegationDispatcher(
@@ -580,25 +750,18 @@ class AgentLoop:
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
         self._refresh_contacts()
-        if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool):
-                message_tool.set_context(channel, chat_id, message_id)
-
-        if mission_tool := self.tools.get("mission_start"):
-            if isinstance(mission_tool, MissionStartTool):
-                mission_tool.set_context(channel, chat_id)
-
-        if cron_tool := self.tools.get("cron"):
-            if isinstance(cron_tool, CronTool):
-                cron_tool.set_context(channel, chat_id)
-
-        if feedback_tool := self.tools.get("feedback"):
-            if isinstance(feedback_tool, FeedbackTool):
-                feedback_tool.set_context(
-                    channel,
-                    chat_id,
-                    session_key=f"{channel}:{chat_id}",
-                )
+        if self._ctx_message_tool:
+            self._ctx_message_tool.set_context(channel, chat_id, message_id)
+        if self._ctx_mission_tool:
+            self._ctx_mission_tool.set_context(channel, chat_id)
+        if self._ctx_cron_tool:
+            self._ctx_cron_tool.set_context(channel, chat_id)
+        if self._ctx_feedback_tool:
+            self._ctx_feedback_tool.set_context(
+                channel,
+                chat_id,
+                session_key=f"{channel}:{chat_id}",
+            )
 
     def _ensure_scratchpad(self, session_key: str) -> None:
         """Initialise (or swap) the per-session scratchpad and update tools."""
@@ -709,7 +872,17 @@ class AgentLoop:
         consecutive_errors = 0
         has_plan = False
         plan_enforced = False
+        _last_tool_call_msg_idx: int = -1  # index of last assistant msg with tool_calls
         tracker = ToolCallTracker()
+        # Tools suppressed this turn due to repeated or permanent failures.
+        # Stored separately from the registry so removal is scoped to this turn
+        # only — the registry is never mutated, keeping tools available for
+        # subsequent turns.
+        disabled_tools: set[str] = set()
+        # Cache tools_def between iterations; recomputed only when disabled_tools changes.
+        # Eagerly built here so the first iteration has a valid (non-empty) list.
+        _tools_def_snapshot: frozenset[str] = frozenset()
+        _tools_def_cache: list[dict] = list(self.tools.get_definitions())
 
         # Reset per-turn token accumulators
         self._turn_tokens_prompt = 0
@@ -766,18 +939,30 @@ class AgentLoop:
             iteration += 1
 
             # --- Context compression: keep messages within budget ----------
-            summary_model = self.config.summary_model or self.model
-            preserve_n = _dynamic_preserve_recent(messages)
-            messages = await summarize_and_compress(
-                messages,
-                context_budget,
-                provider=self.provider,
-                model=summary_model,
-                tool_token_threshold=self.config.tool_result_context_tokens,
-                preserve_recent=preserve_n,
-            )
+            # Skip the (expensive) compression pass when well under budget.
+            if estimate_messages_tokens(messages) > int(context_budget * 0.85):
+                summary_model = self.config.summary_model or self.model
+                preserve_n = _dynamic_preserve_recent(messages, _last_tool_call_msg_idx)
+                messages = await summarize_and_compress(
+                    messages,
+                    context_budget,
+                    provider=self.provider,
+                    model=summary_model,
+                    tool_token_threshold=self.config.tool_result_context_tokens,
+                    preserve_recent=preserve_n,
+                )
 
-            tools_def = self.tools.get_definitions()
+            # Exclude tools disabled this turn (failure threshold or permanent failure).
+            # Read after removals so the LLM never sees a tool it cannot use.
+            # Recompute only when disabled_tools has changed since last iteration.
+            if frozenset(disabled_tools) != _tools_def_snapshot:
+                _tools_def_cache = [
+                    t
+                    for t in self.tools.get_definitions()
+                    if t["function"]["name"] not in disabled_tools
+                ]
+                _tools_def_snapshot = frozenset(disabled_tools)
+            tools_def = _tools_def_cache
             active_tools = tools_def if not nudged_for_final else None
 
             # --- LLM call (streaming when a progress callback exists) ------
@@ -927,14 +1112,16 @@ class AgentLoop:
                             },
                         )
 
+                # Serialize arguments once; reused for message building and logging.
+                _args_json: dict[str, str] = {
+                    tc.id: json.dumps(tc.arguments, ensure_ascii=False)
+                    for tc in response.tool_calls
+                }
                 tool_call_dicts = [
                     {
                         "id": tc.id,
                         "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": json.dumps(tc.arguments, ensure_ascii=False),
-                        },
+                        "function": {"name": tc.name, "arguments": _args_json[tc.id]},
                     }
                     for tc in response.tool_calls
                 ]
@@ -946,6 +1133,7 @@ class AgentLoop:
                     tool_call_dicts,
                     reasoning_content=reasoning,
                 )
+                _last_tool_call_msg_idx = len(messages) - 1
 
                 # Execute tools (parallel for readonly, sequential for writes)
                 t0_tools = time.monotonic()
@@ -953,19 +1141,23 @@ class AgentLoop:
                 tools_elapsed_ms = (time.monotonic() - t0_tools) * 1000
 
                 any_failed = False
+                failed_this_batch: list[tuple[str, FailureClass]] = []
                 tools_to_remove: list[str] = []
                 for tool_call, result in zip(response.tool_calls, tool_results):
                     turn_tool_calls += 1
                     tools_used.append(tool_call.name)
-                    args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+                    args_str = _args_json[tool_call.id]
                     status = "OK" if result.success else "FAIL"
+                    # Log tool name and status at INFO; args are gated to DEBUG to
+                    # avoid leaking sensitive data (file contents, credentials, etc.)
+                    # from write_file, exec, web_fetch and similar tools.
                     bind_trace().info(
-                        "tool_exec | {} | {}({}) | {:.0f}ms batch",
+                        "tool_exec | {} | {} | {:.0f}ms batch",
                         status,
                         tool_call.name,
-                        args_str[:200],
                         tools_elapsed_ms,
                     )
+                    bind_trace().debug("tool_exec args | {}({})", tool_call.name, args_str[:200])
                     # Emit structured tool-result event with real output
                     if on_progress:
                         await on_progress(
@@ -980,16 +1172,24 @@ class AgentLoop:
                     )
                     if not result.success:
                         any_failed = True
-                        count = tracker.record_failure(tool_call.name, tool_call.arguments)
-                        if count >= ToolCallTracker.REMOVE_THRESHOLD:
+                        count, fc = tracker.record_failure(
+                            tool_call.name, tool_call.arguments, result
+                        )
+                        failed_this_batch.append((tool_call.name, fc))
+                        remove_now = count >= ToolCallTracker.REMOVE_THRESHOLD or fc.is_permanent
+                        if remove_now:
                             tools_to_remove.append(tool_call.name)
+                            reason = (
+                                f"permanently unavailable ({fc.value})"
+                                if fc.is_permanent
+                                else f"failed {count} times with identical arguments"
+                            )
                             messages.append(
                                 {
                                     "role": "system",
                                     "content": (
-                                        f"TOOL REMOVED: `{tool_call.name}` has failed "
-                                        f"{count} times with identical arguments and has "
-                                        "been disabled. Use a different approach."
+                                        f"TOOL REMOVED: `{tool_call.name}` is {reason} "
+                                        "and has been disabled. Use a different approach."
                                     ),
                                 }
                             )
@@ -1008,9 +1208,10 @@ class AgentLoop:
                     else:
                         tracker.record_success(tool_call.name, tool_call.arguments)
 
-                # Remove tools that hit the failure threshold
-                for name in tools_to_remove:
-                    self.tools.unregister(name)
+                # Suppress tools that hit the failure threshold for the rest of
+                # this turn. The registry is NOT mutated so tools remain
+                # available in future turns.
+                disabled_tools.update(tools_to_remove)
 
                 # Global failure budget: force final answer
                 if tracker.budget_exhausted:
@@ -1043,11 +1244,18 @@ class AgentLoop:
                         }
                     )
                 elif any_failed:
-                    # Failure-aware: prompt alternative strategy
+                    # Failure-aware: structured replanning prompt with classification context
                     messages.append(
                         {
                             "role": "system",
-                            "content": prompts.get("failure_strategy"),
+                            "content": _build_failure_prompt(
+                                failed_this_batch,
+                                tracker.permanent_failures,
+                                # Use the already-built cache — avoids an extra
+                                # tool_names allocation and correctly excludes
+                                # any tools already in disabled_tools.
+                                [t["function"]["name"] for t in _tools_def_cache],
+                            ),
                         }
                     )
                 elif had_delegations:
@@ -1402,22 +1610,8 @@ class AgentLoop:
         self.missions.coordinator = self._coordinator
         self._wire_delegate_tools()
 
-        # Wire agent registry into the unified capability registry
-        self._capabilities._agents = registry
-        for role_name in registry.role_names():
-            role = registry.get(role_name)
-            if role and role.name not in self._capabilities:
-                # Populate Capability entry without re-registering in AgentRegistry
-                from nanobot.agent.capability import Capability
-
-                self._capabilities._capabilities[role.name] = Capability(
-                    name=role.name,
-                    kind="delegate_role",
-                    description=role.description,
-                    health="healthy" if role.enabled else "unavailable",
-                    unavailability_reason=None if role.enabled else "role disabled",
-                    role_config=role,
-                )
+        # Wire agent registry into the unified capability registry via public API
+        self._capabilities.wire_agent_registry(registry)
 
         logger.info(
             "Multi-agent routing enabled with {} roles",
@@ -1493,7 +1687,13 @@ class AgentLoop:
         self._saved_temperature = self.temperature
         self._saved_max_iterations = self.max_iterations
         self._saved_role_prompt = self.context.role_system_prompt
-        self._saved_tools: dict[str, Any] = dict(self.tools._tools)
+        # Only copy the tool registry when filtering will actually be applied.
+        # Roles with no allowed/denied lists leave the registry unchanged, so
+        # copying is wasted allocation.  The save/restore pattern is also not
+        # concurrency-safe (AR-H2); a future TurnContext refactor will eliminate
+        # it entirely.
+        _will_filter = role.allowed_tools is not None or bool(role.denied_tools)
+        self._saved_tools = self.tools.snapshot() if _will_filter else None
 
         if role.model:
             self.model = role.model
@@ -1514,7 +1714,7 @@ class AgentLoop:
         denied = set(role.denied_tools) if role.denied_tools else set()
         if allowed is None and not denied:
             return
-        for name in list(self.tools._tools):
+        for name in list(self.tools.tool_names):
             if allowed is not None and name not in allowed:
                 self.tools.unregister(name)
             elif name in denied:
@@ -1522,14 +1722,23 @@ class AgentLoop:
 
     def _reset_role_after_turn(self) -> None:
         """Restore original agent settings after a routed turn."""
-        self.model = getattr(self, "_saved_model", self.model)
-        self.temperature = getattr(self, "_saved_temperature", self.temperature)
-        self.max_iterations = getattr(self, "_saved_max_iterations", self.max_iterations)
-        self.context.role_system_prompt = getattr(self, "_saved_role_prompt", "")
+        if self._saved_model is not None:
+            self.model = self._saved_model
+            self._saved_model = None
+        if self._saved_temperature is not None:
+            self.temperature = self._saved_temperature
+            self._saved_temperature = None
+        if self._saved_max_iterations is not None:
+            self.max_iterations = self._saved_max_iterations
+            self._saved_max_iterations = None
+        if self._saved_role_prompt is not None:
+            self.context.role_system_prompt = self._saved_role_prompt
+            self._saved_role_prompt = None
         self.role_name = self.role_config.name if self.role_config else ""
-        # Restore full tool set
-        if hasattr(self, "_saved_tools"):
-            self.tools._tools = self._saved_tools
+        # Restore full tool set (only non-None — None means no filtering was applied)
+        if self._saved_tools is not None:
+            self.tools.restore(self._saved_tools)
+            self._saved_tools = None
 
     async def close_mcp(self) -> None:
         """Close MCP connections and other async resources."""
@@ -1609,7 +1818,7 @@ class AgentLoop:
                 max_tokens=self.max_tokens,
             )
         except Exception:  # crash-barrier: recovery LLM call
-            logger.warning("Recovery LLM call failed with exception")
+            logger.exception("Recovery LLM call failed")
             return None
 
         if response.finish_reason == "error":
@@ -1751,9 +1960,32 @@ class AgentLoop:
 
         memory_store = self.context.memory
 
-        conflict_reply = await asyncio.to_thread(
-            memory_store.handle_user_conflict_reply, msg.content
-        )
+        # Run both memory pre-checks in a single thread dispatch to avoid
+        # two round-trips through asyncio.to_thread for what are in-memory ops.
+        # handle_user_conflict_reply short-circuits when message is a conflict
+        # resolution; apply_live_user_correction extracts preference/fact edits.
+        _channel = msg.channel
+        _chat_id = msg.chat_id
+        _content = msg.content
+        _enable_cc = self.memory_enable_contradiction_check
+
+        def _pre_turn_memory() -> tuple[dict[str, Any], dict[str, Any] | None]:
+            cr = memory_store.handle_user_conflict_reply(_content)
+            if cr.get("handled"):
+                return cr, None
+            try:
+                corr = memory_store.apply_live_user_correction(
+                    _content,
+                    channel=_channel,
+                    chat_id=_chat_id,
+                    enable_contradiction_check=_enable_cc,
+                )
+            except (RuntimeError, KeyError, TypeError):
+                logger.exception("Live correction capture failed")
+                corr = {}
+            return cr, corr
+
+        conflict_reply, correction_result = await asyncio.to_thread(_pre_turn_memory)
         if conflict_reply.get("handled"):
             return OutboundMessage(
                 channel=msg.channel,
@@ -1761,22 +1993,12 @@ class AgentLoop:
                 content=str(conflict_reply.get("message", "")),
             )
 
-        try:
-            correction_result = await asyncio.to_thread(
-                memory_store.apply_live_user_correction,
-                msg.content,
+        if correction_result and correction_result.get("question"):
+            return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                enable_contradiction_check=self.memory_enable_contradiction_check,
+                content=str(correction_result.get("question", "")),
             )
-            if correction_result.get("question"):
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=str(correction_result.get("question", "")),
-                )
-        except (RuntimeError, KeyError, TypeError):
-            logger.exception("Live correction capture failed")
 
         # Defer conflict questions until after the agent answers the user's message.
         # We check here and append to the response later instead of blocking.
@@ -1837,6 +2059,11 @@ class AgentLoop:
             actor_id=self.role_name,
         )
 
+        # Build a base metadata dict once for this turn; per-event fields are
+        # shallow-merged on each call to avoid re-copying msg.metadata each time.
+        _base_meta: dict = dict(msg.metadata or {})
+        _base_meta["_progress"] = True
+
         async def _bus_progress(
             content: str,
             *,
@@ -1849,8 +2076,7 @@ class AgentLoop:
             status_code: str = "",
             status_label: str = "",
         ) -> None:
-            meta = dict(msg.metadata or {})
-            meta["_progress"] = True
+            meta = dict(_base_meta)
             meta["_tool_hint"] = tool_hint
             meta["_streaming"] = streaming
             if tool_call:
