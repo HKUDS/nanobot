@@ -37,7 +37,7 @@ class CronTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Schedule reminders and recurring tasks. Actions: add, list, remove."
+        return "Schedule reminders and recurring tasks. Actions: add, list, remove, edit."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -46,10 +46,10 @@ class CronTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["add", "list", "remove"],
+                    "enum": ["add", "list", "remove", "edit"],
                     "description": "Action to perform",
                 },
-                "message": {"type": "string", "description": "Reminder message (for add)"},
+                "message": {"type": "string", "description": "Reminder message (for add/edit)"},
                 "every_seconds": {
                     "type": "integer",
                     "description": "Interval in seconds (for recurring tasks)",
@@ -66,7 +66,7 @@ class CronTool(Tool):
                     "type": "string",
                     "description": "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00')",
                 },
-                "job_id": {"type": "string", "description": "Job ID (for remove)"},
+                "job_id": {"type": "string", "description": "Job ID (for remove/edit)"},
             },
             "required": ["action"],
         }
@@ -90,6 +90,10 @@ class CronTool(Tool):
             return self._list_jobs()
         elif action == "remove":
             return self._remove_job(job_id)
+        elif action == "edit":
+            if self._in_cron_context.get():
+                return "Error: cannot edit jobs from within a cron job execution"
+            return self._edit_job(job_id, message, every_seconds, cron_expr, tz, at)
         return f"Unknown action: {action}"
 
     def _add_job(
@@ -144,6 +148,68 @@ class CronTool(Tool):
         )
         return f"Created job '{job.name}' (id: {job.id})"
 
+    def _edit_job(
+        self,
+        job_id: str | None,
+        message: str,
+        every_seconds: int | None,
+        cron_expr: str | None,
+        tz: str | None,
+        at: str | None,
+    ) -> str:
+        if not job_id:
+            return "Error: job_id is required for edit"
+        
+        jobs = self._cron.list_jobs()
+        job = next((j for j in jobs if j.id == job_id), None)
+        if not job:
+            return f"Error: Job {job_id} not found"
+
+        if not message and not every_seconds and not cron_expr and not at:
+            return "Error: provide at least one field to edit (message, every_seconds, cron_expr, at)"
+
+        if tz and not cron_expr:
+            return "Error: tz can only be used with cron_expr"
+        if tz:
+            from zoneinfo import ZoneInfo
+            try:
+                ZoneInfo(tz)
+            except (KeyError, Exception):
+                return f"Error: unknown timezone '{tz}'"
+
+        new_message = message if message else job.payload.message
+        new_schedule = job.schedule
+        delete_after = job.delete_after_run
+
+        if every_seconds or cron_expr or at:
+            if every_seconds:
+                new_schedule = CronSchedule(kind="every", every_ms=every_seconds * 1000)
+                delete_after = False
+            elif cron_expr:
+                new_schedule = CronSchedule(kind="cron", expr=cron_expr, tz=tz)
+                delete_after = False
+            elif at:
+                from datetime import datetime
+                try:
+                    dt = datetime.fromisoformat(at)
+                except ValueError:
+                    return f"Error: invalid ISO datetime format '{at}'. Expected format: YYYY-MM-DDTHH:MM:SS"
+                at_ms = int(dt.timestamp() * 1000)
+                new_schedule = CronSchedule(kind="at", at_ms=at_ms)
+                delete_after = True
+
+        self._cron.remove_job(job_id)
+        new_job = self._cron.add_job(
+            name=new_message[:30],
+            schedule=new_schedule,
+            message=new_message,
+            deliver=True,
+            channel=job.payload.channel,
+            to=job.payload.to,
+            delete_after_run=delete_after,
+        )
+        return f"Edited job '{new_job.name}' (new id: {new_job.id})"
+
     @staticmethod
     def _format_timing(schedule: CronSchedule) -> str:
         """Format schedule as a human-readable timing string."""
@@ -187,6 +253,8 @@ class CronTool(Tool):
         for j in jobs:
             timing = self._format_timing(j.schedule)
             parts = [f"- {j.name} (id: {j.id}, {timing})"]
+            if j.payload and j.payload.message:
+                parts.append(f"  Message: {j.payload.message}")
             parts.extend(self._format_state(j.state))
             lines.append("\n".join(parts))
         return "Scheduled jobs:\n" + "\n".join(lines)
