@@ -40,7 +40,7 @@ import uuid
 from contextlib import AsyncExitStack
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol
 
 from loguru import logger
 
@@ -110,6 +110,29 @@ if TYPE_CHECKING:
 from nanobot.agent.delegation import _delegation_ancestry  # noqa: F401
 
 
+class ProgressCallback(Protocol):
+    """Signature for progress callbacks passed through the agent call chain.
+
+    Matches the ``_bus_progress`` closure created in ``_process_message``.
+    External callers may pass a simpler ``async def cb(content: str) -> None``
+    via ``process_direct``; that path does not use keyword arguments.
+    """
+
+    async def __call__(
+        self,
+        content: str,
+        *,
+        tool_hint: bool = ...,
+        streaming: bool = ...,
+        tool_call: dict | None = ...,
+        tool_result: dict | None = ...,
+        delegate_start: dict | None = ...,
+        delegate_end: dict | None = ...,
+        status_code: str = ...,
+        status_label: str = ...,
+    ) -> None: ...
+
+
 def _user_friendly_error(exc: Exception) -> str:
     """Map exceptions to actionable user-facing messages."""
     msg = str(exc).lower()
@@ -148,9 +171,8 @@ def _build_failure_prompt(
             f"{', '.join(sorted(permanent_failures))}"
         )
 
-    remaining = [t for t in available_tools if t not in permanent_failures]
-    if remaining:
-        lines.append(f"\nAvailable alternatives: {', '.join(remaining)}")
+    if available_tools:
+        lines.append(f"\nAvailable alternatives: {', '.join(available_tools)}")
 
     lines.append(
         "\nAnalyze what went wrong, choose an alternative tool or approach from the "
@@ -464,7 +486,8 @@ class AgentLoop:
         self._mcp_connected = False
         self._mcp_connecting = False
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
-        self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
+        self._consolidation_tasks: set[asyncio.Task[None]] = set()  # Strong refs to in-flight tasks
+        self._consolidation_sem = asyncio.Semaphore(3)  # Cap concurrent consolidation LLM calls
         self._register_default_tools()
         # Cache typed tool references for O(1) context updates in _set_tool_context.
         # Populated once at construction — no per-message isinstance checks needed.
@@ -791,7 +814,7 @@ class AgentLoop:
         self,
         messages: list[dict],
         tools: list[dict[str, Any]] | None,
-        on_progress: Callable[..., Awaitable[None]] | None,
+        on_progress: ProgressCallback | None,
     ) -> LLMResponse:
         """Call the LLM — delegates to StreamingLLMCaller."""
         return await self._llm_caller.call(messages, tools, on_progress)
@@ -855,7 +878,7 @@ class AgentLoop:
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
-        on_progress: Callable[..., Awaitable[None]] | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the Plan-Act-Observe-Reflect agent loop.
 
@@ -1251,10 +1274,13 @@ class AgentLoop:
                             "content": _build_failure_prompt(
                                 failed_this_batch,
                                 tracker.permanent_failures,
-                                # Use the already-built cache — avoids an extra
-                                # tool_names allocation and correctly excludes
-                                # any tools already in disabled_tools.
-                                [t["function"]["name"] for t in _tools_def_cache],
+                                # Pre-filter permanent failures at call site — avoids
+                                # an allocation inside _build_failure_prompt per failure.
+                                [
+                                    t["function"]["name"]
+                                    for t in _tools_def_cache
+                                    if t["function"]["name"] not in tracker.permanent_failures
+                                ],
                             ),
                         }
                     )
@@ -1770,6 +1796,16 @@ class AgentLoop:
         """Drop lock entry if no longer in use."""
         self._consolidator.prune_lock(session_key, lock)
 
+    async def _run_consolidation_task(self, session: Session, lock: asyncio.Lock) -> None:
+        """Run one consolidation pass; holds the semaphore and per-session lock."""
+        try:
+            async with self._consolidation_sem:
+                async with lock:
+                    await self._consolidate_memory(session)
+        finally:
+            self._consolidating.discard(session.key)
+            self._prune_consolidation_lock(session.key, lock)
+
     def _should_force_verification(self, text: str) -> bool:
         return self._verifier.should_force_verification(text)
 
@@ -2014,20 +2050,9 @@ class AgentLoop:
         ):
             self._consolidating.add(session.key)
             lock = self._get_consolidation_lock(session.key)
-
-            async def _consolidate_and_unlock():
-                try:
-                    async with lock:
-                        await self._consolidate_memory(session)
-                finally:
-                    self._consolidating.discard(session.key)
-                    self._prune_consolidation_lock(session.key, lock)
-                    _task = asyncio.current_task()
-                    if _task is not None:
-                        self._consolidation_tasks.discard(_task)
-
-            _task = asyncio.create_task(_consolidate_and_unlock())
+            _task = asyncio.create_task(self._run_consolidation_task(session, lock))
             self._consolidation_tasks.add(_task)
+            _task.add_done_callback(self._consolidation_tasks.discard)
             _task.add_done_callback(
                 lambda t: logger.exception("Consolidation task failed") if t.exception() else None
             )
@@ -2143,7 +2168,10 @@ class AgentLoop:
 
         final_content, tools_used, all_msgs = await self._run_agent_loop(
             initial_messages,
-            on_progress=(on_progress or _bus_progress) if self.config.streaming_enabled else None,
+            # External on_progress (e.g. _cli_progress) may only implement the
+            # simplified (content: str) signature; ProgressCallback is the full
+            # internal signature. BP-M2: tracked for a future wrapper.
+            on_progress=(on_progress or _bus_progress) if self.config.streaming_enabled else None,  # type: ignore[arg-type]
         )
 
         # Clear the per-turn callback to prevent cross-turn leakage.

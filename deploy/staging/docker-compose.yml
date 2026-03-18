@@ -21,7 +21,10 @@ services:
     container_name: nanobot-staging
     image: ${NANOBOT_IMAGE:-ghcr.io/cgajagon/nanobot:latest}
     command: ["gateway", "--port", "18791"]
-    network_mode: host
+    networks:
+      - nanobot
+    ports:
+      - "127.0.0.1:18791:18791"
     volumes:
       - ${NANOBOT_CONFIG_DIR:-~/.nanobot-staging}:/root/.nanobot
     env_file:
@@ -37,3 +40,7 @@ services:
         reservations:
           cpus: '0.1'
           memory: 128M
+
+networks:
+  nanobot:
+    driver: bridge

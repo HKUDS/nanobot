@@ -21,7 +21,7 @@ services:
         reservations:
           cpus: '0.25'
           memory: 256M
-  
+
   neo4j:
     container_name: nanobot-neo4j
     image: neo4j:5-community
@@ -30,7 +30,7 @@ services:
       - "7474:7474"
       - "7687:7687"
     environment:
-      NEO4J_AUTH: neo4j/nanobot_graph
+      NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/nanobot_graph}
     volumes:
       - neo4j-data:/data
     deploy:
