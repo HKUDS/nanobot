@@ -357,7 +357,9 @@ def _onboard_plugins(config_path: Path) -> None:
         else:
             channels[name] = _merge_missing_defaults(channels[name], cls.default_config())
 
-    with open(config_path, "w", encoding="utf-8") as f:
+    import os
+    fd = os.open(str(config_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 

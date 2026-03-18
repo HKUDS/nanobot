@@ -1,6 +1,7 @@
 """Configuration loading utilities."""
 
 import json
+import os
 from pathlib import Path
 
 from nanobot.config.schema import Config
@@ -61,7 +62,8 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
 
     data = config.model_dump(by_alias=True)
 
-    with open(path, "w", encoding="utf-8") as f:
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
