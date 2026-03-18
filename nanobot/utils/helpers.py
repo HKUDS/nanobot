@@ -19,7 +19,7 @@ def set_token_counter_mode(local_mode: bool) -> None:
 
 
 class OfflineTokenizer:
-    """离线 Token 估算器（误差 <10%）"""
+    """offline Token（offset <10%）"""
 
     def __init__(self):
         self._chinese_re = re.compile(r'[\u4e00-\u9fff]')
