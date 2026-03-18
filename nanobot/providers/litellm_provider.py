@@ -7,8 +7,6 @@ import string
 from typing import Any
 
 import json_repair
-import litellm
-from litellm import acompletion
 from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
@@ -42,6 +40,8 @@ class LiteLLMProvider(LLMProvider):
         provider_name: str | None = None,
     ):
         super().__init__(api_key, api_base)
+        import litellm
+        self.acompletion = litellm.acompletion
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
 
@@ -278,7 +278,7 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tool_choice"] = tool_choice or "auto"
 
         try:
-            response = await acompletion(**kwargs)
+            response = await self.acompletion(**kwargs)
             return self._parse_response(response)
         except Exception as e:
             # Return error as content for graceful handling
