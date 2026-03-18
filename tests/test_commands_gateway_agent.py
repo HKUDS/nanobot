@@ -211,7 +211,8 @@ def test_gateway_continues_when_health_port_is_busy_with_web_enabled(
     out = runner.invoke(app, ["gateway", "--port", "19000"])
     assert out.exit_code == 0
     assert "Gateway health port 19000 is already in use" in out.stdout
-    assert "Web UI: http://127.0.0.1:8000" in out.stdout
+    # "Web UI:" when frontend is built; "Web API:" when it is not — assert the URL only.
+    assert "http://127.0.0.1:8000" in out.stdout
 
 
 def test_agent_single_message_and_interactive_exit(
