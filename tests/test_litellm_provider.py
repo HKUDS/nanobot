@@ -133,7 +133,6 @@ def test_setup_env_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     provider._setup_env("abc", None, "gpt-4.1")
 
 
-@pytest.mark.asyncio
 async def test_chat_success_and_exception(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = LiteLLMProvider(
         api_key="k", api_base="https://api.example", default_model="openai/gpt-4.1"
@@ -164,7 +163,6 @@ async def test_chat_success_and_exception(monkeypatch: pytest.MonkeyPatch) -> No
     assert "Error calling LLM" in (err.content or "")
 
 
-@pytest.mark.asyncio
 async def test_stream_chat_success_and_error(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = LiteLLMProvider(api_key=None)
 
@@ -225,7 +223,6 @@ async def test_stream_chat_success_and_error(monkeypatch: pytest.MonkeyPatch) ->
     assert "Error calling LLM" in (err_chunks[-1].content_delta or "")
 
 
-@pytest.mark.asyncio
 async def test_aclose_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = LiteLLMProvider(api_key=None)
     await provider.aclose()

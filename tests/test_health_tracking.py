@@ -235,7 +235,6 @@ class TestHeartbeatHealthRefresh:
         defaults.update(overrides)
         return HeartbeatService(**defaults)
 
-    @pytest.mark.asyncio
     async def test_tick_calls_health_refresh(self, tmp_path) -> None:
         """Health refresh callback is called during heartbeat tick."""
         refresh_mock = MagicMock(return_value=HealthRefreshResult(health={}))
@@ -244,14 +243,12 @@ class TestHeartbeatHealthRefresh:
         await service._tick()
         refresh_mock.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_tick_without_health_refresh(self, tmp_path) -> None:
         """Tick works fine when no health refresh callback is set."""
         service = self._make_service(tmp_path)
         # Should not raise
         await service._tick()
 
-    @pytest.mark.asyncio
     async def test_tick_survives_health_refresh_error(self, tmp_path) -> None:
         """If health refresh raises, tick continues with heartbeat logic."""
         from nanobot.providers.base import LLMResponse, ToolCallRequest
@@ -290,7 +287,6 @@ class TestHeartbeatHealthRefresh:
         await service._tick()  # Should not raise
         on_execute.assert_awaited_once()  # Heartbeat still ran
 
-    @pytest.mark.asyncio
     async def test_health_refresh_called_before_heartbeat_file(self, tmp_path) -> None:
         """Health refresh runs even when HEARTBEAT.md doesn't exist."""
         refresh_mock = MagicMock(return_value=HealthRefreshResult(health={}))
@@ -299,7 +295,6 @@ class TestHeartbeatHealthRefresh:
         await service._tick()
         refresh_mock.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_end_to_end_with_capability_registry(self, tmp_path) -> None:
         """Integration: real CapabilityRegistry.refresh_health wired into heartbeat."""
         reg = CapabilityRegistry()

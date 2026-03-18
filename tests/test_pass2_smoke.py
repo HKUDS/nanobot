@@ -111,7 +111,6 @@ class FakeSMTP:
 class TestPhaseASmoke:
     """Smoke tests for outbound recipient validation and contacts."""
 
-    @pytest.mark.asyncio
     async def test_hallucinated_email_blocked(self, monkeypatch) -> None:
         """The original bug: agent invents an email address → should be blocked."""
         monkeypatch.setattr("nanobot.channels.email.smtplib.SMTP", lambda *a, **kw: FakeSMTP())
@@ -128,7 +127,6 @@ class TestPhaseASmoke:
                 )
             )
 
-    @pytest.mark.asyncio
     async def test_allowlisted_email_succeeds(self, monkeypatch) -> None:
         """Explicitly allowlisted recipient should go through."""
         instances: list[FakeSMTP] = []
@@ -154,7 +152,6 @@ class TestPhaseASmoke:
         assert len(instances) == 1
         assert instances[0].sent
 
-    @pytest.mark.asyncio
     async def test_invalid_format_blocked(self, monkeypatch) -> None:
         """Gibberish addresses never reach SMTP."""
         monkeypatch.setattr("nanobot.channels.email.smtplib.SMTP", lambda *a, **kw: FakeSMTP())

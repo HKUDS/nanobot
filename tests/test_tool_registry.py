@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.errors import ToolExecutionError
@@ -71,7 +69,6 @@ class _RaiseUnknownTool(_OkTool):
         raise RuntimeError("boom")
 
 
-@pytest.mark.asyncio
 async def test_not_found_and_membership_helpers() -> None:
     reg = ToolRegistry()
     out = await reg.execute("missing", {})
@@ -81,7 +78,6 @@ async def test_not_found_and_membership_helpers() -> None:
     assert "missing" not in reg
 
 
-@pytest.mark.asyncio
 async def test_execute_success_and_string_error_wrapping() -> None:
     reg = ToolRegistry()
     reg.register(_OkTool())
@@ -96,7 +92,6 @@ async def test_execute_success_and_string_error_wrapping() -> None:
     assert err.output.endswith(reg._HINT)
 
 
-@pytest.mark.asyncio
 async def test_validation_error_wrapping() -> None:
     reg = ToolRegistry()
     reg.register(_ValidationTool())
@@ -106,7 +101,6 @@ async def test_validation_error_wrapping() -> None:
     assert out.output.endswith(reg._HINT)
 
 
-@pytest.mark.asyncio
 async def test_typed_and_unknown_exception_paths_and_unregister() -> None:
     reg = ToolRegistry()
     reg.register(_RaiseTypedTool())

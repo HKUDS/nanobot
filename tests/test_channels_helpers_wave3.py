@@ -80,7 +80,6 @@ def test_slack_policy_and_markdown_helpers(monkeypatch: pytest.MonkeyPatch) -> N
     assert "&amp;" not in fixed
 
 
-@pytest.mark.asyncio
 async def test_whatsapp_bridge_message_paths() -> None:
     ch = WhatsAppChannel(WhatsAppConfig(), _Bus())
     ch._handle_message = AsyncMock()  # type: ignore[method-assign]
@@ -105,7 +104,6 @@ async def test_whatsapp_bridge_message_paths() -> None:
     assert ch._handle_message.await_count == 1
 
 
-@pytest.mark.asyncio
 async def test_whatsapp_send_paths() -> None:
     ch = WhatsAppChannel(WhatsAppConfig(), _Bus())
     with pytest.raises(DeliverySkippedError):

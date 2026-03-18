@@ -25,7 +25,6 @@ def _install_fake_channel_module(monkeypatch: pytest.MonkeyPatch, mod_name: str,
     monkeypatch.setitem(sys.modules, mod_name, mod)
 
 
-@pytest.mark.asyncio
 async def test_init_channels_and_start_all(monkeypatch: pytest.MonkeyPatch, tmp_path):
     cfg = Config()
     cfg.agents.defaults.workspace = str(tmp_path)

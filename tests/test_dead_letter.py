@@ -7,8 +7,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
-import pytest
-
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels.manager import ChannelManager
 
@@ -73,13 +71,11 @@ class TestReadDeadLetters:
 
 
 class TestReplayDeadLetters:
-    @pytest.mark.asyncio
     async def test_empty_file(self, tmp_path: Path) -> None:
         mgr = _make_manager(tmp_path)
         total, ok, fail = await mgr.replay_dead_letters()
         assert total == 0
 
-    @pytest.mark.asyncio
     async def test_dry_run(self, tmp_path: Path) -> None:
         mgr = _make_manager(tmp_path, channels=["telegram"])
         _write_dead_letters(mgr._dead_letter_file, [_dead_entry()])
@@ -89,7 +85,6 @@ class TestReplayDeadLetters:
         # File should still exist (dry run doesn't modify)
         assert mgr._dead_letter_file.exists()
 
-    @pytest.mark.asyncio
     async def test_successful_replay(self, tmp_path: Path) -> None:
         mgr = _make_manager(tmp_path, channels=["telegram"])
         _write_dead_letters(
@@ -109,7 +104,6 @@ class TestReplayDeadLetters:
         # Verify send was called
         assert mgr.channels["telegram"].send.call_count == 2
 
-    @pytest.mark.asyncio
     async def test_partial_failure(self, tmp_path: Path) -> None:
         mgr = _make_manager(tmp_path, channels=["telegram"])
         _write_dead_letters(
@@ -139,7 +133,6 @@ class TestReplayDeadLetters:
         assert len(remaining) == 1
         assert remaining[0]["content"] == "fail-msg"
 
-    @pytest.mark.asyncio
     async def test_skips_unavailable_channel(self, tmp_path: Path) -> None:
         mgr = _make_manager(tmp_path, channels=["telegram"])
         _write_dead_letters(

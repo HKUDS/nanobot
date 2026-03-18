@@ -1,0 +1,9 @@
+# Trivy ignore file — add CVE IDs or misconfiguration IDs to suppress known
+# accepted false positives.  Each entry should include a comment explaining
+# the reason for suppression and a review date.
+#
+# Format:
+#   CVE-YYYY-NNNNN  # reason — reviewed YYYY-MM-DD
+#
+# Example:
+#   CVE-2023-12345  # only affects feature X which we don't use — reviewed 2026-03-18

@@ -72,7 +72,6 @@ def _install_fake_mcp(monkeypatch: pytest.MonkeyPatch, *, tools: list[SimpleName
     monkeypatch.setitem(sys.modules, "mcp.client.streamable_http", mcp_http_mod)
 
 
-@pytest.mark.asyncio
 async def test_mcp_wrapper_execute_success_and_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     tool_def = SimpleNamespace(name="echo", description="Echo", inputSchema={"type": "object"})
 
@@ -101,7 +100,6 @@ async def test_mcp_wrapper_execute_success_and_timeout(monkeypatch: pytest.Monke
     assert "timed out" in timeout_out
 
 
-@pytest.mark.asyncio
 async def test_connect_mcp_servers_command_url_skip_and_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

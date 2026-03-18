@@ -21,7 +21,6 @@ from nanobot.agent.tools.web import (
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_web_search_uses_configured_api_key(monkeypatch) -> None:
     seen: dict[str, object] = {}
 
@@ -69,7 +68,6 @@ async def test_web_search_uses_configured_api_key(monkeypatch) -> None:
     }
 
 
-@pytest.mark.asyncio
 async def test_web_search_no_key_and_error(monkeypatch: pytest.MonkeyPatch) -> None:
     tool = WebSearchTool(api_key="")
     no_key = await tool.execute("nanobot")
@@ -91,7 +89,6 @@ async def test_web_search_no_key_and_error(monkeypatch: pytest.MonkeyPatch) -> N
     assert not err.success
 
 
-@pytest.mark.asyncio
 async def test_web_search_empty_results(monkeypatch: pytest.MonkeyPatch) -> None:
     class _Resp:
         def raise_for_status(self):
@@ -134,7 +131,6 @@ def test_web_helpers() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_web_fetch_invalid_url() -> None:
     tool = WebFetchTool()
     out = await tool.execute(url="ftp://invalid")
@@ -143,7 +139,6 @@ async def test_web_fetch_invalid_url() -> None:
     assert "validation" in payload["error"].lower()
 
 
-@pytest.mark.asyncio
 async def test_web_fetch_json_and_raw(monkeypatch: pytest.MonkeyPatch) -> None:
     _url_cache.clear()
 
@@ -194,7 +189,6 @@ async def test_web_fetch_json_and_raw(monkeypatch: pytest.MonkeyPatch) -> None:
     assert raw_payload["text"] == "hello raw"
 
 
-@pytest.mark.asyncio
 async def test_web_fetch_html_and_error(monkeypatch: pytest.MonkeyPatch) -> None:
     class _Doc:
         def __init__(self, _html: str):
@@ -266,7 +260,6 @@ def test_web_fetch_cache_without_summary() -> None:
     assert tool.summarize is False
 
 
-@pytest.mark.asyncio
 async def test_web_fetch_bot_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
     """When userAgent='bot', the request should use the bot UA string."""
     _url_cache.clear()
@@ -305,7 +298,6 @@ async def test_web_fetch_bot_user_agent(monkeypatch: pytest.MonkeyPatch) -> None
     assert payload["text"] == "Montreal: +5°C"
 
 
-@pytest.mark.asyncio
 async def test_web_fetch_browser_user_agent_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default userAgent should use the browser UA string."""
     _url_cache.clear()

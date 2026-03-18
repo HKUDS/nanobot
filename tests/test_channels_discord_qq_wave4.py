@@ -25,7 +25,6 @@ def test_discord_split_message_branches() -> None:
     assert len(chunks) >= 2
 
 
-@pytest.mark.asyncio
 async def test_discord_send_paths() -> None:
     ch = DiscordChannel(DiscordConfig(token="t"), _Bus())
     with pytest.raises(DeliverySkippedError):
@@ -39,7 +38,6 @@ async def test_discord_send_paths() -> None:
     assert ch._send_payload.await_count == 1
 
 
-@pytest.mark.asyncio
 async def test_discord_send_payload_retry_and_fail() -> None:
     ch = DiscordChannel(DiscordConfig(token="t"), _Bus())
 
@@ -81,7 +79,6 @@ async def test_discord_send_payload_retry_and_fail() -> None:
         await ch._send_payload("u", {}, {"a": 1})
 
 
-@pytest.mark.asyncio
 async def test_discord_gateway_loop_dispatches() -> None:
     ch = DiscordChannel(DiscordConfig(token="t"), _Bus())
     ch._running = True
@@ -116,7 +113,6 @@ async def test_discord_gateway_loop_dispatches() -> None:
     assert ch._handle_message_create.await_count == 1
 
 
-@pytest.mark.asyncio
 async def test_discord_handle_message_create_with_attachments(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

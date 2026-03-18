@@ -1571,7 +1571,7 @@ class AgentLoop:
                     flush_langfuse()
 
                 except Exception as e:  # crash-barrier: message processing
-                    logger.error("Error processing message: {}", e)
+                    logger.exception("Error processing message")
                     if role_applied:
                         self._reset_role_after_turn()
                     await self.bus.publish_outbound(
@@ -2028,6 +2028,9 @@ class AgentLoop:
 
             _task = asyncio.create_task(_consolidate_and_unlock())
             self._consolidation_tasks.add(_task)
+            _task.add_done_callback(
+                lambda t: logger.exception("Consolidation task failed") if t.exception() else None
+            )
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         self._ensure_scratchpad(key)

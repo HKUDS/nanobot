@@ -95,7 +95,6 @@ def test_extract_text_body_falls_back_to_html() -> None:
     assert "world" in text
 
 
-@pytest.mark.asyncio
 async def test_start_returns_immediately_without_consent(monkeypatch) -> None:
     cfg = _make_config()
     cfg.consent_granted = False
@@ -113,7 +112,6 @@ async def test_start_returns_immediately_without_consent(monkeypatch) -> None:
     assert called["fetch"] is False
 
 
-@pytest.mark.asyncio
 async def test_send_uses_smtp_and_reply_subject(monkeypatch) -> None:
     class FakeSMTP:
         def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
@@ -169,7 +167,6 @@ async def test_send_uses_smtp_and_reply_subject(monkeypatch) -> None:
     assert sent["In-Reply-To"] == "<m1@example.com>"
 
 
-@pytest.mark.asyncio
 async def test_send_skips_reply_when_auto_reply_disabled(monkeypatch) -> None:
     """When auto_reply_enabled=False, replies should be skipped but proactive sends allowed."""
 
@@ -232,7 +229,6 @@ async def test_send_skips_reply_when_auto_reply_disabled(monkeypatch) -> None:
     assert len(fake_instances[0].sent_messages) == 1
 
 
-@pytest.mark.asyncio
 async def test_send_proactive_email_when_auto_reply_disabled(monkeypatch) -> None:
     """Proactive emails (not replies) should be sent even when auto_reply_enabled=False."""
 
@@ -284,7 +280,6 @@ async def test_send_proactive_email_when_auto_reply_disabled(monkeypatch) -> Non
     assert sent["To"] == "bob@example.com"
 
 
-@pytest.mark.asyncio
 async def test_send_skips_when_consent_not_granted(monkeypatch) -> None:
     class FakeSMTP:
         def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:

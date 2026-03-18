@@ -14,8 +14,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -98,7 +96,6 @@ def _make_inbound(text: str) -> InboundMessage:
 class TestRecoveryRetry:
     """Test that recovery LLM call is attempted when main loop produces None."""
 
-    @pytest.mark.asyncio
     async def test_recovery_succeeds(self, tmp_path: Path):
         """When main loop returns None but recovery call succeeds, user gets an answer."""
         provider = ScriptedProvider(
@@ -119,7 +116,6 @@ class TestRecoveryRetry:
         recovery_call = provider.call_log[-1]
         assert recovery_call["has_tools"] is False
 
-    @pytest.mark.asyncio
     async def test_recovery_fails_falls_through(self, tmp_path: Path):
         """When both main loop and recovery return None, user gets the fallback explanation."""
         provider = ScriptedProvider(
@@ -137,7 +133,6 @@ class TestRecoveryRetry:
         assert "Sorry" in result.content
         assert "try rephrasing" in result.content.lower()
 
-    @pytest.mark.asyncio
     async def test_recovery_with_think_only_response(self, tmp_path: Path):
         """Recovery handles <think>-only responses gracefully."""
         provider = ScriptedProvider(
@@ -155,7 +150,6 @@ class TestRecoveryRetry:
         # Both None -> falls back to explanation
         assert "Sorry" in result.content
 
-    @pytest.mark.asyncio
     async def test_recovery_error_falls_through(self, tmp_path: Path):
         """When recovery LLM call returns an error, falls through to explanation."""
         provider = ScriptedProvider(
@@ -181,7 +175,6 @@ class TestRecoveryRetry:
 class TestContentFilterHandling:
     """Test that content_filter finish_reason is detected and retried."""
 
-    @pytest.mark.asyncio
     async def test_content_filter_retry_then_success(self, tmp_path: Path):
         """First attempt is filtered, second attempt succeeds."""
         provider = ScriptedProvider(
@@ -196,7 +189,6 @@ class TestContentFilterHandling:
         assert result is not None
         assert "safe response" in result.content
 
-    @pytest.mark.asyncio
     async def test_content_filter_persistent(self, tmp_path: Path):
         """Two consecutive content_filter responses -> specific error message."""
         provider = ScriptedProvider(
@@ -211,7 +203,6 @@ class TestContentFilterHandling:
         assert result is not None
         assert "content filter" in result.content.lower()
 
-    @pytest.mark.asyncio
     async def test_length_empty_content_retry(self, tmp_path: Path):
         """finish_reason=length with no content is retried."""
         provider = ScriptedProvider(
@@ -226,7 +217,6 @@ class TestContentFilterHandling:
         assert result is not None
         assert "Short answer" in result.content
 
-    @pytest.mark.asyncio
     async def test_length_with_partial_content_accepted(self, tmp_path: Path):
         """finish_reason=length with non-empty content is accepted (partial answer)."""
         provider = ScriptedProvider(

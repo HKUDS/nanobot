@@ -83,7 +83,6 @@ def _patch_smtp(monkeypatch) -> list[FakeSMTP]:
 
 
 class TestEmailFormatValidation:
-    @pytest.mark.asyncio
     async def test_valid_email_passes(self, monkeypatch) -> None:
         _patch_smtp(monkeypatch)
         cfg = _make_config(proactive_send_policy="open")
@@ -92,7 +91,6 @@ class TestEmailFormatValidation:
             OutboundMessage(channel="email", chat_id="alice@example.com", content="hi")
         )
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "addr",
         [
@@ -118,7 +116,6 @@ class TestEmailFormatValidation:
 
 
 class TestAllowlist:
-    @pytest.mark.asyncio
     async def test_allowlist_permits_listed_address(self, monkeypatch) -> None:
         instances = _patch_smtp(monkeypatch)
         cfg = _make_config(allow_to=["alice@example.com"], proactive_send_policy="open")
@@ -128,7 +125,6 @@ class TestAllowlist:
         )
         assert len(instances) == 1
 
-    @pytest.mark.asyncio
     async def test_allowlist_blocks_unlisted_address(self, monkeypatch) -> None:
         _patch_smtp(monkeypatch)
         cfg = _make_config(allow_to=["alice@example.com"], proactive_send_policy="open")
@@ -138,7 +134,6 @@ class TestAllowlist:
                 OutboundMessage(channel="email", chat_id="eve@example.com", content="hi")
             )
 
-    @pytest.mark.asyncio
     async def test_empty_allowlist_permits_all(self, monkeypatch) -> None:
         instances = _patch_smtp(monkeypatch)
         cfg = _make_config(allow_to=[], proactive_send_policy="open")
@@ -157,7 +152,6 @@ class TestAllowlist:
 class TestProactiveSendPolicy:
     """Policy only applies to non-reply, non-force_send outbound emails."""
 
-    @pytest.mark.asyncio
     async def test_known_only_blocks_unknown(self, monkeypatch) -> None:
         _patch_smtp(monkeypatch)
         cfg = _make_config(proactive_send_policy="known_only")
@@ -167,7 +161,6 @@ class TestProactiveSendPolicy:
                 OutboundMessage(channel="email", chat_id="stranger@example.com", content="hi")
             )
 
-    @pytest.mark.asyncio
     async def test_known_only_allows_known_sender(self, monkeypatch) -> None:
         instances = _patch_smtp(monkeypatch)
         cfg = _make_config(proactive_send_policy="known_only")
@@ -178,7 +171,6 @@ class TestProactiveSendPolicy:
         )
         assert len(instances) == 1
 
-    @pytest.mark.asyncio
     async def test_known_only_allows_allowlisted(self, monkeypatch) -> None:
         instances = _patch_smtp(monkeypatch)
         cfg = _make_config(proactive_send_policy="known_only", allow_to=["allowed@example.com"])
@@ -188,7 +180,6 @@ class TestProactiveSendPolicy:
         )
         assert len(instances) == 1
 
-    @pytest.mark.asyncio
     async def test_allowlist_policy_blocks_without_allowlist(self, monkeypatch) -> None:
         _patch_smtp(monkeypatch)
         cfg = _make_config(proactive_send_policy="allowlist", allow_to=[])
@@ -198,7 +189,6 @@ class TestProactiveSendPolicy:
                 OutboundMessage(channel="email", chat_id="bob@example.com", content="hi")
             )
 
-    @pytest.mark.asyncio
     async def test_allowlist_policy_allows_listed(self, monkeypatch) -> None:
         instances = _patch_smtp(monkeypatch)
         cfg = _make_config(proactive_send_policy="allowlist", allow_to=["bob@example.com"])
@@ -208,7 +198,6 @@ class TestProactiveSendPolicy:
         )
         assert len(instances) == 1
 
-    @pytest.mark.asyncio
     async def test_open_policy_allows_anyone(self, monkeypatch) -> None:
         instances = _patch_smtp(monkeypatch)
         cfg = _make_config(proactive_send_policy="open")
@@ -218,7 +207,6 @@ class TestProactiveSendPolicy:
         )
         assert len(instances) == 1
 
-    @pytest.mark.asyncio
     async def test_policy_skipped_for_replies(self, monkeypatch) -> None:
         """Replies bypass proactive policy — they're responses not initiations."""
         instances = _patch_smtp(monkeypatch)
@@ -231,7 +219,6 @@ class TestProactiveSendPolicy:
         )
         assert len(instances) == 1
 
-    @pytest.mark.asyncio
     async def test_force_send_bypasses_policy(self, monkeypatch) -> None:
         instances = _patch_smtp(monkeypatch)
         cfg = _make_config(proactive_send_policy="known_only")

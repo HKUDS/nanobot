@@ -484,7 +484,6 @@ class TestEmptyAndBoundarySessions:
 class TestConsolidationDeduplicationGuard:
     """Test that consolidation tasks are deduplicated and serialized."""
 
-    @pytest.mark.asyncio
     async def test_consolidation_guard_prevents_duplicate_tasks(self, tmp_path: Path) -> None:
         """Concurrent messages above memory_window spawn only one consolidation task."""
         from nanobot.agent.loop import AgentLoop
@@ -526,7 +525,6 @@ class TestConsolidationDeduplicationGuard:
             f"Expected exactly 1 consolidation, got {consolidation_calls}"
         )
 
-    @pytest.mark.asyncio
     async def test_new_command_guard_prevents_concurrent_consolidation(
         self, tmp_path: Path
     ) -> None:
@@ -580,7 +578,6 @@ class TestConsolidationDeduplicationGuard:
             f"Expected serialized consolidation, observed concurrency={max_active}"
         )
 
-    @pytest.mark.asyncio
     async def test_consolidation_tasks_are_referenced(self, tmp_path: Path) -> None:
         """create_task results are tracked in _consolidation_tasks while in flight."""
         from nanobot.agent.loop import AgentLoop
@@ -623,7 +620,6 @@ class TestConsolidationDeduplicationGuard:
             "Task reference must be removed after completion"
         )
 
-    @pytest.mark.asyncio
     async def test_new_waits_for_inflight_consolidation_and_preserves_messages(
         self, tmp_path: Path
     ) -> None:
@@ -683,7 +679,6 @@ class TestConsolidationDeduplicationGuard:
         session_after = loop.sessions.get_or_create("cli:test")
         assert session_after.messages == [], "Session should be cleared after successful archival"
 
-    @pytest.mark.asyncio
     async def test_new_does_not_clear_session_when_archive_fails(self, tmp_path: Path) -> None:
         """/new must keep session data if archive step reports failure."""
         from nanobot.agent.loop import AgentLoop
@@ -725,7 +720,6 @@ class TestConsolidationDeduplicationGuard:
             "Session must remain intact when /new archival fails"
         )
 
-    @pytest.mark.asyncio
     async def test_new_archives_only_unconsolidated_messages_after_inflight_task(
         self, tmp_path: Path
     ) -> None:
@@ -786,7 +780,6 @@ class TestConsolidationDeduplicationGuard:
             f"Expected only unconsolidated tail to archive, got {archived_count}"
         )
 
-    @pytest.mark.asyncio
     async def test_new_cleans_up_consolidation_lock_for_invalidated_session(
         self, tmp_path: Path
     ) -> None:

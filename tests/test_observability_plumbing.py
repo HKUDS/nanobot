@@ -20,8 +20,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-import pytest
-
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.streaming import StreamingLLMCaller
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -140,7 +138,6 @@ def _make_inbound(text: str, channel: str = "cli", chat_id: str = "test-user") -
 class TestOutboundMessageUsageMetadata:
     """_process_message attaches prompt/completion token counts to the OutboundMessage."""
 
-    @pytest.mark.asyncio
     async def test_usage_in_response_metadata(self, tmp_path: Path):
         provider = ScriptedProvider(
             [
@@ -160,7 +157,6 @@ class TestOutboundMessageUsageMetadata:
         assert usage["prompt_tokens"] == 100
         assert usage["completion_tokens"] == 25
 
-    @pytest.mark.asyncio
     async def test_usage_accumulates_across_llm_calls(self, tmp_path: Path):
         """When the agent makes multiple LLM calls (e.g. tool use), tokens accumulate."""
         from nanobot.providers.base import ToolCallRequest
@@ -221,7 +217,6 @@ class _FakeWebChannel:
 class TestStreamAgentResponseTokenCounts:
     """The SSE finish event reads token counts from OutboundMessage metadata."""
 
-    @pytest.mark.asyncio
     async def test_finish_event_has_token_counts(self):
         final_msg = OutboundMessage(
             channel="web",
@@ -249,7 +244,6 @@ class TestStreamAgentResponseTokenCounts:
         assert payload["usage"]["inputTokens"] == 500
         assert payload["usage"]["outputTokens"] == 42
 
-    @pytest.mark.asyncio
     async def test_finish_event_defaults_to_zero_without_metadata(self):
         """When OutboundMessage has no usage metadata, finish event has zero counts."""
         final_msg = OutboundMessage(
@@ -285,7 +279,6 @@ class TestStreamAgentResponseTokenCounts:
 class TestGenerationNameMetadata:
     """StreamingLLMCaller passes generation_name metadata to provider calls."""
 
-    @pytest.mark.asyncio
     async def test_non_streaming_passes_generation_name(self):
         provider = StreamCapturingProvider(chunks=[])
         caller = StreamingLLMCaller(
@@ -300,7 +293,6 @@ class TestGenerationNameMetadata:
         assert len(provider.chat_metadata) == 1
         assert provider.chat_metadata[0] == {"generation_name": "chat_completion"}
 
-    @pytest.mark.asyncio
     async def test_streaming_passes_generation_name(self):
         provider = StreamCapturingProvider(
             chunks=[StreamChunk(content_delta="Hello", finish_reason="stop", done=True)]
@@ -330,7 +322,6 @@ class TestGenerationNameMetadata:
 class TestSpanMetadataNoRedundantTokens:
     """update_current_span is called without prompt_tokens/completion_tokens/total_tokens."""
 
-    @pytest.mark.asyncio
     async def test_span_metadata_excludes_token_counts(self, tmp_path: Path):
         provider = ScriptedProvider(
             [
@@ -380,7 +371,6 @@ class TestSpanMetadataNoRedundantTokens:
 class TestVerifierScoreCurrentTrace:
     """AnswerVerifier.verify() calls score_current_trace after parsing confidence."""
 
-    @pytest.mark.asyncio
     async def test_score_called_with_confidence_and_issues(self):
         from nanobot.agent.verifier import AnswerVerifier
         from nanobot.providers.base import LLMResponse
@@ -415,7 +405,6 @@ class TestVerifierScoreCurrentTrace:
             comment="minor issue",
         )
 
-    @pytest.mark.asyncio
     async def test_score_called_with_passed_when_no_issues(self):
         from nanobot.agent.verifier import AnswerVerifier
         from nanobot.providers.base import LLMResponse
@@ -459,7 +448,6 @@ class TestVerifierScoreCurrentTrace:
 class TestProcessDirectTraceMetadata:
     """process_direct passes session_id, user_id, tags to trace_request."""
 
-    @pytest.mark.asyncio
     async def test_trace_request_receives_session_user_tags(self, tmp_path: Path):
         provider = ScriptedProvider(
             [LLMResponse(content="Hello!", usage={"prompt_tokens": 10, "completion_tokens": 2})]
@@ -496,7 +484,6 @@ class TestProcessDirectTraceMetadata:
 class TestToolRegistryToolSpan:
     """ToolRegistry._execute_inner wraps tool execution in a tool_span."""
 
-    @pytest.mark.asyncio
     async def test_tool_span_called_with_name_and_input(self):
         from nanobot.agent.tools.base import Tool, ToolResult
         from nanobot.agent.tools.registry import ToolRegistry
@@ -536,7 +523,6 @@ class TestToolRegistryToolSpan:
 class TestContextBuilderSpan:
     """summarize_and_compress wraps LLM compression in a langfuse span."""
 
-    @pytest.mark.asyncio
     async def test_compress_span_created(self):
         from nanobot.agent.context import summarize_and_compress
         from nanobot.providers.base import LLMResponse

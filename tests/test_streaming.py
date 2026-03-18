@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from nanobot.providers.base import LLMProvider, LLMResponse, StreamChunk, ToolCallRequest
 
 # ---------------------------------------------------------------------------
@@ -71,7 +69,6 @@ class TestStreamChunk:
 class TestBaseProviderStreamFallback:
     """The default stream_chat on LLMProvider falls back to chat()."""
 
-    @pytest.mark.asyncio
     async def test_fallback_yields_single_chunk(self):
         class SimpleProvider(LLMProvider):
             async def chat(
@@ -107,7 +104,6 @@ class TestBaseProviderStreamFallback:
 
 
 class TestFakeStreamProvider:
-    @pytest.mark.asyncio
     async def test_yields_all_chunks(self):
         provider = FakeStreamProvider(
             chunks=[
@@ -126,7 +122,6 @@ class TestFakeStreamProvider:
         assert text == "Hello world!"
         assert accumulated[-1].done
 
-    @pytest.mark.asyncio
     async def test_tool_calls_on_final_chunk(self):
         tc = ToolCallRequest(id="tc1", name="exec", arguments={"command": "ls"})
         provider = FakeStreamProvider(
@@ -145,7 +140,6 @@ class TestFakeStreamProvider:
         assert len(final.tool_calls) == 1
         assert final.tool_calls[0].name == "exec"
 
-    @pytest.mark.asyncio
     async def test_chat_not_called_when_streaming(self):
         """stream_chat should NOT fall back to chat()."""
         provider = FakeStreamProvider(
@@ -169,7 +163,6 @@ class TestFakeStreamProvider:
 class TestChunkReassembly:
     """Verify that accumulating chunks produces a correct LLMResponse."""
 
-    @pytest.mark.asyncio
     async def test_reassemble_text_response(self):
         chunks = [
             StreamChunk(content_delta="The answer"),
@@ -200,7 +193,6 @@ class TestChunkReassembly:
         assert response.usage["total_tokens"] == 10
         assert not response.has_tool_calls
 
-    @pytest.mark.asyncio
     async def test_reassemble_tool_call_response(self):
         tc = ToolCallRequest(id="t1", name="web_search", arguments={"query": "weather"})
         chunks = [

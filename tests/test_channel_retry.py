@@ -73,7 +73,6 @@ def test_is_transient(exc: Exception, expected: bool) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_connection_loop_reconnects_on_error() -> None:
     """connection_loop retries after transient errors with backoff."""
     call_count = 0
@@ -105,7 +104,6 @@ async def test_connection_loop_reconnects_on_error() -> None:
     assert call_count == 3
 
 
-@pytest.mark.asyncio
 async def test_connection_loop_stops_on_cancelled() -> None:
     """connection_loop exits cleanly on CancelledError."""
 
@@ -121,7 +119,6 @@ async def test_connection_loop_stops_on_cancelled() -> None:
     # Should exit without errors
 
 
-@pytest.mark.asyncio
 async def test_connection_loop_stops_when_flag_false() -> None:
     """connection_loop stops when running_flag returns False."""
     call_count = 0
@@ -171,7 +168,6 @@ def test_base_channel_has_health() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_retry_send_success_first_try() -> None:
     """retry_send records success on first call."""
     h = ChannelHealth()
@@ -187,7 +183,6 @@ async def test_retry_send_success_first_try() -> None:
     assert h.last_success_at is not None
 
 
-@pytest.mark.asyncio
 async def test_retry_send_retries_transient_errors() -> None:
     """retry_send retries transient errors up to max_attempts."""
     h = ChannelHealth()
@@ -204,7 +199,6 @@ async def test_retry_send_retries_transient_errors() -> None:
     assert h.healthy is True
 
 
-@pytest.mark.asyncio
 async def test_retry_send_raises_non_transient_immediately() -> None:
     """retry_send does not retry non-transient errors."""
     h = ChannelHealth()
@@ -221,7 +215,6 @@ async def test_retry_send_raises_non_transient_immediately() -> None:
     assert h.healthy is False
 
 
-@pytest.mark.asyncio
 async def test_retry_send_raises_after_max_attempts() -> None:
     """retry_send raises after exhausting retries on transient errors."""
     calls = 0
@@ -236,7 +229,6 @@ async def test_retry_send_raises_after_max_attempts() -> None:
     assert calls == 2
 
 
-@pytest.mark.asyncio
 async def test_retry_send_no_health() -> None:
     """retry_send works without a health tracker."""
 

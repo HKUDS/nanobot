@@ -3,8 +3,6 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from nanobot.heartbeat.service import HeartbeatService
 
 
@@ -23,7 +21,6 @@ def _make_service(tmp_path, **overrides):
     return HeartbeatService(**defaults)
 
 
-@pytest.mark.asyncio
 async def test_start_is_idempotent(tmp_path) -> None:
     service = _make_service(tmp_path)
 
@@ -37,7 +34,6 @@ async def test_start_is_idempotent(tmp_path) -> None:
     await asyncio.sleep(0)
 
 
-@pytest.mark.asyncio
 async def test_decide_skip_when_no_tool_call(tmp_path) -> None:
     """If the LLM returns plain text (no tool call), decision is 'skip'."""
     from nanobot.providers.base import LLMResponse
@@ -52,7 +48,6 @@ async def test_decide_skip_when_no_tool_call(tmp_path) -> None:
     assert tasks == ""
 
 
-@pytest.mark.asyncio
 async def test_decide_run_when_tool_call(tmp_path) -> None:
     """If the LLM calls the heartbeat tool with action=run, extract tasks."""
     from nanobot.providers.base import LLMResponse, ToolCallRequest
@@ -78,7 +73,6 @@ async def test_decide_run_when_tool_call(tmp_path) -> None:
     assert tasks == "Deploy v2.1"
 
 
-@pytest.mark.asyncio
 async def test_tick_skips_when_no_heartbeat_file(tmp_path) -> None:
     """Tick should be a silent no-op when HEARTBEAT.md doesn't exist."""
     service = _make_service(tmp_path)
@@ -86,7 +80,6 @@ async def test_tick_skips_when_no_heartbeat_file(tmp_path) -> None:
     await service._tick()
 
 
-@pytest.mark.asyncio
 async def test_tick_executes_on_run(tmp_path) -> None:
     """Full tick: HEARTBEAT.md present -> LLM says run -> on_execute called."""
     from nanobot.providers.base import LLMResponse, ToolCallRequest

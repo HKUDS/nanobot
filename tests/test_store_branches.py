@@ -209,7 +209,6 @@ class TestConsolidationHelpers:
         assert store.history_file.exists()
         assert store.memory_file.exists()
 
-    @pytest.mark.asyncio
     async def test_consolidate_no_tool_call(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         session = SimpleNamespace(
@@ -225,7 +224,6 @@ class TestConsolidationHelpers:
         ok = await store.consolidate(session, provider, model="m", memory_window=10)
         assert ok is False
 
-    @pytest.mark.asyncio
     async def test_consolidate_parsing_failure(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         session = SimpleNamespace(
@@ -250,7 +248,6 @@ class TestConsolidationHelpers:
         ok = await store.consolidate(session, provider, model="m", memory_window=10)
         assert ok is False
 
-    @pytest.mark.asyncio
     async def test_consolidate_exception_path(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         session = SimpleNamespace(
@@ -348,7 +345,6 @@ class TestVerifyAndContextBranches:
 
 
 class TestConsolidationMem0Path:
-    @pytest.mark.asyncio
     async def test_consolidate_success_with_mem0_turn_writes(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         store.mem0.enabled = True
@@ -460,7 +456,6 @@ class TestStoreCoreBranchHelpers:
         sup_idx = store._find_semantic_supersession(candidate2, existing)
         assert sup_idx == 0
 
-    @pytest.mark.asyncio
     async def test_ingest_graph_triples_enabled(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         store.graph.enabled = True

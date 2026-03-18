@@ -4,8 +4,6 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 from nanobot.agent.consolidation import ConsolidationOrchestrator
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.verifier import AnswerVerifier
@@ -137,7 +135,6 @@ def test_verification_helpers_and_lock_lifecycle(tmp_path: Path) -> None:
     assert "s1" not in loop._consolidation_locks
 
 
-@pytest.mark.asyncio
 async def test_attempt_recovery_missing_or_error_paths(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path)
     loop.provider = SimpleNamespace(chat=None)

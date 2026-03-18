@@ -172,7 +172,6 @@ class TestParallelStructureDetection:
 class TestParallelDelegationE2E:
     """Full cycle: plan → delegate_parallel(research + code) → synthesise."""
 
-    @pytest.mark.asyncio
     async def test_plan_delegate_parallel_synthesise(self, tmp_path: Path) -> None:
         """Parent agent plans, fans out to research & code, combines results."""
 
@@ -293,7 +292,6 @@ class TestParallelDelegationE2E:
 class TestSequentialDelegationChain:
     """Test A → B sequential delegation (single delegate tool)."""
 
-    @pytest.mark.asyncio
     async def test_delegate_then_answer(self, tmp_path: Path) -> None:
         """Parent delegates to research, gets result, responds to user."""
 
@@ -365,7 +363,6 @@ class TestSequentialDelegationChain:
 class TestDelegationWithToolUse:
     """Test that a delegated agent can use tools to accomplish its task."""
 
-    @pytest.mark.asyncio
     async def test_code_agent_uses_read_file(self, tmp_path: Path) -> None:
         """Code agent reads a file during its delegated tool loop."""
 
@@ -425,7 +422,6 @@ class TestDelegationWithToolUse:
 class TestPlanningPromptInjection:
     """Verify the planning prompt is injected for complex tasks."""
 
-    @pytest.mark.asyncio
     async def test_planning_prompt_added(self, tmp_path: Path) -> None:
         """Complex task triggers planning; simple task does not."""
 
@@ -441,7 +437,6 @@ class TestPlanningPromptInjection:
         # The planning prompt should make the message count higher
         assert first_call["messages_count"] >= 3  # system + user + planning system
 
-    @pytest.mark.asyncio
     async def test_simple_message_no_planning(self, tmp_path: Path) -> None:
         """Short message doesn't trigger planning."""
 
@@ -460,7 +455,6 @@ class TestPlanningPromptInjection:
 class TestCycleDetectionInMultiAgent:
     """Cycle detection across multi-agent chains."""
 
-    @pytest.mark.asyncio
     async def test_self_delegation_blocked(self, tmp_path: Path) -> None:
         """Agent cannot delegate back to a role already in the ancestry."""
 
@@ -514,7 +508,6 @@ class TestCycleDetectionInMultiAgent:
         finally:
             _delegation_ancestry.reset(token)
 
-    @pytest.mark.asyncio
     async def test_deep_chain_allowed(self, tmp_path: Path) -> None:
         """A → B → C delegation chain is allowed (no cycle)."""
 
@@ -549,7 +542,6 @@ class TestCycleDetectionInMultiAgent:
 class TestMultiAgentRoutingTrace:
     """Verify routing trace captures the full delegation lifecycle."""
 
-    @pytest.mark.asyncio
     async def test_trace_captures_latency(self, tmp_path: Path) -> None:
         """Delegation trace entries include latency_ms > 0."""
 
@@ -564,7 +556,6 @@ class TestMultiAgentRoutingTrace:
         assert complete[0]["latency_ms"] >= 0
         assert complete[0]["success"] is True
 
-    @pytest.mark.asyncio
     async def test_parallel_trace_complete(self, tmp_path: Path) -> None:
         """Parallel delegation records traces for ALL branches."""
 

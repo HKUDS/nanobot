@@ -9,8 +9,6 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from nanobot.agent.memory import MemoryStore
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
@@ -46,7 +44,6 @@ def _make_tool_response(history_entry, memory_update):
 class TestMemoryConsolidationTypeHandling:
     """Test that consolidation handles various argument types correctly."""
 
-    @pytest.mark.asyncio
     async def test_string_arguments_work(self, tmp_path: Path) -> None:
         """Normal case: LLM returns string arguments."""
         store = MemoryStore(tmp_path)
@@ -66,7 +63,6 @@ class TestMemoryConsolidationTypeHandling:
         assert "[2026-01-01] User discussed testing." in store.history_file.read_text()
         assert "User likes testing." in store.memory_file.read_text()
 
-    @pytest.mark.asyncio
     async def test_dict_arguments_serialized_to_json(self, tmp_path: Path) -> None:
         """Issue #1042: LLM returns dict instead of string — must not raise TypeError."""
         store = MemoryStore(tmp_path)
@@ -91,7 +87,6 @@ class TestMemoryConsolidationTypeHandling:
         parsed_mem = json.loads(memory_content)
         assert "User likes testing" in parsed_mem["facts"]
 
-    @pytest.mark.asyncio
     async def test_string_arguments_as_raw_json(self, tmp_path: Path) -> None:
         """Some providers return arguments as a JSON string instead of parsed dict."""
         store = MemoryStore(tmp_path)
@@ -121,7 +116,6 @@ class TestMemoryConsolidationTypeHandling:
         assert result is True
         assert "User discussed testing." in store.history_file.read_text()
 
-    @pytest.mark.asyncio
     async def test_no_tool_call_returns_false(self, tmp_path: Path) -> None:
         """When LLM doesn't use the save_memory tool, return False."""
         store = MemoryStore(tmp_path)
@@ -136,7 +130,6 @@ class TestMemoryConsolidationTypeHandling:
         assert result is False
         assert not store.history_file.exists()
 
-    @pytest.mark.asyncio
     async def test_skips_when_few_messages(self, tmp_path: Path) -> None:
         """Consolidation should be a no-op when messages < keep_count."""
         store = MemoryStore(tmp_path)

@@ -87,7 +87,6 @@ def test_convert_user_message_variants_and_prompt_key() -> None:
     assert key1 == key2
 
 
-@pytest.mark.asyncio
 async def test_iter_sse_and_consume_sse() -> None:
     def _line(payload: dict) -> str:
         return f"data: {json.dumps(payload)}"
@@ -151,7 +150,6 @@ async def test_iter_sse_and_consume_sse() -> None:
     assert tool_calls[0].arguments["path"] == "a"
 
 
-@pytest.mark.asyncio
 async def test_chat_ssl_fallback_and_error(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.1")
 

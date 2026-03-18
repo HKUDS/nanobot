@@ -72,7 +72,6 @@ def test_get_config_path_points_home(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert get_config_path() == tmp_path / ".nanobot" / "config.json"
 
 
-@pytest.mark.asyncio
 async def test_base_channel_allowlist_and_handle_message() -> None:
     cfg = SimpleNamespace(allow_from=["42", "abc"])
     bus = _FakeBus()
