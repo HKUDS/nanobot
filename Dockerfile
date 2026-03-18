@@ -26,8 +26,9 @@ RUN groupadd --gid 1001 nanobot && \
 USER nanobot
 
 # Health check for orchestrators (Docker, Compose, Kubernetes)
+# Uses NANOBOT_GATEWAY__PORT if set (e.g. staging uses 18791), falls back to 18790.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -sf http://localhost:18790/health || exit 1
+    CMD curl -sf "http://localhost:${NANOBOT_GATEWAY__PORT:-18790}/health" || exit 1
 
 # Gateway default port
 EXPOSE 18790
