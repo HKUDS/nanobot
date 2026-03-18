@@ -175,7 +175,8 @@ class ProgressCallback(Protocol):
         delegate_end: dict | None = ...,
         status_code: str = ...,
         status_label: str = ...,
-    ) -> None: ...
+    ) -> None:
+        pass
 
 
 @dataclass(slots=True)
@@ -1009,6 +1010,17 @@ class AgentLoop:
                     "unverified. Consider cross-checking critical claims "
                     "before including them in your answer."
                 )
+            # If the agent used sequential delegate for an inherently parallel
+            # request, nudge it to switch to delegate_parallel next round.
+            if not any(
+                tc.name == "delegate_parallel" for tc in response.tool_calls
+            ) and self._has_parallel_structure(user_text):
+                nudge += (
+                    "\n\nYou used sequential `delegate` but the user's "
+                    "request lists independent sub-tasks. For the "
+                    "remaining work, switch to `delegate_parallel` "
+                    "to execute them concurrently."
+                )
             messages.append({"role": "system", "content": nudge})
         elif (
             has_plan
@@ -1026,22 +1038,6 @@ class AgentLoop:
                         "yourself. Use `delegate_parallel` NOW to distribute "
                         "remaining work to specialist agents. This is "
                         "required for multi-part tasks."
-                    ),
-                }
-            )
-        elif (
-            had_delegations
-            and not any(tc.name == "delegate_parallel" for tc in response.tool_calls)
-            and self._has_parallel_structure(user_text)
-        ):
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        "You used sequential `delegate` but the user's "
-                        "request lists independent sub-tasks. For the "
-                        "remaining work, switch to `delegate_parallel` "
-                        "to execute them concurrently."
                     ),
                 }
             )
