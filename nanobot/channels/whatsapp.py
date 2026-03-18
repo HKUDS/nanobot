@@ -7,7 +7,6 @@ from collections import OrderedDict
 from typing import Any
 
 from loguru import logger
-
 from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage

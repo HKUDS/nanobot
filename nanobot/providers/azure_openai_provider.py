@@ -35,13 +35,13 @@ class AzureOpenAIProvider(LLMProvider):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.api_version = "2024-10-21"
-        
+
         # Validate required parameters
         if not api_key:
             raise ValueError("Azure OpenAI api_key is required")
         if not api_base:
             raise ValueError("Azure OpenAI api_base is required")
-        
+
         # Ensure api_base ends with /
         if not api_base.endswith('/'):
             api_base += '/'
@@ -54,9 +54,9 @@ class AzureOpenAIProvider(LLMProvider):
         base_url = self.api_base
         if not base_url.endswith('/'):
             base_url += '/'
-        
+
         url = urljoin(
-            base_url, 
+            base_url,
             f"openai/deployments/{deployment_name}/chat/completions"
         )
         return f"{url}?api-version={self.api_version}"
@@ -151,7 +151,7 @@ class AzureOpenAIProvider(LLMProvider):
                         content=f"Azure OpenAI API Error {response.status_code}: {response.text}",
                         finish_reason="error",
                     )
-                
+
                 response_data = response.json()
                 return self._parse_response(response_data)
 

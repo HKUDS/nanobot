@@ -7,13 +7,13 @@ from collections import OrderedDict
 from typing import Any
 
 from loguru import logger
+from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
-from pydantic import Field
 
 WECOM_AVAILABLE = importlib.util.find_spec("wecom_aibot_sdk") is not None
 

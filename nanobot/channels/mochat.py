@@ -11,13 +11,13 @@ from typing import Any
 
 import httpx
 from loguru import logger
+from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_runtime_subdir
 from nanobot.config.schema import Base
-from pydantic import Field
 
 try:
     import socketio

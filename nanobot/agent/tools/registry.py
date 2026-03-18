@@ -46,7 +46,7 @@ class ToolRegistry:
         try:
             # Attempt to cast parameters to match schema types
             params = tool.cast_params(params)
-            
+
             # Validate parameters
             errors = tool.validate_params(params)
             if errors:

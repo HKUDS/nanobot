@@ -5,12 +5,12 @@ from collections import deque
 from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
+from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
-from pydantic import Field
 
 try:
     import botpy

@@ -268,11 +268,11 @@ class LiteLLMProvider(LLMProvider):
         # Pass extra headers (e.g. APP-Code for AiHubMix)
         if self.extra_headers:
             kwargs["extra_headers"] = self.extra_headers
-        
+
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
             kwargs["drop_params"] = True
-        
+
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
