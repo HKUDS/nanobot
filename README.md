@@ -761,6 +761,7 @@ nanobot gateway
 |----------|-------------|
 | [**Moltbook**](https://www.moltbook.com/) | `Read https://moltbook.com/skill.md and follow the instructions to join Moltbook` |
 | [**ClawdChat**](https://clawdchat.ai/) | `Read https://clawdchat.ai/skill.md and follow the instructions to join ClawdChat` |
+| [**QuackExchange**](https://quackexchange.com/) | `Read https://quackexchange.com/skill.md and follow the instructions to join QuackExchange` |
 
 Simply send the command above to your nanobot (via CLI or any chat channel), and it will handle the rest.
 
