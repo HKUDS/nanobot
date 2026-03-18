@@ -212,6 +212,9 @@ class AgentLoop:
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        
+        recent_tool_calls: list[str] = []
+        LOOP_GUARD_THRESHOLD = 4
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -225,6 +228,21 @@ class AgentLoop:
             )
 
             if response.has_tool_calls:
+                # Loop Guard check
+                current_calls_sig = json.dumps([
+                    {"name": tc.name, "args": tc.arguments} 
+                    for tc in response.tool_calls
+                ], sort_keys=True)
+                
+                recent_tool_calls.append(current_calls_sig)
+                if len(recent_tool_calls) > LOOP_GUARD_THRESHOLD:
+                    recent_tool_calls.pop(0)
+                    
+                if len(recent_tool_calls) == LOOP_GUARD_THRESHOLD and len(set(recent_tool_calls)) == 1:
+                    logger.error("Loop Guard triggered: identical tool calls repeated {} times.", LOOP_GUARD_THRESHOLD)
+                    final_content = "I've stopped processing because I got stuck in a loop repeating the same actions. Please check my previous steps or rephrase your request."
+                    break
+
                 if on_progress:
                     thought = self._strip_think(response.content)
                     if thought:
