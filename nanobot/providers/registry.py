@@ -400,7 +400,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
     # Novita AI: OpenAI-compatible API gateway.
-    # Default model: deepseek/deepseek-v3.2; also supports zai-org/glm-5, minimax/minimax-m2.5.
+    # Default model: moonshotai/kimi-k2.5; also supports deepseek/deepseek-v3.2, zai-org/glm-5, minimax/minimax-m2.5.
     ProviderSpec(
         name="novita",
         keywords=("novita",),

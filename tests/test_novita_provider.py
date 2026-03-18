@@ -4,7 +4,7 @@ Validates that:
 - The ProviderSpec is registered correctly with expected metadata.
 - Model names are prefixed correctly for LiteLLM routing via OpenAI-compatible API.
 - Auto-detection by api_base keyword works.
-- Default model (deepseek/deepseek-v3.2) and multi-model IDs route correctly.
+- Default model (moonshotai/kimi-k2.5) and multi-model IDs route correctly.
 """
 
 from __future__ import annotations
@@ -51,23 +51,23 @@ def test_novita_detected_by_base_keyword() -> None:
 
 @pytest.mark.asyncio
 async def test_novita_prefixes_default_model() -> None:
-    """Default model deepseek/deepseek-v3.2 should get openai/ prefix for LiteLLM."""
+    """Default model moonshotai/kimi-k2.5 should get openai/ prefix for LiteLLM."""
     mock_acompletion = AsyncMock(return_value=_fake_response())
 
     with patch("nanobot.providers.litellm_provider.acompletion", mock_acompletion):
         provider = LiteLLMProvider(
             api_key="novita-test-key",
             api_base="https://api.novita.ai/openai",
-            default_model="deepseek/deepseek-v3.2",
+            default_model="moonshotai/kimi-k2.5",
             provider_name="novita",
         )
         await provider.chat(
             messages=[{"role": "user", "content": "hello"}],
-            model="deepseek/deepseek-v3.2",
+            model="moonshotai/kimi-k2.5",
         )
 
     call_kwargs = mock_acompletion.call_args.kwargs
-    assert call_kwargs["model"] == "openai/deepseek/deepseek-v3.2", (
+    assert call_kwargs["model"] == "openai/moonshotai/kimi-k2.5", (
         "Novita models need openai/ prefix for LiteLLM OpenAI-compatible routing"
     )
 
