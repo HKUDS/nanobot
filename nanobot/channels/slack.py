@@ -5,25 +5,59 @@ import re
 from typing import Any
 
 from loguru import logger
-from slack_sdk.socket_mode.websockets import SocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
+from slack_sdk.socket_mode.websockets import SocketModeClient
 from slack_sdk.web.async_client import AsyncWebClient
-
 from slackify_markdown import slackify_markdown
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
+from pydantic import Field
+
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import SlackConfig
+from nanobot.config.schema import Base
+
+
+class SlackDMConfig(Base):
+    """Slack DM policy configuration."""
+
+    enabled: bool = True
+    policy: str = "open"
+    allow_from: list[str] = Field(default_factory=list)
+
+
+class SlackConfig(Base):
+    """Slack channel configuration."""
+
+    enabled: bool = False
+    mode: str = "socket"
+    webhook_path: str = "/slack/events"
+    bot_token: str = ""
+    app_token: str = ""
+    user_token_read_only: bool = True
+    reply_in_thread: bool = True
+    react_emoji: str = "eyes"
+    done_emoji: str = "white_check_mark"
+    allow_from: list[str] = Field(default_factory=list)
+    group_policy: str = "mention"
+    group_allow_from: list[str] = Field(default_factory=list)
+    dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
 
 
 class SlackChannel(BaseChannel):
     """Slack channel using Socket Mode."""
 
     name = "slack"
+    display_name = "Slack"
 
-    def __init__(self, config: SlackConfig, bus: MessageBus):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return SlackConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = SlackConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: SlackConfig = config
         self._web_client: AsyncWebClient | None = None
@@ -36,7 +70,7 @@ class SlackChannel(BaseChannel):
             logger.error("Slack bot/app token not configured")
             return
         if self.config.mode != "socket":
-            logger.error(f"Unsupported Slack mode: {self.config.mode}")
+            logger.error("Unsupported Slack mode: {}", self.config.mode)
             return
 
         self._running = True
@@ -53,9 +87,9 @@ class SlackChannel(BaseChannel):
         try:
             auth = await self._web_client.auth_test()
             self._bot_user_id = auth.get("user_id")
-            logger.info(f"Slack bot connected as {self._bot_user_id}")
+            logger.info("Slack bot connected as {}", self._bot_user_id)
         except Exception as e:
-            logger.warning(f"Slack auth_test failed: {e}")
+            logger.warning("Slack auth_test failed: {}", e)
 
         logger.info("Starting Slack Socket Mode client...")
         await self._socket_client.connect()
@@ -70,7 +104,7 @@ class SlackChannel(BaseChannel):
             try:
                 await self._socket_client.close()
             except Exception as e:
-                logger.warning(f"Slack socket close failed: {e}")
+                logger.warning("Slack socket close failed: {}", e)
             self._socket_client = None
 
     async def send(self, msg: OutboundMessage) -> None:
@@ -82,15 +116,35 @@ class SlackChannel(BaseChannel):
             slack_meta = msg.metadata.get("slack", {}) if msg.metadata else {}
             thread_ts = slack_meta.get("thread_ts")
             channel_type = slack_meta.get("channel_type")
-            # Only reply in thread for channel/group messages; DMs don't use threads
-            use_thread = thread_ts and channel_type != "im"
-            await self._web_client.chat_postMessage(
-                channel=msg.chat_id,
-                text=self._to_mrkdwn(msg.content),
-                thread_ts=thread_ts if use_thread else None,
-            )
+            # Slack DMs don't use threads; channel/group replies may keep thread_ts.
+            thread_ts_param = thread_ts if thread_ts and channel_type != "im" else None
+
+            # Slack rejects empty text payloads. Keep media-only messages media-only,
+            # but send a single blank message when the bot has no text or files to send.
+            if msg.content or not (msg.media or []):
+                await self._web_client.chat_postMessage(
+                    channel=msg.chat_id,
+                    text=self._to_mrkdwn(msg.content) if msg.content else " ",
+                    thread_ts=thread_ts_param,
+                )
+
+            for media_path in msg.media or []:
+                try:
+                    await self._web_client.files_upload_v2(
+                        channel=msg.chat_id,
+                        file=media_path,
+                        thread_ts=thread_ts_param,
+                    )
+                except Exception as e:
+                    logger.error("Failed to upload file {}: {}", media_path, e)
+
+            # Update reaction emoji when the final (non-progress) response is sent
+            if not (msg.metadata or {}).get("_progress"):
+                event = slack_meta.get("event", {})
+                await self._update_react_emoji(msg.chat_id, event.get("ts"))
+
         except Exception as e:
-            logger.error(f"Error sending Slack message: {e}")
+            logger.error("Error sending Slack message: {}", e)
 
     async def _on_socket_request(
         self,
@@ -164,20 +218,49 @@ class SlackChannel(BaseChannel):
                     timestamp=event.get("ts"),
                 )
         except Exception as e:
-            logger.debug(f"Slack reactions_add failed: {e}")
+            logger.debug("Slack reactions_add failed: {}", e)
 
-        await self._handle_message(
-            sender_id=sender_id,
-            chat_id=chat_id,
-            content=text,
-            metadata={
-                "slack": {
-                    "event": event,
-                    "thread_ts": thread_ts,
-                    "channel_type": channel_type,
-                }
-            },
-        )
+        # Thread-scoped session key for channel/group messages
+        session_key = f"slack:{chat_id}:{thread_ts}" if thread_ts and channel_type != "im" else None
+
+        try:
+            await self._handle_message(
+                sender_id=sender_id,
+                chat_id=chat_id,
+                content=text,
+                metadata={
+                    "slack": {
+                        "event": event,
+                        "thread_ts": thread_ts,
+                        "channel_type": channel_type,
+                    },
+                },
+                session_key=session_key,
+            )
+        except Exception:
+            logger.exception("Error handling Slack message from {}", sender_id)
+
+    async def _update_react_emoji(self, chat_id: str, ts: str | None) -> None:
+        """Remove the in-progress reaction and optionally add a done reaction."""
+        if not self._web_client or not ts:
+            return
+        try:
+            await self._web_client.reactions_remove(
+                channel=chat_id,
+                name=self.config.react_emoji,
+                timestamp=ts,
+            )
+        except Exception as e:
+            logger.debug("Slack reactions_remove failed: {}", e)
+        if self.config.done_emoji:
+            try:
+                await self._web_client.reactions_add(
+                    channel=chat_id,
+                    name=self.config.done_emoji,
+                    timestamp=ts,
+                )
+            except Exception as e:
+                logger.debug("Slack done reaction failed: {}", e)
 
     def _is_allowed(self, sender_id: str, chat_id: str, channel_type: str) -> bool:
         if channel_type == "im":
@@ -209,6 +292,11 @@ class SlackChannel(BaseChannel):
         return re.sub(rf"<@{re.escape(self._bot_user_id)}>\s*", "", text).strip()
 
     _TABLE_RE = re.compile(r"(?m)^\|.*\|$(?:\n\|[\s:|-]*\|$)(?:\n\|.*\|$)*")
+    _CODE_FENCE_RE = re.compile(r"```[\s\S]*?```")
+    _INLINE_CODE_RE = re.compile(r"`[^`]+`")
+    _LEFTOVER_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+    _LEFTOVER_HEADER_RE = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
+    _BARE_URL_RE = re.compile(r"(?<![|<])(https?://\S+)")
 
     @classmethod
     def _to_mrkdwn(cls, text: str) -> str:
@@ -216,7 +304,26 @@ class SlackChannel(BaseChannel):
         if not text:
             return ""
         text = cls._TABLE_RE.sub(cls._convert_table, text)
-        return slackify_markdown(text)
+        return cls._fixup_mrkdwn(slackify_markdown(text))
+
+    @classmethod
+    def _fixup_mrkdwn(cls, text: str) -> str:
+        """Fix markdown artifacts that slackify_markdown misses."""
+        code_blocks: list[str] = []
+
+        def _save_code(m: re.Match) -> str:
+            code_blocks.append(m.group(0))
+            return f"\x00CB{len(code_blocks) - 1}\x00"
+
+        text = cls._CODE_FENCE_RE.sub(_save_code, text)
+        text = cls._INLINE_CODE_RE.sub(_save_code, text)
+        text = cls._LEFTOVER_BOLD_RE.sub(r"*\1*", text)
+        text = cls._LEFTOVER_HEADER_RE.sub(r"*\1*", text)
+        text = cls._BARE_URL_RE.sub(lambda m: m.group(0).replace("&amp;", "&"), text)
+
+        for i, block in enumerate(code_blocks):
+            text = text.replace(f"\x00CB{i}\x00", block)
+        return text
 
     @staticmethod
     def _convert_table(match: re.Match) -> str:
@@ -234,4 +341,3 @@ class SlackChannel(BaseChannel):
             if parts:
                 rows.append(" · ".join(parts))
         return "\n".join(rows)
-
