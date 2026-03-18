@@ -2,11 +2,14 @@
 
 import asyncio
 import json
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
 from loguru import logger
+
+from nanobot.agent.monitoring import add_llm_call_step, _AGENTSCOPE_AVAILABLE
 
 
 @dataclass
@@ -89,6 +92,14 @@ class LLMProvider(ABC):
         "server error",
         "temporarily unavailable",
     )
+    _IMAGE_UNSUPPORTED_MARKERS = (
+        "image_url is only supported",
+        "does not support image",
+        "images are not supported",
+        "image input is not supported",
+        "image_url is not supported",
+        "unsupported image input",
+    )
 
     _SENTINEL = object()
 
@@ -99,7 +110,11 @@ class LLMProvider(ABC):
 
     @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Sanitize message content: fix empty blocks, strip internal _meta fields."""
+        """Replace empty text content that causes provider 400 errors.
+
+        Empty content can appear when MCP tools return nothing. Most providers
+        reject empty-string content or empty text blocks in list content.
+        """
         result: list[dict[str, Any]] = []
         for msg in messages:
             content = msg.get("content")
@@ -111,25 +126,18 @@ class LLMProvider(ABC):
                 continue
 
             if isinstance(content, list):
-                new_items: list[Any] = []
-                changed = False
-                for item in content:
-                    if (
+                filtered = [
+                    item for item in content
+                    if not (
                         isinstance(item, dict)
                         and item.get("type") in ("text", "input_text", "output_text")
                         and not item.get("text")
-                    ):
-                        changed = True
-                        continue
-                    if isinstance(item, dict) and "_meta" in item:
-                        new_items.append({k: v for k, v in item.items() if k != "_meta"})
-                        changed = True
-                    else:
-                        new_items.append(item)
-                if changed:
+                    )
+                ]
+                if len(filtered) != len(content):
                     clean = dict(msg)
-                    if new_items:
-                        clean["content"] = new_items
+                    if filtered:
+                        clean["content"] = filtered
                     elif msg.get("role") == "assistant" and msg.get("tool_calls"):
                         clean["content"] = None
                     else:
@@ -192,6 +200,11 @@ class LLMProvider(ABC):
         err = (content or "").lower()
         return any(marker in err for marker in cls._TRANSIENT_ERROR_MARKERS)
 
+    @classmethod
+    def _is_image_unsupported_error(cls, content: str | None) -> bool:
+        err = (content or "").lower()
+        return any(marker in err for marker in cls._IMAGE_UNSUPPORTED_MARKERS)
+
     @staticmethod
     def _strip_image_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
         """Replace image_url blocks with text placeholder. Returns None if no images found."""
@@ -203,9 +216,7 @@ class LLMProvider(ABC):
                 new_content = []
                 for b in content:
                     if isinstance(b, dict) and b.get("type") == "image_url":
-                        path = (b.get("_meta") or {}).get("path", "")
-                        placeholder = f"[image: {path}]" if path else "[image omitted]"
-                        new_content.append({"type": "text", "text": placeholder})
+                        new_content.append({"type": "text", "text": "[image omitted]"})
                         found = True
                     else:
                         new_content.append(b)
@@ -252,17 +263,31 @@ class LLMProvider(ABC):
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
         )
 
+        start_time = time.time()
+        final_model = model or self.get_default_model()
+        
         for attempt, delay in enumerate(self._CHAT_RETRY_DELAYS, start=1):
             response = await self._safe_chat(**kw)
 
             if response.finish_reason != "error":
+                if _AGENTSCOPE_AVAILABLE:
+                    latency_ms = (time.time() - start_time) * 1000
+                    add_llm_call_step(final_model, messages, tools or [], response, latency_ms)
                 return response
 
             if not self._is_transient_error(response.content):
-                stripped = self._strip_image_content(messages)
-                if stripped is not None:
-                    logger.warning("Non-transient LLM error with image content, retrying without images")
-                    return await self._safe_chat(**{**kw, "messages": stripped})
+                if self._is_image_unsupported_error(response.content):
+                    stripped = self._strip_image_content(messages)
+                    if stripped is not None:
+                        logger.warning("Model does not support image input, retrying without images")
+                        response = await self._safe_chat(**{**kw, "messages": stripped})
+                        if _AGENTSCOPE_AVAILABLE:
+                            latency_ms = (time.time() - start_time) * 1000
+                            add_llm_call_step(final_model, messages, tools or [], response, latency_ms)
+                        return response
+                if _AGENTSCOPE_AVAILABLE:
+                    latency_ms = (time.time() - start_time) * 1000
+                    add_llm_call_step(final_model, messages, tools or [], response, latency_ms)
                 return response
 
             logger.warning(
@@ -272,7 +297,11 @@ class LLMProvider(ABC):
             )
             await asyncio.sleep(delay)
 
-        return await self._safe_chat(**kw)
+        response = await self._safe_chat(**kw)
+        if _AGENTSCOPE_AVAILABLE:
+            latency_ms = (time.time() - start_time) * 1000
+            add_llm_call_step(final_model, messages, tools or [], response, latency_ms)
+        return response
 
     @abstractmethod
     def get_default_model(self) -> str:
