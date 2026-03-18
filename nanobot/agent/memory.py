@@ -17,6 +17,16 @@ if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session, SessionManager
 
+# AgentScope monitoring
+try:
+    from nanobot.agent.monitoring import (
+        add_memory_step,
+        add_context_window_step,
+        _AGENTSCOPE_AVAILABLE
+    )
+except ImportError:
+    _AGENTSCOPE_AVAILABLE = False
+
 
 _SAVE_MEMORY_TOOL = [
     {
@@ -319,9 +329,20 @@ class MemoryConsolidator:
                     source,
                 )
                 return
-
+            
+            # AgentScope: Record context window management
+            original_count = len(session.messages)
+            
             for round_num in range(self._MAX_CONSOLIDATION_ROUNDS):
                 if estimated <= target:
+                    # Record final state after consolidation
+                    if _AGENTSCOPE_AVAILABLE and round_num > 0:
+                        add_context_window_step(
+                            operation='consolidate',
+                            original_count=original_count,
+                            new_count=len(session.messages),
+                            reason=f'Token limit: {estimated}/{self.context_window_tokens}'
+                        )
                     return
 
                 boundary = self.pick_consolidation_boundary(session, max(1, estimated - target))

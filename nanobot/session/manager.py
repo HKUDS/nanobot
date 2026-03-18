@@ -12,6 +12,15 @@ from loguru import logger
 from nanobot.config.paths import get_legacy_sessions_dir
 from nanobot.utils.helpers import ensure_dir, safe_filename
 
+# AgentScope monitoring
+try:
+    from nanobot.agent.monitoring import (
+        add_session_lifecycle_step,
+        _AGENTSCOPE_AVAILABLE
+    )
+except ImportError:
+    _AGENTSCOPE_AVAILABLE = False
+
 
 @dataclass
 class Session:
@@ -138,6 +147,21 @@ class SessionManager:
         session = self._load(key)
         if session is None:
             session = Session(key=key)
+            # AgentScope: Record new session creation
+            if _AGENTSCOPE_AVAILABLE:
+                add_session_lifecycle_step(
+                    event='created',
+                    session_key=key,
+                    details='New session initialized'
+                )
+        else:
+            # AgentScope: Record session loaded
+            if _AGENTSCOPE_AVAILABLE:
+                add_session_lifecycle_step(
+                    event='loaded',
+                    session_key=key,
+                    details=f'Messages: {len(session.messages)}'
+                )
 
         self._cache[key] = session
         return session
@@ -207,6 +231,14 @@ class SessionManager:
                 f.write(json.dumps(msg, ensure_ascii=False) + "\n")
 
         self._cache[session.key] = session
+        
+        # AgentScope: Record session save
+        if _AGENTSCOPE_AVAILABLE:
+            add_session_lifecycle_step(
+                event='saved',
+                session_key=session.key,
+                details=f'Messages: {len(session.messages)}'
+            )
 
     def invalidate(self, key: str) -> None:
         """Remove a session from the in-memory cache."""

@@ -19,7 +19,16 @@ from nanobot.agent.monitoring import (
     start_trace,
     finish_trace,
     add_context_building_step,
+    add_llm_call_step,
+    add_tool_execution_step,
+    add_skill_trigger_step,
     add_memory_step,
+    add_prompt_building_step,
+    add_context_window_step,
+    add_retry_step,
+    add_rate_limit_step,
+    add_session_lifecycle_step,
+    add_skill_loading_step,
     get_trace,
     _AGENTSCOPE_AVAILABLE,
 )
@@ -227,11 +236,27 @@ class AgentLoop:
 
             tool_defs = self.tools.get_definitions()
 
+            # AgentScope: Record LLM call
+            import time
+            llm_start = time.time()
             response = await self.provider.chat_with_retry(
                 messages=messages,
                 tools=tool_defs,
                 model=self.model,
             )
+            llm_latency = (time.time() - llm_start) * 1000
+            
+            if _AGENTSCOPE_AVAILABLE:
+                add_llm_call_step(
+                    model=self.model,
+                    messages_count=len(messages),
+                    tools_count=len(tool_defs),
+                    response_content=response.content if not response.has_tool_calls else None,
+                    tool_calls=[{"name": tc.name, "args": tc.arguments} for tc in response.tool_calls] if response.has_tool_calls else [],
+                    tokens_in=response.usage.get('prompt_tokens', 0) if response.usage else 0,
+                    tokens_out=response.usage.get('completion_tokens', 0) if response.usage else 0,
+                    latency_ms=llm_latency,
+                )
 
             if response.has_tool_calls:
                 if on_progress:
@@ -256,7 +281,31 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    
+                    # AgentScope: Record tool execution
+                    tool_start = time.time()
+                    try:
+                        result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                        tool_latency = (time.time() - tool_start) * 1000
+                        if _AGENTSCOPE_AVAILABLE:
+                            add_tool_execution_step(
+                                tool_name=tool_call.name,
+                                arguments=tool_call.arguments,
+                                result=result,
+                                latency_ms=tool_latency,
+                            )
+                    except Exception as e:
+                        tool_latency = (time.time() - tool_start) * 1000
+                        if _AGENTSCOPE_AVAILABLE:
+                            add_tool_execution_step(
+                                tool_name=tool_call.name,
+                                arguments=tool_call.arguments,
+                                result=None,
+                                error=str(e),
+                                latency_ms=tool_latency,
+                            )
+                        raise
+                    
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )

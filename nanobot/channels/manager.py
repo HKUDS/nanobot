@@ -36,8 +36,15 @@ class ChannelManager:
 
         groq_key = self.config.providers.groq.api_key
 
+        def _to_camel(snake: str) -> str:
+            parts = snake.split("_")
+            return parts[0] + "".join(p.title() for p in parts[1:])
+
         for name, cls in discover_all().items():
+            # Try snake_case first (attribute), then camelCase (model_extra for plugin channels)
             section = getattr(self.config.channels, name, None)
+            if section is None:
+                section = (self.config.channels.model_extra or {}).get(_to_camel(name))
             if section is None:
                 continue
             enabled = (
@@ -50,7 +57,9 @@ class ChannelManager:
             try:
                 channel = cls(section, self.bus)
                 channel.transcription_api_key = groq_key
-                self.channels[name] = channel
+                # Use cls.name (not the module name) so _dispatch_outbound can
+                # match msg.channel (which is also set to channel.name).
+                self.channels[cls.name] = channel
                 logger.info("{} channel enabled", cls.display_name)
             except Exception as e:
                 logger.warning("{} channel not available: {}", name, e)

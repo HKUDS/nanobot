@@ -9,8 +9,6 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.agent.monitoring import add_llm_call_step, _AGENTSCOPE_AVAILABLE
-
 
 @dataclass
 class ToolCallRequest:
@@ -263,6 +261,9 @@ class LLMProvider(ABC):
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
         )
 
+        # Lazy import to avoid circular imports
+        from nanobot.agent.monitoring import add_llm_call_step, add_retry_step, add_rate_limit_step, _AGENTSCOPE_AVAILABLE
+        
         start_time = time.time()
         final_model = model or self.get_default_model()
         
@@ -272,7 +273,16 @@ class LLMProvider(ABC):
             if response.finish_reason != "error":
                 if _AGENTSCOPE_AVAILABLE:
                     latency_ms = (time.time() - start_time) * 1000
-                    add_llm_call_step(final_model, messages, tools or [], response, latency_ms)
+                    add_llm_call_step(
+                        final_model, 
+                        len(messages), 
+                        len(tools or []), 
+                        response.content if not response.has_tool_calls else None,
+                        [{"name": tc.name, "args": tc.arguments} for tc in response.tool_calls] if response.has_tool_calls else [],
+                        response.usage.get('prompt_tokens', 0) if response.usage else 0,
+                        response.usage.get('completion_tokens', 0) if response.usage else 0,
+                        latency_ms
+                    )
                 return response
 
             if not self._is_transient_error(response.content):
@@ -283,13 +293,42 @@ class LLMProvider(ABC):
                         response = await self._safe_chat(**{**kw, "messages": stripped})
                         if _AGENTSCOPE_AVAILABLE:
                             latency_ms = (time.time() - start_time) * 1000
-                            add_llm_call_step(final_model, messages, tools or [], response, latency_ms)
+                            add_llm_call_step(
+                                final_model, 
+                                len(messages), 
+                                len(tools or []), 
+                                response.content if not response.has_tool_calls else None,
+                                [{"name": tc.name, "args": tc.arguments} for tc in response.tool_calls] if response.has_tool_calls else [],
+                                response.usage.get('prompt_tokens', 0) if response.usage else 0,
+                                response.usage.get('completion_tokens', 0) if response.usage else 0,
+                                latency_ms
+                            )
                         return response
                 if _AGENTSCOPE_AVAILABLE:
                     latency_ms = (time.time() - start_time) * 1000
-                    add_llm_call_step(final_model, messages, tools or [], response, latency_ms)
+                    add_llm_call_step(
+                        final_model, 
+                        len(messages), 
+                        len(tools or []), 
+                        response.content if not response.has_tool_calls else None,
+                        [{"name": tc.name, "args": tc.arguments} for tc in response.tool_calls] if response.has_tool_calls else [],
+                        response.usage.get('prompt_tokens', 0) if response.usage else 0,
+                        response.usage.get('completion_tokens', 0) if response.usage else 0,
+                        latency_ms
+                    )
                 return response
 
+            is_last_attempt = attempt >= len(self._CHAT_RETRY_DELAYS)
+            
+            if _AGENTSCOPE_AVAILABLE:
+                add_retry_step(
+                    attempt=attempt,
+                    max_attempts=len(self._CHAT_RETRY_DELAYS),
+                    error_type="transient_error",
+                    delay=delay,
+                    will_retry=not is_last_attempt
+                )
+            
             logger.warning(
                 "LLM transient error (attempt {}/{}), retrying in {}s: {}",
                 attempt, len(self._CHAT_RETRY_DELAYS), delay,
@@ -300,7 +339,16 @@ class LLMProvider(ABC):
         response = await self._safe_chat(**kw)
         if _AGENTSCOPE_AVAILABLE:
             latency_ms = (time.time() - start_time) * 1000
-            add_llm_call_step(final_model, messages, tools or [], response, latency_ms)
+            add_llm_call_step(
+                final_model, 
+                len(messages), 
+                len(tools or []), 
+                response.content if not response.has_tool_calls else None,
+                [{"name": tc.name, "args": tc.arguments} for tc in response.tool_calls] if response.has_tool_calls else [],
+                response.usage.get('prompt_tokens', 0) if response.usage else 0,
+                response.usage.get('completion_tokens', 0) if response.usage else 0,
+                latency_ms
+            )
         return response
 
     @abstractmethod
