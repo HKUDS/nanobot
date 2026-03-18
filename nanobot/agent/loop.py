@@ -15,6 +15,8 @@ from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryConsolidator
+from nanobot.agent.messages import AgentMessage
+from nanobot.agent.steering import InterruptionChecker
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
@@ -32,6 +34,9 @@ from nanobot.session.manager import Session, SessionManager
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, InputLimitsConfig, WebSearchConfig
     from nanobot.cron.service import CronService
+
+TransformContextHook = Callable[[list[AgentMessage]], list[AgentMessage]]
+ConvertToLlmHook = Callable[[list[AgentMessage]], list[dict[str, Any]]]
 
 
 class AgentLoop:
@@ -65,6 +70,10 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        *,
+        enable_steering: bool = False,
+        transform_context: TransformContextHook | None = None,
+        convert_to_llm: ConvertToLlmHook | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, InputLimitsConfig, WebSearchConfig
 
@@ -81,6 +90,11 @@ class AgentLoop:
         self.input_limits = input_limits or InputLimitsConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+
+        # Dual-layer architecture (opt-in)
+        self.enable_steering = enable_steering
+        self._transform_context = transform_context
+        self._convert_to_llm = convert_to_llm or AgentMessage.to_llm_list
 
         self.context = ContextBuilder(workspace, input_limits=self.input_limits)
         self.sessions = session_manager or SessionManager(workspace)
@@ -103,6 +117,7 @@ class AgentLoop:
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
+        self._interrupt_checkers: dict[str, InterruptionChecker] = {}
         self._processing_lock = asyncio.Lock()
         self.memory_consolidator = MemoryConsolidator(
             workspace=workspace,
@@ -206,6 +221,7 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        interruption_checker: InterruptionChecker | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop."""
         messages = initial_messages
@@ -213,13 +229,40 @@ class AgentLoop:
         final_content = None
         tools_used: list[str] = []
 
+        def _drain_interruptions() -> str | None:
+            """Drain pending interruptions into a combined user message, or None."""
+            if not interruption_checker:
+                return None
+            pending = interruption_checker.drain_all()
+            if not pending:
+                return None
+            combined = "\n\n---\n\n".join(m.content for m in pending)
+            return (
+                "[The user just sent a new message while you were working. "
+                "Read it and decide: continue current work, switch to the "
+                "new request, or address both.]\n\n" + combined
+            )
+
         while iteration < self.max_iterations:
             iteration += 1
 
             tool_defs = self.tools.get_definitions()
 
+            # Steering: check for interruptions before LLM call
+            if injection := _drain_interruptions():
+                messages.append({"role": "user", "content": injection})
+                logger.info("Steering: injected interruption before LLM call")
+
+            # Context hooks: transform before LLM call (opt-in)
+            if self._transform_context:
+                agent_msgs = AgentMessage.from_dict_list(messages)
+                agent_msgs = self._transform_context(agent_msgs)
+                llm_messages = self._convert_to_llm(agent_msgs)
+            else:
+                llm_messages = messages
+
             response = await self.provider.chat_with_retry(
-                messages=messages,
+                messages=llm_messages,
                 tools=tool_defs,
                 model=self.model,
             )
@@ -243,15 +286,23 @@ class AgentLoop:
                     thinking_blocks=response.thinking_blocks,
                 )
 
+                # Steering: check before launching tools — cancel all on interruption
+                if injection := _drain_interruptions():
+                    logger.info("Steering: interruption before tools, cancelling {} tools", len(response.tool_calls))
+                    for tc in response.tool_calls:
+                        messages = self.context.add_tool_result(
+                            messages, tc.id, tc.name, "CANCELLED: User interrupted",
+                        )
+                    messages.append({"role": "user", "content": injection})
+                    if on_progress:
+                        await on_progress("New message merged, tools cancelled", tool_hint=True)
+                    continue
+
                 for tc in response.tool_calls:
                     tools_used.append(tc.name)
                     args_str = json.dumps(tc.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tc.name, args_str[:200])
 
-                # Execute all tool calls concurrently — the LLM batches
-                # independent calls in a single response on purpose.
-                # return_exceptions=True ensures all results are collected
-                # even if one tool is cancelled or raises BaseException.
                 results = await asyncio.gather(*(
                     self.tools.execute(tc.name, tc.arguments)
                     for tc in response.tool_calls
@@ -291,7 +342,7 @@ class AgentLoop:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
         await self._connect_mcp()
-        logger.info("Agent loop started")
+        logger.info("Agent loop started (steering={})", self.enable_steering)
 
         while self._running:
             try:
@@ -307,10 +358,20 @@ class AgentLoop:
                 await self._handle_stop(msg)
             elif cmd == "/restart":
                 await self._handle_restart(msg)
-            else:
-                task = asyncio.create_task(self._dispatch(msg))
-                self._active_tasks.setdefault(msg.session_key, []).append(task)
-                task.add_done_callback(lambda t, k=msg.session_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
+                continue
+
+            # Steering: if this session already has an active task, signal interruption
+            # instead of queuing a new task.  The running loop will merge the message.
+            if self.enable_steering:
+                active = [t for t in self._active_tasks.get(msg.session_key, []) if not t.done()]
+                if active and msg.session_key in self._interrupt_checkers:
+                    await self._interrupt_checkers[msg.session_key].signal(msg)
+                    logger.info("Steering: signaled interruption for {}", msg.session_key)
+                    continue
+
+            task = asyncio.create_task(self._dispatch(msg))
+            self._active_tasks.setdefault(msg.session_key, []).append(task)
+            task.add_done_callback(lambda t, k=msg.session_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
 
     async def _handle_stop(self, msg: InboundMessage) -> None:
         """Cancel all active tasks and subagents for the session."""
@@ -344,9 +405,16 @@ class AgentLoop:
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message under the global lock."""
+        checker: InterruptionChecker | None = None
+        if self.enable_steering:
+            checker = InterruptionChecker()
+            self._interrupt_checkers[msg.session_key] = checker
+
         async with self._processing_lock:
             try:
-                response = await self._process_message(msg)
+                response = await self._process_message(
+                    msg, interruption_checker=checker,
+                )
                 if response is not None:
                     await self.bus.publish_outbound(response)
                 elif msg.channel == "cli":
@@ -363,6 +431,14 @@ class AgentLoop:
                     channel=msg.channel, chat_id=msg.chat_id,
                     content="Sorry, I encountered an error.",
                 ))
+            finally:
+                if self.enable_steering:
+                    checker = self._interrupt_checkers.pop(msg.session_key, None)
+                    # Re-publish orphaned messages so they're processed as new tasks
+                    if checker:
+                        for orphan in checker.drain_all():
+                            logger.info("Steering: re-queuing orphaned message for {}", msg.session_key)
+                            await self.bus.publish_inbound(orphan)
 
     async def close_mcp(self) -> None:
         """Drain pending background archives, then close MCP connections."""
@@ -415,6 +491,7 @@ class AgentLoop:
         msg: InboundMessage,
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        interruption_checker: InterruptionChecker | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -434,7 +511,9 @@ class AgentLoop:
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, _, all_msgs = await self._run_agent_loop(
+                messages, interruption_checker=interruption_checker,
+            )
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
@@ -495,7 +574,9 @@ class AgentLoop:
             ))
 
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages,
+            on_progress=on_progress or _bus_progress,
+            interruption_checker=interruption_checker,
         )
 
         if final_content is None:
@@ -559,9 +640,20 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        interruption_checker: InterruptionChecker | None = None,
     ) -> str:
-        """Process a message directly (for CLI or cron usage)."""
+        """Process a message directly (for CLI, cron, or gateway usage).
+
+        When *interruption_checker* is supplied, the inner agent loop will
+        check for pending messages at each tool boundary and before each
+        LLM call, enabling real-time steering without cancelling the task.
+        """
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+        response = await self._process_message(
+            msg,
+            session_key=session_key,
+            on_progress=on_progress,
+            interruption_checker=interruption_checker,
+        )
         return response.content if response else ""
