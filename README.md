@@ -900,7 +900,7 @@ Run LLMs locally on Intel GPUs using [OpenVINO Model Server](https://docs.openvi
 
 > Requires Docker and an Intel GPU with driver access (`/dev/dri`).
 
-**1. Pull the model**
+**1. Pull the model** (example):
 
 ```bash
 mkdir -p ov/models && cd ov
@@ -923,7 +923,7 @@ docker run -d \
 
 > This downloads the model weights. Wait for the container to finish before proceeding.
 
-**2. Start the server**
+**2. Start the server** (example):
 
 ```bash
 docker run -d \
@@ -946,7 +946,7 @@ docker run -d \
   --target_device GPU
 ```
 
-**3. Configure nanobot** (merge into `~/.nanobot/config.json`):
+**3. Add to config** (partial — merge into `~/.nanobot/config.json`):
 
 ```json
 {
@@ -964,14 +964,8 @@ docker run -d \
 }
 ```
 
-**4. Chat**
-
-```bash
-nanobot agent
-```
-
 > OVMS is a local server — no API key required. Supports tool calling (`--tool_parser gptoss`), reasoning (`--reasoning_parser gptoss`), and streaming.
-> See the [official OVMS Agentic AI demo](https://docs.openvino.ai/2026/model-server/ovms_docs_llm_quickstart.html) for more details.
+> See the [official OVMS docs](https://docs.openvino.ai/2026/model-server/ovms_docs_llm_quickstart.html) for more details.
 </details>
 
 <details>
