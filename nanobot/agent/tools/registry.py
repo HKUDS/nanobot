@@ -4,7 +4,6 @@ import time
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
-from nanobot.agent.monitoring import add_tool_execution_step, _AGENTSCOPE_AVAILABLE
 
 
 class ToolRegistry:
@@ -46,6 +45,10 @@ class ToolRegistry:
             return f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
 
         start_time = time.time()
+        
+        # Lazy import to avoid circular imports during module load
+        from nanobot.agent.monitoring import add_tool_execution_step, _AGENTSCOPE_AVAILABLE
+        
         try:
             # Attempt to cast parameters to match schema types
             params = tool.cast_params(params)

@@ -27,8 +27,6 @@ try:
         instrumented_tool,
     )
     from agentscope.models import TraceEvent, ExecutionStep, StepType, Status, ToolCall
-    # Keep backward compatibility
-    from agentscope.monitor import set_current_trace as _set_trace, _send_trace
     _AGENTSCOPE_AVAILABLE = True
     _SCHEME3_AVAILABLE = True
     logger.info("AgentScope Scheme 3 monitoring available")
@@ -108,7 +106,10 @@ def start_trace(name: str, tags: List[str], input_query: str) -> Optional[TraceE
     try:
         trace = TraceEvent(name=name, tags=tags)
         trace.input_query = input_query[:1000]
-        _set_trace(trace)
+        
+        # Lazy import to avoid event loop issues during module import
+        from agentscope.monitor import set_current_trace
+        set_current_trace(trace)
         
         # Add input step
         add_step(
@@ -149,6 +150,8 @@ def finish_trace(trace: Optional[TraceEvent], output: Optional[str], error: Opti
             trace.finish(Status.SUCCESS)
             logger.debug(f"AgentScope: Trace {trace.id} finished successfully")
         
+        # Lazy import to avoid event loop issues during module import
+        from agentscope.monitor import _send_trace
         _send_trace(trace)
     except Exception as e:
         logger.warning(f"AgentScope: Failed to finish trace: {e}")

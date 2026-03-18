@@ -214,7 +214,9 @@ class LLMProvider(ABC):
                 new_content = []
                 for b in content:
                     if isinstance(b, dict) and b.get("type") == "image_url":
-                        new_content.append({"type": "text", "text": "[image omitted]"})
+                        path = (b.get("_meta") or {}).get("path", "")
+                        placeholder = f"[image: {path}]" if path else "[image omitted]"
+                        new_content.append({"type": "text", "text": placeholder})
                         found = True
                     else:
                         new_content.append(b)
@@ -286,24 +288,24 @@ class LLMProvider(ABC):
                 return response
 
             if not self._is_transient_error(response.content):
-                if self._is_image_unsupported_error(response.content):
-                    stripped = self._strip_image_content(messages)
-                    if stripped is not None:
-                        logger.warning("Model does not support image input, retrying without images")
-                        response = await self._safe_chat(**{**kw, "messages": stripped})
-                        if _AGENTSCOPE_AVAILABLE:
-                            latency_ms = (time.time() - start_time) * 1000
-                            add_llm_call_step(
-                                final_model, 
-                                len(messages), 
-                                len(tools or []), 
-                                response.content if not response.has_tool_calls else None,
-                                [{"name": tc.name, "args": tc.arguments} for tc in response.tool_calls] if response.has_tool_calls else [],
-                                response.usage.get('prompt_tokens', 0) if response.usage else 0,
-                                response.usage.get('completion_tokens', 0) if response.usage else 0,
-                                latency_ms
-                            )
-                        return response
+                # Any non-transient error: retry once with images stripped if present
+                stripped = self._strip_image_content(messages)
+                if stripped is not None:
+                    logger.warning("Non-transient LLM error with image content, retrying without images")
+                    response = await self._safe_chat(**{**kw, "messages": stripped})
+                    if _AGENTSCOPE_AVAILABLE:
+                        latency_ms = (time.time() - start_time) * 1000
+                        add_llm_call_step(
+                            final_model, 
+                            len(messages), 
+                            len(tools or []), 
+                            response.content if not response.has_tool_calls else None,
+                            [{"name": tc.name, "args": tc.arguments} for tc in response.tool_calls] if response.has_tool_calls else [],
+                            response.usage.get('prompt_tokens', 0) if response.usage else 0,
+                            response.usage.get('completion_tokens', 0) if response.usage else 0,
+                            latency_ms
+                        )
+                    return response
                 if _AGENTSCOPE_AVAILABLE:
                     latency_ms = (time.time() - start_time) * 1000
                     add_llm_call_step(
