@@ -110,7 +110,6 @@ class StreamingLLMCaller:
         finish_reason = "stop"
         usage: dict[str, int] = {}
         chunk_count = 0
-        last_flushed = 0
 
         async for chunk in self.provider.stream_chat(
             messages=messages,
@@ -133,28 +132,21 @@ class StreamingLLMCaller:
 
             chunk_count += 1
 
-            # Periodically flush accumulated content to the channel
-            chars_since = sum(len(p) for p in content_parts[last_flushed:])
-            if (
-                chars_since >= 80
-                and chunk_count % self.STREAM_FLUSH_INTERVAL == 0
-                and not chunk.done
-            ):
-                partial = "".join(content_parts)
-                clean = strip_think(partial)
-                if clean:
-                    await on_progress(clean, streaming=True)
-                last_flushed = len(content_parts)
-
         full_content = "".join(content_parts) or None
         full_reasoning = "".join(reasoning_parts) or None
+        full_clean = strip_think(full_content) if full_content else None
 
-        # Final flush: ensure the channel has the complete text before
-        # post-processing (e.g. self-check/verifier) might alter it.
-        if full_content:
-            clean = strip_think(full_content)
-            if clean:
-                await on_progress(clean, streaming=True)
+        if tool_calls:
+            # Intermediate LLM call — text is thinking/planning, not the final
+            # response.  Route as a status event so it appears in the header
+            # indicator rather than polluting the message body.
+            if full_clean:
+                label = full_clean.split("\n")[0][:80].strip()
+                await on_progress("", status_code="thinking", status_label=label or "Thinking…")
+        else:
+            # Final response — emit full text so the channel can display it.
+            if full_clean:
+                await on_progress(full_clean, streaming=True)
 
         from nanobot.providers.base import LLMResponse
 

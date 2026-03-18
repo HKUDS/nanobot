@@ -7,6 +7,10 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`FailureClass` enum**: six-way failure classification (`PERMANENT_CONFIG`, `PERMANENT_AUTH`, `TRANSIENT_TIMEOUT`, `TRANSIENT_ERROR`, `LOGICAL_ERROR`, `UNKNOWN`) with `is_permanent` property for immediate tool suppression
+- **`classify_failure()`**: static method on `ToolCallTracker` — classifies tool errors from `error_type` metadata and keyword context; narrows `"no such"` / `"not found"` matches to command/binary context only to avoid false-positive permanent disabling on file-not-found errors
+- **`_build_failure_prompt()`**: replaces static `failure_strategy.md` injection with a dynamic REFLECT-phase prompt built from live tracker state and per-class recovery guidance
+- **Turn-scoped tool suppression** (`disabled_tools: set[str]` in `_run_agent_loop`): tools that hit the failure threshold or classify as permanently failed are excluded from the LLM's tool list for the current turn only; the registry is never mutated, so suppressed tools become available again in subsequent turns (fixes permanent tool removal regression)
 - **Background missions**: `MissionManager` + `MissionStartTool` / `MissionStatusTool` / `MissionListTool` / `MissionCancelTool` for asynchronous delegated task execution with coordinator routing, structured contracts, task taxonomy, grounding verification, and direct result delivery via `OutboundMessage`
 - **Mission observability**: Langfuse spans wrapping mission execution, `score_current_trace` for grounding, `TraceContext` correlation IDs, `update_current_span` for completion metadata, `tool_span` in `run_tool_loop`
 - **MCP tool sharing**: MCP tools are now available within background missions and delegated agents (shared `MCPToolWrapper` instances, respecting role-based `denied_tools`/`allowed_tools` filters)
@@ -36,6 +40,10 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Release checklist**: step-by-step validation process for releases
 
 ### Changed
+- **`ToolCallTracker.record_failure()`** return type changed from `int` to `tuple[int, FailureClass]` — callers must unpack both values
+- **`failure_strategy.md`** is now a design reference only; runtime failure guidance is generated dynamically by `_build_failure_prompt()` from live tracker state
+- **Context compression** (`summarize_and_compress`) now guarded by an 85% token-budget threshold — skipped on iterations where messages are well under budget (PERF-C1)
+- **`tools_def` list** cached between loop iterations and recomputed only when `disabled_tools` changes (PERF-C2)
 - `_run_agent_loop()` tool execution now logs with `bind_trace()` and batch timing
 - `_process_message()` emits request-complete audit line with duration and tool count
 - Legacy `MetricsCollector` removed — observability now via Langfuse

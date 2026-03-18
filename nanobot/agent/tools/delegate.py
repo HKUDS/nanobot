@@ -40,6 +40,10 @@ _INVESTIGATION_RE = re.compile(
 )
 
 
+# Type alias for a callback that returns available delegation role names
+AvailableRolesFn = Callable[[], list[str]]
+
+
 class DelegateTool(Tool):
     """Delegate a sub-task to a specialist agent via the coordinator."""
 
@@ -47,10 +51,20 @@ class DelegateTool(Tool):
 
     def __init__(self) -> None:
         self._dispatch: DispatchFn | None = None
+        self._available_roles_fn: AvailableRolesFn | None = None
 
     def set_dispatch(self, fn: DispatchFn) -> None:
         """Wire the dispatch callback (called by AgentLoop during setup)."""
         self._dispatch = fn
+
+    def set_available_roles_fn(self, fn: AvailableRolesFn) -> None:
+        """Wire a callback that returns the current list of valid role names."""
+        self._available_roles_fn = fn
+
+    def check_available(self) -> tuple[bool, str | None]:
+        if not self._dispatch:
+            return False, "Delegation not configured"
+        return True, None
 
     @property
     def name(self) -> str:
@@ -98,6 +112,17 @@ class DelegateTool(Tool):
         if not self._dispatch:
             return ToolResult.fail("Delegation not available", error_type="config")
 
+        # Validate target_role against known roles
+        target_role = target_role.strip()
+        if target_role and self._available_roles_fn:
+            available = self._available_roles_fn()
+            if available and target_role not in available:
+                return ToolResult.fail(
+                    f"Unknown delegation role '{target_role}'. "
+                    f"Available roles: {', '.join(available)}",
+                    error_type="unknown_role",
+                )
+
         try:
             dr = await self._dispatch(target_role, task, context or None)
             return self._format_result(dr, task)
@@ -129,9 +154,19 @@ class DelegateParallelTool(Tool):
 
     def __init__(self) -> None:
         self._dispatch: DispatchFn | None = None
+        self._available_roles_fn: AvailableRolesFn | None = None
 
     def set_dispatch(self, fn: DispatchFn) -> None:
         self._dispatch = fn
+
+    def set_available_roles_fn(self, fn: AvailableRolesFn) -> None:
+        """Wire a callback that returns the current list of valid role names."""
+        self._available_roles_fn = fn
+
+    def check_available(self) -> tuple[bool, str | None]:
+        if not self._dispatch:
+            return False, "Delegation not configured"
+        return True, None
 
     @property
     def name(self) -> str:
@@ -187,8 +222,22 @@ class DelegateParallelTool(Tool):
         if not subtasks:
             return ToolResult.fail("At least one subtask required", error_type="validation")
 
+        # Validate all target_role values upfront
+        if self._available_roles_fn:
+            available = self._available_roles_fn()
+            if available:
+                invalid: list[tuple[int, str]] = []
+                for i, st in enumerate(subtasks, 1):
+                    role = st.get("target_role", "").strip()
+                    if role and role not in available:
+                        invalid.append((i, role))
+                if invalid:
+                    lines = [f"Subtask [{i}]: unknown role '{r}'" for i, r in invalid]
+                    lines.append(f"Available roles: {', '.join(available)}")
+                    return ToolResult.fail("\n".join(lines), error_type="unknown_role")
+
         async def _run_one(st: dict[str, str]) -> DelegationResult:
-            role = st.get("target_role", "")
+            role = st.get("target_role", "").strip()
             task = st.get("task", "")
             ctx = st.get("context") or None
             return await self._dispatch(role, task, ctx)  # type: ignore[misc]

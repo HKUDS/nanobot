@@ -381,8 +381,18 @@ class SkillsLoader:
                 remaining.append(skill)
 
         # Pass 2: description keyword matching (lower confidence, fills remaining slots)
+        #
+        # Scoring uses max(precision, recall) so description length does not
+        # penalise skills with detailed descriptions:
+        #   precision = hits / desc_keywords   (original metric — biased against long descs)
+        #   recall    = hits / msg_keywords    (new — how much of the query the skill covers)
+        #   score     = max(precision, recall)
+        #
+        # Both sets are stemmed before comparison so word-form variants
+        # ("summarize" / "summary", "analyze" / "analysis") match correctly.
         if remaining and len(matches) < max_skills:
-            text_words = set(text.split())
+            msg_keywords = self._description_keywords(text)
+            msg_stems = {self._stem(w) for w in msg_keywords}
             scored: list[tuple[float, str]] = []
             for skill in remaining:
                 name = skill["name"]
@@ -390,10 +400,13 @@ class SkillsLoader:
                 keywords = self._description_keywords(desc)
                 if len(keywords) < 2:
                     continue
-                hits = sum(1 for kw in keywords if kw in text_words)
+                desc_stems = {self._stem(w) for w in keywords}
+                hits = len(msg_stems & desc_stems)
                 if hits < 2:
                     continue
-                score = hits / len(keywords)
+                precision = hits / len(desc_stems)
+                recall = hits / len(msg_stems) if msg_stems else 0.0
+                score = max(precision, recall)
                 if score >= 0.2:
                     scored.append((score, name))
             scored.sort(reverse=True)
@@ -457,3 +470,42 @@ class SkillsLoader:
                 seen.add(w)
                 keywords.append(w)
         return keywords
+
+    @staticmethod
+    def _stem(word: str) -> str:
+        """Reduce a word to an approximate stem by stripping common suffixes.
+
+        Handles the most frequent English inflections so that word-form
+        variants match during skill detection (e.g. "summarize"/"summary",
+        "analyze"/"analysis", "schedule"/"schedules", "gate"/"gates").
+        """
+        # Longest suffixes first to avoid partial stripping.
+        suffixes = (
+            "ization",
+            "isation",
+            "ization",
+            "ation",
+            "iness",
+            "iness",
+            "ness",
+            "ment",
+            "tion",
+            "ize",
+            "ise",
+            "ing",
+            "ies",
+            "ied",
+            "ers",
+            "est",
+            "ed",
+            "er",
+            "es",
+            "ly",
+        )
+        for s in suffixes:
+            if word.endswith(s) and len(word) - len(s) >= 3:
+                return word[: -len(s)]
+        # Strip a plain trailing 's' (plurals) when stem would be ≥ 3 chars.
+        if word.endswith("s") and len(word) > 3:
+            return word[:-1]
+        return word

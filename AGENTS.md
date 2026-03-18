@@ -94,7 +94,7 @@ nanobot/
 
 ## Architecture & Refactoring
 
-- Architecture decisions: `docs/adr/` (ADR-001 through ADR-008)
+- Architecture decisions: `docs/adr/` (ADR-001 through ADR-009)
 - Module ownership and import rules: `docs/architecture.md`
 - Refactoring guidelines: `docs/refactoring-principles.md`
 - Reusable prompt files: `.github/prompts/`

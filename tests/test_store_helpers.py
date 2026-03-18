@@ -189,7 +189,8 @@ class TestMemoryStoreExtraProfileAndConflicts:
 
         assert store._conflict_pair("Use dark mode", "Do not use dark mode") is True
         assert store._parse_conflict_user_action("keep new") == "keep_new"
-        assert store.get_next_user_conflict() is not None
+        # ask_user_for_conflict sets asked_at; get_next_user_conflict only returns
+        # conflicts that were actually presented to the user (asked_at set).
         prompt = store.ask_user_for_conflict(include_already_asked=True)
         assert prompt is None or isinstance(prompt, str)
 

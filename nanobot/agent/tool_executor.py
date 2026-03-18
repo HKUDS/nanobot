@@ -54,6 +54,14 @@ class ToolExecutor:
     def unregister(self, name: str) -> None:
         return self._registry.unregister(name)
 
+    def snapshot(self) -> dict[str, Tool]:
+        """Return a shallow copy of the tool set for later restore."""
+        return self._registry.snapshot()
+
+    def restore(self, snap: dict[str, Tool]) -> None:
+        """Replace the current tool set with a previously captured snapshot."""
+        self._registry.restore(snap)
+
     def get_definitions(self) -> list[dict[str, Any]]:
         return self._registry.get_definitions()
 

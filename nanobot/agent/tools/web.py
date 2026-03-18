@@ -87,6 +87,11 @@ class WebSearchTool(Tool):
         """Resolve API key at call time so env/config changes are picked up."""
         return self._init_api_key or os.environ.get("BRAVE_API_KEY", "")
 
+    def check_available(self) -> tuple[bool, str | None]:
+        if not self.api_key:
+            return False, "Brave Search API key not configured"
+        return True, None
+
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> ToolResult:  # type: ignore[override]
         if not self.api_key:
             return ToolResult.fail(

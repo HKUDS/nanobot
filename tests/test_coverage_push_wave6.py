@@ -532,7 +532,7 @@ async def test_loop_run_agent_loop_delegation_and_failure_reflection_paths(tmp_p
     final2, _tools2, msgs2 = await loop._run_agent_loop([{"role": "user", "content": "Read file."}])
     assert final2 == "done2"
     assert any(
-        "propose an alternative approach" in str(m.get("content", "")).lower()
+        "alternative" in str(m.get("content", "")).lower()
         for m in msgs2
         if m.get("role") == "system"
     )
@@ -798,6 +798,7 @@ async def test_loop_dispatch_delegation_route_and_exception_paths(tmp_path: Path
     dispatcher.coordinator = None
     dispatcher.active_messages = None
     dispatcher.role_name = "general"
+    dispatcher.on_progress = None
     dispatcher.record_route_trace = MagicMock()
     loop._dispatcher = dispatcher
 

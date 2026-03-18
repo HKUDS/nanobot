@@ -5,6 +5,12 @@
 
 ## P0 — Critical Path
 
+- [ ] **Capability registry** (ADR-009): Unified tool/skill/role registration with
+  availability checks. Prevents LLM from calling unconfigured tools or delegating to
+  nonexistent roles. See [`docs/agent-intelligence-layers.md`](agent-intelligence-layers.md)
+  for the full 4-layer plan. Target: `agent/capability.py`, `agent/tools/base.py`.
+  Branch: `feature/capability-registry`.
+
 - [ ] **Circuit breaker for LLM providers**: Track consecutive failures per provider,
   trip after N errors, auto-recover after cooldown. Prevents cascading retries when
   a provider is down. Target: `providers/litellm_provider.py`.

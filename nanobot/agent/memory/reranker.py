@@ -16,10 +16,9 @@ The module is gated behind the rollout system:
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 _cross_encoder_cls: Any = None
 _import_attempted = False
@@ -65,9 +64,11 @@ class CrossEncoderReranker:
             return None
         try:
             self._model = _cross_encoder_cls(self._model_name)
-            logger.info("Loaded cross-encoder model: %s", self._model_name)
+            logger.info("Loaded cross-encoder model: {}", self._model_name)
         except Exception:  # crash-barrier: third-party ML model loading
-            logger.warning("Failed to load cross-encoder model %s", self._model_name, exc_info=True)
+            logger.opt(exception=True).warning(
+                "Failed to load cross-encoder model {}", self._model_name
+            )
             self._model = None
         return self._model
 
@@ -113,7 +114,7 @@ class CrossEncoderReranker:
         try:
             ce_scores: list[float] = [float(s) for s in model.predict(pairs)]
         except Exception:  # crash-barrier: third-party ML model inference
-            logger.warning("Cross-encoder prediction failed", exc_info=True)
+            logger.opt(exception=True).warning("Cross-encoder prediction failed")
             return items
 
         # Normalise CE scores to [0, 1] for blending.

@@ -15,6 +15,8 @@ export default defineConfig({
       "/api": {
         target: "http://127.0.0.1:8000",
         changeOrigin: true,
+        // Agent responses can take minutes for complex tasks (spreadsheet analysis, etc.)
+        timeout: 600000,
       },
     },
   },

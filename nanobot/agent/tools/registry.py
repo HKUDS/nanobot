@@ -17,16 +17,15 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 from typing import TYPE_CHECKING, Any
+
+from loguru import logger
 
 from nanobot.agent.observability import tool_span
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tracing import bind_trace
 from nanobot.errors import ToolExecutionError, ToolNotFoundError, ToolValidationError
-
-logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from nanobot.agent.tools.result_cache import ToolResultCache, _ChatProvider
@@ -68,6 +67,14 @@ class ToolRegistry:
         """Unregister a tool by name."""
         self._tools.pop(name, None)
 
+    def snapshot(self) -> dict[str, Tool]:
+        """Return a shallow copy of the current tool set for later restore."""
+        return dict(self._tools)
+
+    def restore(self, snap: dict[str, Tool]) -> None:
+        """Replace the current tool set with a previously captured snapshot."""
+        self._tools = snap
+
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""
         return self._tools.get(name)
@@ -77,8 +84,22 @@ class ToolRegistry:
         return name in self._tools
 
     def get_definitions(self) -> list[dict[str, Any]]:
-        """Get all tool definitions in OpenAI format."""
-        return [tool.to_schema() for tool in self._tools.values()]
+        """Get tool definitions in OpenAI format, excluding unavailable tools."""
+        defs = []
+        for tool in self._tools.values():
+            available, _reason = tool.check_available()
+            if available:
+                defs.append(tool.to_schema())
+        return defs
+
+    def get_unavailable_summary(self) -> str:
+        """Return a human-readable summary of unavailable tools for the system prompt."""
+        lines: list[str] = []
+        for tool in self._tools.values():
+            available, reason = tool.check_available()
+            if not available:
+                lines.append(f"- {tool.name}: {reason or 'unavailable'}")
+        return "\n".join(lines)
 
     async def execute(self, name: str, params: dict[str, Any]) -> ToolResult:
         """Execute a tool by name with given parameters.

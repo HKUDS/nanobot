@@ -227,13 +227,18 @@ class TestNewSessionEndpoint:
 class TestStreamingFormat:
     """Tests for the SSE streaming adapter."""
 
-    def test_escape_text(self):
-        """Should properly escape text for JSON embedding."""
-        from nanobot.web.streaming import _escape_text
+    def test_sse_helper_produces_valid_json(self):
+        """_sse() must emit valid JSON with special characters escaped."""
+        import json
 
-        assert _escape_text('hello "world"') == 'hello \\"world\\"'
-        assert _escape_text("line\nnew") == "line\\nnew"
-        assert _escape_text("back\\slash") == "back\\\\slash"
+        from nanobot.web.streaming import _sse
+
+        chunk = _sse({"type": "text-delta", "textDelta": 'hello "world"\nback\\slash'})
+        # Extract JSON payload from SSE line
+        data_line = next(line for line in chunk.splitlines() if line.startswith("data:"))
+        payload = json.loads(data_line[len("data:") :].strip())
+        assert payload["type"] == "text-delta"
+        assert payload["textDelta"] == 'hello "world"\nback\\slash'
 
 
 class TestModels:

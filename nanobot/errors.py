@@ -84,6 +84,22 @@ class ToolPermissionError(ToolExecutionError):
         super().__init__(tool_name, msg, error_type="permission", recoverable=False)
 
 
+class UnknownRoleError(ToolExecutionError):
+    """Requested delegation role does not exist in the registry."""
+
+    def __init__(self, role_name: str, available: list[str] | None = None):
+        avail_str = ", ".join(available or []) or "none configured"
+        msg = f"Unknown delegation role '{role_name}'. Available roles: {avail_str}"
+        super().__init__(
+            "delegate",
+            msg,
+            error_type="unknown_role",
+            recoverable=True,
+        )
+        self.role_name = role_name
+        self.available_roles = available or []
+
+
 # ---------------------------------------------------------------------------
 # Provider / LLM errors
 # ---------------------------------------------------------------------------

@@ -127,3 +127,32 @@ async def test_typed_and_unknown_exception_paths_and_unregister() -> None:
     assert reg.get("typed_raise") is not None
     reg.unregister("typed_raise")
     assert reg.has("typed_raise") is False
+
+
+def test_snapshot_and_restore() -> None:
+    """snapshot() returns a copy; restore() replaces the tool set (AR-M2)."""
+    reg = ToolRegistry()
+    reg.register(_OkTool())
+
+    snap = reg.snapshot()
+    assert "ok_tool" in snap
+
+    # Modifying the registry after snapshot must not affect the snapshot
+    reg.unregister("ok_tool")
+    assert not reg.has("ok_tool")
+    assert "ok_tool" in snap
+
+    # Restore puts the tool back
+    reg.restore(snap)
+    assert reg.has("ok_tool")
+
+
+def test_snapshot_is_shallow_copy() -> None:
+    """snapshot() returns a dict copy, not a reference to the internal dict."""
+    reg = ToolRegistry()
+    reg.register(_OkTool())
+
+    snap = reg.snapshot()
+    # Mutating the snapshot dict must not affect the registry
+    del snap["ok_tool"]
+    assert reg.has("ok_tool"), "Registry must not be affected by mutating the snapshot"

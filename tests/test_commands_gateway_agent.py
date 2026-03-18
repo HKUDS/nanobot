@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -49,6 +50,7 @@ class _AgentLoop:
         self.channels_config = SimpleNamespace(send_tool_hints=True, send_progress=True)
         self._stopped = False
         self.context = SimpleNamespace(set_contacts_context=lambda contacts: None)
+        self._capabilities = SimpleNamespace(refresh_health=lambda: None)
 
     def set_deliver_callback(self, callback):
         pass
@@ -86,6 +88,9 @@ class _ChannelManager:
     def get_email_contacts(self):
         return []
 
+    def get_channel(self, name: str):
+        return self.channels[name]
+
 
 class _CronService:
     def __init__(self, _path: Path):
@@ -103,7 +108,7 @@ class _CronService:
 
 
 class _HeartbeatService:
-    def __init__(self, *, on_execute, on_notify, **kwargs):
+    def __init__(self, *, on_execute, on_notify, on_health_refresh=None, **kwargs):
         self._on_execute = on_execute
         self._on_notify = on_notify
 
@@ -148,6 +153,66 @@ def test_gateway_runs_cron_and_heartbeat_callbacks(
     assert "Channels enabled" in out.stdout
     assert "Heartbeat" in out.stdout
     assert len(bus.outbound) >= 1
+
+
+def test_gateway_continues_when_health_port_is_busy_with_web_enabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cfg = Config()
+    cfg.agents.defaults.workspace = str(tmp_path)
+    cfg.channels.web.enabled = True
+    cfg.channels.web.host = "127.0.0.1"
+    cfg.channels.web.port = 8000
+
+    bus = _Bus()
+
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda: cfg)
+    monkeypatch.setattr("nanobot.config.loader.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _cfg: object())
+    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: bus)
+    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _AgentLoop)
+    monkeypatch.setattr("nanobot.session.manager.SessionManager", _SessionManager)
+    monkeypatch.setattr("nanobot.cron.service.CronService", _CronService)
+    monkeypatch.setattr("nanobot.heartbeat.service.HeartbeatService", _HeartbeatService)
+    monkeypatch.setattr(
+        "nanobot.channels.manager.ChannelManager",
+        lambda _config, _bus: _ChannelManager(_config, _bus, enabled=["telegram", "web"]),
+    )
+
+    class _WebChannel:
+        pass
+
+    web_channel = _WebChannel()
+
+    class _FakeServer:
+        async def serve(self):
+            await asyncio.sleep(0)
+
+    class _FakeConfig:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    def _create_app(*args, **kwargs):
+        return object()
+
+    async def _start_health_server(*args, **kwargs):
+        raise OSError(errno.EADDRINUSE, "address already in use")
+
+    monkeypatch.setattr("nanobot.channels.web.WebChannel", _WebChannel)
+    monkeypatch.setattr("nanobot.web.app.create_app", _create_app)
+    monkeypatch.setattr("uvicorn.Config", _FakeConfig)
+    monkeypatch.setattr("uvicorn.Server", lambda *_args, **_kwargs: _FakeServer())
+    monkeypatch.setattr("nanobot.web.health.start_health_server", _start_health_server)
+
+    manager = _ChannelManager(cfg, bus, enabled=["telegram", "web"])
+    manager.channels["web"] = web_channel
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", lambda _config, _bus: manager)
+
+    out = runner.invoke(app, ["gateway", "--port", "19000"])
+    assert out.exit_code == 0
+    assert "Gateway health port 19000 is already in use" in out.stdout
+    # "Web UI:" when frontend is built; "Web API:" when it is not — assert the URL only.
+    assert "http://127.0.0.1:8000" in out.stdout
 
 
 def test_agent_single_message_and_interactive_exit(

@@ -314,6 +314,29 @@ class TestPhaseBSmoke:
         # = 5 messages, but floor is 6
         assert preserve >= 6
 
+    def test_dynamic_preserve_o1_path_matches_scan(self) -> None:
+        """Providing last_tool_call_idx skips the scan and gives the same result."""
+        msgs = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "q"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": "tc1", "type": "function", "function": {"name": "f"}}],
+            },
+            {"role": "tool", "content": "r1", "tool_call_id": "tc1"},
+            {"role": "assistant", "content": "done"},
+        ]
+        scan_result = _dynamic_preserve_recent(msgs)
+        o1_result = _dynamic_preserve_recent(msgs, last_tool_call_idx=2)
+        assert scan_result == o1_result
+
+    def test_dynamic_preserve_o1_no_tool_calls_uses_floor(self) -> None:
+        """last_tool_call_idx=-1 falls back to scan (no tool calls → floor)."""
+        msgs = [{"role": "user", "content": f"m{i}"} for i in range(10)]
+        result = _dynamic_preserve_recent(msgs, -1)
+        assert result == 6  # floor
+
 
 # ===================================================================
 # Phase D — End-to-end: delegation verification

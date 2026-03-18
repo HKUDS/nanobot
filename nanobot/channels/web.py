@@ -40,6 +40,10 @@ class WebChannel(BaseChannel):
         super().__init__(config, bus)
         # chat_id → queue of outbound messages for that thread's SSE stream
         self._streams: dict[str, asyncio.Queue[OutboundMessage | None]] = {}
+        # chat_ids whose SSE stream was closed (client disconnect / stop button).
+        # Messages for these are silently dropped to avoid log spam from the
+        # agent loop which may still be running.
+        self._disconnected: set[str] = set()
         self._dispatcher_task: asyncio.Task[None] | None = None
         self._managed = managed
 
@@ -75,6 +79,8 @@ class WebChannel(BaseChannel):
         q = self._streams.get(msg.chat_id)
         if q is not None:
             await q.put(msg)
+        elif msg.chat_id in self._disconnected:
+            pass  # silently drop — client already disconnected
         else:
             logger.debug("web: no active stream for chat_id={}", msg.chat_id)
 
@@ -86,11 +92,13 @@ class WebChannel(BaseChannel):
         """Register an SSE stream for *chat_id* and return its queue."""
         q: asyncio.Queue[OutboundMessage | None] = asyncio.Queue()
         self._streams[chat_id] = q
+        self._disconnected.discard(chat_id)
         return q
 
     def unregister_stream(self, chat_id: str) -> None:
         """Remove the SSE stream registration for *chat_id*."""
         self._streams.pop(chat_id, None)
+        self._disconnected.add(chat_id)
 
     async def publish_user_message(
         self,

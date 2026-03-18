@@ -235,12 +235,19 @@ class TestStreamAgentResponseTokenCounts:
         async for event in stream_agent_response(channel, "chat-1", "question"):  # type: ignore[arg-type]
             events.append(event)
 
-        # Last event should be the finish event (d: prefix)
-        finish_events = [e for e in events if e.startswith("d:")]
+        # finish event in ui-message-stream: event: message / data: {"type":"finish",...}
+        import json as _json
+
+        finish_events = [
+            _json.loads(line[len("data:") :].strip())
+            for chunk in events
+            for line in chunk.splitlines()
+            if line.startswith("data:") and '"finish"' in line
+        ]
         assert len(finish_events) == 1
-        payload = json.loads(finish_events[0][2:])
-        assert payload["usage"]["promptTokens"] == 500
-        assert payload["usage"]["completionTokens"] == 42
+        payload = finish_events[0]
+        assert payload["usage"]["inputTokens"] == 500
+        assert payload["usage"]["outputTokens"] == 42
 
     @pytest.mark.asyncio
     async def test_finish_event_defaults_to_zero_without_metadata(self):
@@ -257,10 +264,17 @@ class TestStreamAgentResponseTokenCounts:
         async for event in stream_agent_response(channel, "chat-1", "question"):  # type: ignore[arg-type]
             events.append(event)
 
-        finish_events = [e for e in events if e.startswith("d:")]
-        payload = json.loads(finish_events[0][2:])
-        assert payload["usage"]["promptTokens"] == 0
-        assert payload["usage"]["completionTokens"] == 0
+        import json as _json
+
+        finish_events = [
+            _json.loads(line[len("data:") :].strip())
+            for chunk in events
+            for line in chunk.splitlines()
+            if line.startswith("data:") and '"finish"' in line
+        ]
+        payload = finish_events[0]
+        assert payload["usage"]["inputTokens"] == 0
+        assert payload["usage"]["outputTokens"] == 0
 
 
 # ---------------------------------------------------------------------------
