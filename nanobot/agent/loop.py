@@ -370,6 +370,29 @@ class AgentLoop:
         self._background_tasks.append(task)
         task.add_done_callback(self._background_tasks.remove)
 
+    def _maybe_consolidate_bg(self, session: Session) -> None:
+        """Non-blocking consolidation: quick token check, background if over threshold.
+
+        The per-session lock inside maybe_consolidate_by_tokens prevents
+        concurrent consolidation runs.  If the current request proceeds
+        with a slightly oversized context, the LLM provider's context-window
+        limit acts as a safety net, and the background task will trim the
+        session for subsequent requests.
+        """
+        mc = self.memory_consolidator
+        if not session.messages or mc.context_window_tokens <= 0:
+            return
+        if mc.get_lock(session.key).locked():
+            return
+        estimated, source = mc.estimate_session_prompt_tokens(session)
+        if estimated <= 0 or estimated < mc.context_window_tokens:
+            return
+        logger.info(
+            "Scheduling background consolidation for {} ({}/{} via {})",
+            session.key, estimated, mc.context_window_tokens, source,
+        )
+        self._schedule_background(mc.maybe_consolidate_by_tokens(session))
+
     def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
@@ -389,7 +412,7 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
-            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+            self._maybe_consolidate_bg(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             # Subagent results should be assistant role, other system messages use user role
@@ -436,7 +459,7 @@ class AgentLoop:
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
             )
-        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+        self._maybe_consolidate_bg(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
