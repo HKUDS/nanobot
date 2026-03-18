@@ -41,6 +41,7 @@ class AgentDefaults(Base):
     # Deprecated compatibility field: accepted from old configs but ignored at runtime.
     memory_window: int | None = Field(default=None, exclude=True)
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    transcriber: Literal["auto", "groq", "faster-whisper"] = "auto"
 
     @property
     def should_warn_deprecated_memory_window(self) -> bool:
@@ -87,6 +88,35 @@ class ProvidersConfig(Base):
     byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
+
+
+class TranscriptionFasterWhisperConfig(Base):
+    """Configuration for local faster-whisper transcription."""
+
+    model: str = "small"
+    device: str = "auto"
+    compute_type: str = "default"
+    cpu_threads: int = 0
+    download_root: str | None = None
+    language: str | None = None
+    beam_size: int = 5
+
+
+class TranscriptionGroqConfig(Base):
+    """Configuration for Groq-based transcription."""
+
+    model: str = "whisper-large-v3"
+    language: str | None = None
+    prompt: str | None = None
+    temperature: float | None = None
+    timeout_s: float = 60.0
+
+
+class TranscriptionConfig(Base):
+    """Transcription backend configuration."""
+
+    faster_whisper: TranscriptionFasterWhisperConfig = Field(default_factory=TranscriptionFasterWhisperConfig)
+    groq: TranscriptionGroqConfig = Field(default_factory=TranscriptionGroqConfig)
 
 
 class HeartbeatConfig(Base):
@@ -156,6 +186,7 @@ class Config(BaseSettings):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
+    transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
 

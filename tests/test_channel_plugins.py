@@ -171,6 +171,9 @@ async def test_manager_loads_plugin_from_dict_config():
     with patch(
         "nanobot.channels.registry.discover_all",
         return_value={"fakeplugin": _FakePlugin},
+    ), patch(
+        "nanobot.providers.transcription.resolve_transcription_provider",
+        return_value=None,
     ):
         mgr = ChannelManager.__new__(ChannelManager)
         mgr.config = fake_config
@@ -195,6 +198,9 @@ async def test_manager_skips_disabled_plugin():
     with patch(
         "nanobot.channels.registry.discover_all",
         return_value={"fakeplugin": _FakePlugin},
+    ), patch(
+        "nanobot.providers.transcription.resolve_transcription_provider",
+        return_value=None,
     ):
         mgr = ChannelManager.__new__(ChannelManager)
         mgr.config = fake_config

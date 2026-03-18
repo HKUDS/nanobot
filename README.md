@@ -773,7 +773,7 @@ Config file: `~/.nanobot/config.json`
 ### Providers
 
 > [!TIP]
-> - **Groq** provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
+> - Voice transcription supports `auto`, `faster-whisper`, and `groq`. `auto` prefers local transcription when `faster-whisper` is installed, then falls back to Groq when `providers.groq.apiKey` is configured.
 > - **MiniMax Coding Plan**: Exclusive discount links for the nanobot community: [Overseas](https://platform.minimax.io/subscribe/coding-plan?code=9txpdXw04g&source=link) · [Mainland China](https://platform.minimaxi.com/subscribe/token-plan?code=GILTJpMTqZ&source=link)
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
 > - **VolcEngine / BytePlus Coding Plan**: Use dedicated providers `volcengineCodingPlan` or `byteplusCodingPlan` instead of the pay-per-use `volcengine` / `byteplus` providers.
@@ -790,7 +790,8 @@ Config file: `~/.nanobot/config.json`
 | `azure_openai` | LLM (Azure OpenAI) | [portal.azure.com](https://portal.azure.com) |
 | `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
-| `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
+| `groq` | LLM + **Optional voice transcription** (Whisper API) | [console.groq.com](https://console.groq.com) |
+| `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 | `minimax` | LLM (MiniMax direct) | [platform.minimaxi.com](https://platform.minimaxi.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 | `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
@@ -802,6 +803,47 @@ Config file: `~/.nanobot/config.json`
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
+
+### Voice transcription
+
+Set `agents.defaults.transcriber` to `auto`, `faster-whisper`, or `groq`.
+
+- `auto`: prefer local `faster-whisper` when installed, otherwise fall back to Groq if configured
+- `faster-whisper`: require local `faster-whisper`
+- `groq`: require `providers.groq.apiKey`
+
+Example:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "transcriber": "auto"
+    }
+  },
+  "providers": {
+    "groq": {
+      "apiKey": "..."
+    }
+  },
+  "transcription": {
+    "fasterWhisper": {
+      "model": "small",
+      "device": "cpu",
+      "computeType": "int8"
+    },
+    "groq": {
+      "model": "whisper-large-v3"
+    }
+  }
+}
+```
+
+To install local transcription support:
+
+```bash
+pip install "nanobot-ai[local-transcription]"
+```
 
 <details>
 <summary><b>OpenAI Codex (OAuth)</b></summary>

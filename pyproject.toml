@@ -50,6 +50,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+local-transcription = [
+    "faster-whisper>=1.1.0,<2.0.0",
+]
 wecom = [
     "wecom-aibot-sdk-python>=0.1.5",
 ]
