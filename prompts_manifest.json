@@ -1,7 +1,7 @@
 {
   "_comment": "SHA-256 hashes of prompt template files. Verified by scripts/check_prompt_manifest.py in CI. Update with: python scripts/check_prompt_manifest.py --update",
   "prompts": {
-    "classify.md": "5fb2aa49676247947cfb641ab7d5452814d66e5c2faf76dc47028dbaa8625970",
+    "classify.md": "f7b78ebe1037bbdc22167b94c8adef68bf1f4dc2aedd40e97012ad943066780c",
     "compress.md": "22e64d702d6ba1dfbff8730a3ff060552948d100fc1a5b598cd804e076dc04dd",
     "critique.md": "6d0af1423ae83fad39faa5b107c7f0a09ad33f5833aa0859ef7d875d9fd7209f",
     "failure_strategy.md": "eedc3068a96d22ddc463cf25e599823b0e434eb0529d628433ed1eaf07ce2beb",
