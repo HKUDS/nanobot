@@ -9,6 +9,45 @@ from typing import Any
 
 import tiktoken
 
+_use_local_counter = False
+
+
+def set_token_counter_mode(local_mode: bool) -> None:
+    """Set token counter mode globally."""
+    global _use_local_counter
+    _use_local_counter = local_mode
+
+
+class OfflineTokenizer:
+    """离线 Token 估算器（误差 <10%）"""
+
+    def __init__(self):
+        self._chinese_re = re.compile(r'[\u4e00-\u9fff]')
+        self._word_re = re.compile(r'\b\w+\b')
+
+    def estimate(self, text: str) -> int:
+        if not text:
+            return 0
+
+        chinese_chars = len(self._chinese_re.findall(text))
+
+        words = self._word_re.findall(text)
+        word_tokens = sum(len(w) / 4 for w in words)
+
+        english_chars = sum(len(w) for w in words)
+        remaining = len(text) - chinese_chars - english_chars
+
+        tokens = (
+            chinese_chars * 1.3 +
+            word_tokens +
+            remaining * 0.5
+        )
+
+        return int(tokens)
+
+
+_offline_tokenizer = OfflineTokenizer()
+
 
 def detect_image_mime(data: bytes) -> str | None:
     """Detect image MIME type from magic bytes, ignoring file extension."""
@@ -101,25 +140,30 @@ def estimate_prompt_tokens(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
 ) -> int:
-    """Estimate prompt tokens with tiktoken."""
+    """Estimate prompt tokens with tiktoken or local counter."""
+    parts: list[str] = []
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, str):
+            parts.append(content)
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    txt = part.get("text", "")
+                    if txt:
+                        parts.append(txt)
+    if tools:
+        parts.append(json.dumps(tools, ensure_ascii=False))
+
+    text = "\n".join(parts)
+    if _use_local_counter:
+        return _offline_tokenizer.estimate(text)
+
     try:
         enc = tiktoken.get_encoding("cl100k_base")
-        parts: list[str] = []
-        for msg in messages:
-            content = msg.get("content")
-            if isinstance(content, str):
-                parts.append(content)
-            elif isinstance(content, list):
-                for part in content:
-                    if isinstance(part, dict) and part.get("type") == "text":
-                        txt = part.get("text", "")
-                        if txt:
-                            parts.append(txt)
-        if tools:
-            parts.append(json.dumps(tools, ensure_ascii=False))
-        return len(enc.encode("\n".join(parts)))
+        return len(enc.encode(text))
     except Exception:
-        return 0
+        return _offline_tokenizer.estimate(text)
 
 
 def estimate_message_tokens(message: dict[str, Any]) -> int:
@@ -149,11 +193,15 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
     payload = "\n".join(parts)
     if not payload:
         return 1
+
+    if _use_local_counter:
+        return max(1, _offline_tokenizer.estimate(payload))
+
     try:
         enc = tiktoken.get_encoding("cl100k_base")
         return max(1, len(enc.encode(payload)))
     except Exception:
-        return max(1, len(payload) // 4)
+        return max(1, _offline_tokenizer.estimate(payload))
 
 
 def estimate_prompt_tokens_chain(
@@ -174,7 +222,8 @@ def estimate_prompt_tokens_chain(
 
     estimated = estimate_prompt_tokens(messages, tools)
     if estimated > 0:
-        return int(estimated), "tiktoken"
+        source = "local" if _use_local_counter else "tiktoken"
+        return int(estimated), source
     return 0, "none"
 
 

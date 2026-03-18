@@ -43,12 +43,23 @@ def load_config(config_path: Path | None = None) -> Config:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             data = _migrate_config(data)
-            return Config.model_validate(data)
+            config = Config.model_validate(data)
         except (json.JSONDecodeError, ValueError, pydantic.ValidationError) as e:
             logger.warning(f"Failed to load config from {path}: {e}")
             logger.warning("Using default configuration.")
+            config = Config()
+    else:
+        config = Config()
 
-    return Config()
+    _apply_token_counter_mode(config)
+    return config
+
+
+def _apply_token_counter_mode(config: Config) -> None:
+    """Set the global token counter mode based on config."""
+    from nanobot.utils.helpers import set_token_counter_mode
+
+    set_token_counter_mode(config.agents.defaults.local_mode)
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:
