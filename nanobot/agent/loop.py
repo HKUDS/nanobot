@@ -250,12 +250,16 @@ class AgentLoop:
 
                 # Execute all tool calls concurrently — the LLM batches
                 # independent calls in a single response on purpose.
+                # return_exceptions=True ensures all results are collected
+                # even if one tool is cancelled or raises BaseException.
                 results = await asyncio.gather(*(
                     self.tools.execute(tc.name, tc.arguments)
                     for tc in response.tool_calls
-                ))
+                ), return_exceptions=True)
 
                 for tool_call, result in zip(response.tool_calls, results):
+                    if isinstance(result, BaseException):
+                        result = f"Error: {type(result).__name__}: {result}"
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
