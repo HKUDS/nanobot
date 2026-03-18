@@ -12,7 +12,7 @@ jobs:
       - name: Checkout nanobot fork
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Detect bridge changes
         id: bridge
@@ -29,12 +29,13 @@ jobs:
           node-version: '20'
 
       - name: Build WhatsApp bridge
+        id: bridge_build
         if: steps.bridge.outputs.changed == 'true'
         working-directory: bridge
-        run: npm ci --silent && npm run build
+        run: npm install --silent && npm run build
 
       - name: Copy bridge dist to VPS
-        if: steps.bridge.outputs.changed == 'true'
+        if: steps.bridge.outputs.changed == 'true' && steps.bridge_build.outcome == 'success'
         run: |
           echo "${{ secrets.VPS_SSH_KEY }}" > /tmp/deploy_key
           chmod 600 /tmp/deploy_key
@@ -44,6 +45,7 @@ jobs:
           rm /tmp/deploy_key
 
       - name: Reinstall nanobot + restart on Homer VPS
+        if: always()
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
