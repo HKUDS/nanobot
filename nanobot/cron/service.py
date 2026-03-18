@@ -149,14 +149,14 @@ class CronService:
                         "expr": j.schedule.expr,
                         "tz": j.schedule.tz,
                     },
-                     "payload": {
-                         "kind": j.payload.kind,
-                         "message": j.payload.message,
-                         "deliver": j.payload.deliver,
-                         "channel": j.payload.channel,
-                         "to": j.payload.to,
-+                        "notifyMode": j.payload.notify_mode,
-                     },
+                    "payload": {
+                        "kind": j.payload.kind,
+                        "message": j.payload.message,
+                        "deliver": j.payload.deliver,
+                        "channel": j.payload.channel,
+                        "to": j.payload.to,
+                        "notifyMode": j.payload.notify_mode,
+                    },
                     "state": {
                         "nextRunAtMs": j.state.next_run_at_ms,
                         "lastRunAtMs": j.state.last_run_at_ms,
@@ -292,6 +292,8 @@ class CronService:
         message: str,
         deliver: bool = False,
         channel: str | None = None,
+        to: str | None = None,
+        delete_after_run: bool = False,
         notify_mode: str = "auto",
     ) -> CronJob:
         """Add a new job."""
