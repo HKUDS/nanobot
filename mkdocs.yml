@@ -1,0 +1,154 @@
+site_name: Nanobot
+site_description: Ultra-lightweight personal AI assistant framework supporting 16+ chat platforms
+site_url: https://nanobot.dev
+repo_url: https://github.com/HKUDS/nanobot
+repo_name: nanobot
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: zh-TW
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: 切換至深色模式
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: 切換至淺色模式
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.indexes
+    - navigation.top
+    - search.highlight
+    - search.share
+    - search.suggest
+    - content.tabs.link
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+
+not_in_nav: |
+  CHANNEL_PLUGIN_GUIDE.md
+
+plugins:
+  - search:
+      lang:
+        - zh
+        - en
+  - minify:
+      minify_html: true
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink:
+      repo_url_shorthand: true
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/HKUDS/nanobot
+  version:
+    provider: mike
+  analytics:
+    provider: google
+
+extra_css:
+  - assets/extra.css
+
+nav:
+  - 首頁: index.md
+  - 快速開始:
+    - getting-started/index.md
+    - 安裝: getting-started/installation.md
+    - 快速入門: getting-started/quick-start.md
+    - 互動設定: getting-started/onboarding.md
+  - 頻道設定:
+    - channels/index.md
+    - Telegram: channels/telegram.md
+    - Discord: channels/discord.md
+    - Slack: channels/slack.md
+    - 飛書 (Feishu): channels/feishu.md
+    - 釘釘 (DingTalk): channels/dingtalk.md
+    - 企業微信 (WeCom): channels/wecom.md
+    - QQ: channels/qq.md
+    - Email: channels/email.md
+    - Matrix: channels/matrix.md
+    - WhatsApp: channels/whatsapp.md
+    - Mochat: channels/mochat.md
+  - LLM 提供商:
+    - providers/index.md
+    - OpenRouter: providers/openrouter.md
+    - Anthropic: providers/anthropic.md
+    - OpenAI: providers/openai.md
+    - 其他提供商: providers/others.md
+    - 本地模型: providers/local.md
+  - 設定參考:
+    - configuration/index.md
+    - 完整設定參考: configuration/reference.md
+    - 多實例設定: configuration/multi-instance.md
+  - 工具與技能:
+    - tools-skills/index.md
+    - 內建工具: tools-skills/tools.md
+    - 技能系統: tools-skills/skills.md
+    - MCP 整合: tools-skills/mcp.md
+  - 部署:
+    - deployment/index.md
+    - Gateway 服務: deployment/gateway.md
+    - Docker: deployment/docker.md
+    - Linux 服務: deployment/linux-service.md
+  - 開發:
+    - development/index.md
+    - 架構說明: development/architecture.md
+    - 貢獻指南: development/contributing.md
+    - 頻道插件開發: development/channel-plugin.md
+  - CLI 指令: cli-reference.md

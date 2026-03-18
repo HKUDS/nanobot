@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <!-- Robot head body -->
+  <rect x="20" y="30" width="60" height="50" rx="10" ry="10" fill="#3f51b5"/>
+  <!-- Robot antenna -->
+  <rect x="47" y="15" width="6" height="16" rx="3" fill="#5c6bc0"/>
+  <circle cx="50" cy="12" r="6" fill="#7986cb"/>
+  <!-- Robot eyes -->
+  <rect x="30" y="42" width="16" height="12" rx="4" fill="#e8eaf6"/>
+  <rect x="54" y="42" width="16" height="12" rx="4" fill="#e8eaf6"/>
+  <circle cx="38" cy="48" r="4" fill="#3f51b5"/>
+  <circle cx="62" cy="48" r="4" fill="#3f51b5"/>
+  <circle cx="40" cy="46" r="1.5" fill="white"/>
+  <circle cx="64" cy="46" r="1.5" fill="white"/>
+  <!-- Robot mouth -->
+  <rect x="32" y="62" width="36" height="8" rx="4" fill="#e8eaf6"/>
+  <rect x="38" y="64" width="4" height="4" rx="1" fill="#3f51b5"/>
+  <rect x="46" y="64" width="4" height="4" rx="1" fill="#3f51b5"/>
+  <rect x="54" y="64" width="4" height="4" rx="1" fill="#3f51b5"/>
+  <!-- Robot ears -->
+  <rect x="12" y="42" width="10" height="18" rx="4" fill="#5c6bc0"/>
+  <rect x="78" y="42" width="10" height="18" rx="4" fill="#5c6bc0"/>
+  <!-- Letter N overlay -->
+  <text x="50" y="90" font-family="Arial, sans-serif" font-size="0" fill="white" text-anchor="middle"/>
+</svg>
