@@ -116,6 +116,15 @@ _ARGS_REDACT_TOOLS: frozenset[str] = frozenset(
 # Delegation tool names — hoisted here to avoid rebuilding the set each iteration.
 _DELEGATION_TOOL_NAMES: frozenset[str] = frozenset({"delegate", "delegate_parallel"})
 
+# Named constants for magic numbers used across the agent loop (CQ-L6).
+_GREETING_MAX_LEN: int = 20  # Messages shorter than this are treated as greetings / simple Qs
+_CONTEXT_RESERVE_RATIO: float = (
+    0.80  # Fraction of context window reserved for prompt; ~20% for reply
+)
+_DEFAULT_CONFIDENCE_THRESHOLD: float = (
+    0.6  # Fallback routing confidence threshold (no RoutingConfig)
+)
+
 # Multi-step planning signal substrings for _needs_planning().
 # Defined at module level so the tuple is allocated once, not per call.
 _PLANNING_SIGNALS: tuple[str, ...] = (
@@ -729,7 +738,7 @@ class AgentLoop:
             return False
         text_lower = text.strip().lower()
         # Very short messages (< 20 chars) are usually greetings or simple Qs
-        if len(text_lower) < 20:
+        if len(text_lower) < _GREETING_MAX_LEN:
             return False
         # Explicit multi-step indicators
         return any(signal in text_lower for signal in _PLANNING_SIGNALS)
@@ -1091,7 +1100,7 @@ class AgentLoop:
         self._turn_llm_calls = 0
 
         # Reserve ~20% of context window for the model's response
-        context_budget = int(self.config.context_window_tokens * 0.80)
+        context_budget = int(self.config.context_window_tokens * _CONTEXT_RESERVE_RATIO)
 
         # Extract the last user message (used by planning + verification)
         user_text = ""
@@ -1473,7 +1482,7 @@ class AgentLoop:
                             threshold = (
                                 self._routing_config.confidence_threshold
                                 if self._routing_config
-                                else 0.6
+                                else _DEFAULT_CONFIDENCE_THRESHOLD
                             )
                             if confidence < threshold:
                                 role_name = (
