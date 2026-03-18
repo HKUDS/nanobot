@@ -116,6 +116,35 @@ _ARGS_REDACT_TOOLS: frozenset[str] = frozenset(
 # Delegation tool names — hoisted here to avoid rebuilding the set each iteration.
 _DELEGATION_TOOL_NAMES: frozenset[str] = frozenset({"delegate", "delegate_parallel"})
 
+# Multi-step planning signal substrings for _needs_planning().
+# Defined at module level so the tuple is allocated once, not per call.
+_PLANNING_SIGNALS: tuple[str, ...] = (
+    " and ",
+    " then ",
+    " after that",
+    " also ",
+    " steps",
+    " first ",
+    " second ",
+    " finally ",
+    "\n-",
+    "\n*",
+    "\n1.",
+    "\n2.",
+    " research ",
+    " analyze ",
+    " compare ",
+    " investigate ",
+    " create ",
+    " build ",
+    " implement ",
+    " set up ",
+    " configure ",
+    " plan ",
+    " schedule ",
+    " organize ",
+)
+
 
 class ProgressCallback(Protocol):
     """Signature for progress callbacks passed through the agent call chain.
@@ -705,33 +734,7 @@ class AgentLoop:
         if len(text_lower) < 20:
             return False
         # Explicit multi-step indicators
-        multi_step_signals = (
-            " and ",
-            " then ",
-            " after that",
-            " also ",
-            " steps",
-            " first ",
-            " second ",
-            " finally ",
-            "\n-",
-            "\n*",
-            "\n1.",
-            "\n2.",
-            " research ",
-            " analyze ",
-            " compare ",
-            " investigate ",
-            " create ",
-            " build ",
-            " implement ",
-            " set up ",
-            " configure ",
-            " plan ",
-            " schedule ",
-            " organize ",
-        )
-        return any(signal in text_lower for signal in multi_step_signals)
+        return any(signal in text_lower for signal in _PLANNING_SIGNALS)
 
     @staticmethod
     def _has_parallel_structure(text: str) -> bool:

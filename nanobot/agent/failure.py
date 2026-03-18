@@ -41,6 +41,21 @@ class FailureClass(str, Enum):
         """
         return self in (FailureClass.PERMANENT_CONFIG, FailureClass.PERMANENT_AUTH)
 
+    @property
+    def guidance(self) -> str:
+        """Short remediation hint appended to each failure line in the REFLECT prompt.
+
+        Returning a class-local string here eliminates the ``elif`` chain in
+        ``_build_failure_prompt`` and keeps guidance co-located with the class.
+        """
+        if self.is_permanent:
+            return "permanently disabled for this session"
+        if self == FailureClass.TRANSIENT_TIMEOUT:
+            return "consider retrying with a shorter operation or different parameters"
+        if self == FailureClass.LOGICAL_ERROR:
+            return "fix the parameters before retrying"
+        return ""
+
 
 class ToolCallTracker:
     """Detect and break infinite identical-failure tool call loops.
@@ -178,17 +193,9 @@ def _build_failure_prompt(
     """
     lines: list[str] = ["One or more tool calls failed:"]
     for name, fc in failed_tools:
-        if fc.is_permanent:
-            lines.append(f"- `{name}`: {fc.value} — permanently disabled for this session")
-        elif fc == FailureClass.TRANSIENT_TIMEOUT:
-            lines.append(
-                f"- `{name}`: {fc.value} — consider retrying with a shorter operation "
-                "or different parameters"
-            )
-        elif fc == FailureClass.LOGICAL_ERROR:
-            lines.append(f"- `{name}`: {fc.value} — fix the parameters before retrying")
-        else:
-            lines.append(f"- `{name}`: {fc.value}")
+        hint = fc.guidance
+        suffix = f" — {hint}" if hint else ""
+        lines.append(f"- `{name}`: {fc.value}{suffix}")
 
     if permanent_failures:
         lines.append(
