@@ -20,8 +20,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -130,7 +128,6 @@ class TestGoldenSingleTurn:
     - Does not inject nudge, planning, or reflection prompts
     """
 
-    @pytest.mark.asyncio
     async def test_one_llm_call_no_orchestration_overhead(self, tmp_path: Path):
         provider = ScriptedProvider([LLMResponse(content="Paris.")])
         loop = _make_loop(tmp_path, provider)
@@ -166,7 +163,6 @@ class TestGoldenToolResultInjection:
     3. Call the LLM a second time with the tool result in context
     """
 
-    @pytest.mark.asyncio
     async def test_real_file_content_injected(self, tmp_path: Path):
         secret = "db_password=hunter2"
         (tmp_path / "secrets.txt").write_text(secret)
@@ -201,7 +197,6 @@ class TestGoldenToolResultInjection:
             "Tool result must contain actual file content, not a canned string"
         )
 
-    @pytest.mark.asyncio
     async def test_failed_tool_produces_error_in_context(self, tmp_path: Path):
         """When a tool fails, the agent injects the error as a tool result."""
         provider = ScriptedProvider(
@@ -230,7 +225,6 @@ class TestGoldenToolResultInjection:
             "Failed tool execution must produce an error message in context"
         )
 
-    @pytest.mark.asyncio
     async def test_failure_strategy_prompt_injected(self, tmp_path: Path):
         """After a tool failure, the agent injects a failure-strategy system prompt."""
         provider = ScriptedProvider(
@@ -270,7 +264,6 @@ class TestGoldenMultiStepHistory:
     growing message histories.
     """
 
-    @pytest.mark.asyncio
     async def test_message_history_accumulates(self, tmp_path: Path):
         (tmp_path / "data.csv").write_text("a,b,c")
         provider = ScriptedProvider(
@@ -337,7 +330,6 @@ class TestGoldenNudgeForFinalAnswer:
     inject a 'produce your final answer' nudge and retry WITHOUT tool defs.
     """
 
-    @pytest.mark.asyncio
     async def test_nudge_injected_and_tools_disabled(self, tmp_path: Path):
         (tmp_path / "f.txt").write_text("data")
         provider = ScriptedProvider(
@@ -388,7 +380,6 @@ class TestGoldenMaxIterationsGuard:
     message mentioning the limit — this tests the loop's safety mechanism.
     """
 
-    @pytest.mark.asyncio
     async def test_iteration_limit_produces_explanation(self, tmp_path: Path):
         provider = ScriptedProvider(
             [
@@ -425,7 +416,6 @@ class TestGoldenWriteToolSideEffect:
     This verifies that the loop actually runs tools, not just passes through.
     """
 
-    @pytest.mark.asyncio
     async def test_write_file_creates_real_file(self, tmp_path: Path):
         target = tmp_path / "output.txt"
         provider = ScriptedProvider(
@@ -464,7 +454,6 @@ class TestGoldenConsecutiveErrorFallback:
     This tests the agent's error-counting and recovery mechanism.
     """
 
-    @pytest.mark.asyncio
     async def test_three_errors_produce_fallback(self, tmp_path: Path):
         provider = ScriptedProvider(
             [
@@ -492,7 +481,6 @@ class TestGoldenToolFailureRecovery:
     then succeed on a different approach.  This tests the recovery path.
     """
 
-    @pytest.mark.asyncio
     async def test_recover_after_initial_failure(self, tmp_path: Path):
         # First attempt reads a missing file; second reads an existing one
         (tmp_path / "backup.txt").write_text("recovered data")
@@ -555,7 +543,6 @@ class TestGoldenPlanningInjection:
     the agent should inject a planning prompt into the LLM context.
     """
 
-    @pytest.mark.asyncio
     async def test_planning_prompt_present_for_complex_task(self, tmp_path: Path):
         provider = ScriptedProvider(
             [
@@ -589,7 +576,6 @@ class TestGoldenParallelReadonlyTools:
     the agent must execute them all and include all results in the next call.
     """
 
-    @pytest.mark.asyncio
     async def test_multiple_read_results_in_context(self, tmp_path: Path):
         (tmp_path / "a.txt").write_text("alpha")
         (tmp_path / "b.txt").write_text("beta")

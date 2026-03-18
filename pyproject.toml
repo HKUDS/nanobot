@@ -148,6 +148,8 @@ module = [
     "nanobot.agent.capability",
     "nanobot.agent.consolidation",
     "nanobot.agent.delegation",
+    "nanobot.agent.failure",
+    "nanobot.agent.loop",
     "nanobot.agent.mission",
     "nanobot.agent.scratchpad",
     "nanobot.agent.skills",

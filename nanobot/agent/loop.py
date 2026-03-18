@@ -963,17 +963,19 @@ class AgentLoop:
                 }
             )
         elif any_failed:
+            _permanent = tracker.permanent_failures
+            _available = [
+                t["function"]["name"]
+                for t in _tools_def_cache
+                if t["function"]["name"] not in _permanent
+            ]
             messages.append(
                 {
                     "role": "system",
                     "content": _build_failure_prompt(
                         failed_this_batch,
-                        tracker.permanent_failures,
-                        [
-                            t["function"]["name"]
-                            for t in _tools_def_cache
-                            if t["function"]["name"] not in tracker.permanent_failures
-                        ],
+                        _permanent,
+                        _available,
                     ),
                 }
             )
@@ -2254,7 +2256,7 @@ class AgentLoop:
             session.messages.append(entry)
         session.updated_at = datetime.now()
 
-    async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
+    async def _consolidate_memory(self, session: Session, archive_all: bool = False) -> bool:
         """Delegate to ConsolidationOrchestrator."""
         return await self._consolidator.consolidate(
             session,

@@ -11,8 +11,6 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
-import pytest
-
 from nanobot.providers.base import LLMProvider, LLMResponse, StreamChunk, ToolCallRequest
 
 # ---------------------------------------------------------------------------
@@ -110,7 +108,6 @@ class TestConcreteProviderContract:
         assert isinstance(model, str)
         assert len(model) > 0
 
-    @pytest.mark.asyncio
     async def test_chat_returns_llm_response(self):
         provider = _TestProvider()
         result = await provider.chat(
@@ -119,7 +116,6 @@ class TestConcreteProviderContract:
         assert isinstance(result, LLMResponse)
         assert result.content is not None
 
-    @pytest.mark.asyncio
     async def test_stream_chat_yields_stream_chunks(self):
         """Default stream_chat fallback should yield StreamChunk objects."""
         provider = _TestProvider()
