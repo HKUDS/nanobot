@@ -3,6 +3,7 @@
 import asyncio
 import json
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -186,6 +187,31 @@ class LLMProvider(ABC):
             LLMResponse with content and/or tool calls.
         """
         pass
+
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        reasoning_effort: str | None = None,
+    ) -> AsyncIterator[LLMResponse]:
+        """
+        Stream a chat completion request, yielding partial responses.
+
+        Default implementation falls back to non-streaming chat().
+        Subclasses can override to provide true streaming support.
+
+        Yields:
+            LLMResponse chunks with partial content.
+        """
+        response = await self.chat(
+            messages=messages, tools=tools, model=model,
+            max_tokens=max_tokens, temperature=temperature,
+            reasoning_effort=reasoning_effort,
+        )
+        yield response
 
     @classmethod
     def _is_transient_error(cls, content: str | None) -> bool:
