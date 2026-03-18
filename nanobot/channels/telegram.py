@@ -542,7 +542,6 @@ class TelegramChannel(BaseChannel):
                 transcription = await self.transcribe_audio(file_path)
                 if transcription:
                     logger.info("Transcribed {}: {}...", media_type, transcription[:50])
-                    transcribed = True
                     return [path_str], [f"[transcription: {transcription}]"]
                 return [path_str], [f"[{media_type}: {path_str}]"]
             return [path_str], [f"[{media_type}: {path_str}]"]
@@ -726,7 +725,7 @@ class TelegramChannel(BaseChannel):
             media=media_paths,
             metadata={
                 **metadata,
-                # "wasAudio": transcribed
+                "wasAudio": any(isinstance(m, str) and m.startswith("[transcription: ") for m in current_media_parts)
             },
             session_key=session_key,
         )
