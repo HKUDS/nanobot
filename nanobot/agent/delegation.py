@@ -61,6 +61,7 @@ _delegation_ancestry: contextvars.ContextVar[tuple[str, ...]] = contextvars.Cont
 # Prevents runaway recursive delegation: each level runs up to max_iterations LLM
 # calls, so uncapped chains multiply cost exponentially.
 MAX_DELEGATION_DEPTH: int = 3
+_SCRATCHPAD_INJECTION_LIMIT: int = 4_000
 
 # ---------------------------------------------------------------------------
 # Task type taxonomy
@@ -142,6 +143,16 @@ TASK_TYPES: dict[str, dict[str, Any]] = {
         "anti_hallucination": ("Ground all claims in tool output. Say 'unknown' when unsure."),
     },
 }
+
+
+def _cap_scratchpad_for_injection(content: str, limit: int = _SCRATCHPAD_INJECTION_LIMIT) -> str:
+    """Truncate scratchpad content for delegation injection to avoid context bloat."""
+    if len(content) <= limit:
+        return content
+    return (
+        content[:limit] + f"\n\n[truncated — {len(content) - limit:,} chars omitted. "
+        "Use scratchpad_read tool for full content.]"
+    )
 
 
 class DelegationDispatcher:
@@ -753,7 +764,10 @@ class DelegationDispatcher:
         if role.name in ("pm", "writing", "general") and self.scratchpad:
             scratchpad_content = self.scratchpad.read()
             if scratchpad_content and scratchpad_content != "Scratchpad is empty.":
-                user_content += f"\n\n## Prior Agent Findings (Scratchpad)\n{scratchpad_content}"
+                user_content += (
+                    "\n\n## Prior Agent Findings (Scratchpad)\n"
+                    + _cap_scratchpad_for_injection(scratchpad_content)
+                )
 
         # Build system prompt
         avail_tools = ", ".join(tools.tool_names)
