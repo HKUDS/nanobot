@@ -454,17 +454,7 @@ class AgentLoop:
 
         config = load_config()
         thinkingToolUseStreamingConfig = config.tools.thinkingToolUseStreaming
-        if thinkingToolUseStreamingConfig.enabled:
-                posibleToolName = content.split("(")[0]
-                tool = self.tools.get(posibleToolName)
-                if tool:
-                    content = thinkingToolUseStreamingConfig.toolUsageTemplate.replace("{{tool}}", content)
-                    if msg.channel in thinkingToolUseStreamingConfig.channelsBlacklist or tool.name in thinkingToolUseStreamingConfig.toolsBlacklist or "*" in thinkingToolUseStreamingConfig.toolsBlacklist:
-                        return
-                else:
-                    content = thinkingToolUseStreamingConfig.thinkingTemplate.replace("{{thought}}", content)
-                    if msg.channel in thinkingToolUseStreamingConfig.channelsBlacklist or "thinking" in thinkingToolUseStreamingConfig.toolsBlacklist:
-                        return bool = False) -> None:
+        async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             # if thinkingToolUseStreamingConfig.enabled:
             #     posibleToolName = content.split("(")[0]
             #     tool = self.tools.get(posibleToolName)
