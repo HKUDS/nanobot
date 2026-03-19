@@ -505,6 +505,7 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        allowed_hosts=config.tools.allowed_hosts or None,
     )
 
     # Set cron callback (needs agent)
@@ -555,6 +556,12 @@ def gateway(
 
     # Create channel manager
     channels = ChannelManager(config, bus)
+
+    # Inject shared gateway services into the Web channel so its FastAPI app
+    # has access to session_manager, cron, and the full config.
+    web_ch = channels.get_channel("web")
+    if web_ch:
+        web_ch.set_services(session_manager=session_manager, cron_service=cron, config=config)
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -696,6 +703,7 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        allowed_hosts=config.tools.allowed_hosts or None,
     )
 
     # Shared reference for progress callbacks

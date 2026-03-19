@@ -41,6 +41,34 @@ async def test_web_fetch_blocks_localhost():
 
 
 @pytest.mark.asyncio
+async def test_web_fetch_allowlist_bypasses_private_ip():
+    """WebFetchTool with allowed_hosts must pass validation for private-resolving allowlisted hosts."""
+    allowed = frozenset(["gitlab.gleezy.cn"])
+    tool = WebFetchTool(allowed_hosts=allowed)
+
+    def _resolve_gitlab(hostname, port, family=0, type_=0):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("172.16.1.10", 0))]
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _resolve_gitlab):
+        ok, err = tool._validate_url_safe("https://gitlab.gleezy.cn/api/v4/projects")
+    assert ok, f"Allowlisted host should pass validation, got: {err}"
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_allowlist_still_blocks_non_allowlisted():
+    """WebFetchTool with allowed_hosts must still block non-allowlisted private hosts."""
+    allowed = frozenset(["gitlab.gleezy.cn"])
+    tool = WebFetchTool(allowed_hosts=allowed)
+
+    def _resolve_evil(hostname, port, family=0, type_=0):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("10.0.0.5", 0))]
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _resolve_evil):
+        ok, err = tool._validate_url_safe("https://evil.internal/secret")
+    assert not ok
+
+
+@pytest.mark.asyncio
 async def test_web_fetch_result_contains_untrusted_flag():
     """When fetch succeeds, result JSON must include untrusted=True and the banner."""
     tool = WebFetchTool()

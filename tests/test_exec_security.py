@@ -67,3 +67,34 @@ async def test_exec_blocks_chained_internal_url():
             command="echo start && curl http://169.254.169.254/latest/meta-data/ && echo done"
         )
     assert "Error" in result
+
+
+@pytest.mark.asyncio
+async def test_exec_allowlist_bypasses_private_ip():
+    """Commands targeting an allowlisted host must not be blocked even if it resolves to private IP."""
+    allowed = frozenset(["gitlab.gleezy.cn"])
+    tool = ExecTool(allowed_hosts=allowed)
+
+    def _fake_resolve_gitlab(hostname, port, family=0, type_=0):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("172.16.1.10", 0))]
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_gitlab):
+        guard = tool._guard_command(
+            "git push https://user:token@gitlab.gleezy.cn/org/repo.git main", "/tmp"
+        )
+    assert guard is None, f"Allowlisted host should not be blocked, got: {guard}"
+
+
+@pytest.mark.asyncio
+async def test_exec_allowlist_still_blocks_other_private():
+    """Non-allowlisted private hosts must still be blocked even when an allowlist is set."""
+    allowed = frozenset(["gitlab.gleezy.cn"])
+    tool = ExecTool(allowed_hosts=allowed)
+
+    def _fake_resolve_evil(hostname, port, family=0, type_=0):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("10.0.0.5", 0))]
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_evil):
+        guard = tool._guard_command("curl http://evil.internal/secret", "/tmp")
+    assert guard is not None
+    assert "internal" in guard.lower() or "private" in guard.lower()

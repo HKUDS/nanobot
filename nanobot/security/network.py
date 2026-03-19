@@ -1,10 +1,19 @@
-"""Network security utilities — SSRF protection and internal URL detection."""
+"""Network security utilities — SSRF protection and internal URL detection.
+
+Allowlist semantics
+-------------------
+The ``allowed_hosts`` parameter accepted by the public functions is matched
+**by hostname only** (case-insensitive).  IP-literal hostnames are supported
+as strings (e.g. ``"172.16.1.1"``), so to allow a redirect whose final URL
+has a bare IP host, add that IP string to ``allowed_hosts``.
+"""
 
 from __future__ import annotations
 
 import ipaddress
 import re
 import socket
+from typing import AbstractSet
 from urllib.parse import urlparse
 
 _BLOCKED_NETWORKS = [
@@ -27,10 +36,15 @@ def _is_private(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return any(addr in net for net in _BLOCKED_NETWORKS)
 
 
-def validate_url_target(url: str) -> tuple[bool, str]:
+def validate_url_target(
+    url: str,
+    allowed_hosts: AbstractSet[str] | None = None,
+) -> tuple[bool, str]:
     """Validate a URL is safe to fetch: scheme, hostname, and resolved IPs.
 
     Returns (ok, error_message).  When ok is True, error_message is empty.
+    If allowed_hosts is provided, hostnames in the set bypass the private-IP
+    check (SSRF allowlist for known internal services).
     """
     try:
         p = urlparse(url)
@@ -45,6 +59,9 @@ def validate_url_target(url: str) -> tuple[bool, str]:
     hostname = p.hostname
     if not hostname:
         return False, "Missing hostname"
+
+    if allowed_hosts and hostname.lower() in allowed_hosts:
+        return True, ""
 
     try:
         infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
@@ -62,8 +79,15 @@ def validate_url_target(url: str) -> tuple[bool, str]:
     return True, ""
 
 
-def validate_resolved_url(url: str) -> tuple[bool, str]:
-    """Validate an already-fetched URL (e.g. after redirect). Only checks the IP, skips DNS."""
+def validate_resolved_url(
+    url: str,
+    allowed_hosts: AbstractSet[str] | None = None,
+) -> tuple[bool, str]:
+    """Validate an already-fetched URL (e.g. after redirect). Only checks the IP, skips DNS.
+
+    If allowed_hosts is provided, hostnames in the set bypass the private-IP
+    check (SSRF allowlist for known internal services).
+    """
     try:
         p = urlparse(url)
     except Exception:
@@ -71,6 +95,9 @@ def validate_resolved_url(url: str) -> tuple[bool, str]:
 
     hostname = p.hostname
     if not hostname:
+        return True, ""
+
+    if allowed_hosts and hostname.lower() in allowed_hosts:
         return True, ""
 
     try:
@@ -94,11 +121,17 @@ def validate_resolved_url(url: str) -> tuple[bool, str]:
     return True, ""
 
 
-def contains_internal_url(command: str) -> bool:
-    """Return True if the command string contains a URL targeting an internal/private address."""
+def contains_internal_url(
+    command: str,
+    allowed_hosts: AbstractSet[str] | None = None,
+) -> bool:
+    """Return True if the command string contains a URL targeting an internal/private address.
+
+    If allowed_hosts is provided, hostnames in the set are not considered internal.
+    """
     for m in _URL_RE.finditer(command):
         url = m.group(0)
-        ok, _ = validate_url_target(url)
+        ok, _ = validate_url_target(url, allowed_hosts=allowed_hosts)
         if not ok:
             return True
     return False

@@ -3,6 +3,7 @@
 import asyncio
 import os
 import re
+from typing import AbstractSet
 from pathlib import Path
 from typing import Any
 
@@ -20,23 +21,25 @@ class ExecTool(Tool):
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
         path_append: str = "",
+        allowed_hosts: AbstractSet[str] | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
         self.deny_patterns = deny_patterns or [
-            r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
-            r"\bdel\s+/[fq]\b",              # del /f, del /q
-            r"\brmdir\s+/s\b",               # rmdir /s
-            r"(?:^|[;&|]\s*)format\b",       # format (as standalone command only)
-            r"\b(mkfs|diskpart)\b",          # disk operations
-            r"\bdd\s+if=",                   # dd
-            r">\s*/dev/sd",                  # write to disk
+            r"\brm\s+-[rf]{1,2}\b",  # rm -r, rm -rf, rm -fr
+            r"\bdel\s+/[fq]\b",  # del /f, del /q
+            r"\brmdir\s+/s\b",  # rmdir /s
+            r"(?:^|[;&|]\s*)format\b",  # format (as standalone command only)
+            r"\b(mkfs|diskpart)\b",  # disk operations
+            r"\bdd\s+if=",  # dd
+            r">\s*/dev/sd",  # write to disk
             r"\b(shutdown|reboot|poweroff)\b",  # system power
-            r":\(\)\s*\{.*\};\s*:",          # fork bomb
+            r":\(\)\s*\{.*\};\s*:",  # fork bomb
         ]
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
+        self.allowed_hosts: AbstractSet[str] = allowed_hosts or frozenset()
 
     @property
     def name(self) -> str:
@@ -76,8 +79,11 @@ class ExecTool(Tool):
         }
 
     async def execute(
-        self, command: str, working_dir: str | None = None,
-        timeout: int | None = None, **kwargs: Any,
+        self,
+        command: str,
+        working_dir: str | None = None,
+        timeout: int | None = None,
+        **kwargs: Any,
     ) -> str:
         cwd = working_dir or self.working_dir or os.getcwd()
         guard_error = self._guard_command(command, cwd)
@@ -155,12 +161,17 @@ class ExecTool(Tool):
                 return "Error: Command blocked by safety guard (not in allowlist)"
 
         from nanobot.security.network import contains_internal_url
-        if contains_internal_url(cmd):
-            return "Error: Command blocked by safety guard (internal/private URL detected)"
+
+        if contains_internal_url(cmd, allowed_hosts=self.allowed_hosts or None):
+            return (
+                "Error: Command blocked by safety guard (internal/private URL detected)"
+            )
 
         if self.restrict_to_workspace:
             if "..\\" in cmd or "../" in cmd:
-                return "Error: Command blocked by safety guard (path traversal detected)"
+                return (
+                    "Error: Command blocked by safety guard (path traversal detected)"
+                )
 
             cwd_path = Path(cwd).resolve()
 
@@ -177,7 +188,11 @@ class ExecTool(Tool):
 
     @staticmethod
     def _extract_absolute_paths(command: str) -> list[str]:
-        win_paths = re.findall(r"[A-Za-z]:\\[^\s\"'|><;]+", command)   # Windows: C:\...
-        posix_paths = re.findall(r"(?:^|[\s|>'\"])(/[^\s\"'>;|<]+)", command) # POSIX: /absolute only
-        home_paths = re.findall(r"(?:^|[\s|>'\"])(~[^\s\"'>;|<]*)", command) # POSIX/Windows home shortcut: ~
+        win_paths = re.findall(r"[A-Za-z]:\\[^\s\"'|><;]+", command)  # Windows: C:\...
+        posix_paths = re.findall(
+            r"(?:^|[\s|>'\"])(/[^\s\"'>;|<]+)", command
+        )  # POSIX: /absolute only
+        home_paths = re.findall(
+            r"(?:^|[\s|>'\"])(~[^\s\"'>;|<]*)", command
+        )  # POSIX/Windows home shortcut: ~
         return win_paths + posix_paths + home_paths

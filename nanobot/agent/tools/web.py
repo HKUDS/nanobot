@@ -7,6 +7,7 @@ import html
 import json
 import os
 import re
+from typing import AbstractSet
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
@@ -39,7 +40,12 @@ def _normalize(text: str) -> str:
 
 
 def _validate_url(url: str) -> tuple[bool, str]:
-    """Validate URL scheme/domain. Does NOT check resolved IPs (use _validate_url_safe for that)."""
+    """Validate URL scheme/domain only (no resolved-IP check).
+
+    For full SSRF protection (resolved IPs + allowlist), use
+    ``nanobot.security.network.validate_url_target`` directly or
+    ``WebFetchTool._validate_url_safe`` within a tool context.
+    """
     try:
         p = urlparse(url)
         if p.scheme not in ('http', 'https'):
@@ -49,12 +55,6 @@ def _validate_url(url: str) -> tuple[bool, str]:
         return True, ""
     except Exception as e:
         return False, str(e)
-
-
-def _validate_url_safe(url: str) -> tuple[bool, str]:
-    """Validate URL with SSRF protection: scheme, domain, and resolved IP check."""
-    from nanobot.security.network import validate_url_target
-    return validate_url_target(url)
 
 
 def _format_results(query: str, items: list[dict[str, Any]], n: int) -> str:
@@ -227,13 +227,24 @@ class WebFetchTool(Tool):
         "required": ["url"],
     }
 
-    def __init__(self, max_chars: int = 50000, proxy: str | None = None):
+    def __init__(
+        self,
+        max_chars: int = 50000,
+        proxy: str | None = None,
+        allowed_hosts: AbstractSet[str] | None = None,
+    ):
         self.max_chars = max_chars
         self.proxy = proxy
+        self.allowed_hosts: AbstractSet[str] = allowed_hosts or frozenset()
+
+    def _validate_url_safe(self, url: str) -> tuple[bool, str]:
+        """Validate URL with SSRF protection, respecting this tool's allowed_hosts."""
+        from nanobot.security.network import validate_url_target
+        return validate_url_target(url, allowed_hosts=self.allowed_hosts or None)
 
     async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
         max_chars = maxChars or self.max_chars
-        is_valid, error_msg = _validate_url_safe(url)
+        is_valid, error_msg = self._validate_url_safe(url)
         if not is_valid:
             return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False)
 
@@ -293,7 +304,7 @@ class WebFetchTool(Tool):
                 r.raise_for_status()
 
             from nanobot.security.network import validate_resolved_url
-            redir_ok, redir_err = validate_resolved_url(str(r.url))
+            redir_ok, redir_err = validate_resolved_url(str(r.url), allowed_hosts=self.allowed_hosts or None)
             if not redir_ok:
                 return json.dumps({"error": f"Redirect blocked: {redir_err}", "url": url}, ensure_ascii=False)
 

@@ -50,6 +50,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+web = [
+    "fastapi[standard]>=0.135.0,<1.0.0",
+]
 wecom = [
     "wecom-aibot-sdk-python>=0.1.5",
 ]

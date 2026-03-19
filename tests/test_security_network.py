@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from nanobot.security.network import contains_internal_url, validate_url_target
+from nanobot.security.network import contains_internal_url, validate_resolved_url, validate_url_target
 
 
 def _fake_resolve(host: str, results: list[str]):
@@ -99,3 +99,71 @@ def test_allows_normal_curl():
 
 def test_no_urls_returns_false():
     assert not contains_internal_url("echo hello && ls -la")
+
+
+# ---------------------------------------------------------------------------
+# allowed_hosts — validate_url_target allowlist
+# ---------------------------------------------------------------------------
+
+def test_allowlist_bypasses_private_ip_block():
+    """Hosts in allowed_hosts must not be blocked even when resolving to private IPs."""
+    allowed = frozenset(["gitlab.gleezy.cn"])
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("gitlab.gleezy.cn", ["172.16.1.10"])):
+        ok, err = validate_url_target("https://gitlab.gleezy.cn/api", allowed_hosts=allowed)
+    assert ok, f"Expected allowlisted host to pass, got: {err}"
+
+
+def test_non_allowlisted_host_still_blocked():
+    """Hosts NOT in allowed_hosts must still be blocked for private IPs."""
+    allowed = frozenset(["gitlab.gleezy.cn"])
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("evil.internal", ["172.16.1.10"])):
+        ok, err = validate_url_target("https://evil.internal/", allowed_hosts=allowed)
+    assert not ok
+
+
+def test_allowlist_case_insensitive():
+    """allowed_hosts matching must be case-insensitive."""
+    allowed = frozenset(["gitlab.gleezy.cn"])
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("GITLAB.GLEEZY.CN", ["172.16.1.10"])):
+        ok, _ = validate_url_target("https://GITLAB.GLEEZY.CN/repo", allowed_hosts=allowed)
+    assert ok
+
+
+# ---------------------------------------------------------------------------
+# allowed_hosts — contains_internal_url allowlist
+# ---------------------------------------------------------------------------
+
+def test_contains_internal_url_respects_allowlist():
+    """git push to allowlisted host must not be flagged as internal URL."""
+    allowed = frozenset(["gitlab.gleezy.cn"])
+    cmd = "git push https://user:token@gitlab.gleezy.cn/org/repo.git main"
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("gitlab.gleezy.cn", ["172.16.1.10"])):
+        assert not contains_internal_url(cmd, allowed_hosts=allowed)
+
+
+def test_contains_internal_url_blocks_non_allowlisted():
+    """Non-allowlisted private hosts must still be caught."""
+    allowed = frozenset(["gitlab.gleezy.cn"])
+    cmd = "curl http://192.168.0.1/secret"
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("192.168.0.1", ["192.168.0.1"])):
+        assert contains_internal_url(cmd, allowed_hosts=allowed)
+
+
+# ---------------------------------------------------------------------------
+# allowed_hosts — validate_resolved_url allowlist
+# ---------------------------------------------------------------------------
+
+def test_validate_resolved_url_blocks_private_redirect():
+    """Without allowlist, redirect to private IP must be blocked."""
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("internal.host", ["10.0.0.5"])):
+        ok, err = validate_resolved_url("http://internal.host/path")
+    assert not ok
+    assert "private" in err.lower() or "redirect" in err.lower()
+
+
+def test_validate_resolved_url_allows_allowlisted_redirect():
+    """Allowlisted host must pass even when it redirects to a private IP."""
+    allowed = frozenset(["gitlab.gleezy.cn"])
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("gitlab.gleezy.cn", ["172.16.1.10"])):
+        ok, err = validate_resolved_url("https://gitlab.gleezy.cn/api", allowed_hosts=allowed)
+    assert ok, f"Expected allowlisted redirect host to pass, got: {err}"
