@@ -261,7 +261,8 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
     "telegram": {
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
+      "allowFrom": ["YOUR_USER_ID"],
+      "silentToolHints": false
     }
   }
 }
