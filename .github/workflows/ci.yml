@@ -18,9 +18,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: pip
+      - name: Install uv
+        run: pip install uv
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: uv sync --frozen --extra dev
       - name: Ruff lint
         run: ruff check nanobot/ tests/
       - name: Ruff format check
@@ -34,9 +35,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: pip
+      - name: Install uv
+        run: pip install uv
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: uv sync --frozen --extra dev
       - name: mypy
         run: python -m mypy nanobot/
 
@@ -75,8 +77,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
+      - name: Install uv
+        run: pip install uv
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: uv sync --frozen --extra dev
       - name: Run tests with coverage
         run: python -m pytest tests/ -x -q --cov=nanobot --cov-report=term-missing --cov-fail-under=85
