@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.cycle_detector import CycleDetector
 from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
@@ -32,7 +33,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, InputLimitsConfig, WebSearchConfig
+    from nanobot.config.schema import ChannelsConfig, CycleDetectionConfig, ExecToolConfig, InputLimitsConfig, WebSearchConfig
     from nanobot.cron.service import CronService
 
 
@@ -68,6 +69,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        cycle_detection: CycleDetectionConfig | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, InputLimitsConfig, WebSearchConfig
 
@@ -100,6 +102,7 @@ class AgentLoop:
             web_proxy=web_proxy,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            cycle_detection=cycle_detection,
         )
 
         self._running = False
@@ -125,6 +128,7 @@ class AgentLoop:
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
         )
+        self.cycle_detector = CycleDetector.from_config(cycle_detection)
         self._register_default_tools()
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
@@ -273,6 +277,9 @@ class AgentLoop:
             if incremental and _raw_stream:
                 await _raw_stream(incremental)
 
+        # Reset cycle detector for new conversation turn
+        self.cycle_detector.reset()
+
         while iteration < self.max_iterations:
             iteration += 1
 
@@ -325,14 +332,28 @@ class AgentLoop:
                     thinking_blocks=response.thinking_blocks,
                 )
 
+                # Re-bind tool context right before execution so that
+                # concurrent sessions don't clobber each other's routing.
+                self._set_tool_context(channel, chat_id, message_id)
+
                 for tc in response.tool_calls:
                     tools_used.append(tc.name)
                     args_str = json.dumps(tc.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tc.name, args_str[:200])
 
-                # Re-bind tool context right before execution so that
-                # concurrent sessions don't clobber each other's routing.
-                self._set_tool_context(channel, chat_id, message_id)
+                    # Check for cycle before executing tool
+                    cycle_result = self.cycle_detector.check(tc.name, tc.arguments)
+                    if cycle_result.is_cycle:
+                        logger.warning("Tool cycle detected: {}", cycle_result.reason)
+                        final_content = (
+                            f"I detected I'm stuck in a loop ({cycle_result.reason}). "
+                            "Let me try a different approach or ask for clarification."
+                        )
+                        break
+
+                # If cycle was detected, exit the loop
+                if final_content is not None:
+                    break
 
                 # Execute all tool calls concurrently — the LLM batches
                 # independent calls in a single response on purpose.

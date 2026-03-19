@@ -4,10 +4,11 @@ import asyncio
 import json
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from nanobot.agent.cycle_detector import CycleDetector
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -18,6 +19,9 @@ from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ExecToolConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.utils.helpers import build_assistant_message
+
+if TYPE_CHECKING:
+    from nanobot.config.schema import CycleDetectionConfig
 
 
 class SubagentManager:
@@ -33,6 +37,7 @@ class SubagentManager:
         web_proxy: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
+        cycle_detection: "CycleDetectionConfig | None" = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -44,8 +49,11 @@ class SubagentManager:
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
+        self._cycle_detection_config = cycle_detection
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+        self._cycle_detection_config = cycle_detection
+        self.cycle_detector = CycleDetector.from_config(cycle_detection)
 
     async def spawn(
         self,
@@ -118,6 +126,9 @@ class SubagentManager:
             iteration = 0
             final_result: str | None = None
 
+            # Reset cycle detector for new subagent task
+            self.cycle_detector.reset()
+
             while iteration < max_iterations:
                 iteration += 1
 
@@ -138,6 +149,19 @@ class SubagentManager:
                         reasoning_content=response.reasoning_content,
                         thinking_blocks=response.thinking_blocks,
                     ))
+
+                    # Check for cycles before executing tools
+                    cycle_detected = False
+                    for tool_call in response.tool_calls:
+                        cycle_result = self.cycle_detector.check(tool_call.name, tool_call.arguments)
+                        if cycle_result.is_cycle:
+                            logger.warning("Subagent [{}] cycle detected: {}", task_id, cycle_result.reason)
+                            final_result = f"Task interrupted due to detected loop: {cycle_result.reason}"
+                            cycle_detected = True
+                            break
+
+                    if cycle_detected:
+                        break
 
                     # Execute tools
                     for tool_call in response.tool_calls:

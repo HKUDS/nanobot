@@ -28,6 +28,16 @@ class ChannelsConfig(Base):
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
 
 
+class CycleDetectionConfig(Base):
+    """Configuration for tool call cycle detection to prevent infinite loops."""
+
+    enabled: bool = True
+    window_size: int = 20  # Number of recent tool calls to track
+    max_same_calls: int = 3  # Max times the same (tool, args) can be called
+    pattern_min_length: int = 2  # Minimum pattern length to detect
+    pattern_min_repeats: int = 2  # Minimum pattern repetitions to trigger
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -41,6 +51,9 @@ class AgentDefaults(Base):
     temperature: float = 0.1
     max_tool_iterations: int = 40
     context_budget_tokens: int = 0  # Max old-history tokens during tool iterations (0 = no trim)
+    cycle_detection: CycleDetectionConfig = Field(default_factory=CycleDetectionConfig)
+    # Deprecated compatibility field: accepted from old configs but ignored at runtime.
+    memory_window: int | None = Field(default=None, exclude=True)
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
 
 
