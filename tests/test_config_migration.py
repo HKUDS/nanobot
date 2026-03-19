@@ -216,7 +216,7 @@ def test_save_keeps_intentional_in_memory_override_of_env_ref(tmp_path, monkeypa
     assert saved["providers"]["openai"]["apiKey"] == "sk-manual-override"
 
 
-def test_missing_env_ref_resolves_empty_at_runtime_but_persists_placeholder(tmp_path) -> None:
+def test_missing_env_ref_stays_unresolved_and_persists_placeholder(tmp_path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(
         json.dumps(
@@ -232,8 +232,7 @@ def test_missing_env_ref_resolves_empty_at_runtime_but_persists_placeholder(tmp_
     )
 
     config = load_config(config_path)
-    assert config.providers.openai.api_key == ""
-    assert config.get_provider_name("openai/gpt-4.1") is None
+    assert config.providers.openai.api_key == "{env:MISSING_OPENAI_KEY}"
 
     save_config(config, config_path)
     saved = json.loads(config_path.read_text(encoding="utf-8"))

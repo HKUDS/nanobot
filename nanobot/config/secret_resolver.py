@@ -19,12 +19,15 @@ def resolve_env_vars(value: str) -> str:
 
     Returns:
         String with all {env:VAR} references replaced by their values.
-        Missing env vars resolve to empty string.
+        Missing env vars are left unchanged.
     """
 
     def replacer(match: re.Match[str]) -> str:
         var_name = match.group(1)
-        return os.environ.get(var_name, "")
+        env_value = os.environ.get(var_name)
+        if env_value is None:
+            return match.group(0)
+        return env_value
 
     return _REF_PATTERN.sub(replacer, value)
 
