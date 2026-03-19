@@ -189,7 +189,7 @@ class ToolRegistry:
                     and len(result.output) > self._SUMMARY_THRESHOLD
                 ):
                     if tool.summarize:
-                        await self._cache.store_with_summary(
+                        _, result = await self._cache.store_with_summary(
                             name,
                             params,
                             result,
@@ -197,7 +197,7 @@ class ToolRegistry:
                             model=self._summary_model,
                         )
                     else:
-                        self._cache.store_only(name, params, result)
+                        _, result = self._cache.store_only(name, params, result)
 
                 return result
 

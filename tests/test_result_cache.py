@@ -123,16 +123,18 @@ class TestToolResultCache:
         """store_only caches the full output but doesn't set summary on result."""
         cache = ToolResultCache(workspace=tmp_path)
         result = ToolResult.ok("x" * 5000)
-        key = cache.store_only("web_fetch", {"url": "https://example.com"}, result)
+        key, new_result = cache.store_only("web_fetch", {"url": "https://example.com"}, result)
         # Full output cached and retrievable
         entry = cache.get(key)
         assert entry is not None
         assert entry.full_output == "x" * 5000
         assert entry.summary == ""
-        # Result has cache_key but NOT summary — to_llm_string returns raw output
-        assert result.metadata["cache_key"] == key
-        assert "summary" not in result.metadata
-        assert result.to_llm_string() == "x" * 5000
+        # New result has cache_key but NOT summary — to_llm_string returns raw output
+        assert new_result.metadata["cache_key"] == key
+        assert "summary" not in new_result.metadata
+        assert new_result.to_llm_string() == "x" * 5000
+        # Original result is not mutated
+        assert "cache_key" not in result.metadata
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +154,7 @@ class TestStoreWithSummary:
     async def test_llm_summary_stored(self, tmp_path: Path, mock_provider: AsyncMock):
         cache = ToolResultCache(workspace=tmp_path)
         result = ToolResult.ok("x" * 5000)
-        key = await cache.store_with_summary(
+        key, new_result = await cache.store_with_summary(
             "read_excel",
             {"path": "a.xlsx"},
             result,
@@ -162,9 +164,10 @@ class TestStoreWithSummary:
         entry = cache.get(key)
         assert entry is not None
         assert entry.summary == "LLM generated summary for the tool output."
-        # Result metadata annotated
-        assert result.metadata["cache_key"] == key
-        assert result.metadata["summary"] == entry.summary
+        # New result has metadata; original is not mutated
+        assert new_result.metadata["cache_key"] == key
+        assert new_result.metadata["summary"] == entry.summary
+        assert "cache_key" not in result.metadata
 
     async def test_heuristic_fallback_on_provider_failure(self, tmp_path: Path):
         provider = AsyncMock()
@@ -172,7 +175,7 @@ class TestStoreWithSummary:
 
         cache = ToolResultCache(workspace=tmp_path)
         result = ToolResult.ok("x" * 5000)
-        key = await cache.store_with_summary(
+        key, _ = await cache.store_with_summary(
             "read_excel",
             {"path": "a.xlsx"},
             result,
@@ -188,7 +191,7 @@ class TestStoreWithSummary:
     async def test_heuristic_when_no_provider(self, tmp_path: Path):
         cache = ToolResultCache(workspace=tmp_path)
         result = ToolResult.ok("x" * 5000)
-        key = await cache.store_with_summary("tool", {"a": 1}, result)
+        key, _ = await cache.store_with_summary("tool", {"a": 1}, result)
         entry = cache.get(key)
         assert "chars" in entry.summary
 

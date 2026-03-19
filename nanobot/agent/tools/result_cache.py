@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -59,7 +60,7 @@ class _ChatProvider(Protocol):
 def _heuristic_summary(tool_name: str, output: str, cache_key: str) -> str:
     """Deterministic fallback summary when LLM is unavailable."""
     total = len(output)
-    preview = output[:400]
+    preview = output[:2000]
     return (
         f"[{tool_name}] returned {total:,} chars of output.\n"
         f"Preview:\n{preview}\n...\n"
@@ -109,7 +110,7 @@ async def generate_summary(
                 "LLM summary for {}(key={}) — {} chars", tool_name, cache_key, len(summary)
             )
             return summary
-    except Exception:  # crash-barrier: LLM call may raise arbitrary provider errors
+    except Exception:
         logger.warning("LLM summary failed for {}, using heuristic fallback", tool_name)
 
     return _heuristic_summary(tool_name, output, cache_key)
@@ -133,6 +134,7 @@ def _make_cache_key(tool_name: str, args: dict[str, Any]) -> str:
 
 _MAX_DISK_ENTRY_BYTES = 200_000  # entries larger than this are memory-only
 _MAX_DISK_ENTRIES = 50
+_MAX_MEMORY_ENTRIES = 500  # LRU cap for in-memory cache
 
 
 @dataclass(slots=True)
@@ -152,13 +154,8 @@ class ToolResultCache:
     """In-memory tool result cache with optional JSONL disk persistence."""
 
     def __init__(self, workspace: Path | None = None) -> None:
-        self._entries: dict[str, CacheEntry] = {}
-        # Maps (tool_name, args_key) → cache_key for dedup lookups
-        self._args_index: dict[str, str] = {}
+        self._entries: OrderedDict[str, CacheEntry] = OrderedDict()
         self._disk_path: Path | None = None
-        # P-05: track how many records have been appended since startup so we
-        # only call _evict_disk() when the file might exceed _MAX_DISK_ENTRIES.
-        self._disk_write_count: int = 0
         if workspace:
             self._disk_path = workspace / "memory" / "tool_cache.jsonl"
             self._load_disk()
@@ -200,7 +197,9 @@ class ToolResultCache:
             truncated=truncated,
         )
         self._entries[key] = entry
-        self._args_index[f"{tool_name}:{key}"] = key
+        # LRU eviction: pop the oldest entry when the cap is exceeded
+        if len(self._entries) > _MAX_MEMORY_ENTRIES:
+            self._entries.popitem(last=False)
         self._persist_entry(entry)
         return key
 
@@ -211,8 +210,13 @@ class ToolResultCache:
         result: ToolResult,
         provider: _ChatProvider | None = None,
         model: str | None = None,
-    ) -> str:
-        """Generate an LLM summary and store the result.  Returns cache key."""
+    ) -> tuple[str, ToolResult]:
+        """Generate an LLM summary and store the result.
+
+        Returns ``(cache_key, new_result)`` where *new_result* is a fresh
+        ``ToolResult`` with ``cache_key`` and ``summary`` added to its
+        metadata.  The original *result* is never mutated.
+        """
         key = _make_cache_key(tool_name, args)
         summary = await generate_summary(
             tool_name, result.output, key, provider=provider, model=model
@@ -225,22 +229,31 @@ class ToolResultCache:
             truncated=result.truncated,
             token_estimate=len(result.output) // 4,
         )
-        # Annotate the result so to_llm_string() returns the summary
-        result.metadata["cache_key"] = key
-        result.metadata["summary"] = summary
-        return key
+        # Return a new ToolResult with cache metadata — never mutate the original.
+        new_result = ToolResult(
+            output=result.output,
+            success=result.success,
+            error=result.error,
+            truncated=result.truncated,
+            metadata={**result.metadata, "cache_key": key, "summary": summary},
+        )
+        return key, new_result
 
     def store_only(
         self,
         tool_name: str,
         args: dict[str, Any],
         result: ToolResult,
-    ) -> str:
+    ) -> tuple[str, ToolResult]:
         """Cache the full output *without* generating a summary.
 
         The LLM sees raw output on the current turn.  On later turns the
         context compressor can truncate the message and the agent can use
         ``cache_get_slice`` with the returned key to page through the data.
+
+        Returns ``(cache_key, new_result)`` where *new_result* is a fresh
+        ``ToolResult`` with ``cache_key`` added to its metadata.  The
+        original *result* is never mutated.
         """
         key = _make_cache_key(tool_name, args)
         self.store(
@@ -251,10 +264,16 @@ class ToolResultCache:
             truncated=result.truncated,
             token_estimate=len(result.output) // 4,
         )
-        # Set cache_key so context compression hints reference it,
-        # but do NOT set "summary" — to_llm_string() will return raw output.
-        result.metadata["cache_key"] = key
-        return key
+        # Return a new ToolResult with cache_key metadata — never mutate the original.
+        # Do NOT include "summary" so to_llm_string() returns raw output.
+        new_result = ToolResult(
+            output=result.output,
+            success=result.success,
+            error=result.error,
+            truncated=result.truncated,
+            metadata={**result.metadata, "cache_key": key},
+        )
+        return key, new_result
 
     def get_slice(self, cache_key: str, start: int = 0, end: int = 25) -> str | None:
         """Return a slice of the cached output (lines or JSON rows)."""
@@ -266,7 +285,6 @@ class ToolResultCache:
     def clear(self) -> None:
         """Flush in-memory and disk caches."""
         self._entries.clear()
-        self._args_index.clear()
         if self._disk_path and self._disk_path.exists():
             self._disk_path.unlink()
 
@@ -294,12 +312,7 @@ class ToolResultCache:
         with open(self._disk_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-        self._disk_write_count += 1
-        # P-05: only compact the file when we know it has grown past the cap;
-        # avoids a full read+rewrite on every store() call.
-        if self._disk_write_count > _MAX_DISK_ENTRIES:
-            self._evict_disk()
-            self._disk_write_count = _MAX_DISK_ENTRIES
+        self._evict_disk()
 
     def _load_disk(self) -> None:
         """Load entries from the JSONL disk file."""
@@ -307,8 +320,6 @@ class ToolResultCache:
             return
         try:
             lines = self._disk_path.read_text(encoding="utf-8").strip().splitlines()
-            # P-05: seed write count so eviction fires at the right time.
-            self._disk_write_count = len(lines)
             for line in lines[-_MAX_DISK_ENTRIES:]:
                 record = json.loads(line)
                 entry = CacheEntry(
@@ -321,9 +332,8 @@ class ToolResultCache:
                     truncated=record.get("truncated", False),
                 )
                 self._entries[entry.cache_key] = entry
-                self._args_index[f"{entry.tool_name}:{entry.cache_key}"] = entry.cache_key
             logger.debug("Loaded {} cached tool results from disk", len(self._entries))
-        except Exception:  # crash-barrier: malformed JSONL cache file
+        except Exception:
             logger.warning("Failed to load tool result cache from disk")
 
     def _evict_disk(self) -> None:
@@ -335,7 +345,7 @@ class ToolResultCache:
             if len(lines) > _MAX_DISK_ENTRIES:
                 keep = lines[-_MAX_DISK_ENTRIES:]
                 self._disk_path.write_text("\n".join(keep) + "\n", encoding="utf-8")
-        except Exception:  # crash-barrier: disk I/O errors during cache eviction
+        except Exception:
             pass
 
 
