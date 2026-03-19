@@ -86,7 +86,7 @@ class CronTool(Tool):
                 "tz": {
                     "type": "string",
                     "description": (
-                        "Optional IANA timezone for cron expressions "
+                        "Optional IANA timezone for cron_expr or at "
                         f"(e.g. 'America/Vancouver'). Defaults to {self._default_timezone}."
                     ),
                 },
@@ -135,8 +135,8 @@ class CronTool(Tool):
             return "Error: message is required for add"
         if not self._channel or not self._chat_id:
             return "Error: no session context (channel/chat_id)"
-        if tz and not cron_expr:
-            return "Error: tz can only be used with cron_expr"
+        if tz and not cron_expr and not at:
+            return "Error: tz can only be used with cron_expr or at"
         if tz:
             if err := self._validate_timezone(tz):
                 return err
@@ -158,9 +158,10 @@ class CronTool(Tool):
             except ValueError:
                 return f"Error: invalid ISO datetime format '{at}'. Expected format: YYYY-MM-DDTHH:MM:SS"
             if dt.tzinfo is None:
-                if err := self._validate_timezone(self._default_timezone):
+                fallback_tz = tz or self._default_timezone
+                if err := self._validate_timezone(fallback_tz):
                     return err
-                dt = dt.replace(tzinfo=ZoneInfo(self._default_timezone))
+                dt = dt.replace(tzinfo=ZoneInfo(fallback_tz))
             at_ms = int(dt.timestamp() * 1000)
             schedule = CronSchedule(kind="at", at_ms=at_ms)
             delete_after = True
