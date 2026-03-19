@@ -72,19 +72,19 @@ class TestChannelMethodContract:
     @pytest.mark.parametrize("name,cls", _CHANNEL_CLASSES, ids=[c[0] for c in _CHANNEL_CLASSES])
     def test_has_start_method(self, name: str, cls: type):
         assert hasattr(cls, "start"), f"{name} must implement start()"
-        assert callable(getattr(cls, "start")), f"{name}.start must be callable"
+        assert callable(cls.start), f"{name}.start must be callable"
         assert inspect.iscoroutinefunction(cls.start), f"{name}.start must be async"
 
     @pytest.mark.parametrize("name,cls", _CHANNEL_CLASSES, ids=[c[0] for c in _CHANNEL_CLASSES])
     def test_has_stop_method(self, name: str, cls: type):
         assert hasattr(cls, "stop"), f"{name} must implement stop()"
-        assert callable(getattr(cls, "stop")), f"{name}.stop must be callable"
+        assert callable(cls.stop), f"{name}.stop must be callable"
         assert inspect.iscoroutinefunction(cls.stop), f"{name}.stop must be async"
 
     @pytest.mark.parametrize("name,cls", _CHANNEL_CLASSES, ids=[c[0] for c in _CHANNEL_CLASSES])
     def test_has_send_method(self, name: str, cls: type):
         assert hasattr(cls, "send"), f"{name} must implement send()"
-        assert callable(getattr(cls, "send")), f"{name}.send must be callable"
+        assert callable(cls.send), f"{name}.send must be callable"
         assert inspect.iscoroutinefunction(cls.send), f"{name}.send must be async"
 
 
@@ -99,7 +99,7 @@ class TestChannelNameContract:
     @pytest.mark.parametrize("name,cls", _CHANNEL_CLASSES, ids=[c[0] for c in _CHANNEL_CLASSES])
     def test_has_name_attribute(self, name: str, cls: type):
         assert hasattr(cls, "name"), f"{name} must have a 'name' attribute"
-        channel_name = getattr(cls, "name")
+        channel_name = cls.name
         assert isinstance(channel_name, str), f"{name}.name must be a string"
         assert len(channel_name) > 0, f"{name}.name must not be empty"
 
