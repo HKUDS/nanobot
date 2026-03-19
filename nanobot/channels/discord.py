@@ -4,6 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote
 
 import httpx
 from pydantic import Field
@@ -31,6 +32,7 @@ class DiscordConfig(Base):
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377
     group_policy: Literal["mention", "open"] = "mention"
+    read_receipt: bool = True  # React with 👀 when message is received, remove after reply
 
 
 class DiscordChannel(BaseChannel):
@@ -54,6 +56,7 @@ class DiscordChannel(BaseChannel):
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._http: httpx.AsyncClient | None = None
         self._bot_user_id: str | None = None
+        self._pending_reactions: dict[str, str] = {}  # channel_id -> message_id
 
     async def start(self) -> None:
         """Start the Discord gateway connection."""
@@ -136,6 +139,9 @@ class DiscordChannel(BaseChannel):
                     break  # Abort remaining chunks on failure
         finally:
             await self._stop_typing(msg.chat_id)
+            message_id = self._pending_reactions.pop(msg.chat_id, None)
+            if message_id:
+                await self._remove_reaction(msg.chat_id, message_id, "👀")
 
     async def _send_payload(
         self, url: str, headers: dict[str, str], payload: dict[str, Any]
@@ -336,6 +342,11 @@ class DiscordChannel(BaseChannel):
 
         await self._start_typing(channel_id)
 
+        message_id = str(payload.get("id", ""))
+        if message_id and self.config.read_receipt:
+            await self._add_reaction(channel_id, message_id, "👀")
+            self._pending_reactions[channel_id] = message_id
+
         await self._handle_message(
             sender_id=sender_id,
             chat_id=channel_id,
@@ -368,6 +379,30 @@ class DiscordChannel(BaseChannel):
             return False
 
         return True
+
+    async def _add_reaction(self, channel_id: str, message_id: str, emoji: str) -> None:
+        """Add a reaction to a message."""
+        if not self._http:
+            return
+        emoji_encoded = quote(emoji, safe="")
+        url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}/reactions/{emoji_encoded}/@me"
+        headers = {"Authorization": f"Bot {self.config.token}"}
+        try:
+            await self._http.put(url, headers=headers)
+        except Exception as e:
+            logger.debug("Failed to add reaction: {}", e)
+
+    async def _remove_reaction(self, channel_id: str, message_id: str, emoji: str) -> None:
+        """Remove bot's own reaction from a message."""
+        if not self._http:
+            return
+        emoji_encoded = quote(emoji, safe="")
+        url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}/reactions/{emoji_encoded}/@me"
+        headers = {"Authorization": f"Bot {self.config.token}"}
+        try:
+            await self._http.delete(url, headers=headers)
+        except Exception as e:
+            logger.debug("Failed to remove reaction: {}", e)
 
     async def _start_typing(self, channel_id: str) -> None:
         """Start periodic typing indicator for a channel."""
