@@ -323,6 +323,12 @@ docker compose down nanobot-gateway
 docker compose -f docker/docker-compose.browser.yml up -d --build
 ```
 
+> **Mac M-series (Apple Silicon) users:** The Playwright image is AMD64-based. Add `--platform linux/amd64` to avoid compatibility issues:
+> ```bash
+> docker compose -f docker/docker-compose.browser.yml up -d --build --platform linux/amd64
+> ```
+> Intel Mac and Linux users can skip this.
+
 > `--build` is required the first time — it builds a new image based on `docker/Dockerfile.browser`, which includes Playwright and Chromium. Subsequent restarts don't need `--build` unless the code changes.
 
 **4. Enable browser in `~/.nanobot/config.json`:**
@@ -365,7 +371,11 @@ Your existing config (`~/.nanobot`) is still mounted into the new container — 
 
 2. **Start the service:**
    ```bash
-   docker-compose -f docker/docker-compose.browser.yml up -d
+   # Intel Mac / Linux
+   docker compose -f docker/docker-compose.browser.yml up -d
+
+   # Mac M-series (Apple Silicon)
+   docker compose -f docker/docker-compose.browser.yml up -d --platform linux/amd64
    ```
 
 3. **Test browser automation:**

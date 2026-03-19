@@ -113,8 +113,11 @@ docker compose down
 ### Browser 模式
 
 ```bash
-# 第一次使用：构建镜像并启动（含 Playwright + Chromium）
+# Intel Mac / Linux
 docker compose -f docker/docker-compose.browser.yml up -d --build
+
+# Mac M 系列（M1 / M2 / M3，Apple Silicon）
+docker compose -f docker/docker-compose.browser.yml up -d --build --platform linux/amd64
 
 # 查看日志
 docker compose -f docker/docker-compose.browser.yml logs -f
@@ -124,6 +127,9 @@ docker compose -f docker/docker-compose.browser.yml down
 ```
 
 > **注意**：Browser 模式首次启动需要构建镜像（约 3~5 分钟，需下载 Playwright 和 Chromium）。后续重启不需要 `--build`。
+>
+> **为什么 Mac M 系列需要加 `--platform linux/amd64`？**
+> Playwright 官方镜像基于 AMD64（x86）架构，而 Mac M 系列是 ARM 架构。加这个参数让 Docker Desktop 自动用内置的 Rosetta 2 转译层运行，兼容性更好。不加有时也能跑，但可能遇到奇怪的崩溃。
 
 ### 从标准模式升级到 Browser 模式
 
@@ -137,7 +143,10 @@ git pull origin main
 docker compose down nanobot-gateway
 
 # 3. 构建新镜像并启动
+# Intel Mac / Linux：
 docker compose -f docker/docker-compose.browser.yml up -d --build
+# Mac M 系列：
+docker compose -f docker/docker-compose.browser.yml up -d --build --platform linux/amd64
 
 # 4. 在配置文件中启用 browser（可选，Compose 文件已通过环境变量启用）
 # 编辑 ~/.nanobot/config.json，添加：
@@ -430,7 +439,8 @@ docker compose logs -f nanobot-gateway
 docker compose down
 
 # Docker（Browser 模式）
-docker compose -f docker/docker-compose.browser.yml up -d --build
+docker compose -f docker/docker-compose.browser.yml up -d --build              # Intel Mac / Linux
+docker compose -f docker/docker-compose.browser.yml up -d --build --platform linux/amd64  # Mac M 系列
 docker compose -f docker/docker-compose.browser.yml logs -f
 docker compose -f docker/docker-compose.browser.yml down
 ```
