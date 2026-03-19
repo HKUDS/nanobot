@@ -20,6 +20,7 @@ class ExecTool(Tool):
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
         path_append: str = "",
+        allowed_paths: list[str] | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -35,6 +36,8 @@ class ExecTool(Tool):
             r":\(\)\s*\{.*\};\s*:",          # fork bomb
         ]
         self.allow_patterns = allow_patterns or []
+        allowed_paths = allowed_paths or []
+        self.allowed_paths = [Path(p).expanduser().resolve() for p in allowed_paths]
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
 
@@ -170,8 +173,8 @@ class ExecTool(Tool):
                     p = Path(expanded).expanduser().resolve()
                 except Exception:
                     continue
-                if p.is_absolute() and cwd_path not in p.parents and p != cwd_path:
-                    return "Error: Command blocked by safety guard (path outside working dir)"
+                if p.is_absolute() and cwd_path not in p.parents and p != cwd_path and p not in self.allowed_paths:
+                    return "Error: Command blocked by safety guard (path outside working dir and not in allowed_paths)"
 
         return None
 
