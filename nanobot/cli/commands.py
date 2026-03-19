@@ -162,7 +162,7 @@ async def _read_interactive_input_async() -> str:
         raise KeyboardInterrupt from exc
 
 
-def version_callback(value: bool):
+def version_callback(value: bool) -> None:
     if value:
         console.print(f"{__logo__} nanobot v{__version__}")
         raise typer.Exit()
@@ -171,7 +171,7 @@ def version_callback(value: bool):
 @app.callback()
 def main(
     version: bool = typer.Option(None, "--version", "-v", callback=version_callback, is_eager=True),
-):
+) -> None:
     """nanobot - Personal AI Assistant."""
     pass
 
@@ -182,7 +182,7 @@ def main(
 
 
 @app.command()
-def onboard():
+def onboard() -> None:
     """Initialize nanobot configuration and workspace."""
     from nanobot.config.loader import get_config_path, load_config, save_config
     from nanobot.config.schema import Config
@@ -230,7 +230,7 @@ def onboard():
     )
 
 
-def _create_workspace_templates(workspace: Path):
+def _create_workspace_templates(workspace: Path) -> None:
     """Create default workspace template files from bundled templates."""
     from importlib.resources import files as pkg_files
 
@@ -308,7 +308,7 @@ def _sys_stderr(message: str) -> None:
     sys.stderr.write(message)
 
 
-def _make_provider(config: Config):
+def _make_provider(config: Config) -> Any:
     """Create the appropriate LLM provider from config."""
     from nanobot.providers.custom_provider import CustomProvider
     from nanobot.providers.litellm_provider import LiteLLMProvider
@@ -390,7 +390,7 @@ def _make_agent_config(config: Config) -> AgentConfig:
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
-):
+) -> None:
     """Start the nanobot gateway."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
@@ -504,7 +504,7 @@ def gateway(
         """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
 
-        async def _silent(*_args, **_kwargs):
+        async def _silent(*_args: Any, **_kwargs: Any) -> None:
             pass
 
         return await agent.process_direct(
@@ -575,7 +575,7 @@ def gateway(
                 f"[green]✓[/green] Web API: http://{web_cfg.host}:{web_cfg.port} (no frontend)"
             )
 
-    async def run():
+    async def run() -> None:
         health_server: asyncio.Server | None = None
         uvi_server = None
         try:
@@ -651,7 +651,7 @@ def ui(
     port: int = typer.Option(8000, "--port", "-p", help="Web UI port"),
     host: str = typer.Option("127.0.0.1", "--host", help="Bind address"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
-):
+) -> None:
     """Start the nanobot web UI (FastAPI + assistant-ui)."""
     try:
         import uvicorn  # noqa: F401
@@ -727,7 +727,7 @@ def ui(
 
     import uvicorn
 
-    async def _run():
+    async def _run() -> None:
         uvi_config = uvicorn.Config(
             app,
             host=host,
@@ -773,7 +773,7 @@ def agent(
         "--timeout",
         help="Timeout in seconds for single-message mode (--message). Use 0 to disable.",
     ),
-):
+) -> None:
     """Interact with the agent directly."""
     from loguru import logger
 
@@ -818,7 +818,7 @@ def agent(
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
-    def _thinking_ctx():
+    def _thinking_ctx() -> Any:
         if logs:
             from contextlib import nullcontext
 
@@ -838,7 +838,7 @@ def agent(
 
     if message:
         # Single message mode — direct call, no bus needed
-        async def run_once():
+        async def run_once() -> None:
             try:
                 with _thinking_ctx():
                     coro = agent_loop.process_direct(message, session_id, on_progress=_cli_progress)
@@ -897,20 +897,20 @@ def agent(
         else:
             cli_channel, cli_chat_id = "cli", session_id
 
-        def _exit_on_sigint(signum, frame):
+        def _exit_on_sigint(signum: int, frame: object) -> None:
             _restore_terminal()
             console.print("\nGoodbye!")
             os._exit(0)
 
         signal.signal(signal.SIGINT, _exit_on_sigint)
 
-        async def run_interactive():
+        async def run_interactive() -> None:
             bus_task = asyncio.create_task(agent_loop.run())
             turn_done = asyncio.Event()
             turn_done.set()
             turn_response: list[str] = []
 
-            async def _consume_outbound():
+            async def _consume_outbound() -> None:
                 while True:
                     try:
                         msg = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
@@ -997,7 +997,7 @@ app.add_typer(channels_app, name="channels")
 
 
 @channels_app.command("status")
-def channels_status():
+def channels_status() -> None:
     """Show channel status."""
     from nanobot.config.loader import load_config
 
@@ -1092,7 +1092,7 @@ def _get_bridge_dir() -> Path:
 
 
 @channels_app.command("login")
-def channels_login():
+def channels_login() -> None:
     """Link device via QR code."""
     import subprocess
 
@@ -1127,7 +1127,7 @@ app.add_typer(cron_app, name="cron")
 @cron_app.command("list")
 def cron_list(
     all: bool = typer.Option(False, "--all", "-a", help="Include disabled jobs"),
-):
+) -> None:
     """List scheduled jobs."""
     from nanobot.config.loader import get_data_dir
     from nanobot.cron.service import CronService
@@ -1197,7 +1197,7 @@ def cron_add(
     channel: str = typer.Option(
         None, "--channel", help="Channel for delivery (e.g. 'telegram', 'whatsapp')"
     ),
-):
+) -> None:
     """Add a scheduled job."""
     from nanobot.config.loader import get_data_dir
     from nanobot.cron.service import CronService
@@ -1243,7 +1243,7 @@ def cron_add(
 @cron_app.command("remove")
 def cron_remove(
     job_id: str = typer.Argument(..., help="Job ID to remove"),
-):
+) -> None:
     """Remove a scheduled job."""
     from nanobot.config.loader import get_data_dir
     from nanobot.cron.service import CronService
@@ -1261,7 +1261,7 @@ def cron_remove(
 def cron_enable(
     job_id: str = typer.Argument(..., help="Job ID"),
     disable: bool = typer.Option(False, "--disable", help="Disable instead of enable"),
-):
+) -> None:
     """Enable or disable a job."""
     from nanobot.config.loader import get_data_dir
     from nanobot.cron.service import CronService
@@ -1281,7 +1281,7 @@ def cron_enable(
 def cron_run(
     job_id: str = typer.Argument(..., help="Job ID to run"),
     force: bool = typer.Option(False, "--force", "-f", help="Run even if disabled"),
-):
+) -> None:
     """Manually run a job."""
     from loguru import logger
 
@@ -1331,7 +1331,7 @@ def cron_run(
 
     service.on_job = on_job
 
-    async def run():
+    async def run() -> bool:
         return await service.run_job(job_id, force=force)
 
     try:
@@ -1357,7 +1357,7 @@ app.add_typer(routing_app, name="routing")
 @routing_app.command("trace")
 def routing_trace(
     last: int = typer.Option(20, "--last", "-n", help="Number of recent trace entries to show"),
-):
+) -> None:
     """Show the last N routing decisions from the trace log.
 
     Routing traces are now captured by Langfuse.  Use the Langfuse dashboard
@@ -1424,7 +1424,7 @@ def routing_trace(
 
 
 @routing_app.command("metrics")
-def routing_metrics_cmd():
+def routing_metrics_cmd() -> None:
     """Show routing metrics (classifications, delegations, latencies).
 
     Routing metrics are now captured by Langfuse.  Use the Langfuse dashboard
@@ -1534,7 +1534,7 @@ def _memory_rollout_overrides(config: Config) -> dict[str, object]:
 def memory_inspect(
     query: str = typer.Option("", "--query", "-q", help="Optional retrieval query"),
     top_k: int = typer.Option(6, "--top-k", "-k", help="Top-k memories to display"),
-):
+) -> None:
     """Inspect memory backend health, profile, and retrieval results."""
     from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
@@ -1607,7 +1607,7 @@ def memory_metrics(
         False, "--write-baseline", help="(deprecated) Previously wrote baselines"
     ),
     baseline_file: str = typer.Option("", "--baseline-file", help="(deprecated)"),
-):
+) -> None:
     """Show memory backend health. Per-counter metrics now live in Langfuse."""
     from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
@@ -1644,7 +1644,7 @@ def memory_rebuild(
     max_events: int = typer.Option(
         30, "--max-events", help="Max recent events for MEMORY.md snapshot"
     ),
-):
+) -> None:
     """Rebuild memory/MEMORY.md from structured memory profile and events."""
     from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
@@ -1669,7 +1669,7 @@ def memory_reindex(
         "--reset/--no-reset",
         help="Reset mem0 user memories before rebuilding from structured memory.",
     ),
-):
+) -> None:
     """Reindex mem0 vectors from structured profile/events only."""
     from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
@@ -1710,7 +1710,7 @@ def memory_compact(
         "--reset/--no-reset",
         help="Reset mem0 user memories before compact rebuild.",
     ),
-):
+) -> None:
     """Compact backend memory (dedup/drop superseded) and rebuild mem0 from structured sources."""
     from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
@@ -1750,7 +1750,7 @@ def memory_verify(
     stale_days: int = typer.Option(
         90, "--stale-days", help="Age threshold for stale events without TTL"
     ),
-):
+) -> None:
     """Verify memory consistency and freshness."""
     from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
@@ -1799,7 +1799,7 @@ def memory_eval(
     output_file: str = typer.Option(
         "", "--output-file", help="Optional JSON output path (implies --export)"
     ),
-):
+) -> None:
     """Evaluate memory retrieval quality (Recall@k, Precision@k) plus runtime KPIs."""
     import json
 
@@ -1946,7 +1946,7 @@ def memory_eval(
 @memory_app.command("conflicts")
 def memory_conflicts(
     all: bool = typer.Option(False, "--all", help="Include resolved conflicts"),
-):
+) -> None:
     """List memory conflicts for manual review."""
     from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
@@ -1988,7 +1988,7 @@ def memory_resolve(
         ..., "--index", help="Conflict index from `nanobot memory conflicts`"
     ),
     action: str = typer.Option(..., "--action", help="Resolution: keep_old | keep_new | dismiss"),
-):
+) -> None:
     """Resolve a single memory conflict."""
     from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
@@ -2024,7 +2024,7 @@ def memory_pin(
         help="Profile field (preferences|stable_facts|active_projects|relationships|constraints)",
     ),
     text: str = typer.Option(..., "--text", help="Memory text to pin"),
-):
+) -> None:
     """Pin a memory item so it is prioritized in snapshots and context."""
     from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
@@ -2048,7 +2048,7 @@ def memory_pin(
 def memory_unpin(
     field: str = typer.Option(..., "--field", help="Profile field"),
     text: str = typer.Option(..., "--text", help="Memory text to unpin"),
-):
+) -> None:
     """Unpin a memory item."""
     from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
@@ -2072,7 +2072,7 @@ def memory_unpin(
 def memory_outdated(
     field: str = typer.Option(..., "--field", help="Profile field"),
     text: str = typer.Option(..., "--text", help="Memory text to mark outdated"),
-):
+) -> None:
     """Mark a memory item as outdated (stale)."""
     from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
@@ -2098,7 +2098,7 @@ def replay_deadletters(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Preview what would be replayed without sending."
     ),
-):
+) -> None:
     """Replay undelivered outbound messages from the dead-letter file."""
     from nanobot.config.loader import load_config
 
@@ -2152,7 +2152,7 @@ def replay_deadletters(
 
     console.print(f"Channels: {', '.join(manager.enabled_channels)}")
 
-    async def _run():
+    async def _run() -> tuple[int, int, int]:
         return await manager.replay_dead_letters(dry_run=False)
 
     total, ok, fail = asyncio.run(_run())
@@ -2164,7 +2164,7 @@ def replay_deadletters(
 
 
 @app.command()
-def status():
+def status() -> None:
     """Show nanobot status."""
     from nanobot.config.loader import get_config_path, load_config
 
@@ -2217,8 +2217,8 @@ app.add_typer(provider_app, name="provider")
 _LOGIN_HANDLERS: dict[str, Any] = {}
 
 
-def _register_login(name: str):
-    def decorator(fn):
+def _register_login(name: str) -> Any:
+    def decorator(fn: Any) -> Any:
         _LOGIN_HANDLERS[name] = fn
         return fn
 
@@ -2230,7 +2230,7 @@ def provider_login(
     provider: str = typer.Argument(
         ..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"
     ),
-):
+) -> None:
     """Authenticate with an OAuth provider."""
     from nanobot.providers.registry import PROVIDERS
 
@@ -2283,7 +2283,7 @@ def _login_github_copilot() -> None:
 
     console.print("[cyan]Starting GitHub Copilot device flow...[/cyan]\n")
 
-    async def _trigger():
+    async def _trigger() -> None:
         from litellm import acompletion
 
         await acompletion(

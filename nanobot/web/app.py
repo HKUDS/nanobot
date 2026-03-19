@@ -62,7 +62,7 @@ def create_app(
     """
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI):  # type: ignore[misc]
         yield
         if owns_lifecycle:
             try:
@@ -108,12 +108,12 @@ def create_app(
 
     # Health check routes (outside /api — used by Docker HEALTHCHECK & probes)
     @app.get("/health", tags=["health"])
-    async def health():
+    async def health() -> dict:
         """Liveness probe — returns 200 if the process is alive."""
         return {"status": "ok"}
 
     @app.get("/ready", tags=["health"])
-    async def ready():
+    async def ready():  # type: ignore[return]
         """Readiness probe — returns 200 if the agent loop is accepting work."""
         loop = app.state.agent_loop
         if loop and getattr(loop, "_running", False):

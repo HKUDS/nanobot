@@ -15,7 +15,7 @@ class MessageBus:
     them and pushes responses to the outbound queue.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.inbound: asyncio.Queue[InboundMessage] = asyncio.Queue()
         self.outbound: asyncio.Queue[OutboundMessage] = asyncio.Queue()
 

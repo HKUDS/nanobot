@@ -405,7 +405,7 @@ class TelegramChannel(BaseChannel):
         )
 
     @staticmethod
-    def _sender_id(user) -> str:
+    def _sender_id(user: Any) -> str:
         """Build sender_id with username for allowlist matching."""
         sid = str(user.id)
         return f"{sid}|{user.username}" if user.username else sid

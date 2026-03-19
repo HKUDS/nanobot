@@ -135,39 +135,15 @@ warn_return_any = true
 warn_unused_configs = true
 check_untyped_defs = true
 ignore_missing_imports = true
-disallow_untyped_defs = false
+disallow_untyped_defs = true
 no_implicit_optional = true
 
+# FastAPI route handlers and web glue use complex return types (StreamingResponse,
+# JSONResponse, async generators) that are difficult to annotate without importing
+# starlette internals. Suppress here; tighten in a follow-up.
 [[tool.mypy.overrides]]
-module = "nanobot.errors"
-disallow_untyped_defs = true
-
-[[tool.mypy.overrides]]
-module = "nanobot.config.*"
-disallow_untyped_defs = true
-
-[[tool.mypy.overrides]]
-module = "nanobot.agent.tools.base"
-disallow_untyped_defs = true
-
-[[tool.mypy.overrides]]
-module = [
-    "nanobot.agent.capability",
-    "nanobot.agent.consolidation",
-    "nanobot.agent.delegation",
-    "nanobot.agent.failure",
-    "nanobot.agent.loop",
-    "nanobot.agent.mission",
-    "nanobot.agent.scratchpad",
-    "nanobot.agent.skills",
-    "nanobot.agent.streaming",
-    "nanobot.agent.tool_executor",
-    "nanobot.agent.tool_loop",
-    "nanobot.agent.tracing",
-    "nanobot.agent.verifier",
-    "nanobot.agent.tools.*",
-]
-disallow_untyped_defs = true
+module = "nanobot.web.*"
+disallow_untyped_defs = false
 
 [tool.coverage.run]
 source = ["nanobot"]
