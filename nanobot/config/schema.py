@@ -196,7 +196,13 @@ class AgentDefaults(Base):
     # Knowledge graph
     graph_enabled: bool = False
     graph_neo4j_uri: str = "bolt://localhost:7687"
-    graph_neo4j_auth: str = "neo4j/nanobot_graph"
+    graph_neo4j_auth: str = Field(
+        default="",
+        description=(
+            "Neo4j credentials in 'user/password' format. "
+            "No default — must be configured explicitly before enabling the knowledge graph."
+        ),
+    )
     graph_neo4j_database: str = "neo4j"
 
     # Reranker
@@ -281,7 +287,13 @@ class AgentConfig(Base):
     # Knowledge graph
     graph_enabled: bool = False
     graph_neo4j_uri: str = "bolt://localhost:7687"
-    graph_neo4j_auth: str = "neo4j/nanobot_graph"
+    graph_neo4j_auth: str = Field(
+        default="",
+        description=(
+            "Neo4j credentials in 'user/password' format. "
+            "No default — must be configured explicitly before enabling the knowledge graph."
+        ),
+    )
     graph_neo4j_database: str = "neo4j"
 
     # Reranker / mem0
@@ -490,7 +502,7 @@ class ToolsConfig(Base):
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
-    restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
+    restrict_to_workspace: bool = True  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 

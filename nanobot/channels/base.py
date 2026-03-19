@@ -35,6 +35,15 @@ class BaseChannel(ABC):
         self._running = False
         self._health = ChannelHealth()
 
+        # Warn once at startup if allow_from is empty — all senders will be permitted.
+        allow_list = getattr(self.config, "allow_from", [])
+        if not allow_list:
+            logger.warning(
+                "Channel '{}' has no allow_from configured — all senders will be accepted. "
+                "Set allow_from in config to restrict access to trusted users.",
+                self.name,
+            )
+
     @property
     def health(self) -> ChannelHealth:
         """Per-channel delivery health metrics."""

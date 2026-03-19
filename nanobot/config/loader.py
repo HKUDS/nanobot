@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from nanobot.config.schema import Config
@@ -60,6 +61,7 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+    os.chmod(path, 0o600)
 
 
 def _migrate_config(data: dict) -> dict:
