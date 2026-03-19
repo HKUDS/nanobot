@@ -5,6 +5,7 @@ Supports {env:VARIABLE_NAME} syntax to reference environment variables.
 
 import os
 import re
+from typing import Any
 
 # Pattern matches {env:VAR_NAME} where VAR_NAME follows env var naming conventions
 _REF_PATTERN = re.compile(r"\{env:([A-Z_][A-Z0-9_]*)\}")
@@ -18,19 +19,22 @@ def resolve_env_vars(value: str) -> str:
 
     Returns:
         String with all {env:VAR} references replaced by their values.
-        Unresolved references are left unchanged.
+        Missing env vars resolve to empty string.
     """
+
     def replacer(match: re.Match[str]) -> str:
         var_name = match.group(1)
-        env_value = os.environ.get(var_name)
-        if env_value is None:
-            return match.group(0)  # Keep original if env var doesn't exist
-        return env_value
+        return os.environ.get(var_name, "")
 
     return _REF_PATTERN.sub(replacer, value)
 
 
-def resolve_config(obj):
+def has_env_ref(value: str) -> bool:
+    """Return True if string contains at least one {env:VAR} reference."""
+    return bool(_REF_PATTERN.search(value))
+
+
+def resolve_config(obj: Any) -> Any:
     """Recursively resolve {env:VAR} references in a configuration object.
 
     Args:

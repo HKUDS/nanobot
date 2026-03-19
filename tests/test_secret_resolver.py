@@ -1,7 +1,5 @@
 """Tests for secret_resolver module."""
 
-import os
-
 import pytest
 
 from nanobot.config.secret_resolver import resolve_config, resolve_env_vars
@@ -23,9 +21,8 @@ class TestResolveEnvVars:
         monkeypatch.setenv("HOST", "example.com")
         assert resolve_env_vars("{env:USER}@{env:HOST}") == "alice@example.com"
 
-    def test_unresolved_var_kept_unchanged(self) -> None:
-        # Environment variable that doesn't exist should remain as-is
-        assert resolve_env_vars("{env:NONEXISTENT_VAR_XYZ}") == "{env:NONEXISTENT_VAR_XYZ}"
+    def test_unresolved_var_becomes_empty(self) -> None:
+        assert resolve_env_vars("{env:NONEXISTENT_VAR_XYZ}") == ""
 
     def test_empty_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("EMPTY_VAR", "")
