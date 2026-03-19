@@ -802,6 +802,7 @@ Config file: `~/.nanobot/config.json`
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | `ollama` | LLM (local, Ollama) | — |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
+| `openai_oauth` | LLM (GPT direct, OAuth) | `nanobot provider login openai-oauth` |
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
 
@@ -835,6 +836,48 @@ nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello!"
 
 # One-off workspace override on top of that config
 nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -m "Hello!"
+```
+
+> Docker users: use `docker run -it` for interactive OAuth login.
+
+</details>
+
+<details>
+<summary><b>OpenAI OAuth</b></summary>
+
+Use OpenAI's official OAuth login flow instead of an API key. This keeps the existing `openai` provider unchanged for API-key users.
+
+**1. Login:**
+```bash
+nanobot provider login openai-oauth
+```
+
+**2. Set model** (merge into `~/.nanobot/config.json`):
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "openai-oauth/gpt-5.1"
+    }
+  }
+}
+```
+
+You can also force the provider explicitly and keep a bare model name:
+```json
+{
+  "agents": {
+    "defaults": {
+      "provider": "openai_oauth",
+      "model": "gpt-5.1"
+    }
+  }
+}
+```
+
+**3. Chat:**
+```bash
+nanobot agent -m "Hello!"
 ```
 
 > Docker users: use `docker run -it` for interactive OAuth login.

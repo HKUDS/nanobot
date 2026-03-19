@@ -11,6 +11,7 @@ from nanobot.cli.commands import _make_provider, app
 from nanobot.config.schema import Config
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
+from nanobot.providers.openai_oauth_provider import OpenAIOAuthProvider
 from nanobot.providers.registry import find_by_model
 
 
@@ -165,6 +166,13 @@ def test_config_matches_openai_codex_with_hyphen_prefix():
     assert config.get_provider_name() == "openai_codex"
 
 
+def test_config_matches_openai_oauth_with_hyphen_prefix():
+    config = Config()
+    config.agents.defaults.model = "openai-oauth/gpt-5.1"
+
+    assert config.get_provider_name() == "openai_oauth"
+
+
 def test_config_matches_explicit_ollama_prefix_without_api_key():
     config = Config()
     config.agents.defaults.model = "ollama/llama3.2"
@@ -241,6 +249,42 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+
+
+def test_make_provider_uses_openai_oauth_provider():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "openai_oauth", "model": "gpt-5.1"}},
+        }
+    )
+
+    with patch("nanobot.providers.openai_oauth_provider.AsyncOpenAI"):
+        provider = _make_provider(config)
+
+    assert isinstance(provider, OpenAIOAuthProvider)
+
+
+def test_provider_login_openai_oauth_uses_existing_token(monkeypatch):
+    from oauth_cli_kit import OAuthToken
+
+    monkeypatch.setattr(
+        "oauth_cli_kit.get_token",
+        lambda provider=None: OAuthToken(
+            access="token",
+            refresh="refresh",
+            expires=9999999999999,
+            account_id="acct_456",
+        ),
+    )
+    monkeypatch.setattr(
+        "oauth_cli_kit.login_oauth_interactive",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("interactive login should not run")),
+    )
+
+    result = runner.invoke(app, ["provider", "login", "openai-oauth"])
+
+    assert result.exit_code == 0
+    assert "Authenticated with OpenAI OAuth" in _strip_ansi(result.stdout)
 
 
 def test_make_provider_passes_extra_headers_to_custom_provider():

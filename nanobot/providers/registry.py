@@ -316,6 +316,24 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
+    # OpenAI OAuth: official OAuth login, direct Responses API calls.
+    ProviderSpec(
+        name="openai_oauth",
+        keywords=("openai-oauth", "openai_oauth"),
+        env_key="",
+        display_name="OpenAI OAuth",
+        litellm_prefix="",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="https://api.openai.com/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
+        is_oauth=True,
+    ),
     # OpenAI Codex: uses OAuth, not API key.
     ProviderSpec(
         name="openai_codex",

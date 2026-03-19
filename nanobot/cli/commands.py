@@ -365,6 +365,7 @@ def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
     from nanobot.providers.base import GenerationSettings
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
+    from nanobot.providers.openai_oauth_provider import OpenAIOAuthProvider
     from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
     from nanobot.providers.registry import find_by_name
@@ -377,6 +378,12 @@ def _make_provider(config: Config):
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         provider = OpenAICodexProvider(default_model=model)
+    # OpenAI OAuth (official auth flow + Responses API)
+    elif provider_name == "openai_oauth" or model.startswith(("openai-oauth/", "openai_oauth/")):
+        provider = OpenAIOAuthProvider(
+            default_model=model,
+            api_base=p.api_base if p and p.api_base else None,
+        )
     # Custom / is_direct: direct OpenAI-compatible endpoint, bypasses LiteLLM
     elif provider_name == "custom" or (spec and spec.is_direct):
         from nanobot.providers.custom_provider import CustomProvider
@@ -1115,6 +1122,33 @@ def _login_openai_codex() -> None:
             console.print("[red]✗ Authentication failed[/red]")
             raise typer.Exit(1)
         console.print(f"[green]✓ Authenticated with OpenAI Codex[/green]  [dim]{token.account_id}[/dim]")
+    except ImportError:
+        console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
+        raise typer.Exit(1)
+
+
+@_register_login("openai_oauth")
+def _login_openai_oauth() -> None:
+    try:
+        from oauth_cli_kit import get_token, login_oauth_interactive
+        from nanobot.providers.openai_oauth_provider import OPENAI_OAUTH_PROVIDER
+
+        token = None
+        try:
+            token = get_token(provider=OPENAI_OAUTH_PROVIDER)
+        except Exception:
+            pass
+        if not (token and token.access):
+            console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
+            token = login_oauth_interactive(
+                print_fn=lambda s: console.print(s),
+                prompt_fn=lambda s: typer.prompt(s),
+                provider=OPENAI_OAUTH_PROVIDER,
+            )
+        if not (token and token.access):
+            console.print("[red]✗ Authentication failed[/red]")
+            raise typer.Exit(1)
+        console.print(f"[green]✓ Authenticated with OpenAI OAuth[/green]  [dim]{token.account_id}[/dim]")
     except ImportError:
         console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
         raise typer.Exit(1)
