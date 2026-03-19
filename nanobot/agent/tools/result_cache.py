@@ -156,6 +156,9 @@ class ToolResultCache:
         # Maps (tool_name, args_key) → cache_key for dedup lookups
         self._args_index: dict[str, str] = {}
         self._disk_path: Path | None = None
+        # P-05: track how many records have been appended since startup so we
+        # only call _evict_disk() when the file might exceed _MAX_DISK_ENTRIES.
+        self._disk_write_count: int = 0
         if workspace:
             self._disk_path = workspace / "memory" / "tool_cache.jsonl"
             self._load_disk()
@@ -291,7 +294,12 @@ class ToolResultCache:
         with open(self._disk_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-        self._evict_disk()
+        self._disk_write_count += 1
+        # P-05: only compact the file when we know it has grown past the cap;
+        # avoids a full read+rewrite on every store() call.
+        if self._disk_write_count > _MAX_DISK_ENTRIES:
+            self._evict_disk()
+            self._disk_write_count = _MAX_DISK_ENTRIES
 
     def _load_disk(self) -> None:
         """Load entries from the JSONL disk file."""
@@ -299,6 +307,8 @@ class ToolResultCache:
             return
         try:
             lines = self._disk_path.read_text(encoding="utf-8").strip().splitlines()
+            # P-05: seed write count so eviction fires at the right time.
+            self._disk_write_count = len(lines)
             for line in lines[-_MAX_DISK_ENTRIES:]:
                 record = json.loads(line)
                 entry = CacheEntry(

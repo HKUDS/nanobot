@@ -9,8 +9,9 @@ import os
 import re
 import shutil
 import sys
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import yaml  # type: ignore[import-untyped]
 from loguru import logger
@@ -39,10 +40,17 @@ class SkillsLoader:
     specific tools or perform certain tasks.
     """
 
+    # P-04: TTL for the skills list cache (builtin skills never change at
+    # runtime; workspace skills rarely do).  30 s is well below any perceptible
+    # latency while avoiding repeated rglob + YAML parses per turn.
+    _LIST_CACHE_TTL: ClassVar[float] = 30.0
+
     def __init__(self, workspace: Path, builtin_skills_dir: Path | None = None):
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
+        self._list_cache: list[dict[str, str]] | None = None
+        self._list_cache_ts: float = 0.0
 
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """
@@ -54,7 +62,22 @@ class SkillsLoader:
         Returns:
             List of skill info dicts with 'name', 'path', 'source'.
         """
-        skills = []
+        # P-04: serve from TTL cache — rglob + YAML parses are expensive per turn.
+        now = time.monotonic()
+        if self._list_cache is None or (now - self._list_cache_ts) > self._LIST_CACHE_TTL:
+            self._list_cache = self._discover_skills()
+            self._list_cache_ts = now
+
+        skills = self._list_cache
+
+        # Filter by requirements
+        if filter_unavailable:
+            return [s for s in skills if self._check_requirements(self._get_skill_meta(s["name"]))]
+        return list(skills)
+
+    def _discover_skills(self) -> list[dict[str, str]]:
+        """Perform the actual filesystem scan for SKILL.md files."""
+        skills: list[dict[str, str]] = []
         seen_names: set[str] = set()
 
         # Workspace skills (highest priority) — recursive discovery
@@ -81,9 +104,6 @@ class SkillsLoader:
                 )
                 seen_names.add(skill_dir.name)
 
-        # Filter by requirements
-        if filter_unavailable:
-            return [s for s in skills if self._check_requirements(self._get_skill_meta(s["name"]))]
         return skills
 
     def load_skill(self, name: str) -> str | None:

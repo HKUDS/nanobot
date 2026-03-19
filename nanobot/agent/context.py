@@ -400,6 +400,10 @@ class ContextBuilder:
         self.role_system_prompt = role_system_prompt
         self._contacts_context: str = ""
         self._unavailable_tools_fn: Callable[[], str] | None = None
+        # P-03: mtime-keyed cache for bootstrap files — avoids re-reading static
+        # workspace files on every LLM iteration within the same agent turn.
+        self._bootstrap_cache: str | None = None
+        self._bootstrap_cache_mtimes: dict[str, float] = {}
 
     def set_unavailable_tools_fn(self, fn: Callable[[], str]) -> None:
         """Register a callback that returns the unavailable-tools summary."""
@@ -583,16 +587,30 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         return [*user_content, {"type": "text", "text": block}]
 
     def _load_bootstrap_files(self) -> str:
-        """Load all bootstrap files from workspace."""
-        parts = []
+        """Load all bootstrap files from workspace (P-03: mtime-cached)."""
+        # Check whether any file's mtime has changed since last load.
+        current_mtimes: dict[str, float] = {}
+        for filename in self.BOOTSTRAP_FILES:
+            fp = self.workspace / filename
+            try:
+                current_mtimes[filename] = fp.stat().st_mtime if fp.exists() else -1.0
+            except OSError:
+                current_mtimes[filename] = -1.0
 
+        if self._bootstrap_cache is not None and current_mtimes == self._bootstrap_cache_mtimes:
+            return self._bootstrap_cache
+
+        parts = []
         for filename in self.BOOTSTRAP_FILES:
             file_path = self.workspace / filename
             if file_path.exists():
                 content = file_path.read_text(encoding="utf-8")
                 parts.append(f"## {filename}\n\n{content}")
 
-        return "\n\n".join(parts) if parts else ""
+        result = "\n\n".join(parts) if parts else ""
+        self._bootstrap_cache = result
+        self._bootstrap_cache_mtimes = current_mtimes
+        return result
 
     def build_messages(
         self,
