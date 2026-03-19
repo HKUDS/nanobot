@@ -44,6 +44,27 @@ _BLOCKED_HOSTS: frozenset[str] = frozenset(
 # In-memory URL cache: url+ua → (timestamp, ToolResult) — LRU-capped at 200 entries (C-3)
 _url_cache: OrderedDict[str, tuple[float, ToolResult]] = OrderedDict()
 
+# Shared httpx client — created lazily on first use and reused across calls (LAN-60)
+_http_client: httpx.AsyncClient | None = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    """Return the module-level shared httpx.AsyncClient, creating it on first call.
+
+    Uses the more conservative browser timeout as the default; per-request
+    timeout overrides are passed via ``httpx.Request`` when needed.
+    follow_redirects and max_redirects are set here so every fetch benefits
+    from redirect following without per-call configuration.
+    """
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(
+            follow_redirects=True,
+            max_redirects=MAX_REDIRECTS,
+            timeout=_BROWSER_TIMEOUT,
+        )
+    return _http_client
+
 
 def _strip_tags(text: str) -> str:
     """Remove HTML tags and decode entities."""
@@ -270,13 +291,15 @@ class WebFetchTool(Tool):
         # Fetch with internal retry for transient failures
         last_err: Exception | None = None
         r: httpx.Response | None = None
+        client = _get_http_client()
         for attempt in range(_RETRY_ATTEMPTS):
             try:
-                async with httpx.AsyncClient(
-                    follow_redirects=True, max_redirects=MAX_REDIRECTS, timeout=timeout
-                ) as client:
-                    r = await client.get(url, headers={"User-Agent": ua_string})
-                    r.raise_for_status()
+                r = await client.get(
+                    url,
+                    headers={"User-Agent": ua_string},
+                    timeout=timeout,
+                )
+                r.raise_for_status()
                 break
             except (httpx.TimeoutException, httpx.NetworkError) as e:
                 last_err = e
