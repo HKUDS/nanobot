@@ -1,5 +1,7 @@
 """Configuration loading utilities."""
 
+import os
+from typing import Any
 import json
 from pathlib import Path
 
@@ -43,6 +45,7 @@ def load_config(config_path: Path | None = None) -> Config:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             data = _migrate_config(data)
+            data = _expand_env_vars(data)
             return Config.model_validate(data)
         except (json.JSONDecodeError, ValueError, pydantic.ValidationError) as e:
             logger.warning(f"Failed to load config from {path}: {e}")
@@ -75,4 +78,14 @@ def _migrate_config(data: dict) -> dict:
     exec_cfg = tools.get("exec", {})
     if "restrictToWorkspace" in exec_cfg and "restrictToWorkspace" not in tools:
         tools["restrictToWorkspace"] = exec_cfg.pop("restrictToWorkspace")
+    return data
+
+def _expand_env_vars(data: Any) -> Any:
+    """Recursively expand environment variables ($VAR or ${VAR}) in string values."""
+    if isinstance(data, dict):
+        return {k: _expand_env_vars(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [_expand_env_vars(i) for i in data]
+    elif isinstance(data, str):
+        return os.path.expandvars(data)
     return data
