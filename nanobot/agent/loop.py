@@ -358,33 +358,7 @@ class AgentLoop:
             role_system_prompt=role_config.system_prompt if role_config else "",
         )
         self.sessions = session_manager or SessionManager(self.workspace)
-        _tool_registry = ToolRegistry()
-        self._capabilities = CapabilityRegistry(
-            tool_registry=_tool_registry,
-            skills_loader=self.context.skills,
-        )
-        self.tools = ToolExecutor(_tool_registry)
-        self.result_cache = ToolResultCache(workspace=self.workspace)
-        self._capabilities.tool_registry.set_cache(
-            self.result_cache,
-            provider=provider,
-            summary_model=config.tool_summary_model or None,
-        )
-        self.context.set_unavailable_tools_fn(self._capabilities.get_unavailable_summary)
-        self.missions = MissionManager(
-            provider=provider,
-            workspace=self.workspace,
-            bus=bus,
-            model=self.model,
-            temperature=self.temperature,
-            max_tokens=self.config.max_tokens,
-            max_iterations=config.mission_max_iterations,
-            max_concurrent=config.mission_max_concurrent,
-            result_max_chars=config.mission_result_max_chars,
-            brave_api_key=brave_api_key,
-            exec_config=self.exec_config,
-            restrict_to_workspace=self.config.restrict_to_workspace,
-        )
+        self._build_tools()
 
         self._running = False
         self._stop_event: asyncio.Event | None = None  # created lazily in run()
@@ -395,23 +369,6 @@ class AgentLoop:
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._consolidation_tasks: set[asyncio.Task[None]] = set()  # Strong refs to in-flight tasks
         self._consolidation_sem = asyncio.Semaphore(3)  # Cap concurrent consolidation LLM calls
-        self._register_default_tools()
-        # Cache typed tool references for O(1) context updates in _set_tool_context.
-        # Populated once at construction — no per-message isinstance checks needed.
-        _msg_t = self.tools.get("message")
-        self._ctx_message_tool: MessageTool | None = (
-            _msg_t if isinstance(_msg_t, MessageTool) else None
-        )
-        _fb_t = self.tools.get("feedback")
-        self._ctx_feedback_tool: FeedbackTool | None = (
-            _fb_t if isinstance(_fb_t, FeedbackTool) else None
-        )
-        _ms_t = self.tools.get("mission_start")
-        self._ctx_mission_tool: MissionStartTool | None = (
-            _ms_t if isinstance(_ms_t, MissionStartTool) else None
-        )
-        _cr_t = self.tools.get("cron")
-        self._ctx_cron_tool: CronTool | None = _cr_t if isinstance(_cr_t, CronTool) else None
 
         # Multi-agent coordinator (initialized lazily in run() if routing enabled)
         self._routing_config = routing_config
@@ -492,6 +449,58 @@ class AgentLoop:
     @_active_messages.setter
     def _active_messages(self, value: list[dict[str, Any]] | None) -> None:
         self._dispatcher.active_messages = value
+
+    def _build_tools(self) -> None:
+        """Construct and wire the tool/capability layer.
+
+        Called once from ``__init__`` after ``ContextBuilder`` and ``SessionManager``
+        are ready.  Extracted from the constructor to keep ``__init__`` focused on
+        pure attribute assignment (LAN-103).
+        """
+        _tool_registry = ToolRegistry()
+        self._capabilities = CapabilityRegistry(
+            tool_registry=_tool_registry,
+            skills_loader=self.context.skills,
+        )
+        self.tools = ToolExecutor(_tool_registry)
+        self.result_cache = ToolResultCache(workspace=self.workspace)
+        self._capabilities.tool_registry.set_cache(
+            self.result_cache,
+            provider=self.provider,
+            summary_model=self.config.tool_summary_model or None,
+        )
+        self.context.set_unavailable_tools_fn(self._capabilities.get_unavailable_summary)
+        self.missions = MissionManager(
+            provider=self.provider,
+            workspace=self.workspace,
+            bus=self.bus,
+            model=self.model,
+            temperature=self.temperature,
+            max_tokens=self.config.max_tokens,
+            max_iterations=self.config.mission_max_iterations,
+            max_concurrent=self.config.mission_max_concurrent,
+            result_max_chars=self.config.mission_result_max_chars,
+            brave_api_key=self.brave_api_key,
+            exec_config=self.exec_config,
+            restrict_to_workspace=self.config.restrict_to_workspace,
+        )
+        self._register_default_tools()
+        # Cache typed tool references for O(1) context updates in _set_tool_context.
+        # Populated once at construction — no per-message isinstance checks needed.
+        _msg_t = self.tools.get("message")
+        self._ctx_message_tool: MessageTool | None = (
+            _msg_t if isinstance(_msg_t, MessageTool) else None
+        )
+        _fb_t = self.tools.get("feedback")
+        self._ctx_feedback_tool: FeedbackTool | None = (
+            _fb_t if isinstance(_fb_t, FeedbackTool) else None
+        )
+        _ms_t = self.tools.get("mission_start")
+        self._ctx_mission_tool: MissionStartTool | None = (
+            _ms_t if isinstance(_ms_t, MissionStartTool) else None
+        )
+        _cr_t = self.tools.get("cron")
+        self._ctx_cron_tool: CronTool | None = _cr_t if isinstance(_cr_t, CronTool) else None
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools, filtered by role config."""
