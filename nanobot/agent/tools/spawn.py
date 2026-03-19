@@ -32,7 +32,8 @@ class SpawnTool(Tool):
         return (
             "Spawn a subagent to handle a task in the background. "
             "Use this for complex or time-consuming tasks that can run independently. "
-            "The subagent will complete the task and report back when done."
+            "The subagent will complete the task and report back when done.\n            "
+            "For deliverables or existing projects, inspect the workspace and assign/create a dedicated working directory for the subagent."
         )
 
     @property
