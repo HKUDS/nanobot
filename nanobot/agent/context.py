@@ -184,6 +184,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
                 current_message, self._viking_client
             )
             if viking_mem:
+                logger.info(f"OpenViking User Memory : {str(viking_mem)[:100]}")
                 system_prompt += (
                     "\n\n## Your memories about the current conversation. "
                     "If you need more details, use the tools.\n"

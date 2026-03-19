@@ -42,6 +42,7 @@ class VikingClient:
         embedding_api_key: str = "",
         embedding_base_url: str = "",
         embedding_dimension: int = 1024,
+        memory_recall_limit: int = 5,
     ):
         if not HAS_OPENVIKING:
             raise RuntimeError("openviking package is not installed. Install with: pip install openviking")
@@ -49,6 +50,7 @@ class VikingClient:
         self.mode = mode
         self.user_id = user_id or "default"
         self.agent_id = agent_id or "default"
+        self.memory_recall_limit = memory_recall_limit
 
         if mode == "local":
             ov_data_path = Path(data_dir).expanduser()
@@ -163,6 +165,7 @@ class VikingClient:
         embedding_api_key: str = "",
         embedding_base_url: str = "",
         embedding_dimension: int = 1024,
+        memory_recall_limit: int = 5,
     ) -> "VikingClient":
         """Factory: create and initialise a VikingClient."""
         instance = cls(
@@ -179,6 +182,7 @@ class VikingClient:
             embedding_api_key=embedding_api_key,
             embedding_base_url=embedding_base_url,
             embedding_dimension=embedding_dimension,
+            memory_recall_limit=memory_recall_limit,
         )
         await instance._initialize()
         return instance
@@ -203,6 +207,7 @@ class VikingClient:
             embedding_api_key=cfg.embedding_api_key,
             embedding_base_url=cfg.embedding_base_url,
             embedding_dimension=cfg.embedding_dimension,
+            memory_recall_limit=cfg.memory_recall_limit,
         )
 
     # ------------------------------------------------------------------
@@ -453,28 +458,16 @@ class VikingClient:
     # Memory context helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _is_schema_uri(uri: str) -> bool:
-        """Exclude structural metadata (overview/abstract) from recall."""
-        parts = uri.rstrip("/").split("/")
-        last = parts[-1] if parts else ""
-        return last in (".overview.md", ".abstract.md")
-
     async def get_viking_memory_context(self, current_message: str) -> str:
-        """Return formatted Viking memory context for the system prompt."""
-        result = await self.search_memory(current_message, limit=5)
+        """Return formatted Viking memory context."""
+        result = await self.search_memory(current_message, limit=self.memory_recall_limit)
         if not result:
             return ""
-        user_raw = result.get("user_memory", [])
-        agent_raw = result.get("agent_memory", [])
-        user_memory = [m for m in user_raw if not VikingClient._is_schema_uri(getattr(m, "uri", "") or "")]
-        agent_memory = [m for m in agent_raw if not VikingClient._is_schema_uri(getattr(m, "uri", "") or "")]
-        user_text = self._format_memories(user_memory)
-        agent_text = self._format_memories(agent_memory)
+        user_text = self._format_memories(result.get("user_memory", []))
+        agent_text = self._format_memories(result.get("agent_memory", []))
         if not user_text and not agent_text:
             return ""
         return (
-            "## Related Memories (use tools for details)\n"
             f"### User Memories\n{user_text or '(none)'}\n"
             f"### Agent Memories\n{agent_text or '(none)'}"
         )
@@ -552,8 +545,11 @@ class VikingClient:
         for idx, m in enumerate(memories, 1):
             abstract = getattr(m, "abstract", "")
             uri = getattr(m, "uri", "")
+            is_leaf = getattr(m, "is_leaf", False)
             score = getattr(m, "score", 0.0)
-            lines.append(f"{idx}. {abstract}; uri: {uri}; score: {score:.2f}")
+            lines.append(
+                f"{idx}. {abstract}; uri: {uri}; isLeaf: {is_leaf}; score: {score:.2f}"
+            )
         return "\n".join(lines)
 
     async def aclose(self) -> None:

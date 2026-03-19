@@ -70,6 +70,7 @@ class OpenVikingConfig(Base):
     embedding_base_url: str = ""
     embedding_dimension: int = 1024
     max_concurrent_commits: int = 1
+    memory_recall_limit: int = 5
 
 
 class WebConfig(BaseModel):

@@ -185,7 +185,6 @@ class TestRecall:
         ctx = await committed_client.get_viking_memory_context("Python 编程 FastAPI")
         assert isinstance(ctx, str)
         if ctx:
-            assert "Related Memories" in ctx
             assert "User Memories" in ctx
             assert "Agent Memories" in ctx
 
