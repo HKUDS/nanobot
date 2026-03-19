@@ -140,7 +140,6 @@ class QQConfig(Base):
     download_chunk_size: int = 1024 * 256  # 256KB
     download_max_bytes: int = 1024 * 1024 * 200  # 200MB safety limit
 
-
 class QQChannel(BaseChannel):
     """QQ channel using botpy SDK with WebSocket connection."""
 
