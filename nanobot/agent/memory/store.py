@@ -51,6 +51,7 @@ if TYPE_CHECKING:
 _UNRESOLVED_INTENTS: frozenset[str] = frozenset(
     {"planning", "debug", "conflict", "reflection", "task"}
 )
+_COUNT_CACHE_TTL: float = 60.0  # seconds — SQLite counts change infrequently (LAN-102)
 
 
 class MemoryStore:
@@ -109,7 +110,12 @@ class MemoryStore:
             force_infer_true=bool(self.rollout.get("mem0_force_infer_true", False)),
         )
 
-        self._ensure_vector_health()
+        # _ensure_vector_health() moved to async ensure_health() — called from
+        # AgentLoop.run() to avoid blocking the event loop at instantiation (LAN-101).
+
+        # TTL caches for SQLite count queries — avoids re-opening connections on every call (LAN-102)
+        self._vector_count_cache: tuple[float, int] | None = None
+        self._history_count_cache: tuple[float, int] | None = None
 
         # Cross-encoder re-ranker (Step 7)
         reranker_alpha = float(self.rollout.get("reranker_alpha", 0.5))
@@ -905,13 +911,13 @@ class MemoryStore:
         for key, value in metadata.items():
             if value is None:
                 continue
-            if isinstance(value, (str, int, float, bool)):
+            if isinstance(value, str | int | float | bool):
                 clean[key] = value
                 continue
             if isinstance(value, list):
                 items: list[str | int | float | bool] = []
                 for item in value:
-                    if isinstance(item, (str, int, float, bool)):
+                    if isinstance(item, str | int | float | bool):
                         items.append(item)
                     elif item is not None:
                         items.append(str(item))
@@ -951,10 +957,17 @@ class MemoryStore:
         return self.mem0._rows(raw)
 
     def _vector_points_count(self) -> int:
+        now = time.monotonic()
+        if self._vector_count_cache is not None:
+            ts, cached = self._vector_count_cache
+            if now - ts < _COUNT_CACHE_TTL:
+                return cached
         local_mem0_dir = self.mem0._local_mem0_dir or (self.workspace / "memory" / "mem0")
         base = local_mem0_dir / "qdrant" / "collection"
         if not base.exists() or not base.is_dir():
-            return 0
+            result = 0
+            self._vector_count_cache = (now, result)
+            return result
         total = 0
         for child in base.iterdir():
             if not child.is_dir():
@@ -970,12 +983,20 @@ class MemoryStore:
                 conn.close()
             except (sqlite3.Error, OSError):
                 continue
-        return max(total, 0)
+        result = max(total, 0)
+        self._vector_count_cache = (now, result)
+        return result
 
     def _history_row_count(self) -> int:
+        now = time.monotonic()
+        if self._history_count_cache is not None:
+            ts, cached = self._history_count_cache
+            if now - ts < _COUNT_CACHE_TTL:
+                return cached
         local_mem0_dir = self.mem0._local_mem0_dir or (self.workspace / "memory" / "mem0")
         history_db = local_mem0_dir / "history.db"
         if not history_db.exists():
+            self._history_count_cache = (now, 0)
             return 0
         try:
             conn = sqlite3.connect(history_db)
@@ -990,7 +1011,9 @@ class MemoryStore:
             )
             count = int(cur.fetchone()[0])
             conn.close()
-            return max(count, 0)
+            result = max(count, 0)
+            self._history_count_cache = (now, result)
+            return result
         except (sqlite3.Error, OSError):
             return 0
 
@@ -1234,6 +1257,17 @@ class MemoryStore:
             "seeded_events": len(seeded_events),
             "reindex": result,
         }
+
+    async def ensure_health(self) -> None:
+        """Run vector health check asynchronously (non-blocking).
+
+        Must be awaited from an async context after instantiation.
+        Called by ``AgentLoop.run()`` at startup instead of running
+        synchronously in ``__init__`` (LAN-101).
+        """
+        import asyncio
+
+        await asyncio.to_thread(self._ensure_vector_health)
 
     def _ensure_vector_health(self) -> None:
         if not bool(self.rollout.get("memory_vector_health_enabled", True)):

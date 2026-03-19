@@ -13,18 +13,18 @@ def _workspace(tmp_path: Path) -> Path:
     return ws
 
 
-def test_build_user_content_ignores_non_images(tmp_path: Path) -> None:
+async def test_build_user_content_ignores_non_images(tmp_path: Path) -> None:
     ws = _workspace(tmp_path)
     builder = ContextBuilder(ws)
 
     text_file = ws / "note.txt"
     text_file.write_text("hello", encoding="utf-8")
 
-    out = builder._build_user_content("question", [str(text_file)])
+    out = await builder._build_user_content("question", [str(text_file)])
     assert out == "question"
 
 
-def test_build_user_content_embeds_image(tmp_path: Path) -> None:
+async def test_build_user_content_embeds_image(tmp_path: Path) -> None:
     ws = _workspace(tmp_path)
     builder = ContextBuilder(ws)
 
@@ -32,7 +32,7 @@ def test_build_user_content_embeds_image(tmp_path: Path) -> None:
     # Minimal PNG signature bytes are enough for base64 path coverage.
     png.write_bytes(b"\x89PNG\r\n\x1a\n")
 
-    out = builder._build_user_content("describe", [str(png)])
+    out = await builder._build_user_content("describe", [str(png)])
     assert isinstance(out, list)
     assert out[-1]["type"] == "text"
     assert out[-1]["text"] == "describe"

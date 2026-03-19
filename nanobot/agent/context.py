@@ -20,6 +20,7 @@ package while allowing the summarization phase to call the LLM.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -612,7 +613,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         self._bootstrap_cache_mtimes = current_mtimes
         return result
 
-    def build_messages(
+    async def build_messages(
         self,
         history: list[dict[str, Any]],
         current_message: str,
@@ -652,7 +653,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         messages.extend(history)
 
         # Current message (with optional image attachments)
-        user_content = self._build_user_content(current_message, media)
+        user_content = await self._build_user_content(current_message, media)
         user_content = self._inject_runtime_context(user_content, channel, chat_id)
         messages.append({"role": "user", "content": user_content})  # type: ignore[dict-item]
 
@@ -664,7 +665,9 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         )
         return messages
 
-    def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
+    async def _build_user_content(
+        self, text: str, media: list[str] | None
+    ) -> str | list[dict[str, Any]]:
         """Build user message content with optional base64-encoded images."""
         if not media:
             return text
@@ -675,7 +678,8 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             mime, _ = mimetypes.guess_type(path)
             if not p.is_file() or not mime or not mime.startswith("image/"):
                 continue
-            b64 = base64.b64encode(p.read_bytes()).decode()
+            data = await asyncio.to_thread(p.read_bytes)
+            b64 = base64.b64encode(data).decode()
             images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
 
         if not images:

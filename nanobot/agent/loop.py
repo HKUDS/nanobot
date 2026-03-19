@@ -1418,6 +1418,7 @@ class AgentLoop:
         self._stop_event = asyncio.Event()
         await self._connect_mcp()
         self._ensure_coordinator()
+        await self.context.memory.ensure_health()  # LAN-101: non-blocking vector health check
 
         logger.info("Agent loop started")
 
@@ -1965,7 +1966,7 @@ class AgentLoop:
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=self.config.memory_window)
             skill_names = self.context.skills.detect_relevant_skills(msg.content)
-            messages = self.context.build_messages(
+            messages = await self.context.build_messages(
                 history=history,
                 current_message=msg.content,
                 skill_names=skill_names,
@@ -2110,7 +2111,7 @@ class AgentLoop:
         history = session.get_history(max_messages=self.config.memory_window)
         verify_before_answer = self._should_force_verification(msg.content)
         skill_names = self.context.skills.detect_relevant_skills(msg.content)
-        initial_messages = self.context.build_messages(
+        initial_messages = await self.context.build_messages(
             history=history,
             current_message=msg.content,
             skill_names=skill_names,
