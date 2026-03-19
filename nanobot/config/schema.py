@@ -14,6 +14,7 @@ class Base(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
+
 class WhatsAppConfig(Base):
     """WhatsApp channel configuration."""
 
@@ -220,6 +221,7 @@ class WebConfig(Base):
     static_dir: str = ""  # Path to frontend directory; defaults to ./web relative to CWD
     allow_from: list[str] = Field(default_factory=list)  # empty = allow all
     vision: bool = True  # Send images to LLM; set false if model lacks vision support
+
 
 
 class ChannelsConfig(Base):
