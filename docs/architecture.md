@@ -230,6 +230,12 @@ These imports **must never exist** (enforced by `scripts/check_imports.py` in CI
 | `agent/tools/*` | `channels/*` |
 | `agent/memory/*` | `channels/*`, `agent/tools/*` |
 
+### Approved Exceptions
+
+| Exception | Location | Reason |
+|---|---|---|
+| `config/schema.py` imports `providers.registry` | `NanobotConfig._match_provider()` and `.get_api_base()` | These are **deferred** (inside method bodies, not at module top-level), so the import only happens at call time. `config` must look up provider metadata to resolve model-to-key mappings. Extracting this lookup into a separate `config/provider_bridge.py` helper was considered but rejected as over-engineering for a single query; the deferred import is the approved pattern. |
+
 ## Failure Modes & Recovery
 
 | Failure | Detection | Recovery | Owner |

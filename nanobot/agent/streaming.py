@@ -136,6 +136,13 @@ class StreamingLLMCaller:
         full_reasoning = "".join(reasoning_parts) or None
         full_clean = strip_think(full_content) if full_content else None
 
+        # LAN-5: some providers omit completion_tokens from streaming chunks.
+        # Fall back to a character-based estimate (≈ 1 token per 4 chars) so
+        # Langfuse spans record a non-zero output count instead of 0.
+        if not usage.get("completion_tokens") and full_content:
+            usage = dict(usage)  # don't mutate the chunk's dict
+            usage["completion_tokens"] = max(1, len(full_content) // 4)
+
         if tool_calls:
             # Intermediate LLM call — text is thinking/planning, not the final
             # response.  Route as a status event so it appears in the header
