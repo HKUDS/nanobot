@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.memory.store import MemoryStore
 
 
 def _workspace(tmp_path: Path) -> Path:
@@ -110,3 +112,11 @@ def test_bootstrap_files_cached_across_calls(
     builder.build_system_prompt(current_message="third")
 
     assert read_count == 1, f"SOUL.md read {read_count} times; expected 1 (cache miss only)"
+
+
+def test_injected_memory_store_is_used(tmp_path: Path) -> None:
+    """LAN-105: when memory= is passed, ContextBuilder uses that instance, not a new one."""
+    ws = _workspace(tmp_path)
+    mock_store = MagicMock(spec=MemoryStore)
+    builder = ContextBuilder(ws, memory=mock_store)
+    assert builder.memory is mock_store
