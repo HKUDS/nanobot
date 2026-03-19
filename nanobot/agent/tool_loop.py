@@ -89,12 +89,19 @@ async def run_tool_loop(
                 ) as obs:
                     if obs is not None:
                         obs.update(output=result_str[:500])
+                # Wrap in XML tags to create a structural boundary between untrusted
+                # tool output and agent instructions (prompt-injection mitigation, LAN-43).
+                # Avoid double-wrapping if the content is already tagged.
+                if result_str.startswith("<tool_result>"):
+                    wrapped_result = result_str
+                else:
+                    wrapped_result = f"<tool_result>\n{result_str}\n</tool_result>"
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "name": tool_call.name,
-                        "content": result_str,
+                        "content": wrapped_result,
                     }
                 )
         else:
