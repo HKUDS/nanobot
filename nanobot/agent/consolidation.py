@@ -45,9 +45,19 @@ class ConsolidationOrchestrator:
         return lock
 
     def prune_lock(self, session_key: str, lock: asyncio.Lock) -> None:
-        """Drop lock entry if no longer in use (no-op with WeakValueDictionary)."""
-        # Entries are automatically removed when the caller drops its reference.
-        # This method is kept for API compatibility.
+        """Remove the lock entry for a session key when it is no longer in use.
+
+        Called after /new or when a session is fully invalidated so the entry
+        is removed immediately rather than waiting for GC to collect the last
+        weak reference.  If the lock is currently acquired by another coroutine
+        the entry is left intact.
+        """
+        existing = self._locks.get(session_key)
+        if existing is lock and not lock.locked():
+            try:
+                del self._locks[session_key]
+            except KeyError:
+                pass
 
     async def consolidate(
         self,

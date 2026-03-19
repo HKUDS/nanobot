@@ -60,7 +60,7 @@ class _ChatProvider(Protocol):
 def _heuristic_summary(tool_name: str, output: str, cache_key: str) -> str:
     """Deterministic fallback summary when LLM is unavailable."""
     total = len(output)
-    preview = output[:2000]
+    preview = output[:400]
     return (
         f"[{tool_name}] returned {total:,} chars of output.\n"
         f"Preview:\n{preview}\n...\n"

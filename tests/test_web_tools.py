@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import nanobot.agent.tools.web as _web_mod
 from nanobot.agent.tools.web import (
     WebFetchTool,
     WebSearchTool,
@@ -16,6 +17,17 @@ from nanobot.agent.tools.web import (
     _url_cache,
     _validate_url,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_web_module_state():
+    """Reset module-level shared state between tests to prevent cross-test pollution."""
+    _url_cache.clear()
+    _web_mod._http_client = None
+    yield
+    _url_cache.clear()
+    _web_mod._http_client = None
+
 
 # ---------------------------------------------------------------------------
 # WebSearchTool
@@ -304,9 +316,6 @@ async def test_web_fetch_html_and_error(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda **kwargs: _Client())
     monkeypatch.setitem(__import__("sys").modules, "readability", SimpleNamespace(Document=_Doc))
 
-    # Clear URL cache from prior tests
-    _url_cache.clear()
-
     tool = WebFetchTool(max_chars=20)
     out = await tool.execute(url="https://example.com", extractMode="markdown")
     assert out.success
@@ -326,6 +335,7 @@ async def test_web_fetch_html_and_error(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda **kwargs: _BadClient())
     _url_cache.clear()  # clear cached success for same URL
+    _web_mod._http_client = None  # force _BadClient to be picked up
     fail = await tool.execute(url="https://example.com")
     assert not fail.success
 
