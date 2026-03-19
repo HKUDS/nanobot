@@ -54,7 +54,7 @@ except ImportError:  # pragma: no cover
     Route = None
 
 if TYPE_CHECKING:
-    from botpy.message import C2CMessage, GroupMessage, BaseMessage
+    from botpy.message import BaseMessage, C2CMessage, GroupMessage
     from botpy.types.message import Media
 
 
@@ -64,7 +64,15 @@ QQ_FILE_TYPE_IMAGE = 1
 QQ_FILE_TYPE_FILE = 4
 
 _IMAGE_EXTS = {
-    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".ico",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+    ".webp",
+    ".tif",
+    ".tiff",
+    ".ico",
 }
 
 # Replace unsafe characters with "_", keep Chinese and common safe punctuation.
@@ -140,6 +148,7 @@ class QQConfig(Base):
     download_chunk_size: int = 1024 * 256  # 256KB
     download_max_bytes: int = 1024 * 1024 * 200  # 200MB safety limit
 
+
 class QQChannel(BaseChannel):
     """QQ channel using botpy SDK with WebSocket connection."""
 
@@ -198,8 +207,7 @@ class QQChannel(BaseChannel):
         self._running = True
         self._http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120))
 
-        BotClass = _make_bot_class(self)
-        self._client = BotClass()
+        self._client = _make_bot_class(self)()
         logger.info("QQ bot started (C2C & Group supported)")
         await self._run_bot()
 
@@ -250,7 +258,10 @@ class QQChannel(BaseChannel):
         # 1) Send media
         for media_ref in msg.media or []:
             ok = await self._send_media(
-                chat_id=msg.chat_id, media_ref=media_ref, msg_id=msg_id, is_group=is_group,
+                chat_id=msg.chat_id,
+                media_ref=media_ref,
+                msg_id=msg_id,
+                is_group=is_group,
             )
             if not ok:
                 filename = (
@@ -275,7 +286,11 @@ class QQChannel(BaseChannel):
             )
 
     async def _send_text_only(
-        self, chat_id: str, is_group: bool, msg_id: str | None, content: str,
+        self,
+        chat_id: str,
+        is_group: bool,
+        msg_id: str | None,
+        content: str,
     ) -> None:
         """Send a plain/markdown text message."""
         if not self._client:
@@ -299,7 +314,11 @@ class QQChannel(BaseChannel):
             await self._client.api.post_c2c_message(openid=chat_id, **payload)
 
     async def _send_media(
-        self, chat_id: str, media_ref: str, msg_id: str | None, is_group: bool,
+        self,
+        chat_id: str,
+        media_ref: str,
+        msg_id: str | None,
+        is_group: bool,
     ) -> bool:
         """Read bytes -> base64 upload -> msg_type=7 send."""
         if not self._client:
@@ -364,7 +383,8 @@ class QQChannel(BaseChannel):
                     if resp.status >= 400:
                         logger.warning(
                             "QQ outbound media download failed status={} url={}",
-                            resp.status, media_ref,
+                            resp.status,
+                            media_ref,
                         )
                         return None, None
                     data = await resp.read()
@@ -456,9 +476,15 @@ class QQChannel(BaseChannel):
 
             # Compose content that always contains actionable saved paths
             if recv_lines:
-                tag = "[Image]" if any(_is_image_name(Path(p).name) for p in media_paths) else "[File]"
+                tag = (
+                    "[Image]"
+                    if any(_is_image_name(Path(p).name) for p in media_paths)
+                    else "[File]"
+                )
                 file_block = "Received files:\n" + "\n".join(recv_lines)
-                content = f"{content}\n\n{file_block}".strip() if content else f"{tag}\n{file_block}"
+                content = (
+                    f"{content}\n\n{file_block}".strip() if content else f"{tag}\n{file_block}"
+                )
 
             if not content and not media_paths:
                 return
@@ -494,12 +520,14 @@ class QQChannel(BaseChannel):
             logger.info("Downloading file from QQ: {}", filename or url)
             local_path = await self._download_to_media_dir_chunked(url, filename_hint=filename)
 
-            att_meta.append({
-                "url": url,
-                "filename": filename,
-                "content_type": ctype,
-                "saved_path": local_path,
-            })
+            att_meta.append(
+                {
+                    "url": url,
+                    "filename": filename,
+                    "content_type": ctype,
+                    "saved_path": local_path,
+                }
+            )
 
             if local_path:
                 media_paths.append(local_path)
@@ -512,7 +540,9 @@ class QQChannel(BaseChannel):
         return media_paths, recv_lines, att_meta
 
     async def _download_to_media_dir_chunked(
-        self, url: str, filename_hint: str = "",
+        self,
+        url: str,
+        filename_hint: str = "",
     ) -> str | None:
         """Download an inbound attachment using streaming chunk write.
 
@@ -529,7 +559,9 @@ class QQChannel(BaseChannel):
 
         try:
             async with self._http.get(
-                url, timeout=aiohttp.ClientTimeout(total=120), allow_redirects=True,
+                url,
+                timeout=aiohttp.ClientTimeout(total=120),
+                allow_redirects=True,
             ) as resp:
                 if resp.status != 200:
                     logger.warning("QQ download failed: status={} url={}", resp.status, url)
@@ -571,7 +603,9 @@ class QQChannel(BaseChannel):
                 # Stream write
                 downloaded = 0
                 chunk_size = max(1024, int(self.config.download_chunk_size or 262144))
-                max_bytes = max(1024 * 1024, int(self.config.download_max_bytes or (200 * 1024 * 1024)))
+                max_bytes = max(
+                    1024 * 1024, int(self.config.download_max_bytes or (200 * 1024 * 1024))
+                )
 
                 def _open_tmp():
                     tmp_path.parent.mkdir(parents=True, exist_ok=True)
@@ -586,7 +620,8 @@ class QQChannel(BaseChannel):
                         if downloaded > max_bytes:
                             logger.warning(
                                 "QQ download exceeded max_bytes={} url={} -> abort",
-                                max_bytes, url,
+                                max_bytes,
+                                url,
                             )
                             return None
                         await asyncio.to_thread(f.write, chunk)
