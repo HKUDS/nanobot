@@ -83,3 +83,30 @@ def test_build_system_prompt_memory_failure_fallback(
     prompt = builder.build_system_prompt(current_message="hello")
     assert "# nanobot" in prompt
     assert "**Answer from these facts first.**" not in prompt
+
+
+def test_bootstrap_files_cached_across_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-L1 (LAN-93): bootstrap files must be read at most once when mtime hasn't changed."""
+    ws = _workspace(tmp_path)
+    (ws / "SOUL.md").write_text("soul content", encoding="utf-8")
+    builder = ContextBuilder(ws)
+
+    read_count = 0
+    original_read_text = Path.read_text
+
+    def counting_read_text(self: Path, *args, **kwargs) -> str:
+        nonlocal read_count
+        if self.name == "SOUL.md":
+            read_count += 1
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counting_read_text)
+
+    # Call build_system_prompt three times — SOUL.md should only be read once
+    builder.build_system_prompt(current_message="first")
+    builder.build_system_prompt(current_message="second")
+    builder.build_system_prompt(current_message="third")
+
+    assert read_count == 1, f"SOUL.md read {read_count} times; expected 1 (cache miss only)"

@@ -35,13 +35,16 @@ async def run_tool_loop(
     iteration = 0
     final_result: str | None = None
     tools_used: list[str] = []
+    # P-20: compute tool definitions once before the loop — they are static
+    # within a run_tool_loop invocation.
+    tool_definitions = tools.get_definitions()
 
     while iteration < max_iterations:
         iteration += 1
 
         response = await provider.chat(
             messages=messages,
-            tools=tools.get_definitions(),
+            tools=tool_definitions,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,

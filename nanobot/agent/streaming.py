@@ -55,8 +55,6 @@ def strip_think(text: str | None) -> str | None:
 class StreamingLLMCaller:
     """Handles LLM calls with optional streaming and progress flushing."""
 
-    STREAM_FLUSH_INTERVAL = 12  # flush partial content every N chunks
-
     def __init__(
         self,
         *,
