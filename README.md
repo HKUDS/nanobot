@@ -396,11 +396,11 @@ These features were added in the `feat/mem0-memory-integration` branch and are c
 | Feature | Config Key | Default | Description |
 |---------|-----------|---------|-------------|
 | Planning | `planning_enabled` | `true` | Decomposes complex tasks into sub-steps before acting |
-| Self-critique | `verification_mode` | `"auto"` | Verifies tool outputs for correctness (`auto`/`always`/`off`) |
-| Streaming | `streaming` | `false` | Stream LLM responses token-by-token |
+| Self-critique | `verification_mode` | `"on_uncertainty"` | Verifies tool outputs for correctness (`on_uncertainty`/`always`/`off`) |
+| Streaming | `streaming` | `true` | Stream LLM responses token-by-token |
 | Summary compression | `summary_model` | `""` | LLM model for context window compression (empty = use main model) |
-| Memory cap | `memory_md_token_cap` | `800` | Max tokens injected from MEMORY.md into system prompt |
-| Shell mode | `shell_mode` | `"strict"` | Shell command security (`strict` blocks destructive commands) |
+| Memory cap | `memory_md_token_cap` | `1500` | Max tokens injected from MEMORY.md into system prompt |
+| Shell mode | `shell_mode` | `"denylist"` | Shell command security (`denylist` blocks destructive commands, `allowlist` for strict allowlisting) |
 
 **Rollout flags** (environment variables):
 

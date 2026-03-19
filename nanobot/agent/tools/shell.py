@@ -45,8 +45,9 @@ _DEFAULT_DENY_PATTERNS: list[str] = [
     r"\beval\s+.*\$",  # eval with variable expansion
     r"\bchmod\s+[0-7]*777\b",  # chmod 777
     r"\bchown\s+-r\s+root\b",  # chown -R root (pattern lowercase; guard lowercases input)
-    r"\bcurl\s+.*\|\s*(sh|bash|zsh)\b",  # curl | sh
-    r"\bwget\s+.*\|\s*(sh|bash|zsh)\b",  # wget | sh
+    r"\bcurl\s+.*\|\s*(sh|bash|zsh|dash)\b",  # curl | sh
+    r"\bwget\s+.*\|\s*(sh|bash|zsh|dash)\b",  # wget | sh
+    r"\|\s*(bash|sh|zsh|dash)\b",  # SEC-01: generic pipe-to-shell (any source)
     # Command-substitution bypass vectors (SEC-H3):
     r"\$\(",  # $(cmd) — command substitution
     r"`[^`\n]+`",  # `cmd` — backtick substitution
