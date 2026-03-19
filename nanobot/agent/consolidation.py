@@ -13,6 +13,7 @@ on message processing.
 from __future__ import annotations
 
 import asyncio
+import weakref
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -29,7 +30,11 @@ class ConsolidationOrchestrator:
 
     def __init__(self, memory_store: MemoryStore) -> None:
         self._memory = memory_store
-        self._locks: dict[str, asyncio.Lock] = {}
+        # WeakValueDictionary allows lock entries to be garbage-collected once
+        # no callers hold a strong reference to the lock object.  During
+        # consolidation the lock is held via ``async with lock:`` so it is
+        # strongly referenced for the duration and will not be collected early.
+        self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Get or create a per-session consolidation lock."""
@@ -40,9 +45,9 @@ class ConsolidationOrchestrator:
         return lock
 
     def prune_lock(self, session_key: str, lock: asyncio.Lock) -> None:
-        """Drop lock entry if no longer in use."""
-        if not lock.locked():
-            self._locks.pop(session_key, None)
+        """Drop lock entry if no longer in use (no-op with WeakValueDictionary)."""
+        # Entries are automatically removed when the caller drops its reference.
+        # This method is kept for API compatibility.
 
     async def consolidate(
         self,

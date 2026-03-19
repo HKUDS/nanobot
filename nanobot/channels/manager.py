@@ -234,7 +234,9 @@ class ChannelManager:
 
         while True:
             try:
-                msg = await asyncio.wait_for(self.bus.consume_outbound(), timeout=1.0)
+                # Block until a message is available — no timeout needed because
+                # task cancellation (via stop_all) handles shutdown cleanly.
+                msg = await self.bus.consume_outbound()
 
                 if msg.metadata.get("_progress"):
                     if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
@@ -251,8 +253,6 @@ class ChannelManager:
                 else:
                     logger.warning("Unknown channel: {}", msg.channel)
 
-            except asyncio.TimeoutError:
-                continue
             except asyncio.CancelledError:
                 break
             except Exception as e:  # crash-barrier: keep dispatcher alive

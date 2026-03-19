@@ -27,54 +27,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
-
-# ---------------------------------------------------------------------------
-# Scripted provider that maps calls to deterministic responses
-# ---------------------------------------------------------------------------
-
-
-class ScriptedProvider(LLMProvider):
-    """LLM provider that returns pre-configured responses in order.
-
-    Each call to ``chat()`` pops the next response off the queue.  When the
-    queue is exhausted a default fallback is returned.
-    """
-
-    def __init__(self, responses: list[LLMResponse]) -> None:
-        super().__init__()
-        self._responses = list(responses)
-        self._index = 0
-        self.call_log: list[dict] = []
-
-    def get_default_model(self) -> str:
-        return "test-model"
-
-    async def chat(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        model: str | None = None,
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
-        metadata: dict[str, Any] | None = None,
-    ) -> LLMResponse:
-        self.call_log.append(
-            {
-                "messages_count": len(messages),
-                "has_tools": tools is not None,
-                "model": model,
-                "last_user_msg": next(
-                    (m.get("content", "")[:120] for m in reversed(messages) if m["role"] == "user"),
-                    "",
-                ),
-            }
-        )
-        if self._index >= len(self._responses):
-            return LLMResponse(content="(no more scripted responses)")
-        resp = self._responses[self._index]
-        self._index += 1
-        return resp
-
+from tests.helpers import ScriptedProvider
 
 # ---------------------------------------------------------------------------
 # Helpers

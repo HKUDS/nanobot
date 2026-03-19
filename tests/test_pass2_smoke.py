@@ -7,7 +7,6 @@ These validate the end-to-end behavior rather than individual functions.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -23,30 +22,12 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.email import EmailChannel
 from nanobot.config.schema import AgentConfig, EmailConfig
 from nanobot.errors import DeliverySkippedError
-from nanobot.providers.base import LLMProvider, LLMResponse
+from nanobot.providers.base import LLMProvider
+from tests.helpers import ScriptedProvider
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-class ScriptedProvider(LLMProvider):
-    """LLM provider that returns pre-configured responses in order."""
-
-    def __init__(self, responses: list[LLMResponse]):
-        super().__init__()
-        self._responses = list(responses)
-        self._index = 0
-
-    def get_default_model(self) -> str:
-        return "smoke-model"
-
-    async def chat(self, **kwargs: Any) -> LLMResponse:
-        if self._index >= len(self._responses):
-            return LLMResponse(content="(exhausted)")
-        resp = self._responses[self._index]
-        self._index += 1
-        return resp
 
 
 def _email_config(**overrides) -> EmailConfig:

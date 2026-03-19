@@ -21,45 +21,11 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from tests.helpers import ScriptedProvider
 
 # ---------------------------------------------------------------------------
 # Helpers (same pattern as golden tests)
 # ---------------------------------------------------------------------------
-
-
-class ScriptedProvider(LLMProvider):
-    """LLM provider that returns pre-configured responses in order."""
-
-    def __init__(self, responses: list[LLMResponse]):
-        super().__init__()
-        self._responses = list(responses)
-        self._index = 0
-        self.call_log: list[dict[str, Any]] = []
-
-    def get_default_model(self) -> str:
-        return "test-model"
-
-    async def chat(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        model: str | None = None,
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
-        metadata: dict[str, Any] | None = None,
-    ) -> LLMResponse:
-        self.call_log.append(
-            {
-                "messages": [dict(m) for m in messages],
-                "tools": tools,
-                "model": model,
-            }
-        )
-        if self._index >= len(self._responses):
-            return LLMResponse(content="(no more scripted responses)")
-        resp = self._responses[self._index]
-        self._index += 1
-        return resp
 
 
 def _make_config(tmp_path: Path, **overrides: Any) -> AgentConfig:

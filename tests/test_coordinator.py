@@ -23,6 +23,7 @@ from nanobot.agent.coordinator import (
 from nanobot.agent.registry import AgentRegistry
 from nanobot.config.schema import AgentConfig, AgentRoleConfig, RoutingConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
+from tests.helpers import ScriptedProvider
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -361,35 +362,6 @@ def _make_agent_config(tmp_path: Path, **overrides: Any) -> AgentConfig:
     )
     defaults.update(overrides)
     return AgentConfig(**defaults)
-
-
-class ScriptedProvider(LLMProvider):
-    """Provider that returns scripted responses in order."""
-
-    def __init__(self, responses: list[LLMResponse]) -> None:
-        super().__init__()
-        self._responses = list(responses)
-        self._index = 0
-        self.call_log: list[dict[str, Any]] = []
-
-    def get_default_model(self) -> str:
-        return "test-model"
-
-    async def chat(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        model: str | None = None,
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
-        metadata: dict[str, Any] | None = None,
-    ) -> LLMResponse:
-        self.call_log.append({"model": model, "temperature": temperature})
-        if self._index >= len(self._responses):
-            return LLMResponse(content="(no more scripted responses)")
-        resp = self._responses[self._index]
-        self._index += 1
-        return resp
 
 
 class TestIntegrationRoutedFlow:

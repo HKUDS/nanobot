@@ -34,6 +34,7 @@ import asyncio
 import json
 import time
 import uuid
+import weakref
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -461,7 +462,7 @@ class AgentLoop:
     # --- Delegation state proxied to _dispatcher ---
 
     @property
-    def _consolidation_locks(self) -> dict[str, asyncio.Lock]:
+    def _consolidation_locks(self) -> weakref.WeakValueDictionary[str, asyncio.Lock]:
         return self._consolidator._locks
 
     @property
