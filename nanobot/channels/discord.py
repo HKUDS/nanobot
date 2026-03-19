@@ -32,6 +32,7 @@ class DiscordConfig(Base):
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377
     group_policy: Literal["mention", "open"] = "mention"
+    read_receipt: bool = True  # React with 👀 when message is received, remove after reply
 
 
 class DiscordChannel(BaseChannel):
@@ -342,7 +343,7 @@ class DiscordChannel(BaseChannel):
         await self._start_typing(channel_id)
 
         message_id = str(payload.get("id", ""))
-        if message_id:
+        if message_id and self.config.read_receipt:
             await self._add_reaction(channel_id, message_id, "👀")
             self._pending_reactions[channel_id] = message_id
 
