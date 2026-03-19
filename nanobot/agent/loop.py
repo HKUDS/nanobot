@@ -135,6 +135,11 @@ class AgentLoop:
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
+        # Discover and register external tool plugins
+        if self._config:
+            from nanobot.agent.tools.registry import discover_tool_plugins
+            discover_tool_plugins(self.tools, self._config)
+
     def _handle_models_command(self, arg: str) -> str:
         """Handle /models command: list providers or models under a provider."""
         if not self._config:

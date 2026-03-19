@@ -1,8 +1,15 @@
 """Tool registry for dynamic tool management."""
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+from loguru import logger
 
 from nanobot.agent.tools.base import Tool
+
+if TYPE_CHECKING:
+    from nanobot.config.schema import Config
 
 
 class ToolRegistry:
@@ -68,3 +75,16 @@ class ToolRegistry:
 
     def __contains__(self, name: str) -> bool:
         return name in self._tools
+
+
+def discover_tool_plugins(registry: ToolRegistry, config: Config) -> None:
+    """Discover and register external tool plugins via entry_points."""
+    from importlib.metadata import entry_points
+
+    for ep in entry_points(group="nanobot.tools"):
+        try:
+            register_fn = ep.load()
+            register_fn(registry, config)
+            logger.info("Tool plugin '{}' registered", ep.name)
+        except Exception as e:
+            logger.warning("Failed to load tool plugin '{}': {}", ep.name, e)
