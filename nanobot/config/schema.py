@@ -89,6 +89,21 @@ class ProvidersConfig(Base):
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
 
 
+class GuardConfig(Base):
+    """Three-level security classification + cost-aware routing configuration."""
+
+    enabled: bool = False
+    # Security detection
+    extra_rules: list[dict] = Field(default_factory=list)  # {"pattern": "...", "level": "S2", "type": "..."}
+    local_detector_model: str = ""  # LLM for semantic detection; empty = rule-only
+    # Security routing
+    local_model: str = ""  # Model for S3 (private) data — never sent to cloud
+    # Cost-aware routing (applied after S1/S2 clearance)
+    cost_aware: bool = False
+    simple_model: str = ""   # Model for SIMPLE tasks (cheapest)
+    medium_model: str = ""   # Model for MEDIUM tasks
+
+
 class HeartbeatConfig(Base):
     """Heartbeat service configuration."""
 
@@ -182,6 +197,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    guard: GuardConfig = Field(default_factory=GuardConfig)
 
     @property
     def workspace_path(self) -> Path:

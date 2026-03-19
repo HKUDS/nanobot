@@ -420,6 +420,35 @@ def _make_provider(config: Config):
     return provider
 
 
+def _make_local_provider(config: Config):
+    """Create a local LLM provider for guard S3 routing (returns None if not configured)."""
+    guard = config.guard
+    if not guard.enabled or not guard.local_model:
+        return None
+
+    from nanobot.providers.base import GenerationSettings
+    from nanobot.providers.litellm_provider import LiteLLMProvider
+
+    local_model = guard.local_model
+    provider_name = config.get_provider_name(local_model)
+    p = config.get_provider(local_model)
+
+    local_provider = LiteLLMProvider(
+        api_key=p.api_key if p else None,
+        api_base=config.get_api_base(local_model),
+        default_model=local_model,
+        extra_headers=p.extra_headers if p else None,
+        provider_name=provider_name,
+    )
+    defaults = config.agents.defaults
+    local_provider.generation = GenerationSettings(
+        temperature=defaults.temperature,
+        max_tokens=defaults.max_tokens,
+        reasoning_effort=None,
+    )
+    return local_provider
+
+
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
     """Load config and optionally override the active workspace."""
     from nanobot.config.loader import load_config, set_config_path
@@ -483,6 +512,7 @@ def gateway(
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
+    local_provider = _make_local_provider(config)
     session_manager = SessionManager(config.workspace_path)
 
     # Create cron service first (callback set after agent creation)
@@ -506,6 +536,8 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         browser_config=config.tools.browser,
+        guard_config=config.guard,
+        local_provider=local_provider,
     )
 
     # Set cron callback (needs agent)
@@ -673,6 +705,7 @@ def agent(
 
     bus = MessageBus()
     provider = _make_provider(config)
+    local_provider = _make_local_provider(config)
 
     # Create cron service for tool usage (no callback needed for CLI unless running)
     cron_store_path = get_cron_dir() / "jobs.json"
@@ -698,6 +731,8 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         browser_config=config.tools.browser,
+        guard_config=config.guard,
+        local_provider=local_provider,
     )
 
     # Shared reference for progress callbacks

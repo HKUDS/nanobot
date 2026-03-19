@@ -30,7 +30,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import BrowserConfig, ChannelsConfig, ExecToolConfig, WebSearchConfig
+    from nanobot.config.schema import BrowserConfig, ChannelsConfig, ExecToolConfig, GuardConfig, WebSearchConfig
     from nanobot.cron.service import CronService
 
 
@@ -65,12 +65,16 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         browser_config: BrowserConfig | None = None,
+        guard_config: GuardConfig | None = None,
+        local_provider: LLMProvider | None = None,
     ):
-        from nanobot.config.schema import BrowserConfig, ExecToolConfig, WebSearchConfig
+        from nanobot.config.schema import BrowserConfig, ExecToolConfig, GuardConfig, WebSearchConfig
+        from nanobot.guard.router import CostRouter, SecurityRouter
 
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
+        self.local_provider = local_provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
@@ -95,6 +99,15 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
+
+        # Guard: security classification and cost-aware routing
+        self._guard_config = guard_config
+        if guard_config and guard_config.enabled:
+            self._security_router: SecurityRouter | None = SecurityRouter(guard_config)
+            self._cost_router: CostRouter | None = CostRouter(guard_config) if guard_config.cost_aware else None
+        else:
+            self._security_router = None
+            self._cost_router = None
 
         self._running = False
         self._mcp_servers = mcp_servers or {}
@@ -223,26 +236,78 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    async def _apply_guard_routing(
+        self,
+        messages: list[dict],
+    ) -> tuple[list[dict], LLMProvider | None, str | None] | str:
+        """Apply security classification and cost-aware routing.
+
+        Returns either:
+        - A refusal string (str) when S3 data is detected and no local model is configured.
+        - A tuple (messages, provider_override, model_override) for normal flow.
+          messages may have PII masked for S2. provider/model overrides may be None (use defaults).
+        """
+        from nanobot.guard.detector import SecurityLevel
+
+        if not self._security_router:
+            return messages, None, None
+
+        level, entities = self._security_router.classify_messages(messages)
+
+        if level == SecurityLevel.S3:
+            if not self.local_provider and not (self._guard_config and self._guard_config.local_model):
+                return (
+                    "⚠️ 消息含私密信息（S3 级别），未配置本地模型，无法安全处理。\n"
+                    "请在配置文件 guard.local_model 中指定本地模型（例如 ollama/minicpm4）。"
+                )
+            local_model = self._guard_config.local_model if self._guard_config else None
+            logger.info("Guard: S3 detected — routing to local model {}", local_model or "default")
+            return messages, self.local_provider, local_model
+
+        if level == SecurityLevel.S2:
+            logger.info("Guard: S2 detected — masking {} entities before cloud", len(entities))
+            messages = self._security_router.apply_mask(messages, entities)
+
+        # Cost-aware routing (S1 or masked S2 only)
+        provider_override: LLMProvider | None = None
+        model_override: str | None = None
+        if self._cost_router and self._guard_config:
+            from nanobot.guard.router import Complexity
+            complexity = await self._cost_router.classify(messages, self.provider)
+            logger.info("Guard: task complexity = {}", complexity)
+            cfg = self._guard_config
+            if complexity == Complexity.SIMPLE and cfg.simple_model:
+                model_override = cfg.simple_model
+            elif complexity == Complexity.MEDIUM and cfg.medium_model:
+                model_override = cfg.medium_model
+            # COMPLEX / REASONING → use default model (no override)
+
+        return messages, provider_override, model_override
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        provider_override: LLMProvider | None = None,
+        model_override: str | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        effective_provider = provider_override or self.provider
+        effective_model = model_override or self.model
 
         while iteration < self.max_iterations:
             iteration += 1
 
             tool_defs = self.tools.get_definitions()
 
-            response = await self.provider.chat_with_retry(
+            response = await effective_provider.chat_with_retry(
                 messages=messages,
                 tools=tool_defs,
-                model=self.model,
+                model=effective_model,
             )
 
             if response.has_tool_calls:
@@ -480,8 +545,21 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
+        # Guard: security classification and cost-aware routing
+        guard_result = await self._apply_guard_routing(initial_messages)
+        if isinstance(guard_result, str):
+            # S3 data with no local model configured — refuse
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content=guard_result, metadata=msg.metadata or {},
+            )
+        guard_messages, provider_override, model_override = guard_result
+
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            guard_messages,
+            on_progress=on_progress or _bus_progress,
+            provider_override=provider_override,
+            model_override=model_override,
         )
 
         if final_content is None:
