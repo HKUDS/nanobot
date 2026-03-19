@@ -5,14 +5,15 @@ import base64
 import mimetypes
 from collections import deque
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import QQConfig
+from nanobot.config.schema import Base
+from pydantic import Field
 
 try:
     import botpy
@@ -87,12 +88,29 @@ def _make_bot_class(channel: "QQChannel") -> "type[Client]":
     return _Bot
 
 
+class QQConfig(Base):
+    """QQ channel configuration using botpy SDK."""
+
+    enabled: bool = False
+    app_id: str = ""
+    secret: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+    msg_format: Literal["plain", "markdown"] = "plain"
+
+
 class QQChannel(BaseChannel):
     """QQ channel using botpy SDK with WebSocket connection."""
 
     name = "qq"
+    display_name = "QQ"
 
-    def __init__(self, config: QQConfig, bus: MessageBus):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return QQConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = QQConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: QQConfig = config
         self._client: "Client | None" = None
@@ -144,33 +162,37 @@ class QQChannel(BaseChannel):
             return
 
         msg_id = msg.metadata.get("message_id")
-        msg_type = self._chat_type_cache.get(msg.chat_id, "c2c")
+        chat_type = self._chat_type_cache.get(msg.chat_id, "c2c")
 
-        # 发送富媒体文件
-        is_group = msg_type == "group"
+        # 先发送富媒体文件
+        is_group = chat_type == "group"
         for media_path in msg.media or []:
             await self._send_media(msg.chat_id, media_path, msg_id, is_group=is_group)
 
-        self._msg_seq += 1
-
-        # 发送文本内容
+        # 再发送文本内容，支持 plain/markdown 两种格式
         if msg.content and msg.content != "[empty message]":
             try:
-                if msg_type == "group":
+                self._msg_seq += 1
+                use_markdown = self.config.msg_format == "markdown"
+                payload: dict[str, Any] = {
+                    "msg_type": 2 if use_markdown else 0,
+                    "msg_id": msg_id,
+                    "msg_seq": self._msg_seq,
+                }
+                if use_markdown:
+                    payload["markdown"] = {"content": msg.content}
+                else:
+                    payload["content"] = msg.content
+
+                if chat_type == "group":
                     await self._client.api.post_group_message(
                         group_openid=msg.chat_id,
-                        msg_type=2,
-                        markdown={"content": msg.content},
-                        msg_id=msg_id,
-                        msg_seq=self._msg_seq,
+                        **payload,
                     )
                 else:
                     await self._client.api.post_c2c_message(
                         openid=msg.chat_id,
-                        msg_type=2,
-                        markdown={"content": msg.content},
-                        msg_id=msg_id,
-                        msg_seq=self._msg_seq,
+                        **payload,
                     )
             except Exception as e:
                 logger.error("Error sending QQ message: {}", e)

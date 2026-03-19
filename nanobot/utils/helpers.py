@@ -1,8 +1,13 @@
 """Utility functions for nanobot."""
 
+import json
 import re
+import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+
+import tiktoken
 
 
 def detect_image_mime(data: bytes) -> str | None:
@@ -27,6 +32,13 @@ def ensure_dir(path: Path) -> Path:
 def timestamp() -> str:
     """Current ISO timestamp."""
     return datetime.now().isoformat()
+
+
+def current_time_str() -> str:
+    """Human-readable current time with weekday and timezone, e.g. '2026-03-15 22:30 (Saturday) (CST)'."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+    tz = time.strftime("%Z") or "UTC"
+    return f"{now} ({tz})"
 
 
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
@@ -68,6 +80,104 @@ def split_message(content: str, max_len: int = 2000) -> list[str]:
     return chunks
 
 
+def build_assistant_message(
+    content: str | None,
+    tool_calls: list[dict[str, Any]] | None = None,
+    reasoning_content: str | None = None,
+    thinking_blocks: list[dict] | None = None,
+) -> dict[str, Any]:
+    """Build a provider-safe assistant message with optional reasoning fields."""
+    msg: dict[str, Any] = {"role": "assistant", "content": content}
+    if tool_calls:
+        msg["tool_calls"] = tool_calls
+    if reasoning_content is not None:
+        msg["reasoning_content"] = reasoning_content
+    if thinking_blocks:
+        msg["thinking_blocks"] = thinking_blocks
+    return msg
+
+
+def estimate_prompt_tokens(
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None = None,
+) -> int:
+    """Estimate prompt tokens with tiktoken."""
+    try:
+        enc = tiktoken.get_encoding("cl100k_base")
+        parts: list[str] = []
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, str):
+                parts.append(content)
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        txt = part.get("text", "")
+                        if txt:
+                            parts.append(txt)
+        if tools:
+            parts.append(json.dumps(tools, ensure_ascii=False))
+        return len(enc.encode("\n".join(parts)))
+    except Exception:
+        return 0
+
+
+def estimate_message_tokens(message: dict[str, Any]) -> int:
+    """Estimate prompt tokens contributed by one persisted message."""
+    content = message.get("content")
+    parts: list[str] = []
+    if isinstance(content, str):
+        parts.append(content)
+    elif isinstance(content, list):
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                text = part.get("text", "")
+                if text:
+                    parts.append(text)
+            else:
+                parts.append(json.dumps(part, ensure_ascii=False))
+    elif content is not None:
+        parts.append(json.dumps(content, ensure_ascii=False))
+
+    for key in ("name", "tool_call_id"):
+        value = message.get(key)
+        if isinstance(value, str) and value:
+            parts.append(value)
+    if message.get("tool_calls"):
+        parts.append(json.dumps(message["tool_calls"], ensure_ascii=False))
+
+    payload = "\n".join(parts)
+    if not payload:
+        return 1
+    try:
+        enc = tiktoken.get_encoding("cl100k_base")
+        return max(1, len(enc.encode(payload)))
+    except Exception:
+        return max(1, len(payload) // 4)
+
+
+def estimate_prompt_tokens_chain(
+    provider: Any,
+    model: str | None,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None = None,
+) -> tuple[int, str]:
+    """Estimate prompt tokens via provider counter first, then tiktoken fallback."""
+    provider_counter = getattr(provider, "estimate_prompt_tokens", None)
+    if callable(provider_counter):
+        try:
+            tokens, source = provider_counter(messages, tools, model)
+            if isinstance(tokens, (int, float)) and tokens > 0:
+                return int(tokens), str(source or "provider_counter")
+        except Exception:
+            pass
+
+    estimated = estimate_prompt_tokens(messages, tools)
+    if estimated > 0:
+        return int(estimated), "tiktoken"
+    return 0, "none"
+
+
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
     """Sync bundled templates to workspace. Only creates missing files."""
     from importlib.resources import files as pkg_files
@@ -88,7 +198,7 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         added.append(str(dest.relative_to(workspace)))
 
     for item in tpl.iterdir():
-        if item.name.endswith(".md"):
+        if item.name.endswith(".md") and not item.name.startswith("."):
             _write(item, workspace / item.name)
     _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
     _write(None, workspace / "memory" / "HISTORY.md")
