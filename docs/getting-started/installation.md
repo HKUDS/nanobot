@@ -1,29 +1,29 @@
-# 安裝指南
+# Installation Guide
 
-本頁說明如何在您的系統上安裝 nanobot，涵蓋多種安裝方式及常見問題排解。
+This page explains how to install nanobot on your system, covering multiple installation methods and common troubleshooting.
 
 ---
 
-## 系統需求
+## System Requirements
 
-| 需求 | 版本 |
+| Requirement | Version |
 |------|------|
-| **Python** | 3.11 或更新版本 |
-| **作業系統** | macOS、Linux、Windows（WSL 推薦） |
-| **uv**（推薦）| 最新版本 |
-| **Node.js**（選用）| ≥18，僅 WhatsApp 頻道需要 |
+| **Python** | 3.11 or newer |
+| **Operating System** | macOS, Linux, Windows (WSL recommended) |
+| **uv** (recommended) | Latest version |
+| **Node.js** (optional) | ≥18, required only for WhatsApp channel |
 
-!!! tip "確認 Python 版本"
+!!! tip "Check Python version"
     ```bash
     python3 --version
-    # 應輸出 Python 3.11.x 或更新版本
+    # Should output Python 3.11.x or newer
     ```
 
 ---
 
-## 安裝 uv（推薦）
+## Install uv (Recommended)
 
-[uv](https://github.com/astral-sh/uv) 是 nanobot 推薦使用的套件管理工具，速度極快。
+[uv](https://github.com/astral-sh/uv) is the package manager recommended by nanobot, and it is extremely fast.
 
 === "macOS / Linux"
 
@@ -43,7 +43,7 @@
     pip install uv
     ```
 
-安裝後，重新開啟終端機並確認：
+After installation, reopen your terminal and verify:
 
 ```bash
 uv --version
@@ -51,39 +51,39 @@ uv --version
 
 ---
 
-## 安裝 nanobot
+## Install nanobot
 
-### 方式一：使用 uv（推薦）
+### Method 1: Using uv (Recommended)
 
 ```bash
 uv tool install nanobot-ai
 ```
 
-這是最快速的安裝方式，nanobot 會被安裝為獨立的命令列工具。
+This is the fastest installation method. nanobot is installed as an independent CLI tool.
 
-**更新至最新版本：**
+**Upgrade to latest version:**
 
 ```bash
 uv tool upgrade nanobot-ai
 nanobot --version
 ```
 
-### 方式二：使用 pip
+### Method 2: Using pip
 
 ```bash
 pip install nanobot-ai
 ```
 
-**更新至最新版本：**
+**Upgrade to latest version:**
 
 ```bash
 pip install -U nanobot-ai
 nanobot --version
 ```
 
-### 方式三：從源碼安裝（開發者推薦）
+### Method 3: Install from source (Recommended for developers)
 
-適合想取得最新功能或參與開發的用戶。
+Suitable for users who want the latest features or want to contribute.
 
 ```bash
 git clone https://github.com/HKUDS/nanobot.git
@@ -91,8 +91,8 @@ cd nanobot
 uv sync
 ```
 
-!!! note "從源碼執行"
-    從源碼安裝後，使用 `uv run nanobot` 代替直接輸入 `nanobot`：
+!!! note "Run from source"
+    After source installation, use `uv run nanobot` instead of directly typing `nanobot`:
     ```bash
     uv run nanobot --version
     uv run nanobot onboard
@@ -101,147 +101,147 @@ uv sync
 
 ---
 
-## 使用 Docker 安裝
+## Install with Docker
 
-不想在本機安裝 Python 環境？可使用 Docker。
+Do not want to install a local Python environment? You can use Docker.
 
-### 前置需求
+### Prerequisites
 
-- [Docker](https://docs.docker.com/get-docker/) 已安裝並運行
+- [Docker](https://docs.docker.com/get-docker/) is installed and running
 
-### 方式一：Docker Compose（推薦）
+### Method 1: Docker Compose (Recommended)
 
 ```bash
-# 複製儲存庫
+# Clone repository
 git clone https://github.com/HKUDS/nanobot.git
 cd nanobot
 
-# 初始化設定（第一次執行）
+# Initialize configuration (first run)
 docker compose run --rm nanobot-cli onboard
 
-# 編輯 config，加入 API 金鑰
+# Edit config and add API keys
 vim ~/.nanobot/config.json
 
-# 啟動 gateway
+# Start gateway
 docker compose up -d nanobot-gateway
 ```
 
-常用 Docker Compose 指令：
+Common Docker Compose commands:
 
 ```bash
-# 執行 CLI 模式對話
+# Run CLI chat
 docker compose run --rm nanobot-cli agent -m "Hello!"
 
-# 查看 gateway 日誌
+# View gateway logs
 docker compose logs -f nanobot-gateway
 
-# 停止 gateway
+# Stop gateway
 docker compose down
 ```
 
-### 方式二：直接使用 Docker
+### Method 2: Use Docker directly
 
 ```bash
-# 建立映像檔
+# Build image
 docker build -t nanobot .
 
-# 初始化設定（第一次執行）
+# Initialize configuration (first run)
 docker run -v ~/.nanobot:/root/.nanobot --rm nanobot onboard
 
-# 編輯設定
+# Edit configuration
 vim ~/.nanobot/config.json
 
-# 啟動 gateway
+# Start gateway
 docker run -v ~/.nanobot:/root/.nanobot -p 18790:18790 nanobot gateway
 
-# 或執行單次 CLI 指令
+# Or run one-off CLI commands
 docker run -v ~/.nanobot:/root/.nanobot --rm nanobot agent -m "Hello!"
 docker run -v ~/.nanobot:/root/.nanobot --rm nanobot status
 ```
 
-!!! tip "資料持久化"
-    `-v ~/.nanobot:/root/.nanobot` 旗標會將您本機的設定目錄掛載至容器中，確保設定與 workspace 在容器重啟後仍然保留。
+!!! tip "Data persistence"
+    The `-v ~/.nanobot:/root/.nanobot` flag mounts your local config directory into the container so config and workspace remain after container restarts.
 
-!!! note "Docker 互動式 OAuth 登入"
-    若需要互動式 OAuth 登入（例如 OpenAI Codex），請加上 `-it` 旗標：
+!!! note "Interactive OAuth login in Docker"
+    If you need interactive OAuth login (e.g., OpenAI Codex), add the `-it` flag:
     ```bash
     docker run -it -v ~/.nanobot:/root/.nanobot --rm nanobot provider login openai-codex
     ```
 
 ---
 
-## 安裝選用依賴
+## Install Optional Dependencies
 
-部分頻道需要額外安裝依賴：
+Some channels require additional dependencies:
 
-| 頻道 | 安裝指令 |
+| Channel | Install Command |
 |------|----------|
 | **Matrix** | `pip install nanobot-ai[matrix]` |
-| **WeCom（企業微信）** | `pip install nanobot-ai[wecom]` |
-| **WhatsApp** | 需要 Node.js ≥18；執行 `nanobot channels login` 時會自動安裝橋接器 |
+| **WeCom** | `pip install nanobot-ai[wecom]` |
+| **WhatsApp** | Requires Node.js ≥18; running `nanobot channels login` installs bridge automatically |
 
 ---
 
-## 驗證安裝
+## Verify Installation
 
-安裝完成後，執行以下指令確認：
+After installation, run the following command to verify:
 
 ```bash
 nanobot --version
 ```
 
-預期輸出範例：
+Expected output example:
 
 ```
 nanobot 0.1.4.post5
 ```
 
-接著嘗試查看狀態：
+Then try checking status:
 
 ```bash
 nanobot status
 ```
 
-如果安裝正確，您會看到目前的設定狀態概覽。
+If installation is correct, you will see an overview of current configuration status.
 
 ---
 
-## 常見安裝問題
+## Common Installation Issues
 
 ### `nanobot: command not found`
 
-**原因：** uv tool 安裝後，`~/.local/bin` 尚未加入 `PATH`。
+**Cause:** After `uv tool install`, `~/.local/bin` is not yet in `PATH`.
 
-**解決方法：**
+**Fix:**
 
 ```bash
-# 將以下內容加入 ~/.bashrc 或 ~/.zshrc
+# Add the following to ~/.bashrc or ~/.zshrc
 export PATH="$HOME/.local/bin:$PATH"
 
-# 重新載入設定
-source ~/.bashrc   # 或 source ~/.zshrc
+# Reload config
+source ~/.bashrc   # or source ~/.zshrc
 ```
 
-### Python 版本不符
+### Python version mismatch
 
-**錯誤訊息：** `requires Python >=3.11`
+**Error message:** `requires Python >=3.11`
 
-**解決方法：** 安裝 Python 3.11+。推薦使用 [pyenv](https://github.com/pyenv/pyenv)：
+**Fix:** Install Python 3.11+. [pyenv](https://github.com/pyenv/pyenv) is recommended:
 
 ```bash
 pyenv install 3.11
 pyenv global 3.11
 ```
 
-### pip 安裝權限問題（Linux / macOS）
+### pip permission issue (Linux / macOS)
 
-**解決方法：** 加上 `--user` 旗標或使用 virtual environment：
+**Fix:** Add `--user` or use a virtual environment:
 
 ```bash
 pip install --user nanobot-ai
 ```
 
-或建立 virtual environment：
+Or create a virtual environment:
 
 ```bash
 python3 -m venv venv
@@ -249,24 +249,24 @@ source venv/bin/activate
 pip install nanobot-ai
 ```
 
-### WhatsApp 橋接器建置失敗
+### WhatsApp bridge build failed
 
-**原因：** Node.js 版本過舊或未安裝。
+**Cause:** Node.js is too old or not installed.
 
-**解決方法：**
+**Fix:**
 
 ```bash
-# 確認 Node.js 版本（需要 ≥18）
+# Check Node.js version (requires ≥18)
 node --version
 
-# 重建橋接器
+# Rebuild bridge
 rm -rf ~/.nanobot/bridge
 nanobot channels login
 ```
 
-### SSL 憑證錯誤（企業網路 / 代理）
+### SSL certificate errors (corporate network / proxy)
 
-**解決方法：** 在 `~/.nanobot/config.json` 中設定 proxy：
+**Fix:** Configure proxy in `~/.nanobot/config.json`:
 
 ```json
 {
@@ -280,6 +280,6 @@ nanobot channels login
 
 ---
 
-## 下一步
+## Next Step
 
-安裝完成後，前往 [快速開始](quick-start.md) 在 5 分鐘內完成您的第一個 nanobot 設定。
+After installation, go to [Quick Start](quick-start.md) to complete your first nanobot setup in 5 minutes.

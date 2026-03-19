@@ -1,65 +1,65 @@
-# 開發文件總覽
+# Development Docs
 
-歡迎來到 nanobot 開發文件。本節提供深入了解 nanobot 架構、貢獻代碼，以及開發自訂插件所需的所有資訊。
+Welcome to the nanobot development documentation. This section covers architecture, contributing, and building custom plugins.
 
-## 文件目錄
+## Documentation index
 
-| 文件 | 說明 |
-|------|------|
-| [架構說明](./architecture.md) | 系統設計、模組關係、資料流 |
-| [貢獻指南](./contributing.md) | 分支策略、代碼風格、提交 PR |
-| [頻道插件開發](./channel-plugin.md) | 開發自訂聊天平台插件 |
+| Doc | Description |
+|-----|-------------|
+| [Architecture overview](./architecture.md) | System design, module relationships, and data flow |
+| [Contributing guide](./contributing.md) | Branch strategy, coding style, and PR workflow |
+| [Channel plugin development](./channel-plugin.md) | Build custom chat platform integrations |
 
-## 快速入門
+## Quick start
 
-### 環境設定
+### Environment setup
 
 ```bash
-# 複製儲存庫
+# Clone the repo
 git clone https://github.com/HKUDS/nanobot.git
 cd nanobot
 
-# 安裝依賴（包含開發依賴）
+# Install dependencies (including dev extras)
 uv sync
 
-# 執行測試
+# Run the test suite
 uv run pytest tests/
 
-# 啟動本地代理進行測試
+# Start a local agent for manual testing
 uv run nanobot agent
 ```
 
-### 重要原則
+### Core principles
 
-nanobot 的核心設計理念是「以最少的代碼實現最核心的功能」：
+nanobot follows a “less code, more impact” philosophy:
 
-- **輕量**：~16k Python 代碼行完成完整代理功能
-- **非同步優先**：全面使用 `async/await`，避免阻塞呼叫
-- **事件驅動**：訊息透過總線路由，各元件鬆散耦合
-- **可擴展**：透過插件機制支援自訂頻道和技能
+- **Lightweight**: ~16k Python lines deliver the full agent stack
+- **Async-first**: `async/await` everywhere to avoid blocking calls
+- **Event-driven**: Messages flow through a bus so modules stay loosely coupled
+- **Extensible**: Plugin hooks enable custom channels and skills
 
-## 專案結構
+## Project structure
 
 ```
 nanobot/
-├── agent/          # 核心代理邏輯
-│   ├── loop.py     #   代理主循環（LLM ↔ 工具執行）
-│   ├── context.py  #   提示詞建構
-│   ├── memory.py   #   記憶整合
-│   └── tools/      #   工具實作
-├── bus/            # 訊息總線
-├── channels/       # 聊天平台介面卡（支援插件）
-├── providers/      # LLM 提供者
-├── session/        # 會話管理
-├── config/         # 配置模式（Pydantic）
-├── skills/         # 內建技能
-├── cron/           # 定時任務服務
-└── heartbeat/      # 心跳喚醒服務
+├── agent/          # Core agent logic
+│   ├── loop.py     # Agent loop (LLM ↔ tool execution)
+│   ├── context.py  # Prompt builder
+│   ├── memory.py   # Memory integrations
+│   └── tools/      # Built-in tools
+├── bus/            # Message bus
+├── channels/       # Chat platform interfaces (plugin-friendly)
+├── providers/      # LLM provider integrations
+├── session/        # Session management
+├── config/         # Pydantic schemas
+├── skills/         # Bundled skills
+├── cron/           # Scheduled task runner
+└── heartbeat/      # Periodic wake-up service
 ```
 
-## 相關資源
+## Resources
 
-- [GitHub 儲存庫](https://github.com/HKUDS/nanobot)
-- [問題回報](https://github.com/HKUDS/nanobot/issues)
-- [Discord 社群](https://discord.gg/MnCvHqpUGB)
-- [頻道插件指南（英文）](../CHANNEL_PLUGIN_GUIDE.md)
+- [GitHub repository](https://github.com/HKUDS/nanobot)
+- [Issue tracker](https://github.com/HKUDS/nanobot/issues)
+- [Discord community](https://discord.gg/MnCvHqpUGB)
+- [Channel Plugin Guide (English)](../CHANNEL_PLUGIN_GUIDE.md)

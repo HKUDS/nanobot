@@ -1,39 +1,39 @@
-# 設定總覽
+# Configuration Overview
 
-Nanobot 使用單一 JSON 設定檔管理所有行為，包括 AI 模型、聊天頻道、工具以及閘道伺服器。
+Nanobot keeps all of its behavior in a single JSON file, covering models, channels, tools, and gateway settings.
 
 ---
 
-## 設定檔位置
+## Config file location
 
-預設設定檔路徑為：
+The default config is stored at:
 
 ```
 ~/.nanobot/config.json
 ```
 
-執行 `nanobot onboard` 互動式精靈會自動在此路徑建立設定檔。
+Running `nanobot onboard` prompts you for the necessary values and writes this file.
 
-### 使用自訂路徑
+### Custom config paths
 
-透過 `-c` / `--config` 旗標可指定任意路徑的設定檔：
+Use the `-c` / `--config` flag to point nanobot at any config path:
 
 ```bash
-# 啟動閘道時指定設定檔
+# Use a specific config for the gateway
 nanobot gateway --config ~/.nanobot-work/config.json
 
-# 執行 CLI Agent 時指定設定檔
-nanobot agent -c ~/.nanobot-personal/config.json -m "你好！"
+# Run the CLI agent against another config
+nanobot agent -c ~/.nanobot-personal/config.json -m "Hello!"
 ```
 
 > [!TIP]
-> 多執行個體部署時，每個執行個體使用獨立的設定檔路徑。詳見[多執行個體指南](./multi-instance.md)。
+> When deploying multiple instances, each instance uses its own config path. See the [multi-instance guide](./multi-instance.md).
 
 ---
 
-## 設定檔格式
+## Config format
 
-設定檔為標準 JSON，支援 **camelCase**（駝峰式）與 **snake_case**（底線式）兩種鍵名，兩者可混用：
+The config file is standard JSON and accepts a mix of **camelCase** and **snake_case** keys:
 
 ```json
 {
@@ -48,52 +48,51 @@ nanobot agent -c ~/.nanobot-personal/config.json -m "你好！"
 ```
 
 > [!NOTE]
-> 標準 JSON 不支援註解（`//`）。本文件的範例中有時使用 `// 說明` 僅供閱讀，實際設定檔請勿包含註解。
+> Standard JSON does not support comments (`//`). The examples in this guide sometimes include them for clarity, but do not copy them into your config.
 
 ---
 
-## Pydantic 驗證
+## Pydantic validation
 
-Nanobot 使用 [Pydantic](https://docs.pydantic.dev/) 解析並驗證設定。啟動時若設定格式有誤，程式會立即報錯並指出問題所在，不會靜默忽略無效值。
+Nanobot uses [Pydantic](https://docs.pydantic.dev/) to parse and validate configs. Startup fails fast with a clear error if any value is invalid—no silent overrides.
 
 ---
 
-## 環境變數支援
+## Environment variable overrides
 
-所有設定選項均可透過環境變數覆蓋，前綴為 `NANOBOT_`，巢狀鍵以雙底線 `__` 分隔：
+Every setting can be overridden through environment variables with the `NANOBOT_` prefix. Nested keys are separated by double underscores (`__`):
 
-| 環境變數 | 對應設定 |
-|----------|----------|
+| Environment variable | Config key |
+|----------------------|------------|
 | `NANOBOT_AGENTS__DEFAULTS__MODEL` | `agents.defaults.model` |
 | `NANOBOT_PROVIDERS__ANTHROPIC__API_KEY` | `providers.anthropic.api_key` |
 | `NANOBOT_GATEWAY__PORT` | `gateway.port` |
 | `NANOBOT_TOOLS__EXEC__TIMEOUT` | `tools.exec.timeout` |
 
-環境變數的優先順序高於設定檔中的值，適合在 Docker 或 CI/CD 環境中注入機密資訊。
+Environment variables override config file values, which is useful for injecting secrets in Docker or CI/CD pipelines.
 
 ```bash
-# 範例：用環境變數設定 API 金鑰
 export NANOBOT_PROVIDERS__ANTHROPIC__API_KEY="sk-ant-..."
 nanobot gateway
 ```
 
 ---
 
-## 頂層鍵速查表
+## Top-level keys quick reference
 
-| 鍵 | 型別 | 說明 |
-|----|------|------|
-| [`agents`](./reference.md#agents) | 物件 | Agent 預設行為（模型、工作區、Token 限制等） |
-| [`channels`](./reference.md#channels) | 物件 | 聊天頻道設定（Slack、Discord、Telegram 等） |
-| [`providers`](./reference.md#providers) | 物件 | LLM 供應商 API 金鑰與端點 |
-| [`gateway`](./reference.md#gateway) | 物件 | HTTP 閘道伺服器（主機、埠號、心跳） |
-| [`tools`](./reference.md#tools) | 物件 | 工具設定（網路搜尋、Shell 執行、MCP 伺服器等） |
+| Key | Type | Purpose |
+|-----|------|---------|
+| [`agents`](./reference.md#agents) | object | Agent defaults (model, workspace, token limits, etc.) |
+| [`channels`](./reference.md#channels) | object | Chat platforms (Slack, Discord, Telegram, etc.) |
+| [`providers`](./reference.md#providers) | object | LLM provider API keys and endpoints |
+| [`gateway`](./reference.md#gateway) | object | HTTP gateway server (host, port, heartbeat) |
+| [`tools`](./reference.md#tools) | object | Tool settings (web search, shell exec, MCP servers, etc.) |
 
 ---
 
-## 最小可用設定範例
+## Minimum viable config example
 
-以下為僅需 Telegram 頻道與 Anthropic 模型的最小設定：
+The smallest config that enables Telegram and Anthropic:
 
 ```json
 {
@@ -112,12 +111,12 @@ nanobot gateway
 }
 ```
 
-未列出的選項均使用預設值，無須明確設定。
+Every option not listed uses its default value.
 
 ---
 
-## 延伸閱讀
+## Further reading
 
-- [完整設定參考](./reference.md) — 每個選項的詳細說明與預設值
-- [多執行個體指南](./multi-instance.md) — 同時執行多個 Nanobot 執行個體
-- [CLI 參考](../cli-reference.md) — 所有命令列旗標
+- [Full config reference](./reference.md) — detailed descriptions and defaults
+- [Multi-instance guide](./multi-instance.md) — run multiple nanobot instances simultaneously
+- [CLI reference](../cli-reference.md) — every command and flag

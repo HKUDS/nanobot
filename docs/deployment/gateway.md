@@ -1,32 +1,32 @@
-# Gateway 服務指南
+# Gateway service guide
 
-## 什麼是 Gateway？
+## What is the Gateway?
 
-Gateway 是 nanobot 的長期運行服務，負責同時連接多個聊天平台（Telegram、Discord、Slack、飛書、釘釘等），並將所有傳入訊息路由至代理處理引擎。
+The Gateway is a long-running nanobot service that simultaneously connects to multiple chat platforms (Telegram, Discord, Slack, Feishu, DingTalk, etc.) and routes all incoming messages to the agent processing engine.
 
-啟動 Gateway 後，它會：
+Once the Gateway starts, it will:
 
-1. 載入配置文件並初始化所有啟用的頻道
-2. 建立消息總線（Message Bus）
-3. 為每個頻道啟動獨立的監聽協程
-4. 持續等待訊息並將其交由代理循環處理
-5. 將代理的回應透過對應頻道發送回用戶
+1. Load the configuration file and initialize every enabled channel
+2. Build the message bus
+3. Launch dedicated listener coroutines for each channel
+4. Continuously wait for messages and hand them to the agent loop
+5. Send agent responses back to users via the matching channel
 
-## 架構概覽
+## Architecture overview
 
 ```mermaid
 flowchart TD
-    TG[Telegram 頻道] --> BUS
-    DC[Discord 頻道] --> BUS
-    SL[Slack 頻道] --> BUS
-    OT[其他頻道...] --> BUS
+    TG[Telegram channel] --> BUS
+    DC[Discord channel] --> BUS
+    SL[Slack channel] --> BUS
+    OT[Other channels...] --> BUS
 
-    BUS[消息總線\nnanobot/bus/] --> LOOP
+    BUS[Message bus\nnanobot/bus/] --> LOOP
 
-    LOOP[代理循環\nloop.py] --> CTX[上下文建構\ncontext.py]
-    LOOP --> LLM[LLM 提供者\nproviders/]
-    LOOP --> TOOLS[工具執行\ntools/]
-    LOOP --> SESSION[會話管理\nsession/]
+    LOOP[Agent loop\nloop.py] --> CTX[Context builder\ncontext.py]
+    LOOP --> LLM[LLM providers\nproviders/]
+    LOOP --> TOOLS[Tool executor\ntools/]
+    LOOP --> SESSION[Session manager\nsession/]
 
     LOOP --> BUS
     BUS --> TG
@@ -35,72 +35,72 @@ flowchart TD
     BUS --> OT
 ```
 
-消息流向：
+Message flow:
 
 ```
-頻道接收訊息
-  → 消息總線（InboundMessage）
-    → 代理循環（AgentLoop）
-      → 上下文建構（歷史 + 記憶 + 技能）
-      → LLM 呼叫
-      → 工具執行（如需要）
-      → 產生回應
-  → 消息總線（OutboundMessage）
-→ 頻道發送回應
+Channel receives a message
+  → Message bus (InboundMessage)
+    → AgentLoop
+      → Context build (history + memory + skills)
+      → LLM call
+      → Tool execution (if needed)
+      → Generate response
+  → Message bus (OutboundMessage)
+→ Channel sends reply
 ```
 
-## 啟動 Gateway
+## Starting the Gateway
 
-### 基本啟動
+### Basic launch
 
 ```bash
 nanobot gateway
 ```
 
-這會使用預設配置文件 `~/.nanobot/config.json` 啟動 Gateway，監聽預設埠 `18790`。
+This uses the default config (`~/.nanobot/config.json`) and listens on port `18790`.
 
-### 指定配置文件
+### Specify a config file
 
 ```bash
 nanobot gateway --config ~/.nanobot-telegram/config.json
 ```
 
-### 指定埠號
+### Specify a port
 
 ```bash
 nanobot gateway --port 18792
 ```
 
-### 指定工作區
+### Specify a workspace
 
 ```bash
 nanobot gateway --workspace /path/to/workspace
 ```
 
-### 組合多個選項
+### Combine options
 
 ```bash
 nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792
 ```
 
-## 多實例部署
+## Multi-instance deployment
 
-可以同時運行多個 Gateway 實例，每個實例負責不同的頻道組合：
+You can run multiple Gateway instances at once, each handling different channel sets:
 
 ```bash
-# 實例 A — Telegram 機器人
+# Instance A — Telegram bot
 nanobot gateway --config ~/.nanobot-telegram/config.json
 
-# 實例 B — Discord 機器人
+# Instance B — Discord bot
 nanobot gateway --config ~/.nanobot-discord/config.json
 
-# 實例 C — 飛書機器人（自訂埠）
+# Instance C — Feishu bot (custom port)
 nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792
 ```
 
-> **重要：** 每個實例必須使用不同的埠號（若同時運行）。
+> **Important:** Each instance must use a unique port when running concurrently.
 
-配置文件中的埠號設定：
+The port setting in the config file looks like:
 
 ```json
 {
@@ -110,80 +110,80 @@ nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792
 }
 ```
 
-## 心跳服務
+## Heartbeat service
 
-Gateway 內建**心跳服務**，每隔 30 分鐘自動喚醒一次，檢查工作區中的 `HEARTBEAT.md` 文件。
+The Gateway includes a built-in **heartbeat service** that wakes up every 30 minutes to inspect `HEARTBEAT.md` in the workspace.
 
-### 運作方式
+### How it works
 
-1. Gateway 每 30 分鐘讀取 `~/.nanobot/workspace/HEARTBEAT.md`
-2. 若文件中有待執行的任務，代理會執行這些任務
-3. 執行結果發送至您最近活躍的聊天頻道
+1. Every 30 minutes, the Gateway reads `~/.nanobot/workspace/HEARTBEAT.md`
+2. If unchecked tasks exist, the agent executes them
+3. Results are sent to the most recently active chat channel
 
-### HEARTBEAT.md 任務格式
+### HEARTBEAT.md task format
 
 ```markdown
-- [ ] 每天早上 9 點報告今日天氣
-- [ ] 每週五下午提醒週報撰寫
-- [ ] 每小時檢查重要郵件
+- [ ] Report today’s weather at 9 a.m. daily
+- [ ] Reminder to write the weekly report every Friday afternoon
+- [ ] Check critical emails every hour
 ```
 
-> **提示：** 您也可以直接向機器人說「新增一個定期任務」，代理會自動更新 `HEARTBEAT.md`。
+> **Tip:** Ask the bot to “add a recurring task,” and it will update `HEARTBEAT.md` automatically.
 
-### 使用前提
+### Requirements
 
-- Gateway 必須正在運行（`nanobot gateway`）
-- 您至少與機器人對話過一次（讓系統記錄活躍頻道）
+- The Gateway must be running (`nanobot gateway`)
+- You must have spoken to the bot at least once so it knows which channel is active
 
-## 查看狀態
+## Checking status
 
-### 整體狀態
+### Overall system
 
 ```bash
 nanobot status
 ```
 
-顯示 nanobot 版本、配置的提供者、工作區路徑等基本資訊。
+Displays nanobot version, configured providers, workspace path, and other key info.
 
-### 頻道狀態
+### Channel status
 
 ```bash
 nanobot channels status
 ```
 
-顯示所有頻道的啟用狀態、連線情況。
+Shows which channels are enabled and their connection state.
 
-### 插件列表
+### Plugin list
 
 ```bash
 nanobot plugins list
 ```
 
-顯示所有內建頻道與外部插件的啟用狀態。
+Shows every built-in channel and plugin along with their enabled status.
 
-## 優雅關閉
+## Graceful shutdown
 
-在前台運行時，按 `Ctrl+C` 即可觸發優雅關閉：
+Press `Ctrl+C` when running in the foreground to initiate a graceful shutdown:
 
-1. Gateway 收到 SIGINT/SIGTERM 信號
-2. 停止所有頻道的監聽
-3. 等待當前處理中的訊息完成
-4. 清理資源並退出
+1. Gateway receives SIGINT/SIGTERM
+2. Stops listening on all channels
+3. Waits for in-flight messages to finish processing
+4. Cleans up resources and exits
 
-若使用 systemd 服務管理，可透過以下指令安全關閉：
+When managed by systemd, stop it safely with:
 
 ```bash
 systemctl --user stop nanobot-gateway
 ```
 
-## 常用指令速查
+## Quick command reference
 
-| 指令 | 說明 |
+| Command | Description |
 |------|------|
-| `nanobot gateway` | 啟動 Gateway |
-| `nanobot gateway --port 18792` | 指定埠號啟動 |
-| `nanobot gateway --config <path>` | 指定配置文件啟動 |
-| `nanobot status` | 查看整體狀態 |
-| `nanobot channels status` | 查看頻道狀態 |
-| `nanobot plugins list` | 查看插件列表 |
-| `nanobot onboard` | 執行互動式設定精靈 |
+| `nanobot gateway` | Start the Gateway |
+| `nanobot gateway --port 18792` | Start on a custom port |
+| `nanobot gateway --config <path>` | Start with a specific config file |
+| `nanobot status` | View overall status |
+| `nanobot channels status` | View channel health |
+| `nanobot plugins list` | List available plugins |
+| `nanobot onboard` | Run the interactive setup wizard |

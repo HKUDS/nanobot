@@ -1,63 +1,63 @@
 # Discord
 
-nanobot 透過 Discord Gateway WebSocket 連線，無需公開 IP 或 Webhook。支援 Thread 回覆、檔案附件上傳，以及群組中的 @提及控制。
+nanobot connects to Discord via the Gateway WebSocket, so you do not need to expose a public IP or webhook. Supports thread replies, file uploads, and mention-based control inside servers.
 
 ---
 
-## 前置條件
+## Prerequisites
 
-- 一個 Discord 帳號
-- 擁有一個 Discord 伺服器（用於測試）
-
----
-
-## 步驟一：建立 Discord 應用程式與 Bot
-
-1. 前往 [Discord Developer Portal](https://discord.com/developers/applications)
-2. 點擊右上角 **New Application**，輸入名稱後建立
-3. 在左側選單點擊 **Bot**
-4. 點擊 **Add Bot**（或 **Reset Token**）→ 確認
-5. 點擊 **Copy** 複製 **Bot Token**
-
-!!! warning "Token 安全性"
-    Bot Token 等同於密碼，切勿提交至版本控制或分享給他人。若外洩請立即在此頁面重新生成。
+- A Discord account
+- A Discord server to test in
 
 ---
 
-## 步驟二：啟用 Message Content Intent
+## Step 1: Create a Discord application and bot
 
-在 Bot 設定頁面向下捲動至 **Privileged Gateway Intents**：
+1. Visit the [Discord Developer Portal](https://discord.com/developers/applications)
+2. Click **New Application** in the upper-right corner, name it, and create
+3. In the left menu, select **Bot**
+4. Click **Add Bot** (or **Reset Token**) → confirm
+5. Click **Copy** to copy the **Bot Token**
 
-- 勾選 **MESSAGE CONTENT INTENT** ← **必須啟用，否則 bot 無法讀取訊息內容**
-- （選用）勾選 **SERVER MEMBERS INTENT**，若需要根據伺服器成員資料過濾存取
-
-點擊 **Save Changes**。
-
----
-
-## 步驟三：取得您的使用者 ID
-
-1. 前往 Discord 設定 → **進階（Advanced）**
-2. 啟用 **開發者模式（Developer Mode）**
-3. 右鍵點擊您的頭像 → **複製使用者 ID**
-
-取得的數字 ID 格式類似：`123456789012345678`
+!!! warning "Token security"
+    The bot token is equivalent to a password. Never commit it to version control or share it. If it leaks, regenerate it on this page immediately.
 
 ---
 
-## 步驟四：將 Bot 邀請到伺服器
+## Step 2: Enable the Message Content Intent
 
-1. 在 Developer Portal 左側選單點擊 **OAuth2** → **URL Generator**
-2. **Scopes** 勾選：`bot`
-3. **Bot Permissions** 勾選：
+Scroll down the bot settings page to **Privileged Gateway Intents**:
+
+- Tick **MESSAGE CONTENT INTENT** ← **Required; without it the bot cannot read message content**
+- (Optional) Tick **SERVER MEMBERS INTENT** if you need to filter access using server membership data
+
+Click **Save Changes**.
+
+---
+
+## Step 3: Get your user ID
+
+1. Go to Discord Settings → **Advanced**
+2. Enable **Developer Mode**
+3. Right-click your avatar → **Copy User ID**
+
+The ID looks like `123456789012345678`.
+
+---
+
+## Step 4: Invite the bot to your server
+
+1. In the Developer Portal left menu, go to **OAuth2** → **URL Generator**
+2. Under **Scopes**, select `bot`
+3. Under **Bot Permissions**, select:
    - `Send Messages`
    - `Read Message History`
-   - （選用）`Attach Files`，若需要 bot 傳送檔案
-4. 複製生成的 URL，在瀏覽器中開啟，選擇您的伺服器並授權
+   - (Optional) `Attach Files` if the bot needs to send attachments
+4. Copy the generated URL, open it in a browser, choose your server, and authorize
 
 ---
 
-## 步驟五：設定 config.json
+## Step 5: Configure `config.json`
 
 ```json
 {
@@ -72,7 +72,7 @@ nanobot 透過 Discord Gateway WebSocket 連線，無需公開 IP 或 Webhook。
 }
 ```
 
-### 完整設定選項
+### Full configuration options
 
 ```json
 {
@@ -89,27 +89,27 @@ nanobot 透過 Discord Gateway WebSocket 連線，無需公開 IP 或 Webhook。
 }
 ```
 
-| 參數 | 預設值 | 說明 |
-|------|--------|------|
-| `enabled` | `false` | 是否啟用此頻道 |
-| `token` | `""` | Discord Bot Token |
-| `allowFrom` | `[]` | 允許互動的使用者數字 ID 列表 |
-| `gatewayUrl` | Discord 預設 | Gateway WebSocket URL（通常不需修改） |
-| `intents` | `37377` | Gateway Intents 位元遮罩（通常不需修改） |
-| `groupPolicy` | `"mention"` | 群組頻道訊息處理策略（見下方說明） |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `enabled` | `false` | Whether to enable this channel |
+| `token` | `""` | Discord bot token |
+| `allowFrom` | `[]` | List of numeric user IDs allowed to interact |
+| `gatewayUrl` | Discord default | Gateway WebSocket URL (usually no change needed) |
+| `intents` | `37377` | Gateway intents bitmask (usually no change needed) |
+| `groupPolicy` | `"mention"` | How to handle messages in group channels (see below) |
 
-### `groupPolicy` 說明
+### `groupPolicy` explanations
 
-| 值 | 行為 |
-|----|------|
-| `"mention"`（預設） | 僅在頻道中被 @提及時才回應 |
-| `"open"` | 回應頻道中的所有訊息 |
+| Value | Behavior |
+|-------|----------|
+| `"mention"` (default) | Respond only when mentioned in a channel |
+| `"open"` | Respond to every message in a channel |
 
-私訊（DM）永遠回應，不受 `groupPolicy` 影響。
+DMs always respond regardless of `groupPolicy`.
 
 ---
 
-## 步驟六：啟動
+## Step 6: Run the gateway
 
 ```bash
 nanobot gateway
@@ -117,40 +117,40 @@ nanobot gateway
 
 ---
 
-## Thread 支援
+## Thread support
 
-nanobot 在 Discord 頻道中回應訊息時，會在同一個訊息串（Thread）內繼續對話。每個使用者的對話上下文是獨立維護的。
-
----
-
-## 檔案附件支援
-
-nanobot 可以接收並傳送 Discord 附件：
-
-- **接收**：圖片、檔案等附件會被下載並傳遞給 AI 進行處理
-- **傳送**：AI 產生的檔案（如程式碼、圖片）會作為附件上傳
-- 單個附件上限為 **20MB**（Discord 免費帳號限制）
+When replying in Discord, nanobot continues within the same thread. Each user conversation keeps its own context.
 
 ---
 
-## 常見問題
+## File attachments
 
-**Bot 在頻道中看不到訊息？**
+nanobot can receive and send Discord attachments:
 
-- 確認已啟用 **MESSAGE CONTENT INTENT**，這是最常見的問題
-- 沒有此 Intent，bot 會收到事件但無法讀取訊息內容
+- **Receiving**: images, files, etc. are downloaded and passed to the AI for processing
+- **Sending**: AI-generated files (code, images) are uploaded as attachments
+- Single attachment limit: **20 MB** (Discord free tier limit)
 
-**Bot 被邀請到伺服器但不回應？**
+---
 
-- 確認 `allowFrom` 中已包含您的使用者 ID
-- 若 `groupPolicy` 為 `"mention"`，需要在訊息中 @bot
+## FAQ
 
-**Bot Token 錯誤？**
+**Bot cannot see messages in the server?**
 
-- 確認 Token 是 Bot Token，而非 OAuth Client Secret
-- Bot Token 通常以 `MT`、`NT` 等開頭，長度約 70 個字元
+- Ensure **MESSAGE CONTENT INTENT** is enabled; this is the most common issue
+- Without the intent, the bot receives events but cannot read message content
 
-**Rate Limit 警告？**
+**Bot invited but not responding?**
 
-- Discord 有 API 速率限制，nanobot 會自動重試
-- 若頻繁出現此警告，考慮減少並發請求
+- Ensure your user ID is listed under `allowFrom`
+- If `groupPolicy` is `"mention"`, mention the bot in the message
+
+**Bot token invalid?**
+
+- Verify you are using the bot token (not the OAuth client secret)
+- Bot tokens often start with `MT` or `NT` and are ~70 characters long
+
+**Rate limit warnings?**
+
+- Discord enforces API rate limits; nanobot automatically retries
+- If warnings persist, reduce concurrency of requests

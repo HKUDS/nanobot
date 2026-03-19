@@ -1,47 +1,47 @@
 # WhatsApp
 
-nanobot 透過 Node.js Bridge 連接 WhatsApp Web 協定，使用 [@whiskeysockets/baileys](https://github.com/WhiskeySockets/Baileys) 函式庫。Bridge 與 nanobot Python 程序之間透過 WebSocket 通訊。
+nanobot connects to WhatsApp through the Node.js bridge, speaking the WhatsApp Web protocol via [@whiskeysockets/baileys](https://github.com/WhiskeySockets/Baileys). The bridge communicates with the nanobot Python process over WebSocket.
 
 ---
 
-## 前置條件
+## Prerequisites
 
-- **Node.js ≥ 18**（必須）
-- 一個 WhatsApp 帳號（手機需在線）
+- **Node.js ≥ 18** (required)
+- A WhatsApp account with the phone online
 
 ---
 
-## 步驟一：確認 Node.js 版本
+## Step 1: Verify Node.js version
 
 ```bash
 node --version
-# 應顯示 v18.0.0 或更高版本
+# Should display v18.0.0 or higher
 ```
 
-若未安裝，請前往 [nodejs.org](https://nodejs.org) 下載安裝。
+Install Node.js from [nodejs.org](https://nodejs.org) if needed.
 
 ---
 
-## 步驟二：連結裝置（掃描 QR Code）
+## Step 2: Link your device (scan the QR code)
 
 ```bash
 nanobot channels login
 ```
 
-執行後會顯示 QR Code。在手機 WhatsApp 中：
+A QR code appears. In WhatsApp:
 
-1. 前往 **設定（Settings）** → **已連結裝置（Linked Devices）**
-2. 點擊 **連結裝置（Link a Device）**
-3. 掃描終端機中顯示的 QR Code
+1. Go to **Settings** → **Linked Devices**
+2. Tap **Link a Device**
+3. Scan the QR code shown in your terminal
 
-連結成功後，Bridge 會儲存 session 資訊，之後重啟不需要重新掃描。
+Once linked, the bridge stores its session information, so you do not need to rescan after restarts.
 
-!!! tip "首次使用"
-    `nanobot channels login` 指令會自動下載並建置 Node.js Bridge（儲存於 `~/.nanobot/bridge/`），首次執行需要一些時間。
+!!! tip "First-time setup"
+    `nanobot channels login` automatically downloads and builds the Node.js bridge under `~/.nanobot/bridge/`. The first run may take a moment.
 
 ---
 
-## 步驟三：設定 config.json
+## Step 3: Configure `config.json`
 
 ```json
 {
@@ -54,7 +54,7 @@ nanobot channels login
 }
 ```
 
-### 完整設定選項
+### Full configuration options
 
 ```json
 {
@@ -69,80 +69,81 @@ nanobot channels login
 }
 ```
 
-| 參數 | 預設值 | 說明 |
-|------|--------|------|
-| `enabled` | `false` | 是否啟用此頻道 |
-| `bridgeUrl` | `"ws://localhost:3001"` | Node.js Bridge 的 WebSocket URL |
-| `bridgeToken` | `""` | Bridge 認證 Token（選用，預設不需要） |
-| `allowFrom` | `[]` | 允許互動的 WhatsApp 號碼列表（含國碼，如 `+886912345678`） |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `enabled` | `false` | Whether to enable this channel |
+| `bridgeUrl` | `"ws://localhost:3001"` | WebSocket URL of the Node.js bridge |
+| `bridgeToken` | `""` | Optional bridge auth token (not required by default) |
+| `allowFrom` | `[]` | List of allowed WhatsApp numbers (include country code, e.g. `+886912345678`)
 
 ---
 
-## 步驟四：啟動
+## Step 4: Run nanobot and the bridge
 
-需要開啟兩個終端機視窗：
+Open two terminal windows:
 
 ```bash
-# 終端機 1：啟動 WhatsApp Bridge
+# Terminal 1: start the WhatsApp bridge
 nanobot channels login
 
-# 終端機 2：啟動 nanobot gateway
+# Terminal 2: start the gateway
 nanobot gateway
 ```
 
-!!! note "執行順序"
-    建議先啟動 Bridge（`channels login`），再啟動 gateway。Bridge 會在背景持續運行以維持 WhatsApp 連線。
+!!! note "Startup order"
+    Start the bridge (`channels login`) before the gateway. The bridge runs in the background to maintain the WhatsApp connection.
 
 ---
 
-## Bridge 架構說明
+## Bridge architecture
 
 ```
-WhatsApp App（手機）
-    ↕ WhatsApp Web 協定
-Node.js Bridge（~/.nanobot/bridge/）
-    ↕ WebSocket（ws://localhost:3001）
-nanobot Python（gateway）
-    ↕ 訊息匯流排
+WhatsApp App (phone)
+    ↕ WhatsApp Web protocol
+Node.js Bridge (~/.nanobot/bridge/)
+    ↕ WebSocket (ws://localhost:3001)
+nanobot Python (gateway)
+    ↕ Message bus
 AI Agent
 ```
 
-Bridge 負責處理 WhatsApp 的低階協定，nanobot 只需透過簡單的 WebSocket 訊息格式與 Bridge 通訊。
+The bridge handles WhatsApp’s low-level protocol; nanobot speaks a simple WebSocket message format to it.
 
 ---
 
-## 更新 Bridge
+## Update the bridge
 
-升級 nanobot 後，若 Bridge 也有更新，需要重新建置：
+After upgrading nanobot, rebuild the bridge if it changed:
 
 ```bash
 rm -rf ~/.nanobot/bridge && nanobot channels login
 ```
 
-!!! warning "手動重建"
-    Bridge 更新不會自動套用到現有安裝。升級 nanobot 後請手動執行上述指令重建 Bridge。
+!!! warning "Manual rebuild"
+    The bridge does not update automatically. After upgrading nanobot, rerun the command to rebuild it.
 
 ---
 
-## 常見問題
+## FAQ
 
-**掃描 QR Code 後立即失效？**
+**QR code expires immediately?**
 
-- WhatsApp QR Code 有時效性，請盡快掃描
-- 若失敗，重新執行 `nanobot channels login` 取得新 QR Code
+- WhatsApp QR codes time out quickly; scan it right away
+- If it fails, rerun `nanobot channels login` to get a new QR code
 
-**重啟後需要重新掃描？**
+**Need to rescan after restarting?**
 
-- 正常情況下不需要，session 資訊儲存於 `~/.nanobot/bridge/`
-- 若需要重置，刪除該目錄後重新執行 `nanobot channels login`
+- Normally no; the session info is stored in `~/.nanobot/bridge/`
+- To reset, delete that directory and rerun `nanobot channels login`
 
-**連線中斷後無法自動重連？**
+**Connection drops and does not recover?**
 
-- nanobot 會自動重試連線
-- 若長時間中斷，手機 WhatsApp 可能已取消裝置連結，需重新掃描
+- nanobot retries automatically
+- Persistent disconnects may mean WhatsApp revoked the device link; rescan to reconnect
 
-**`allowFrom` 格式？**
+**What is the `allowFrom` format?**
 
-- 填入完整國際格式電話號碼，包含 `+` 和國碼
-- 例如台灣手機：`"+886912345678"`
-- 或使用 `["*"]` 允許所有聯絡人
+- Use the full international phone number including `+` and country code
+- Example for Taiwan: `"+886912345678"`
+- Use `[
+"*"]` to allow all contacts

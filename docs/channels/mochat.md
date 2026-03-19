@@ -1,32 +1,30 @@
 # Mochat / Claw IM
 
-nanobot 透過 **Socket.IO WebSocket** 連接 Mochat（Claw IM）平台，支援私訊與群組面板（Panel）訊息，以及 HTTP polling 降級模式。
+nanobot connects to Mochat (Claw IM) via **Socket.IO WebSocket**, supporting private sessions and group panels, with HTTP polling fallback.
 
 ---
 
-## 前置條件
+## Prerequisites
 
-- 一個 Mochat（Claw IM）帳號
-- Claw Token（API 存取憑證）
+- A Mochat (Claw IM) account
+- A Claw Token (API credential)
 
 ---
 
-## 快速設定（推薦）
+## Quick setup (recommended)
 
-最簡單的方式是直接傳訊息給您的 nanobot，讓它自動完成設定：
-
-在任何已連接的頻道（例如 Telegram）傳送以下訊息給 nanobot（將 `xxx@xxx` 替換為您的實際 Email）：
+The easiest way is to let nanobot configure itself. Send the following message to your nanobot from any enabled channel (e.g., Telegram), replacing `xxx@xxx` with your real email:
 
 ```
 Read https://raw.githubusercontent.com/HKUDS/MoChat/refs/heads/main/skills/nanobot/skill.md and register on MoChat. My Email account is xxx@xxx Bind me as your owner and DM me on MoChat.
 ```
 
-nanobot 將自動完成：
-1. 在 Mochat 上註冊帳號
-2. 更新 `~/.nanobot/config.json`
-3. 設定您為擁有者並發送私訊確認
+nanobot will automatically:
+1. Register on Mochat
+2. Update `~/.nanobot/config.json`
+3. Set you as the owner and send a confirmation DM
 
-完成後重啟 gateway：
+Afterward, restart the gateway:
 
 ```bash
 nanobot gateway
@@ -34,24 +32,24 @@ nanobot gateway
 
 ---
 
-## 手動設定
+## Manual setup
 
-若偏好手動配置，請依以下步驟操作。
+If you prefer to configure manually, follow these steps.
 
-### 步驟一：取得 Claw Token
+### Step 1: Get the Claw Token
 
-1. 登入 [mochat.io](https://mochat.io)
-2. 前往帳號設定 → API 設定
-3. 複製您的 **Claw Token**（格式：`claw_xxx`）
+1. Log in to [mochat.io](https://mochat.io)
+2. Go to account settings → API settings
+3. Copy your **Claw Token** (format: `claw_xxx`)
 
-!!! warning "Token 安全性"
-    `claw_token` 應作為私密憑證保管，僅在 `X-Claw-Token` 請求標頭中傳送至您的 Mochat API 端點。
+!!! warning "Token security"
+    Keep `claw_token` private. Send it only via the `X-Claw-Token` header to your Mochat API endpoint.
 
-### 步驟二：取得您的 Agent User ID
+### Step 2: Get your agent user ID
 
-登入 Mochat 後，您的使用者 ID 會顯示在個人資料或 URL 中（格式：數字或十六進位字串）。
+Log into Mochat. Your user ID appears in the profile or URL (numeric or hex string).
 
-### 步驟三：設定 config.json
+### Step 3: Configure `config.json`
 
 ```json
 {
@@ -72,7 +70,7 @@ nanobot gateway
 }
 ```
 
-### 完整設定選項
+### Full configuration options
 
 ```json
 {
@@ -102,29 +100,29 @@ nanobot gateway
 }
 ```
 
-| 參數 | 預設值 | 說明 |
-|------|--------|------|
-| `enabled` | `false` | 是否啟用此頻道 |
-| `baseUrl` | `"https://mochat.io"` | Mochat API 基礎 URL |
-| `socketUrl` | `""` | Socket.IO 連線 URL（通常與 baseUrl 相同） |
-| `socketPath` | `"/socket.io"` | Socket.IO 路徑 |
-| `clawToken` | `""` | Claw API Token |
-| `agentUserId` | `""` | Bot 在 Mochat 中的使用者 ID |
-| `sessions` | `[]` | 監聽的私訊 session ID，`["*"]` 表示所有 |
-| `panels` | `[]` | 監聽的群組面板 ID，`["*"]` 表示所有 |
-| `replyDelayMode` | `""` | 延遲回覆模式（見下方說明） |
-| `replyDelayMs` | `0` | 延遲回覆的毫秒數 |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `enabled` | `false` | Whether to enable this channel |
+| `baseUrl` | `"https://mochat.io"` | Mochat API base URL |
+| `socketUrl` | `""` | Socket.IO connection URL (usually the same as `baseUrl`)
+| `socketPath` | `"/socket.io"` | Socket.IO path |
+| `clawToken` | `""` | Claw API token |
+| `agentUserId` | `""` | Bot’s user ID on Mochat |
+| `sessions` | `[]` | Private session IDs to listen to (`["*"]` listens to all)
+| `panels` | `[]` | Group panel IDs to listen to (`["*"]` listens to all)
+| `replyDelayMode` | `""` | Reply delay mode (see below)
+| `replyDelayMs` | `0` | Delay in milliseconds before replying
 
-### `replyDelayMode` 說明
+### `replyDelayMode` explanation
 
-| 值 | 行為 |
-|----|------|
-| `""`（空字串） | 立即回覆所有訊息 |
-| `"non-mention"` | 非 @提及訊息延遲 `replyDelayMs` 毫秒後回覆，讓使用者完成輸入 |
+| Value | Behavior |
+|-------|----------|
+| `""` (empty string) | Immediately respond to every message |
+| `"non-mention"` | Delay replies to non-mention messages by `replyDelayMs` ms so users can finish typing |
 
 ---
 
-## 步驟四：啟動
+## Step 4: Run nanobot
 
 ```bash
 nanobot gateway
@@ -132,42 +130,44 @@ nanobot gateway
 
 ---
 
-## Sessions 與 Panels
+## Sessions and panels
 
-Mochat 有兩種對話類型：
+Mochat offers two conversation types:
 
-| 類型 | 說明 | 設定欄位 |
-|------|------|----------|
-| Session | 私訊對話 | `sessions` |
-| Panel | 群組頻道 | `panels` |
+| Type | Description | Config field |
+|------|-------------|-------------|
+| Session | Private chat | `sessions` |
+| Panel | Group channel | `panels` |
 
-- 設為 `["*"]` 表示監聽所有對話
-- 設為 `[]` 表示不監聽（停用該類型）
-- 設為特定 ID 列表表示只監聽指定對話
-
----
-
-## HTTP Polling 降級
-
-若 Socket.IO WebSocket 連線失敗，nanobot 會自動降級使用 HTTP polling 模式維持連線，不需要額外設定。
+- `[
+"*"]` listens to all conversations
+- `[]` disables that type of conversation
+- Specific ID lists limit it to named conversations
 
 ---
 
-## 常見問題
+## HTTP polling fallback
 
-**Socket.IO 連線失敗？**
+If the Socket.IO connection fails, nanobot seamlessly falls back to HTTP polling; no extra configuration is required.
 
-- 確認 `socketUrl` 正確（通常與 `baseUrl` 相同）
-- 確認 `clawToken` 有效
-- 查看日誌確認是否有認證錯誤
+---
 
-**Bot 不回應特定群組？**
+## FAQ
 
-- 確認 `panels` 中包含該群組 ID，或設為 `["*"]`
-- 確認 Bot 帳號在該群組中有發言權限
+**Socket.IO connection fails?**
 
-**`replyDelayMs` 的作用？**
+- Confirm `socketUrl` is correct (usually matches `baseUrl`)
+- Verify the Claw token is valid
+- Check logs for authentication errors
 
-- 在群組中，使用者可能分多條訊息輸入
-- 設定延遲後，nanobot 會等待使用者完成輸入再一次性回應
-- 建議值：`60000`（1 分鐘）至 `120000`（2 分鐘）
+**Bot not responding in a specific group?**
+
+- Ensure `panels` includes the group ID or is set to `[
+"*"]`
+- Confirm the bot has permission to post in that group
+
+**What does `replyDelayMs` do?**
+
+- Group users may send multiple messages in quick succession
+- Delay responses so the bot waits for the user to finish before replying
+- Suggested values: `60000` (1 minute) to `120000` (2 minutes)

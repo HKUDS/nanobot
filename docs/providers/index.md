@@ -1,166 +1,167 @@
-# LLM 提供商總覽
+# LLM Provider Overview
 
-本文說明 nanobot 的提供商（Provider）機制，包括什麼是提供商、如何自動偵測、以及如何選擇適合的服務。
-
----
-
-## 什麼是提供商？
-
-**提供商（Provider）** 是 nanobot 與各家大型語言模型（LLM）服務之間的橋接層。每個提供商封裝了以下資訊：
-
-- API 金鑰與端點 URL
-- LiteLLM 路由前綴（例如 `deepseek/deepseek-chat`）
-- 模型名稱關鍵字（用於自動偵測）
-- 是否為閘道（Gateway）或本地部署
-- 特殊參數覆寫（例如 Kimi 要求 temperature >= 1.0）
-
-所有提供商的定義集中在 `nanobot/providers/registry.py`，是單一事實來源（single source of truth）。
+This document explains nanobot’s provider mechanism—what a provider is, how it is auto-detected, and how to choose a service.
 
 ---
 
-## 自動偵測機制
+## What is a provider?
 
-nanobot 使用三層優先順序來偵測應使用哪個提供商：
+A **provider** bridges nanobot with an external large language model (LLM) service. Each provider encapsulates:
 
-### 1. API 金鑰前綴偵測
+- API key and endpoint URL
+- LiteLLM routing prefix (e.g. `deepseek/deepseek-chat`)
+- Model name keywords (used for auto-detection)
+- Whether it is a gateway service or a local deployment
+- Special parameter overrides (for example, Kimi requires `temperature >= 1.0`)
 
-某些提供商的 API 金鑰有特殊前綴，系統會自動識別：
+All providers are defined in `nanobot/providers/registry.py`, which acts as the single source of truth.
 
-| 金鑰前綴 | 對應提供商 |
-|---------|-----------|
+---
+
+## Auto-detection order
+
+nanobot uses a three-stage priority to resolve which provider should handle a request:
+
+### 1. API key prefix detection
+
+Some providers expose distinct API key prefixes, and nanobot recognizes them automatically:
+
+| Key prefix | Provider |
+|------------|----------|
 | `sk-or-v1-...` | OpenRouter |
 
-### 2. API Base URL 關鍵字偵測
+### 2. API base URL keyword detection
 
-若設定了自訂 `api_base`，系統會比對 URL 中的關鍵字：
+When you override `api_base`, nanobot checks the URL for known keywords:
 
-| URL 關鍵字 | 對應提供商 |
-|-----------|-----------|
+| URL keyword | Provider |
+|-------------|----------|
 | `openrouter` | OpenRouter |
 | `aihubmix` | AiHubMix |
-| `siliconflow` | SiliconFlow（硅基流動） |
-| `volces` | VolcEngine（火山引擎） |
+| `siliconflow` | SiliconFlow |
+| `volces` | VolcEngine |
 | `bytepluses` | BytePlus |
-| `11434` | Ollama（本地） |
+| `11434` | Ollama (local) |
 
-### 3. 模型名稱關鍵字偵測
+### 3. Model name keyword detection
 
-若前兩種方式均未命中，系統會解析模型名稱中的關鍵字：
+If neither of the above match, nanobot inspects the model name:
 
-| 模型名稱包含 | 對應提供商 |
-|------------|-----------|
-| `anthropic`、`claude` | Anthropic |
-| `openai`、`gpt` | OpenAI |
+| Keyword in model | Provider |
+|------------------|----------|
+| `anthropic`, `claude` | Anthropic |
+| `openai`, `gpt` | OpenAI |
 | `deepseek` | DeepSeek |
 | `gemini` | Google Gemini |
-| `zhipu`、`glm`、`zai` | 智譜 AI |
-| `qwen`、`dashscope` | DashScope（阿里雲） |
-| `moonshot`、`kimi` | Moonshot |
+| `zhipu`, `glm`, `zai` | Zhipu AI |
+| `qwen`, `dashscope` | DashScope (Alibaba Cloud) |
+| `moonshot`, `kimi` | Moonshot |
 | `minimax` | MiniMax |
 | `mistral` | Mistral |
 | `groq` | Groq |
-| `ollama`、`nemotron` | Ollama |
-| `vllm` | vLLM / 本地 |
+| `ollama`, `nemotron` | Ollama |
+| `vllm` | vLLM / local |
 
-> **注意：** 閘道（Gateway）和本地提供商不參與模型名稱比對，它們只透過 API 金鑰前綴或 URL 偵測。
-
----
-
-## 支援的提供商列表
-
-nanobot 支援 28+ 個提供商，依類型分為以下幾類：
-
-### 閘道型（Gateway）— 可路由任意模型
-
-閘道型提供商是聚合服務，一個 API 金鑰即可存取來自多家廠商的模型，通常有計費彈性與備援優勢。
-
-| 提供商 | 說明 | 推薦指數 |
-|-------|------|---------|
-| **OpenRouter** | 全球最大模型閘道，支援 300+ 模型 | ⭐⭐⭐⭐⭐ 首選 |
-| **AiHubMix** | OpenAI 相容介面，支援多家模型 | ⭐⭐⭐⭐ |
-| **SiliconFlow（硅基流動）** | 國內免費額度，支援開源模型 | ⭐⭐⭐⭐ |
-| **VolcEngine（火山引擎）** | 位元組跳動雲端，按量付費 | ⭐⭐⭐ |
-| **VolcEngine Coding Plan** | 火山引擎程式碼專用計畫 | ⭐⭐⭐ |
-| **BytePlus** | 火山引擎國際版 | ⭐⭐⭐ |
-| **BytePlus Coding Plan** | BytePlus 程式碼專用計畫 | ⭐⭐⭐ |
-
-### 標準雲端提供商
-
-直接對接各廠商官方 API：
-
-| 提供商 | 主要模型 | 地區 |
-|-------|---------|------|
-| **Anthropic** | Claude Opus/Sonnet/Haiku | 全球 |
-| **OpenAI** | GPT-4o、GPT-4 Turbo、o1/o3 | 全球 |
-| **DeepSeek** | DeepSeek-V3、DeepSeek-R1 | 全球/中國 |
-| **Google Gemini** | Gemini 2.0 Flash/Pro | 全球 |
-| **智譜 AI（Zhipu）** | GLM-4、GLM-Z1 | 中國 |
-| **DashScope（阿里雲）** | Qwen 系列 | 中國/全球 |
-| **Moonshot（Kimi）** | Kimi K2.5、moonshot-v1 | 中國/全球 |
-| **MiniMax** | MiniMax-M2.1 | 中國 |
-| **Mistral** | Mistral Large、Codestral | 全球（歐洲） |
-| **Groq** | Llama、Mixtral（超快推理）+ Whisper 語音 | 全球 |
-
-### OAuth 認證（無需 API 金鑰）
-
-| 提供商 | 認證方式 | 需求 |
-|-------|---------|------|
-| **OpenAI Codex** | OAuth 授權 | ChatGPT Plus/Pro 訂閱 |
-| **GitHub Copilot** | OAuth 授權 | GitHub Copilot 訂閱 |
-
-### 直接端點（Direct API）
-
-| 提供商 | 說明 |
-|-------|------|
-| **Azure OpenAI** | 直接呼叫 Azure 部署，不經 LiteLLM |
-| **Custom（自訂）** | 任何 OpenAI 相容端點 |
-
-### 本地部署
-
-| 提供商 | 說明 |
-|-------|------|
-| **Ollama** | 在 localhost:11434 自動偵測 |
-| **vLLM** | 任何 OpenAI 相容本地伺服器 |
+> **Note:** Gateway services and local deployments are only detected via API key prefixes or URL keywords; they do not participate in model name matching.
 
 ---
 
-## 如何選擇提供商
+## Supported providers
 
-### 我是新用戶，想快速上手
+nanobot supports over 28 providers, grouped by type:
 
-使用 **OpenRouter**。一個金鑰可以存取幾乎所有主流模型，不需要分別申請多家帳號。詳見 [OpenRouter 設定指南](./openrouter.md)。
+### Gateway services (route any model)
 
-### 我想直接使用 Claude
+Gateway providers offer access to multiple vendors through a single API key. They typically provide billing flexibility and failover resilience.
 
-使用 **Anthropic** 官方 API，支援 Prompt Caching 節省費用，並可設定 Thinking（推理努力度）。詳見 [Anthropic 設定指南](./anthropic.md)。
+| Provider | Description | Recommendation |
+|----------|-------------|----------------|
+| **OpenRouter** | Global gateway with 300+ models | ⭐⭐⭐⭐⭐ Top choice |
+| **AiHubMix** | OpenAI-compatible interface with multi-model support | ⭐⭐⭐⭐ |
+| **SiliconFlow** | Local provider with free quota and open-source models | ⭐⭐⭐⭐ |
+| **VolcEngine** | ByteDance cloud, pay-as-you-go | ⭐⭐⭐ |
+| **VolcEngine Coding Plan** | Coding-focused plan on VolcEngine | ⭐⭐⭐ |
+| **BytePlus** | ByteDance international cloud | ⭐⭐⭐ |
+| **BytePlus Coding Plan** | Coding-focused BytePlus plan | ⭐⭐⭐ |
 
-### 我想使用 GPT 系列
+### Direct cloud providers
 
-使用 **OpenAI** 官方 API，或透過 OpenAI Codex OAuth（需要 ChatGPT Plus/Pro）。詳見 [OpenAI 設定指南](./openai.md)。
+Official API endpoints from each vendor:
 
-### 我在中國大陸，想用國內服務
+| Provider | Primary models | Region |
+|----------|----------------|--------|
+| **Anthropic** | Claude Opus / Sonnet / Haiku | Global |
+| **OpenAI** | GPT-4o, GPT-4 Turbo, o1 / o3 | Global |
+| **DeepSeek** | DeepSeek-V3, DeepSeek-R1 | Global / China |
+| **Google Gemini** | Gemini 2.0 Flash / Pro | Global |
+| **Zhipu AI** | GLM-4, GLM-Z1 | China |
+| **DashScope** | Qwen series | China / global |
+| **Moonshot (Kimi)** | Kimi K2.5, moonshot-v1 | China / global |
+| **MiniMax** | MiniMax-M2.1 | China |
+| **Mistral** | Mistral Large, Codestral | Global (Europe) |
+| **Groq** | Llama, Mixtral (ultra-fast inference) + Whisper voice | Global |
 
-推薦以下選項：
-- **SiliconFlow（硅基流動）** — 有免費額度，支援 Qwen、DeepSeek 等開源模型
-- **DashScope** — 阿里雲官方，Qwen 系列最穩定
-- **Moonshot** — Kimi K2.5 使用 `api.moonshot.cn`
-- **智譜 AI** — GLM 系列模型
+### OAuth providers (no API key required)
 
-詳見 [其他雲端提供商](./others.md)。
+| Provider | Auth method | Requirement |
+|----------|-------------|-------------|
+| **OpenAI Codex** | OAuth login | ChatGPT Plus / Pro subscription |
+| **GitHub Copilot** | OAuth login | GitHub Copilot subscription |
 
-### 我想在本機跑模型，不傳資料到雲端
+### Direct endpoints
 
-使用 **Ollama** 或 **vLLM**。詳見 [本地/自託管模型](./local.md)。
+| Provider | Description |
+|----------|-------------|
+| **Azure OpenAI** | Call Azure deployment directly (bypass LiteLLM) |
+| **Custom** | Any OpenAI-compatible endpoint |
 
-### 我有 GitHub Copilot 或 ChatGPT Plus 訂閱
+### Local deployments
 
-可使用 OAuth 認證，無需另購 API 額度。詳見 [OpenAI 設定指南](./openai.md)。
+| Provider | Description |
+|----------|-------------|
+| **Ollama** | Auto-detected on `localhost:11434` |
+| **vLLM** | Any OpenAI-compatible local server |
 
 ---
 
-## 提供商設定格式
+## How to choose a provider
 
-所有提供商的設定都放在 `providers` 節點下，使用相同的結構：
+### New user who just wants to get started
+
+Use **OpenRouter**. One key unlocks almost every mainstream model, so you do not need to sign up for multiple vendors. See the [OpenRouter setup guide](./openrouter.md).
+
+### Want to use Claude directly
+
+Use the official **Anthropic** API. It supports prompt caching to save costs and exposes the Thinking parameter for reasoning intensity. See the [Anthropic setup guide](./anthropic.md).
+
+### Prefer GPT models
+
+Use the **OpenAI** API or the **OpenAI Codex** OAuth flow (requires ChatGPT Plus / Pro). See the [OpenAI setup guide](./openai.md).
+
+### Operating in mainland China
+
+Recommended vendors:
+
+- **SiliconFlow** — free tier and open-source models such as Qwen and DeepSeek
+- **DashScope** — Alibaba’s Qwen lineup with the most stable experience
+- **Moonshot** — Kimi K2.5 via `api.moonshot.cn`
+- **Zhipu AI** — GLM series models
+
+See the [other cloud providers](./others.md) guide for details.
+
+### Running locally without touching the cloud
+
+Use **Ollama** or **vLLM**. See the [local/self-hosted models](./local.md) guide.
+
+### Already have GitHub Copilot or ChatGPT Plus
+
+Use OAuth—no additional API quota needed. See the [OpenAI setup guide](./openai.md).
+
+---
+
+## Provider configuration format
+
+All provider configurations live under the `providers` node and follow the same structure:
 
 ```json
 {
@@ -176,19 +177,19 @@ nanobot 支援 28+ 個提供商，依類型分為以下幾類：
 }
 ```
 
-| 欄位 | 必填 | 說明 |
-|------|------|------|
-| `api_key` | 是（OAuth 提供商除外） | 服務的 API 金鑰 |
-| `api_base` | 否 | 覆寫預設端點 URL |
-| `extra_headers` | 否 | 額外的 HTTP 請求標頭 |
+| Field | Required | Description |
+|-------|----------|-------------|
+| `api_key` | Yes (except OAuth providers) | The service API key |
+| `api_base` | No | Override the default endpoint |
+| `extra_headers` | No | Additional HTTP headers |
 
 ---
 
-## 提供商備援與路由
+## Provider failover and routing
 
-### 多提供商同時設定
+### Configuring multiple providers
 
-可以在 `providers` 下同時設定多個提供商。nanobot 會根據模型名稱自動選擇最合適的那個。
+You may configure multiple providers under `providers`. nanobot auto-selects the most suitable one based on the model name.
 
 ```json
 {
@@ -211,11 +212,11 @@ nanobot 支援 28+ 個提供商，依類型分為以下幾類：
 }
 ```
 
-上例中，模型名稱 `claude-opus-4-5` 含有關鍵字 `claude`，系統自動選用 `anthropic` 提供商。
+`claude-opus-4-5` contains the keyword `claude`, so nanobot automatically routes it through the `anthropic` provider.
 
-### 強制指定提供商
+### Force a specific provider
 
-若要強制使用特定提供商（無論模型名稱為何），在 `agents.defaults.provider` 中指定：
+To always use a particular provider regardless of the model name, set `agents.defaults.provider`:
 
 ```json
 {
@@ -233,16 +234,16 @@ nanobot 支援 28+ 個提供商，依類型分為以下幾類：
 }
 ```
 
-### 閘道型提供商的優先順序
+### Gateway priority
 
-閘道型提供商（OpenRouter、AiHubMix 等）在 `registry.py` 中排在最前面，因此在設定了閘道且金鑰有效的情況下，系統優先使用閘道。標準提供商（Anthropic、OpenAI 等）以模型名稱關鍵字比對，排在閘道之後。
+Gateway providers (OpenRouter, AiHubMix, etc.) are listed first in `registry.py`. When a gateway key is configured and valid, nanobot prefers it. Standard providers (Anthropic, OpenAI, etc.) follow, using model keyword matching.
 
 ---
 
-## 延伸閱讀
+## Further reading
 
-- [OpenRouter（推薦入口）](./openrouter.md)
-- [Anthropic / Claude 模型](./anthropic.md)
-- [OpenAI / GPT 模型](./openai.md)
-- [其他雲端提供商](./others.md)
-- [本地/自託管模型](./local.md)
+- [OpenRouter (recommended gateway)](./openrouter.md)
+- [Anthropic / Claude models](./anthropic.md)
+- [OpenAI / GPT models](./openai.md)
+- [Other cloud providers](./others.md)
+- [Local / self-hosted models](./local.md)

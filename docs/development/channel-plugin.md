@@ -1,28 +1,28 @@
-# 頻道插件開發
+# Channel plugin development
 
-本指南說明如何為 nanobot 開發自訂聊天頻道插件，讓 nanobot 連接任何您需要的平台。
+This guide explains how to build custom channels so nanobot can connect to any platform you need.
 
-## 插件架構概覽
+## Plugin architecture overview
 
-nanobot 透過 Python [Entry Points](https://packaging.python.org/en/latest/specifications/entry-points/) 機制發現頻道插件。當 `nanobot gateway` 啟動時，它會掃描：
+Nanobot discovers channel plugins via Python [Entry Points](https://packaging.python.org/en/latest/specifications/entry-points/). When `nanobot gateway` starts, it scans:
 
-1. **內建頻道**：`nanobot/channels/` 目錄中的頻道
-2. **外部插件**：所有注冊在 `nanobot.channels` Entry Point 群組下的套件
+1. **Built-in channels:** Modules under `nanobot/channels/`
+2. **External plugins:** Packages registered under the `nanobot.channels` entry point group
 
-若對應的配置區塊設定了 `"enabled": true`，該頻道就會被實例化並啟動。
+When the corresponding configuration block sets `"enabled": true`, nanobot instantiates and launches the channel.
 
 ```mermaid
 flowchart LR
-    subgraph 套件發現
-        EP[Python Entry Points\nnanobot.channels 群組]
-        BUILTIN[內建頻道\nnanobot/channels/]
+    subgraph Discovery
+        EP[Python Entry Points\nnanobot.channels group]
+        BUILTIN[Built-in channels\nnanobot/channels/]
     end
 
-    subgraph nanobot Gateway
-        SCAN[頻道掃描器]
-        CONFIG[配置載入\nconfig.json]
-        INIT[頻道實例化]
-        BUS[訊息總線]
+    subgraph Gateway
+        SCAN[Channel scanner]
+        CONFIG[Config loader\nconfig.json]
+        INIT[Channel instantiation]
+        BUS[Message bus]
     end
 
     EP --> SCAN
@@ -32,65 +32,64 @@ flowchart LR
     INIT --> BUS
 ```
 
-## BaseChannel 介面
+## BaseChannel interface
 
-所有頻道插件必須繼承 `nanobot.channels.base.BaseChannel`。
+All channel plugins must inherit from `nanobot.channels.base.BaseChannel`.
 
-### 必須實作的方法
+### Required methods
 
-| 方法 | 說明 |
+| Method | Description |
 |------|------|
-| `async start()` | **必須永久阻塞。** 連接平台、監聽訊息，對每則訊息呼叫 `_handle_message()`。此方法返回即代表頻道已死亡。 |
-| `async stop()` | 設定 `self._running = False` 並清理資源。Gateway 關閉時呼叫。 |
-| `async send(msg: OutboundMessage)` | 將回應訊息發送至平台。 |
+| `async start()` | Must block indefinitely. Connect to the platform, listen for messages, and call `_handle_message()` for each one. Returning means the channel died. |
+| `async stop()` | Set `self._running = False` and clean up resources. Called when the gateway shuts down. |
+| `async send(msg: OutboundMessage)` | Send a response to the platform. |
 
-### 基底類別提供的方法
+### Base class helpers
 
-| 方法 / 屬性 | 說明 |
+| Method / property | Description |
 |------------|------|
-| `_handle_message(sender_id, chat_id, content, media?, metadata?, session_key?)` | **收到訊息時呼叫此方法。** 檢查 `is_allowed()` 後將訊息發布至總線。 |
-| `is_allowed(sender_id)` | 根據 `config["allowFrom"]` 驗證發送者；`"*"` 允許所有人，`[]` 拒絕所有人。 |
-| `default_config()` (classmethod) | 返回預設配置字典，供 `nanobot onboard` 使用。覆寫以宣告您的配置欄位。 |
-| `transcribe_audio(file_path)` | 透過 Groq Whisper 轉錄音頻（若已配置）。 |
-| `is_running` | 返回 `self._running` 的布林值。 |
+| `_handle_message(sender_id, chat_id, content, media?, metadata?, session_key?)` | Call this when a message arrives. It checks `is_allowed()` and publishes the message to the bus. |
+| `is_allowed(sender_id)` | Validates the sender against `config["allowFrom"]`. Use `"*"` to allow everyone, `[]` denies all. |
+| `default_config()` (classmethod) | Returns the default config dictionary used by `nanobot onboard`. Override it to declare your fields. |
+| `transcribe_audio(file_path)` | Transcribes audio via Groq Whisper (if configured). |
+| `is_running` | Boolean flag for `self._running`. |
 
-### OutboundMessage 資料結構
+### OutboundMessage dataclass
 
 ```python
 @dataclass
 class OutboundMessage:
-    channel: str        # 您的頻道名稱
-    chat_id: str        # 接收者（與 _handle_message 傳入的 chat_id 相同）
-    content: str        # Markdown 文字 — 依需要轉換為平台格式
-    media: list[str]    # 要附加的本地檔案路徑（圖片、音頻、文件）
-    metadata: dict      # 可包含："_progress"（bool）表示串流片段，
-                        #        "message_id" 用於回覆串
+    channel: str        # Your channel name
+    chat_id: str        # Recipient (same chat_id passed to _handle_message)
+    content: str        # Markdown text — convert as needed for the platform
+    media: list[str]    # Local file paths for attachments (images, audio, docs)
+    metadata: dict      # May include `_progress` (bool) for streaming or `message_id` for replies
 ```
 
-## 命名規範
+## Naming conventions
 
-| 項目 | 格式 | 範例 |
+| Item | Format | Example |
 |------|------|------|
-| PyPI 套件名稱 | `nanobot-channel-{name}` | `nanobot-channel-webhook` |
-| Entry Point 鍵名 | `{name}` | `webhook` |
-| 配置區塊 | `channels.{name}` | `channels.webhook` |
-| Python 套件名稱 | `nanobot_channel_{name}` | `nanobot_channel_webhook` |
+| PyPI package | `nanobot-channel-{name}` | `nanobot-channel-webhook` |
+| Entry point key | `{name}` | `webhook` |
+| Config block | `channels.{name}` | `channels.webhook` |
+| Python package | `nanobot_channel_{name}` | `nanobot_channel_webhook` |
 
-## 完整範例：Webhook 頻道
+## Full example: webhook channel
 
-以下示範一個完整的 Webhook 頻道插件，透過 HTTP POST 接收訊息。
+Here is a webhook plugin that accepts messages via HTTP POST.
 
-### 專案結構
+### Project structure
 
 ```
 nanobot-channel-webhook/
 ├── nanobot_channel_webhook/
-│   ├── __init__.py          # 重新匯出 WebhookChannel
-│   └── channel.py           # 頻道實作
+│   ├── __init__.py          # Re-export WebhookChannel
+│   └── channel.py           # Implementation
 └── pyproject.toml
 ```
 
-### 步驟一：實作頻道
+### Step 1: Implement the channel
 
 ```python
 # nanobot_channel_webhook/__init__.py
@@ -117,17 +116,11 @@ class WebhookChannel(BaseChannel):
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
-        """宣告此頻道的預設配置欄位。
-        nanobot onboard 會使用這些預設值自動填充 config.json。
-        """
+        """Declare this channel’s default config fields."
         return {"enabled": False, "port": 9000, "allowFrom": []}
 
     async def start(self) -> None:
-        """啟動 HTTP 伺服器監聽傳入訊息。
-
-        重要：start() 必須永久阻塞（或直到 stop() 被呼叫）。
-        若此方法返回，頻道即被視為已死亡。
-        """
+        """Launch an HTTP server and block until stop() is called."""
         self._running = True
         port = self.config.get("port", 9000)
 
@@ -137,38 +130,27 @@ class WebhookChannel(BaseChannel):
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", port)
         await site.start()
-        logger.info("Webhook 監聽於 :{}", port)
+        logger.info("Webhook listening on :{}", port)
 
-        # 阻塞直到停止
         while self._running:
             await asyncio.sleep(1)
 
         await runner.cleanup()
 
     async def stop(self) -> None:
-        """停止頻道。Gateway 關閉時呼叫。"""
         self._running = False
 
     async def send(self, msg: OutboundMessage) -> None:
-        """發送回應訊息至平台。
-
-        msg.content  — Markdown 文字（依需要轉換為平台格式）
-        msg.media    — 要附加的本地檔案路徑列表
-        msg.chat_id  — 接收者（與 _handle_message 傳入的 chat_id 相同）
-        msg.metadata — 可包含 "_progress": True 表示串流片段
-        """
         logger.info("[webhook] -> {}: {}", msg.chat_id, msg.content[:80])
-        # 實際插件中：POST 至回呼 URL、透過 SDK 發送等
+        # In a real plugin, POST back to the callback or use an SDK
 
     async def _on_request(self, request: web.Request) -> web.Response:
-        """處理傳入的 HTTP POST 請求。"""
         body = await request.json()
         sender = body.get("sender", "unknown")
         chat_id = body.get("chat_id", sender)
         text = body.get("text", "")
-        media = body.get("media", [])       # URL 列表
+        media = body.get("media", [])
 
-        # 關鍵呼叫：驗證 allowFrom，然後將訊息放入總線供代理處理
         await self._handle_message(
             sender_id=sender,
             chat_id=chat_id,
@@ -179,10 +161,9 @@ class WebhookChannel(BaseChannel):
         return web.json_response({"ok": True})
 ```
 
-### 步驟二：注冊 Entry Point
+### Step 2: Register the entry point
 
 ```toml
-# pyproject.toml
 [project]
 name = "nanobot-channel-webhook"
 version = "0.1.0"
@@ -196,23 +177,19 @@ requires = ["setuptools"]
 build-backend = "setuptools.backends._legacy:_Backend"
 ```
 
-Entry Point 的**鍵名**（`webhook`）成為配置文件中的區塊名稱，**值**指向您的 `BaseChannel` 子類別。
+The entry point key (`webhook`) becomes the config block name; the value points to your `BaseChannel` subclass.
 
-### 步驟三：安裝與配置
+### Step 3: Install and enable
 
 ```bash
-# 以開發模式安裝（源碼修改立即生效）
 pip install -e .
-
-# 或使用 uv
 uv pip install -e .
 
-# 驗證插件已被發現
 nanobot plugins list
-# 應顯示 "Webhook" 來源為 "plugin"
+# Should show "Webhook" with source "plugin"
 ```
 
-編輯 `~/.nanobot/config.json` 啟用頻道：
+Then edit `~/.nanobot/config.json`:
 
 ```json
 {
@@ -226,28 +203,27 @@ nanobot plugins list
 }
 ```
 
-> **說明：** `allowFrom` 由基底類別的 `_handle_message()` 自動處理，不需要在插件中手動檢查。`"*"` 表示允許所有發送者。
+> **Tip:** `allowFrom` is enforced by `_handle_message()`, so the plugin doesn’t need to re-check it. Use `"*"` to allow everyone.
 
-### 步驟四：執行與測試
+### Step 4: Run and test
 
 ```bash
-# 啟動 Gateway
 nanobot gateway
 ```
 
-在另一個終端測試：
+In another terminal:
 
 ```bash
 curl -X POST http://localhost:9000/message \
   -H "Content-Type: application/json" \
-  -d '{"sender": "user1", "chat_id": "user1", "text": "你好！"}'
+  -d '{"sender": "user1", "chat_id": "user1", "text": "Hello!"}'
 ```
 
-代理接收到訊息後處理，回應會傳遞至您的 `send()` 方法。
+The agent processes the incoming message, and your `send()` method receives the response.
 
-## 配置存取
+## Accessing configuration
 
-您的頻道透過 `self.config` 以純字典形式存取配置。使用 `.get()` 搭配預設值：
+Channel configs are available via `self.config`. Use `.get()` with defaults:
 
 ```python
 async def start(self) -> None:
@@ -256,7 +232,7 @@ async def start(self) -> None:
     webhook_url = self.config.get("webhookUrl", "")
 ```
 
-覆寫 `default_config()` 讓 `nanobot onboard` 自動填充 `config.json`：
+Override `default_config()` so `nanobot onboard` can auto-fill `config.json`:
 
 ```python
 @classmethod
@@ -270,30 +246,27 @@ def default_config(cls) -> dict[str, Any]:
     }
 ```
 
-若不覆寫，基底類別返回 `{"enabled": false}`。
+The base class returns `{"enabled": false}` if you don’t override it.
 
-## 本地開發工作流程
+## Local development workflow
 
 ```bash
-# 複製您的插件儲存庫
+git clone https://github.com/you/nanobot-channel-myplugin
 git clone https://github.com/you/nanobot-channel-myplugin
 cd nanobot-channel-myplugin
 
-# 以開發模式安裝
 pip install -e .
 
-# 驗證插件已被發現
 nanobot plugins list
-# 應顯示您的頻道為 "plugin" 來源
+# Should list your channel as "plugin"
 
-# 端對端測試
 nanobot gateway
 ```
 
-## 驗證插件狀態
+## Checking plugin status
 
 ```bash
-$ nanobot plugins list
+nanobot plugins list
 
   Name       Source    Enabled
   telegram   builtin   yes
@@ -301,20 +274,18 @@ $ nanobot plugins list
   webhook    plugin    yes
 ```
 
-- **builtin**：nanobot 內建頻道
-- **plugin**：透過 Entry Points 安裝的外部插件
+- `builtin`: built-in channels
+- `plugin`: entry-point based plugins
 
-## 進階：處理媒體訊息
+## Handling media
 
 ```python
 async def _on_request(self, request: web.Request) -> web.Response:
     body = await request.json()
 
-    # 媒體可以是 URL 列表
     media_urls = body.get("media", [])
-
-    # 下載媒體至臨時路徑（若需要本地處理）
     local_paths = []
+
     for url in media_urls:
         path = await self._download_media(url)
         local_paths.append(path)
@@ -323,35 +294,33 @@ async def _on_request(self, request: web.Request) -> web.Response:
         sender_id=body["sender"],
         chat_id=body["chat_id"],
         content=body.get("text", ""),
-        media=local_paths,  # 傳入本地檔案路徑或 URL
+        media=local_paths,
     )
     return web.json_response({"ok": True})
 ```
 
-## 進階：串流回應
+## Streaming responses
 
-`OutboundMessage.metadata` 中的 `"_progress": True` 表示這是一個串流片段（非最終回應）：
+Set `_progress: True` in `OutboundMessage.metadata` to stream partial replies:
 
 ```python
 async def send(self, msg: OutboundMessage) -> None:
     is_streaming = msg.metadata.get("_progress", False)
 
     if is_streaming:
-        # 處理串流片段（例如即時更新訊息）
         await self._update_message(msg.chat_id, msg.content)
     else:
-        # 最終回應
         await self._send_final_message(msg.chat_id, msg.content)
 ```
 
-## 提交至主倉庫
+## Submitting to the main repo
 
-若您的插件足夠通用，歡迎提交至 nanobot 主倉庫成為內建頻道：
+If your plugin becomes generally useful, consider making it built-in:
 
-1. 在 `nightly` 分支上建立 PR
-2. 將頻道實作放置於 `nanobot/channels/your_channel.py`
-3. 在 `nanobot/channels/__init__.py` 注冊
-4. 新增對應的測試文件於 `tests/`
-5. 更新 `README.md` 中的頻道列表
+1. Open a PR against `nightly`
+2. Add the channel under `nanobot/channels/your_channel.py`
+3. Register it in `nanobot/channels/__init__.py`
+4. Add tests under `tests/`
+5. Update `README.md` channel list
 
-詳見 [貢獻指南](./contributing.md)。
+See the [Contributing guide](./contributing.md) for more details.

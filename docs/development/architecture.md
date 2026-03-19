@@ -1,50 +1,50 @@
-# 架構說明
+# Architecture overview
 
-## 設計理念
+## Design principles
 
-nanobot 採用**事件驅動、非同步優先**的設計，以極少的代碼實現完整的代理功能。核心思想是：
+Nanobot follows an event-driven, async-first design to deliver a full agent experience with minimal code. Core principles include:
 
-- **訊息總線**作為各元件之間的統一通訊介面
-- **非同步協程**確保高並發下的資源效率
-- **鬆散耦合**使每個元件可以獨立演進
-- **單一責任**讓每個模組只做一件事
+- **Message bus** acts as the unified communication layer between components
+- **Async coroutines** keep resources efficient under high concurrency
+- **Loose coupling** allows each component to evolve independently
+- **Single responsibility** keeps modules focused on one concern
 
-## 架構總覽
+## System architecture
 
 ```mermaid
 flowchart TD
-    subgraph 輸入層
+    subgraph Inbound layer
         TG[Telegram]
         DC[Discord]
         SL[Slack]
-        FL[飛書]
-        OT[其他頻道...]
+        FL[Feishu]
+        OT[Other channels...]
     end
 
-    subgraph 訊息總線
+    subgraph Message bus
         BUS[MessageBus\nnanobot/bus/queue.py]
     end
 
-    subgraph 代理核心
+    subgraph Agent core
         LOOP[AgentLoop\nloop.py]
         CTX[ContextBuilder\ncontext.py]
         MEM[MemoryConsolidator\nmemory.py]
         SESS[SessionManager\nsession/manager.py]
     end
 
-    subgraph LLM 提供者
+    subgraph LLM providers
         LITELLM[LiteLLM Provider]
         OPENAI[OpenAI Compatible]
-        CUSTOM[自訂提供者]
+        CUSTOM[Custom providers]
     end
 
-    subgraph 工具層
-        SHELL[Shell 執行]
-        WEB[網路搜尋/抓取]
-        FS[檔案系統]
-        MCP[MCP 伺服器]
-        CRON[定時任務]
-        SPAWN[子代理]
+    subgraph Tool layer
+        SHELL[Shell execution]
+        WEB[Web search/fetch]
+        FS[Filesystem]
+        MCP[MCP servers]
+        CRON[Cron jobs]
+        SPAWN[Subagents]
     end
 
     TG & DC & SL & FL & OT --> BUS
@@ -58,249 +58,249 @@ flowchart TD
     BUS --> TG & DC & SL & FL & OT
 ```
 
-## 訊息資料流
+## Message data flow
 
-一則使用者訊息從接收到回應的完整流程：
+A user message travels through the system as follows:
 
 ```mermaid
 sequenceDiagram
-    participant CH as 頻道介面卡
-    participant BUS as 訊息總線
-    participant LOOP as 代理循環
-    participant CTX as 上下文建構器
-    participant LLM as LLM 提供者
-    participant TOOLS as 工具執行器
-    participant SESS as 會話管理器
+    participant CH as Channel adapter
+    participant BUS as Message bus
+    participant LOOP as Agent loop
+    participant CTX as Context builder
+    participant LLM as LLM provider
+    participant TOOLS as Tool executor
+    participant SESS as Session manager
 
-    CH->>BUS: InboundMessage（訊息內容、發送者、頻道）
-    BUS->>LOOP: 分發至代理循環
-    LOOP->>SESS: 載入/建立會話
-    LOOP->>CTX: 建構上下文
-    CTX->>CTX: 載入系統提示詞\n（身份、AGENTS.md、記憶、技能）
-    CTX->>CTX: 載入歷史對話
-    LOOP->>LLM: 呼叫 LLM（系統提示 + 歷史 + 新訊息）
-    LLM-->>LOOP: 回應（文字或工具呼叫）
+    CH->>BUS: InboundMessage (content, sender, channel)
+    BUS->>LOOP: Route to agent loop
+    LOOP->>SESS: Load or create session
+    LOOP->>CTX: Build context
+    CTX->>CTX: Load system prompts\n(identity, AGENTS.md, memories, skills)
+    CTX->>CTX: Compose conversation history
+    LOOP->>LLM: Call LLM (system + history + new user message)
+    LLM-->>LOOP: Response (text or tool call)
 
-    loop 工具執行循環（最多 40 次）
-        LOOP->>TOOLS: 執行工具（shell/web/fs/mcp...）
-        TOOLS-->>LOOP: 工具結果
-        LOOP->>LLM: 繼續推理
-        LLM-->>LOOP: 最終回應或下一個工具呼叫
+    loop Tool execution loop (up to 40 iterations)
+        LOOP->>TOOLS: Execute tool (shell/web/fs/mcp...)
+        TOOLS-->>LOOP: Tool result
+        LOOP->>LLM: Resume reasoning
+        LLM-->>LOOP: Final response or next tool call
     end
 
-    LOOP->>SESS: 儲存對話紀錄
-    LOOP->>BUS: OutboundMessage（回應內容）
-    BUS->>CH: 發送回應至頻道
+    LOOP->>SESS: Persist conversation history
+    LOOP->>BUS: OutboundMessage (response)
+    BUS->>CH: Send response back to channel
 ```
 
-## 核心模組說明
+## Core modules explained
 
-### CLI 入口點
+### CLI entry points
 
 **`nanobot/cli/commands.py`**
 
-所有 CLI 指令的入口點。解析命令列參數後，根據子指令（`gateway`、`agent`、`status` 等）初始化對應的元件並啟動。
+All CLI commands originate here. After parsing arguments, it initializes the appropriate component for each subcommand (`gateway`, `agent`, `status`, etc.).
 
 ```bash
-nanobot gateway   # 啟動 Gateway 服務
-nanobot agent     # 啟動本地 CLI 代理
-nanobot status    # 顯示配置狀態
-nanobot onboard   # 執行設定精靈
+nanobot gateway   # Start the gateway service
+nanobot agent     # Run a local CLI agent
+nanobot status    # Dump configuration status
+nanobot onboard   # Run the interactive setup
 ```
 
-### 訊息總線
+### Message bus
 
 **`nanobot/bus/`**
 
-訊息總線是 Gateway 的核心路由層，負責：
+The bus is the gateway’s routing layer responsible for:
 
-- 接收來自各頻道的 `InboundMessage`
-- 將訊息分發至代理循環
-- 將代理的 `OutboundMessage` 路由至對應頻道
+- Receiving `InboundMessage` from each channel
+- Routing messages into the agent loop
+- Routing `OutboundMessage` responses back to the appropriate channel
 
-關鍵資料結構：
+Key dataclasses:
 
 ```python
 @dataclass
 class InboundMessage:
-    channel: str        # 來源頻道名稱
-    sender_id: str      # 發送者 ID
-    chat_id: str        # 聊天室 ID
-    content: str        # 訊息內容
-    media: list[str]    # 媒體附件（URL 或本地路徑）
-    metadata: dict      # 頻道特定的元資料
+    channel: str        # Source channel name
+    sender_id: str      # Sender ID
+    chat_id: str        # Chat room ID
+    content: str        # Message content
+    media: list[str]    # Media attachments (URLs or paths)
+    metadata: dict      # Channel-specific metadata
 
 @dataclass
 class OutboundMessage:
-    channel: str        # 目標頻道名稱
-    chat_id: str        # 接收者
-    content: str        # 回應內容（Markdown）
-    media: list[str]    # 附件檔案路徑
-    metadata: dict      # 可包含 "_progress" 用於串流
+    channel: str        # Target channel name
+    chat_id: str        # Recipient chat ID
+    content: str        # Markdown response
+    media: list[str]    # Attachment file paths
+    metadata: dict      # Can include `_progress` for streaming
 ```
 
-### 代理循環
+### Agent loop
 
-**`nanobot/agent/loop.py`** — `AgentLoop` 類別
+**`nanobot/agent/loop.py`** — `AgentLoop`
 
-代理的核心處理引擎，執行以下循環：
+The core processing engine follows this loop:
 
-1. 從總線接收訊息
-2. 透過 `ContextBuilder` 建構提示詞
-3. 呼叫 LLM 提供者取得回應
-4. 執行工具呼叫（若 LLM 要求）
-5. 重複直到 LLM 給出最終文字回應
-6. 將回應發布至總線
+1. Read a message from the bus
+2. Build prompts via `ContextBuilder`
+3. Call an LLM provider
+4. Execute tool calls if requested
+5. Repeat until the LLM yields a final text response
+6. Publish the response back to the bus
 
-關鍵參數：
+Key parameters:
 
 ```python
 AgentLoop(
-    bus=bus,                          # 訊息總線
-    provider=provider,                # LLM 提供者
-    workspace=workspace,              # 工作區路徑
-    max_iterations=40,                # 最大工具呼叫輪次
-    context_window_tokens=65_536,     # 上下文視窗大小
-    restrict_to_workspace=False,      # 是否限制工作區範圍
+    bus=bus,                          # Message bus
+    provider=provider,                # LLM provider
+    workspace=workspace,              # Workspace path
+    max_iterations=40,                # Max tool call loop count
+    context_window_tokens=65_536,     # Context window size
+    restrict_to_workspace=False,      # Should tools be sandboxed?
 )
 ```
 
-### 上下文建構器
+### Context builder
 
-**`nanobot/agent/context.py`** — `ContextBuilder` 類別
+**`nanobot/agent/context.py`** — `ContextBuilder`
 
-負責為每次 LLM 呼叫組裝完整的提示詞，包含：
+Assembles each LLM call’s prompt, including:
 
-- **身份資訊**：代理的基本身份和能力描述
-- **啟動文件**：`AGENTS.md`、`SOUL.md`、`USER.md`、`TOOLS.md`（若存在於工作區）
-- **記憶摘要**：長期記憶的壓縮摘要
-- **活躍技能**：設定為「常駐」的技能內容
-- **技能目錄**：可用技能的摘要列表
-- **對話歷史**：當前會話的完整對話紀錄
+- **Identity**: Basic persona and capability description
+- **Boot documents**: `AGENTS.md`, `SOUL.md`, `USER.md`, `TOOLS.md` (if present)
+- **Memory summaries**: Long-term memory compressed data
+- **Active skills**: Skills marked as resident
+- **Skills catalog**: Summary of available skills
+- **Conversation history**: Full session transcripts
 
-### 記憶整合
+### Memory consolidation
 
-**`nanobot/agent/memory.py`** — `MemoryConsolidator` 與 `MemoryStore`
+**`nanobot/agent/memory.py`** — `MemoryConsolidator` and `MemoryStore`
 
-Token 感知的記憶管理系統：
+Token-aware memory management:
 
-- **`MemoryStore`**：讀寫長期記憶（以檔案形式儲存於工作區）
-- **`MemoryConsolidator`**：當對話歷史超過 Token 上限時，自動呼叫 LLM 壓縮並整合記憶
+- **`MemoryStore`**: Reads and writes long-term memories (stored in workspace files)
+- **`MemoryConsolidator`**: When history exceeds the context window, it calls the LLM to compress old messages into summaries
 
-記憶整合流程：
+Consolidation flow:
 
 ```
-對話歷史超過上下文視窗
-  → MemoryConsolidator 提取舊對話
-  → 呼叫 LLM 生成摘要
-  → 摘要寫入 memory.md（工作區）
-  → 舊對話從歷史中移除
+Conversation history exceeds context window
+  → MemoryConsolidator extracts old messages
+  → Calls the LLM to generate a summary
+  → Appends the summary to `memory.md`
+  → Removes the old messages from the active history
 ```
 
-### 頻道介面卡
+### Channel adapters
 
 **`nanobot/channels/`**
 
-每個聊天平台都有一個對應的介面卡，繼承自 `BaseChannel`：
+Each chat platform has an adapter inheriting from `BaseChannel`:
 
 ```
 channels/
-├── base.py         # BaseChannel 抽象類別
+├── base.py         # BaseChannel ABC
 ├── telegram.py     # Telegram Bot API
 ├── discord.py      # Discord.py
 ├── slack.py        # Slack Bolt
-├── feishu.py       # 飛書開放平台
-├── dingtalk.py     # 釘釘
-├── wechat.py       # 企業微信
-├── qq.py           # QQ（botpy SDK）
+├── feishu.py       # Feishu Open Platform
+├── dingtalk.py     # DingTalk
+├── wechat.py       # WeCom
+├── qq.py           # QQ (botpy SDK)
 ├── email.py        # SMTP/IMAP
-├── matrix.py       # Matrix 協定
-├── whatsapp.py     # WhatsApp（Node.js Bridge）
-└── mochat.py       # Mochat
+├── matrix.py       # Matrix protocol
+├── whatsapp.py     # WhatsApp (Node.js bridge)
+└── mochat.py       # MoChat
 ```
 
-每個介面卡必須實作三個方法：
+Each adapter must implement:
 
-- `start()` — 連接平台並開始監聽（**必須永久阻塞**）
-- `stop()` — 優雅關閉
-- `send(msg)` — 發送訊息至平台
+- `start()` — connect to the platform and begin listening (must block)
+- `stop()` — gracefully shut down
+- `send(msg)` — dispatch a response to the channel
 
-### LLM 提供者
+### LLM providers
 
 **`nanobot/providers/`**
 
-統一的 LLM 呼叫抽象層：
+A unified abstraction layer for LLM calls:
 
 ```
 providers/
-├── base.py              # LLMProvider 抽象類別
-├── litellm_provider.py  # 主要提供者，透過 LiteLLM 支援 100+ 模型
-└── ...                  # 自訂提供者
+├── base.py              # LLMProvider base class
+├── litellm_provider.py  # Primary provider using LiteLLM for 100+ models
+└── ...                  # Custom providers as needed
 ```
 
-`LiteLLMProvider` 支援：Anthropic Claude、OpenAI GPT、Google Gemini、DeepSeek、Qwen、VolcEngine 等所有 LiteLLM 支援的模型。
+`LiteLLMProvider` covers Anthropic Claude, OpenAI GPT, Google Gemini, DeepSeek, Qwen, VolcEngine, and all LiteLLM-supported models.
 
-### 工具執行
+### Tool execution
 
 **`nanobot/agent/tools/`**
 
-代理可呼叫的所有工具：
+Available tools:
 
-| 工具 | 模組 | 說明 |
-|------|------|------|
-| `exec` | `shell.py` | 執行 shell 指令 |
-| `web_search` | `web.py` | 網路搜尋 |
-| `web_fetch` | `web.py` | 抓取網頁內容 |
-| `read_file` | `filesystem.py` | 讀取檔案 |
-| `write_file` | `filesystem.py` | 寫入檔案 |
-| `edit_file` | `filesystem.py` | 編輯檔案 |
-| `list_dir` | `filesystem.py` | 列出目錄 |
-| `mcp_*` | `mcp.py` | MCP 伺服器工具 |
-| `cron_*` | `cron.py` | 定時任務管理 |
-| `spawn` | `spawn.py` | 建立子代理 |
-| `message` | `message.py` | 跨頻道發送訊息 |
+| Tool | Module | Description |
+|------|--------|-------------|
+| `exec` | `shell.py` | Run shell commands |
+| `web_search` | `web.py` | Web search |
+| `web_fetch` | `web.py` | Fetch web pages |
+| `read_file` | `filesystem.py` | Read files |
+| `write_file` | `filesystem.py` | Write files |
+| `edit_file` | `filesystem.py` | Edit files |
+| `list_dir` | `filesystem.py` | List directories |
+| `mcp_*` | `mcp.py` | MCP server tools |
+| `cron_*` | `cron.py` | Scheduled tasks |
+| `spawn` | `spawn.py` | Spawn sub-agents |
+| `message` | `message.py` | Send cross-channel messages |
 
-### 會話管理
+### Session management
 
 **`nanobot/session/manager.py`** — `SessionManager`
 
-管理每個聊天室的對話狀態：
+Manages state per chat:
 
-- 以 `chat_id` 為鍵維護獨立的會話
-- 在對話之間持久化歷史紀錄
-- 支援會話隔離（不同頻道的相同 `chat_id` 視為不同會話）
+- Maintains sessions keyed by `chat_id`
+- Persists history between conversations
+- Keeps channel isolation (same `chat_id` across platforms is treated as distinct sessions)
 
-## 配置載入流程
+## Configuration loading
 
 ```mermaid
 flowchart LR
-    CLI[CLI 參數] --> LOAD
+    CLI[CLI arguments] --> LOAD
     FILE[config.json] --> LOAD
-    ENV[環境變數] --> LOAD
-    LOAD[配置載入器] --> SCHEMA[Pydantic 模型驗證]
-    SCHEMA --> GATEWAY[Gateway / Agent 初始化]
+    ENV[Environment variables] --> LOAD
+    LOAD[Config loader] --> SCHEMA[Pydantic schema validation]
+    SCHEMA --> GATEWAY[Gateway / Agent initialization]
 ```
 
-配置以 Pydantic 模型定義，位於 `nanobot/config/schema.py`，提供：
+Configurations are defined with Pydantic models in `nanobot/config/schema.py`, which provide:
 
-- 自動型別驗證
-- 預設值管理
-- 清晰的配置文件結構
+- Automatic type validation
+- Default value management
+- A clear, structured configuration layout
 
-## 擴展 nanobot
+## Extending nanobot
 
-### 新增頻道
+### Add a channel
 
-繼承 `BaseChannel` 並透過 Python Entry Points 注冊。詳見 [頻道插件開發](./channel-plugin.md)。
+Inherit from `BaseChannel` and register via Python entry points. See the [Channel Plugin Guide](./channel-plugin.md).
 
-### 新增技能
+### Add a skill
 
-在工作區的 `skills/` 目錄中建立 `SKILL.md` 文件，代理會自動發現並使用。
+Place `SKILL.md` files under the workspace `skills/` directory. The agent auto-discovers and loads them.
 
-### 新增 LLM 提供者
+### Add an LLM provider
 
-繼承 `LLMProvider` 並在 `providers/` 目錄中實作必要方法。
+Implement new providers by subclassing `LLMProvider` under `providers/`.
 
-### 連接外部工具（MCP）
+### Connect external tools (MCP)
 
-在配置文件中的 `mcp` 區塊定義 MCP 伺服器，代理會自動將其工具納入可用工具集。
+Define MCP servers in the `mcp` section of the config; nanobot automatically registers their tools alongside built-in tools.

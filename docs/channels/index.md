@@ -1,32 +1,32 @@
-# 頻道總覽
+# Channel Overview
 
-**頻道（Channel）** 是 nanobot 與各聊天平台之間的橋梁。每個頻道負責連接一個特定的即時通訊平台，將使用者訊息轉入 nanobot 的訊息匯流排，再將 AI 的回應送回平台。
-
----
-
-## 支援的頻道清單
-
-nanobot 目前支援以下 12 個平台：
-
-| 頻道 | 說明 | 連線方式 |
-|------|------|----------|
-| [Telegram](telegram.md) | 最推薦的入門平台，設定簡單、穩定 | Long Polling |
-| [Discord](discord.md) | 社群伺服器與私訊，支援附件上傳 | Gateway WebSocket |
-| [Slack](slack.md) | 企業即時通訊，支援 Thread 回覆 | Socket Mode |
-| [Feishu / 飛書](feishu.md) | 飛書企業通訊，支援多模態輸入 | WebSocket 長連線 |
-| [DingTalk / 釘釘](dingtalk.md) | 阿里巴巴企業通訊 | Stream Mode |
-| [WeCom / 企業微信](wecom.md) | 騰訊企業通訊平台 | WebSocket 長連線 |
-| [QQ](qq.md) | QQ 官方 Bot 平台，支援私聊與群組 | WebSocket |
-| [Email](email.md) | IMAP 收信 + SMTP 回信，適合非同步場景 | IMAP Polling |
-| [Matrix](matrix.md) | 去中心化通訊協定，支援 E2EE 加密 | Matrix Sync |
-| [WhatsApp](whatsapp.md) | 透過 Node.js Bridge 連接 | WebSocket Bridge |
-| [Mochat / Claw IM](mochat.md) | Claw IM 開放平台 | Socket.IO |
+**Channels** are the bridges between nanobot and chat platforms. Each channel connects to a specific instant messaging service, funnels user messages into nanobot's message bus, and delivers the AI response back to the platform.
 
 ---
 
-## 如何啟用多個頻道
+## Supported Channels
 
-在 `~/.nanobot/config.json` 的 `channels` 物件中，將多個頻道同時設為 `"enabled": true`，nanobot 啟動後即可同時監聽所有已啟用的頻道：
+nanobot currently supports the following 12 platforms:
+
+| Channel | Description | Connection Style |
+|---------|-------------|------------------|
+| [Telegram](telegram.md) | Recommended starter channel; easy setup and reliable | Long Polling |
+| [Discord](discord.md) | Supports community servers, DMs, and file attachments | Gateway WebSocket |
+| [Slack](slack.md) | Corporate chat with thread-aware replies | Socket Mode |
+| [Feishu / 飞书](feishu.md) | Enterprise messaging with multimodal input | WebSocket Long Connection |
+| [DingTalk / 钉钉](dingtalk.md) | Alibaba enterprise messaging platform | Stream Mode |
+| [WeCom / 企业微信](wecom.md) | Tencent enterprise messaging | WebSocket Long Connection |
+| [QQ](qq.md) | Official QQ bot platform for private and group chats | WebSocket |
+| [Email](email.md) | IMAP polling + SMTP replies for asynchronous workflows | IMAP Polling |
+| [Matrix](matrix.md) | Decentralized protocol with E2EE support | Matrix Sync |
+| [WhatsApp](whatsapp.md) | Connected through the Node.js bridge | WebSocket Bridge |
+| [Mochat / Claw IM](mochat.md) | Claw IM open platform integration | Socket.IO |
+
+---
+
+## Enabling Multiple Channels
+
+Set multiple channels to `"enabled": true` under the `channels` object in `~/.nanobot/config.json`. When nanobot starts, the gateway listens on every enabled channel at the same time:
 
 ```json
 {
@@ -45,26 +45,26 @@ nanobot 目前支援以下 12 個平台：
 }
 ```
 
-啟動：
+Start the gateway:
 
 ```bash
 nanobot gateway
 ```
 
-所有已啟用的頻道將在同一個 gateway 程序中同時運行。
+All enabled channels run within the same gateway process.
 
 ---
 
-## 頻道專屬設定與全域設定
+## Channel-Specific Settings vs. Global Settings
 
-**全域設定**位於 `channels` 物件的頂層，適用於所有頻道：
+**Global settings** live at the top level of the `channels` object and apply to every channel:
 
-| 參數 | 預設值 | 說明 |
-|------|--------|------|
-| `sendProgress` | `true` | 將 AI 處理中的串流進度訊息發送至頻道 |
-| `sendToolHints` | `false` | 是否將工具呼叫提示（例如 `read_file("…")`）顯示給使用者 |
+| Key | Default | Description |
+|-----|---------|-------------|
+| `sendProgress` | `true` | Stream partial responses to channels while the AI is still composing |
+| `sendToolHints` | `false` | Whether to surface tool call hints (e.g., `read_file("…")`) to users |
 
-**頻道專屬設定**則放在各頻道的子物件中。以下是一個同時設定全域選項與頻道選項的範例：
+**Channel-specific settings** go inside each channel's subsection. Here is an example that combines the global options with a channel override:
 
 ```json
 {
@@ -82,11 +82,11 @@ nanobot gateway
 
 ---
 
-## `sendProgress` 與 `sendToolHints`
+## `sendProgress` and `sendToolHints`
 
-### `sendProgress`（預設：`true`）
+### `sendProgress` (default: `true`)
 
-啟用時，nanobot 在生成回應期間會將中間文字逐步串流傳送到頻道。這讓使用者知道 AI 正在處理，不必等到完整回應才看到輸出。
+When enabled, nanobot streams partial text back to the channel while it is still composing a response. Users see the bot working instead of waiting for the final answer.
 
 ```json
 {
@@ -96,15 +96,15 @@ nanobot gateway
 }
 ```
 
-### `sendToolHints`（預設：`false`）
+### `sendToolHints` (default: `false`)
 
-啟用時，當 nanobot 呼叫工具時（例如搜尋網頁、執行 Shell 指令），會先發送一條簡短的提示訊息，例如：
+When turned on, nanobot sends a brief hint message whenever it invokes a tool (for example, web search or shell execution):
 
 ```
 🔧 web_search("nanobot documentation")
 ```
 
-這有助於使用者了解 AI 正在做什麼，但在安靜模式下建議關閉。
+This helps users understand what the AI is doing, but it is recommended to disable it in quiet mode.
 
 ```json
 {
@@ -116,33 +116,33 @@ nanobot gateway
 
 ---
 
-## `allowFrom` 存取控制
+## `allowFrom` Access Control
 
-每個頻道都有 `allowFrom` 欄位，用來控制哪些使用者可以使用 bot：
+Every channel exposes an `allowFrom` list to control who can interact with the bot:
 
-| 設定 | 效果 |
-|------|------|
-| `[]`（空陣列）| 拒絕所有人（預設，未設定前無法使用） |
-| `["USER_ID_1", "USER_ID_2"]` | 僅允許指定的使用者 |
-| `["*"]` | 允許所有人（公開模式，請謹慎使用） |
+| Setting | Behavior |
+|---------|----------|
+| `[]` (empty array) | Deny everyone (default—no one can interact until you configure access) |
+| `["USER_ID_1", "USER_ID_2"]` | Allow only the specified users |
+| `["*"]` | Allow everyone (public mode—use with caution) |
 
-!!! warning "安全提醒"
-    若 `allowFrom` 為空陣列，所有訊息都會被拒絕。請務必在啟動前設定您的使用者 ID。
+!!! warning "Security reminder"
+    Leaving `allowFrom` empty causes all messages to be rejected. Set your user ID before starting the gateway.
 
 ---
 
-## 多實例部署
+## Multi-Instance Deployment
 
-您可以為不同頻道建立獨立的設定檔，讓每個 bot 有自己的工作空間：
+You can keep separate configs for each channel so every instance has its own workspace:
 
 ```bash
-# 各頻道獨立 onboard
+# Onboard each channel separately
 nanobot onboard --config ~/.nanobot-telegram/config.json --workspace ~/.nanobot-telegram/workspace
 nanobot onboard --config ~/.nanobot-discord/config.json --workspace ~/.nanobot-discord/workspace
 
-# 各自啟動 gateway
+# Start each gateway with its config
 nanobot gateway --config ~/.nanobot-telegram/config.json
 nanobot gateway --config ~/.nanobot-discord/config.json
 ```
 
-詳細設定請參考各頻道的專屬文件。
+See each channel's dedicated documentation for detailed configuration options.

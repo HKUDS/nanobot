@@ -1,56 +1,56 @@
-# Linux systemd 服務指南
+# Linux systemd Service Guide
 
-本指南說明如何將 nanobot Gateway 設定為 systemd 使用者服務，實現開機自動啟動、崩潰自動重啟，並整合系統日誌管理。
+This guide explains how to register the nanobot Gateway as a systemd user service so it starts on login, restarts on failure, and integrates with system logs.
 
-## 為什麼使用 systemd？
+## Why use systemd?
 
-- **開機自動啟動**：登入後 Gateway 自動運行
-- **崩潰自動重啟**：服務異常退出時自動重啟
-- **系統日誌整合**：透過 `journalctl` 集中管理日誌
-- **標準化管理**：使用熟悉的 `systemctl` 指令操作
+- **Auto-start on login** — the gateway launches immediately after you log in
+- **Auto-restart on crash** — systemd observes the process and restarts it on failure
+- **System log integration** — view logs through `journalctl`
+- **Standardized management** — control the service using familiar `systemctl` commands
 
-## 前置步驟
+## Prerequisites
 
-### 確認 nanobot 已安裝
+### Confirm nanobot is installed
 
 ```bash
 which nanobot
-# 應輸出類似：/home/user/.local/bin/nanobot
+# Should output something like: /home/user/.local/bin/nanobot
 ```
 
-若未找到，先安裝 nanobot：
+If not found, install nanobot:
 
 ```bash
 pip install nanobot-ai
-# 或使用 uv
+# or use uv
 uv pip install nanobot-ai
 ```
 
-### 完成初始設定
+### Complete initial setup
 
 ```bash
 nanobot onboard
-# 依提示填入 API 金鑰與頻道配置
+# Follow the prompts to fill in API keys and channel configs
 ```
 
-## 建立 systemd 使用者服務
+## Create the systemd user service
 
-### 第一步：確認 nanobot 路徑
+### Step 1: Confirm the nanobot path
 
 ```bash
 which nanobot
-# 例如：/home/user/.local/bin/nanobot
+# e.g.: /home/user/.local/bin/nanobot
 ```
 
-### 第二步：建立服務文件目錄
+### Step 2: Create the service directory
 
 ```bash
 mkdir -p ~/.config/systemd/user
 ```
 
-### 第三步：建立服務文件
+### Step 3: Create the service file
 
-在 `~/.config/systemd/user/nanobot-gateway.service` 建立以下內容（若 `nanobot` 不在 `~/.local/bin/`，請修改 `ExecStart` 路徑）：
+Write the following to `~/.config/systemd/user/nanobot-gateway.service` (adjust `ExecStart` if nanobot is installed elsewhere):
 
 ```ini
 [Unit]
@@ -70,91 +70,91 @@ ReadWritePaths=%h
 WantedBy=default.target
 ```
 
-> **說明：** `%h` 是 systemd 的展開符號，代表使用者的家目錄（`$HOME`）。
+> **Note:** `%h` expands to the user home directory (`$HOME`).
 
-### 第四步：啟用並啟動服務
+### Step 4: Enable and start the service
 
 ```bash
-# 重新載入 systemd 設定
+# Reload systemd configuration
 systemctl --user daemon-reload
 
-# 啟用並立即啟動服務
+# Enable and start the service immediately
 systemctl --user enable --now nanobot-gateway
 ```
 
-## 日常管理指令
+## Common management commands
 
 ```bash
-# 查看服務狀態
+# Check service status
 systemctl --user status nanobot-gateway
 
-# 啟動服務
+# Start the service
 systemctl --user start nanobot-gateway
 
-# 停止服務
+# Stop the service
 systemctl --user stop nanobot-gateway
 
-# 重啟服務（修改配置後）
+# Restart after config changes
 systemctl --user restart nanobot-gateway
 
-# 停用自動啟動（但不停止當前運行）
+# Disable auto-start (but leave it running)
 systemctl --user disable nanobot-gateway
 ```
 
-## 日誌查看
+## View logs
 
 ```bash
-# 即時追蹤日誌
+# Follow live logs
 journalctl --user -u nanobot-gateway -f
 
-# 查看最近 100 行日誌
+# Read the last 100 lines
 journalctl --user -u nanobot-gateway -n 100
 
-# 查看今日日誌
+# Logs since today
 journalctl --user -u nanobot-gateway --since today
 
-# 查看指定時間範圍的日誌
+# Logs for a specific time range
 journalctl --user -u nanobot-gateway --since "2026-01-01 09:00" --until "2026-01-01 18:00"
 
-# 以 JSON 格式輸出（適合日誌分析）
+# Output logs as JSON for analysis
 journalctl --user -u nanobot-gateway -o json
 ```
 
-## 修改服務文件
+## Modify the service file
 
-若需要修改服務文件（例如更改埠號或配置文件路徑），需要重新載入設定：
+If you need to change the port or config path, edit the service file and reload systemd:
 
 ```bash
-# 編輯服務文件
+# Edit the service file
 vim ~/.config/systemd/user/nanobot-gateway.service
 
-# 重新載入設定（必要步驟）
+# Reload systemd
 systemctl --user daemon-reload
 
-# 重啟服務使修改生效
+# Restart the service
 systemctl --user restart nanobot-gateway
 ```
 
-## 登出後保持運行
+## Keep it running after logout
 
-預設情況下，使用者服務只在登入期間運行。若需要在登出後繼續運行（例如伺服器環境），啟用 **lingering**：
+By default, user services only run while you are logged in. Enable lingering to keep nanobot alive after logout (useful on servers):
 
 ```bash
 loginctl enable-linger $USER
 ```
 
-驗證已啟用：
+Verify the setting:
 
 ```bash
 loginctl show-user $USER | grep Linger
 # Linger=yes
 ```
 
-## 多實例部署
+## Multiple instances
 
-若需要同時運行多個 nanobot 實例（連接不同頻道），可建立多個服務文件：
+Run multiple nanobot gateways for different channels by creating additional service files.
 
-### Telegram 實例
+### Telegram instance
 
 ```ini
 # ~/.config/systemd/user/nanobot-telegram.service
@@ -175,7 +175,7 @@ ReadWritePaths=%h
 WantedBy=default.target
 ```
 
-### Discord 實例
+### Discord instance
 
 ```ini
 # ~/.config/systemd/user/nanobot-discord.service
@@ -196,7 +196,7 @@ ReadWritePaths=%h
 WantedBy=default.target
 ```
 
-啟用所有實例：
+Enable both instances:
 
 ```bash
 systemctl --user daemon-reload
@@ -204,9 +204,7 @@ systemctl --user enable --now nanobot-telegram
 systemctl --user enable --now nanobot-discord
 ```
 
-## 完整服務文件範例（含環境變數）
-
-以下是包含環境變數設定的完整服務文件範例：
+## Full service example (with env vars)
 
 ```ini
 [Unit]
@@ -218,23 +216,20 @@ Wants=network-online.target
 [Service]
 Type=simple
 
-# nanobot 執行路徑（依實際安裝位置調整）
+# Adjust the exec path if needed
 ExecStart=%h/.local/bin/nanobot gateway
 
-# 環境變數（可選，也可直接寫入 config.json）
+# Environment variables (optional — can be stored in config.json)
 # Environment=ANTHROPIC_API_KEY=sk-ant-xxx
 # Environment=TELEGRAM_BOT_TOKEN=xxx
 
-# 重啟策略
 Restart=always
 RestartSec=10
 
-# 安全限制
 NoNewPrivileges=yes
 ProtectSystem=strict
 ReadWritePaths=%h
 
-# 日誌設定
 StandardOutput=journal
 StandardError=journal
 
@@ -242,18 +237,18 @@ StandardError=journal
 WantedBy=default.target
 ```
 
-## 設定環境變數
+## Set environment variables
 
-有兩種方式設定環境變數：
+Two options:
 
-**方式一：直接寫入 config.json（推薦）**
+**Option 1: Put them directly in config.json (recommended)**
 
 ```bash
 vim ~/.nanobot/config.json
-# 在配置文件中填入 API 金鑰
+# Add your API keys to the config
 ```
 
-**方式二：使用 EnvironmentFile**
+**Option 2: Use an EnvironmentFile**
 
 ```ini
 [Service]
@@ -267,33 +262,33 @@ ANTHROPIC_API_KEY=sk-ant-xxx
 TELEGRAM_BOT_TOKEN=xxx
 ```
 
-## 常見問題排解
+## Troubleshooting
 
-**服務啟動失敗**
+**Service fails to start**
 
 ```bash
-# 查看詳細錯誤訊息
+# View the latest error logs
 journalctl --user -u nanobot-gateway -n 50
 
-# 手動測試啟動指令
+# Test the command manually
 /home/user/.local/bin/nanobot gateway
 ```
 
-**服務不斷重啟**
+**Service keeps restarting**
 
 ```bash
-# 查看重啟原因
+# Check restart reason
 systemctl --user status nanobot-gateway
 journalctl --user -u nanobot-gateway --since "5 minutes ago"
 ```
 
-**找不到 nanobot 執行檔**
+**Binary not found**
 
 ```bash
-# 確認安裝路徑
+# Confirm the install path
 which nanobot
 pip show nanobot-ai | grep Location
 
-# 使用完整路徑
+# Use the absolute path in ExecStart
 ExecStart=/full/path/to/nanobot gateway
 ```

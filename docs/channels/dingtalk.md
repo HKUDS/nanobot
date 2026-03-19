@@ -1,59 +1,59 @@
-# DingTalk / 釘釘
+# DingTalk / 钉钉
 
-nanobot 透過釘釘 **Stream Mode** 連線接收訊息，無需公開 IP 或 Webhook。支援私聊與群聊、圖片、檔案等多媒體訊息。
-
----
-
-## 前置條件
-
-- 一個釘釘帳號
-- 具有建立應用程式權限的釘釘企業帳號
+nanobot connects to DingTalk via **Stream Mode**, so no public IP or webhook is required. Supports private chats, group chats, images, and file attachments.
 
 ---
 
-## 步驟一：建立釘釘應用程式
+## Prerequisites
 
-1. 前往 [釘釘開放平台](https://open-dev.dingtalk.com/)
-2. 登入後前往 **應用開發** → **企業內部應用**
-3. 點擊 **建立應用**，選擇 **釘釘應用**
-4. 填寫應用名稱與描述後建立
+- A DingTalk account
+- An enterprise account with permission to create apps
 
 ---
 
-## 步驟二：添加機器人能力
+## Step 1: Create a DingTalk app
 
-1. 進入應用設定後，前往 **添加應用能力** → **機器人**
-2. 點擊 **確認添加**
-3. 在機器人設定中：
-   - **Stream Mode**：確認已選擇 **Stream 模式**（即 WebSocket 接收，無需 Webhook URL）
-   - 填寫機器人名稱與描述
-
----
-
-## 步驟三：設定權限
-
-前往 **權限管理**，根據需要申請以下權限：
-
-- `qyapi_chat_group` — 群組訊息相關（若需要群聊）
-- 發送互動卡片相關權限（若需要富媒體回覆）
+1. Visit the [DingTalk Open Platform](https://open-dev.dingtalk.com/)
+2. Sign in and go to **App Development** → **Enterprise Internal App**
+3. Click **Create App** → choose **DingTalk App**
+4. Enter the app name and description, then create
 
 ---
 
-## 步驟四：取得 Client ID 與 Client Secret
+## Step 2: Add the robot capability
 
-1. 前往 **應用憑證** 頁面
-2. 複製 **AppKey**（即 Client ID）
-3. 複製 **AppSecret**（即 Client Secret）
-
----
-
-## 步驟五：發佈應用程式
-
-前往 **版本管理** → 建立版本 → 提交審核或直接發佈（企業內部應用通常可直接發佈）。
+1. In the app settings, go to **Add App Capabilities** → **Robot**
+2. Click **Confirm Add**
+3. In the robot configuration:
+   - Ensure **Stream Mode** is selected (WebSocket reception, no webhook URL needed)
+   - Enter the robot name and description
 
 ---
 
-## 步驟六：設定 config.json
+## Step 3: Configure permissions
+
+In **Permission Management**, request permissions as needed:
+
+- `qyapi_chat_group` — group message access (required for group chats)
+- Permissions for sending interactive cards (required for rich media replies)
+
+---
+
+## Step 4: Get the Client ID and Client Secret
+
+1. Go to the **Application Credentials** page
+2. Copy the **AppKey** (Client ID)
+3. Copy the **AppSecret** (Client Secret)
+
+---
+
+## Step 5: Publish the app
+
+Navigate to **Version Management** → create a version → submit for review or publish (internal apps typically publish immediately).
+
+---
+
+## Step 6: Configure `config.json`
 
 ```json
 {
@@ -68,7 +68,7 @@ nanobot 透過釘釘 **Stream Mode** 連線接收訊息，無需公開 IP 或 We
 }
 ```
 
-### 完整設定選項
+### Full configuration options
 
 ```json
 {
@@ -83,16 +83,16 @@ nanobot 透過釘釘 **Stream Mode** 連線接收訊息，無需公開 IP 或 We
 }
 ```
 
-| 參數 | 預設值 | 說明 |
-|------|--------|------|
-| `enabled` | `false` | 是否啟用此頻道 |
-| `clientId` | `""` | 釘釘應用的 AppKey（Client ID） |
-| `clientSecret` | `""` | 釘釘應用的 AppSecret（Client Secret） |
-| `allowFrom` | `[]` | 允許互動的員工 Staff ID 列表 |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `enabled` | `false` | Whether to enable this channel |
+| `clientId` | `""` | DingTalk app AppKey (Client ID) |
+| `clientSecret` | `""` | DingTalk app AppSecret (Client Secret) |
+| `allowFrom` | `[]` | List of staff IDs that can interact |
 
 ---
 
-## 步驟七：啟動
+## Step 7: Run nanobot
 
 ```bash
 nanobot gateway
@@ -100,42 +100,42 @@ nanobot gateway
 
 ---
 
-## 取得您的 Staff ID
+## Capture your staff ID
 
-`allowFrom` 填入的是釘釘的員工 Staff ID（staffId），格式類似 `user_abc123`。
+`allowFrom` expects the DingTalk staff ID (format: `user_abc123`).
 
-**取得方法：**
+**How to retrieve it:**
 
-1. 先將 `allowFrom` 設為 `["*"]` 暫時允許所有人
-2. 啟動 nanobot 並傳訊息給 Bot
-3. 查看 nanobot 日誌，其中會顯示您的 Staff ID
-4. 更新 `allowFrom`
-
----
-
-## 多媒體支援
-
-釘釘頻道支援以下媒體類型：
-
-- **圖片**：自動下載並傳遞給 AI 處理
-- **檔案**：自動下載後處理
-- **富文本（RichText）**：解析文字與圖片內容
+1. Temporarily set `allowFrom` to `["*"]` to allow all users
+2. Start nanobot and message the bot
+3. Check the nanobot logs for your staff ID
+4. Update `allowFrom` accordingly
 
 ---
 
-## 常見問題
+## Multimedia support
 
-**Stream Mode 是什麼？**
+DingTalk channel supports:
 
-- Stream Mode 使用 WebSocket 連線，由 nanobot 主動連接至釘釘伺服器
-- 相對於 HTTP 回調模式，無需公開 IP 或反向代理
+- **Images**: downloaded and passed to the AI
+- **Files**: downloaded before processing
+- **RichText**: parses text and embedded media
 
-**Bot 無法接收訊息？**
+---
 
-- 確認選擇的是 **Stream 模式**，而非 HTTP 回調
-- 確認應用已發佈
+## FAQ
 
-**群組中 Bot 沒有回應？**
+**What is Stream Mode?**
 
-- 釘釘群組中需要 @機器人才會回應
-- 確認機器人已被邀請加入群組
+- Stream Mode uses WebSocket connections initiated by nanobot to DingTalk servers
+- Requires no public IP or reverse proxy, unlike HTTP callback mode
+
+**Bot not receiving messages?**
+
+- Ensure Stream Mode is selected, not HTTP callback mode
+- Confirm the app is published
+
+**Bot ignored in group chats?**
+
+- The bot must be @mentioned in DingTalk groups to respond
+- Make sure the robot is invited to the group

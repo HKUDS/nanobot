@@ -1,72 +1,72 @@
-# 工具與技能總覽
+# Tools & Skills Overview
 
-Nanobot 的能力擴充分為兩個層面：**工具（Tools）** 是代理的內建執行能力，**技能（Skills）** 則是可封裝、可分發的知識與工作流程模組。兩者各司其職，共同構成靈活且可延伸的 AI 助理框架。
-
----
-
-## 工具（Tools）
-
-工具是代理直接呼叫的底層能力，每個工具對應一個具體的操作：執行 Shell 指令、讀寫檔案、搜尋網路、排程任務等。工具由 nanobot 核心提供，透過配置啟用或調整行為。
-
-| 工具名稱 | 說明 |
-|---------|------|
-| `exec` | 執行 Shell 指令與腳本 |
-| `read_file` | 讀取檔案內容（支援分頁） |
-| `write_file` | 寫入檔案（自動建立目錄） |
-| `edit_file` | 精確取代檔案中的文字片段 |
-| `list_dir` | 列出目錄結構 |
-| `web_search` | 網路搜尋（多個供應商） |
-| `web_fetch` | 擷取並解析網頁內容 |
-| `cron` | 排程提醒與週期性任務 |
-| `spawn` | 在背景啟動子代理執行複雜任務 |
-| `message` | 傳送訊息給使用者（支援附件） |
-
-詳細說明請參閱 [工具使用指南](tools.md)。
+Nanobot’s capabilities expand across two layers: **Tools** provide built-in execution primitives, while **Skills** package reusable knowledge and workflows. Together they create a flexible assistant framework.
 
 ---
 
-## 技能（Skills）
+## Tools
 
-技能是以 Markdown 格式封裝的知識與工作流程模組，告訴代理「如何做」某類事情。技能在觸發時載入代理的上下文，提供特定領域的操作指引、指令範例，以及可重複使用的腳本與參考文件。
+Tools are the core operations the agent can invoke—run shell commands, read/write files, search the web, schedule tasks, and more. They are provided by nanobot and controlled via configuration.
 
-技能遵循 [OpenClaw](https://github.com/openclaw/openclaw) 的規格格式，因此可與 OpenClaw 的技能生態系統相容。
+| Tool | Description |
+|------|-------------|
+| `exec` | Run shell commands and scripts |
+| `read_file` | Read file contents (supports pagination) |
+| `write_file` | Write files (creates directories automatically) |
+| `edit_file` | Replace specific text fragments in files |
+| `list_dir` | List directory trees |
+| `web_search` | Search the web (multiple providers) |
+| `web_fetch` | Fetch and parse web pages |
+| `cron` | Schedule reminders and periodic jobs |
+| `spawn` | Launch sub-agents for complex background work |
+| `message` | Send messages to users (attachments supported) |
 
-| 技能名稱 | 說明 |
-|---------|------|
-| `github` | 透過 `gh` CLI 與 GitHub 互動 |
-| `weather` | 取得天氣資訊（wttr.in / Open-Meteo） |
-| `summarize` | 摘要 URL、YouTube 影片與本地檔案 |
-| `tmux` | 遠端控制 tmux 工作階段 |
-| `memory` | 兩層記憶體系統（長期事實 + 歷史記錄） |
-| `cron` | 排程提醒與週期任務的操作指引 |
-| `clawhub` | 搜尋並安裝 ClawHub 公開技能庫中的技能 |
-| `skill-creator` | 建立自訂技能的完整指導 |
-
-詳細說明請參閱 [技能使用指南](skills.md)。
-
----
-
-## 工具與技能的差異
-
-| 面向 | 工具（Tools） | 技能（Skills） |
-|------|--------------|---------------|
-| 本質 | Python 程式碼，代理可直接呼叫 | Markdown 文件，載入代理上下文 |
-| 擴充方式 | 需修改 nanobot 核心或透過 MCP | 任何人皆可撰寫 `.md` 檔案 |
-| 觸發方式 | 代理主動選擇呼叫 | 由 `description` 欄位觸發載入 |
-| 攜帶能力 | 執行操作（Shell、網路、檔案…） | 提供知識、程序與範例 |
-| 分發方式 | 隨 nanobot 安裝 | `.skill` 封裝檔，可上傳至 ClawHub |
+See the [Tools guide](tools.md) for full details.
 
 ---
 
-## MCP 整合
+## Skills
 
-MCP（Model Context Protocol）是連接外部工具伺服器的開放協定。透過 MCP，nanobot 可以動態載入任意外部工具，而無需修改核心程式碼。
+Skills are Markdown-based knowledge/workflow modules that teach the agent how to perform a task. When a skill loads, it enriches the agent context with instructions, example commands, scripts, and references.
 
-MCP 伺服器可透過兩種方式連線：
+Skills follow the [OpenClaw](https://github.com/openclaw/openclaw) spec so they remain compatible with the OpenClaw skill ecosystem.
 
-- **Stdio**：本地程序，透過標準輸入/輸出通訊
-- **HTTP/SSE**：遠端服務，透過 URL 連線
+| Skill | Description |
+|-------|-------------|
+| `github` | Interact with GitHub via the `gh` CLI |
+| `weather` | Retrieve weather data (wttr.in / Open-Meteo) |
+| `summarize` | Summarize URLs, YouTube videos, or local files |
+| `tmux` | Control tmux sessions remotely |
+| `memory` | Two-layer memory system (facts + history) |
+| `cron` | Operate scheduled reminders and recurring tasks |
+| `clawhub` | Search and install skills from the ClawHub marketplace |
+| `skill-creator` | Step-by-step guide to author custom skills |
 
-每個 MCP 工具在 nanobot 中以 `mcp_<伺服器名稱>_<工具名稱>` 的格式呈現，與內建工具完全相同地被代理使用。
+See the [Skills guide](skills.md) for more information.
 
-詳細設定說明請參閱 [MCP 整合指南](mcp.md)。
+---
+
+## Tools vs. Skills
+
+| Aspect | Tools | Skills |
+|--------|-------|--------|
+| Nature | Python code callable by the agent | Markdown documents that load into context |
+| Extension path | Update nanobot core or use MCP | Anyone can write `.md` skills |
+| Trigger | Agent decides based on context | `description` field triggers load |
+| Capability | Perform actions (shell, network, files…) | Teach processes, scripts, references |
+| Distribution | Bundled with nanobot | `.skill` packages uploadable to ClawHub |
+
+---
+
+## MCP integration
+
+[Model Context Protocol](https://modelcontextprotocol.io/) lets nanobot load external tool servers without changing the core. MCP tools appear just like built-in tools.
+
+Connection modes:
+
+- **Stdio** – Local process using stdin/stdout
+- **HTTP/SSE** – Remote server via URL
+
+Each tool is exposed as `mcp_<server>_<tool>`, which the agent can call immediately.
+
+See the [MCP integration guide](mcp.md) for setup instructions.

@@ -1,51 +1,51 @@
-# CLI 指令參考
+# CLI Command Reference
 
-本文件涵蓋 nanobot 所有命令列指令的完整說明。
+This document provides complete coverage of all nanobot command-line commands.
 
-## 快速參考表
+## Quick Reference Table
 
-| 指令 | 說明 |
+| Command | Description |
 |------|------|
-| `nanobot --version` | 顯示版本號碼 |
-| `nanobot --help` | 顯示說明文件 |
-| `nanobot onboard` | 互動式初始化設定與工作區 |
-| `nanobot onboard -c <路徑> -w <路徑>` | 初始化或更新指定實例的設定 |
-| `nanobot agent` | 進入互動式對話模式 |
-| `nanobot agent -m "..."` | 單次訊息模式（非互動式） |
-| `nanobot agent --no-markdown` | 以純文字顯示回應 |
-| `nanobot agent --logs` | 對話時顯示執行記錄 |
-| `nanobot gateway` | 啟動 Gateway 服務（連接聊天頻道） |
-| `nanobot gateway --port <埠號>` | 以指定埠號啟動 Gateway |
-| `nanobot status` | 顯示設定與連線狀態 |
-| `nanobot channels login` | WhatsApp QR Code 登入 |
-| `nanobot channels status` | 顯示各頻道連線狀態 |
-| `nanobot plugins list` | 列出所有已安裝的頻道插件 |
-| `nanobot provider login <提供商>` | OAuth 登入（openai-codex、github-copilot） |
+| `nanobot --version` | Show version number |
+| `nanobot --help` | Show help documentation |
+| `nanobot onboard` | Interactively initialize configuration and workspace |
+| `nanobot onboard -c <path> -w <path>` | Initialize or update a specific instance configuration |
+| `nanobot agent` | Enter interactive chat mode |
+| `nanobot agent -m "..."` | Single-message mode (non-interactive) |
+| `nanobot agent --no-markdown` | Display responses as plain text |
+| `nanobot agent --logs` | Show runtime logs during chat |
+| `nanobot gateway` | Start Gateway service (connects chat channels) |
+| `nanobot gateway --port <port>` | Start Gateway on a specified port |
+| `nanobot status` | Show configuration and connection status |
+| `nanobot channels login` | WhatsApp QR Code login |
+| `nanobot channels status` | Show connection status of each channel |
+| `nanobot plugins list` | List all installed channel plugins |
+| `nanobot provider login <provider>` | OAuth login (`openai-codex`, `github-copilot`) |
 
 ---
 
-## nanobot — 主命令
+## nanobot — Main Command
 
 ```
 nanobot [OPTIONS] COMMAND [ARGS]...
 ```
 
-nanobot 個人 AI 助理框架的主要入口點。
+The main entry point for the nanobot personal AI assistant framework.
 
-### 全域選項
+### Global Options
 
-| 選項 | 說明 |
+| Option | Description |
 |------|------|
-| `--version`, `-v` | 顯示版本號碼後退出 |
-| `--help` | 顯示說明文件 |
+| `--version`, `-v` | Show version number and exit |
+| `--help` | Show help documentation |
 
-### 使用範例
+### Examples
 
 ```bash
-# 顯示版本
+# Show version
 nanobot --version
 
-# 顯示所有可用指令
+# Show all available commands
 nanobot --help
 ```
 
@@ -57,44 +57,44 @@ nanobot --help
 nanobot onboard [OPTIONS]
 ```
 
-互動式初始化設定與工作區。執行精靈引導完成 API 金鑰、LLM 提供商及基本設定。
+Interactively initialize configuration and workspace. The wizard guides you through API keys, LLM provider setup, and basic settings.
 
-### 選項
+### Options
 
-| 選項 | 預設值 | 說明 |
+| Option | Default | Description |
 |------|--------|------|
-| `-c`, `--config PATH` | `~/.nanobot/config.json` | 設定檔路徑 |
-| `-w`, `--workspace PATH` | `~/.nanobot/workspace` | 工作區路徑 |
-| `--non-interactive` | `false` | 略過互動式精靈，直接建立或更新設定檔 |
+| `-c`, `--config PATH` | `~/.nanobot/config.json` | Configuration file path |
+| `-w`, `--workspace PATH` | `~/.nanobot/workspace` | Workspace path |
+| `--non-interactive` | `false` | Skip interactive wizard and directly create or update config |
 
-### 行為說明
+### Behavior
 
-- **互動模式（預設）**：啟動引導精靈，逐步設定 LLM 提供商、API 金鑰及頻道。
-- **非互動模式（`--non-interactive`）**：若設定檔不存在則以預設值建立；若已存在則詢問是否覆寫或更新缺少的欄位。
+- **Interactive mode (default):** Launches guided setup to configure LLM provider, API key, and channels step by step.
+- **Non-interactive mode (`--non-interactive`):** If config does not exist, create it with defaults; if it exists, prompt to overwrite or fill missing fields.
 
-### 使用範例
+### Examples
 
 ```bash
-# 互動式初始化（建議首次使用）
+# Interactive initialization (recommended for first-time use)
 nanobot onboard
 
-# 初始化指定實例
+# Initialize a specific instance
 nanobot onboard --config ~/.nanobot-telegram/config.json --workspace ~/.nanobot-telegram/workspace
 
-# 非互動式建立預設設定檔
+# Non-interactively create default config
 nanobot onboard --non-interactive
 
-# 以指定設定檔路徑進行非互動式初始化
+# Non-interactive initialization with a specific config path
 nanobot onboard -c ~/my-nanobot/config.json --non-interactive
 ```
 
-### 完成後的後續步驟
+### Next Steps After Completion
 
 ```bash
-# 測試設定是否正確
+# Test whether configuration is correct
 nanobot agent -m "Hello!"
 
-# 啟動 Gateway 服務以連接聊天頻道
+# Start Gateway service to connect chat channels
 nanobot gateway
 ```
 
@@ -106,55 +106,55 @@ nanobot gateway
 nanobot agent [OPTIONS]
 ```
 
-直接與 AI 代理人對話。支援單次訊息模式與互動式持續對話。
+Chat directly with the AI agent. Supports both single-message mode and persistent interactive conversations.
 
-### 選項
+### Options
 
-| 選項 | 預設值 | 說明 |
+| Option | Default | Description |
 |------|--------|------|
-| `-m`, `--message TEXT` | 無 | 單次訊息模式（非互動式），傳送訊息後立即退出 |
-| `-c`, `--config PATH` | `~/.nanobot/config.json` | 設定檔路徑 |
-| `-w`, `--workspace PATH` | 設定檔中的值 | 工作區路徑（覆寫設定檔中的值） |
-| `-s`, `--session TEXT` | `cli:direct` | 工作階段 ID |
-| `--markdown` / `--no-markdown` | `--markdown` | 是否將回應以 Markdown 格式渲染 |
-| `--logs` / `--no-logs` | `--no-logs` | 對話時是否顯示工具執行記錄 |
+| `-m`, `--message TEXT` | None | Single-message mode (non-interactive); sends one message and exits immediately |
+| `-c`, `--config PATH` | `~/.nanobot/config.json` | Configuration file path |
+| `-w`, `--workspace PATH` | Value from config | Workspace path (overrides config value) |
+| `-s`, `--session TEXT` | `cli:direct` | Session ID |
+| `--markdown` / `--no-markdown` | `--markdown` | Whether to render responses in Markdown |
+| `--logs` / `--no-logs` | `--no-logs` | Whether to show tool execution logs during chat |
 
-### 互動模式快捷鍵
+### Interactive Mode Shortcuts
 
-| 按鍵／指令 | 功能 |
+| Key / Command | Function |
 |-----------|------|
-| `exit`、`quit`、`:q` | 離開對話 |
-| `Ctrl+D` | 離開對話 |
-| `Ctrl+C` | 離開對話 |
-| 上下方向鍵 | 瀏覽歷史指令 |
-| 貼上多行文字 | 自動支援多行輸入（bracketed paste） |
+| `exit`, `quit`, `:q` | Exit chat |
+| `Ctrl+D` | Exit chat |
+| `Ctrl+C` | Exit chat |
+| Up/Down arrow keys | Browse command history |
+| Paste multiline text | Automatically supports multiline input (bracketed paste) |
 
-### 使用範例
+### Examples
 
 ```bash
-# 單次訊息模式
-nanobot agent -m "今天天氣如何？"
+# Single-message mode
+nanobot agent -m "What's the weather today?"
 
-# 進入互動式對話
+# Enter interactive chat
 nanobot agent
 
-# 使用指定設定檔
+# Use a specific config file
 nanobot agent --config ~/.nanobot-telegram/config.json
 
-# 使用指定工作區
+# Use a specific workspace
 nanobot agent --workspace /tmp/nanobot-test
 
-# 同時指定設定檔與工作區
+# Specify config and workspace together
 nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
 
-# 以純文字顯示回應（不渲染 Markdown）
+# Display plain-text responses (do not render Markdown)
 nanobot agent --no-markdown
 
-# 顯示工具執行記錄（除錯用）
+# Show tool execution logs (for debugging)
 nanobot agent --logs
 
-# 單次訊息並顯示記錄
-nanobot agent -m "列出工作區檔案" --logs
+# Single-message mode with logs
+nanobot agent -m "List files in the workspace" --logs
 ```
 
 ---
@@ -165,45 +165,45 @@ nanobot agent -m "列出工作區檔案" --logs
 nanobot gateway [OPTIONS]
 ```
 
-啟動 nanobot Gateway 服務，連接所有已啟用的聊天頻道（Telegram、Discord、Slack、WhatsApp 等）。Gateway 同時管理排程任務（Cron）與定期心跳檢查。
+Start the nanobot Gateway service and connect all enabled chat channels (Telegram, Discord, Slack, WhatsApp, etc.). Gateway also manages scheduled tasks (Cron) and periodic heartbeat checks.
 
-### 選項
+### Options
 
-| 選項 | 預設值 | 說明 |
+| Option | Default | Description |
 |------|--------|------|
-| `-c`, `--config PATH` | `~/.nanobot/config.json` | 設定檔路徑 |
-| `-w`, `--workspace PATH` | 設定檔中的值 | 工作區路徑（覆寫設定檔中的值） |
-| `-p`, `--port INT` | 設定檔中的值 | 覆寫 Gateway 埠號 |
-| `-v`, `--verbose` | `false` | 顯示詳細除錯記錄 |
+| `-c`, `--config PATH` | `~/.nanobot/config.json` | Configuration file path |
+| `-w`, `--workspace PATH` | Value from config | Workspace path (overrides config value) |
+| `-p`, `--port INT` | Value from config | Override Gateway port |
+| `-v`, `--verbose` | `false` | Show verbose debug logs |
 
-### 使用範例
+### Examples
 
 ```bash
-# 啟動 Gateway（使用預設設定）
+# Start Gateway (using default config)
 nanobot gateway
 
-# 指定埠號啟動
+# Start on a specified port
 nanobot gateway --port 18792
 
-# 使用指定設定檔啟動（多實例部署）
+# Start with a specified config file (multi-instance deployment)
 nanobot gateway --config ~/.nanobot-telegram/config.json
 
-# 多個實例同時執行
+# Run multiple instances simultaneously
 nanobot gateway --config ~/.nanobot-telegram/config.json &
 nanobot gateway --config ~/.nanobot-discord/config.json &
 nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792 &
 
-# 啟用詳細記錄（除錯用）
+# Enable verbose logs (for debugging)
 nanobot gateway --verbose
 ```
 
-### 啟動後顯示資訊
+### Startup Information
 
-Gateway 啟動時會顯示：
+When Gateway starts, it shows:
 
-- 已啟用的頻道清單
-- 已設定的排程任務數量
-- 心跳檢查間隔時間
+- List of enabled channels
+- Number of configured scheduled tasks
+- Heartbeat check interval
 
 ---
 
@@ -213,15 +213,15 @@ Gateway 啟動時會顯示：
 nanobot status
 ```
 
-顯示目前設定與連線狀態，包括設定檔路徑、工作區路徑、使用的模型以及各 LLM 提供商的 API 金鑰狀態。
+Show current configuration and connection status, including config path, workspace path, selected model, and API key status for each LLM provider.
 
-### 使用範例
+### Example
 
 ```bash
 nanobot status
 ```
 
-### 輸出範例
+### Example Output
 
 ```
 🐈 nanobot Status
@@ -242,9 +242,9 @@ OpenAI: not set
 nanobot channels COMMAND [ARGS]...
 ```
 
-管理聊天頻道連線的子指令群組。
+Subcommand group for managing chat channel connections.
 
-### 子指令
+### Subcommands
 
 #### nanobot channels login
 
@@ -252,21 +252,21 @@ nanobot channels COMMAND [ARGS]...
 nanobot channels login
 ```
 
-透過 QR Code 掃描進行 WhatsApp 登入。首次使用或重新授權時執行此指令。
+Log in to WhatsApp by scanning a QR Code. Run this command for first-time use or re-authorization.
 
-若尚未安裝 Node.js bridge，此指令會自動下載並建置。
+If Node.js bridge is not installed, this command will download and build it automatically.
 
-**需求：**
+**Requirements:**
 - Node.js >= 18
 - npm
 
-**使用範例：**
+**Examples:**
 
 ```bash
-# 首次 WhatsApp 登入
+# First-time WhatsApp login
 nanobot channels login
 
-# 重新建置 bridge 後登入（升級後使用）
+# Rebuild bridge and login again (after upgrade)
 rm -rf ~/.nanobot/bridge && nanobot channels login
 ```
 
@@ -278,15 +278,15 @@ rm -rf ~/.nanobot/bridge && nanobot channels login
 nanobot channels status
 ```
 
-以表格形式顯示所有已發現頻道（內建與插件）的啟用狀態。
+Show enabled status of all discovered channels (built-in and plugin) in table format.
 
-**使用範例：**
+**Example:**
 
 ```bash
 nanobot channels status
 ```
 
-**輸出範例：**
+**Example Output:**
 
 ```
         Channel Status
@@ -308,9 +308,9 @@ nanobot channels status
 nanobot plugins COMMAND [ARGS]...
 ```
 
-管理頻道插件的子指令群組。
+Subcommand group for managing channel plugins.
 
-### 子指令
+### Subcommands
 
 #### nanobot plugins list
 
@@ -318,9 +318,9 @@ nanobot plugins COMMAND [ARGS]...
 nanobot plugins list
 ```
 
-列出所有已發現的頻道（包含內建頻道與第三方插件），顯示名稱、來源（builtin / plugin）及啟用狀態。
+List all discovered channels (including built-in channels and third-party plugins), showing name, source (`builtin` / `plugin`), and enabled status.
 
-**使用範例：**
+**Example:**
 
 ```bash
 nanobot plugins list
@@ -334,9 +334,9 @@ nanobot plugins list
 nanobot provider COMMAND [ARGS]...
 ```
 
-管理 LLM 提供商的子指令群組。
+Subcommand group for managing LLM providers.
 
-### 子指令
+### Subcommands
 
 #### nanobot provider login
 
@@ -344,66 +344,66 @@ nanobot provider COMMAND [ARGS]...
 nanobot provider login PROVIDER
 ```
 
-透過 OAuth 流程登入指定的 LLM 提供商。
+Log in to the specified LLM provider through OAuth.
 
-**參數：**
+**Arguments:**
 
-| 參數 | 說明 |
+| Argument | Description |
 |------|------|
-| `PROVIDER` | 提供商名稱（見下表） |
+| `PROVIDER` | Provider name (see table below) |
 
-**支援的 OAuth 提供商：**
+**Supported OAuth providers:**
 
-| 提供商名稱 | 說明 |
+| Provider Name | Description |
 |-----------|------|
-| `openai-codex` | OpenAI Codex（OAuth 授權） |
-| `github-copilot` | GitHub Copilot（裝置授權流程） |
+| `openai-codex` | OpenAI Codex (OAuth authorization) |
+| `github-copilot` | GitHub Copilot (device authorization flow) |
 
-**使用範例：**
+**Examples:**
 
 ```bash
-# 登入 OpenAI Codex
+# Log in to OpenAI Codex
 nanobot provider login openai-codex
 
-# 登入 GitHub Copilot
+# Log in to GitHub Copilot
 nanobot provider login github-copilot
 ```
 
 ---
 
-## 多實例部署
+## Multi-Instance Deployment
 
-nanobot 支援同時執行多個獨立實例，每個實例擁有各自的設定檔與工作區。使用 `--config` 作為主要區分參數。
+nanobot supports running multiple independent instances at the same time, each with its own config file and workspace. Use `--config` as the primary discriminator.
 
-### 快速設定
+### Quick Setup
 
 ```bash
-# 初始化各實例
+# Initialize each instance
 nanobot onboard --config ~/.nanobot-telegram/config.json --workspace ~/.nanobot-telegram/workspace
 nanobot onboard --config ~/.nanobot-discord/config.json --workspace ~/.nanobot-discord/workspace
 nanobot onboard --config ~/.nanobot-feishu/config.json --workspace ~/.nanobot-feishu/workspace
 
-# 分別啟動各實例的 Gateway
+# Start Gateway for each instance separately
 nanobot gateway --config ~/.nanobot-telegram/config.json
 nanobot gateway --config ~/.nanobot-discord/config.json
 nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792
 ```
 
-### 多實例使用 agent 指令
+### Using agent Command with Multiple Instances
 
 ```bash
-# 對特定實例發送訊息
+# Send a message to a specific instance
 nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello from Telegram instance"
 nanobot agent -c ~/.nanobot-discord/config.json -m "Hello from Discord instance"
 
-# 覆寫工作區（測試用）
+# Override workspace (for testing)
 nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
 ```
 
-### 路徑解析邏輯
+### Path Resolution Logic
 
-| 設定項目 | 來源 |
+| Setting Item | Source |
 |---------|------|
-| 設定檔 | `--config` 指定的路徑 |
-| 工作區 | `--workspace` 覆寫 > 設定檔中的 `agents.defaults.workspace` |
-| 執行時資料目錄 | 由設定檔位置自動推導 |
+| Config file | Path specified by `--config` |
+| Workspace | `--workspace` override > `agents.defaults.workspace` in config |
+| Runtime data directory | Automatically derived from config file location |

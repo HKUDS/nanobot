@@ -1,79 +1,79 @@
 # Slack
 
-nanobot 透過 Slack **Socket Mode** 連線，無需公開 URL 或 Webhook。支援頻道 Thread 回覆、檔案上傳，以及表情符號回應（reaction）。
+nanobot connects to Slack using **Socket Mode**, so you do not need to expose a public URL or webhook. Supports channel thread replies, file uploads, and emoji reactions.
 
 ---
 
-## 前置條件
+## Prerequisites
 
-- 一個 Slack 帳號
-- 具有安裝 App 權限的 Slack Workspace
-
----
-
-## 步驟一：建立 Slack App
-
-1. 前往 [Slack API](https://api.slack.com/apps)
-2. 點擊 **Create New App** → 選擇 **From scratch**
-3. 輸入 App 名稱並選擇您的 Workspace
-4. 點擊 **Create App**
+- A Slack account
+- A workspace where you can install apps
 
 ---
 
-## 步驟二：啟用 Socket Mode 並取得 App Token
+## Step 1: Create a Slack app
 
-1. 在左側選單點擊 **Socket Mode**
-2. 將 Socket Mode **Toggle ON**
-3. 點擊 **Generate an app-level token**
-4. 輸入 Token 名稱（例如 `nanobot-socket`）
-5. 點擊 **Add Scope** → 選擇 `connections:write`
-6. 點擊 **Generate**，複製 **App-Level Token**（格式：`xapp-1-...`）
+1. Visit [Slack API](https://api.slack.com/apps)
+2. Click **Create New App** → choose **From scratch**
+3. Enter an app name and pick your workspace
+4. Click **Create App**
 
 ---
 
-## 步驟三：設定 OAuth 權限與 Bot Token
+## Step 2: Enable Socket Mode and get an app token
 
-1. 在左側選單點擊 **OAuth & Permissions**
-2. 在 **Bot Token Scopes** 中新增以下 Scope：
-   - `chat:write` — 發送訊息
-   - `reactions:write` — 添加表情回應
-   - `app_mentions:read` — 讀取 @提及
-   - `files:write` — （選用）上傳檔案
-3. 點擊頁面頂部的 **Install to Workspace** → 授權
-4. 複製 **Bot User OAuth Token**（格式：`xoxb-...`）
+1. In the left menu, choose **Socket Mode**
+2. Toggle **Socket Mode** to ON
+3. Click **Generate an app-level token**
+4. Enter a token name (e.g. `nanobot-socket`)
+5. Click **Add Scope** → select `connections:write`
+6. Click **Generate**, then copy the **App-Level Token** (format: `xapp-1-...`)
 
 ---
 
-## 步驟四：訂閱事件
+## Step 3: Configure OAuth scopes and bot token
 
-1. 在左側選單點擊 **Event Subscriptions**
-2. 將 **Enable Events** Toggle ON
-3. 在 **Subscribe to bot events** 中新增：
-   - `message.im` — 接收私訊
-   - `message.channels` — 接收頻道訊息
-   - `app_mention` — 接收 @提及
-4. 點擊 **Save Changes**
-
----
-
-## 步驟五：啟用 Messages Tab
-
-1. 在左側選單點擊 **App Home**
-2. 在 **Show Tabs** 區塊啟用 **Messages Tab**
-3. 勾選 **Allow users to send Slash commands and messages from the messages tab**
+1. In the left menu, select **OAuth & Permissions**
+2. Under **Bot Token Scopes**, add:
+   - `chat:write` — send messages
+   - `reactions:write` — add emoji reactions
+   - `app_mentions:read` — read mentions
+   - `files:write` — (optional) upload files
+3. Click **Install to Workspace** at the top → authorize
+4. Copy the **Bot User OAuth Token** (format: `xoxb-...`)
 
 ---
 
-## 步驟六：取得您的 Slack 使用者 ID
+## Step 4: Subscribe to events
 
-1. 在 Slack 中點擊您的個人資料
-2. 點擊 **...** → **複製成員 ID**
-
-格式類似：`U0123456789`
+1. In the left menu, open **Event Subscriptions**
+2. Toggle **Enable Events** to ON
+3. Under **Subscribe to bot events**, add:
+   - `message.im` — receive direct messages
+   - `message.channels` — receive channel messages
+   - `app_mention` — receive mentions
+4. Click **Save Changes**
 
 ---
 
-## 步驟七：設定 config.json
+## Step 5: Enable the Messages Tab
+
+1. In the left menu, go to **App Home**
+2. Under **Show Tabs**, enable the **Messages Tab**
+3. Check **Allow users to send Slash commands and messages from the messages tab**
+
+---
+
+## Step 6: Get your Slack user ID
+
+1. Click your profile in Slack
+2. Click **...** → **Copy member ID**
+
+The ID looks like `U0123456789`.
+
+---
+
+## Step 7: Configure `config.json`
 
 ```json
 {
@@ -89,7 +89,7 @@ nanobot 透過 Slack **Socket Mode** 連線，無需公開 URL 或 Webhook。支
 }
 ```
 
-### 完整設定選項
+### Full configuration options
 
 ```json
 {
@@ -115,46 +115,46 @@ nanobot 透過 Slack **Socket Mode** 連線，無需公開 URL 或 Webhook。支
 }
 ```
 
-| 參數 | 預設值 | 說明 |
-|------|--------|------|
-| `enabled` | `false` | 是否啟用此頻道 |
-| `mode` | `"socket"` | 連線模式（目前僅支援 `"socket"`） |
-| `botToken` | `""` | Bot User OAuth Token（`xoxb-...`） |
-| `appToken` | `""` | App-Level Token（`xapp-...`） |
-| `allowFrom` | `[]` | 允許互動的使用者 ID 列表 |
-| `groupPolicy` | `"mention"` | 頻道訊息處理策略（見下方） |
-| `groupAllowFrom` | `[]` | 當 `groupPolicy` 為 `"allowlist"` 時，允許的頻道 ID |
-| `replyInThread` | `true` | 是否在 Thread 中回覆 |
-| `reactEmoji` | `"eyes"` | 收到訊息時添加的 reaction |
-| `doneEmoji` | `"white_check_mark"` | 回應完成時的 reaction |
-| `dm.enabled` | `true` | 是否接受私訊 |
-| `dm.policy` | `"open"` | 私訊策略 |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `enabled` | `false` | Whether to enable this channel |
+| `mode` | `"socket"` | Connection mode (only `"socket"` supported now) |
+| `botToken` | `""` | Bot User OAuth Token (`xoxb-...`) |
+| `appToken` | `""` | App-Level Token (`xapp-...`) |
+| `allowFrom` | `[]` | List of user IDs allowed to interact |
+| `groupPolicy` | `"mention"` | How channel messages are handled (see below) |
+| `groupAllowFrom` | `[]` | Allowed channel IDs when `groupPolicy` is `"allowlist"` |
+| `replyInThread` | `true` | Whether the bot replies in the thread |
+| `reactEmoji` | `"eyes"` | Reaction emoji added when a message is received |
+| `doneEmoji` | `"white_check_mark"` | Reaction emoji added when a reply completes |
+| `dm.enabled` | `true` | Whether to accept direct messages |
+| `dm.policy` | `"open"` | Direct message policy |
 
-### `groupPolicy` 說明
+### `groupPolicy` explanation
 
-| 值 | 行為 |
-|----|------|
-| `"mention"`（預設） | 僅在頻道中被 @提及時才回應 |
-| `"open"` | 回應頻道中的所有訊息 |
-| `"allowlist"` | 僅回應 `groupAllowFrom` 中指定頻道的訊息 |
+| Value | Behavior |
+|-------|----------|
+| `"mention"` (default) | Respond only when mentioned in a channel |
+| `"open"` | Respond to every channel message |
+| `"allowlist"` | Respond only in the channels listed in `groupAllowFrom` |
 
 ---
 
-## 步驟八：啟動
+## Step 8: Run nanobot
 
 ```bash
 nanobot gateway
 ```
 
-直接傳私訊給 Bot，或在頻道中 @提及 Bot，即可開始互動。
+Message the bot directly or mention it in a channel to start interacting.
 
 ---
 
-## Thread 支援
+## Thread support
 
-`replyInThread` 預設為 `true`，Bot 的回應會在原訊息的 Thread 中顯示，保持頻道整潔。
+`replyInThread` defaults to `true`, so replies appear in the original thread to keep channels tidy.
 
-若要停用 Thread 回覆：
+To disable thread replies:
 
 ```json
 {
@@ -166,14 +166,14 @@ nanobot gateway
 }
 ```
 
-!!! note "私訊不使用 Thread"
-    私訊（DM）不會使用 Thread，即使 `replyInThread` 為 `true`。
+!!! note "DMs do not use threads"
+    Direct messages never appear in threads even if `replyInThread` is `true`.
 
 ---
 
-## 禁用私訊
+## Disable direct messages
 
-若只想讓 Bot 在頻道中使用，可以禁用私訊：
+If you only want the bot to operate in channels, disable DMs:
 
 ```json
 {
@@ -189,23 +189,23 @@ nanobot gateway
 
 ---
 
-## 常見問題
+## FAQ
 
-**Bot 沒有收到私訊？**
+**Bot not receiving DMs?**
 
-- 確認已在 App Home 中啟用 Messages Tab
-- 確認已訂閱 `message.im` 事件
+- Ensure the Messages Tab is enabled in App Home
+- Verify `message.im` is subscribed
 
-**Bot 在頻道中沒有回應？**
+**Bot not responding in channels?**
 
-- 確認已訂閱 `message.channels` 和 `app_mention` 事件
-- 若 `groupPolicy` 為 `"mention"`，需要 @提及 Bot
+- Confirm `message.channels` and `app_mention` are subscribed
+- If `groupPolicy` is `"mention"`, mention the bot
 
-**`xapp` Token 是什麼？**
+**What is the `xapp` token?**
 
-- 這是 App-Level Token，與 Bot Token（`xoxb`）不同
-- 在 **Socket Mode** 設定頁面生成，用於建立 WebSocket 連線
+- This is the App-Level Token, different from the bot token (`xoxb`)
+- Generated on the Socket Mode page for establishing the WebSocket connection
 
-**安裝後需要重新授權嗎？**
+**Do I need to reinstall after scope changes?**
 
-- 每次修改 Bot Scopes 後，需要重新點擊 **Install to Workspace** 重新授權
+- Yes, re-run **Install to Workspace** after modifying bot scopes to reauthorize

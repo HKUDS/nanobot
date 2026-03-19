@@ -1,83 +1,83 @@
-# 入門指南
+# Getting Started Guide
 
-歡迎使用 **nanobot** — 一個超輕量的個人 AI 助手框架，支援 16+ 個聊天平台、多個 LLM 提供商，以及 MCP 整合。
+Welcome to **nanobot** — an ultra-lightweight personal AI assistant framework that supports 16+ chat platforms, multiple LLM providers, and MCP integration.
 
-本節將引導您從安裝到與您的 AI 助手進行第一次對話，全程只需幾分鐘。
+This section guides you from installation to your first conversation with your AI assistant in just a few minutes.
 
 ---
 
-## 本節內容
+## Contents
 
 <div class="grid cards" markdown>
 
--   :material-download-box:{ .lg .middle } **安裝**
+-   :material-download-box:{ .lg .middle } **Installation**
 
     ---
 
-    系統需求、安裝方式（pip / uv / 源碼 / Docker），以及常見問題排解。
+    System requirements, installation methods (pip / uv / source / Docker), and common troubleshooting.
 
-    [:octicons-arrow-right-24: 安裝指南](installation.md)
+    [:octicons-arrow-right-24: Installation Guide](installation.md)
 
--   :material-rocket-launch:{ .lg .middle } **快速開始**
-
-    ---
-
-    5 分鐘內完成設定，讓 nanobot 在 Telegram 或 CLI 上開始運作。
-
-    [:octicons-arrow-right-24: 快速開始](quick-start.md)
-
--   :material-wizard-hat:{ .lg .middle } **Onboarding 精靈**
+-   :material-rocket-launch:{ .lg .middle } **Quick Start**
 
     ---
 
-    深入了解 `nanobot onboard` 精靈的每個步驟，以及如何自訂 workspace 範本。
+    Complete setup in 5 minutes and get nanobot running on Telegram or CLI.
 
-    [:octicons-arrow-right-24: Onboarding 精靈](onboarding.md)
+    [:octicons-arrow-right-24: Quick Start](quick-start.md)
+
+-   :material-wizard-hat:{ .lg .middle } **Onboarding Wizard**
+
+    ---
+
+    Learn each step of the `nanobot onboard` wizard in depth, and how to customize workspace templates.
+
+    [:octicons-arrow-right-24: Onboarding Wizard](onboarding.md)
 
 </div>
 
 ---
 
-## 學習路徑
+## Learning Path
 
 ```
-安裝 nanobot
+Install nanobot
     ↓
-執行 nanobot onboard（初始化設定與 workspace）
+Run nanobot onboard (initialize config and workspace)
     ↓
-編輯 ~/.nanobot/config.json（設定 API 金鑰與模型）
+Edit ~/.nanobot/config.json (set API keys and model)
     ↓
-nanobot agent（在 CLI 對話）
+nanobot agent (chat in CLI)
     ↓
-連接聊天頻道（Telegram / Discord / Slack 等）
+Connect chat channels (Telegram / Discord / Slack, etc.)
     ↓
-nanobot gateway（啟動 gateway，接收即時訊息）
+nanobot gateway (start gateway and receive real-time messages)
 ```
 
-## 前置需求
+## Prerequisites
 
-在開始之前，請確認您已準備好：
+Before you start, make sure you have:
 
-| 需求 | 說明 |
+| Requirement | Description |
 |------|------|
-| **Python 3.11+** | nanobot 需要 Python 3.11 或更新版本 |
-| **uv**（推薦）或 **pip** | Python 套件管理工具 |
-| **LLM API 金鑰** | 例如 OpenRouter、Anthropic、OpenAI 等 |
-| **（選用）聊天平台 Bot Token** | 例如 Telegram Bot Token，若要連接聊天平台 |
+| **Python 3.11+** | nanobot requires Python 3.11 or newer |
+| **uv** (recommended) or **pip** | Python package manager |
+| **LLM API key** | Such as OpenRouter, Anthropic, OpenAI, etc. |
+| **(Optional) Chat platform Bot Token** | Such as Telegram Bot Token, if you want to connect chat platforms |
 
-!!! tip "新手推薦"
-    如果您不確定從哪裡取得 API 金鑰，推薦使用 [OpenRouter](https://openrouter.ai/keys)，它支援全球主流模型，且提供免費額度。
+!!! tip "Recommended for beginners"
+    If you are not sure where to get an API key, we recommend [OpenRouter](https://openrouter.ai/keys). It supports mainstream models worldwide and offers a free tier.
 
-## 最常見的問題
+## Most Common Questions
 
-**Q: nanobot 支援哪些 LLM？**
+**Q: Which LLMs does nanobot support?**
 
-支援 20+ 個 LLM 提供商，包括 OpenAI、Anthropic Claude、Google Gemini、DeepSeek、Qwen、本地 Ollama 等。詳見 [Providers 文件](../providers/index.md)。
+It supports 20+ LLM providers, including OpenAI, Anthropic Claude, Google Gemini, DeepSeek, Qwen, local Ollama, and more. See [Providers docs](../providers/index.md) for details.
 
-**Q: 需要公開 IP 嗎？**
+**Q: Do I need a public IP?**
 
-不需要。大部分聊天頻道（Telegram、Discord、Feishu、DingTalk、Slack）都使用 WebSocket 長連線或 Socket Mode，無需公開 IP。
+No. Most chat channels (Telegram, Discord, Feishu, DingTalk, Slack) use long-lived WebSocket connections or Socket Mode and do not require a public IP.
 
-**Q: nanobot 佔用多少資源？**
+**Q: How many resources does nanobot use?**
 
-極少。nanobot 核心只有約 16,000 行 Python 程式碼，啟動速度快，記憶體佔用極低。
+Very little. nanobot core has only around 16,000 lines of Python code, with fast startup and very low memory usage.

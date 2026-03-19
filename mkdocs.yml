@@ -1,5 +1,5 @@
 site_name: Nanobot
-site_description: 超輕量個人 AI 助理框架，支援 16+ 聊天平台
+site_description: Ultra-lightweight personal AI assistant framework supporting 16+ chat platforms
 site_url: https://nanobot.dev
 repo_url: https://github.com/HKUDS/nanobot
 repo_name: nanobot
@@ -7,7 +7,7 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
-  language: zh-TW
+  language: en
   logo: assets/logo.svg
   favicon: assets/logo.svg
   palette:
@@ -17,14 +17,14 @@ theme:
       accent: indigo
       toggle:
         icon: material/brightness-7
-        name: 切換至深色模式
+        name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       primary: indigo
       accent: indigo
       toggle:
         icon: material/brightness-4
-        name: 切換至淺色模式
+        name: Switch to light mode
   features:
     - navigation.tabs
     - navigation.tabs.sticky
@@ -47,223 +47,9 @@ not_in_nav: |
   CHANNEL_PLUGIN_GUIDE.md
 
 plugins:
-  - i18n:
-      docs_structure: folder
-      fallback_to_default: true
-      reconfigure_material: true
-      reconfigure_search: true
-      languages:
-        - locale: zh-TW
-          name: 繁體中文
-          default: true
-          build: true
-        - locale: en
-          name: English
-          build: true
-          site_description: Ultra-lightweight personal AI assistant framework supporting 16+ chat platforms
-          theme:
-            palette:
-              - media: "(prefers-color-scheme: light)"
-                scheme: default
-                primary: indigo
-                accent: indigo
-                toggle:
-                  icon: material/brightness-7
-                  name: Switch to dark mode
-              - media: "(prefers-color-scheme: dark)"
-                scheme: slate
-                primary: indigo
-                accent: indigo
-                toggle:
-                  icon: material/brightness-4
-                  name: Switch to light mode
-          nav:
-            - Home: index.md
-            - Getting Started:
-                - getting-started/index.md
-                - Installation: getting-started/installation.md
-                - Quick Start: getting-started/quick-start.md
-                - Onboarding: getting-started/onboarding.md
-            - Channels:
-                - channels/index.md
-                - Telegram: channels/telegram.md
-                - Discord: channels/discord.md
-                - Slack: channels/slack.md
-                - Feishu: channels/feishu.md
-                - DingTalk: channels/dingtalk.md
-                - WeCom: channels/wecom.md
-                - QQ: channels/qq.md
-                - Email: channels/email.md
-                - Matrix: channels/matrix.md
-                - WhatsApp: channels/whatsapp.md
-                - Mochat: channels/mochat.md
-            - LLM Providers:
-                - providers/index.md
-                - OpenRouter: providers/openrouter.md
-                - Anthropic: providers/anthropic.md
-                - OpenAI: providers/openai.md
-                - Other Providers: providers/others.md
-                - Local Models: providers/local.md
-            - Configuration Reference:
-                - configuration/index.md
-                - Full Configuration Reference: configuration/reference.md
-                - Multi-instance Configuration: configuration/multi-instance.md
-            - Tools & Skills:
-                - tools-skills/index.md
-                - Built-in Tools: tools-skills/tools.md
-                - Skills System: tools-skills/skills.md
-                - MCP Integration: tools-skills/mcp.md
-            - Deployment:
-                - deployment/index.md
-                - Gateway Service: deployment/gateway.md
-                - Docker: deployment/docker.md
-                - Linux Service: deployment/linux-service.md
-            - Development:
-                - development/index.md
-                - Architecture: development/architecture.md
-                - Contributing Guide: development/contributing.md
-                - Channel Plugin Development: development/channel-plugin.md
-            - CLI Reference: cli-reference.md
-        - locale: de
-          name: Deutsch
-          build: true
-          site_description: Ultraleichtes Framework für persönliche KI-Assistenten mit Unterstützung für 16+ Chat-Plattformen
-          theme:
-            palette:
-              - media: "(prefers-color-scheme: light)"
-                scheme: default
-                primary: indigo
-                accent: indigo
-                toggle:
-                  icon: material/brightness-7
-                  name: Zu dunklem Modus wechseln
-              - media: "(prefers-color-scheme: dark)"
-                scheme: slate
-                primary: indigo
-                accent: indigo
-                toggle:
-                  icon: material/brightness-4
-                  name: Zu hellem Modus wechseln
-          nav:
-            - Startseite: index.md
-            - Erste Schritte:
-                - getting-started/index.md
-                - Installation: getting-started/installation.md
-                - Schnellstart: getting-started/quick-start.md
-                - Onboarding: getting-started/onboarding.md
-            - Kanäle:
-                - channels/index.md
-                - Telegram: channels/telegram.md
-                - Discord: channels/discord.md
-                - Slack: channels/slack.md
-                - Feishu: channels/feishu.md
-                - DingTalk: channels/dingtalk.md
-                - WeCom: channels/wecom.md
-                - QQ: channels/qq.md
-                - E-Mail: channels/email.md
-                - Matrix: channels/matrix.md
-                - WhatsApp: channels/whatsapp.md
-                - Mochat: channels/mochat.md
-            - LLM-Anbieter:
-                - providers/index.md
-                - OpenRouter: providers/openrouter.md
-                - Anthropic: providers/anthropic.md
-                - OpenAI: providers/openai.md
-                - Weitere Anbieter: providers/others.md
-                - Lokale Modelle: providers/local.md
-            - Konfigurationsreferenz:
-                - configuration/index.md
-                - Vollständige Konfigurationsreferenz: configuration/reference.md
-                - Multi-Instanz-Konfiguration: configuration/multi-instance.md
-            - Tools und Skills:
-                - tools-skills/index.md
-                - Integrierte Tools: tools-skills/tools.md
-                - Skill-System: tools-skills/skills.md
-                - MCP-Integration: tools-skills/mcp.md
-            - Bereitstellung:
-                - deployment/index.md
-                - Gateway-Dienst: deployment/gateway.md
-                - Docker: deployment/docker.md
-                - Linux-Dienst: deployment/linux-service.md
-            - Entwicklung:
-                - development/index.md
-                - Architektur: development/architecture.md
-                - Beitragsleitfaden: development/contributing.md
-                - Entwicklung von Kanal-Plugins: development/channel-plugin.md
-            - CLI-Referenz: cli-reference.md
-        - locale: ja
-          name: 日本語
-          build: true
-          site_description: 16+ のチャットプラットフォームをサポートする超軽量な個人向け AI アシスタントフレームワーク
-          theme:
-            palette:
-              - media: "(prefers-color-scheme: light)"
-                scheme: default
-                primary: indigo
-                accent: indigo
-                toggle:
-                  icon: material/brightness-7
-                  name: ダークモードに切り替え
-              - media: "(prefers-color-scheme: dark)"
-                scheme: slate
-                primary: indigo
-                accent: indigo
-                toggle:
-                  icon: material/brightness-4
-                  name: ライトモードに切り替え
-          nav:
-            - ホーム: index.md
-            - はじめに:
-                - getting-started/index.md
-                - インストール: getting-started/installation.md
-                - クイックスタート: getting-started/quick-start.md
-                - オンボーディング: getting-started/onboarding.md
-            - チャンネル設定:
-                - channels/index.md
-                - Telegram: channels/telegram.md
-                - Discord: channels/discord.md
-                - Slack: channels/slack.md
-                - Feishu: channels/feishu.md
-                - DingTalk: channels/dingtalk.md
-                - WeCom: channels/wecom.md
-                - QQ: channels/qq.md
-                - Email: channels/email.md
-                - Matrix: channels/matrix.md
-                - WhatsApp: channels/whatsapp.md
-                - Mochat: channels/mochat.md
-            - LLMプロバイダー:
-                - providers/index.md
-                - OpenRouter: providers/openrouter.md
-                - Anthropic: providers/anthropic.md
-                - OpenAI: providers/openai.md
-                - その他のプロバイダー: providers/others.md
-                - ローカルモデル: providers/local.md
-            - 設定リファレンス:
-                - configuration/index.md
-                - 完全設定リファレンス: configuration/reference.md
-                - マルチインスタンス設定: configuration/multi-instance.md
-            - ツールとスキル:
-                - tools-skills/index.md
-                - 組み込みツール: tools-skills/tools.md
-                - スキルシステム: tools-skills/skills.md
-                - MCP 統合: tools-skills/mcp.md
-            - デプロイ:
-                - deployment/index.md
-                - Gateway サービス: deployment/gateway.md
-                - Docker: deployment/docker.md
-                - Linux サービス: deployment/linux-service.md
-            - 開発:
-                - development/index.md
-                - アーキテクチャ: development/architecture.md
-                - コントリビューションガイド: development/contributing.md
-                - チャンネルプラグイン開発: development/channel-plugin.md
-            - CLI リファレンス: cli-reference.md
   - search:
       lang:
-        - zh
         - en
-        - de
-        - ja
   - minify:
       minify_html: true
 
@@ -319,49 +105,49 @@ extra_css:
   - assets/extra.css
 
 nav:
-  - 首頁: index.md
-  - 快速開始:
+  - Home: index.md
+  - Getting Started:
       - getting-started/index.md
-      - 安裝: getting-started/installation.md
-      - 快速入門: getting-started/quick-start.md
-      - 互動設定: getting-started/onboarding.md
-  - 頻道設定:
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quick-start.md
+      - Onboarding: getting-started/onboarding.md
+  - Channels:
       - channels/index.md
       - Telegram: channels/telegram.md
       - Discord: channels/discord.md
       - Slack: channels/slack.md
-      - 飛書 (Feishu): channels/feishu.md
-      - 釘釘 (DingTalk): channels/dingtalk.md
-      - 企業微信 (WeCom): channels/wecom.md
+      - Feishu: channels/feishu.md
+      - DingTalk: channels/dingtalk.md
+      - WeCom: channels/wecom.md
       - QQ: channels/qq.md
       - Email: channels/email.md
       - Matrix: channels/matrix.md
       - WhatsApp: channels/whatsapp.md
       - Mochat: channels/mochat.md
-  - LLM 提供商:
+  - LLM Providers:
       - providers/index.md
       - OpenRouter: providers/openrouter.md
       - Anthropic: providers/anthropic.md
       - OpenAI: providers/openai.md
-      - 其他提供商: providers/others.md
-      - 本地模型: providers/local.md
-  - 設定參考:
+      - Other Providers: providers/others.md
+      - Local Models: providers/local.md
+  - Configuration Reference:
       - configuration/index.md
-      - 完整設定參考: configuration/reference.md
-      - 多實例設定: configuration/multi-instance.md
-  - 工具與技能:
+      - Full Configuration Reference: configuration/reference.md
+      - Multi-instance Configuration: configuration/multi-instance.md
+  - Tools & Skills:
       - tools-skills/index.md
-      - 內建工具: tools-skills/tools.md
-      - 技能系統: tools-skills/skills.md
-      - MCP 整合: tools-skills/mcp.md
-  - 部署:
+      - Built-in Tools: tools-skills/tools.md
+      - Skills System: tools-skills/skills.md
+      - MCP Integration: tools-skills/mcp.md
+  - Deployment:
       - deployment/index.md
-      - Gateway 服務: deployment/gateway.md
+      - Gateway Service: deployment/gateway.md
       - Docker: deployment/docker.md
-      - Linux 服務: deployment/linux-service.md
-  - 開發:
+      - Linux Service: deployment/linux-service.md
+  - Development:
       - development/index.md
-      - 架構說明: development/architecture.md
-      - 貢獻指南: development/contributing.md
-      - 頻道插件開發: development/channel-plugin.md
-  - CLI 指令: cli-reference.md
+      - Architecture: development/architecture.md
+      - Contributing Guide: development/contributing.md
+      - Channel Plugin Development: development/channel-plugin.md
+  - CLI Reference: cli-reference.md

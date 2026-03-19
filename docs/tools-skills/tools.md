@@ -1,165 +1,163 @@
-# 內建工具使用指南
+# Built-in tools guide
 
-Nanobot 代理配備了一組內建工具，涵蓋 Shell 執行、檔案系統操作、網路存取、排程與訊息傳送。本頁詳述每個工具的用途、參數與實際範例。
+Nanobot agents ship with a set of built-in tools covering shell execution, filesystem operations, web access, scheduling, and messaging. This page documents each tool’s purpose, parameters, and real-world examples.
 
 ---
 
-## Shell 工具（`exec`）
+## Shell tool (`exec`)
 
-執行任意 Shell 指令，並回傳標準輸出與標準錯誤。
+Runs arbitrary shell commands while returning their stdout and stderr.
 
-### 參數
+### Parameters
 
-| 參數 | 類型 | 必填 | 說明 |
+| Parameter | Type | Required | Description |
 |------|------|------|------|
-| `command` | string | 是 | 要執行的 Shell 指令 |
-| `working_dir` | string | 否 | 指令的工作目錄 |
-| `timeout` | integer | 否 | 逾時秒數（預設 60，最大 600） |
+| `command` | string | yes | The shell command to execute |
+| `working_dir` | string | no | Directory where the command runs |
+| `timeout` | integer | no | Timeout in seconds (default 60, max 600) |
 
-### 使用範例
+### Usage examples
 
 ```bash
-# 執行 Python 腳本
+# Run a Python script
 exec(command="python3 script.py")
 
-# 安裝 npm 套件（延長逾時）
+# Install npm dependencies with extra timeout
 exec(command="npm install", working_dir="/project", timeout=300)
 
-# 在特定目錄列出檔案
+# List files inside /tmp
 exec(command="ls -la", working_dir="/tmp")
 ```
 
-### 安全防護
+### Safety guardrails
 
-Shell 工具內建多層安全防護，以下指令模式會被自動封鎖：
+The shell tool blocks dangerous commands such as:
 
-| 被封鎖的模式 | 說明 |
+| Blocked pattern | Description |
 |------------|------|
-| `rm -rf` / `rm -r` | 遞迴刪除 |
-| `format` / `mkfs` / `diskpart` | 磁碟格式化 |
-| `dd if=` | 直接寫入磁碟 |
-| `shutdown` / `reboot` / `poweroff` | 系統電源操作 |
-| Fork bomb `:(){ ... }` | 資源耗盡攻擊 |
-| 指向內網 IP 的 URL | SSRF 防護 |
+| `rm -rf` / `rm -r` | Recursive deletion |
+| `format` / `mkfs` / `diskpart` | Disk formatting |
+| `dd if=` | Direct disk writes |
+| `shutdown` / `reboot` / `poweroff` | Power operations |
+| Fork bomb `:(){ ... }` | Resource exhaustion |
+| URLs pointing to internal IPs | SSRF protection |
 
-此外，若啟用 `restrict_to_workspace`，工具將拒絕任何存取工作區目錄以外路徑的指令（包含 `../` 路徑穿越）。
+When `restrict_to_workspace` is enabled, the tool also rejects any commands accessing paths outside the workspace (including `../`).
 
-### 配置選項
-
-在 `config.yaml` 中可調整下列選項：
+### Configuration options
 
 ```yaml
 tools:
   exec:
-    timeout: 120          # 預設逾時秒數
-    path_append: "/usr/local/bin"  # 附加至 PATH 環境變數
-  restrict_to_workspace: false    # 限制所有工具只能存取工作區
+    timeout: 120          # Default timeout in seconds
+    path_append: "/usr/local/bin"  # Extra PATH entries
+  restrict_to_workspace: false    # Limit all tools to workspace
 ```
 
-**自訂封鎖清單**：可在程式碼層級透過 `deny_patterns`（正規表達式清單）覆寫預設的危險指令模式，或使用 `allow_patterns` 建立明確的允許清單（白名單模式）。
+You can also customize `deny_patterns` (regex) or use `allow_patterns` for whitelist enforcement.
 
-### 輸出截斷
+### Output truncation
 
-單次執行結果最多回傳 **10,000 字元**。若輸出超過此限制，系統會保留前半段與後半段，並在中間標示截斷的字元數量。
-
----
-
-## 檔案系統工具
-
-檔案系統工具包含四個子工具：讀取、寫入、編輯與列目錄。
-
-### 路徑解析規則
-
-- **相對路徑**：相對於代理的工作區目錄（`workspace`）解析
-- **絕對路徑**：直接使用
-- 若設定 `restrict_to_workspace: true`，存取工作區以外的路徑會被拒絕
+Results are capped at **10,000 characters**. Longer output keeps the beginning and end while indicating how many characters were truncated.
 
 ---
 
-### 讀取檔案（`read_file`）
+## Filesystem tools
 
-讀取檔案內容，回傳帶行號的文字。
+Four filesystem operations are available: `read_file`, `write_file`, `edit_file`, and `list_dir`.
 
-#### 參數
+### Path resolution rules
 
-| 參數 | 類型 | 必填 | 說明 |
+- **Relative paths** resolve against the agent’s workspace
+- **Absolute paths** are honored directly
+- When `restrict_to_workspace: true`, paths outside the workspace are rejected
+
+---
+
+### Read file (`read_file`)
+
+Returns the file content with line numbers.
+
+#### Parameters
+
+| Parameter | Type | Required | Description |
 |------|------|------|------|
-| `path` | string | 是 | 檔案路徑 |
-| `offset` | integer | 否 | 起始行號（從 1 開始，預設 1） |
-| `limit` | integer | 否 | 最多讀取行數（預設 2000） |
+| `path` | string | yes | File path |
+| `offset` | integer | no | Starting line (1-indexed, default 1) |
+| `limit` | integer | no | Max lines to read (default 2000) |
 
-#### 使用範例
+#### Examples
 
 ```python
-# 讀取整個檔案
+# Read the entire file
 read_file(path="config.yaml")
 
-# 讀取大型檔案的第 500-700 行
+# Read lines 500–700 of a large log
 read_file(path="large_log.txt", offset=500, limit=200)
 
-# 讀取絕對路徑
+# Read an absolute path
 read_file(path="/etc/hosts")
 ```
 
-回傳格式為帶行號的文字，例如：
+Results use `line| content` format:
 ```
-1| # 這是第一行
-2| 這是第二行
+1| # First line
+2| Second line
 ```
 
-單次最多讀取 **128,000 字元**；若檔案更長，輸出末尾會提示可繼續讀取的 `offset` 值。
+Single calls return up to **128,000 characters**. If the file is longer, the response includes the next `offset` to continue reading.
 
 ---
 
-### 寫入檔案（`write_file`）
+### Write file (`write_file`)
 
-將內容完整寫入檔案，若父目錄不存在會自動建立。
+Writes content to a file, creating parent directories when needed.
 
-#### 參數
+#### Parameters
 
-| 參數 | 類型 | 必填 | 說明 |
+| Parameter | Type | Required | Description |
 |------|------|------|------|
-| `path` | string | 是 | 目標檔案路徑 |
-| `content` | string | 是 | 要寫入的內容 |
+| `path` | string | yes | Destination file |
+| `content` | string | yes | Content to write |
 
-#### 使用範例
+#### Examples
 
 ```python
-# 寫入新檔案
-write_file(path="output/report.txt", content="報告內容...")
+# Create a new file
+write_file(path="output/report.txt", content="Report contents...")
 
-# 建立設定檔（自動建立目錄）
+# Write a config file (directories created automatically)
 write_file(path="config/settings.json", content='{"debug": true}')
 ```
 
-> **注意**：此工具會**完整覆寫**現有檔案。若只需修改部分內容，請使用 `edit_file`。
+> **Note:** This overwrites the existing file. Use `edit_file` for partial updates.
 
 ---
 
-### 編輯檔案（`edit_file`）
+### Edit file (`edit_file`)
 
-以精確的文字取代方式修改檔案，支援輕微空白差異的模糊匹配。
+Modify files via precise replacements, with optional `replace_all` support.
 
-#### 參數
+#### Parameters
 
-| 參數 | 類型 | 必填 | 說明 |
+| Parameter | Type | Required | Description |
 |------|------|------|------|
-| `path` | string | 是 | 要編輯的檔案路徑 |
-| `old_text` | string | 是 | 要搜尋並取代的原始文字 |
-| `new_text` | string | 是 | 取代後的新文字 |
-| `replace_all` | boolean | 否 | 取代所有符合的位置（預設 false） |
+| `path` | string | yes | Target file |
+| `old_text` | string | yes | Text to replace |
+| `new_text` | string | yes | Replacement text |
+| `replace_all` | boolean | no | Replace all matches (default false) |
 
-#### 使用範例
+#### Examples
 
 ```python
-# 取代單一出現的文字
+# Replace a single occurrence
 edit_file(
     path="config.yaml",
     old_text="debug: false",
     new_text="debug: true"
 )
 
-# 批次取代所有出現位置
+# Replace every occurrence
 edit_file(
     path="app.py",
     old_text="import old_module",
@@ -168,278 +166,254 @@ edit_file(
 )
 ```
 
-若 `old_text` 在檔案中出現多次，且未設定 `replace_all=true`，工具會回傳警告而不執行修改。若找不到完全匹配，工具會嘗試模糊匹配並顯示最相似的片段作為診斷提示。
+If `old_text` appears multiple times and `replace_all` is false, the tool warns and does not edit. Fuzzy matching suggestions appear when no exact match is found.
 
 ---
 
-### 列出目錄（`list_dir`）
+### List directory (`list_dir`)
 
-列出目錄內容，支援遞迴瀏覽。
+List directory contents with optional recursion.
 
-#### 參數
+#### Parameters
 
-| 參數 | 類型 | 必填 | 說明 |
+| Parameter | Type | Required | Description |
 |------|------|------|------|
-| `path` | string | 是 | 目錄路徑 |
-| `recursive` | boolean | 否 | 遞迴列出所有檔案（預設 false） |
-| `max_entries` | integer | 否 | 最大回傳項目數（預設 200） |
+| `path` | string | yes | Directory path |
+| `recursive` | boolean | no | Recursively list entries (default false) |
+| `max_entries` | integer | no | Max items returned (default 200) |
 
-#### 使用範例
+#### Examples
 
 ```python
-# 列出當前目錄
+# List the current directory
 list_dir(path=".")
 
-# 遞迴列出專案結構
+# Recursively list /project (up to 500 entries)
 list_dir(path="/project", recursive=True, max_entries=500)
 ```
 
-以下目錄會自動忽略：`.git`、`node_modules`、`__pycache__`、`.venv`、`venv`、`dist`、`build`、`.tox`、`.mypy_cache`、`.pytest_cache`、`.ruff_cache`。
+Ignored directories: `.git`, `node_modules`, `__pycache__`, `.venv`, `venv`, `dist`, `build`, `.tox`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`.
 
 ---
 
-## 網路工具
+## Web tools
 
-### 網路搜尋（`web_search`）
+### Web search (`web_search`)
 
-透過設定的搜尋供應商搜尋網路，回傳標題、URL 與摘要片段。
+Search the web using the configured provider and return titles, URLs, and snippets.
 
-#### 參數
+#### Parameters
 
-| 參數 | 類型 | 必填 | 說明 |
+| Parameter | Type | Required | Description |
 |------|------|------|------|
-| `query` | string | 是 | 搜尋關鍵字 |
-| `count` | integer | 否 | 結果數量（1-10，預設由配置決定） |
+| `query` | string | yes | Search query |
+| `count` | integer | no | Number of results (1–10, default from config) |
 
-#### 使用範例
+#### Examples
 
 ```python
-# 基本搜尋
-web_search(query="Python asyncio 教學")
-
-# 指定回傳筆數
+web_search(query="Python asyncio tutorial")
 web_search(query="nanobot AI framework", count=5)
 ```
 
-#### 搜尋供應商
+#### Providers
 
-| 供應商 | 設定值 | 需要 API 金鑰 | 說明 |
+| Provider | Config value | Requires API key | Notes |
 |--------|--------|--------------|------|
-| Brave Search | `brave` | 是（`BRAVE_API_KEY`） | 預設供應商；無金鑰時自動退回 DuckDuckGo |
-| Tavily | `tavily` | 是（`TAVILY_API_KEY`） | AI 搜尋，適合研究用途 |
-| DuckDuckGo | `duckduckgo` | 否 | 免費，無需金鑰 |
-| SearXNG | `searxng` | 否（需自架） | 自架開源搜尋引擎 |
-| Jina | `jina` | 是（`JINA_API_KEY`） | 支援語意搜尋 |
+| Brave Search | `brave` | Yes (`BRAVE_API_KEY`) | Default; falls back to DuckDuckGo without a key |
+| Tavily | `tavily` | Yes (`TAVILY_API_KEY`) | Research-focused AI search |
+| DuckDuckGo | `duckduckgo` | No | Free, zero config |
+| SearXNG | `searxng` | No (self-hosted) | Open-source, self-hosted search |
+| Jina | `jina` | Yes (`JINA_API_KEY`) | Semantic search |
 
-#### 配置選項
+#### Configuration snippet
 
 ```yaml
 tools:
   web:
     search:
-      provider: brave          # 搜尋供應商
-      api_key: "YOUR_KEY"      # API 金鑰（或透過環境變數設定）
-      max_results: 5           # 預設結果數量
-    proxy: "http://127.0.0.1:7890"  # HTTP/SOCKS5 代理（可選）
+      provider: brave
+      api_key: "YOUR_KEY"
+      max_results: 5
+    proxy: "http://127.0.0.1:7890"
 ```
 
 ---
 
-### 擷取網頁（`web_fetch`）
+### Web fetch (`web_fetch`)
 
-擷取指定 URL 的內容，自動轉換為 Markdown 或純文字格式。
+Fetch a URL’s contents and convert them to Markdown or plain text.
 
-#### 參數
+#### Parameters
 
-| 參數 | 類型 | 必填 | 說明 |
+| Parameter | Type | Required | Description |
 |------|------|------|------|
-| `url` | string | 是 | 要擷取的 URL |
-| `extractMode` | string | 否 | 輸出格式：`markdown`（預設）或 `text` |
-| `maxChars` | integer | 否 | 最大字元數（預設 50,000） |
+| `url` | string | yes | Target URL |
+| `extractMode` | string | no | Output format: `markdown` (default) or `text` |
+| `maxChars` | integer | no | Max characters (default 50,000) |
 
-#### 使用範例
+#### Examples
 
 ```python
-# 擷取並轉換為 Markdown
 web_fetch(url="https://docs.python.org/3/library/asyncio.html")
-
-# 只取純文字，限制長度
 web_fetch(url="https://example.com/article", extractMode="text", maxChars=10000)
 ```
 
-#### 擷取流程
+#### Fetch flow
 
-1. 優先使用 **Jina Reader API**（若有 `JINA_API_KEY`）
-2. 遇到限速（429）或失敗時，退回本地 **readability-lxml** 解析
-3. JSON 回應直接以格式化 JSON 回傳
-4. 所有擷取到的外部內容均附加不信任標記，提示代理將其視為資料而非指令
+1. Try **Jina Reader API** if `JINA_API_KEY` is set
+2. Fall back to local `readability-lxml` if rate limits or errors occur
+3. Return JSON responses as-is
+4. Mark fetched content as untrusted context for the agent
 
-#### 安全防護
+#### Security
 
-- 僅允許 `http://` 與 `https://` 協定
-- 封鎖指向內網 IP（RFC 1918）、localhost、迴路位址的請求（SSRF 防護）
-- 跟隨重新導向時亦會重新驗證目標 IP
+- Only `http://` and `https://` schemes are allowed
+- Requests pointing to RFC 1918, localhost, or loopback addresses are blocked (SSRF protection)
+- Redirect chains revalidate every hop
 
-#### 代理設定
+#### Proxy configuration
 
 ```yaml
 tools:
   web:
-    proxy: "http://127.0.0.1:7890"   # HTTP 代理
-    # proxy: "socks5://127.0.0.1:1080"  # SOCKS5 代理
+    proxy: "http://127.0.0.1:7890"
+    # proxy: "socks5://127.0.0.1:1080"
 ```
 
 ---
 
-## Cron 工具（`cron`）
+## Cron tool (`cron`)
 
-排程提醒與週期性任務，支援固定間隔、CRON 表達式與一次性定時執行。
+Schedule reminders and periodic tasks with intervals, cron expressions, or single-run execution.
 
-### 動作
+### Actions
 
-| `action` | 說明 |
+| `action` | Description |
 |----------|------|
-| `add` | 新增排程任務 |
-| `list` | 列出所有排程任務 |
-| `remove` | 移除指定任務 |
+| `add` | Create a scheduled task |
+| `list` | List active tasks |
+| `remove` | Delete a task |
 
-### 參數（`add` 動作）
+### Parameters (for `add`)
 
-| 參數 | 類型 | 說明 |
+| Parameter | Type | Description |
 |------|------|------|
-| `message` | string | 提醒文字或任務描述 |
-| `every_seconds` | integer | 固定間隔（秒） |
-| `cron_expr` | string | CRON 表達式，如 `"0 9 * * *"` |
-| `tz` | string | IANA 時區名稱，如 `"Asia/Taipei"`（僅與 `cron_expr` 併用） |
-| `at` | string | ISO 8601 datetime，一次性執行，如 `"2026-03-20T10:00:00"` |
-| `job_id` | string | 任務 ID（用於 `remove`） |
+| `message` | string | Reminder text or task description |
+| `every_seconds` | integer | Fixed interval in seconds |
+| `cron_expr` | string | Cron expression (e.g., `"0 9 * * *"`) |
+| `tz` | string | IANA timezone (e.g., `"Asia/Taipei"`) — works with `cron_expr` |
+| `at` | string | ISO 8601 datetime for one-time execution (e.g., `"2026-03-20T10:00:00"`) |
+| `job_id` | string | Task ID (used with `remove`) |
 
-### 使用範例
+### Examples
 
 ```python
-# 每 20 分鐘提醒休息
-cron(action="add", message="起來動一動！", every_seconds=1200)
-
-# 每天早上 9 點（台北時間）執行任務
-cron(action="add", message="查詢今日天氣並回報", cron_expr="0 9 * * *", tz="Asia/Taipei")
-
-# 在特定時間只執行一次
-cron(action="add", message="會議提醒：週三下午三點", at="2026-03-18T15:00:00")
-
-# 每週一至週五下午 5 點提醒下班
-cron(action="add", message="可以準備下班了", cron_expr="0 17 * * 1-5", tz="Asia/Taipei")
-
-# 列出所有任務
+cron(action="add", message="Take a break", every_seconds=1200)
+cron(action="add", message="Report weather", cron_expr="0 9 * * *", tz="Asia/Taipei")
+cron(action="add", message="Meeting reminder", at="2026-03-18T15:00:00")
+cron(action="add", message="Time to clock off", cron_expr="0 17 * * 1-5", tz="Asia/Taipei")
 cron(action="list")
-
-# 移除任務（使用 list 取得 job_id）
 cron(action="remove", job_id="abc123")
 ```
 
-### 時間表達式快速對照
+### Quick reference
 
-| 描述 | 參數 |
+| Description | Parameter |
 |------|------|
-| 每 20 分鐘 | `every_seconds: 1200` |
-| 每小時 | `every_seconds: 3600` |
-| 每天早上 8 點 | `cron_expr: "0 8 * * *"` |
-| 平日下午 5 點 | `cron_expr: "0 17 * * 1-5"` |
-| 每月 1 日午夜 | `cron_expr: "0 0 1 * *"` |
-| 指定時間一次性 | `at: "2026-03-20T10:00:00"` |
+| Every 20 minutes | `every_seconds: 1200` |
+| Every hour | `every_seconds: 3600` |
+| Daily at 8 AM | `cron_expr: "0 8 * * *"` |
+| Weekdays at 5 PM | `cron_expr: "0 17 * * 1-5"` |
+| Monthly midnight | `cron_expr: "0 0 1 * *"` |
+| One-time event | `at: "2026-03-20T10:00:00"` |
 
-> **注意**：排程任務不能從另一個排程任務的回呼內部建立新任務。
+> **Note:** Cron jobs may not schedule new jobs from inside another cron job’s callback.
 
 ---
 
-## Spawn 工具（`spawn`）
+## Spawn tool (`spawn`)
 
-在背景啟動子代理（subagent）非同步執行複雜或耗時的任務，主代理立即取得控制權，子代理完成後會主動回報結果。
+Launch background subagents for complex or long-running work. The main agent regains control immediately and receives the result once the subagent completes.
 
-### 參數
+### Parameters
 
-| 參數 | 類型 | 必填 | 說明 |
+| Parameter | Type | Required | Description |
 |------|------|------|------|
-| `task` | string | 是 | 子代理要執行的任務描述 |
-| `label` | string | 否 | 任務的簡短標籤（顯示用途） |
+| `task` | string | yes | Description of the task for the subagent |
+| `label` | string | no | Short label shown in UI |
 
-### 使用範例
+### Examples
 
 ```python
-# 背景執行長時間運算
 spawn(
-    task="分析 /data/logs/ 目錄下所有日誌檔案，統計每小時的錯誤數量，並以表格格式回報結果",
-    label="日誌分析"
+    task="Analyze /data/logs/ for hourly error counts and report in table format",
+    label="Log analysis"
 )
-
-# 同時處理多個獨立任務
-spawn(task="從 GitHub API 取得 nanobot 最新發佈版本資訊", label="版本查詢")
-spawn(task="搜尋 Python 3.13 的新功能並整理摘要", label="新功能摘要")
+spawn(task="Fetch nanobot release info via GitHub API", label="Release check")
+spawn(task="Summarize Python 3.13 features", label="Feature summary")
 ```
 
-### 適用情境
+### Use cases
 
-- 需要多個工具呼叫的多步驟流程
-- 耗時的資料處理或網路請求
-- 需要獨立執行、最終才需要匯總結果的平行任務
+- Multi-step flows requiring several tool calls
+- Time-consuming data processing or network requests
+- Parallel tasks that only need to report back when done
 
 ---
 
-## 訊息工具（`message`）
+## Message tool (`message`)
 
-主動向使用者傳送訊息，支援跨頻道傳送與媒體附件。
+Send proactive messages with optional media attachments across channels.
 
-### 參數
+### Parameters
 
-| 參數 | 類型 | 必填 | 說明 |
+| Parameter | Type | Required | Description |
 |------|------|------|------|
-| `content` | string | 是 | 要傳送的訊息內容 |
-| `channel` | string | 否 | 目標頻道（如 `telegram`、`discord`） |
-| `chat_id` | string | 否 | 目標聊天室或使用者 ID |
-| `media` | array | 否 | 附件檔案路徑清單（圖片、音訊、文件） |
+| `content` | string | yes | Message text |
+| `channel` | string | no | Target channel (e.g., `telegram`, `discord`) |
+| `chat_id` | string | no | Recipient chat or user ID |
+| `media` | array | no | List of attachment paths (images, audio, docs) |
 
-### 使用範例
+### Examples
 
 ```python
-# 傳送純文字訊息
-message(content="任務已完成！")
-
-# 傳送帶附件的訊息
+message(content="Task complete!")
 message(
-    content="這是今日的報告",
+    content="Here is today’s report",
     media=["/workspace/report.pdf", "/workspace/chart.png"]
 )
-
-# 跨頻道傳送（從 Slack 傳送到 Telegram）
 message(
-    content="部署成功",
+    content="Deployment succeeded",
     channel="telegram",
     chat_id="123456789"
 )
 ```
 
-### 適用情境
+### Common scenarios
 
-- 排程任務（`cron`）執行完畢後主動通知使用者
-- 子代理（`spawn`）完成工作後回報結果
-- 需要傳送圖片、PDF 或其他媒體附件時
+- Notify users after cron jobs finish
+- Report results from spawned subagents
+- Send rich media (images, PDFs, audio)
 
 ---
 
-## 全域工具配置
+## Global tool settings
 
-以下配置適用於所有工具，在 `config.yaml` 中的 `tools` 區段設定：
+Configure the `tools` section in your config to apply settings across all tools:
 
 ```yaml
 tools:
-  restrict_to_workspace: false   # 限制所有工具只能存取工作區目錄
+  restrict_to_workspace: false   # Restrict tools to the workspace
   exec:
-    timeout: 60                  # Shell 工具預設逾時（秒）
-    path_append: ""              # 附加至 PATH 的路徑
+    timeout: 60
+    path_append: ""
   web:
-    proxy: null                  # HTTP/SOCKS5 代理 URL
+    proxy: null
     search:
-      provider: brave            # 搜尋供應商
-      api_key: ""                # 供應商 API 金鑰
-      max_results: 5             # 預設搜尋結果數
-  mcp_servers: {}                # MCP 伺服器設定（見 MCP 整合指南）
+      provider: brave
+      api_key: ""
+      max_results: 5
+  mcp_servers: {}
 ```
+

@@ -1,12 +1,12 @@
-# 快速開始
+# Quick Start
 
-在 5 分鐘內完成 nanobot 設定，並與您的 AI 助手進行第一次對話。
+Complete nanobot setup in 5 minutes and have your first conversation with your AI assistant.
 
 ---
 
-## 步驟一：安裝 nanobot
+## Step 1: Install nanobot
 
-=== "uv（推薦）"
+=== "uv (Recommended)"
 
     ```bash
     uv tool install nanobot-ai
@@ -18,57 +18,57 @@
     pip install nanobot-ai
     ```
 
-確認安裝成功：
+Verify installation succeeded:
 
 ```bash
 nanobot --version
 ```
 
-!!! tip "尚未安裝 uv？"
-    請先參閱 [安裝指南](installation.md) 安裝 uv 和 nanobot。
+!!! tip "Haven't installed uv yet?"
+    Please see the [Installation Guide](installation.md) to install uv and nanobot first.
 
 ---
 
-## 步驟二：執行 Onboarding 精靈
+## Step 2: Run the onboarding wizard
 
 ```bash
 nanobot onboard
 ```
 
-精靈會引導您完成初始設定，並在 `~/.nanobot/` 建立以下檔案：
+The wizard guides you through initial setup and creates the following files in `~/.nanobot/`:
 
 ```
 ~/.nanobot/
-├── config.json          # 主設定檔
+├── config.json          # Main config file
 └── workspace/
-    ├── AGENTS.md        # Agent 行為指引
-    ├── USER.md          # 用戶個人資料
-    ├── SOUL.md          # Agent 個性定義
-    ├── TOOLS.md         # 工具使用偏好
-    └── HEARTBEAT.md     # 定期任務設定
+    ├── AGENTS.md        # Agent behavior guidelines
+    ├── USER.md          # User profile
+    ├── SOUL.md          # Agent personality definition
+    ├── TOOLS.md         # Tool usage preferences
+    └── HEARTBEAT.md     # Periodic task settings
 ```
 
-!!! note "已有設定？"
-    重複執行 `nanobot onboard` 不會覆蓋現有設定，只會補充缺少的部分。
+!!! note "Already have configuration?"
+    Running `nanobot onboard` again does not overwrite existing settings; it only fills missing parts.
 
 ---
 
-## 步驟三：設定 API 金鑰與模型
+## Step 3: Configure API key and model
 
-開啟 `~/.nanobot/config.json`，加入您的 LLM API 金鑰與模型設定。
+Open `~/.nanobot/config.json` and add your LLM API key and model configuration.
 
 ```bash
-# 使用任意編輯器開啟
+# Open with any editor
 vim ~/.nanobot/config.json
-# 或
+# or
 nano ~/.nanobot/config.json
-# 或
+# or
 code ~/.nanobot/config.json
 ```
 
-### 設定 API 金鑰
+### Configure API key
 
-以 [OpenRouter](https://openrouter.ai/keys)（全球用戶推薦）為例：
+Using [OpenRouter](https://openrouter.ai/keys) (recommended for global users) as an example:
 
 ```json
 {
@@ -80,9 +80,9 @@ code ~/.nanobot/config.json
 }
 ```
 
-其他常用提供商：
+Other common providers:
 
-=== "Anthropic（Claude）"
+=== "Anthropic (Claude)"
 
     ```json
     {
@@ -94,7 +94,7 @@ code ~/.nanobot/config.json
     }
     ```
 
-=== "OpenAI（GPT）"
+=== "OpenAI (GPT)"
 
     ```json
     {
@@ -118,7 +118,7 @@ code ~/.nanobot/config.json
     }
     ```
 
-=== "Ollama（本地）"
+=== "Ollama (Local)"
 
     ```json
     {
@@ -136,9 +136,9 @@ code ~/.nanobot/config.json
     }
     ```
 
-### 設定模型（選用）
+### Configure model (optional)
 
-可選擇性地指定預設模型。若不設定，nanobot 會根據已設定的 API 金鑰自動偵測：
+You can optionally specify a default model. If omitted, nanobot auto-detects based on configured API keys:
 
 ```json
 {
@@ -151,7 +151,7 @@ code ~/.nanobot/config.json
 }
 ```
 
-### 完整的最簡設定範例
+### Minimal complete configuration example
 
 ```json
 {
@@ -169,70 +169,70 @@ code ~/.nanobot/config.json
 }
 ```
 
-!!! warning "保護您的 API 金鑰"
-    `config.json` 包含敏感的 API 金鑰，請勿將此檔案提交至版本控制系統（git）。
+!!! warning "Protect your API key"
+    `config.json` contains sensitive API keys. Do not commit this file to version control (git).
 
 ---
 
-## 步驟四：在 CLI 上對話
+## Step 4: Chat in CLI
 
-設定完成後，立即開始對話：
+After setup, start chatting immediately:
 
 ```bash
 nanobot agent
 ```
 
-您會看到互動式對話介面：
+You will see the interactive interface:
 
 ```
-nanobot> 你好！你能幫我做什麼？
+nanobot> Hello! What can you help me with?
 ```
 
-nanobot 支援多種使用方式：
+nanobot supports multiple usage modes:
 
 ```bash
-# 互動式對話（預設）
+# Interactive chat (default)
 nanobot agent
 
-# 單次訊息（非互動）
-nanobot agent -m "今天天氣如何？"
+# One-off message (non-interactive)
+nanobot agent -m "What's the weather today?"
 
-# 顯示純文字回應（不渲染 Markdown）
+# Show plain-text responses (do not render Markdown)
 nanobot agent --no-markdown
 
-# 顯示執行日誌
+# Show runtime logs
 nanobot agent --logs
 ```
 
-退出互動模式：輸入 `exit`、`quit` 或按 `Ctrl+D`。
+To exit interactive mode: type `exit`, `quit`, or press `Ctrl+D`.
 
-!!! tip "恭喜！"
-    您已成功完成基本設定。以下步驟說明如何將 nanobot 連接至 Telegram，讓您隨時隨地透過手機與 AI 助手對話。
+!!! tip "Congratulations!"
+    You have completed the basic setup successfully. The next steps explain how to connect nanobot to Telegram so you can chat with your AI assistant from your phone anytime.
 
 ---
 
-## 步驟五：連接 Telegram（選用）
+## Step 5: Connect Telegram (Optional)
 
-Telegram 是最容易設定的聊天平台，推薦新手使用。
+Telegram is the easiest chat platform to set up and is recommended for beginners.
 
-### 建立 Telegram Bot
+### Create a Telegram Bot
 
-1. 開啟 Telegram，搜尋 **@BotFather**
-2. 傳送 `/newbot`
-3. 依提示輸入 Bot 名稱（顯示名稱，例如 `My Nanobot`）
-4. 輸入 Bot 用戶名（必須以 `bot` 結尾，例如 `my_nanobot_bot`）
-5. BotFather 會回覆一組 **Bot Token**，格式類似：`1234567890:ABCdefGHIjklMNOpqrsTUVwxyz`
+1. Open Telegram and search for **@BotFather**
+2. Send `/newbot`
+3. Enter a Bot name (display name, e.g., `My Nanobot`)
+4. Enter a Bot username (must end with `bot`, e.g., `my_nanobot_bot`)
+5. BotFather returns a **Bot Token**, similar to: `1234567890:ABCdefGHIjklMNOpqrsTUVwxyz`
 
-### 取得您的 Telegram User ID
+### Get your Telegram User ID
 
-您的 User ID 顯示在 Telegram 設定中，格式為 `@yourUserId`。
-複製時請**去掉 `@` 符號**。
+Your User ID appears in Telegram settings as `@yourUserId`.
+Remove the `@` symbol when copying.
 
-或者，傳送任何訊息給您的 bot，然後查看 nanobot 的執行日誌，其中會顯示發送者的 User ID。
+Or send any message to your bot and check nanobot runtime logs, where the sender User ID is shown.
 
-### 更新設定檔
+### Update config file
 
-將以下內容合併至 `~/.nanobot/config.json`：
+Merge the following into `~/.nanobot/config.json`:
 
 ```json
 {
@@ -246,24 +246,24 @@ Telegram 是最容易設定的聊天平台，推薦新手使用。
 }
 ```
 
-| 欄位 | 說明 |
+| Field | Description |
 |------|------|
-| `token` | 從 @BotFather 取得的 Bot Token |
-| `allowFrom` | 允許與 bot 互動的 User ID 清單（留空則拒絕所有人） |
+| `token` | Bot Token from @BotFather |
+| `allowFrom` | List of User IDs allowed to interact with the bot (empty means deny all) |
 
-!!! warning "安全提醒"
-    `allowFrom` 清單用於控制誰可以使用您的 bot。
-    使用 `["*"]` 可允許所有人，但請謹慎使用，避免濫用 API 額度。
+!!! warning "Security reminder"
+    The `allowFrom` list controls who can use your bot.
+    Use `["*"]` to allow everyone, but use with caution to avoid API quota abuse.
 
 ---
 
-## 步驟六：啟動 Gateway
+## Step 6: Start Gateway
 
 ```bash
 nanobot gateway
 ```
 
-Gateway 啟動後，您會看到類似以下的輸出：
+After Gateway starts, you will see output similar to:
 
 ```
 [nanobot] Gateway starting on port 18790
@@ -271,17 +271,17 @@ Gateway 啟動後，您會看到類似以下的輸出：
 [nanobot] Ready to receive messages
 ```
 
-現在，開啟 Telegram 並傳送訊息給您的 bot！
+Now open Telegram and send a message to your bot.
 
-!!! note "Gateway 與 CLI 的差別"
-    - `nanobot agent`：本機 CLI 互動模式，直接在終端機對話
-    - `nanobot gateway`：啟動伺服器，持續監聽來自聊天平台的訊息
+!!! note "Difference between Gateway and CLI"
+    - `nanobot agent`: local CLI interactive mode, direct terminal chat
+    - `nanobot gateway`: starts server mode and continuously listens to chat platform messages
 
 ---
 
-## 完整設定範例
+## Full Configuration Example
 
-以下是包含 Telegram 頻道的完整最簡設定：
+Here is a minimal complete config including Telegram:
 
 ```json
 {
@@ -308,9 +308,9 @@ Gateway 啟動後，您會看到類似以下的輸出：
 
 ---
 
-## 下一步
+## Next Steps
 
-- **了解 Onboarding 精靈**：[Onboarding 精靈詳細說明](onboarding.md)
-- **連接其他聊天平台**：[頻道設定指南](../channels/index.md)
-- **設定更多 LLM 提供商**：[Providers 文件](../providers/index.md)
-- **探索工具與技能**：[工具與技能](../tools-skills/index.md)
+- **Learn the onboarding wizard**: [Onboarding Wizard Details](onboarding.md)
+- **Connect other chat platforms**: [Channel Setup Guide](../channels/index.md)
+- **Configure more LLM providers**: [Providers Docs](../providers/index.md)
+- **Explore tools and skills**: [Tools and Skills](../tools-skills/index.md)
