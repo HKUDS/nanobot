@@ -50,6 +50,7 @@ from nanobot.agent.context import (
 )
 from nanobot.agent.delegation import DelegationDispatcher
 from nanobot.agent.failure import FailureClass, ToolCallTracker, _build_failure_prompt
+from nanobot.agent.memory import MemoryStore
 from nanobot.agent.mission import MissionManager
 from nanobot.agent.observability import (
     flush as flush_langfuse,
@@ -348,12 +349,16 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
 
+        self.memory = MemoryStore(
+            self.workspace,
+            rollout_overrides=self.memory_rollout_overrides,
+        )
         self.context = ContextBuilder(
             self.workspace,
+            memory=self.memory,
             memory_retrieval_k=self.config.memory_retrieval_k if config.memory_enabled else 0,
             memory_token_budget=self.config.memory_token_budget if config.memory_enabled else 0,
             memory_md_token_cap=config.memory_md_token_cap if config.memory_enabled else 0,
-            memory_rollout_overrides=self.memory_rollout_overrides,
             role_system_prompt=role_config.system_prompt if role_config else "",
         )
         self.sessions = session_manager or SessionManager(self.workspace)
