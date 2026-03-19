@@ -54,12 +54,25 @@ class AgentsConfig(Base):
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
 
 
+class ModelConfig(Base):
+    """Model capability declaration for custom providers."""
+
+    id: str                          # Model ID, e.g. "MiniMax-M2.5"
+    name: str = ""                   # Display name, defaults to id
+    supports_image: bool = False     # Whether the model supports image input
+    supports_reasoning: bool = False # Whether the model supports reasoning/thinking
+    context_window: int = 200000     # Context window size in tokens
+    max_tokens: int = 8192           # Maximum output tokens
+
+
 class ProviderConfig(Base):
     """LLM provider configuration."""
 
     api_key: str = ""
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+    api: str | None = None  # API protocol: "openai" (default), "anthropic"
+    models: list[ModelConfig] = Field(default_factory=list)  # Model capability declarations
 
 
 class ProvidersConfig(Base):
@@ -87,6 +100,7 @@ class ProvidersConfig(Base):
     byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
+    extras: dict[str, ProviderConfig] = Field(default_factory=dict)  # Custom providers (dynamic)
 
 
 class HeartbeatConfig(Base):
@@ -167,11 +181,17 @@ class Config(BaseSettings):
     def _match_provider(
         self, model: str | None = None
     ) -> tuple["ProviderConfig | None", str | None]:
-        """Match provider config and its registry name. Returns (config, spec_name)."""
+        """Match provider config and its registry name. Returns (config, spec_name).
+
+        For extras providers, spec_name is "extras:<key>" (e.g. "extras:scnet").
+        """
         from nanobot.providers.registry import PROVIDERS
 
         forced = self.agents.defaults.provider
         if forced != "auto":
+            # Check extras first
+            if forced in self.providers.extras:
+                return self.providers.extras[forced], f"extras:{forced}"
             p = getattr(self.providers, forced, None)
             return (p, forced) if p else (None, None)
 
@@ -179,6 +199,12 @@ class Config(BaseSettings):
         model_normalized = model_lower.replace("-", "_")
         model_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else ""
         normalized_prefix = model_prefix.replace("-", "_")
+
+        # Extras: match by explicit provider prefix (e.g. "scnet/MiniMax-M2.5")
+        if model_prefix:
+            for key, p in self.providers.extras.items():
+                if key.lower().replace("-", "_") == normalized_prefix and p.api_key:
+                    return p, f"extras:{key}"
 
         def _kw_matches(kw: str) -> bool:
             kw = kw.lower()
@@ -224,6 +250,12 @@ class Config(BaseSettings):
             p = getattr(self.providers, spec.name, None)
             if p and p.api_key:
                 return p, spec.name
+
+        # Fallback: extras with a configured api_key
+        for key, p in self.providers.extras.items():
+            if p.api_key:
+                return p, f"extras:{key}"
+
         return None, None
 
     def get_provider(self, model: str | None = None) -> ProviderConfig | None:
@@ -248,6 +280,9 @@ class Config(BaseSettings):
         p, name = self._match_provider(model)
         if p and p.api_base:
             return p.api_base
+        # Extras providers always use their configured api_base (no default)
+        if name and name.startswith("extras:"):
+            return None
         # Only gateways get a default api_base here. Standard providers
         # (like Moonshot) set their base URL via env vars in _setup_env
         # to avoid polluting the global litellm.api_base.
@@ -255,6 +290,19 @@ class Config(BaseSettings):
             spec = find_by_name(name)
             if spec and (spec.is_gateway or spec.is_local) and spec.default_api_base:
                 return spec.default_api_base
+        return None
+
+    def get_model_config(self, model: str | None = None) -> "ModelConfig | None":
+        """Find model capability declaration from extras providers."""
+        p, name = self._match_provider(model)
+        if not p or not p.models:
+            return None
+        # Strip provider prefix to get bare model id
+        raw = model or self.agents.defaults.model
+        bare = raw.split("/", 1)[1] if "/" in raw else raw
+        for mc in p.models:
+            if mc.id == bare:
+                return mc
         return None
 
     model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")

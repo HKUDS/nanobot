@@ -30,7 +30,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
+    from nanobot.config.schema import ChannelsConfig, Config, ExecToolConfig, WebSearchConfig
     from nanobot.cron.service import CronService
 
 
@@ -64,11 +64,13 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        config: Config | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
         self.bus = bus
         self.channels_config = channels_config
+        self._config = config
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
@@ -132,6 +134,101 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+
+    def _handle_models_command(self, arg: str) -> str:
+        """Handle /models command: list providers or models under a provider."""
+        if not self._config:
+            return "Config not available."
+
+        providers_cfg = self._config.providers
+
+        if not arg:
+            # List all configured providers that have an api_key
+            lines = ["📋 Configured providers:"]
+
+            # Standard providers
+            for field_name in providers_cfg.model_fields:
+                if field_name == "extras":
+                    continue
+                p = getattr(providers_cfg, field_name, None)
+                if p and p.api_key:
+                    n_models = len(p.models)
+                    suffix = f" ({n_models} models)" if n_models else ""
+                    lines.append(f"  • {field_name}{suffix}")
+
+            # Extras providers
+            for key, p in providers_cfg.extras.items():
+                if p.api_key:
+                    n_models = len(p.models)
+                    suffix = f" ({n_models} models)" if n_models else " (auto)"
+                    lines.append(f"  • {key}{suffix}")
+
+            return "\n".join(lines) if len(lines) > 1 else "No providers configured."
+
+        # List models for a specific provider
+        name = arg.lower()
+
+        # Check extras first
+        for key, p in providers_cfg.extras.items():
+            if key.lower() == name:
+                if p.models:
+                    lines = [f"📋 Models for {key}:"]
+                    for m in p.models:
+                        lines.append(f"  • {key}/{m.id}")
+                    return "\n".join(lines)
+                return f"Provider '{key}' uses auto-fetch (no static model list). Use /model {key}/<model_name> to switch directly."
+
+        # Check standard providers
+        for field_name in providers_cfg.model_fields:
+            if field_name == "extras":
+                continue
+            if field_name.lower() == name:
+                p = getattr(providers_cfg, field_name, None)
+                if p and p.api_key:
+                    if p.models:
+                        lines = [f"📋 Models for {field_name}:"]
+                        for m in p.models:
+                            lines.append(f"  • {field_name}/{m.id}")
+                        return "\n".join(lines)
+                    return f"Provider '{field_name}' has no static model list configured."
+                return f"Provider '{field_name}' is not configured (no API key)."
+
+        return f"Provider '{arg}' not found."
+
+    def _handle_model_command(self, arg: str) -> str:
+        """Handle /model command: show current model or switch to a new one."""
+        if not arg:
+            return f"Current model: {self.model}"
+
+        new_model = arg
+        old_model = self.model
+
+        # Determine if we need to rebuild the provider (different provider prefix)
+        old_prefix = old_model.split("/", 1)[0] if "/" in old_model else ""
+        new_prefix = new_model.split("/", 1)[0] if "/" in new_model else ""
+
+        need_new_provider = old_prefix != new_prefix
+
+        if need_new_provider and self._config:
+            # Rebuild provider for the new model
+            saved_model = self._config.agents.defaults.model
+            self._config.agents.defaults.model = new_model
+            try:
+                from nanobot.cli.commands import _make_provider
+                new_provider = _make_provider(self._config)
+                self.provider = new_provider
+                self.subagents.provider = new_provider
+                self.memory_consolidator.provider = new_provider
+            except Exception as e:
+                self._config.agents.defaults.model = saved_model
+                return f"Failed to switch model: {e}"
+
+        # Update model references everywhere
+        self.model = new_model
+        self.subagents.model = new_model
+        self.memory_consolidator.model = new_model
+
+        return f"✅ Switched model: {old_model} → {new_model}"
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -234,7 +331,10 @@ class AgentLoop:
                 # Don't persist error responses to session history — they can
                 # poison the context and cause permanent 400 loops (#1303).
                 if response.finish_reason == "error":
-                    logger.error("LLM returned error: {}", (clean or "")[:200])
+                    import re
+                    err_brief = re.sub(r"<[^>]+>", " ", clean or "").strip()
+                    err_brief = re.sub(r"\s+", " ", err_brief)[:200]
+                    logger.error("LLM returned error: {}", err_brief)
                     final_content = clean or "Sorry, I encountered an error calling the AI model."
                     break
                 messages = self.context.add_assistant_message(
@@ -409,11 +509,27 @@ class AgentLoop:
                 "/new — Start a new conversation",
                 "/stop — Stop the current task",
                 "/restart — Restart the bot",
+                "/model — Show current model (or /model <name> to switch)",
+                "/models — List configured providers (or /models <provider> to list models)",
                 "/help — Show available commands",
             ]
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
             )
+
+        # Parse commands with optional @botname suffix (e.g. /model@MyBot arg)
+        raw = msg.content.strip()
+        cmd_match = re.match(r'^(/\w+)(?:@\S+)?\s*(.*)', raw, re.DOTALL)
+        if cmd_match:
+            cmd_name = cmd_match.group(1).lower()
+            cmd_arg = cmd_match.group(2).strip()
+            if cmd_name == "/models":
+                result = self._handle_models_command(cmd_arg)
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=result)
+            if cmd_name == "/model":
+                result = self._handle_model_command(cmd_arg)
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=result)
+
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
