@@ -454,6 +454,24 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
+    # === Xiaomi MiMo (direct OpenAI-compatible endpoint, bypasses LiteLLM) ===
+    ProviderSpec(
+        name="xiaomi_mimo",
+        keywords=("mimo", "xiaomi"),
+        env_key="",
+        display_name="Xiaomi MiMo",
+        litellm_prefix="",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="xiaomimimo",
+        default_api_base="https://api.xiaomimimo.com/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
+        is_direct=True,
+    ),
 )
 
 

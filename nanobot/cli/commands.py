@@ -383,6 +383,15 @@ def _make_provider(config: Config):
             default_model=model,
             extra_headers=p.extra_headers if p else None,
         )
+    # Xiaomi MiMo: direct OpenAI-compatible endpoint, bypasses LiteLLM
+    elif provider_name == "xiaomi_mimo":
+        from nanobot.providers.custom_provider import CustomProvider
+        provider = CustomProvider(
+            api_key=p.api_key if p else "no-key",
+            api_base=config.get_api_base(model) or "https://api.xiaomimimo.com/v1",
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+        )
     # Azure OpenAI: direct Azure OpenAI endpoint with deployment name
     elif provider_name == "azure_openai":
         if not p or not p.api_key or not p.api_base:

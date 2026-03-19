@@ -1,5 +1,6 @@
 """Configuration schema using Pydantic."""
 
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -87,6 +88,7 @@ class ProvidersConfig(Base):
     byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
+    xiaomi_mimo: ProviderConfig = Field(default_factory=ProviderConfig)  # Xiaomi MiMo
 
 
 class HeartbeatConfig(Base):
@@ -171,9 +173,10 @@ class Config(BaseSettings):
         from nanobot.providers.registry import PROVIDERS
 
         forced = self.agents.defaults.provider
-        if forced != "auto":
-            p = getattr(self.providers, forced, None)
-            return (p, forced) if p else (None, None)
+        if forced and forced != "auto":
+            forced_snake = re.sub(r"(?<!^)(?=[A-Z])", "_", forced.replace("-", "_")).lower()
+            p = getattr(self.providers, forced_snake, None)
+            return (p, forced_snake) if p else (None, None)
 
         model_lower = (model or self.agents.defaults.model).lower()
         model_normalized = model_lower.replace("-", "_")
