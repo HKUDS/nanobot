@@ -364,6 +364,8 @@ class AgentLoop:
         )
         self.sessions = session_manager or SessionManager(self.workspace)
         self._build_tools()
+        self._wire_memory()
+        self._register_handlers()
 
         self._running = False
         self._stop_event: asyncio.Event | None = None  # created lazily in run()
@@ -371,9 +373,6 @@ class AgentLoop:
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
-        self._consolidating: set[str] = set()  # Session keys with consolidation in progress
-        self._consolidation_tasks: set[asyncio.Task[None]] = set()  # Strong refs to in-flight tasks
-        self._consolidation_sem = asyncio.Semaphore(3)  # Cap concurrent consolidation LLM calls
 
         # Multi-agent coordinator (initialized lazily in run() if routing enabled)
         self._routing_config = routing_config
@@ -414,7 +413,6 @@ class AgentLoop:
             memory_uncertainty_threshold=self.config.memory_uncertainty_threshold,
             memory_store=self.context.memory,
         )
-        self._consolidator = ConsolidationOrchestrator(self.context.memory)
 
         # Per-turn token accumulators (reset in _run_agent_loop)
         self._turn_tokens_prompt = 0
@@ -506,6 +504,25 @@ class AgentLoop:
         )
         _cr_t = self.tools.get("cron")
         self._ctx_cron_tool: CronTool | None = _cr_t if isinstance(_cr_t, CronTool) else None
+
+    def _wire_memory(self) -> None:
+        """Set up the memory consolidation subsystem.
+
+        Called once from __init__ after _build_tools(). Initialises consolidation
+        state and the ConsolidationOrchestrator that wraps self.context.memory.
+        """
+        self._consolidating: set[str] = set()  # Session keys with consolidation in progress
+        self._consolidation_tasks: set[asyncio.Task[None]] = set()  # Strong refs to in-flight tasks
+        self._consolidation_sem = asyncio.Semaphore(3)  # Cap concurrent consolidation LLM calls
+        self._consolidator = ConsolidationOrchestrator(self.context.memory)
+
+    def _register_handlers(self) -> None:
+        """Register bus message handlers.
+
+        This agent uses a pull-based bus model (consume_inbound() in run()), so
+        no pub/sub subscriptions are set up at construction time. This method
+        exists as a named seam for future extension or subclass overrides.
+        """
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools, filtered by role config."""
