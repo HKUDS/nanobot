@@ -113,6 +113,7 @@ class WebChannelConfig(Base):
     enabled: bool = False
     host: str = "127.0.0.1"  # Bind address for the web UI server
     port: int = 8000  # Web UI port (separate from gateway health port)
+    api_key: str = ""  # SEC-06: Bearer token for /api/* routes; empty = no auth (dev only)
 
 
 class ChannelsConfig(Base):

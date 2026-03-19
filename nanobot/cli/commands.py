@@ -566,6 +566,7 @@ def gateway(
             session_manager,
             web_channel,
             static_dir=frontend_dist if frontend_dist.is_dir() else None,
+            api_key=web_cfg.api_key,
         )
         if frontend_dist.is_dir():
             console.print(f"[green]✓[/green] Web UI: http://{web_cfg.host}:{web_cfg.port}")
@@ -714,6 +715,7 @@ def ui(
         web_channel,
         static_dir=frontend_dist if frontend_dist.is_dir() else None,
         owns_lifecycle=True,
+        api_key=os.environ.get("NANOBOT_WEB_API_KEY", ""),
     )
 
     console.print(f"[green]✓[/green] Agent initialized (model: {agent_loop.model})")

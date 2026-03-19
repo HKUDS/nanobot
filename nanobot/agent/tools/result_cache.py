@@ -109,7 +109,7 @@ async def generate_summary(
                 "LLM summary for {}(key={}) — {} chars", tool_name, cache_key, len(summary)
             )
             return summary
-    except Exception:
+    except Exception:  # crash-barrier: LLM call may raise arbitrary provider errors
         logger.warning("LLM summary failed for {}, using heuristic fallback", tool_name)
 
     return _heuristic_summary(tool_name, output, cache_key)
@@ -313,7 +313,7 @@ class ToolResultCache:
                 self._entries[entry.cache_key] = entry
                 self._args_index[f"{entry.tool_name}:{entry.cache_key}"] = entry.cache_key
             logger.debug("Loaded {} cached tool results from disk", len(self._entries))
-        except Exception:
+        except Exception:  # crash-barrier: malformed JSONL cache file
             logger.warning("Failed to load tool result cache from disk")
 
     def _evict_disk(self) -> None:
@@ -325,7 +325,7 @@ class ToolResultCache:
             if len(lines) > _MAX_DISK_ENTRIES:
                 keep = lines[-_MAX_DISK_ENTRIES:]
                 self._disk_path.write_text("\n".join(keep) + "\n", encoding="utf-8")
-        except Exception:
+        except Exception:  # crash-barrier: disk I/O errors during cache eviction
             pass
 
 

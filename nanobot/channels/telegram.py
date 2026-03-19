@@ -430,6 +430,15 @@ class TelegramChannel(BaseChannel):
         chat_id = message.chat_id
         sender_id = self._sender_id(user)
 
+        # SEC-13: ACL check before any media download — reject unauthorized users early
+        if not self.is_allowed(sender_id):
+            logger.warning(
+                "Access denied for sender {} on Telegram channel. "
+                "Add them to allowFrom list in config to grant access.",
+                sender_id,
+            )
+            return
+
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
 
