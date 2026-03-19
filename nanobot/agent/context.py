@@ -16,7 +16,7 @@ from nanobot.utils.helpers import build_assistant_message, detect_image_mime
 class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
 
-    BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
+    BOOTSTRAP_FILES = ["BOOTSTRAP.md", "AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
 
     def __init__(self, workspace: Path):
