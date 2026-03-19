@@ -233,6 +233,7 @@ class MemoryConsolidator:
         context_window_tokens: int,
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
+        consolidation_turn_threshold: int = 20,
     ):
         self.store = MemoryStore(workspace)
         self.provider = provider
@@ -241,6 +242,7 @@ class MemoryConsolidator:
         self.context_window_tokens = context_window_tokens
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
+        self._turn_threshold = consolidation_turn_threshold
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 
     def get_lock(self, session_key: str) -> asyncio.Lock:
@@ -355,3 +357,50 @@ class MemoryConsolidator:
                 estimated, source = self.estimate_session_prompt_tokens(session)
                 if estimated <= 0:
                     return
+
+    async def maybe_consolidate_by_turns(self, session: Session) -> None:
+        """Consolidate when unconsolidated user turn count exceeds threshold."""
+        if not session.messages or self._turn_threshold <= 0:
+            return
+
+        unconsolidated = session.messages[session.last_consolidated:]
+        user_turns = sum(1 for m in unconsolidated if m.get("role") == "user")
+        if user_turns < self._turn_threshold:
+            return
+
+        lock = self.get_lock(session.key)
+        async with lock:
+            # Re-check under lock
+            unconsolidated = session.messages[session.last_consolidated:]
+            user_turns = sum(1 for m in unconsolidated if m.get("role") == "user")
+            if user_turns < self._turn_threshold:
+                return
+
+            # Find boundary at ~half the user turns
+            target_turns = user_turns // 2
+            count = 0
+            end_idx = len(session.messages)
+            for idx in range(session.last_consolidated, len(session.messages)):
+                if session.messages[idx].get("role") == "user":
+                    count += 1
+                    if count >= target_turns:
+                        for j in range(idx + 1, len(session.messages)):
+                            if session.messages[j].get("role") == "user":
+                                end_idx = j
+                                break
+                        break
+
+            chunk = session.messages[session.last_consolidated:end_idx]
+            if not chunk:
+                return
+
+            logger.info(
+                "Turn-based consolidation for {}: {} user turns, consolidating {} msgs",
+                session.key,
+                user_turns,
+                len(chunk),
+            )
+            if not await self.consolidate_messages(chunk):
+                return
+            session.last_consolidated = end_idx
+            self.sessions.save(session)

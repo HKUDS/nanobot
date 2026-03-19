@@ -36,6 +36,7 @@ class AgentDefaults(Base):
     )
     max_tokens: int = 8192
     context_window_tokens: int = 65_536
+    consolidation_turn_threshold: int = 20  # consolidate memory every N user turns
     temperature: float = 0.1
     max_tool_iterations: int = 40
     # Deprecated compatibility field: accepted from old configs but ignored at runtime.
