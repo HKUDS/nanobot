@@ -156,7 +156,7 @@ class ExecTool(Tool):
                     await asyncio.wait_for(process.wait(), timeout=5.0)
                 except asyncio.TimeoutError:
                     pass
-                raise ToolTimeoutError("exec", self.timeout)
+                raise ToolTimeoutError("exec", self.timeout) from None
 
             output_parts = []
 

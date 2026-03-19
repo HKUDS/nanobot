@@ -53,7 +53,9 @@ def _resolve_path(
         try:
             resolved.relative_to(allowed_dir.resolve())
         except ValueError:
-            raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
+            raise PermissionError(
+                f"Path {path} is outside allowed directory {allowed_dir}"
+            ) from None
     return resolved
 
 

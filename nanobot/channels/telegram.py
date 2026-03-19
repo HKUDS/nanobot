@@ -250,7 +250,7 @@ class TelegramChannel(BaseChannel):
         try:
             chat_id = int(msg.chat_id)
         except ValueError:
-            raise DeliverySkippedError(f"Invalid Telegram chat_id: {msg.chat_id}")
+            raise DeliverySkippedError(f"Invalid Telegram chat_id: {msg.chat_id}") from None
 
         reply_params = None
         if self.config.reply_to_message:

@@ -660,7 +660,7 @@ def ui(
             "[red]Error: Web UI requires extra dependencies.[/red]\n"
             "Install with: pip install nanobot-ai[web]"
         )
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     from nanobot.agent.loop import AgentLoop
     from nanobot.agent.observability import init_langfuse
@@ -851,7 +851,7 @@ def agent(
                 console.print(
                     f"[red]Error:[/red] agent timed out after {timeout_s}s in single-message mode."
                 )
-                raise typer.Exit(124)
+                raise typer.Exit(124) from None
             finally:
                 agent_loop.stop()
                 try:
@@ -871,9 +871,7 @@ def agent(
 
             def _hard_timeout_kill() -> None:
                 # Last-resort guard for blocking calls that ignore cancellation.
-                os.write(
-                    2, f"\nError: agent exceeded hard timeout ({timeout_s}s)\n".encode("utf-8")
-                )
+                os.write(2, f"\nError: agent exceeded hard timeout ({timeout_s}s)\n".encode())
                 os._exit(124)
 
             watchdog = threading.Timer(float(timeout_s), _hard_timeout_kill)
@@ -1088,7 +1086,7 @@ def _get_bridge_dir() -> Path:
         console.print(f"[red]Build failed: {e}[/red]")
         if e.stderr:
             console.print(f"[dim]{e.stderr.decode()[:500]}[/dim]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     return user_bridge
 
@@ -1451,7 +1449,7 @@ def routing_metrics_cmd():
         data = json.loads(metrics_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, FileNotFoundError, UnicodeDecodeError) as exc:
         console.print(f"[red]Failed to read metrics:[/red] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     table = Table(title="Routing Metrics [legacy]")
     table.add_column("Metric", style="cyan")
@@ -1869,7 +1867,7 @@ def memory_eval(
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, FileNotFoundError, UnicodeDecodeError) as exc:
         console.print(f"[red]Failed to parse benchmark file:[/red] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     raw_cases = payload.get("cases") if isinstance(payload, dict) else payload
     if not isinstance(raw_cases, list):
@@ -2040,7 +2038,7 @@ def memory_pin(
         ok = store.set_item_pin(field, text, pinned=True)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     if not ok:
         raise typer.Exit(1)
     console.print(f"[green]✓[/green] Pinned memory item in '{field}'")
@@ -2064,7 +2062,7 @@ def memory_unpin(
         ok = store.set_item_pin(field, text, pinned=False)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     if not ok:
         raise typer.Exit(1)
     console.print(f"[green]✓[/green] Unpinned memory item in '{field}'")
@@ -2088,7 +2086,7 @@ def memory_outdated(
         ok = store.mark_item_outdated(field, text)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     if not ok:
         console.print("[red]Memory item not found.[/red]")
         raise typer.Exit(1)
@@ -2276,7 +2274,7 @@ def _login_openai_codex() -> None:
         )
     except ImportError:
         console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 @_register_login("github_copilot")
@@ -2299,7 +2297,7 @@ def _login_github_copilot() -> None:
         console.print("[green]✓ Authenticated with GitHub Copilot[/green]")
     except Exception as e:  # crash-barrier: catch all provider/auth errors
         console.print(f"[red]Authentication error: {e}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 if __name__ == "__main__":

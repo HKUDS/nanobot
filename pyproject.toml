@@ -112,8 +112,13 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W"]
-ignore = ["E501"]
+select = ["E", "F", "I", "N", "W", "B", "UP"]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "UP035",  # typing → collections.abc imports (large-scale, deferred)
+    "UP037",  # quoted annotations (deferred — needs audit per file)
+    "B905",   # zip() strict= (deferred — low risk)
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
