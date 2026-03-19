@@ -476,12 +476,8 @@ def gateway(
     from loguru import logger
 
     logger.remove()
-    if verbose:
-        logger.add(sys.stderr, level="DEBUG")
-        logging.getLogger().setLevel(logging.DEBUG)
-    else:
-        logger.add(sys.stderr, level="INFO")
-        logging.getLogger().setLevel(logging.INFO)
+    logger.add(sys.stderr, level="DEBUG" if verbose else "INFO")
+    logging.getLogger().setLevel(logging.DEBUG if verbose else logging.INFO)
 
     config = _load_runtime_config(config, workspace)
     _print_deprecated_memory_window_notice(config)
