@@ -13,6 +13,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.observability import tool_span
+from nanobot.agent.tool_executor import ToolExecutor
 from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider
@@ -38,6 +39,7 @@ async def run_tool_loop(
     # P-20: compute tool definitions once before the loop — they are static
     # within a run_tool_loop invocation.
     tool_definitions = tools.get_definitions()
+    executor = ToolExecutor(tools)
 
     while iteration < max_iterations:
         iteration += 1
@@ -71,19 +73,20 @@ async def run_tool_loop(
                 }
             )
 
-            # Execute tools
-            for tool_call in response.tool_calls:
-                tools_used.append(tool_call.name)
+            # Execute tools — readonly tools run in parallel, writes sequentially.
+            tool_results = await executor.execute_batch(response.tool_calls)
+            for tool_call, result in zip(response.tool_calls, tool_results):
                 args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                logger.debug("Executing: {} with arguments: {}", tool_call.name, args_str[:200])
+                logger.debug("Executed: {} with arguments: {}", tool_call.name, args_str[:200])
+                tools_used.append(tool_call.name)
+                result_str = (
+                    result.to_llm_string() if isinstance(result, ToolResult) else str(result)
+                )
+                # Record a per-tool observability span with the execution result.
                 async with tool_span(
                     name=tool_call.name,
                     input=tool_call.arguments,
                 ) as obs:
-                    result = await tools.execute(tool_call.name, tool_call.arguments)
-                    result_str = (
-                        result.to_llm_string() if isinstance(result, ToolResult) else str(result)
-                    )
                     if obs is not None:
                         obs.update(output=result_str[:500])
                 messages.append(
