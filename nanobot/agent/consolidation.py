@@ -13,7 +13,7 @@ on message processing.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -81,7 +81,7 @@ class ConsolidationOrchestrator:
                 return True
 
             header = (
-                f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] "
+                f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}] "
                 f"Fallback archive from /new ({len(lines)} messages)"
             )
             entry = header + "\n" + "\n".join(lines)

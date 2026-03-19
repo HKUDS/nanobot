@@ -27,7 +27,7 @@ import mimetypes
 import platform
 import time
 from collections import OrderedDict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
@@ -576,7 +576,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         chat_id: str | None,
     ) -> str | list[dict[str, Any]]:
         """Append dynamic runtime context to the tail of the user message."""
-        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M (%A)")
         tz = time.strftime("%Z") or "UTC"
         lines = [f"Current Time: {now} ({tz})"]
         if channel and chat_id:

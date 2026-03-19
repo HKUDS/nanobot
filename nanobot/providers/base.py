@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
 
-@dataclass
+@dataclass(slots=True)
 class ToolCallRequest:
     """A tool call request from the LLM."""
 
@@ -16,7 +16,7 @@ class ToolCallRequest:
     arguments: dict[str, Any]
 
 
-@dataclass
+@dataclass(slots=True)
 class LLMResponse:
     """Response from an LLM provider."""
 

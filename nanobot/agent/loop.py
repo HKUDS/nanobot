@@ -36,7 +36,7 @@ import time
 import uuid
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal, Protocol
 
 from loguru import logger
@@ -1425,8 +1425,8 @@ class AgentLoop:
             try:
                 # Race consume_inbound against the stop event so that stop()
                 # wakes the loop immediately instead of waiting up to 5 s.
-                _consume = asyncio.ensure_future(self.bus.consume_inbound())
-                _stop_wait = asyncio.ensure_future(self._stop_event.wait())  # type: ignore[union-attr]
+                _consume = asyncio.create_task(self.bus.consume_inbound())
+                _stop_wait = asyncio.create_task(self._stop_event.wait())  # type: ignore[union-attr]
                 done, pending = await asyncio.wait(
                     {_consume, _stop_wait},
                     timeout=5.0,
@@ -2094,7 +2094,11 @@ class AgentLoop:
             self._consolidation_tasks.add(_task)
             _task.add_done_callback(self._consolidation_tasks.discard)
             _task.add_done_callback(
-                lambda t: logger.exception("Consolidation task failed") if t.exception() else None
+                lambda t: (
+                    logger.exception("Consolidation task failed")
+                    if not t.cancelled() and t.exception()
+                    else None
+                )
             )
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
@@ -2258,9 +2262,9 @@ class AgentLoop:
                 content = entry["content"]
                 if len(content) > max_chars:
                     entry["content"] = content[:max_chars] + "\n... (truncated)"
-            entry.setdefault("timestamp", datetime.now().isoformat())
+            entry.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
             session.messages.append(entry)
-        session.updated_at = datetime.now()
+        session.updated_at = datetime.now(timezone.utc)
 
     async def _consolidate_memory(self, session: Session, archive_all: bool = False) -> bool:
         """Delegate to ConsolidationOrchestrator."""

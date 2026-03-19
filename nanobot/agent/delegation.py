@@ -17,7 +17,7 @@ from __future__ import annotations
 import contextvars
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -218,7 +218,7 @@ class DelegationDispatcher:
             return
         for name in ("delegate", "delegate_parallel"):
             tool = self.tools.get(name)
-            if isinstance(tool, (DelegateTool, DelegateParallelTool)):
+            if isinstance(tool, DelegateTool | DelegateParallelTool):
                 tool.set_dispatch(self.dispatch)
                 if available_roles_fn is not None:
                     tool.set_available_roles_fn(available_roles_fn)
@@ -250,7 +250,7 @@ class DelegationDispatcher:
             "depth": depth,
             "success": success,
             "message": message_excerpt[:80],
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         if tools_used is not None:
             entry["tools_used"] = tools_used

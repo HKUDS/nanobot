@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, ClassVar
 
 
-@dataclass
+@dataclass(slots=True)
 class InboundMessage:
     """Message received from a chat channel."""
 
@@ -15,7 +15,7 @@ class InboundMessage:
     sender_id: str  # User identifier
     chat_id: str  # Chat/channel identifier
     content: str  # Message text
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     media: list[str] = field(default_factory=list)  # Media URLs
     metadata: dict[str, Any] = field(default_factory=dict)  # Channel-specific data
     session_key_override: str | None = None  # Optional override for thread-scoped sessions
@@ -26,7 +26,7 @@ class InboundMessage:
         return self.session_key_override or f"{self.channel}:{self.chat_id}"
 
 
-@dataclass
+@dataclass(slots=True)
 class OutboundMessage:
     """Message to send to a chat channel."""
 
@@ -48,7 +48,7 @@ class DeliveryResult:
     error: str | None = None
 
 
-@dataclass
+@dataclass(slots=True)
 class ReactionEvent:
     """Emoji reaction received on a message.
 
@@ -61,7 +61,7 @@ class ReactionEvent:
     chat_id: str
     emoji: str  # e.g. "\U0001f44d", "THUMBSUP", "+1"
     message_id: str | None = None  # platform message ID the reaction is on
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = field(default_factory=dict)
 
     # ----- convenience helpers -----

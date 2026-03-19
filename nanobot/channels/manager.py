@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +41,7 @@ class ChannelManager:
             path: Path = self._dead_letter_file
             path.parent.mkdir(parents=True, exist_ok=True)
             payload = {
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "channel": msg.channel,
                 "chat_id": msg.chat_id,
                 "content": msg.content,
