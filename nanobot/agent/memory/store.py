@@ -136,6 +136,11 @@ class MemoryStore:
             self.rollout.get("conflict_auto_resolve_gap", 0.25)
         )
 
+        # P-01/P-02: mtime-based cache for events.jsonl — avoids re-reading the
+        # file on every BM25 retrieval call within the same turn.
+        self._events_cache: list[dict[str, Any]] | None = None
+        self._events_cache_mtime: float = -1.0
+
     @staticmethod
     def _utc_now_iso() -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -1598,7 +1603,17 @@ class MemoryStore:
         }
 
     def read_events(self, limit: int | None = None) -> list[dict[str, Any]]:
-        out = self.persistence.read_jsonl(self.events_file)
+        # P-01/P-02: serve from cache when events_file has not been modified.
+        try:
+            current_mtime = self.events_file.stat().st_mtime if self.events_file.exists() else -1.0
+        except OSError:
+            current_mtime = -1.0
+
+        if self._events_cache is None or current_mtime != self._events_cache_mtime:
+            self._events_cache = self.persistence.read_jsonl(self.events_file)
+            self._events_cache_mtime = current_mtime
+
+        out = self._events_cache
         if limit is not None and limit > 0:
             return out[-limit:]
         return out

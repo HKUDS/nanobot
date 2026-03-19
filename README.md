@@ -867,30 +867,38 @@ python scripts/memory_eval_ci.py \
 
 ```
 nanobot/
-├── agent/          # 🧠 Core agent logic
-│   ├── loop.py     #    Agent loop (plan→act→observe→reflect)
-│   ├── context.py  #    Prompt builder + summarization compressor
-│   ├── skills.py   #    Skills loader + custom tool discovery
-│   ├── subagent.py #    Background task execution
-│   ├── memory/     #    Persistent memory (decomposed package)
-│   │   ├── store.py       # MemoryStore — main API
-│   │   ├── extractor.py   # LLM + heuristic event extraction
-│   │   ├── mem0_adapter.py # mem0 wrapper with fallback chain
-│   │   ├── reranker.py    # Cross-encoder re-ranker (optional)
-│   │   ├── retrieval.py   # Local keyword search fallback
-│   │   ├── persistence.py # File I/O helpers
-│   │   └── constants.py   # Tool schema definitions
-│   └── tools/      #    Built-in tools (incl. feedback, spawn)
-├── errors.py       # 🛡️ Structured error taxonomy
-├── skills/         # 🎯 Bundled skills (github, weather, tmux...)
-├── channels/       # 📱 Chat channel integrations
-├── bus/            # 🚌 Message routing (+ dead-letter queue)
-├── cron/           # ⏰ Scheduled tasks
-├── heartbeat/      # 💓 Proactive wake-up
-├── providers/      # 🤖 LLM providers (streaming support)
-├── session/        # 💬 Conversation sessions
-├── config/         # ⚙️ Configuration (Pydantic schemas)
-└── cli/            # 🖥️ Commands
+├── agent/               # 🧠 Core agent logic
+│   ├── loop.py          #    Agent loop (plan→act→observe→reflect)
+│   ├── context.py       #    Prompt builder + summarization compressor
+│   ├── skills.py        #    Skills loader + custom tool discovery
+│   ├── coordinator.py   #    Multi-agent intent routing + role classification
+│   ├── delegation.py    #    Sub-agent dispatch, cycle detection
+│   ├── capability.py    #    Unified capability registry (ADR-009)
+│   ├── failure.py       #    Failure classification + loop detection
+│   ├── mission.py       #    Background mission manager
+│   ├── tool_loop.py     #    Shared lightweight think→act→observe loop
+│   ├── scratchpad.py    #    Session-scoped JSONL artifact sharing
+│   ├── observability.py #    Langfuse OTEL tracing
+│   ├── tracing.py       #    Correlation IDs + structured log binding
+│   ├── memory/          #    Persistent memory (decomposed package)
+│   │   ├── store.py         # MemoryStore — main API
+│   │   ├── extractor.py     # LLM + heuristic event extraction
+│   │   ├── mem0_adapter.py  # mem0 wrapper with fallback chain
+│   │   ├── reranker.py      # Cross-encoder re-ranker (optional)
+│   │   ├── retrieval.py     # Local keyword search fallback
+│   │   ├── persistence.py   # File I/O helpers
+│   │   └── constants.py     # Tool schema definitions
+│   └── tools/           #    Built-in tools (shell, fs, web, mcp, ...)
+├── errors.py            # 🛡️ Structured error taxonomy
+├── skills/              # 🎯 Bundled skills (github, weather, tmux...)
+├── channels/            # 📱 Chat channel integrations
+├── bus/                 # 🚌 Message routing (+ dead-letter queue)
+├── cron/                # ⏰ Scheduled tasks
+├── heartbeat/           # 💓 Proactive wake-up
+├── providers/           # 🤖 LLM providers (streaming support)
+├── session/             # 💬 Conversation sessions
+├── config/              # ⚙️ Configuration (Pydantic schemas)
+└── cli/                 # 🖥️ Commands
 ```
 
 ## 🤝 Contribute & Roadmap

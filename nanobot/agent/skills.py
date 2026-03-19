@@ -1,5 +1,7 @@
 """Skills loader for agent capabilities."""
 
+from __future__ import annotations
+
 import importlib.util
 import inspect
 import json
@@ -17,6 +19,16 @@ from nanobot.agent.tools.base import Tool
 
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
+
+# P-04/P-14: process-lifetime cache for shutil.which() — binary locations are
+# stable for the process lifetime and repeated calls are unnecessary syscalls.
+_which_cache: dict[str, str | None] = {}
+
+
+def _which(binary: str) -> str | None:
+    if binary not in _which_cache:
+        _which_cache[binary] = shutil.which(binary)
+    return _which_cache[binary]
 
 
 class SkillsLoader:
@@ -132,7 +144,7 @@ class SkillsLoader:
         missing = []
         requires = skill_meta.get("requires", {})
         for b in requires.get("bins", []):
-            if not shutil.which(b):
+            if not _which(b):
                 missing.append(f"CLI: {b}")
         for env in requires.get("env", []):
             if not os.environ.get(env):
@@ -179,7 +191,7 @@ class SkillsLoader:
         """Check if skill requirements are met (bins, env vars)."""
         requires = skill_meta.get("requires", {})
         for b in requires.get("bins", []):
-            if not shutil.which(b):
+            if not _which(b):
                 return False
         for env in requires.get("env", []):
             if not os.environ.get(env):

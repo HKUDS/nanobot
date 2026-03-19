@@ -1,5 +1,7 @@
 """Message tool for sending messages to users."""
 
+from __future__ import annotations
+
 from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool, ToolResult
@@ -7,7 +9,13 @@ from nanobot.bus.events import DeliveryResult, OutboundMessage
 
 
 class MessageTool(Tool):
-    """Tool to send messages to users on chat channels."""
+    """Tool to send messages to users on chat channels.
+
+    SEC-08: By default the tool is restricted to the session's channel/chat_id
+    pair set via ``set_context()``.  Additional destinations can be explicitly
+    whitelisted via ``allow_destination()`` so that legitimate cross-channel
+    sends (e.g. email reports) are possible without opening an open relay.
+    """
 
     def __init__(
         self,
@@ -21,12 +29,19 @@ class MessageTool(Tool):
         self._default_chat_id = default_chat_id
         self._default_message_id = default_message_id
         self._sent_in_turn: bool = False
+        # SEC-08: explicit allowlist of (channel, chat_id) pairs the agent may
+        # send to in addition to the current session context.
+        self._allowed_destinations: set[tuple[str, str]] = set()
 
     def set_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Set the current message context."""
         self._default_channel = channel
         self._default_chat_id = chat_id
         self._default_message_id = message_id
+
+    def allow_destination(self, channel: str, chat_id: str) -> None:
+        """Whitelist an additional (channel, chat_id) destination (SEC-08)."""
+        self._allowed_destinations.add((channel, chat_id))
 
     def set_send_callback(
         self, callback: Callable[[OutboundMessage], Awaitable[DeliveryResult | None]]
@@ -87,6 +102,14 @@ class MessageTool(Tool):
 
         if not channel or not chat_id:
             return ToolResult.fail("Error: No target channel/chat specified")
+
+        # SEC-08: block relay to destinations outside the session context
+        is_session_dest = channel == self._default_channel and chat_id == self._default_chat_id
+        if not is_session_dest and (channel, chat_id) not in self._allowed_destinations:
+            return ToolResult.fail(
+                f"Error: Sending to {channel}:{chat_id} is not permitted. "
+                "Only the current session destination is allowed by default."
+            )
 
         if not self._send_callback:
             return ToolResult.fail("Error: Message sending not configured")

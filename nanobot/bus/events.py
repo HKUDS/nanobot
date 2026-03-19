@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, ClassVar
 
 
 @dataclass
@@ -66,7 +66,7 @@ class ReactionEvent:
 
     # ----- convenience helpers -----
 
-    _POSITIVE_EMOJIS: frozenset[str] = frozenset(
+    _POSITIVE_EMOJIS: ClassVar[frozenset[str]] = frozenset(
         {
             "\U0001f44d",
             "+1",
@@ -90,7 +90,7 @@ class ReactionEvent:
             "white_check_mark",
         }
     )
-    _NEGATIVE_EMOJIS: frozenset[str] = frozenset(
+    _NEGATIVE_EMOJIS: ClassVar[frozenset[str]] = frozenset(
         {
             "\U0001f44e",
             "-1",
