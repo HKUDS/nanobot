@@ -119,6 +119,7 @@ class WebToolsConfig(Base):
     proxy: str | None = (
         None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     )
+    allow_private_ip: bool = False  # If true, allow fetching private/internal network addresses
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
@@ -142,11 +143,26 @@ class MCPServerConfig(Base):
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
 class ToolsConfig(Base):
-    """Tools configuration."""
+    """Tool configuration.
+
+    Example (config.json)::
+
+        {
+          "tools": {
+            "web": { "allowPrivateIp": false },
+            "maxConcurrentSubagents": 5,
+            "maxCronJobs": 20
+          }
+        }
+
+    Set ``maxConcurrentSubagents`` or ``maxCronJobs`` to ``null`` for no limit.
+    """
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
+    max_concurrent_subagents: int | None = 5  # Maximum concurrent subagents; null = unlimited
+    max_cron_jobs: int | None = 20  # Maximum scheduled cron jobs; null = unlimited
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 

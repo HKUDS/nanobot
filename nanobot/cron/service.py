@@ -66,10 +66,12 @@ class CronService:
     def __init__(
         self,
         store_path: Path,
-        on_job: Callable[[CronJob], Coroutine[Any, Any, str | None]] | None = None
+        on_job: Callable[[CronJob], Coroutine[Any, Any, str | None]] | None = None,
+        max_jobs: int | None = 20,
     ):
         self.store_path = store_path
         self.on_job = on_job
+        self._max_jobs = max_jobs
         self._store: CronStore | None = None
         self._last_mtime: float = 0.0
         self._timer_task: asyncio.Task | None = None
@@ -295,6 +297,8 @@ class CronService:
     ) -> CronJob:
         """Add a new job."""
         store = self._load_store()
+        if self._max_jobs is not None and len(store.jobs) >= self._max_jobs:
+            raise ValueError(f"Maximum number of cron jobs ({self._max_jobs}) reached. Remove existing jobs before adding new ones.")
         _validate_schedule_for_add(schedule)
         now = _now_ms()
 
