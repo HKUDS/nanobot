@@ -411,6 +411,7 @@ def register_routes(app: FastAPI) -> None:
             content = target_path.read_text(encoding="utf-8", errors="replace")
 
         import mimetypes as _mimetypes
+
         mime, _ = _mimetypes.guess_type(target_path.name)
 
         return {
@@ -419,7 +420,9 @@ def register_routes(app: FastAPI) -> None:
             "content_type": mime or "text/plain",
         }
 
-    @app.put("/api/workspace/content/{file_path:path}", status_code=204, tags=["workspace"])
+    @app.put(
+        "/api/workspace/content/{file_path:path}", status_code=204, tags=["workspace"]
+    )
     async def write_workspace_file_content(
         file_path: str, request: Request, config: _Config
     ) -> Response:
@@ -455,6 +458,7 @@ def register_routes(app: FastAPI) -> None:
         ct = request.headers.get("content-type", "")
         if "application/json" in ct:
             import json as _json
+
             try:
                 payload = _json.loads(body)
                 text = payload.get("content", "")
