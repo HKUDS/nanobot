@@ -362,3 +362,117 @@ class TestWorkspaceRestriction:
         assert "Error" in result
         assert "outside" in result.lower()
         assert skill_file.read_text() == "# Weather\nOriginal content."
+
+
+# ---------------------------------------------------------------------------
+# Denied paths (config file protection) — issue #1873
+# ---------------------------------------------------------------------------
+
+class TestDeniedPaths:
+
+    @pytest.mark.asyncio
+    async def test_read_blocked_for_denied_file(self, tmp_path):
+        """read_file must block access to explicitly denied paths."""
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        config_file = tmp_path / ".nanobot" / "config.json"
+        config_file.parent.mkdir()
+        config_file.write_text('{"providers": {"openai": {"api_key": "sk-secret"}}}')
+
+        tool = ReadFileTool(workspace=workspace, denied_paths=[config_file])
+        result = await tool.execute(path=str(config_file))
+        assert "Error" in result
+        assert "protected" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_read_blocked_for_denied_directory(self, tmp_path):
+        """read_file must block access to files inside a denied directory."""
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        config_dir = tmp_path / ".nanobot"
+        config_dir.mkdir()
+        config_file = config_dir / "config.json"
+        config_file.write_text('{"providers": {}}')
+
+        tool = ReadFileTool(workspace=workspace, denied_paths=[config_dir])
+        result = await tool.execute(path=str(config_file))
+        assert "Error" in result
+        assert "protected" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_write_blocked_for_denied_path(self, tmp_path):
+        """write_file must block writes to denied paths."""
+        from nanobot.agent.tools.filesystem import WriteFileTool
+
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        config_file = tmp_path / ".nanobot" / "config.json"
+        config_file.parent.mkdir()
+        config_file.write_text('{"original": true}')
+
+        tool = WriteFileTool(workspace=workspace, denied_paths=[config_file])
+        result = await tool.execute(path=str(config_file), content='{"hacked": true}')
+        assert "Error" in result
+        assert "protected" in result.lower()
+        # Original content must be preserved
+        assert '"original"' in config_file.read_text()
+
+    @pytest.mark.asyncio
+    async def test_edit_blocked_for_denied_path(self, tmp_path):
+        """edit_file must block edits to denied paths."""
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        config_file = tmp_path / ".nanobot" / "config.json"
+        config_file.parent.mkdir()
+        config_file.write_text('{"api_key": "sk-secret"}')
+
+        tool = EditFileTool(workspace=workspace, denied_paths=[config_file])
+        result = await tool.execute(
+            path=str(config_file),
+            old_text="sk-secret",
+            new_text="sk-hacked",
+        )
+        assert "Error" in result
+        assert "protected" in result.lower()
+        assert "sk-secret" in config_file.read_text()
+
+    @pytest.mark.asyncio
+    async def test_list_blocked_for_denied_directory(self, tmp_path):
+        """list_dir must block listing of denied directories."""
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        config_dir = tmp_path / ".nanobot"
+        config_dir.mkdir()
+        (config_dir / "config.json").write_text("{}")
+
+        tool = ListDirTool(workspace=workspace, denied_paths=[config_dir])
+        result = await tool.execute(path=str(config_dir))
+        assert "Error" in result
+        assert "protected" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_denied_paths_do_not_affect_normal_files(self, tmp_path):
+        """Normal files outside denied paths must remain accessible."""
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        normal_file = workspace / "readme.md"
+        normal_file.write_text("Hello")
+        config_file = tmp_path / ".nanobot" / "config.json"
+
+        tool = ReadFileTool(workspace=workspace, denied_paths=[config_file])
+        result = await tool.execute(path=str(normal_file))
+        assert "Hello" in result
+        assert "Error" not in result
+
+    @pytest.mark.asyncio
+    async def test_denied_paths_work_without_restrict_to_workspace(self, tmp_path):
+        """denied_paths must be enforced even when allowed_dir is None."""
+        config_file = tmp_path / ".nanobot" / "config.json"
+        config_file.parent.mkdir()
+        config_file.write_text('{"api_key": "secret"}')
+
+        # No allowed_dir = restrictToWorkspace is off
+        tool = ReadFileTool(workspace=tmp_path, denied_paths=[config_file])
+        result = await tool.execute(path=str(config_file))
+        assert "Error" in result
+        assert "protected" in result.lower()

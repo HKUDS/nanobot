@@ -20,6 +20,7 @@ class ExecTool(Tool):
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
         path_append: str = "",
+        denied_paths: list[Path] | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -37,6 +38,7 @@ class ExecTool(Tool):
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
+        self.denied_paths = denied_paths or []
 
     @property
     def name(self) -> str:
@@ -158,6 +160,13 @@ class ExecTool(Tool):
         if contains_internal_url(cmd):
             return "Error: Command blocked by safety guard (internal/private URL detected)"
 
+        # Block commands that reference denied paths (e.g. config files with API keys).
+        # This check runs regardless of restrict_to_workspace to protect secrets.
+        if self.denied_paths:
+            error = self._guard_denied_paths(cmd)
+            if error:
+                return error
+
         if self.restrict_to_workspace:
             if "..\\" in cmd or "../" in cmd:
                 return "Error: Command blocked by safety guard (path traversal detected)"
@@ -172,6 +181,30 @@ class ExecTool(Tool):
                     continue
                 if p.is_absolute() and cwd_path not in p.parents and p != cwd_path:
                     return "Error: Command blocked by safety guard (path outside working dir)"
+
+        return None
+
+    def _guard_denied_paths(self, command: str) -> str | None:
+        """Block commands that reference denied paths in any form.
+
+        Checks both literal path strings and common indirect references
+        (e.g. inside Python string literals, environment variable expansions).
+        """
+        for denied in self.denied_paths:
+            resolved = denied.expanduser().resolve()
+            # Check the resolved absolute path and common aliases
+            candidates = [
+                str(resolved),                          # /home/user/.nanobot/config.json
+                str(denied),                            # ~/.nanobot/config.json (unexpanded)
+            ]
+            # Also check the directory containing the file
+            candidates.append(str(resolved.parent))     # /home/user/.nanobot
+            if str(denied).startswith("~"):
+                candidates.append(str(denied.parent))   # ~/.nanobot
+
+            for candidate in candidates:
+                if candidate in command:
+                    return "Error: Command blocked by safety guard (access to protected path)"
 
         return None
 

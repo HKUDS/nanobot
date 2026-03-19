@@ -406,3 +406,49 @@ async def test_exec_timeout_capped_at_max() -> None:
     # Should not raise — just clamp to 600
     result = await tool.execute(command="echo ok", timeout=9999)
     assert "Exit code: 0" in result
+
+
+# --- ExecTool denied_paths tests (issue #1873) ---
+
+from pathlib import Path
+
+
+def test_exec_guard_blocks_denied_path_in_cat(tmp_path) -> None:
+    """exec must block commands that reference denied paths."""
+    config = tmp_path / ".nanobot" / "config.json"
+    config.parent.mkdir()
+    config.write_text("{}")
+    tool = ExecTool(denied_paths=[config, config.parent])
+    error = tool._guard_command(f"cat {config}", str(tmp_path))
+    assert error is not None
+    assert "protected" in error.lower()
+
+
+def test_exec_guard_blocks_denied_path_in_python(tmp_path) -> None:
+    """exec must block Python commands that reference the denied directory."""
+    config_dir = tmp_path / ".nanobot"
+    config_dir.mkdir()
+    tool = ExecTool(denied_paths=[config_dir / "config.json", config_dir])
+    cmd = f'python3 -c "print(open(\'{config_dir}/config.json\').read())"'
+    error = tool._guard_command(cmd, str(tmp_path))
+    assert error is not None
+    assert "protected" in error.lower()
+
+
+def test_exec_guard_allows_normal_commands_with_denied_paths(tmp_path) -> None:
+    """Normal commands must not be blocked by denied_paths."""
+    config = tmp_path / ".nanobot" / "config.json"
+    tool = ExecTool(denied_paths=[config, config.parent])
+    error = tool._guard_command("echo hello", str(tmp_path))
+    assert error is None
+
+
+def test_exec_guard_denied_paths_work_without_restrict_to_workspace(tmp_path) -> None:
+    """denied_paths must be enforced even when restrict_to_workspace is False."""
+    config = tmp_path / ".nanobot" / "config.json"
+    config.parent.mkdir()
+    config.write_text("{}")
+    tool = ExecTool(restrict_to_workspace=False, denied_paths=[config, config.parent])
+    error = tool._guard_command(f"cat {config}", str(tmp_path))
+    assert error is not None
+    assert "protected" in error.lower()

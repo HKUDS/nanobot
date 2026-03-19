@@ -115,16 +115,24 @@ class AgentLoop:
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
+        from nanobot.config.loader import get_config_path
+
         allowed_dir = self.workspace if self.restrict_to_workspace else None
         extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
-        self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
+
+        # Always protect the config file (contains API keys) from agent access.
+        config_path = get_config_path()
+        denied_paths = [config_path, config_path.parent]
+
+        self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read, denied_paths=denied_paths))
         for cls in (WriteFileTool, EditFileTool, ListDirTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
+            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir, denied_paths=denied_paths))
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
             path_append=self.exec_config.path_append,
+            denied_paths=denied_paths,
         ))
         self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
