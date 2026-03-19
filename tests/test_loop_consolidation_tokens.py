@@ -184,11 +184,7 @@ async def test_preflight_consolidation_runs_in_background(tmp_path, monkeypatch)
     call_count = [0]
     def mock_estimate(_session):
         call_count[0] += 1
-        # First two calls must exceed threshold: one from _maybe_consolidate_bg
-        # (pre-request check) and one from maybe_consolidate_by_tokens (background
-        # task initial check).  Subsequent calls return below-target so the
-        # consolidation loop exits.
-        return (1000 if call_count[0] <= 2 else 80, "test")
+        return (1000 if call_count[0] <= 1 else 80, "test")
     loop.memory_consolidator.estimate_session_prompt_tokens = mock_estimate  # type: ignore[method-assign]
 
     await loop.process_direct("hello", session_key="cli:test")
