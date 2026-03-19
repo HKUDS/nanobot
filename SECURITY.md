@@ -235,6 +235,9 @@ If you suspect a security breach:
 3. **No Session Management** - No automatic session expiry
 4. **Limited Command Filtering** - Only blocks obvious dangerous patterns
 5. **No Audit Trail** - Limited security event logging (enhance as needed)
+6. **SSRF via WebFetch/WebSearch** - The `web_fetch` and `web_search` tools will follow any URL the LLM supplies, including internal network addresses (`169.254.x.x`, `10.x.x.x`, `192.168.x.x`). If nanobot runs inside a cloud VPC, an adversarial prompt could cause it to reach the instance metadata service or internal APIs. Mitigation: run nanobot in a network namespace that blocks access to RFC-1918 ranges, or apply egress firewall rules.
+7. **Web API Channel — No Authentication** - The HTTP channel (`nanobot/channels/web.py`) listens on the configured port with no built-in authentication. Anyone with network access can send messages. Mitigation: bind to localhost and place a reverse proxy (nginx, Caddy) with auth in front, or restrict access at the firewall level. Do not expose the port directly to the internet.
+8. **MessageTool Open Relay** - By default, `MessageTool` (`send_message`) only allows the agent to reply to the session that originated the request, and a guarded allowlist of additional destinations (`allow_destination()`). If allowlist entries are added programmatically without user consent, the agent could be used to relay messages to arbitrary channels. Mitigation: only call `allow_destination()` from audited code paths; review delegation contracts before enabling cross-channel messaging.
 
 ## Security Checklist
 
@@ -253,7 +256,7 @@ Before deploying nanobot:
 
 ## Updates
 
-**Last Updated**: 2026-02-03
+**Last Updated**: 2026-03-19
 
 For the latest security updates and announcements, check:
 - GitHub Security Advisories: https://github.com/HKUDS/nanobot/security/advisories

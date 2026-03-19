@@ -4,7 +4,7 @@
 and handles:
 
 - Non-streaming fallback when no progress callback is given.
-- Periodic flushing of partial content for progressive display.
+- Streaming with full-response progress delivery on completion.
 - Trace logging of latency, token usage, and tool calls.
 
 ``strip_think`` is a utility for removing ``<think>…</think>`` blocks

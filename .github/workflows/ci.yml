@@ -18,6 +18,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
       - name: Install dependencies
         run: pip install -e ".[dev]"
       - name: Ruff lint
@@ -33,6 +34,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
       - name: Install dependencies
         run: pip install -e ".[dev]"
       - name: mypy
@@ -46,6 +48,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
       - name: Enforce module boundaries
         run: python scripts/check_imports.py
 
@@ -57,6 +60,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
       - name: Verify prompt manifest
         run: python scripts/check_prompt_manifest.py
 
@@ -71,6 +75,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
       - name: Install dependencies
         run: pip install -e ".[dev]"
       - name: Run tests with coverage
