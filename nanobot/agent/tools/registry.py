@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from nanobot.agent.metrics import tool_calls_total, tool_latency_seconds
 from nanobot.agent.observability import tool_span
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tracing import bind_trace
@@ -177,13 +178,18 @@ class ToolRegistry:
                     if not result.output.endswith(self._HINT):
                         result.output += self._HINT
 
-                duration_ms = (time.monotonic() - t0) * 1000
+                elapsed = time.monotonic() - t0
+                duration_ms = elapsed * 1000
                 bind_trace().debug(
                     "Tool {} success={} duration_ms={:.0f}",
                     name,
                     result.success,
                     duration_ms,
                 )
+
+                # Prometheus metrics
+                tool_calls_total.labels(tool_name=name, success=str(result.success)).inc()
+                tool_latency_seconds.labels(tool_name=name).observe(elapsed)
 
                 # Cache large successful results and generate summary
                 if (
@@ -206,21 +212,25 @@ class ToolRegistry:
                 return result
 
             except ToolExecutionError as e:
-                duration_ms = (time.monotonic() - t0) * 1000
+                elapsed = time.monotonic() - t0
                 bind_trace().debug(
                     "Tool {} error={} duration_ms={:.0f}",
                     name,
                     e.error_type,
-                    duration_ms,
+                    elapsed * 1000,
                 )
+                tool_calls_total.labels(tool_name=name, success="False").inc()
+                tool_latency_seconds.labels(tool_name=name).observe(elapsed)
                 return ToolResult.fail(str(e) + self._HINT, error_type=e.error_type)
             except Exception as e:  # crash-barrier: user-provided tool execution
-                duration_ms = (time.monotonic() - t0) * 1000
+                elapsed = time.monotonic() - t0
                 bind_trace().exception(
                     "Tool {} error=unknown duration_ms={:.0f}",
                     name,
-                    duration_ms,
+                    elapsed * 1000,
                 )
+                tool_calls_total.labels(tool_name=name, success="False").inc()
+                tool_latency_seconds.labels(tool_name=name).observe(elapsed)
                 return ToolResult.fail(
                     f"Error executing {name}: {str(e)}" + self._HINT, error_type="unknown"
                 )

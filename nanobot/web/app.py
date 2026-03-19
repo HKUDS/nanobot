@@ -123,6 +123,15 @@ def create_app(
     # API routes
     app.include_router(router)
 
+    # Optional Prometheus /metrics endpoint — only active when prometheus_client is installed.
+    try:
+        from prometheus_client import make_asgi_app
+
+        metrics_app = make_asgi_app()
+        app.mount("/metrics", metrics_app)
+    except ImportError:
+        pass
+
     # Serve built frontend if available
     if static_dir and static_dir.is_dir():
         app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="frontend")
