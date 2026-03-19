@@ -2782,17 +2782,21 @@ class MemoryStore:
                     type_separation_enabled=type_separation_enabled,
                     reflection_enabled=reflection_enabled,
                 )
-                primary_ids = [
+                primary_ids = {
                     str(item.get("id", "")) for item in final if str(item.get("id", "")).strip()
-                ]
-                shadow_ids = [
+                }
+                shadow_ids = {
                     str(item.get("id", ""))
                     for item in shadow_final
                     if str(item.get("id", "")).strip()
-                ]
+                }
                 if primary_ids or shadow_ids:
-                    _overlap = len(set(primary_ids) & set(shadow_ids)) / max(
-                        len(set(primary_ids) | set(shadow_ids)), 1
+                    overlap = len(primary_ids & shadow_ids) / max(len(primary_ids | shadow_ids), 1)
+                    bind_trace().debug(
+                        "Shadow retrieve overlap={:.2f} primary={} shadow={}",
+                        overlap,
+                        len(primary_ids),
+                        len(shadow_ids),
                     )
         bind_trace().debug(
             "Memory retrieve source=mem0 results={} intent={} duration_ms={:.0f}",

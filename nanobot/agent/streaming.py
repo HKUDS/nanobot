@@ -27,12 +27,16 @@ from nanobot.agent.tracing import bind_trace
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider, LLMResponse
 
+# LAN-90: pre-compile static regexes to avoid recompilation on every call.
+_THINK_RE = re.compile(r"<think>[\s\S]*?</think>")
+_ANALYSIS_PREFIX_RE = re.compile(r"^(assistant\s*)?analysis[^\n]*\n?", re.IGNORECASE)
+
 
 def strip_think(text: str | None) -> str | None:
     """Remove ``<think>…</think>`` blocks that some models embed in content."""
     if not text:
         return None
-    clean = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
+    clean = _THINK_RE.sub("", text).strip()
     if not clean:
         logger.warning(
             "strip_think removed all content from non-empty response (first 100 chars): {}",
@@ -41,9 +45,7 @@ def strip_think(text: str | None) -> str | None:
         return None
     # Strip common reasoning prefixes that sometimes leak into final answers.
     while True:
-        stripped = re.sub(
-            r"^(assistant\s*)?analysis[^\n]*\n?", "", clean, flags=re.IGNORECASE
-        ).lstrip()
+        stripped = _ANALYSIS_PREFIX_RE.sub("", clean).lstrip()
         if stripped == clean:
             break
         clean = stripped

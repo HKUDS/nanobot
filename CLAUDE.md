@@ -51,6 +51,8 @@ nanobot/
 │   ├── scratchpad.py    # Session-scoped JSONL artifact sharing (multi-agent)
 │   ├── skills.py        # Skill discovery and loading
 │   ├── mission.py       # Background mission manager (async delegated tasks)
+│   ├── capability.py    # Unified capability registry (ADR-009): ToolRegistry + SkillsLoader + AgentRegistry
+│   ├── failure.py       # Failure classification + tool-call loop detection (FailureClass, ToolCallTracker)
 │   ├── tool_loop.py     # Shared lightweight think→act→observe loop
 │   ├── observability.py # Langfuse OTEL tracing: init, shutdown, spans, scoring
 │   ├── tracing.py       # Correlation IDs via contextvars, structured log binding

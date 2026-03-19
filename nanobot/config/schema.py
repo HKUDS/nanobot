@@ -306,7 +306,18 @@ class AgentConfig(Base):
 
     @classmethod
     def from_defaults(cls, defaults: "AgentDefaults", **overrides: Any) -> "AgentConfig":
-        """Build an ``AgentConfig`` from the ``AgentDefaults`` section of the config file."""
+        """Build an ``AgentConfig`` from the ``AgentDefaults`` section of the config file.
+
+        .. warning:: Adding a new config field requires **three** coordinated steps:
+
+            1. Add the field to :class:`AgentDefaults` with its default value.
+            2. Add the corresponding mapping entry in the ``data`` dict below
+               (``"agent_config_key": defaults.agent_defaults_key``).
+            3. Add the field to :class:`AgentConfig` with a matching type.
+
+            Skipping any step causes silent misconfiguration — the field will
+            silently use the ``AgentConfig`` default instead of the user's value.
+        """
         data = {
             "workspace": defaults.workspace,
             "model": defaults.model,
