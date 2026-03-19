@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from nanobot.config.providers_registry import PROVIDERS, find_by_name
+
 
 class Base(BaseModel):
     """Base model that accepts both camelCase and snake_case keys."""
@@ -574,8 +576,6 @@ class Config(BaseSettings):
         self, model: str | None = None
     ) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
-        from nanobot.providers.registry import PROVIDERS
-
         model_lower = (model or self.agents.defaults.model).lower()
         model_normalized = model_lower.replace("-", "_")
         model_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else ""
@@ -626,8 +626,6 @@ class Config(BaseSettings):
 
     def get_api_base(self, model: str | None = None) -> str | None:
         """Get API base URL for the given model. Applies default URLs for known gateways."""
-        from nanobot.providers.registry import find_by_name
-
         p, name = self._match_provider(model)
         if p and p.api_base:
             return p.api_base
