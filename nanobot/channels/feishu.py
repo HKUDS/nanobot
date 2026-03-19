@@ -279,6 +279,7 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._bot_open_id: str | None = None
 
     @staticmethod
     def _register_optional_event(builder: Any, method_name: str, handler: Any) -> Any:
@@ -306,6 +307,10 @@ class FeishuChannel(BaseChannel):
             .app_secret(self.config.app_secret) \
             .log_level(lark.LogLevel.INFO) \
             .build()
+        # Fetch bot's own open_id for precise mention detection
+        self._bot_open_id = await self._loop.run_in_executor(None, self._fetch_bot_open_id_sync)
+        if self._bot_open_id:
+            logger.info("Feishu bot open_id: {}", self._bot_open_id)
         builder = lark.EventDispatcherHandler.builder(
             self.config.encrypt_key or "",
             self.config.verification_token or "",
@@ -387,9 +392,15 @@ class FeishuChannel(BaseChannel):
             mid = getattr(mention, "id", None)
             if not mid:
                 continue
-            # Bot mentions have no user_id (None or "") but a valid open_id
-            if not getattr(mid, "user_id", None) and (getattr(mid, "open_id", None) or "").startswith("ou_"):
-                return True
+            open_id = getattr(mid, "open_id", None) or ""
+            if self._bot_open_id:
+                # Exact match using known bot open_id
+                if open_id == self._bot_open_id:
+                    return True
+            else:
+                # Fallback: heuristic (original logic)
+                if not getattr(mid, "user_id", None) and open_id.startswith("ou_"):
+                    return True
         return False
 
     def _is_group_message_for_bot(self, message: Any) -> bool:
@@ -397,6 +408,28 @@ class FeishuChannel(BaseChannel):
         if self.config.group_policy == "open":
             return True
         return self._is_bot_mentioned(message)
+
+    def _fetch_bot_open_id_sync(self) -> str | None:
+        """Fetch the bot's own open_id from the Feishu API (synchronous)."""
+        import lark_oapi as lark
+        try:
+            req = lark.BaseRequest()
+            req.http_method = lark.HttpMethod.GET
+            req.uri = "/open-apis/bot/v3/info"
+            req.token_types = {lark.AccessTokenType.TENANT}
+            resp = self._client.request(req)
+            if resp.success():
+                body = json.loads(resp.raw.content)
+                return body.get("bot", {}).get("open_id")
+            logger.warning(
+                "Feishu: could not fetch bot info (code={}), falling back to heuristic mention detection",
+                resp.code,
+            )
+        except Exception as e:
+            logger.warning(
+                "Feishu: failed to fetch bot info: {}, falling back to heuristic mention detection", e
+            )
+        return None
 
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
         """Sync helper for adding reaction (runs in thread pool)."""
