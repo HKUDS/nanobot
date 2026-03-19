@@ -18,6 +18,8 @@ See ``tests/test_shell_safety.py`` for 40+ parametrized test cases covering
 bypass attempts.
 """
 
+from __future__ import annotations
+
 import asyncio
 import os
 import re

@@ -1,5 +1,7 @@
 """LiteLLM provider implementation for multi-provider support."""
 
+from __future__ import annotations
+
 from typing import Any, AsyncIterator
 
 import json_repair

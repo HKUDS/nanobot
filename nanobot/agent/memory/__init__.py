@@ -27,6 +27,8 @@ Architecture
 - **constants.py** — Shared constants and tool schemas.
 """
 
+from __future__ import annotations
+
 from .event import KnowledgeTriple, MemoryEvent
 from .extractor import MemoryExtractor
 from .graph import KnowledgeGraph
