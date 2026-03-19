@@ -97,6 +97,22 @@ def build_assistant_message(
     return msg
 
 
+def _estimate_image_tokens(part: dict) -> int:
+    """Estimate token cost of an image_url content part.
+
+    For data: URLs, estimate from base64 payload size.
+    For external URLs, return a conservative fallback of 765 tokens.
+    """
+    url = (part.get("image_url") or {}).get("url", "")
+    if url.startswith("data:"):
+        # Extract base64 payload after the comma
+        _, _, b64_payload = url.partition(",")
+        if b64_payload:
+            raw_bytes = len(b64_payload) * 3 // 4
+            return max(765, raw_bytes // 6)
+    return 765
+
+
 def estimate_prompt_tokens(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
@@ -105,6 +121,7 @@ def estimate_prompt_tokens(
     try:
         enc = tiktoken.get_encoding("cl100k_base")
         parts: list[str] = []
+        image_tokens = 0
         for msg in messages:
             content = msg.get("content")
             if isinstance(content, str):
@@ -115,9 +132,11 @@ def estimate_prompt_tokens(
                         txt = part.get("text", "")
                         if txt:
                             parts.append(txt)
+                    elif isinstance(part, dict) and part.get("type") == "image_url":
+                        image_tokens += _estimate_image_tokens(part)
         if tools:
             parts.append(json.dumps(tools, ensure_ascii=False))
-        return len(enc.encode("\n".join(parts)))
+        return len(enc.encode("\n".join(parts))) + image_tokens
     except Exception:
         return 0
 
@@ -126,6 +145,7 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
     """Estimate prompt tokens contributed by one persisted message."""
     content = message.get("content")
     parts: list[str] = []
+    image_tokens = 0
     if isinstance(content, str):
         parts.append(content)
     elif isinstance(content, list):
@@ -134,6 +154,8 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
                 text = part.get("text", "")
                 if text:
                     parts.append(text)
+            elif isinstance(part, dict) and part.get("type") == "image_url":
+                image_tokens += _estimate_image_tokens(part)
             else:
                 parts.append(json.dumps(part, ensure_ascii=False))
     elif content is not None:
@@ -147,13 +169,13 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
         parts.append(json.dumps(message["tool_calls"], ensure_ascii=False))
 
     payload = "\n".join(parts)
-    if not payload:
+    if not payload and image_tokens == 0:
         return 1
     try:
         enc = tiktoken.get_encoding("cl100k_base")
-        return max(1, len(enc.encode(payload)))
+        return max(1, len(enc.encode(payload)) + image_tokens)
     except Exception:
-        return max(1, len(payload) // 4)
+        return max(1, len(payload) // 4 + image_tokens)
 
 
 def estimate_prompt_tokens_chain(
