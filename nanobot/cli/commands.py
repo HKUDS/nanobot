@@ -1,6 +1,7 @@
 """CLI commands for nanobot."""
 
 import asyncio
+from contextlib import contextmanager, nullcontext
 import os
 import select
 import signal
@@ -169,6 +170,51 @@ async def _print_interactive_response(response: str, render_markdown: bool) -> N
     await run_in_terminal(_write)
 
 
+class _ThinkingSpinner:
+    """Spinner wrapper with pause support for clean progress output."""
+
+    def __init__(self, enabled: bool):
+        self._spinner = console.status(
+            "[dim]nanobot is thinking...[/dim]", spinner="dots"
+        ) if enabled else None
+        self._active = False
+
+    def __enter__(self):
+        if self._spinner:
+            self._spinner.start()
+        self._active = True
+        return self
+
+    def __exit__(self, *exc):
+        self._active = False
+        if self._spinner:
+            self._spinner.stop()
+        return False
+
+    @contextmanager
+    def pause(self):
+        """Temporarily stop spinner while printing progress."""
+        if self._spinner and self._active:
+            self._spinner.stop()
+        try:
+            yield
+        finally:
+            if self._spinner and self._active:
+                self._spinner.start()
+
+
+def _print_cli_progress_line(text: str, thinking: _ThinkingSpinner | None) -> None:
+    """Print a CLI progress line, pausing the spinner if needed."""
+    with thinking.pause() if thinking else nullcontext():
+        console.print(f"  [dim]↳ {text}[/dim]")
+
+
+async def _print_interactive_progress_line(text: str, thinking: _ThinkingSpinner | None) -> None:
+    """Print an interactive progress line, pausing the spinner if needed."""
+    with thinking.pause() if thinking else nullcontext():
+        await _print_interactive_line(text)
+
+
 def _is_exit_command(command: str) -> bool:
     """Return True when input should end interactive chat."""
     return command.lower() in EXIT_COMMANDS
@@ -216,47 +262,64 @@ def main(
 
 
 @app.command()
-def onboard():
+def onboard(
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
     """Initialize nanobot configuration and workspace."""
-    from nanobot.config.loader import get_config_path, load_config, save_config
+    from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
     from nanobot.config.schema import Config
 
-    config_path = get_config_path()
+    if config:
+        config_path = Path(config).expanduser().resolve()
+        set_config_path(config_path)
+        console.print(f"[dim]Using config: {config_path}[/dim]")
+    else:
+        config_path = get_config_path()
 
+    def _apply_workspace_override(loaded: Config) -> Config:
+        if workspace:
+            loaded.agents.defaults.workspace = workspace
+        return loaded
+
+    # Create or update config
     if config_path.exists():
         console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
         console.print("  [bold]y[/bold] = overwrite with defaults (existing values will be lost)")
         console.print("  [bold]N[/bold] = refresh config, keeping existing values and adding new fields")
         if typer.confirm("Overwrite?"):
-            config = Config()
-            save_config(config)
+            config = _apply_workspace_override(Config())
+            save_config(config, config_path)
             console.print(f"[green]✓[/green] Config reset to defaults at {config_path}")
         else:
-            config = load_config()
-            save_config(config)
+            config = _apply_workspace_override(load_config(config_path))
+            save_config(config, config_path)
             console.print(f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)")
     else:
-        save_config(Config())
+        config = _apply_workspace_override(Config())
+        save_config(config, config_path)
         console.print(f"[green]✓[/green] Created config at {config_path}")
-
     console.print("[dim]Config template now uses `maxTokens` + `contextWindowTokens`; `memoryWindow` is no longer a runtime setting.[/dim]")
 
     _onboard_plugins(config_path)
 
-    # Create workspace
-    workspace = get_workspace_path()
-
+    # Create workspace, preferring the configured workspace path.
+    workspace = get_workspace_path(config.workspace_path)
     if not workspace.exists():
         workspace.mkdir(parents=True, exist_ok=True)
         console.print(f"[green]✓[/green] Created workspace at {workspace}")
 
     sync_workspace_templates(workspace)
 
+    agent_cmd = 'nanobot agent -m "Hello!"'
+    if config:
+        agent_cmd += f" --config {config_path}"
+
     console.print(f"\n{__logo__} nanobot is ready!")
     console.print("\nNext steps:")
-    console.print("  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
+    console.print(f"  1. Add your API key to [cyan]{config_path}[/cyan]")
     console.print("     Get one at: https://openrouter.ai/keys")
-    console.print("  2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
+    console.print(f"  2. Chat: [cyan]{agent_cmd}[/cyan]")
     console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
 
 
@@ -318,6 +381,7 @@ def _make_provider(config: Config):
             api_key=p.api_key if p else "no-key",
             api_base=config.get_api_base(model) or "http://localhost:8000/v1",
             default_model=model,
+            extra_headers=p.extra_headers if p else None,
         )
     # Azure OpenAI: direct Azure OpenAI endpoint with deployment name
     elif provider_name == "azure_openai":
@@ -415,7 +479,7 @@ def gateway(
     _print_deprecated_memory_window_notice(config)
     port = port if port is not None else config.gateway.port
 
-    console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
+    console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
@@ -636,13 +700,8 @@ def agent(
         browser_config=config.tools.browser,
     )
 
-    # Show spinner when logs are off (no output to miss); skip when logs are on
-    def _thinking_ctx():
-        if logs:
-            from contextlib import nullcontext
-            return nullcontext()
-        # Animated spinner is safe to use with prompt_toolkit input handling
-        return console.status("[dim]nanobot is thinking...[/dim]", spinner="dots")
+    # Shared reference for progress callbacks
+    _thinking: _ThinkingSpinner | None = None
 
     async def _cli_progress(content: str, *, tool_hint: bool = False) -> None:
         ch = agent_loop.channels_config
@@ -650,13 +709,16 @@ def agent(
             return
         if ch and not tool_hint and not ch.send_progress:
             return
-        console.print(f"  [dim]↳ {content}[/dim]")
+        _print_cli_progress_line(content, _thinking)
 
     if message:
         # Single message mode — direct call, no bus needed
         async def run_once():
-            with _thinking_ctx():
+            nonlocal _thinking
+            _thinking = _ThinkingSpinner(enabled=not logs)
+            with _thinking:
                 response = await agent_loop.process_direct(message, session_id, on_progress=_cli_progress)
+            _thinking = None
             _print_agent_response(response, render_markdown=markdown)
             await agent_loop.close_mcp()
 
@@ -706,7 +768,7 @@ def agent(
                             elif ch and not is_tool_hint and not ch.send_progress:
                                 pass
                             else:
-                                await _print_interactive_line(msg.content)
+                                await _print_interactive_progress_line(msg.content, _thinking)
 
                         elif not turn_done.is_set():
                             if msg.content:
@@ -746,8 +808,11 @@ def agent(
                             content=user_input,
                         ))
 
-                        with _thinking_ctx():
+                        nonlocal _thinking
+                        _thinking = _ThinkingSpinner(enabled=not logs)
+                        with _thinking:
                             await turn_done.wait()
+                        _thinking = None
 
                         if turn_response:
                             _print_agent_response(turn_response[0], render_markdown=markdown)

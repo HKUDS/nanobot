@@ -191,6 +191,10 @@ def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
                     texts.append(el.get("text", ""))
                 elif tag == "at":
                     texts.append(f"@{el.get('user_name', 'user')}")
+                elif tag == "code_block":
+                    lang = el.get("language", "")
+                    code_text = el.get("text", "")
+                    texts.append(f"\n```{lang}\n{code_text}\n```\n")
                 elif tag == "img" and (key := el.get("image_key")):
                     images.append(key)
         return (" ".join(texts).strip() or None), images
@@ -437,16 +441,39 @@ class FeishuChannel(BaseChannel):
 
     _CODE_BLOCK_RE = re.compile(r"(```[\s\S]*?```)", re.MULTILINE)
 
-    @staticmethod
-    def _parse_md_table(table_text: str) -> dict | None:
+    # Markdown formatting patterns that should be stripped from plain-text
+    # surfaces like table cells and heading text.
+    _MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+    _MD_BOLD_UNDERSCORE_RE = re.compile(r"__(.+?)__")
+    _MD_ITALIC_RE = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
+    _MD_STRIKE_RE = re.compile(r"~~(.+?)~~")
+
+    @classmethod
+    def _strip_md_formatting(cls, text: str) -> str:
+        """Strip markdown formatting markers from text for plain display.
+
+        Feishu table cells do not support markdown rendering, so we remove
+        the formatting markers to keep the text readable.
+        """
+        # Remove bold markers
+        text = cls._MD_BOLD_RE.sub(r"\1", text)
+        text = cls._MD_BOLD_UNDERSCORE_RE.sub(r"\1", text)
+        # Remove italic markers
+        text = cls._MD_ITALIC_RE.sub(r"\1", text)
+        # Remove strikethrough markers
+        text = cls._MD_STRIKE_RE.sub(r"\1", text)
+        return text
+
+    @classmethod
+    def _parse_md_table(cls, table_text: str) -> dict | None:
         """Parse a markdown table into a Feishu table element."""
         lines = [_line.strip() for _line in table_text.strip().split("\n") if _line.strip()]
         if len(lines) < 3:
             return None
         def split(_line: str) -> list[str]:
             return [c.strip() for c in _line.strip("|").split("|")]
-        headers = split(lines[0])
-        rows = [split(_line) for _line in lines[2:]]
+        headers = [cls._strip_md_formatting(h) for h in split(lines[0])]
+        rows = [[cls._strip_md_formatting(c) for c in split(_line)] for _line in lines[2:]]
         columns = [{"tag": "column", "name": f"c{i}", "display_name": h, "width": "auto"}
                    for i, h in enumerate(headers)]
         return {
@@ -512,12 +539,13 @@ class FeishuChannel(BaseChannel):
             before = protected[last_end:m.start()].strip()
             if before:
                 elements.append({"tag": "markdown", "content": before})
-            text = m.group(2).strip()
+            text = self._strip_md_formatting(m.group(2).strip())
+            display_text = f"**{text}**" if text else ""
             elements.append({
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": f"**{text}**",
+                    "content": display_text,
                 },
             })
             last_end = m.end()
@@ -961,10 +989,13 @@ class FeishuChannel(BaseChannel):
                 else:
                     key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
                     if key:
-                        # Use msg_type "media" for audio/video so users can play inline;
-                        # "file" for everything else (documents, archives, etc.)
-                        if ext in self._AUDIO_EXTS or ext in self._VIDEO_EXTS:
-                            media_type = "media"
+                        # Use msg_type "audio" for audio, "video" for video, "file" for documents.
+                        # Feishu requires these specific msg_types for inline playback.
+                        # Note: "media" is only valid as a tag inside "post" messages, not as a standalone msg_type.
+                        if ext in self._AUDIO_EXTS:
+                            media_type = "audio"
+                        elif ext in self._VIDEO_EXTS:
+                            media_type = "video"
                         else:
                             media_type = "file"
                         await loop.run_in_executor(
@@ -1012,7 +1043,7 @@ class FeishuChannel(BaseChannel):
             event = data.event
             message = event.message
             sender = event.sender
-
+            
             # Deduplication check
             message_id = message.message_id
             if message_id in self._processed_message_ids:
