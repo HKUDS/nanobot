@@ -441,7 +441,7 @@ class AgentLoop:
             initial_messages, on_progress=on_progress or _bus_progress,
         )
 
-        if final_content is None:
+        if not final_content or not final_content.strip():
             final_content = "I've completed processing but have no response to give."
 
         self._save_turn(session, all_msgs, 1 + len(history))
