@@ -304,7 +304,57 @@ Or inline:
 
 ## Docker Deployment
 
-### Quick Start with Docker
+### Upgrading from Standard Docker Compose to Browser Mode
+
+If you were already running `docker compose up -d nanobot-gateway` with the standard `docker-compose.yml`, follow these steps to switch to the browser-enabled image:
+
+**1. Pull the latest code:**
+```bash
+git pull origin main
+```
+
+**2. Stop the current container:**
+```bash
+docker compose down nanobot-gateway
+```
+
+**3. Build and start the browser-enabled service:**
+```bash
+docker compose -f docker/docker-compose.browser.yml up -d --build
+```
+
+> `--build` is required the first time — it builds a new image based on `docker/Dockerfile.browser`, which includes Playwright and Chromium. Subsequent restarts don't need `--build` unless the code changes.
+
+**4. Enable browser in `~/.nanobot/config.json`:**
+```json
+{
+  "tools": {
+    "browser": {
+      "enabled": true,
+      "headless": true
+    }
+  }
+}
+```
+
+> The browser Compose file already passes `NANOBOT__TOOLS__BROWSER__ENABLED=true` as an environment variable, so this step is optional but recommended for clarity.
+
+**Key differences between standard and browser mode:**
+
+| | Standard (`docker-compose.yml`) | Browser (`docker/docker-compose.browser.yml`) |
+|---|---|---|
+| Container name | `nanobot-gateway` | `nanobot-browser` |
+| Image base | Standard Python | Playwright official image |
+| Includes Chromium | No | Yes |
+| Memory limit | 1 GB | 2 GB |
+| Extra ports | — | 5900, 6080 (VNC) |
+| Config/workspace | `~/.nanobot` (host mount) | Docker volume + `~/.nanobot` |
+
+Your existing config (`~/.nanobot`) is still mounted into the new container — conversation history and settings are preserved.
+
+---
+
+### Quick Start with Docker (Fresh Install)
 
 1. **Copy environment file:**
    ```bash
