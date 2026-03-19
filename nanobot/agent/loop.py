@@ -264,6 +264,12 @@ class AgentLoop:
                 msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
             except asyncio.TimeoutError:
                 continue
+            except asyncio.CancelledError:
+                # anyio/MCP cancel scopes surface as CancelledError (a BaseException subclass).
+                # Re-raise only if the loop itself is being shut down; otherwise keep running.
+                if not self._running:
+                    raise
+                continue
             except Exception as e:
                 logger.warning("Error consuming inbound message: {}, continuing...", e)
                 continue
