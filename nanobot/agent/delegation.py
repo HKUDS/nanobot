@@ -171,6 +171,12 @@ class DelegationDispatcher:
         brave_api_key: str | None,
         exec_config: ExecToolConfig,
         role_name: str,
+        coordinator: Coordinator | None = None,
+        scratchpad: Scratchpad | None = None,
+        active_messages: list[dict[str, Any]] | None = None,
+        tools: ToolExecutor | None = None,
+        mcp_tools: list[Tool] | None = None,
+        on_progress: Callable[..., Awaitable[None]] | None = None,
     ) -> None:
         self.provider = provider
         self.workspace = workspace
@@ -188,15 +194,12 @@ class DelegationDispatcher:
         self.max_delegations: int = 8
         self.routing_trace: list[dict[str, Any]] = []
 
-        # Set by AgentLoop after construction
-        self.coordinator: Coordinator | None = None
-        self.scratchpad: Scratchpad | None = None
-        self.active_messages: list[dict[str, Any]] | None = None
-        self.tools: ToolExecutor | None = None  # for wire_delegate_tools
-        # MCP tools injected lazily by AgentLoop after _connect_mcp()
-        self.mcp_tools: list[Tool] = []
-        # Per-turn progress callback — set by AgentLoop._process_message, cleared after turn.
-        self.on_progress: Callable[..., Awaitable[None]] | None = None
+        self.coordinator: Coordinator | None = coordinator
+        self.scratchpad: Scratchpad | None = scratchpad
+        self.active_messages: list[dict[str, Any]] | None = active_messages
+        self.tools: ToolExecutor | None = tools
+        self.mcp_tools: list[Tool] = mcp_tools if mcp_tools is not None else []
+        self.on_progress: Callable[..., Awaitable[None]] | None = on_progress
 
     # ------------------------------------------------------------------
     # Wiring
