@@ -19,8 +19,17 @@ from nanobot.config.schema import DiscordConfig
 from nanobot.errors import DeliverySkippedError
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
-MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
+MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024  # 10MB
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
+
+_ALLOWED_CONTENT_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "application/pdf",
+    "text/plain",
+}
 
 
 def _split_message(content: str, max_len: int = MAX_MESSAGE_LEN) -> list[str]:
@@ -242,20 +251,40 @@ class DiscordChannel(BaseChannel):
 
         for attachment in payload.get("attachments") or []:
             url = attachment.get("url")
-            filename = attachment.get("filename") or "attachment"
+            raw_filename = attachment.get("filename") or "attachment"
+            # Sanitize filename to prevent path traversal
+            filename = Path(raw_filename).name or "attachment"
             size = attachment.get("size") or 0
+            content_type = (attachment.get("content_type") or "").split(";")[0].strip().lower()
             if not url or not self._http:
                 continue
             if size and size > MAX_ATTACHMENT_BYTES:
                 content_parts.append(f"[attachment: {filename} - too large]")
                 continue
+            if content_type and content_type not in _ALLOWED_CONTENT_TYPES:
+                logger.warning(
+                    "Skipping Discord attachment '{}' with disallowed content-type '{}'",
+                    filename,
+                    content_type,
+                )
+                content_parts.append(f"[attachment: {filename} - unsupported type]")
+                continue
             try:
                 media_dir.mkdir(parents=True, exist_ok=True)
-                file_path = (
-                    media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
-                )
+                file_path = media_dir / f"{attachment.get('id', 'file')}_{filename}"
                 resp = await self._http.get(url)
                 resp.raise_for_status()
+                resp_content_type = (
+                    (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+                )
+                if resp_content_type and resp_content_type not in _ALLOWED_CONTENT_TYPES:
+                    logger.warning(
+                        "Skipping Discord attachment '{}': response content-type '{}' not allowed",
+                        filename,
+                        resp_content_type,
+                    )
+                    content_parts.append(f"[attachment: {filename} - unsupported type]")
+                    continue
                 file_path.write_bytes(resp.content)
                 media_paths.append(str(file_path))
                 content_parts.append(f"[attachment: {file_path}]")

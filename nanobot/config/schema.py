@@ -309,7 +309,7 @@ class AgentConfig(Base):
     vision_model: str = "gpt-4o-mini"
 
     # Tools
-    restrict_to_workspace: bool = False
+    restrict_to_workspace: bool = True
 
     # Missions
     mission_max_concurrent: int = 3

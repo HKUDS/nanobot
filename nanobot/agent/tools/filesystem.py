@@ -16,6 +16,13 @@ _SENSITIVE_PATHS: tuple[Path, ...] = tuple(
     for raw in (
         "~/.ssh",
         "~/.gnupg",
+        "~/.aws/credentials",
+        "~/.aws/config",
+        "~/.aws",
+        "~/.gcp",
+        "~/.config/gcloud",
+        "~/.azure",
+        "~/.kube/config",
         "~/.nanobot/config.json",
         "/etc/shadow",
         "/etc/passwd",
