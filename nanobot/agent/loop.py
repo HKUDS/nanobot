@@ -9,7 +9,7 @@ import re
 import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from loguru import logger
 
@@ -30,7 +30,13 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
+    from nanobot.config.schema import (
+        AgentDefaults,
+        ChannelsConfig,
+        ExecToolConfig,
+        ModelConfig,
+        WebSearchConfig,
+    )
     from nanobot.cron.service import CronService
 
 
@@ -64,6 +70,9 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        models: list["ModelConfig"] | None = None,
+        provider_factory: Callable[..., LLMProvider] | None = None,
+        default_config: "AgentDefaults | None" = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -72,6 +81,9 @@ class AgentLoop:
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
+        self.models = models or []
+        self.provider_factory = provider_factory
+        self.default_config = default_config
         self.max_iterations = max_iterations
         self.context_window_tokens = context_window_tokens
         self.web_search_config = web_search_config or WebSearchConfig()
@@ -191,67 +203,171 @@ class AgentLoop:
         final_content = None
         tools_used: list[str] = []
 
-        while iteration < self.max_iterations:
-            iteration += 1
+        original_subagent_provider = self.subagents.provider
+        original_subagent_model = self.subagents.model
+        original_memory_provider = self.memory_consolidator.provider
+        original_memory_model = self.memory_consolidator.model
+        original_context_window_tokens = self.context_window_tokens
+        original_memory_context_window_tokens = self.memory_consolidator.context_window_tokens
 
-            tool_defs = self.tools.get_definitions()
+        def _apply_effective_runtime(
+            provider: LLMProvider,
+            model: str,
+            context_window: int | None,
+        ) -> None:
+            self.subagents.provider = provider
+            self.subagents.model = model
+            self.memory_consolidator.provider = provider
+            self.memory_consolidator.model = model
+            if context_window is not None:
+                self.context_window_tokens = context_window
+                self.memory_consolidator.context_window_tokens = context_window
 
-            response = await self.provider.chat_with_retry(
-                messages=messages,
-                tools=tool_defs,
-                model=self.model,
-            )
+        def _restore_runtime() -> None:
+            self.subagents.provider = original_subagent_provider
+            self.subagents.model = original_subagent_model
+            self.memory_consolidator.provider = original_memory_provider
+            self.memory_consolidator.model = original_memory_model
+            self.context_window_tokens = original_context_window_tokens
+            self.memory_consolidator.context_window_tokens = original_memory_context_window_tokens
 
-            if response.has_tool_calls:
-                if on_progress:
-                    thought = self._strip_think(response.content)
-                    if thought:
-                        await on_progress(thought)
-                    tool_hint = self._tool_hint(response.tool_calls)
-                    tool_hint = self._strip_think(tool_hint)
-                    await on_progress(tool_hint, tool_hint=True)
+        try:
+            # Local state for the current session/task execution
+            current_provider = self.provider
+            current_model = self.model
+            available_fallbacks = list(self.models)
 
-                tool_call_dicts = [
-                    tc.to_openai_tool_call()
-                    for tc in response.tool_calls
-                ]
-                messages = self.context.add_assistant_message(
-                    messages, response.content, tool_call_dicts,
-                    reasoning_content=response.reasoning_content,
-                    thinking_blocks=response.thinking_blocks,
+            while iteration < self.max_iterations:
+                iteration += 1
+
+                tool_defs = self.tools.get_definitions()
+
+                response = await current_provider.chat_with_retry(
+                    messages=messages,
+                    tools=tool_defs,
+                    model=current_model,
                 )
 
-                for tool_call in response.tool_calls:
-                    tools_used.append(tool_call.name)
-                    args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                    logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
-                    messages = self.context.add_tool_result(
-                        messages, tool_call.id, tool_call.name, result
-                    )
-            else:
-                clean = self._strip_think(response.content)
-                # Don't persist error responses to session history — they can
-                # poison the context and cause permanent 400 loops (#1303).
                 if response.finish_reason == "error":
-                    logger.error("LLM returned error: {}", (clean or "")[:200])
-                    final_content = clean or "Sorry, I encountered an error calling the AI model."
+                    err_msg = response.content or "Unknown provider error"
+                    logger.warning("Provider call failed: {}", err_msg)
+
+                    if available_fallbacks and self.provider_factory:
+                        fallback_success = False
+                        for fb_idx, fb_config in enumerate(available_fallbacks):
+                            fb_provider_name = fb_config.provider
+                            if fb_provider_name == "auto" and self.default_config:
+                                fb_provider_name = self.default_config.provider
+
+                            fb_max_tokens = fb_config.max_tokens
+                            if fb_max_tokens is None and self.default_config:
+                                fb_max_tokens = self.default_config.max_tokens
+
+                            fb_context_window_tokens = fb_config.context_window_tokens
+                            if fb_context_window_tokens is None and self.default_config:
+                                fb_context_window_tokens = self.default_config.context_window_tokens
+
+                            logger.info(
+                                "Attempting fallback to model: {} (provider: {})",
+                                fb_config.model,
+                                fb_provider_name,
+                            )
+                            try:
+                                if on_progress:
+                                    await on_progress(
+                                        f"Falling back to alternative model: {fb_config.model}..."
+                                    )
+
+                                fallback_provider = self.provider_factory(
+                                    model_override=fb_config.model,
+                                    provider_override=fb_provider_name,
+                                    max_tokens_override=fb_max_tokens,
+                                )
+
+                                response = await fallback_provider.chat_with_retry(
+                                    messages=messages,
+                                    tools=tool_defs,
+                                    model=fb_config.model,
+                                )
+
+                                if response.finish_reason != "error":
+                                    logger.info("Fallback to {} successful.", fb_config.model)
+                                    fallback_success = True
+
+                                    current_provider = fallback_provider
+                                    current_model = fb_config.model
+                                    _apply_effective_runtime(
+                                        provider=fallback_provider,
+                                        model=fb_config.model,
+                                        context_window=fb_context_window_tokens,
+                                    )
+                                    available_fallbacks = available_fallbacks[fb_idx + 1:]
+                                    break
+                            except Exception as fb_err:
+                                logger.error("Fallback to {} failed: {}", fb_config.model, fb_err)
+
+                        if not fallback_success:
+                            clean = self._strip_think(response.content)
+                            final_content = (
+                                clean
+                                or "Sorry, I encountered an error calling the AI model and all fallback models failed."
+                            )
+                            break
+                    else:
+                        clean = self._strip_think(response.content)
+                        final_content = clean or "Sorry, I encountered an error calling the AI model."
+                        break
+
+                if response.has_tool_calls:
+                    if on_progress:
+                        thought = self._strip_think(response.content)
+                        if thought:
+                            await on_progress(thought)
+                        tool_hint = self._tool_hint(response.tool_calls)
+                        tool_hint = self._strip_think(tool_hint)
+                        await on_progress(tool_hint, tool_hint=True)
+
+                    tool_call_dicts = [
+                        tc.to_openai_tool_call()
+                        for tc in response.tool_calls
+                    ]
+                    messages = self.context.add_assistant_message(
+                        messages, response.content, tool_call_dicts,
+                        reasoning_content=response.reasoning_content,
+                        thinking_blocks=response.thinking_blocks,
+                    )
+
+                    for tool_call in response.tool_calls:
+                        tools_used.append(tool_call.name)
+                        args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+                        logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                        result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                        messages = self.context.add_tool_result(
+                            messages, tool_call.id, tool_call.name, result
+                        )
+                else:
+                    clean = self._strip_think(response.content)
+                    if response.finish_reason == "error":
+                        logger.error("LLM returned error: {}", (clean or "")[:200])
+                        final_content = clean or "Sorry, I encountered an error calling the AI model."
+                        break
+                    messages = self.context.add_assistant_message(
+                        messages, clean, reasoning_content=response.reasoning_content,
+                        thinking_blocks=response.thinking_blocks,
+                    )
+                    final_content = clean
                     break
-                messages = self.context.add_assistant_message(
-                    messages, clean, reasoning_content=response.reasoning_content,
-                    thinking_blocks=response.thinking_blocks,
+
+            if final_content is None and iteration >= self.max_iterations:
+                logger.warning("Max iterations ({}) reached", self.max_iterations)
+                final_content = (
+                    f"I reached the maximum number of tool call iterations ({self.max_iterations}) "
+                    "without completing the task. You can try breaking the task into smaller steps."
                 )
-                final_content = clean
-                break
 
-        if final_content is None and iteration >= self.max_iterations:
-            logger.warning("Max iterations ({}) reached", self.max_iterations)
-            final_content = (
-                f"I reached the maximum number of tool call iterations ({self.max_iterations}) "
-                "without completing the task. You can try breaking the task into smaller steps."
-            )
-
-        return final_content, tools_used, messages
+            return final_content, tools_used, messages
+        finally:
+            _restore_runtime()
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
