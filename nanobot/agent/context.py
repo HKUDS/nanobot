@@ -40,6 +40,20 @@ from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools.feedback import feedback_summary
 from nanobot.agent.tracing import bind_trace
+from nanobot.errors import (
+    MemoryRetrievalError,
+)
+from nanobot.errors import (
+    MemorySubsystemError as NanobotMemoryError,
+)
+
+# ---------------------------------------------------------------------------
+# Module-level platform info cache — avoid repeated syscalls on every LLM
+# iteration (platform.system() and platform.python_version() are cheap but
+# unnecessary to call more than once per process).
+# ---------------------------------------------------------------------------
+
+_PLATFORM_INFO: str = f"{platform.system()} / Python {platform.python_version()}"
 
 # ---------------------------------------------------------------------------
 # Async provider protocol (avoids circular import with providers module)
@@ -458,7 +472,7 @@ class ContextBuilder:
                 token_budget=self.memory_token_budget,
                 memory_md_token_cap=self.memory_md_token_cap,
             )
-        except (RuntimeError, KeyError, TypeError):
+        except (NanobotMemoryError, MemoryRetrievalError, RuntimeError, OSError):
             logger.warning("Memory context retrieval failed; continuing without memory")
             memory = ""
         if memory:
@@ -526,8 +540,10 @@ Skills with available="false" need dependencies installed first - you can try in
     def _get_identity(self) -> str:
         """Get the core identity section."""
         workspace_path = str(self.workspace.expanduser().resolve())
-        sys_name = platform.system()
-        runtime = f"{'macOS' if sys_name == 'Darwin' else sys_name} {platform.machine()}, Python {platform.python_version()}"
+        _sys_name, _py_ver = _PLATFORM_INFO.split(" / ", 1)
+        runtime = (
+            f"{'macOS' if _sys_name == 'Darwin' else _sys_name} {platform.machine()}, {_py_ver}"
+        )
 
         return f"""# nanobot 🐈
 

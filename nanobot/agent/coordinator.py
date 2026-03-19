@@ -22,6 +22,10 @@ if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
 
+# Single point of change for the project name used in classification logic.
+_PROJECT_NAME: str = "nanobot"
+
+
 # ------------------------------------------------------------------
 # Built-in role definitions (used when user doesn't configure roles)
 # ------------------------------------------------------------------
