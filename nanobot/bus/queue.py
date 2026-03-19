@@ -1,5 +1,7 @@
 """Async message queue for decoupled channel-agent communication."""
 
+from __future__ import annotations
+
 import asyncio
 
 from nanobot.bus.events import InboundMessage, OutboundMessage

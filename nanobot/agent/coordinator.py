@@ -188,13 +188,14 @@ class Coordinator:
 
                 # Orchestration override: route to "pm" when the classifier
                 # judges the task needs multi-agent coordination.
-                # The relevant_roles heuristic is only applied when confidence
-                # is low (<0.8); at high confidence we trust the classifier's
-                # explicit needs_orchestration=False signal.
+                # Two or more relevant_roles is a strong signal that the task
+                # spans multiple specialists — always override to pm in that
+                # case, even when needs_orchestration=False and confidence is
+                # high, because the specialist count is the authoritative signal.
                 if (
                     role_name not in ("pm", "general")
                     and "pm" in self._registry
-                    and (needs_orchestration or (len(relevant_roles) >= 2 and confidence < 0.8))
+                    and (needs_orchestration or len(relevant_roles) >= 2)
                 ):
                     logger.info(
                         "Orchestration override: {} → pm "

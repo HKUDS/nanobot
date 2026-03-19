@@ -1,5 +1,7 @@
 """Utility functions for nanobot."""
 
+from __future__ import annotations
+
 import unicodedata
 from datetime import datetime
 from pathlib import Path

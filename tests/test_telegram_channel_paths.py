@@ -152,6 +152,44 @@ async def test_send_and_streaming_and_helpers(tmp_path: Path) -> None:
     assert ch._sender_id(SimpleNamespace(id=1, username="u")) == "1|u"
 
 
+async def test_acl_blocks_media_download_for_unauthorized_user(tmp_path: Path) -> None:
+    """T-H2 (LAN-38): ACL check must happen before any media download."""
+    ch = _channel()
+    # Allow only user 999; sender will be user 1 — unauthorized
+    ch.config.allow_from = ["999"]
+
+    class _File:
+        async def download_to_drive(self, path: str):
+            Path(path).write_text("x", encoding="utf-8")
+
+    bot = SimpleNamespace(get_file=AsyncMock(return_value=_File()))
+    ch._app = SimpleNamespace(bot=bot)
+    ch._start_typing = lambda _chat: None  # type: ignore[method-assign]
+
+    user = SimpleNamespace(id=1, username="u", first_name="U")
+    photo_stub = SimpleNamespace(file_id="photo-id", width=800, height=600)
+    msg = SimpleNamespace(
+        chat_id=42,
+        text="",
+        caption="",
+        photo=[photo_stub],
+        voice=None,
+        audio=None,
+        document=None,
+        message_id=9,
+        chat=SimpleNamespace(type="private"),
+        reply_text=AsyncMock(),
+    )
+    upd = SimpleNamespace(message=msg, effective_user=user)
+
+    await ch._on_message(upd, None)
+
+    # The unauthorized sender must not trigger any file download
+    bot.get_file.assert_not_called()
+    # And the message must not reach the agent
+    ch._handle_message.assert_not_called()
+
+
 async def test_message_and_command_handlers(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
