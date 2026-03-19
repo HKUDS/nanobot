@@ -776,10 +776,16 @@ def agent(
 
     async def _cli_progress(content: str, *, tool_hint: bool = False) -> None:
         ch = agent_loop.channels_config
-        if ch and tool_hint and not ch.send_tool_hints:
-            return
-        if ch and not tool_hint and not ch.send_progress:
-            return
+        if ch:
+            if tool_hint:
+                # Check tool_hint_channels: empty = disabled, ["*"] or ["user"] = enabled
+                allowed = ch.tool_hint_channels.get("cli", [])
+                if not allowed:
+                    return
+                if "*" not in allowed and "user" not in allowed:
+                    return
+            elif not ch.send_progress:
+                return
         _print_cli_progress_line(content, _thinking)
 
     if message:
@@ -839,10 +845,23 @@ def agent(
                         if msg.metadata.get("_progress"):
                             is_tool_hint = msg.metadata.get("_tool_hint", False)
                             ch = agent_loop.channels_config
-                            if ch and is_tool_hint and not ch.send_tool_hints:
-                                pass
-                            elif ch and not is_tool_hint and not ch.send_progress:
-                                pass
+                            if ch:
+                                if is_tool_hint:
+                                    # Check tool_hint_channels: empty = disabled, ["*"] or ["user"] = enabled
+                                    allowed = ch.tool_hint_channels.get(msg.channel, [])
+                                    if not allowed:
+                                        pass
+                                    else:
+                                        sender_id = msg.metadata.get("_sender_id", "")
+                                        chat_id = msg.chat_id
+                                        if "*" not in allowed and sender_id not in allowed and chat_id not in allowed:
+                                            pass
+                                        else:
+                                            await _print_interactive_progress_line(msg.content, _thinking)
+                                elif not ch.send_progress:
+                                    pass
+                                else:
+                                    await _print_interactive_progress_line(msg.content, _thinking)
                             else:
                                 await _print_interactive_progress_line(msg.content, _thinking)
 
