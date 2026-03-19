@@ -8,6 +8,7 @@ repos:
       - id: check-json
       - id: check-added-large-files
         args: ['--maxkb=500']
+        exclude: '^uv\.lock$'
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.9.10
