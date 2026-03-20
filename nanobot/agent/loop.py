@@ -113,6 +113,7 @@ class AgentLoop:
         self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._processing_lock = asyncio.Lock()
+        self._event_agent_cache: dict[Path, tuple[ContextBuilder, SessionManager]] = {}
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -132,6 +133,45 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+
+    def _resolve_event_agent_workspace(self, sender_id: str) -> tuple[ContextBuilder, SessionManager] | None:
+        """Check if sender_id is an event agent (guest) and return event-specific context + sessions.
+
+        Reads event_agent_acl.json from the main workspace. If the sender matches,
+        returns a ContextBuilder and SessionManager pointing to the event_agent/ subdirectory.
+        """
+        acl_path = self.workspace / "event_agent_acl.json"
+        if not acl_path.exists():
+            return None
+        try:
+            acl = json.loads(acl_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+
+        # Match sender_id against JIDs in the ACL
+        # sender_id may be just the phone number (without @s.whatsapp.net)
+        matched = False
+        for jid in acl:
+            jid_prefix = jid.split("@")[0] if "@" in jid else jid
+            if sender_id == jid or sender_id == jid_prefix:
+                matched = True
+                break
+
+        if not matched:
+            return None
+
+        event_agent_workspace = self.workspace / "event_agent"
+        if not event_agent_workspace.exists():
+            logger.warning("Event agent ACL matched sender {} but event_agent workspace missing", sender_id)
+            return None
+
+        # Cache event_agent context + sessions to avoid re-creating per message
+        if event_agent_workspace not in self._event_agent_cache:
+            self._event_agent_cache[event_agent_workspace] = (
+                ContextBuilder(event_agent_workspace),
+                SessionManager(event_agent_workspace),
+            )
+        return self._event_agent_cache[event_agent_workspace]
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -398,8 +438,13 @@ class AgentLoop:
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
+        # Resolve event_agent workspace if sender is in event agent ACL
+        guest = self._resolve_event_agent_workspace(msg.sender_id) if msg.sender_id else None
+        context = guest[0] if guest else self.context
+        sessions = guest[1] if guest else self.sessions
+
         key = session_key or msg.session_key
-        session = self.sessions.get_or_create(key)
+        session = sessions.get_or_create(key)
 
         # Slash commands
         cmd = msg.content.strip().lower()
@@ -427,8 +472,8 @@ class AgentLoop:
                 self._consolidating.discard(session.key)
 
             session.clear()
-            self.sessions.save(session)
-            self.sessions.invalidate(session.key)
+            sessions.save(session)
+            sessions.invalidate(session.key)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
         if cmd == "/help":
@@ -459,7 +504,7 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=self.memory_window)
-        initial_messages = self.context.build_messages(
+        initial_messages = context.build_messages(
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
@@ -482,7 +527,7 @@ class AgentLoop:
             final_content = "I've completed processing but have no response to give."
 
         self._save_turn(session, all_msgs, 1 + len(history))
-        self.sessions.save(session)
+        sessions.save(session)
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
