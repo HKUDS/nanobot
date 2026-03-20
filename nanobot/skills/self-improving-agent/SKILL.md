@@ -26,7 +26,7 @@ Log learnings and errors to markdown files for continuous improvement. Important
 
 ## Workspace Structure
 
-nanobot injects the following workspace files into every session's system prompt:
+The agent injects the following workspace files into every session's system prompt:
 
 ```
 ~/.hiperone/workspace/
