@@ -800,8 +800,11 @@ class DelegationDispatcher:
             task_type=task_type,
         )
 
-        # For synthesizing roles, inject scratchpad as primary input
-        if role.name in ("pm", "writing", "general") and self.scratchpad:
+        # Inject scratchpad for all delegated agents so prior findings are visible.
+        # Previously restricted to pm/writing/general; code and research agents now
+        # also receive prior results to avoid re-searching facts already discovered
+        # by peers in the same delegation chain (LAN-112).
+        if self.scratchpad:
             scratchpad_content = self.scratchpad.read()
             if scratchpad_content and scratchpad_content != "Scratchpad is empty.":
                 user_content += (
@@ -826,6 +829,10 @@ class DelegationDispatcher:
             {"role": "user", "content": user_content},
         ]
 
+        # Hard iteration cap for delegated agents (LAN-109).
+        # Without this cap, nested delegation trees multiply LLM cost exponentially:
+        # parent (40 iters) × child (40 iters) = up to 1,600 calls per turn.
+        # Synthesis tasks need fewer iterations; investigation tasks get more.
         if task_type in ("report_writing", "general"):
             iter_cap = 8
         else:
