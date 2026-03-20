@@ -270,6 +270,9 @@ class Coordinator:
     def route_direct(self, role_name: str) -> AgentRoleConfig | None:
         """Look up a role by name without LLM classification.
 
-        Returns ``None`` when *role_name* is not found in the registry.
+        Returns ``None`` when *role_name* is not found or the role is disabled.
         """
-        return self._registry.get(role_name)
+        role = self._registry.get(role_name)
+        if role is not None and not role.enabled:
+            return None
+        return role
