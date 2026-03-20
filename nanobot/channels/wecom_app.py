@@ -18,6 +18,8 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+from flask import Flask, request
+
 
 # Try to import wecom_app_svr
 try:
@@ -26,6 +28,62 @@ try:
 except ImportError:
     WECOM_APP_AVAILABLE = False
     RspTextMsg = None
+
+if WECOM_APP_AVAILABLE:
+    import socket
+    import sys
+    import atexit
+    import werkzeug.serving
+
+    _original_run_simple = werkzeug.serving.run_simple
+    _active_sockets = []
+
+    def _patched_run_simple(host, port, application, **kwargs):
+        threaded = kwargs.pop('threaded', False)
+        processes = kwargs.pop('processes', 1)
+        ssl_context = kwargs.pop('ssl_context', None)
+
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+            if hasattr(socket, 'SOCK_CLOEXEC'):
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM | socket.SOCK_CLOEXEC)
+
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+            if hasattr(socket, 'SO_REUSEPORT'):
+                try:
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+                except (OSError, PermissionError) as e:
+                    print(f"Warning: SO_REUSEPORT not available: {e}", file=sys.stderr)
+
+            sock.bind((host, port))
+            sock.listen(128)
+
+            _active_sockets.append(sock)
+
+            def cleanup():
+                if sock in _active_sockets:
+                    sock.close()
+                    _active_sockets.remove(sock)
+            atexit.register(cleanup)
+
+            srv = werkzeug.serving.make_server(
+                host, port, application,
+                threaded=threaded,
+                processes=processes,
+                ssl_context=ssl_context,
+                fd=sock.fileno())
+            srv.log_startup()
+            srv.serve_forever()
+
+        except Exception as e:
+            if sock:
+                sock.close()
+            raise
+
+    werkzeug.serving.run_simple = _patched_run_simple
 
 
 class WecomAppConfig(Base):
