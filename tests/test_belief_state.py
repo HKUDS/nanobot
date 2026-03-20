@@ -137,3 +137,104 @@ class TestPinnedSectionProtection:
         written = store.read_long_term()
         assert "DO NOT DELETE" in written
         assert "New summary from LLM." in written
+
+
+# ---------------------------------------------------------------------------
+# LAN-197: Evidence event ID linking
+# ---------------------------------------------------------------------------
+
+
+class TestEvidenceLinking:
+    def test_touch_appends_evidence_event_id(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path)
+        profile = store.read_profile()
+        entry = store._meta_entry(profile, "stable_facts", "User uses Python")
+        assert entry.get("evidence_event_ids", []) == []
+
+        store._touch_meta_entry(entry, confidence_delta=0.05, evidence_event_id="evt-001")
+        assert entry["evidence_event_ids"] == ["evt-001"]
+
+    def test_touch_does_not_duplicate_evidence(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path)
+        profile = store.read_profile()
+        entry = store._meta_entry(profile, "stable_facts", "User uses Python")
+
+        store._touch_meta_entry(entry, confidence_delta=0.05, evidence_event_id="evt-001")
+        store._touch_meta_entry(entry, confidence_delta=0.03, evidence_event_id="evt-001")
+        assert entry["evidence_event_ids"] == ["evt-001"]
+
+    def test_evidence_list_capped(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path)
+        profile = store.read_profile()
+        entry = store._meta_entry(profile, "stable_facts", "User uses Python")
+
+        for i in range(15):
+            store._touch_meta_entry(entry, confidence_delta=0.01, evidence_event_id=f"evt-{i:03d}")
+        refs = entry["evidence_event_ids"]
+        assert len(refs) == store._MAX_EVIDENCE_REFS
+        # Most recent should be present.
+        assert "evt-014" in refs
+
+    def test_apply_profile_updates_threads_event_ids(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path)
+        profile = store.read_profile()
+        store._apply_profile_updates(
+            profile,
+            {"stable_facts": ["User prefers vim"]},
+            enable_contradiction_check=False,
+            source_event_ids=["evt-042"],
+        )
+        entry = profile["meta"]["stable_facts"]["user prefers vim"]
+        assert "evt-042" in entry.get("evidence_event_ids", [])
+
+
+# ---------------------------------------------------------------------------
+# LAN-198: Supersession chains + belief IDs in conflict records
+# ---------------------------------------------------------------------------
+
+
+class TestSupersessionChains:
+    def test_conflict_record_includes_belief_ids(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path)
+        profile = store.read_profile()
+        # Seed an existing fact.
+        profile["stable_facts"] = ["User does not use dark mode for coding"]
+        store._meta_entry(profile, "stable_facts", "User does not use dark mode for coding")
+
+        store._apply_profile_updates(
+            profile,
+            {"stable_facts": ["User does use dark mode for coding"]},
+            enable_contradiction_check=True,
+        )
+        conflicts = profile.get("conflicts", [])
+        assert len(conflicts) >= 1
+        c = conflicts[-1]
+        assert "belief_id_old" in c
+        assert "belief_id_new" in c
+        assert c["belief_id_old"].startswith("bf-")
+        assert c["belief_id_new"].startswith("bf-")
+
+    def test_keep_new_sets_supersession(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path)
+        profile = store.read_profile()
+        profile["stable_facts"] = ["User does not use dark mode for coding"]
+        store._meta_entry(profile, "stable_facts", "User does not use dark mode for coding")
+
+        store._apply_profile_updates(
+            profile,
+            {"stable_facts": ["User does use dark mode for coding"]},
+            enable_contradiction_check=True,
+        )
+        store.write_profile(profile)
+
+        # Resolve with keep_new.
+        result = store.resolve_conflict_details(0, "keep_new")
+        assert result["ok"]
+
+        profile = store.read_profile()
+        old_meta = profile["meta"]["stable_facts"].get("user does not use dark mode for coding", {})
+        new_meta = profile["meta"]["stable_facts"].get("user does use dark mode for coding", {})
+
+        assert old_meta.get("status") == "stale"
+        assert old_meta.get("superseded_by_id") == new_meta.get("id")
+        assert new_meta.get("supersedes_id") == old_meta.get("id")

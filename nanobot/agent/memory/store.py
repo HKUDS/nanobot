@@ -2135,6 +2135,8 @@ class MemoryStore:
             entry["id"] = self._generate_belief_id(key, norm, entry["created_at"])
         return entry
 
+    _MAX_EVIDENCE_REFS = 10  # Cap evidence_event_ids to avoid unbounded growth.
+
     def _touch_meta_entry(
         self,
         entry: dict[str, Any],
@@ -2143,6 +2145,7 @@ class MemoryStore:
         min_confidence: float = 0.05,
         max_confidence: float = 0.99,
         status: str | None = None,
+        evidence_event_id: str | None = None,
     ) -> None:
         current_conf = self._safe_float(entry.get("confidence"), 0.65)
         entry["confidence"] = min(
@@ -2153,6 +2156,13 @@ class MemoryStore:
         entry["last_seen_at"] = self._utc_now_iso()
         if status:
             entry["status"] = status
+        # Append evidence link (LAN-197).
+        if evidence_event_id:
+            refs = entry.setdefault("evidence_event_ids", [])
+            if evidence_event_id not in refs:
+                refs.append(evidence_event_id)
+                if len(refs) > self._MAX_EVIDENCE_REFS:
+                    del refs[: len(refs) - self._MAX_EVIDENCE_REFS]
 
     def _validate_profile_field(self, field: str) -> str:
         key = str(field or "").strip()
@@ -2516,6 +2526,12 @@ class MemoryStore:
             )
             new_entry = self._meta_entry(profile, key, new_value)
             new_entry["status"] = self.PROFILE_STATUS_STALE
+            # Supersession chain (LAN-198).
+            winner_id = old_entry.get("id", "")
+            loser_id = new_entry.get("id", "")
+            if winner_id and loser_id:
+                new_entry["superseded_by_id"] = winner_id
+                old_entry.setdefault("supersedes_id", loser_id)
         elif selected == "keep_new":
             clean_new_value = self._sanitize_mem0_text(new_value, allow_archival=False) or new_value
             if old_memory_id:
@@ -2555,6 +2571,12 @@ class MemoryStore:
             )
             old_entry = self._meta_entry(profile, key, old_value)
             old_entry["status"] = self.PROFILE_STATUS_STALE
+            # Supersession chain (LAN-198).
+            winner_id = new_entry.get("id", "")
+            loser_id = old_entry.get("id", "")
+            if winner_id and loser_id:
+                old_entry["superseded_by_id"] = winner_id
+                new_entry.setdefault("supersedes_id", loser_id)
         elif selected == "dismiss":
             mem0_ok = True
             result["mem0_operation"] = "none"
@@ -3898,11 +3920,16 @@ class MemoryStore:
         updates: dict[str, list[str]],
         *,
         enable_contradiction_check: bool,
+        source_event_ids: list[str] | None = None,
     ) -> tuple[int, int, int]:
         added = 0
         conflicts = 0
         touched = 0
         profile.setdefault("conflicts", [])
+        # Use the first source event ID as evidence link for all updates in this
+        # batch.  More granular per-item linking requires changes to the extractor
+        # output format (future work).
+        evidence_id = source_event_ids[0] if source_event_ids else None
 
         for key in self.PROFILE_KEYS:
             values = self._to_str_list(profile.get(key))
@@ -3915,7 +3942,10 @@ class MemoryStore:
                 if normalized in seen:
                     entry = self._meta_entry(profile, key, candidate)
                     self._touch_meta_entry(
-                        entry, confidence_delta=0.03, status=self.PROFILE_STATUS_ACTIVE
+                        entry,
+                        confidence_delta=0.03,
+                        status=self.PROFILE_STATUS_ACTIVE,
+                        evidence_event_id=evidence_id,
                     )
                     touched += 1
                     continue
@@ -3937,7 +3967,9 @@ class MemoryStore:
                                 confidence_delta=-0.2,
                                 min_confidence=0.35,
                                 status=self.PROFILE_STATUS_CONFLICTED,
+                                evidence_event_id=evidence_id,
                             )
+                            # Include belief IDs in conflict record (LAN-198).
                             profile["conflicts"].append(
                                 {
                                     "timestamp": self._utc_now_iso(),
@@ -3946,6 +3978,8 @@ class MemoryStore:
                                     "new": candidate,
                                     "old_memory_id": self._find_mem0_id_for_text(existing),
                                     "new_memory_id": self._find_mem0_id_for_text(candidate),
+                                    "belief_id_old": old_entry.get("id", ""),
+                                    "belief_id_new": new_entry.get("id", ""),
                                     "status": self.CONFLICT_STATUS_OPEN,
                                     "old_confidence": old_entry.get("confidence"),
                                     "new_confidence": new_entry.get("confidence"),
@@ -3962,7 +3996,10 @@ class MemoryStore:
                 entry = self._meta_entry(profile, key, candidate)
                 if not has_conflict:
                     self._touch_meta_entry(
-                        entry, confidence_delta=0.1, status=self.PROFILE_STATUS_ACTIVE
+                        entry,
+                        confidence_delta=0.1,
+                        status=self.PROFILE_STATUS_ACTIVE,
+                        evidence_event_id=evidence_id,
                     )
                     touched += 1
                 added += 1
@@ -4462,10 +4499,13 @@ class MemoryStore:
             )
             events_written = self.append_events(events)
             await self._ingest_graph_triples(events)
+            # Thread event IDs into profile updates for evidence linking (LAN-197).
+            event_ids = [e.get("id", "") for e in events if e.get("id")]
             profile_added, _, profile_touched = self._apply_profile_updates(
                 profile,
                 profile_updates,
                 enable_contradiction_check=enable_contradiction_check,
+                source_event_ids=event_ids,
             )
             if events_written > 0 or profile_added > 0 or profile_touched > 0:
                 profile["last_verified_at"] = self._utc_now_iso()
