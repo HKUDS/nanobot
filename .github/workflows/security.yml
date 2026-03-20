@@ -29,7 +29,8 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Install pip-audit
-        run: pip install pip-audit
+        # Pin version to prevent dependency drift between CI and security scan (LAN-169)
+        run: pip install pip-audit==2.7.3
 
       - name: Run pip-audit
         run: pip-audit --strict --desc

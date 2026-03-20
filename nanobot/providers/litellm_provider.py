@@ -9,6 +9,7 @@ import json_repair
 import litellm
 from litellm import acompletion
 
+from nanobot.errors import BudgetExceededError
 from nanobot.metrics import llm_calls_total, llm_latency_seconds
 from nanobot.providers.base import LLMProvider, LLMResponse, StreamChunk, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
@@ -36,12 +37,15 @@ class LiteLLMProvider(LLMProvider):
         *,
         llm_timeout_s: float = 60.0,
         llm_max_retries: int = 1,
+        max_budget_usd: float = 0.0,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
         self._timeout_s = max(1.0, llm_timeout_s)
         self._max_retries = max(0, llm_max_retries)
+        self._max_budget_usd: float = max(0.0, max_budget_usd)
+        self._session_cost_usd: float = 0.0
 
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
@@ -268,6 +272,14 @@ class LiteLLMProvider(LLMProvider):
             elapsed = time.monotonic() - t0
             llm_calls_total.labels(model=model, role="chat", success="True").inc()
             llm_latency_seconds.labels(model=model, role="chat").observe(elapsed)
+            if self._max_budget_usd > 0.0:
+                try:
+                    call_cost = litellm.completion_cost(completion_response=response)
+                    self._session_cost_usd += call_cost
+                except Exception:  # crash-barrier: cost lookup is best-effort
+                    pass
+                if self._session_cost_usd >= self._max_budget_usd:
+                    raise BudgetExceededError(self._session_cost_usd, self._max_budget_usd)
             return self._parse_response(response)
         except Exception as e:  # crash-barrier: LLM provider errors are varied
             elapsed = time.monotonic() - t0

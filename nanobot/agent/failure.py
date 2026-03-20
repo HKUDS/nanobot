@@ -72,10 +72,20 @@ class ToolCallTracker:
     ``record_failure()`` now returns ``(count, FailureClass)`` — callers must
     unpack both values.  The tool registry is **never mutated**; suppression is
     enforced by filtering ``tools_def`` at definition-generation time.
+
+    **Scope**: A ``ToolCallTracker`` instance is scoped to a single agent
+    turn, not an entire session.  ``AgentLoop`` creates a fresh tracker at
+    the start of each ``_run_agent_loop`` invocation, so ``GLOBAL_BUDGET``
+    limits failures within one turn.  The tracker is never carried across
+    turns.
     """
 
     WARN_THRESHOLD: ClassVar[int] = 2
     REMOVE_THRESHOLD: ClassVar[int] = 3
+    # Maximum total failures allowed per agent turn.  When
+    # ``total_failures >= GLOBAL_BUDGET`` the agent is forced to produce a
+    # final answer.  This budget is per-turn (not per-session) because the
+    # tracker is instantiated fresh at the start of each turn.
     GLOBAL_BUDGET: ClassVar[int] = 8
 
     def __init__(self) -> None:
@@ -172,7 +182,11 @@ class ToolCallTracker:
 
     @property
     def budget_exhausted(self) -> bool:
-        return self._total_failures > self.GLOBAL_BUDGET
+        return self._total_failures >= self.GLOBAL_BUDGET
+
+
+class _CycleError(Exception):
+    """Raised when a delegation cycle or depth/budget limit is reached."""
 
 
 def _build_failure_prompt(
@@ -212,3 +226,11 @@ def _build_failure_prompt(
         "the task cannot be completed."
     )
     return "\n".join(lines)
+
+
+__all__ = [
+    "FailureClass",
+    "ToolCallTracker",
+    "_CycleError",
+    "_build_failure_prompt",
+]

@@ -1,4 +1,4 @@
-.PHONY: install install-all test test-verbose test-cov lint format typecheck check ci pre-push import-check prompt-check memory-eval live-eval clean pre-commit-install
+.PHONY: install install-all test test-verbose test-cov lint format typecheck check ci pre-push import-check prompt-check memory-eval live-eval clean worktree-clean pre-commit-install
 
 PYTHON ?= python3
 
@@ -69,6 +69,12 @@ live-eval:
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	rm -rf .mypy_cache .pytest_cache *.egg-info dist build .ruff_cache
+
+worktree-clean:
+	@echo "Pruning stale worktrees..."
+	git worktree prune
+	@echo "Active worktrees:"
+	git worktree list
 
 pre-commit-install:
 	pre-commit install

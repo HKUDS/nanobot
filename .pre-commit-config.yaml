@@ -30,3 +30,9 @@ repos:
         entry: make import-check
         language: system
         pass_filenames: false
+      - id: prompt-check
+        name: prompt manifest check
+        entry: python3 scripts/check_prompt_manifest.py
+        language: system
+        pass_filenames: false
+        files: '^prompts/'

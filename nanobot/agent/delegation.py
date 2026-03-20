@@ -18,6 +18,8 @@ import contextvars
 import json
 import re
 import time
+from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -43,7 +45,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.agent.tracing import sanitize_for_trace
-from nanobot.config.schema import AgentRoleConfig
+from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
 from nanobot.errors import NanobotError
 from nanobot.metrics import delegation_latency_seconds, delegation_total
 
@@ -52,7 +54,6 @@ if TYPE_CHECKING:
     from nanobot.agent.scratchpad import Scratchpad
     from nanobot.agent.tool_executor import ToolExecutor
     from nanobot.agent.tools.base import Tool
-    from nanobot.config.schema import ExecToolConfig
     from nanobot.providers.base import LLMProvider
 
 # Per-coroutine delegation ancestry — isolated across asyncio.gather branches.
@@ -160,22 +161,35 @@ def _cap_scratchpad_for_injection(content: str, limit: int = _SCRATCHPAD_INJECTI
     )
 
 
+@dataclass(slots=True, frozen=True)
+class DelegationConfig:
+    """Immutable delegation settings (LAN-144).
+
+    Groups parameters that are set once at startup and never mutated
+    during a session.  Mutable per-session wiring (provider, coordinator,
+    scratchpad, etc.) remains as separate ``DelegationDispatcher.__init__``
+    parameters.
+    """
+
+    workspace: Path
+    model: str
+    temperature: float
+    max_tokens: int
+    max_iterations: int
+    restrict_to_workspace: bool
+    brave_api_key: str | None
+    exec_config: ExecToolConfig | None
+    role_name: str
+
+
 class DelegationDispatcher:
     """Manages delegation routing, contract construction, execution, and tracing."""
 
     def __init__(
         self,
         *,
+        config: DelegationConfig,
         provider: LLMProvider,
-        workspace: Path,
-        model: str,
-        temperature: float,
-        max_tokens: int,
-        max_iterations: int,
-        restrict_to_workspace: bool,
-        brave_api_key: str | None,
-        exec_config: ExecToolConfig,
-        role_name: str,
         coordinator: Coordinator | None = None,
         scratchpad: Scratchpad | None = None,
         active_messages: list[dict[str, Any]] | None = None,
@@ -183,16 +197,51 @@ class DelegationDispatcher:
         mcp_tools: list[Tool] | None = None,
         on_progress: Callable[..., Awaitable[None]] | None = None,
     ) -> None:
+        """Initialise the delegation dispatcher.
+
+        Parameters
+        ----------
+        config:
+            Immutable delegation settings (workspace, model, temperature,
+            max_tokens, max_iterations, restrict_to_workspace, brave_api_key,
+            exec_config, role_name).  See ``DelegationConfig``.
+        provider:
+            LLM provider used for delegated agent tool loops.
+        coordinator:
+            Coordinator instance used to classify and route delegation
+            targets.  ``None`` disables delegation (calls to ``dispatch``
+            will raise).
+        scratchpad:
+            Shared scratchpad for inter-agent artifact exchange.  Delegated
+            agents read prior findings from and write results to this
+            scratchpad.
+        active_messages:
+            Reference to the parent agent's message list, used to extract
+            recent tool results and the original user request for context
+            injection into delegation contracts.
+        tools:
+            Parent ``ToolExecutor`` used to locate delegate/delegate_parallel
+            tool instances during ``wire_delegate_tools``.
+        mcp_tools:
+            Additional MCP-provided tool instances to include in delegated
+            agent tool sets (subject to role allow/deny filtering).
+        on_progress:
+            Optional async callback invoked with delegation start/end events
+            for progress reporting.
+        """
+        self.config = config
         self.provider = provider
-        self.workspace = workspace
-        self.model = model
-        self.temperature = temperature
-        self.max_tokens = max_tokens
-        self.max_iterations = max_iterations
-        self.restrict_to_workspace = restrict_to_workspace
-        self.brave_api_key = brave_api_key
-        self.exec_config = exec_config
-        self.role_name = role_name
+        # Unpack config fields for concise access throughout the class body.
+        # This avoids changing 750+ lines of self.workspace / self.model / etc.
+        self.workspace = config.workspace
+        self.model = config.model
+        self.temperature = config.temperature
+        self.max_tokens = config.max_tokens
+        self.max_iterations = config.max_iterations
+        self.restrict_to_workspace = config.restrict_to_workspace
+        self.brave_api_key = config.brave_api_key
+        self.exec_config = config.exec_config
+        self.role_name = config.role_name
 
         # Mutable per-session state
         self.delegation_count: int = 0
@@ -200,7 +249,7 @@ class DelegationDispatcher:
         # This is a structural hard cap enforced in dispatch(), not an advisory prompt nudge.
         # Distinct from MAX_DELEGATION_DEPTH which caps the ancestry chain length.
         self.max_delegations: int = 8
-        self.routing_trace: list[dict[str, Any]] = []
+        self.routing_trace: deque[dict[str, Any]] = deque(maxlen=1000)
 
         self.coordinator: Coordinator | None = coordinator
         self.scratchpad: Scratchpad | None = scratchpad
@@ -210,6 +259,27 @@ class DelegationDispatcher:
         self.on_progress: Callable[..., Awaitable[None]] | None = on_progress
         # JSONL persistence for routing trace (LAN-130). Set by loop._ensure_scratchpad.
         self._trace_path: Path | None = None
+
+        # Pre-built stateless tool instances — shared across delegations to avoid
+        # per-call object construction overhead (LAN-138).
+        _allowed_dir = self.workspace if self.restrict_to_workspace else None
+        _tools: list[Tool] = [
+            ReadFileTool(workspace=self.workspace, allowed_dir=_allowed_dir),
+            ListDirTool(workspace=self.workspace, allowed_dir=_allowed_dir),
+            WriteFileTool(workspace=self.workspace, allowed_dir=_allowed_dir),
+            EditFileTool(workspace=self.workspace, allowed_dir=_allowed_dir),
+        ]
+        if self.exec_config is not None:
+            _tools.append(
+                ExecTool(
+                    working_dir=str(self.workspace),
+                    timeout=self.exec_config.timeout,
+                    restrict_to_workspace=self.restrict_to_workspace,
+                    shell_mode=self.exec_config.shell_mode,
+                )
+            )
+        _tools.extend([WebSearchTool(api_key=self.brave_api_key), WebFetchTool()])
+        self._cached_tools: dict[str, Tool] = {t.name: t for t in _tools}
 
     # ------------------------------------------------------------------
     # Wiring
@@ -398,7 +468,35 @@ class DelegationDispatcher:
 
     @staticmethod
     def classify_task_type(role: str, task: str) -> str:
-        """Classify a delegation task into a task type from the taxonomy."""
+        """Classify a delegation task into a task type from the taxonomy.
+
+        Returns one of the keys from ``TASK_TYPES``: ``report_writing``,
+        ``bug_investigation``, ``repo_architecture``, ``local_code_analysis``,
+        ``web_research``, or ``general``.
+
+        Signal evaluation order and tiebreaking:
+
+        1. **Role override** — ``writing`` role always returns
+           ``report_writing`` regardless of task content.
+        2. **Bug signals** — checked only when ``role == "code"``.  If any
+           bug keyword matches, returns ``bug_investigation``.
+        3. **Architecture signals** — if any architecture keyword matches,
+           returns ``repo_architecture`` (regardless of role).
+        4. **Code signals** — if any code keyword matches *or*
+           ``role == "code"``, returns ``local_code_analysis``.
+        5. **Web signals** — if any web keyword matches, the result depends
+           on whether project-scoped keywords are also present: project
+           keywords present yields ``repo_architecture``; otherwise
+           ``web_research``.
+        6. **Research role fallback** — ``role == "research"`` routes to
+           ``repo_architecture`` when project keywords are present, else
+           ``web_research``.
+        7. **Default** — ``general``.
+
+        For hybrid tasks (e.g. code analysis *and* web research), the first
+        matching signal in the evaluation order wins.  There is no weighted
+        scoring; the order above acts as the tiebreaker.
+        """
         task_lower = task.lower()
         if role == "writing":
             return "report_writing"
@@ -653,8 +751,8 @@ class DelegationDispatcher:
                         "task_title": task[:120],
                     },
                 )
-            except Exception:  # crash-barrier: never let event emission block delegation
-                pass
+            except Exception as exc:  # crash-barrier: never let event emission block delegation
+                logger.debug("delegate_start event emission failed: {}", exc)
 
         t0 = time.monotonic()
         token = _delegation_ancestry.set((*ancestry, role.name))
@@ -691,8 +789,8 @@ class DelegationDispatcher:
                             "success": True,
                         },
                     )
-                except Exception:  # crash-barrier: never let event emission block delegation
-                    pass
+                except Exception as exc:  # crash-barrier: never let event emission block delegation
+                    logger.debug("delegate_end event emission failed: {}", exc)
             return DelegationResult(content=result, tools_used=used_tools)
         except Exception:  # crash-barrier: delegation must record trace on any error
             latency_ms = (time.monotonic() - t0) * 1000
@@ -715,8 +813,8 @@ class DelegationDispatcher:
                             "success": False,
                         },
                     )
-                except Exception:  # crash-barrier: never let event emission block delegation
-                    pass
+                except Exception as exc:  # crash-barrier: never let event emission block delegation
+                    logger.debug("delegate_end (failure) event emission failed: {}", exc)
             raise
         finally:
             _delegation_ancestry.reset(token)
@@ -763,39 +861,15 @@ class DelegationDispatcher:
             return True
 
         tools = ToolRegistry()
-        allowed_dir = self.workspace if self.restrict_to_workspace else None
 
-        # Read-only filesystem tools always considered (grant() decides inclusion)
-        for ro_cls in (ReadFileTool, ListDirTool):
-            ro_t = ro_cls(workspace=self.workspace, allowed_dir=allowed_dir)
-            if _grant(ro_t.name):
-                tools.register(ro_t)
-
-        # Write filesystem tools — privileged
-        for rw_cls in (WriteFileTool, EditFileTool):
-            rw_t = rw_cls(workspace=self.workspace, allowed_dir=allowed_dir)
-            if _grant(rw_t.name):
-                tools.register(rw_t)
-
-        # Exec — privileged; forward shell_mode so allowlist policy applies to
-        # delegated agents (LAN-120).
-        exec_t = ExecTool(
-            working_dir=str(self.workspace),
-            timeout=self.exec_config.timeout,
-            restrict_to_workspace=self.restrict_to_workspace,
-            shell_mode=self.exec_config.shell_mode,
-        )
-        if _grant(exec_t.name):
-            tools.register(exec_t)
-
-        # Web tools — apply _grant() like every other tool so that denied_tools
-        # config is respected in delegated agents (LAN-118).
-        ws_tool = WebSearchTool(api_key=self.brave_api_key)
-        if _grant(ws_tool.name):
-            tools.register(ws_tool)
-        wf_tool = WebFetchTool()
-        if _grant(wf_tool.name):
-            tools.register(wf_tool)
+        # Register pre-cached stateless tool instances (LAN-138); grant() filters
+        # by role allowed/denied lists.  Privileged tools (exec, write_file,
+        # edit_file) are blocked by _grant() unless explicitly in allowed_tools.
+        # Web tools respect denied_tools config (LAN-118); shell_mode forwarded
+        # to ExecTool via the cached instance (LAN-120).
+        for _t in self._cached_tools.values():
+            if _grant(_t.name):
+                tools.register(_t)
 
         # Re-delegation — privileged
         child_delegate = DelegateTool()

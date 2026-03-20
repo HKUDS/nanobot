@@ -122,6 +122,19 @@ class ProviderError(NanobotError):
         self.retryable = retryable
 
 
+class BudgetExceededError(ProviderError):
+    """Session LLM cost budget has been exceeded."""
+
+    def __init__(self, spent_usd: float, budget_usd: float):
+        super().__init__(
+            "nanobot",
+            f"Session cost budget exceeded: ${spent_usd:.4f} spent, limit is ${budget_usd:.4f}",
+            retryable=False,
+        )
+        self.spent_usd = spent_usd
+        self.budget_usd = budget_usd
+
+
 class ProviderRateLimitError(ProviderError):
     """Provider returned a rate limit (429) error."""
 

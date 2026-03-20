@@ -36,7 +36,8 @@ jobs:
             SHORT_SHA=$(echo "${{ github.event.workflow_run.head_sha }}" | cut -c1-7)
             echo "image=ghcr.io/${{ github.repository }}:sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           else
-            echo "image=ghcr.io/${{ github.repository }}:latest" >> "$GITHUB_OUTPUT"
+            echo "::error::No head_sha available — cannot determine image tag. Refusing to deploy 'latest'."
+            exit 1
           fi
           echo "Deploying image: $(grep image= "$GITHUB_OUTPUT" | cut -d= -f2-)"
 

@@ -365,8 +365,8 @@ class SkillsLoader:
                     raw = yaml.safe_load(match.group(1))
                     if isinstance(raw, dict):
                         return raw
-                except Exception:  # crash-barrier: third-party YAML library
-                    pass
+                except Exception as exc:  # crash-barrier: third-party YAML library
+                    logger.debug("YAML frontmatter parse failed: {}", exc)
 
         return None
 

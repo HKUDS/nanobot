@@ -127,13 +127,13 @@ class TestParallelDelegation:
         tool = DelegateParallelTool()
         call_count = 0
 
-        async def maybe_cycle(role: str, task: str, ctx: str | None) -> str:
+        async def maybe_cycle(role: str, task: str, ctx: str | None) -> DelegationResult:
             nonlocal call_count
             call_count += 1
             if "cycle" in task:
                 raise _CycleError("cycle: A → B → A")
             await asyncio.sleep(0.01)
-            return f"ok:{task}"
+            return DelegationResult(content=f"ok:{task}", tools_used=["read_file"])
 
         tool.set_dispatch(maybe_cycle)
         result = await tool.execute(
