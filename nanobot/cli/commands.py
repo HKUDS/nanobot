@@ -527,7 +527,7 @@ def gateway(
         try:
             response = await agent.process_direct(
                 reminder_note,
-                session_key=f"cron:{job.id}",
+                session_key=f"{job.payload.channel}:{job.payload.to}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
             )
@@ -582,7 +582,7 @@ def gateway(
 
         return await agent.process_direct(
             tasks,
-            session_key="heartbeat",
+            session_key=f"{channel}:{chat_id}",
             channel=channel,
             chat_id=chat_id,
             on_progress=_silent,
