@@ -42,7 +42,10 @@ class MessageTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Send a message to the user. Use this when you want to communicate something."
+        return (
+            "Send a message to the user. Use this when you want to communicate something. "
+            "When sending a file (document, image, etc.) to the user, you MUST pass the file path in the media parameter."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -55,7 +58,7 @@ class MessageTool(Tool):
                 },
                 "channel": {
                     "type": "string",
-                    "description": "Optional: target channel (telegram, discord, etc.)"
+                    "description": "Optional: target channel (telegram, discord, email, etc.)"
                 },
                 "chat_id": {
                     "type": "string",
@@ -64,7 +67,10 @@ class MessageTool(Tool):
                 "media": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional: list of file paths to attach (images, audio, documents)"
+                    "description": (
+                        "REQUIRED when sending files: list of absolute file paths to attach. "
+                        "Use this for documents (.docx, .pdf), images, etc. Example: media=[\"/path/to/file.docx\"]"
+                    )
                 }
             },
             "required": ["content"]

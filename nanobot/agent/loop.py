@@ -403,10 +403,17 @@ class AgentLoop:
 
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
+        if cmd == "/clear_memory":
+            archived = self.context.memory.clear_and_archive()
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content="Memory cleared." + (" Previous content archived to HISTORY.md." if archived else ""),
+            )
         if cmd == "/help":
             lines = [
                 "🐈 nanobot commands:",
                 "/new — Start a new conversation",
+                "/clear_memory — Clear long-term memory (archived to HISTORY.md)",
                 "/stop — Stop the current task",
                 "/restart — Restart the bot",
                 "/help — Show available commands",

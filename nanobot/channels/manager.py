@@ -126,6 +126,9 @@ class ChannelManager:
                         continue
                     if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
                         continue
+                    # Email: never stream progress — send only the final response
+                    if msg.channel == "email":
+                        continue
 
                 channel = self.channels.get(msg.channel)
                 if channel:

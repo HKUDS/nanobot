@@ -99,6 +99,19 @@ class MemoryStore:
         long_term = self.read_long_term()
         return f"## Long-term Memory\n{long_term}" if long_term else ""
 
+    def clear_and_archive(self) -> bool:
+        """Clear MEMORY.md and archive its content to HISTORY.md. Returns True if content was archived."""
+        content = self.read_long_term()
+        content = content.strip()
+        if content:
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+            self.append_history(f"[{ts}] [MEMORY_CLEAR] Archived before clear:\n\n{content}")
+        self.write_long_term(
+            "# Long-term Memory\n\n"
+            "This file stores important information that should persist across sessions.\n"
+        )
+        return bool(content)
+
     @staticmethod
     def _format_messages(messages: list[dict]) -> str:
         lines = []

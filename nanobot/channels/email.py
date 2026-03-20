@@ -3,10 +3,12 @@
 import asyncio
 import html
 import imaplib
+import mimetypes
 import re
 import smtplib
 import ssl
 from datetime import date
+from pathlib import Path
 from email import policy
 from email.header import decode_header, make_header
 from email.message import EmailMessage
@@ -20,7 +22,9 @@ from pydantic import Field
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+from nanobot.utils.helpers import ensure_dir
 
 
 class EmailConfig(Base):
@@ -128,6 +132,7 @@ class EmailChannel(BaseChannel):
                         sender_id=sender,
                         chat_id=sender,
                         content=item["content"],
+                        media=item.get("media") or [],
                         metadata=item.get("metadata", {}),
                     )
             except Exception as e:
@@ -175,6 +180,23 @@ class EmailChannel(BaseChannel):
         email_msg["To"] = to_addr
         email_msg["Subject"] = subject
         email_msg.set_content(msg.content or "")
+
+        for media_path in msg.media or []:
+            try:
+                path = Path(media_path)
+                if not path.is_file():
+                    logger.warning("Email attachment not found: {}", media_path)
+                    continue
+                data = path.read_bytes()
+                mime_type, _ = mimetypes.guess_type(str(path)) or (None, None)
+                if mime_type and "/" in mime_type:
+                    maintype, subtype = mime_type.split("/", 1)
+                else:
+                    maintype, subtype = "application", "octet-stream"
+                filename = path.name
+                email_msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=filename)
+            except Exception as e:
+                logger.warning("Failed to attach {} to email: {}", media_path, e)
 
         in_reply_to = self._last_message_id_by_chat.get(to_addr)
         if in_reply_to:
@@ -316,6 +338,12 @@ class EmailChannel(BaseChannel):
                     body = "(empty email body)"
 
                 body = body[: self.config.max_body_chars]
+                all_paths = self._extract_attachments(parsed, uid or imap_id.decode() if isinstance(imap_id, bytes) else str(imap_id))
+                image_paths = [p for p in all_paths if self._is_image_path(p)]
+                if image_paths:
+                    body += "\n\n[Attached images are included below for analysis.]"
+                if all_paths:
+                    body += "\n\n[Attached files: " + ", ".join(all_paths) + "]"
                 content = (
                     f"Email received.\n"
                     f"From: {sender}\n"
@@ -338,6 +366,7 @@ class EmailChannel(BaseChannel):
                         "message_id": message_id,
                         "content": content,
                         "metadata": metadata,
+                        "media": image_paths,
                     }
                 )
 
@@ -429,6 +458,52 @@ class EmailChannel(BaseChannel):
         if msg.get_content_type() == "text/html":
             return cls._html_to_text(payload).strip()
         return payload.strip()
+
+    def _extract_attachments(self, parsed: Any, msg_id: str) -> list[str]:
+        """Extract all attachments (images, audio, documents), save to media dir, return file paths."""
+        paths: list[str] = []
+        media_dir = ensure_dir(get_media_dir("email"))
+        skip_types = ("multipart/", "text/plain", "text/html")
+        ext_map = {
+            "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif",
+            "image/webp": ".webp", "image/bmp": ".bmp",
+            "audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/mp4": ".m4a",
+            "audio/wav": ".wav", "audio/wave": ".wav", "audio/x-wav": ".wav",
+            "audio/ogg": ".ogg", "audio/webm": ".webm",
+            "application/pdf": ".pdf",
+        }
+
+        for i, part in enumerate(parsed.walk()):
+            ct = part.get_content_type().lower()
+            if any(ct.startswith(s) if s.endswith("/") else ct == s for s in skip_types):
+                continue
+            try:
+                payload = part.get_payload(decode=True)
+            except Exception:
+                continue
+            if not payload:
+                continue
+            ext = ext_map.get(ct)
+            if not ext:
+                cd = part.get("Content-Disposition", "")
+                filename = part.get_filename()
+                if filename and "." in filename:
+                    ext = "." + filename.rsplit(".", 1)[-1].lower()
+                else:
+                    ext = ".bin"
+            safe_id = re.sub(r"[^a-zA-Z0-9]", "_", str(msg_id))[:32]
+            path = media_dir / f"{safe_id}_{i}{ext}"
+            try:
+                path.write_bytes(payload)
+                paths.append(str(path))
+            except Exception as e:
+                logger.warning("Failed to save email attachment: {}", e)
+        return paths
+
+    @staticmethod
+    def _is_image_path(path: str) -> bool:
+        """Return True if path has an image extension."""
+        return path.lower().endswith((".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"))
 
     @staticmethod
     def _html_to_text(raw_html: str) -> str:
