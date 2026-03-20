@@ -1,6 +1,7 @@
 """Text-to-speech provider using Microsoft Edge TTS."""
 
 import asyncio
+import shutil
 from pathlib import Path
 
 import edge_tts
@@ -70,19 +71,24 @@ class EdgeTextToSpeechProvider:
             await communicate.save(str(mp3_path))
 
             # 2. Convert MP3 → OGG/Opus via ffmpeg
-            process = await asyncio.create_subprocess_exec(
-                "ffmpeg", "-y", "-i", str(mp3_path),
-                "-c:a", "libopus", "-b:a", "32k",
-                "-vbr", "on", "-compression_level", "10",
-                str(output_path),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await process.communicate()
+            if rate_str != "+0%":
+                if shutil.which("ffmpeg") is None:
+                    logger.warning("ffmpeg is not installed or not in PATH. Please install ffmpeg to speed up audio replies.")
+                else:
+                    process = await asyncio.create_subprocess_exec(
+                        "ffmpeg", "-y", "-i", str(mp3_path),
+                        "-c:a", "libopus", "-b:a", "32k",
+                        "-vbr", "on", "-compression_level", "10",
+                        str(output_path),
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    _, stderr = await process.communicate()
 
-            if process.returncode != 0:
-                logger.error(f"ffmpeg conversion failed: {stderr.decode()}")
-                return None
+                    if process.returncode != 0:
+                        logger.error(f"ffmpeg conversion failed: {stderr.decode()}")
+                        return None
+            
 
             logger.debug(f"TTS audio saved to {output_path}")
             return output_path
