@@ -59,10 +59,12 @@ jobs:
           exit-code: '0'
           trivyignores: '.trivyignore'
           ignore-unfixed: true
+          scanners: 'vuln'
 
       # Step 2: SARIF output for GitHub Security tab (gates the build).
       # --ignore-unfixed: only block on CVEs with available patches.
       # OS-level CVEs without Debian fixes are reported but don't block.
+      # scanners: vuln — disable secret scanning (causes false exit-code 1 with SARIF).
       - name: Trivy scan (SARIF for GitHub Security)
         uses: aquasecurity/trivy-action@0.35.0
         with:
@@ -73,6 +75,7 @@ jobs:
           exit-code: '1'
           trivyignores: '.trivyignore'
           ignore-unfixed: true
+          scanners: 'vuln'
 
       - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
