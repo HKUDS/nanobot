@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.coordinator import Coordinator, build_default_registry
-from nanobot.agent.tools.delegate import DelegateParallelTool, _CycleError
+from nanobot.agent.tools.delegate import DelegateParallelTool, DelegationResult, _CycleError
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import AgentConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
@@ -66,13 +66,13 @@ class TestParallelDelegation:
         start_times: list[float] = []
         end_times: list[float] = []
 
-        async def tracked_dispatch(role: str, task: str, ctx: str | None) -> str:
+        async def tracked_dispatch(role: str, task: str, ctx: str | None) -> DelegationResult:
             import time
 
             start_times.append(time.monotonic())
             await asyncio.sleep(0.05)
             end_times.append(time.monotonic())
-            return f"done:{task}"
+            return DelegationResult(content=f"done:{task}", tools_used=["read_file"])
 
         tool.set_dispatch(tracked_dispatch)
         result = await tool.execute(
@@ -91,10 +91,10 @@ class TestParallelDelegation:
         """When some subtasks fail, the result contains both successes and errors."""
         tool = DelegateParallelTool()
 
-        async def mixed(role: str, task: str, ctx: str | None) -> str:
+        async def mixed(role: str, task: str, ctx: str | None) -> DelegationResult:
             if "bad" in task:
                 raise RuntimeError("task went wrong")
-            return f"ok:{task}"
+            return DelegationResult(content=f"ok:{task}", tools_used=["read_file"])
 
         tool.set_dispatch(mixed)
         result = await tool.execute(
@@ -114,7 +114,7 @@ class TestParallelDelegation:
         """All-failure still returns a structured result (not a crash)."""
         tool = DelegateParallelTool()
 
-        async def always_fail(role: str, task: str, ctx: str | None) -> str:
+        async def always_fail(role: str, task: str, ctx: str | None) -> DelegationResult:
             raise RuntimeError("nope")
 
         tool.set_dispatch(always_fail)

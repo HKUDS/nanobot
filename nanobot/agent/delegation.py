@@ -439,27 +439,26 @@ class DelegationDispatcher:
 
     @staticmethod
     def has_parallel_structure(text: str) -> bool:
-        """Detect enumerated independent subtasks in the user message."""
+        """Detect enumerated independent subtasks in the user message.
+
+        Returns True when any of the five structural patterns are present.
+        Each pattern is specific enough to avoid false positives on natural prose.
+        """
         text_lower = text.strip().lower()
-        count_words = re.search(
+        if re.search(
             r"\b(two|three|four|five|six|seven|eight|nine|ten|\d+)\s+"
             r"(areas?|parts?|aspects?|sections?|components?|topics?|items?|tasks?"
             r"|dimensions?|categories?|modules?|files?|layers?)",
             text_lower,
-        )
-        if count_words:
+        ):
             return True
-        enum_pattern = re.search(r"(?:[^,]+,\s*){2,}(?:and|&)\s+[^,.]+", text_lower)
-        if enum_pattern:
+        if re.search(r"(?:[^,]+,\s*){2,}(?:and|&)\s+[^,.]+", text_lower):
             return True
-        colon_list = re.search(r":\s*[^,]+(?:,\s*[^,]+){2,}", text_lower)
-        if colon_list:
+        if re.search(r":\s*[^,]+(?:,\s*[^,]+){2,}", text_lower):
             return True
-        numbered = re.findall(r"(?:^|\s)(?:\d+[.)\]]|[a-z][.)\]])\s", text_lower)
-        if len(numbered) >= 3:
+        if len(re.findall(r"(?:^|\s)(?:\d+[.)\]]|[a-z][.)\]])\s", text_lower)) >= 3:
             return True
-        across_pattern = re.search(r"\bacross\b.+,.+(?:,|and)\s+", text_lower)
-        if across_pattern:
+        if re.search(r"\bacross\b.+,.+(?:,|and)\s+", text_lower):
             return True
         return False
 
@@ -523,9 +522,11 @@ class DelegationDispatcher:
         plan_text = self.extract_plan_text()
         if plan_text:
             sections.append(f"## Overall Plan (for context)\n{plan_text}")
-        execution_ctx = self.build_execution_context(task_type)
-        if execution_ctx:
-            sections.append(f"## Project Context\n{execution_ctx}")
+        # Skip workspace I/O for synthesis-only tasks where context is unused (LAN-126).
+        if task_type != "report_writing":
+            execution_ctx = self.build_execution_context(task_type)
+            if execution_ctx:
+                sections.append(f"## Project Context\n{execution_ctx}")
         parent_findings = self.gather_recent_tool_results()
         if parent_findings:
             sections.append(f"## Prior Results\n{parent_findings}")

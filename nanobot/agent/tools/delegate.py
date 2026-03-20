@@ -10,6 +10,7 @@ to the session scratchpad.
 
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
@@ -212,8 +213,6 @@ class DelegateParallelTool(Tool):
         }
 
     async def execute(self, *, subtasks: list[dict[str, str]], **_: Any) -> ToolResult:  # type: ignore[override]
-        import asyncio
-
         if not self._dispatch:
             return ToolResult.fail("Delegation not available", error_type="config")
 
