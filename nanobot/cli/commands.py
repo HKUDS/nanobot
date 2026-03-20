@@ -446,6 +446,11 @@ def gateway(
 def agent(
     message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
+    skill: list[str] | None = typer.Option(
+        None,
+        "--skill",
+        help="Preload one or more skills for this turn. Repeat the flag to pass multiple skills.",
+    ),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
 ):
@@ -501,7 +506,12 @@ def agent(
         # Single message mode — direct call, no bus needed
         async def run_once():
             with _thinking_ctx():
-                response = await agent_loop.process_direct(message, session_id, on_progress=_cli_progress)
+                response = await agent_loop.process_direct(
+                    message,
+                    session_id,
+                    skill_names=skill,
+                    on_progress=_cli_progress,
+                )
             _print_agent_response(response, render_markdown=markdown)
             await agent_loop.close_mcp()
 
@@ -572,6 +582,7 @@ def agent(
                             sender_id="user",
                             chat_id=cli_chat_id,
                             content=user_input,
+                            metadata={"skill_names": skill} if skill else {},
                         ))
 
                         with _thinking_ctx():

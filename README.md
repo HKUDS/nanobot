@@ -154,6 +154,12 @@ nanobot agent
 
 That's it! You have a working AI assistant in 2 minutes.
 
+To preload specific skills for a turn, repeat `--skill`:
+
+```bash
+nanobot agent -m "Create a PR for this repo" --skill github --skill summarize
+```
+
 ## 💬 Chat Apps
 
 Connect nanobot to your favorite chat platform.
@@ -813,6 +819,7 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 |---------|-------------|
 | `nanobot onboard` | Initialize config & workspace |
 | `nanobot agent -m "..."` | Chat with the agent |
+| `nanobot agent -m "..." --skill github --skill tmux` | Chat with preloaded selected skills |
 | `nanobot agent` | Interactive chat mode |
 | `nanobot agent --no-markdown` | Show plain-text replies |
 | `nanobot agent --logs` | Show runtime logs during chat |

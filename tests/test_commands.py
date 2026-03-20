@@ -1,6 +1,6 @@
 import shutil
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from typer.testing import CliRunner
@@ -128,3 +128,26 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+
+
+def test_agent_message_mode_passes_selected_skills():
+    config = Config()
+
+    with patch("nanobot.config.loader.load_config", return_value=config), \
+         patch("nanobot.cli.commands._make_provider"), \
+         patch("nanobot.cron.service.CronService"), \
+         patch("nanobot.agent.loop.AgentLoop") as MockAgentLoop:
+        loop = MockAgentLoop.return_value
+        loop.process_direct = AsyncMock(return_value="done")
+        loop.close_mcp = AsyncMock(return_value=None)
+
+        result = runner.invoke(
+            app,
+            ["agent", "-m", "hello", "--skill", "github", "--skill", "tmux"],
+        )
+
+    assert result.exit_code == 0
+    args = loop.process_direct.await_args
+    assert args.args == ("hello", "cli:direct")
+    assert args.kwargs["skill_names"] == ["github", "tmux"]
+    assert callable(args.kwargs["on_progress"])
