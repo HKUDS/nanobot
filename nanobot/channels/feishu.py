@@ -189,6 +189,10 @@ def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
                     texts.append(el.get("text", ""))
                 elif tag == "at":
                     texts.append(f"@{el.get('user_name', 'user')}")
+                elif tag == "code_block":
+                    lang = el.get("language", "")
+                    code_text = el.get("text", "")
+                    texts.append(f"\n```{lang}\n{code_text}\n```\n")
                 elif tag == "img" and (key := el.get("image_key")):
                     images.append(key)
         return (" ".join(texts).strip() or None), images
@@ -1042,7 +1046,7 @@ class FeishuChannel(BaseChannel):
             event = data.event
             message = event.message
             sender = event.sender
-
+            
             # Deduplication check
             message_id = message.message_id
             if message_id in self._processed_message_ids:
