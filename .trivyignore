@@ -7,3 +7,9 @@
 #
 # Example:
 #   CVE-2023-12345  # only affects feature X which we don't use — reviewed 2026-03-18
+
+# OS-level: nghttp2 in python:3.11-slim-bookworm base image.
+# Fix not yet available in Debian bookworm repos. Nanobot does not use
+# nghttp2 directly; it is pulled in as a transitive dependency of libcurl.
+# Will be resolved when the base image publishes an updated package.
+CVE-2026-27135  # nghttp2 in base image, no fix available — reviewed 2026-03-20

@@ -74,4 +74,6 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
       - name: Run tests with coverage
-        run: python -m pytest tests/ -x -q --cov=nanobot --cov-report=term-missing --cov-fail-under=85
+        run: python -m pytest tests/ -x -q --cov=nanobot --cov-report=term-missing --cov-report=json --cov-fail-under=85
+      - name: Check per-module coverage thresholds
+        run: python scripts/check_module_coverage.py

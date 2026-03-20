@@ -93,10 +93,12 @@ class TestCapabilityRegistryWiring:
         loop = _make_loop(tmp_path)
         assert loop._capabilities.skills_loader is loop.context.skills
 
-    def test_agent_registry_initially_none(self, tmp_path: Path) -> None:
-        """Before coordinator init, agent_registry is None."""
+    def test_agent_registry_always_present(self, tmp_path: Path) -> None:
+        """agent_registry is always set (never None) — LAN-150."""
+        from nanobot.agent.registry import AgentRegistry
+
         loop = _make_loop(tmp_path)
-        assert loop._capabilities.agent_registry is None
+        assert isinstance(loop._capabilities.agent_registry, AgentRegistry)
 
 
 # ---------------------------------------------------------------------------
@@ -222,11 +224,15 @@ class TestCoordinatorRoleWiring:
         cap_count_2 = len(loop._capabilities)
         assert cap_count_1 == cap_count_2
 
-    def test_no_routing_config_leaves_agent_registry_none(self, tmp_path: Path) -> None:
+    def test_no_routing_config_leaves_agent_registry_empty(self, tmp_path: Path) -> None:
+        """Without routing, agent_registry exists but has no roles — LAN-150."""
+        from nanobot.agent.registry import AgentRegistry
+
         loop = _make_loop(tmp_path)
         loop._routing_config = None
         loop._ensure_coordinator()
-        assert loop._capabilities.agent_registry is None
+        assert isinstance(loop._capabilities.agent_registry, AgentRegistry)
+        assert len(loop._capabilities.agent_registry) == 0
 
 
 # ---------------------------------------------------------------------------

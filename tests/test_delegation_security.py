@@ -273,7 +273,15 @@ class TestDisabledRoleRouting:
             def get_default_model(self) -> str:
                 return "stub"
 
-            async def chat(self, **kwargs: Any) -> LLMResponse:
+            async def chat(  # type: ignore[override]
+                self,
+                messages: Any,
+                tools: Any = None,
+                model: Any = None,
+                max_tokens: int = 4096,
+                temperature: float = 0.7,
+                metadata: Any = None,
+            ) -> LLMResponse:
                 return LLMResponse(content='{"role": "general"}')
 
         registry = AgentRegistry(default_role="general")
@@ -298,7 +306,15 @@ class TestDisabledRoleRouting:
             def get_default_model(self) -> str:
                 return "stub"
 
-            async def chat(self, **kwargs: Any) -> LLMResponse:
+            async def chat(  # type: ignore[override]
+                self,
+                messages: Any,
+                tools: Any = None,
+                model: Any = None,
+                max_tokens: int = 4096,
+                temperature: float = 0.7,
+                metadata: Any = None,
+            ) -> LLMResponse:
                 return LLMResponse(content='{"role": "general"}')
 
         registry = AgentRegistry(default_role="general")
