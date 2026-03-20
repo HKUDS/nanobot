@@ -88,3 +88,31 @@ def discover_tool_plugins(registry: ToolRegistry, config: Config) -> None:
             logger.info("Tool plugin '{}' registered", ep.name)
         except Exception as e:
             logger.warning("Failed to load tool plugin '{}': {}", ep.name, e)
+
+
+def discover_skill_tools(registry: ToolRegistry, config: Config, workspace: str | Any) -> None:
+    """Discover and register native skill tools from workspace/skills/*/tools/__init__.py."""
+    import importlib.util
+    from pathlib import Path
+
+    skills_dir = Path(str(workspace)) / "skills"
+    if not skills_dir.is_dir():
+        return
+
+    for init_path in sorted(skills_dir.glob("*/tools/__init__.py")):
+        skill_name = init_path.parent.parent.name
+        try:
+            spec = importlib.util.spec_from_file_location(
+                f"nanobot_skill_{skill_name}", str(init_path),
+            )
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            if hasattr(mod, "register"):
+                before = len(registry)
+                mod.register(registry, config)
+                added = len(registry) - before
+                logger.info("Skill '{}' registered {} tool(s)", skill_name, added)
+            else:
+                logger.debug("Skill '{}' tools/__init__.py has no register()", skill_name)
+        except Exception as e:
+            logger.warning("Failed to load skill tools '{}': {}", skill_name, e)

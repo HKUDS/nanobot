@@ -173,8 +173,9 @@ class AgentLoop:
 
         # Discover and register external tool plugins
         if self._config:
-            from nanobot.agent.tools.registry import discover_tool_plugins
+            from nanobot.agent.tools.registry import discover_tool_plugins, discover_skill_tools
             discover_tool_plugins(self.tools, self._config)
+            discover_skill_tools(self.tools, self._config, self.workspace)
 
     def _handle_models_command(self, arg: str) -> str:
         """Handle /models command: list providers or models under a provider."""
