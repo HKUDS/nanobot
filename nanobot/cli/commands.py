@@ -264,7 +264,7 @@ def main(
 def onboard(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
-    interactive: bool = typer.Option(True, "--interactive/--no-interactive", help="Use interactive wizard"),
+    wizard: bool = typer.Option(False, "--wizard", help="Use interactive wizard"),
 ):
     """Initialize nanobot configuration and workspace."""
     from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
@@ -284,7 +284,7 @@ def onboard(
 
     # Create or update config
     if config_path.exists():
-        if interactive:
+        if wizard:
             config = _apply_workspace_override(load_config(config_path))
         else:
             console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
@@ -300,13 +300,13 @@ def onboard(
                 console.print(f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)")
     else:
         config = _apply_workspace_override(Config())
-        # In interactive mode, don't save yet - the wizard will handle saving if should_save=True
-        if not interactive:
+        # In wizard mode, don't save yet - the wizard will handle saving if should_save=True
+        if not wizard:
             save_config(config, config_path)
             console.print(f"[green]✓[/green] Created config at {config_path}")
 
     # Run interactive wizard if enabled
-    if interactive:
+    if wizard:
         from nanobot.cli.onboard_wizard import run_onboard
 
         try:
@@ -336,14 +336,16 @@ def onboard(
     sync_workspace_templates(workspace_path)
 
     agent_cmd = 'nanobot agent -m "Hello!"'
-    if config_path:
+    gateway_cmd = "nanobot gateway"
+    if config:
         agent_cmd += f" --config {config_path}"
+        gateway_cmd += f" --config {config_path}"
 
     console.print(f"\n{__logo__} nanobot is ready!")
     console.print("\nNext steps:")
-    if interactive:
-        console.print("  1. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
-        console.print("  2. Start gateway: [cyan]nanobot gateway[/cyan]")
+    if wizard:
+        console.print(f"  1. Chat: [cyan]{agent_cmd}[/cyan]")
+        console.print(f"  2. Start gateway: [cyan]{gateway_cmd}[/cyan]")
     else:
         console.print(f"  1. Add your API key to [cyan]{config_path}[/cyan]")
         console.print("     Get one at: https://openrouter.ai/keys")

@@ -401,7 +401,7 @@ class TestConfigurePydanticModelDrafts:
             if token == "first":
                 return choices[0]
             if token == "done":
-                return "✓ Done"
+                return "[Done]"
             if token == "back":
                 return _BACK_PRESSED
             return token
@@ -461,9 +461,9 @@ class TestRunOnboardExitBehavior:
 
         responses = iter(
             [
-                "🤖 Configure Agent Settings",
+                "[A] Agent Settings",
                 KeyboardInterrupt(),
-                "🗑️ Exit Without Saving",
+                "[X] Exit Without Saving",
             ]
         )
 
@@ -479,12 +479,13 @@ class TestRunOnboardExitBehavior:
         def fake_select(*_args, **_kwargs):
             return FakePrompt(next(responses))
 
-        def fake_configure_agents(config):
-            config.agents.defaults.model = "test/provider-model"
+        def fake_configure_general_settings(config, section):
+            if section == "Agent Settings":
+                config.agents.defaults.model = "test/provider-model"
 
         monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
-        monkeypatch.setattr(onboard_wizard.questionary, "select", fake_select)
-        monkeypatch.setattr(onboard_wizard, "_configure_agents", fake_configure_agents)
+        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
+        monkeypatch.setattr(onboard_wizard, "_configure_general_settings", fake_configure_general_settings)
 
         result = run_onboard(initial_config=initial_config)
 

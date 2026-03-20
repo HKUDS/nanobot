@@ -61,7 +61,7 @@ def test_onboard_fresh_install(mock_paths):
     """No existing config — should create from scratch."""
     config_file, workspace_dir, mock_ws = mock_paths
 
-    result = runner.invoke(app, ["onboard", "--no-interactive"])
+    result = runner.invoke(app, ["onboard"])
 
     assert result.exit_code == 0
     assert "Created config" in result.stdout
@@ -79,7 +79,7 @@ def test_onboard_existing_config_refresh(mock_paths):
     config_file, workspace_dir, _ = mock_paths
     config_file.write_text('{"existing": true}')
 
-    result = runner.invoke(app, ["onboard", "--no-interactive"], input="n\n")
+    result = runner.invoke(app, ["onboard"], input="n\n")
 
     assert result.exit_code == 0
     assert "Config already exists" in result.stdout
@@ -93,7 +93,7 @@ def test_onboard_existing_config_overwrite(mock_paths):
     config_file, workspace_dir, _ = mock_paths
     config_file.write_text('{"existing": true}')
 
-    result = runner.invoke(app, ["onboard", "--no-interactive"], input="y\n")
+    result = runner.invoke(app, ["onboard"], input="y\n")
 
     assert result.exit_code == 0
     assert "Config already exists" in result.stdout
@@ -107,7 +107,7 @@ def test_onboard_existing_workspace_safe_create(mock_paths):
     workspace_dir.mkdir(parents=True)
     config_file.write_text("{}")
 
-    result = runner.invoke(app, ["onboard", "--no-interactive"], input="n\n")
+    result = runner.invoke(app, ["onboard"], input="n\n")
 
     assert result.exit_code == 0
     assert "Created workspace" not in result.stdout
@@ -130,6 +130,7 @@ def test_onboard_help_shows_workspace_and_config_options():
     assert "-w" in stripped_output
     assert "--config" in stripped_output
     assert "-c" in stripped_output
+    assert "--wizard" in stripped_output
     assert "--dir" not in stripped_output
 
 
@@ -143,7 +144,7 @@ def test_onboard_interactive_discard_does_not_save_or_create_workspace(mock_path
         lambda initial_config: OnboardResult(config=initial_config, should_save=False),
     )
 
-    result = runner.invoke(app, ["onboard"])
+    result = runner.invoke(app, ["onboard", "--wizard"])
 
     assert result.exit_code == 0
     assert "No changes were saved" in result.stdout
@@ -159,7 +160,7 @@ def test_onboard_uses_explicit_config_and_workspace_paths(tmp_path, monkeypatch)
 
     result = runner.invoke(
         app,
-        ["onboard", "--config", str(config_path), "--workspace", str(workspace_path), "--no-interactive"],
+        ["onboard", "--config", str(config_path), "--workspace", str(workspace_path)],
     )
 
     assert result.exit_code == 0
@@ -171,6 +172,31 @@ def test_onboard_uses_explicit_config_and_workspace_paths(tmp_path, monkeypatch)
     resolved_config = str(config_path.resolve())
     assert resolved_config in compact_output
     assert f"--config {resolved_config}" in compact_output
+
+
+def test_onboard_wizard_preserves_explicit_config_in_next_steps(tmp_path, monkeypatch):
+    config_path = tmp_path / "instance" / "config.json"
+    workspace_path = tmp_path / "workspace"
+
+    from nanobot.cli.onboard_wizard import OnboardResult
+
+    monkeypatch.setattr(
+        "nanobot.cli.onboard_wizard.run_onboard",
+        lambda initial_config: OnboardResult(config=initial_config, should_save=True),
+    )
+    monkeypatch.setattr("nanobot.channels.registry.discover_all", lambda: {})
+
+    result = runner.invoke(
+        app,
+        ["onboard", "--wizard", "--config", str(config_path), "--workspace", str(workspace_path)],
+    )
+
+    assert result.exit_code == 0
+    stripped_output = _strip_ansi(result.stdout)
+    compact_output = stripped_output.replace("\n", "")
+    resolved_config = str(config_path.resolve())
+    assert f'nanobot agent -m "Hello!" --config {resolved_config}' in compact_output
+    assert f"nanobot gateway --config {resolved_config}" in compact_output
 
 
 def test_config_matches_github_copilot_codex_with_hyphen_prefix():
