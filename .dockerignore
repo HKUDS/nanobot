@@ -41,8 +41,8 @@ terraform/
 .dockerignore
 Makefile
 
-# Bridge (WhatsApp bridge is optional — run as separate container if needed)
-bridge/
+# Bridge source included (tiny, ~10KB) — needed by hatchling force-include
+# during pip install.  The bridge won't run without Node.js.
 
 # Runtime data
 workspace/

@@ -7,8 +7,10 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Install Python dependencies first (cached layer)
-COPY pyproject.toml README.md LICENSE ./
+# Install Python dependencies first (cached layer).
+# bridge/ must be in the build context (not .dockerignore'd) because
+# pyproject.toml force-includes it in the wheel via hatchling.
+COPY pyproject.toml README.md LICENSE bridge/ bridge/
 RUN mkdir -p nanobot && touch nanobot/__init__.py && \
     pip install --no-cache-dir . && \
     rm -rf nanobot
