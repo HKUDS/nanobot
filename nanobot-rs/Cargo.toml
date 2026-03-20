@@ -1,0 +1,36 @@
+[package]
+name = "nanobot-rs"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "A lightweight personal AI assistant in Rust"
+
+[lib]
+name = "nanobot_rs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nanobot-rs"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.100"
+async-trait = "0.1.89"
+chrono = { version = "0.4.42", features = ["clock", "serde"] }
+clap = { version = "4.5.53", features = ["derive"] }
+dirs = "6.0.0"
+regex = "1.12.2"
+reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+similar = "2.7.0"
+tokio = { version = "1.48.0", features = ["full"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
+url = "2.5.7"
+uuid = { version = "1.18.1", features = ["serde", "v4"] }
+walkdir = "2.5.0"
+
+[dev-dependencies]
+axum = "0.8.6"
+tempfile = "3.23.0"

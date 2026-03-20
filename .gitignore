@@ -23,3 +23,6 @@ botpy.log
 nano.*.save
 .DS_Store
 uv.lock
+.idea
+target/
+nanobot-rs/target/
