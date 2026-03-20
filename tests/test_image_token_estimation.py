@@ -1,7 +1,6 @@
 """Tests for image token estimation in helpers."""
 
 import base64
-import json
 
 from nanobot.utils.helpers import (
     _estimate_image_tokens,

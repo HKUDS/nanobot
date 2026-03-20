@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -115,18 +113,21 @@ class TestThresholdConfigurable:
     def test_config_field_default(self):
         """AgentDefaults has consolidation_turn_threshold with default 20."""
         from nanobot.config.schema import AgentDefaults
+
         defaults = AgentDefaults()
         assert defaults.consolidation_turn_threshold == 20
 
     def test_config_field_custom(self):
         """consolidation_turn_threshold can be set via config."""
         from nanobot.config.schema import AgentDefaults
+
         defaults = AgentDefaults(consolidation_turn_threshold=10)
         assert defaults.consolidation_turn_threshold == 10
 
     def test_config_camel_case_alias(self):
         """Config accepts camelCase JSON alias."""
         from nanobot.config.schema import AgentDefaults
+
         defaults = AgentDefaults(**{"consolidationTurnThreshold": 15})
         assert defaults.consolidation_turn_threshold == 15
 
