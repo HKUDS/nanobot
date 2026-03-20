@@ -568,6 +568,30 @@ def gateway(
         from nanobot.agent.tools.message import MessageTool
         from nanobot.utils.evaluator import evaluate_response
 
+        if job.payload.kind == "system_event":
+            import subprocess
+            import asyncio
+            from loguru import logger
+            
+            logger.info(f"Cron: executing system event command: {job.payload.message}")
+            try:
+                process = await asyncio.create_subprocess_shell(
+                    job.payload.message,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await process.communicate()
+                
+                if process.returncode == 0:
+                    logger.info(f"Cron: system event completed successfully. Output: {stdout.decode().strip()}")
+                    return stdout.decode().strip()
+                else:
+                    logger.error(f"Cron: system event failed with code {process.returncode}. Error: {stderr.decode().strip()}")
+                    raise RuntimeError(f"Command failed: {stderr.decode().strip()}")
+            except Exception as e:
+                logger.error(f"Cron: system event execution error: {e}")
+                raise
+
         reminder_note = (
             "[Scheduled Task] Timer finished.\n\n"
             f"Task '{job.name}' has been triggered.\n"
