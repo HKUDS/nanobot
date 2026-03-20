@@ -57,9 +57,11 @@ _delegation_ancestry: contextvars.ContextVar[tuple[str, ...]] = contextvars.Cont
     "_delegation_ancestry", default=()
 )
 
-# Maximum number of distinct roles that may be chained in a single delegation path.
-# Prevents runaway recursive delegation: each level runs up to max_iterations LLM
-# calls, so uncapped chains multiply cost exponentially.
+# Hard structural depth cap — raises _CycleError if the ancestry chain exceeds
+# this limit. Cannot be ignored by the LLM. Each level can run up to
+# max_iterations LLM calls, so uncapped chains multiply cost exponentially.
+# Compare with DelegationDispatcher.max_delegations, which is a per-session
+# budget enforced in dispatch() (LAN-132).
 MAX_DELEGATION_DEPTH: int = 3
 _SCRATCHPAD_INJECTION_LIMIT: int = 4_000
 
@@ -191,6 +193,9 @@ class DelegationDispatcher:
 
         # Mutable per-session state
         self.delegation_count: int = 0
+        # Per-session delegation budget — raises _CycleError when exhausted (LAN-121/132).
+        # This is a structural hard cap enforced in dispatch(), not an advisory prompt nudge.
+        # Distinct from MAX_DELEGATION_DEPTH which caps the ancestry chain length.
         self.max_delegations: int = 8
         self.routing_trace: list[dict[str, Any]] = []
 
@@ -269,12 +274,25 @@ class DelegationDispatcher:
     # ------------------------------------------------------------------
 
     def gather_recent_tool_results(self, max_results: int = 15, max_chars: int = 8000) -> str:
-        """Extract recent tool results from the active message list."""
+        """Extract recent tool results from the current turn only.
+
+        Takes a snapshot of active_messages at call time to guard against
+        concurrent mutation (LAN-110). Scopes results to messages after the
+        last user message to prevent cross-turn bleed (LAN-111).
+        """
         if not self.active_messages:
             return ""
+        # Snapshot to prevent mutation during iteration (LAN-110).
+        messages = list(self.active_messages)
+        # Find the start of the current turn: last user message (LAN-111).
+        turn_start = 0
+        for i, m in enumerate(messages):
+            if m.get("role") == "user":
+                turn_start = i
+        current_turn = messages[turn_start:]
         tool_results: list[str] = []
         total_chars = 0
-        for m in reversed(self.active_messages):
+        for m in reversed(current_turn):
             if m.get("role") != "tool":
                 continue
             name = m.get("name", "unknown")
@@ -298,7 +316,7 @@ class DelegationDispatcher:
         if not self.active_messages:
             return ""
         found_plan_prompt = False
-        for m in self.active_messages:
+        for m in list(self.active_messages):  # snapshot for LAN-110
             if found_plan_prompt and m.get("role") == "assistant":
                 content = m.get("content", "")
                 if isinstance(content, str) and content.strip():
@@ -316,7 +334,7 @@ class DelegationDispatcher:
         """Pull the original user message from active_messages."""
         if not self.active_messages:
             return ""
-        for m in self.active_messages:
+        for m in list(self.active_messages):  # snapshot for LAN-110
             if m.get("role") == "user":
                 content = m.get("content", "")
                 if isinstance(content, str):

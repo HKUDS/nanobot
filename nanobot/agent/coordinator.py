@@ -138,6 +138,14 @@ class Coordinator:
         self._registry = registry
         self._classifier_model = classifier_model
         self._default_role = default_role
+        # Startup validation: warn if default_role is not registered (LAN-108).
+        if default_role and registry.get(default_role) is None:
+            logger.warning(
+                "Coordinator default_role '{}' is not registered in the registry — "
+                "classification fallback will use the first available role, "
+                "which may be unexpected.",
+                default_role,
+            )
 
     @property
     def registry(self) -> AgentRegistry:
