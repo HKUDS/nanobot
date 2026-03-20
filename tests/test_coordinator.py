@@ -349,6 +349,109 @@ class TestOrchestrationOverride:
 
 
 # ---------------------------------------------------------------------------
+# Confidence threshold tests (LAN-107 / LAN-116)
+# ---------------------------------------------------------------------------
+
+
+class TestConfidenceThreshold:
+    """classify() must fall back to default_role when confidence is below threshold."""
+
+    async def test_low_confidence_falls_back_to_default(self) -> None:
+        """JSON response with confidence below threshold → default role."""
+        provider = FakeProvider('{"role": "code", "confidence": 0.3}')
+        registry = build_default_registry("general")
+        coordinator = Coordinator(
+            provider, registry, default_role="general", confidence_threshold=0.6
+        )
+        role, conf = await coordinator.classify("Fix the bug")
+        assert role == "general", "Low-confidence result must fall back to default role"
+        assert conf == 0.3  # Original confidence returned for logging/auditing
+
+    async def test_exactly_at_threshold_is_accepted(self) -> None:
+        """Confidence exactly at threshold is accepted (>= not >)."""
+        provider = FakeProvider('{"role": "code", "confidence": 0.6}')
+        registry = build_default_registry("general")
+        coordinator = Coordinator(
+            provider, registry, default_role="general", confidence_threshold=0.6
+        )
+        role, _conf = await coordinator.classify("Fix the bug")
+        assert role == "code"
+
+    async def test_text_scan_exempt_from_threshold(self) -> None:
+        """Text-scan fallback (confidence=0.5) is exempt from the threshold."""
+        provider = FakeProvider("the code agent should handle this")
+        registry = build_default_registry("general")
+        coordinator = Coordinator(
+            provider, registry, default_role="general", confidence_threshold=0.6
+        )
+        role, conf = await coordinator.classify("Fix the bug")
+        assert role == "code", "Text-scan result must not be filtered by confidence threshold"
+        assert conf == 0.5
+
+    async def test_zero_threshold_accepts_all(self) -> None:
+        """A threshold of 0.0 accepts any classification including zero-confidence."""
+        provider = FakeProvider('{"role": "code", "confidence": 0.0}')
+        registry = build_default_registry("general")
+        coordinator = Coordinator(
+            provider, registry, default_role="general", confidence_threshold=0.0
+        )
+        role, _conf = await coordinator.classify("Fix the bug")
+        assert role == "code"
+
+
+# ---------------------------------------------------------------------------
+# Orchestration override edge-case tests (LAN-116)
+# ---------------------------------------------------------------------------
+
+
+class TestOrchestrationOverrideEdgeCases:
+    """Additional edge cases for the orchestration override path."""
+
+    async def test_override_skipped_when_pm_disabled(self) -> None:
+        """When pm role is disabled, orchestration override must not fire."""
+        from nanobot.config.schema import AgentRoleConfig
+
+        provider = FakeProvider(
+            '{"role": "code", "confidence": 0.9, '
+            '"needs_orchestration": true, "relevant_roles": ["code", "research"]}'
+        )
+        registry = build_default_registry("general")
+        # Disable pm
+        registry.register(AgentRoleConfig(name="pm", description="disabled pm", enabled=False))
+        coordinator = Coordinator(provider, registry, default_role="general")
+        role, _conf = await coordinator.classify("Do multiple things")
+        assert role == "code", "Override to disabled pm must not fire"
+
+    async def test_override_skipped_when_pm_not_registered(self) -> None:
+        """When pm role is absent from the registry, override must not fire."""
+        from nanobot.agent.registry import AgentRegistry
+        from nanobot.config.schema import AgentRoleConfig
+
+        provider = FakeProvider(
+            '{"role": "code", "confidence": 0.9, '
+            '"needs_orchestration": true, "relevant_roles": ["code", "research"]}'
+        )
+        registry = AgentRegistry(default_role="general")
+        registry.register(AgentRoleConfig(name="general", description="general"))
+        registry.register(AgentRoleConfig(name="code", description="code"))
+        registry.register(AgentRoleConfig(name="research", description="research"))
+        coordinator = Coordinator(provider, registry, default_role="general")
+        role, _conf = await coordinator.classify("Do multiple things")
+        assert role == "code", "Override must not fire when pm is not registered"
+
+    async def test_override_does_not_trigger_with_single_role(self) -> None:
+        """exactly 1 relevant role + no orchestration signal → no override."""
+        provider = FakeProvider(
+            '{"role": "code", "confidence": 0.9, '
+            '"needs_orchestration": false, "relevant_roles": ["code"]}'
+        )
+        registry = build_default_registry("general")
+        coordinator = Coordinator(provider, registry, default_role="general")
+        role, _conf = await coordinator.classify("Review the code")
+        assert role == "code"
+
+
+# ---------------------------------------------------------------------------
 # Integration: AgentLoop + Coordinator (full message flow)
 # ---------------------------------------------------------------------------
 
