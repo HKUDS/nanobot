@@ -486,6 +486,7 @@ class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
     timeout: int = 60
+    shell_mode: str = "denylist"  # "denylist" | "allowlist" — propagated to delegated agents
 
 
 class MCPServerConfig(Base):

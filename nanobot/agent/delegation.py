@@ -563,6 +563,14 @@ class DelegationDispatcher:
         if role is None:
             role = await self.coordinator.route(task)
 
+        # Session budget guard — hard cap on total delegations (LAN-121).
+        max_del = getattr(self, "max_delegations", 8)
+        if self.delegation_count >= max_del:
+            raise _CycleError(
+                f"Delegation budget exhausted: {self.delegation_count}/{max_del} "
+                "delegations used this session"
+            )
+
         # Depth and cycle guard
         ancestry = _delegation_ancestry.get()
         depth = len(ancestry)
@@ -598,7 +606,10 @@ class DelegationDispatcher:
             message_excerpt=task,
         )
 
-        delegation_id = f"del_{self.delegation_count + 1:03d}"
+        # Increment atomically before any await so parallel dispatches under
+        # asyncio.gather each get a unique ID (LAN-117).
+        self.delegation_count += 1
+        delegation_id = f"del_{self.delegation_count:03d}"
 
         # Emit canonical delegation start event if a progress callback is wired.
         if self.on_progress:
@@ -615,7 +626,6 @@ class DelegationDispatcher:
                 pass
 
         t0 = time.monotonic()
-        self.delegation_count += 1
         token = _delegation_ancestry.set((*ancestry, role.name))
         try:
             async with langfuse_span(
@@ -732,17 +742,25 @@ class DelegationDispatcher:
             if _grant(rw_t.name):
                 tools.register(rw_t)
 
-        # Exec — privileged
+        # Exec — privileged; forward shell_mode so allowlist policy applies to
+        # delegated agents (LAN-120).
         exec_t = ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
+            shell_mode=self.exec_config.shell_mode,
         )
         if _grant(exec_t.name):
             tools.register(exec_t)
 
-        tools.register(WebSearchTool(api_key=self.brave_api_key))
-        tools.register(WebFetchTool())
+        # Web tools — apply _grant() like every other tool so that denied_tools
+        # config is respected in delegated agents (LAN-118).
+        ws_tool = WebSearchTool(api_key=self.brave_api_key)
+        if _grant(ws_tool.name):
+            tools.register(ws_tool)
+        wf_tool = WebFetchTool()
+        if _grant(wf_tool.name):
+            tools.register(wf_tool)
 
         # Re-delegation — privileged
         child_delegate = DelegateTool()
