@@ -68,6 +68,7 @@ class AgentLoop:
         model: str | None = None,
         max_iterations: int = 40,
         context_window_tokens: int = 65_536,
+        consolidation_turn_threshold: int = 20,
         web_search_config: WebSearchConfig | None = None,
         web_proxy: str | None = None,
         exec_config: ExecToolConfig | None = None,
@@ -122,6 +123,7 @@ class AgentLoop:
             context_window_tokens=context_window_tokens,
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
+            consolidation_turn_threshold=consolidation_turn_threshold,
         )
         self._register_default_tools()
 
@@ -391,6 +393,7 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
+            await self.memory_consolidator.maybe_consolidate_by_turns(session)
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
@@ -404,7 +407,10 @@ class AgentLoop:
             result = await self._run_agent_loop(messages)
             self._save_turn(session, result.messages, 1 + len(history))
             self.sessions.save(session)
-            self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+            async def _consolidate_system(s=session):
+                await self.memory_consolidator.maybe_consolidate_by_turns(s)
+                await self.memory_consolidator.maybe_consolidate_by_tokens(s)
+            self._schedule_background(_consolidate_system())
             final_content = result.final_content
             if final_content is None:
                 final_content = result.fallback_content
@@ -441,6 +447,7 @@ class AgentLoop:
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
             )
+        await self.memory_consolidator.maybe_consolidate_by_turns(session)
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
@@ -489,7 +496,10 @@ class AgentLoop:
 
         self._save_turn(session, result.messages, 1 + len(history))
         self.sessions.save(session)
-        self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+        async def _consolidate_normal(s=session):
+            await self.memory_consolidator.maybe_consolidate_by_turns(s)
+            await self.memory_consolidator.maybe_consolidate_by_tokens(s)
+        self._schedule_background(_consolidate_normal())
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
