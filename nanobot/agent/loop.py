@@ -128,11 +128,12 @@ class AgentLoop:
 
     def _register_filesystem_tools(self, tools, working_dir) -> None:
         """Register filesystem tools for a session-specific working directory."""
-        allowed_dir = working_dir if self.restrict_to_workspace else None
-        extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
-        tools.register(ReadFileTool(workspace=working_dir, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
+        allowed_dir = self.workspace if self.restrict_to_workspace else None
+        extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else []
+        extra = [self.workspace] if working_dir != self.workspace else []
+        tools.register(ReadFileTool(workspace=working_dir, allowed_dir=allowed_dir,extra_allowed_dirs=extra_read+extra))
         for cls in (WriteFileTool, EditFileTool, ListDirTool):
-            tools.register(cls(workspace=working_dir, allowed_dir=allowed_dir))
+            tools.register(cls(workspace=working_dir, allowed_dir=allowed_dir,extra_allowed_dirs=extra))
         if self.exec_config.enable:
             tools.register(ExecTool(
                 working_dir=str(working_dir),
