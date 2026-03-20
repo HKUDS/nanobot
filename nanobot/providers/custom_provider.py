@@ -51,6 +51,12 @@ class CustomProvider(LLMProvider):
         try:
             return self._parse(await self._client.chat.completions.create(**kwargs))
         except Exception as e:
+            # Extract raw response body from non-JSON API errors.
+            # JSONDecodeError.doc contains the original text (e.g. "unsupported model: xxx");
+            # OpenAI APIError may carry it in response.text.
+            body = getattr(e, "doc", None) or getattr(getattr(e, "response", None), "text", None)
+            if body and body.strip():
+                return LLMResponse(content=f"Error: {body.strip()}", finish_reason="error")
             return LLMResponse(content=f"Error: {e}", finish_reason="error")
 
     def _parse(self, response: Any) -> LLMResponse:
