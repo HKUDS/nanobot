@@ -6,6 +6,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+import nanobot.agent.delegation as delegation_mod
 from nanobot.agent.delegation import (
     _SCRATCHPAD_INJECTION_LIMIT,
     TASK_TYPES,
@@ -608,7 +609,6 @@ class TestExecuteDelegatedAgentRetry:
 
     async def test_retry_succeeds_when_first_attempt_uses_no_tools(self, tmp_path: Path) -> None:
         """When the first call returns no tools, a retry fires and its result is used."""
-        import nanobot.agent.delegation as delegation_mod
 
         msgs: list[dict[str, Any]] = [{"role": "assistant", "content": "ok"}]
         fake, call_log = _make_call_counter_tool_loop(
@@ -637,7 +637,6 @@ class TestExecuteDelegatedAgentRetry:
 
     async def test_no_retry_for_report_writing_task_type(self, tmp_path: Path) -> None:
         """report_writing tasks skip the retry even when no tools are used."""
-        import nanobot.agent.delegation as delegation_mod
 
         msgs: list[dict[str, Any]] = [{"role": "assistant", "content": "ok"}]
         fake, call_log = _make_call_counter_tool_loop(
@@ -653,7 +652,7 @@ class TestExecuteDelegatedAgentRetry:
         original = delegation_mod.run_tool_loop
         delegation_mod.run_tool_loop = fake  # type: ignore[assignment]
         try:
-            summary, tools_used = await d.execute_delegated_agent(
+            _summary, _tools_used = await d.execute_delegated_agent(
                 role, "write a report about the project", None
             )
         finally:
@@ -663,7 +662,6 @@ class TestExecuteDelegatedAgentRetry:
 
     async def test_no_retry_when_max_iter_is_2(self, tmp_path: Path) -> None:
         """When max_iterations <= 2, retry is suppressed."""
-        import nanobot.agent.delegation as delegation_mod
 
         msgs: list[dict[str, Any]] = [{"role": "assistant", "content": "ok"}]
         fake, call_log = _make_call_counter_tool_loop(
@@ -687,7 +685,6 @@ class TestExecuteDelegatedAgentRetry:
 
     async def test_retry_not_applied_when_first_attempt_uses_tools(self, tmp_path: Path) -> None:
         """When the first call already used tools, no retry is attempted."""
-        import nanobot.agent.delegation as delegation_mod
 
         msgs: list[dict[str, Any]] = [{"role": "assistant", "content": "ok"}]
         fake, call_log = _make_call_counter_tool_loop(
