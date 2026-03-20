@@ -664,6 +664,7 @@ def _get_provider_info() -> dict[str, tuple[str, bool, bool, str]]:
             spec.default_api_base,
         )
         for spec in PROVIDERS
+        if not spec.is_oauth
     }
 
 

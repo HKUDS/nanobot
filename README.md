@@ -811,6 +811,7 @@ Config file: `~/.nanobot/config.json`
 <summary><b>OpenAI Codex (OAuth)</b></summary>
 
 Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account.
+No `providers.openaiCodex` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
 
 **1. Login:**
 ```bash
@@ -845,13 +846,14 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -
 
 
 <details>
-<summary><b>Github Copilot (OAuth)</b></summary>
+<summary><b>GitHub Copilot (OAuth)</b></summary>
 
-Github Copilot uses OAuth instead of API keys. Requires a [Github account with a plan](https://github.com/features/copilot/plans) configured.
+GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured.
+No `providers.githubCopilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
 
 **1. Login:**
 ```bash
-nanobot provider login github_copilot
+nanobot provider login github-copilot
 ```
 
 **2. Set model** (merge into `~/.nanobot/config.json`):
