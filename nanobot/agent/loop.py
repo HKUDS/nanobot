@@ -120,12 +120,13 @@ class AgentLoop:
         self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
         for cls in (WriteFileTool, EditFileTool, ListDirTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
-        self.tools.register(ExecTool(
-            working_dir=str(self.workspace),
-            timeout=self.exec_config.timeout,
-            restrict_to_workspace=self.restrict_to_workspace,
-            path_append=self.exec_config.path_append,
-        ))
+        if self.exec_config.enable:
+            self.tools.register(ExecTool(
+                working_dir=str(self.workspace),
+                timeout=self.exec_config.timeout,
+                restrict_to_workspace=self.restrict_to_workspace,
+                path_append=self.exec_config.path_append,
+            ))
         self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
@@ -264,6 +265,12 @@ class AgentLoop:
                 msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
             except asyncio.TimeoutError:
                 continue
+            except asyncio.CancelledError:
+                # Preserve real task cancellation so shutdown can complete cleanly.
+                # Only ignore non-task CancelledError signals that may leak from integrations.
+                if not self._running or asyncio.current_task().cancelling():
+                    raise
+                continue
             except Exception as e:
                 logger.warning("Error consuming inbound message: {}, continuing...", e)
                 continue
@@ -370,9 +377,12 @@ class AgentLoop:
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
+            # Subagent results should be assistant role, other system messages use user role
+            current_role = "assistant" if msg.sender_id == "subagent" else "user"
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
+                current_role=current_role,
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
