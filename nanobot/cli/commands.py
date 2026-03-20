@@ -655,6 +655,11 @@ def agent(
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+    skill: list[str] | None = typer.Option(
+        None,
+        "--skill",
+        help="Preload one or more skills for this turn. Repeat the flag to pass multiple skills.",
+    ),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
 ):
@@ -715,7 +720,12 @@ def agent(
             nonlocal _thinking
             _thinking = _ThinkingSpinner(enabled=not logs)
             with _thinking:
-                response = await agent_loop.process_direct(message, session_id, on_progress=_cli_progress)
+                response = await agent_loop.process_direct(
+                    message,
+                    session_id,
+                    skill_names=skill,
+                    on_progress=_cli_progress,
+                )
             _thinking = None
             _print_agent_response(response, render_markdown=markdown)
             await agent_loop.close_mcp()
@@ -804,6 +814,7 @@ def agent(
                             sender_id="user",
                             chat_id=cli_chat_id,
                             content=user_input,
+                            metadata={"skill_names": skill} if skill else {},
                         ))
 
                         nonlocal _thinking

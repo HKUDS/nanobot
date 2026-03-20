@@ -163,6 +163,23 @@ class AgentLoop:
                     tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
 
     @staticmethod
+    def _extract_skill_names(metadata: dict[str, Any] | None) -> list[str] | None:
+        """Read per-turn selected skills from message metadata."""
+        if not metadata:
+            return None
+        raw = metadata.get("skill_names")
+        if raw is None:
+            return None
+        if isinstance(raw, str):
+            names = [raw]
+        elif isinstance(raw, list):
+            names = [item for item in raw if isinstance(item, str)]
+        else:
+            return None
+        cleaned = [name.strip() for name in names if name.strip()]
+        return cleaned or None
+
+    @staticmethod
     def _strip_think(text: str | None) -> str | None:
         """Remove <think>…</think> blocks that some models embed in content."""
         if not text:
@@ -372,9 +389,13 @@ class AgentLoop:
             history = session.get_history(max_messages=0)
             # Subagent results should be assistant role, other system messages use user role
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
+            skill_names = self._extract_skill_names(msg.metadata)
             messages = self.context.build_messages(
                 history=history,
-                current_message=msg.content, channel=channel, chat_id=chat_id,
+                current_message=msg.content,
+                skill_names=skill_names,
+                channel=channel,
+                chat_id=chat_id,
                 current_role=current_role,
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
@@ -422,9 +443,11 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=0)
+        skill_names = self._extract_skill_names(msg.metadata)
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
+            skill_names=skill_names,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
         )
@@ -501,10 +524,17 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
+        skill_names: list[str] | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+        msg = InboundMessage(
+            channel=channel,
+            sender_id="user",
+            chat_id=chat_id,
+            content=content,
+            metadata={"skill_names": skill_names} if skill_names else {},
+        )
         response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
         return response.content if response else ""

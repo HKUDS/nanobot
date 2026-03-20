@@ -569,3 +569,16 @@ def test_gateway_cli_port_overrides_configured_port(monkeypatch, tmp_path: Path)
 
     assert isinstance(result.exception, _StopGateway)
     assert "port 18792" in result.stdout
+
+
+def test_agent_message_mode_passes_selected_skills(mock_agent_runtime):
+    result = runner.invoke(
+        app,
+        ["agent", "-m", "hello", "--skill", "github", "--skill", "tmux"],
+    )
+
+    assert result.exit_code == 0
+    args = mock_agent_runtime["agent_loop"].process_direct.await_args
+    assert args.args == ("hello", "cli:direct")
+    assert args.kwargs["skill_names"] == ["github", "tmux"]
+    assert callable(args.kwargs["on_progress"])

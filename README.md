@@ -226,6 +226,12 @@ nanobot agent
 
 That's it! You have a working AI assistant in 2 minutes.
 
+To preload specific skills for a turn, repeat `--skill`:
+
+```bash
+nanobot agent -m "Create a PR for this repo" --skill github --skill summarize
+```
+
 ## 💬 Chat Apps
 
 Connect nanobot to your favorite chat platform. Want to build your own? See the [Channel Plugin Guide](./docs/CHANNEL_PLUGIN_GUIDE.md).
@@ -1292,6 +1298,7 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 | `nanobot agent -m "..."` | Chat with the agent |
 | `nanobot agent -w <workspace>` | Chat against a specific workspace |
 | `nanobot agent -w <workspace> -c <config>` | Chat against a specific workspace/config |
+| `nanobot agent -m "..." --skill github --skill tmux` | Chat with preloaded selected skills |
 | `nanobot agent` | Interactive chat mode |
 | `nanobot agent --no-markdown` | Show plain-text replies |
 | `nanobot agent --logs` | Show runtime logs during chat |
