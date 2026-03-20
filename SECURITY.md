@@ -1,8 +1,10 @@
 # Security Policy
 
+This repository is centered on **GeoClaw**, a geospatial workflow layer built by extending nanobot. The guidance below applies to both GeoClaw workflows and the inherited nanobot runtime beneath them.
+
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in nanobot, please report it by:
+If you discover a security vulnerability in GeoClaw or in the bundled nanobot runtime, please report it by:
 
 1. **DO NOT** open a public GitHub issue
 2. Create a private security advisory on GitHub or contact the repository maintainers (xubinrencs@gmail.com)
@@ -67,7 +69,7 @@ The `exec` tool can execute shell commands. While dangerous command patterns are
 - ✅ Review all tool usage in agent logs
 - ✅ Understand what commands the agent is running
 - ✅ Use a dedicated user account with limited privileges
-- ✅ Never run nanobot as root
+- ✅ Never run GeoClaw or nanobot as root
 - ❌ Don't disable security checks
 - ❌ Don't run on systems with sensitive data without careful review
 
@@ -82,10 +84,16 @@ The `exec` tool can execute shell commands. While dangerous command patterns are
 
 File operations have path traversal protection, but:
 
-- ✅ Run nanobot with a dedicated user account
+- ✅ Run GeoClaw with a dedicated user account
 - ✅ Use filesystem permissions to protect sensitive directories
 - ✅ Regularly audit file operations in logs
 - ❌ Don't give unrestricted access to sensitive files
+
+For GeoClaw specifically:
+- ✅ Keep all generated artifacts inside the workspace `runs/` directory
+- ✅ Validate user-supplied AOI files before downstream processing
+- ✅ Prefer typed tools over arbitrary shell-based GIS commands
+- ❌ Don't allow unrestricted filesystem browsing for local geospatial data
 
 ### 5. Network Security
 
@@ -93,6 +101,11 @@ File operations have path traversal protection, but:
 - All external API calls use HTTPS by default
 - Timeouts are configured to prevent hanging requests
 - Consider using a firewall to restrict outbound connections if needed
+
+**GeoClaw external sources:**
+- STAC catalogs and OSM-derived downloads should be treated as external dependencies
+- Review and constrain outbound access when running GeoClaw in sensitive environments
+- Prefer local or self-hosted data sources when possible
 
 **WhatsApp Bridge:**
 - The bridge binds to `127.0.0.1:3001` (localhost only, not accessible from external network)
@@ -187,6 +200,7 @@ For production use:
 - **LLM providers see your prompts** - review their privacy policies
 - **Chat history is stored locally** - protect the `~/.nanobot` directory
 - **API keys are in plain text** - use OS keyring for production
+- **GeoClaw artifacts may contain sensitive location data** - protect `runs/`, exported GeoJSON, raster clips, and route outputs
 
 ### 10. Incident Response
 
@@ -237,7 +251,7 @@ If you suspect a security breach:
 
 ## Security Checklist
 
-Before deploying nanobot:
+Before deploying GeoClaw:
 
 - [ ] API keys stored securely (not in code)
 - [ ] Config file permissions set to 0600

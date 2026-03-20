@@ -1,9 +1,9 @@
 <div align="center">
-  <img src="nanobot_logo.png" alt="nanobot" width="500">
-  <h1>nanobot: Ultra-Lightweight Personal AI Assistant</h1>
+  <img src="nanobot_logo.png" alt="GeoClaw" width="500">
+  <h1>GeoClaw: Lightweight Geospatial Workflow Agent</h1>
   <p>
-    <a href="https://pypi.org/project/nanobot-ai/"><img src="https://img.shields.io/pypi/v/nanobot-ai" alt="PyPI"></a>
-    <a href="https://pepy.tech/project/nanobot-ai"><img src="https://static.pepy.tech/badge/nanobot-ai" alt="Downloads"></a>
+    <img src="https://img.shields.io/badge/focus-geospatial_workflows-1f7a8c" alt="Geospatial Workflows">
+    <img src="https://img.shields.io/badge/runtime-nanobot_based-4c6ef5" alt="nanobot based">
     <img src="https://img.shields.io/badge/python-≥3.11-blue" alt="Python">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
     <a href="./COMMUNICATION.md"><img src="https://img.shields.io/badge/Feishu-Group-E9DBFC?style=flat&logo=feishu&logoColor=white" alt="Feishu"></a>
@@ -12,13 +12,49 @@
   </p>
 </div>
 
-🐈 **nanobot** is an **ultra-lightweight** personal AI assistant inspired by [OpenClaw](https://github.com/openclaw/openclaw).
+🌍 **GeoClaw** is a lightweight geospatial workflow agent for turning natural-language requests into reproducible spatial analysis runs.
 
-⚡️ Delivers core agent functionality with **99% fewer lines of code** than OpenClaw.
+It is designed for typed tools, local-first execution, deterministic outputs, and workspace-isolated artifacts instead of free-form GIS command generation.
 
-📏 Real-time line count: run `bash core_agent_lines.sh` to verify anytime.
+GeoClaw focuses on operational geospatial workflows such as AOI validation, OSM extraction, raster summarization, STAC search, routing, and H3 aggregation.
 
-## 📢 News
+## What GeoClaw Is
+
+GeoClaw is not:
+
+- a desktop GIS replacement
+- a generic chatbot with ad-hoc shell access
+- a map UI product first
+
+GeoClaw is:
+
+- AOI sanity checking
+- vector summaries
+- OSM extraction and place profiling
+- raster clipping, statistics, and previews
+- STAC search, ranking, and best-scene selection
+- H3 aggregation and neighborhood summaries
+- routing, isochrones, and accessibility coverage
+- DuckDB Spatial and GDAL-style dataset operations
+
+## Current Status
+
+Current implementation status in this repository:
+
+- `32` registered GeoClaw tools
+- `6` packaged workflow skills
+- deterministic outputs under `runs/<run_id>/`
+- `32 passed` GeoClaw tests in the current local suite
+
+## Built on nanobot
+
+GeoClaw is implemented by extending nanobot rather than replacing it.
+
+It keeps nanobot's runtime strengths, including channels, sessions, memory, MCP compatibility, multi-instance configuration, and workspace sandboxing, then layers a geospatial tool-and-skill system on top.
+
+## Runtime Base Notes
+
+The notes below come from the upstream nanobot runtime that GeoClaw builds on.
 
 - **2026-03-16** 🚀 Released **v0.1.4.post5** — a refinement-focused release with stronger reliability and channel support, and a more dependable day-to-day experience. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post5) for details.
 - **2026-03-15** 🧩 DingTalk rich media, smarter built-in skills, and cleaner model compatibility.
@@ -70,9 +106,19 @@
 
 </details>
 
-> 🐈 nanobot is for educational, research, and technical exchange purposes only. It is unrelated to crypto and does not involve any official token or coin.
+> GeoClaw is for educational, research, and technical exchange purposes only. It is unrelated to crypto and does not involve any official token or coin.
 
-## Key Features of nanobot:
+## Why GeoClaw
+
+🌍 **Geospatial-First**: The core workflows are about places, geometry, rasters, networks, and spatial aggregation.
+
+🧰 **Typed Tools**: GeoClaw prefers explicit Python-backed tool interfaces over letting the model invent arbitrary GIS shell commands.
+
+📁 **Reproducible Runs**: Each workflow writes machine-readable outputs and artifacts into a workspace-scoped run directory.
+
+🏠 **Local-First**: The stack is designed for self-hosted or local execution with a moderate Python dependency footprint.
+
+## Inherited Runtime Qualities
 
 🪶 **Ultra-Lightweight**: A super lightweight implementation of OpenClaw — 99% smaller, significantly faster.
 
@@ -85,15 +131,19 @@
 ## 🏗️ Architecture
 
 <p align="center">
-  <img src="nanobot_arch.png" alt="nanobot architecture" width="800">
+  <img src="nanobot_arch.png" alt="GeoClaw architecture base" width="800">
 </p>
 
 ## Table of Contents
 
-- [News](#-news)
-- [Key Features](#key-features-of-nanobot)
+- [What GeoClaw Is](#what-geoclaw-is)
+- [Current Status](#current-status)
+- [Built on nanobot](#built-on-nanobot)
+- [Runtime Base Notes](#runtime-base-notes)
+- [Why GeoClaw](#why-geoclaw)
+- [Inherited Runtime Qualities](#inherited-runtime-qualities)
 - [Architecture](#️-architecture)
-- [Features](#-features)
+- [Runtime Features](#-runtime-features)
 - [Install](#-install)
 - [Quick Start](#-quick-start)
 - [Chat Apps](#-chat-apps)
@@ -107,7 +157,7 @@
 - [Contribute & Roadmap](#-contribute--roadmap)
 - [Star History](#-star-history)
 
-## ✨ Features
+## ✨ Runtime Features
 
 <table align="center">
   <tr align="center">
@@ -130,15 +180,27 @@
   </tr>
 </table>
 
+The section above reflects the broader nanobot runtime capabilities that GeoClaw inherits. GeoClaw itself narrows that general-purpose agent base into a reproducible geospatial workflow agent.
+
 ## 📦 Install
 
-**Install from source** (latest features, recommended for development)
+**Install from source** (recommended for local development)
 
 ```bash
-git clone https://github.com/HKUDS/nanobot.git
-cd nanobot
+# clone your GeoClaw repository
+cd geoclaw
 pip install -e .
 ```
+
+**Install with GeoClaw geospatial extras**
+
+```bash
+# clone your GeoClaw repository
+cd geoclaw
+pip install -e ".[geo]"
+```
+
+This installs the Python geospatial stack used by GeoClaw, including `geopandas`, `shapely`, `pyproj`, `rasterio`, `rioxarray`, `duckdb`, `quackosm`, `osmnx`, `pystac-client`, and `h3`.
 
 **Install with [uv](https://github.com/astral-sh/uv)** (stable, fast)
 
@@ -178,20 +240,22 @@ nanobot channels login
 ## 🚀 Quick Start
 
 > [!TIP]
-> Set your API key in `~/.nanobot/config.json`.
+> GeoClaw currently reuses nanobot's runtime config layout, so the default config path is still `~/.nanobot/config.json`.
 > Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global)
 >
 > For other LLM providers, please see the [Providers](#providers) section.
 >
 > For web search capability setup, please see [Web Search](#web-search).
 
-**1. Initialize**
+### GeoClaw First Run
+
+**1. Initialize runtime config**
 
 ```bash
 nanobot onboard
 ```
 
-**2. Configure** (`~/.nanobot/config.json`)
+**2. Configure provider/model** (`~/.nanobot/config.json`)
 
 Add or merge these **two parts** into your config (other options have defaults).
 
@@ -218,13 +282,30 @@ Add or merge these **two parts** into your config (other options have defaults).
 }
 ```
 
-**3. Chat**
+**3. Run GeoClaw**
+
+```bash
+geoclaw sync-skills
+geoclaw agent -m "检查这个 AOI，并给我推荐后续地理分析流程"
+```
+
+Example requests:
+
+```bash
+geoclaw agent -m "用这个 bbox 做 AOI sanity check: 116.3,39.9,116.5,40.0"
+geoclaw agent -m "分析这个区域的 OSM place profile"
+geoclaw agent -m "从这里步行 15 分钟的可达范围是什么？"
+geoclaw agent -m "搜索 2024 年夏季这个 AOI 的低云量 STAC 场景"
+geoclaw agent -m "把这些点按 H3 resolution 8 做覆盖聚合"
+```
+
+### Underlying Runtime CLI
+
+If you want the generic runtime CLI instead of the geospatial workflow layer:
 
 ```bash
 nanobot agent
 ```
-
-That's it! You have a working AI assistant in 2 minutes.
 
 ## 💬 Chat Apps
 

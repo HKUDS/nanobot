@@ -1,0 +1,1 @@
+"""GeoClaw prompt templates."""

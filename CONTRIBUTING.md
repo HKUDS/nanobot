@@ -1,8 +1,15 @@
-# Contributing to nanobot
+# Contributing to GeoClaw
 
 Thank you for being here.
 
-nanobot is built with a simple belief: good tools should feel calm, clear, and humane.
+This repository now contains two layers:
+
+- `geoclaw/`: the primary product layer, focused on reproducible geospatial workflows
+- `nanobot/`: the inherited lightweight agent runtime that GeoClaw extends
+
+When contributing, please keep the separation clear: geospatial workflow behavior, tools, schemas, renderers, and skills should live under `geoclaw/`, while generic runtime improvements should remain in `nanobot/`.
+
+GeoClaw is built with a simple belief: geospatial tooling should feel calm, clear, reproducible, and safe to run locally.
 We care deeply about useful features, but we also believe in achieving more with less:
 solutions should be powerful without becoming heavy, and ambitious without becoming
 needlessly complicated.
@@ -33,6 +40,7 @@ We use a two-branch model to balance stability and exploration:
 - New features or functionality
 - Refactoring that may affect existing behavior
 - Changes to APIs or configuration
+- New GeoClaw workflow capabilities or geospatial tools
 
 **Target `main` if your PR includes:**
 
@@ -71,25 +79,27 @@ Keep setup boring and reliable. The goal is to get you into the code quickly:
 
 ```bash
 # Clone the repository
-git clone https://github.com/HKUDS/nanobot.git
-cd nanobot
+cd geoclaw
 
 # Install with dev dependencies
 pip install -e ".[dev]"
+
+# Install GeoClaw's geospatial stack too (recommended for this fork)
+pip install -e ".[geo]"
 
 # Run tests
 pytest
 
 # Lint code
-ruff check nanobot/
+ruff check nanobot/ geoclaw/ tests/
 
 # Format code
-ruff format nanobot/
+ruff format nanobot/ geoclaw/ tests/
 ```
 
 ## Code Style
 
-We care about more than passing lint. We want nanobot to stay small, calm, and readable.
+We care about more than passing lint. We want GeoClaw to stay small, calm, and readable.
 
 When contributing, please aim for code that feels:
 
@@ -113,10 +123,10 @@ In practice:
 
 If you have questions, ideas, or half-formed insights, you are warmly welcome here.
 
-Please feel free to open an [issue](https://github.com/HKUDS/nanobot/issues), join the community, or simply reach out:
+Please feel free to open an issue, join the community, or simply reach out:
 
 - [Discord](https://discord.gg/MnCvHqpUGB)
 - [Feishu/WeChat](./COMMUNICATION.md)
 - Email: Xubin Ren (@Re-bin) — <xubinrencs@gmail.com>
 
-Thank you for spending your time and care on nanobot. We would love for more people to participate in this community, and we genuinely welcome contributions of all sizes.
+Thank you for spending your time and care on GeoClaw. At the same time, please remember that part of this repository is an inherited nanobot runtime, so some contributions may naturally touch both layers.

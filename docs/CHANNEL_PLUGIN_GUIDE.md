@@ -2,6 +2,8 @@
 
 Build a custom nanobot channel in three steps: subclass, package, install.
 
+GeoClaw reuses the same channel architecture because it runs on top of nanobot's runtime. If you expose GeoClaw through a custom chat or webhook integration, this guide still applies unchanged.
+
 ## How It Works
 
 nanobot discovers channel plugins via Python [entry points](https://packaging.python.org/en/latest/specifications/entry-points/). When `nanobot gateway` starts, it scans:
