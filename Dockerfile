@@ -31,10 +31,19 @@ RUN pip install --prefix=/install pip && \
         hatchling pathspec pluggy trove-classifiers editables 2>/dev/null; \
     rm -rf /install/bin/pip* /install/bin/wheel 2>/dev/null; true
 # Fallback: brute-force remove any remaining dist-info for build tools.
-RUN cd /install/lib/python3.11/site-packages && \
-    rm -rf pip* setuptools* wheel* hatchling* _distutils_hack* \
-           pkg_resources* distutils* pathspec* pluggy* \
-           trove_classifiers* editables* 2>/dev/null; true
+# Uses full paths instead of cd to avoid Trivy DS-0013 linting warning.
+RUN rm -rf /install/lib/python3.11/site-packages/pip* \
+           /install/lib/python3.11/site-packages/setuptools* \
+           /install/lib/python3.11/site-packages/wheel* \
+           /install/lib/python3.11/site-packages/hatchling* \
+           /install/lib/python3.11/site-packages/_distutils_hack* \
+           /install/lib/python3.11/site-packages/pkg_resources* \
+           /install/lib/python3.11/site-packages/distutils* \
+           /install/lib/python3.11/site-packages/pathspec* \
+           /install/lib/python3.11/site-packages/pluggy* \
+           /install/lib/python3.11/site-packages/trove_classifiers* \
+           /install/lib/python3.11/site-packages/editables* \
+           2>/dev/null; true
 
 
 # ============== STAGE 2: Runtime ==============
