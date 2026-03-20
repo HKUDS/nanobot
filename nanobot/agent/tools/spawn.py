@@ -48,16 +48,27 @@ class SpawnTool(Tool):
                     "type": "string",
                     "description": "Optional short label for the task (for display)",
                 },
+                "resume": {
+                    "type": "string",
+                    "description": (
+                        "Task ID of a previously failed subagent to resume from its "
+                        "last checkpoint. The subagent will continue from where it "
+                        "left off instead of starting from scratch."
+                    ),
+                },
             },
             "required": ["task"],
         }
 
-    async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str:
-        """Spawn a subagent to execute the given task."""
+    async def execute(
+        self, task: str, label: str | None = None, resume: str | None = None, **kwargs: Any
+    ) -> str:
+        """Spawn a subagent to execute the given task, optionally resuming from checkpoint."""
         return await self._manager.spawn(
             task=task,
             label=label,
             origin_channel=self._origin_channel,
             origin_chat_id=self._origin_chat_id,
             session_key=self._session_key,
+            resume=resume,
         )
