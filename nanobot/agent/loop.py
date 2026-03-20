@@ -50,7 +50,7 @@ from nanobot.agent.context import (
     estimate_messages_tokens,
     summarize_and_compress,
 )
-from nanobot.agent.delegation import DelegationDispatcher
+from nanobot.agent.delegation import DelegationConfig, DelegationDispatcher
 from nanobot.agent.failure import FailureClass, ToolCallTracker, _build_failure_prompt
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.mission import MissionManager
@@ -381,16 +381,18 @@ class AgentLoop:
 
         # Delegation dispatcher (owns delegation state, tracing, contracts)
         self._dispatcher = DelegationDispatcher(
+            config=DelegationConfig(
+                workspace=self.workspace,
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.config.max_tokens,
+                max_iterations=self.max_iterations,
+                restrict_to_workspace=self.config.restrict_to_workspace,
+                brave_api_key=brave_api_key,
+                exec_config=self.exec_config,
+                role_name=self.role_name,
+            ),
             provider=provider,
-            workspace=self.workspace,
-            model=self.model,
-            temperature=self.temperature,
-            max_tokens=self.config.max_tokens,
-            max_iterations=self.max_iterations,
-            restrict_to_workspace=self.config.restrict_to_workspace,
-            brave_api_key=brave_api_key,
-            exec_config=self.exec_config,
-            role_name=self.role_name,
         )
         self._dispatcher.tools = self.tools
 

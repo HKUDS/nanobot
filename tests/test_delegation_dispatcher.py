@@ -9,6 +9,7 @@ from typing import Any
 from nanobot.agent.delegation import (
     _SCRATCHPAD_INJECTION_LIMIT,
     TASK_TYPES,
+    DelegationConfig,
     DelegationDispatcher,
     _cap_scratchpad_for_injection,
 )
@@ -18,10 +19,11 @@ from nanobot.config.schema import ExecToolConfig
 # Helpers
 # ---------------------------------------------------------------------------
 
+_CONFIG_FIELDS = {f for f in DelegationConfig.__dataclass_fields__}
+
 
 def _make_dispatcher(tmp_path: Path, **overrides: Any) -> DelegationDispatcher:
-    defaults = dict(
-        provider=None,
+    config_defaults: dict[str, Any] = dict(
         workspace=tmp_path,
         model="test-model",
         temperature=0.7,
@@ -32,8 +34,15 @@ def _make_dispatcher(tmp_path: Path, **overrides: Any) -> DelegationDispatcher:
         exec_config=None,
         role_name="main",
     )
-    defaults.update(overrides)
-    return DelegationDispatcher(**defaults)  # type: ignore[arg-type]
+    cfg_overrides = {k: v for k, v in overrides.items() if k in _CONFIG_FIELDS}
+    wiring_overrides = {k: v for k, v in overrides.items() if k not in _CONFIG_FIELDS}
+    config_defaults.update(cfg_overrides)
+    config = DelegationConfig(**config_defaults)  # type: ignore[arg-type]
+    return DelegationDispatcher(
+        config=config,
+        provider=wiring_overrides.pop("provider", None),
+        **wiring_overrides,  # type: ignore[arg-type]
+    )
 
 
 # ---------------------------------------------------------------------------

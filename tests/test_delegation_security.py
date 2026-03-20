@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.delegation import DelegationDispatcher
+from nanobot.agent.delegation import DelegationConfig, DelegationDispatcher
 from nanobot.agent.registry import AgentRegistry
 from nanobot.agent.tools.delegate import _CycleError
 from nanobot.config.schema import AgentRoleConfig
@@ -26,13 +26,14 @@ from nanobot.config.schema import AgentRoleConfig
 # Helpers
 # ---------------------------------------------------------------------------
 
+_CONFIG_FIELDS = {f for f in DelegationConfig.__dataclass_fields__}
+
 
 def _make_dispatcher(tmp_path: Path, **overrides: Any) -> DelegationDispatcher:
     exec_cfg = MagicMock()
     exec_cfg.timeout = 30
     exec_cfg.shell_mode = "denylist"
-    defaults: dict[str, Any] = dict(
-        provider=None,
+    config_defaults: dict[str, Any] = dict(
         workspace=tmp_path,
         model="test-model",
         temperature=0.7,
@@ -43,8 +44,15 @@ def _make_dispatcher(tmp_path: Path, **overrides: Any) -> DelegationDispatcher:
         exec_config=exec_cfg,
         role_name="main",
     )
-    defaults.update(overrides)
-    return DelegationDispatcher(**defaults)  # type: ignore[arg-type]
+    cfg_overrides = {k: v for k, v in overrides.items() if k in _CONFIG_FIELDS}
+    wiring_overrides = {k: v for k, v in overrides.items() if k not in _CONFIG_FIELDS}
+    config_defaults.update(cfg_overrides)
+    config = DelegationConfig(**config_defaults)  # type: ignore[arg-type]
+    return DelegationDispatcher(
+        config=config,
+        provider=wiring_overrides.pop("provider", None),
+        **wiring_overrides,  # type: ignore[arg-type]
+    )
 
 
 def _role(name: str, **kwargs: Any) -> AgentRoleConfig:

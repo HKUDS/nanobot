@@ -19,6 +19,7 @@ import json
 import re
 import time
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -44,7 +45,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.agent.tracing import sanitize_for_trace
-from nanobot.config.schema import AgentRoleConfig
+from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
 from nanobot.errors import NanobotError
 from nanobot.metrics import delegation_latency_seconds, delegation_total
 
@@ -53,7 +54,6 @@ if TYPE_CHECKING:
     from nanobot.agent.scratchpad import Scratchpad
     from nanobot.agent.tool_executor import ToolExecutor
     from nanobot.agent.tools.base import Tool
-    from nanobot.config.schema import ExecToolConfig
     from nanobot.providers.base import LLMProvider
 
 # Per-coroutine delegation ancestry — isolated across asyncio.gather branches.
@@ -161,22 +161,35 @@ def _cap_scratchpad_for_injection(content: str, limit: int = _SCRATCHPAD_INJECTI
     )
 
 
+@dataclass(slots=True, frozen=True)
+class DelegationConfig:
+    """Immutable delegation settings (LAN-144).
+
+    Groups parameters that are set once at startup and never mutated
+    during a session.  Mutable per-session wiring (provider, coordinator,
+    scratchpad, etc.) remains as separate ``DelegationDispatcher.__init__``
+    parameters.
+    """
+
+    workspace: Path
+    model: str
+    temperature: float
+    max_tokens: int
+    max_iterations: int
+    restrict_to_workspace: bool
+    brave_api_key: str | None
+    exec_config: ExecToolConfig | None
+    role_name: str
+
+
 class DelegationDispatcher:
     """Manages delegation routing, contract construction, execution, and tracing."""
 
     def __init__(
         self,
         *,
+        config: DelegationConfig,
         provider: LLMProvider,
-        workspace: Path,
-        model: str,
-        temperature: float,
-        max_tokens: int,
-        max_iterations: int,
-        restrict_to_workspace: bool,
-        brave_api_key: str | None,
-        exec_config: ExecToolConfig,
-        role_name: str,
         coordinator: Coordinator | None = None,
         scratchpad: Scratchpad | None = None,
         active_messages: list[dict[str, Any]] | None = None,
@@ -188,30 +201,12 @@ class DelegationDispatcher:
 
         Parameters
         ----------
+        config:
+            Immutable delegation settings (workspace, model, temperature,
+            max_tokens, max_iterations, restrict_to_workspace, brave_api_key,
+            exec_config, role_name).  See ``DelegationConfig``.
         provider:
             LLM provider used for delegated agent tool loops.
-        workspace:
-            Absolute path to the project workspace root.  Used for filesystem
-            tool containment and project-context injection.
-        model:
-            Default LLM model identifier; may be overridden per-role via
-            ``AgentRoleConfig.model``.
-        temperature:
-            Default sampling temperature; may be overridden per-role.
-        max_tokens:
-            Maximum tokens per LLM completion in delegated agents.
-        max_iterations:
-            Upper bound on tool-loop iterations for delegated agents (further
-            capped by task-type-specific limits).
-        restrict_to_workspace:
-            When ``True``, filesystem tools restrict paths to *workspace*.
-        brave_api_key:
-            API key for the Brave web-search tool; ``None`` disables it.
-        exec_config:
-            Shell execution configuration (timeout, shell_mode, deny/allow
-            patterns).  Forwarded to ``ExecTool`` instances.
-        role_name:
-            Name of the *parent* agent role that owns this dispatcher.
         coordinator:
             Coordinator instance used to classify and route delegation
             targets.  ``None`` disables delegation (calls to ``dispatch``
@@ -234,16 +229,19 @@ class DelegationDispatcher:
             Optional async callback invoked with delegation start/end events
             for progress reporting.
         """
+        self.config = config
         self.provider = provider
-        self.workspace = workspace
-        self.model = model
-        self.temperature = temperature
-        self.max_tokens = max_tokens
-        self.max_iterations = max_iterations
-        self.restrict_to_workspace = restrict_to_workspace
-        self.brave_api_key = brave_api_key
-        self.exec_config = exec_config
-        self.role_name = role_name
+        # Unpack config fields for concise access throughout the class body.
+        # This avoids changing 750+ lines of self.workspace / self.model / etc.
+        self.workspace = config.workspace
+        self.model = config.model
+        self.temperature = config.temperature
+        self.max_tokens = config.max_tokens
+        self.max_iterations = config.max_iterations
+        self.restrict_to_workspace = config.restrict_to_workspace
+        self.brave_api_key = config.brave_api_key
+        self.exec_config = config.exec_config
+        self.role_name = config.role_name
 
         # Mutable per-session state
         self.delegation_count: int = 0

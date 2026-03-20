@@ -711,6 +711,7 @@ class TestDelegationDepthLimit:
 
         from nanobot.agent.delegation import (
             MAX_DELEGATION_DEPTH,
+            DelegationConfig,
             DelegationDispatcher,
             _delegation_ancestry,
         )
@@ -719,16 +720,18 @@ class TestDelegationDepthLimit:
 
         provider = ScriptedProvider([])
         dispatcher = DelegationDispatcher(
+            config=DelegationConfig(
+                workspace=tmp_path,
+                model="test-model",
+                temperature=0.0,
+                max_tokens=2048,
+                max_iterations=3,
+                restrict_to_workspace=True,
+                brave_api_key="",
+                exec_config=ExecToolConfig(),
+                role_name="parent",
+            ),
             provider=provider,
-            workspace=tmp_path,
-            model="test-model",
-            temperature=0.0,
-            max_tokens=2048,
-            max_iterations=3,
-            restrict_to_workspace=True,
-            brave_api_key="",
-            exec_config=ExecToolConfig(),
-            role_name="parent",
         )
 
         # Provide a mock coordinator so dispatch() gets past the coordinator check
