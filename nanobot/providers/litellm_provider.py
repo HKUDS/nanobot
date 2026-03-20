@@ -40,10 +40,12 @@ class LiteLLMProvider(LLMProvider):
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
         provider_name: str | None = None,
+        user: str | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self.user = user
 
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
@@ -268,6 +270,12 @@ class LiteLLMProvider(LLMProvider):
         # Pass extra headers (e.g. APP-Code for AiHubMix)
         if self.extra_headers:
             kwargs["extra_headers"] = self.extra_headers
+
+        # Pass user identifier for provider-side usage tracking (e.g. OpenRouter).
+        # Use extra_body because LiteLLM doesn't forward the top-level `user` kwarg
+        # to all providers (confirmed: OpenRouter ignores it via LiteLLM).
+        if self.user:
+            kwargs.setdefault("extra_body", {})["user"] = self.user
         
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort

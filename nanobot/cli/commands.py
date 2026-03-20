@@ -409,6 +409,7 @@ def _make_provider(config: Config):
             default_model=model,
             extra_headers=p.extra_headers if p else None,
             provider_name=provider_name,
+            user=p.user if p else None,
         )
 
     defaults = config.agents.defaults
