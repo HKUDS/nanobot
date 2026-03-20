@@ -87,6 +87,8 @@ class HeartbeatConfig(Base):
 
     enabled: bool = True
     interval_s: int = 30 * 60  # 30 minutes
+    channel: str = ""  # Target channel type (e.g. "slack")
+    chat_id: str = ""  # Target chat ID (e.g. Slack channel ID)
 
 
 class GatewayConfig(Base):
