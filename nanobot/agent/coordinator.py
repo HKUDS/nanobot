@@ -133,11 +133,13 @@ class Coordinator:
         *,
         classifier_model: str | None = None,
         default_role: str = "general",
+        confidence_threshold: float = 0.6,
     ) -> None:
         self._provider = provider
         self._registry = registry
         self._classifier_model = classifier_model
         self._default_role = default_role
+        self._confidence_threshold = confidence_threshold
         # Startup validation: warn if default_role is not registered (LAN-108).
         if default_role and registry.get(default_role) is None:
             logger.warning(
@@ -194,10 +196,27 @@ class Coordinator:
                     metadata={"generation_name": "classify"},
                 )
                 raw = (response.content or "").strip()
-                parsed_role, confidence, needs_orchestration, relevant_roles = self._parse_response(
-                    raw
+                parsed_role, confidence, needs_orchestration, relevant_roles, from_json = (
+                    self._parse_response(raw)
                 )
-                role_name = parsed_role if parsed_role in self._registry else self._default_role
+                # Apply confidence_threshold only to JSON LLM responses (LAN-107).
+                # Text-scan fallbacks are already a last resort and should not be
+                # further filtered — they would just fall back to default_role anyway.
+                if parsed_role in self._registry:
+                    if from_json and confidence < self._confidence_threshold:
+                        logger.info(
+                            "Classification confidence {:.2f} below threshold {:.2f} "
+                            "for role '{}' — falling back to default role '{}'",
+                            confidence,
+                            self._confidence_threshold,
+                            parsed_role,
+                            self._default_role,
+                        )
+                        role_name = self._default_role
+                    else:
+                        role_name = parsed_role
+                else:
+                    role_name = self._default_role
 
                 # Orchestration override: route to "pm" when the classifier
                 # judges the task needs multi-agent coordination.
@@ -237,10 +256,13 @@ class Coordinator:
                 logger.warning("Coordinator classification failed, using default role")
                 return self._default_role, 0.0
 
-    def _parse_response(self, raw: str) -> tuple[str, float, bool, list[str]]:
+    def _parse_response(self, raw: str) -> tuple[str, float, bool, list[str], bool]:
         """Extract classification fields from the classifier's raw response.
 
-        Returns ``(role_name, confidence, needs_orchestration, relevant_roles)``.
+        Returns ``(role_name, confidence, needs_orchestration, relevant_roles, from_json)``.
+        The ``from_json`` flag is True when the LLM returned valid JSON with an explicit
+        confidence score — only these responses are subject to ``confidence_threshold``
+        filtering (LAN-107). Text-scan fallbacks are trusted as-is.
         """
         # Try JSON parse first
         try:
@@ -254,15 +276,15 @@ class Coordinator:
                     str(r).strip().lower()
                     for r in (raw_roles if isinstance(raw_roles, list) else [])
                 ]
-                return role, min(max(confidence, 0.0), 1.0), needs_orch, relevant
+                return role, min(max(confidence, 0.0), 1.0), needs_orch, relevant, True
         except (json.JSONDecodeError, ValueError):
             pass
         # Fallback: look for a known role name in the raw text
         lower = raw.lower()
         for name in self._registry.role_names():
             if name in lower:
-                return name, 0.5, False, []  # Text-scan match gets moderate confidence
-        return self._default_role, 0.0, False, []
+                return name, 0.5, False, [], False  # Text-scan: not subject to threshold
+        return self._default_role, 0.0, False, [], False
 
     async def route(self, message: str) -> AgentRoleConfig:
         """Classify message and return the matching role config."""

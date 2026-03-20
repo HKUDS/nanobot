@@ -23,9 +23,16 @@ from loguru import logger
 class Scratchpad:
     """Per-session JSONL-backed scratchpad."""
 
-    def __init__(self, session_dir: Path, *, max_entries: int = 50) -> None:
+    # Default per-entry content size cap (bytes). Prevents a single large delegated
+    # output from overflowing downstream agents' context windows (LAN-113).
+    MAX_ENTRY_CHARS: int = 5_000
+
+    def __init__(
+        self, session_dir: Path, *, max_entries: int = 50, max_entry_chars: int = 5_000
+    ) -> None:
         self._path = session_dir / "scratchpad.jsonl"
         self._max_entries = max_entries
+        self._max_entry_chars = max_entry_chars
         self._lock = asyncio.Lock()
         self._entries: list[dict[str, Any]] = []
         self._loaded = False
@@ -37,7 +44,14 @@ class Scratchpad:
     async def write(
         self, *, role: str, label: str, content: str, metadata: dict[str, Any] | None = None
     ) -> str:
-        """Append an entry and return its ID."""
+        """Append an entry and return its ID.
+
+        Content exceeding ``max_entry_chars`` is truncated with a notice to prevent
+        downstream agents from exceeding their context window (LAN-113).
+        """
+        if len(content) > self._max_entry_chars:
+            truncated = content[: self._max_entry_chars]
+            content = truncated + f"\n…[truncated: {len(content)} chars total]"
         entry_id = uuid.uuid4().hex[:8]
         entry: dict[str, Any] = {
             "id": entry_id,

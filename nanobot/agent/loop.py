@@ -1625,6 +1625,7 @@ class AgentLoop:
             registry=registry,
             classifier_model=self._routing_config.classifier_model,
             default_role=self._routing_config.default_role,
+            confidence_threshold=self._routing_config.confidence_threshold,
         )
         self._dispatcher.coordinator = self._coordinator
         self.missions.coordinator = self._coordinator

@@ -219,7 +219,7 @@ class TestRoute:
 class TestParseResponse:
     def test_json_object(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, confidence, needs_orch, relevant = coordinator._parse_response('{"role": "code"}')
+        role, confidence, needs_orch, relevant, _ = coordinator._parse_response('{"role": "code"}')
         assert role == "code"
         assert confidence == 1.0
         assert needs_orch is False
@@ -227,18 +227,20 @@ class TestParseResponse:
 
     def test_json_with_confidence_field(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, confidence, _, _ = coordinator._parse_response('{"role": "code", "confidence": 0.75}')
+        role, confidence, _, _, _ = coordinator._parse_response(
+            '{"role": "code", "confidence": 0.75}'
+        )
         assert role == "code"
         assert confidence == 0.75
 
     def test_json_uppercase_normalised(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, _, _, _ = coordinator._parse_response('{"role": "CODE"}')
+        role, _, _, _, _ = coordinator._parse_response('{"role": "CODE"}')
         assert role == "code"
 
     def test_plain_text_fallback(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, confidence, needs_orch, relevant = coordinator._parse_response(
+        role, confidence, needs_orch, relevant, _ = coordinator._parse_response(
             "Use the research agent"
         )
         assert role == "research"
@@ -248,7 +250,7 @@ class TestParseResponse:
 
     def test_no_match_returns_default(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, confidence, needs_orch, relevant = coordinator._parse_response("something random")
+        role, confidence, needs_orch, relevant, _ = coordinator._parse_response("something random")
         assert role == "general"
         assert confidence == 0.0
         assert needs_orch is False
@@ -256,14 +258,14 @@ class TestParseResponse:
 
     def test_confidence_clamped(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        _, conf, _, _ = coordinator._parse_response('{"role": "code", "confidence": 1.5}')
+        _, conf, _, _, _ = coordinator._parse_response('{"role": "code", "confidence": 1.5}')
         assert conf == 1.0
-        _, conf2, _, _ = coordinator._parse_response('{"role": "code", "confidence": -0.5}')
+        _, conf2, _, _, _ = coordinator._parse_response('{"role": "code", "confidence": -0.5}')
         assert conf2 == 0.0
 
     def test_needs_orchestration_parsed(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, confidence, needs_orch, relevant = coordinator._parse_response(
+        role, confidence, needs_orch, relevant, _ = coordinator._parse_response(
             '{"role": "code", "confidence": 0.9, '
             '"needs_orchestration": true, "relevant_roles": ["code", "writing"]}'
         )
@@ -274,7 +276,7 @@ class TestParseResponse:
 
     def test_needs_orchestration_false_when_absent(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        _, _, needs_orch, relevant = coordinator._parse_response(
+        _, _, needs_orch, relevant, _ = coordinator._parse_response(
             '{"role": "code", "confidence": 0.8}'
         )
         assert needs_orch is False
@@ -282,7 +284,7 @@ class TestParseResponse:
 
     def test_malformed_relevant_roles_ignored(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        _, _, _, relevant = coordinator._parse_response(
+        _, _, _, relevant, _ = coordinator._parse_response(
             '{"role": "code", "relevant_roles": "not-a-list"}'
         )
         assert relevant == []
