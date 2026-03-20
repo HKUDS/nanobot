@@ -581,7 +581,7 @@ class AgentLoop:
         )
 
         if final_content is None:
-            final_content = "I've completed processing but have no response to give."
+            final_content = "已处理完毕"
 
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
