@@ -23,6 +23,8 @@ import base64
 import mimetypes
 import os
 import re
+import shutil
+import subprocess
 import time
 from collections import deque
 from pathlib import Path
@@ -54,6 +56,14 @@ except ImportError:  # pragma: no cover
     botpy = None
     Route = None
 
+try:
+    import pilk
+
+    PILK_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    PILK_AVAILABLE = False
+    pilk = None
+
 if TYPE_CHECKING:
     from botpy.message import BaseMessage, C2CMessage, GroupMessage
     from botpy.types.message import Media
@@ -76,6 +86,9 @@ _IMAGE_EXTS = {
     ".ico",
     ".svg",
 }
+_AUDIO_EXTS = {".aac", ".amr", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".silk", ".slk", ".wav", ".webm"}
+_TRANSCRIBE_READY_EXTS = {".m4a", ".mp3", ".wav", ".webm"}
+_SILK_HEADER = b"\x02#!SILK_V3"
 
 # Replace unsafe characters with "_", keep Chinese and common safe punctuation.
 _SAFE_NAME_RE = re.compile(r"[^\w.\-()\[\]（）【】\u4e00-\u9fff]+", re.UNICODE)
@@ -413,6 +426,69 @@ class QQChannel(BaseChannel):
             logger.warning("QQ outbound media download error url={} err={}", media_ref, e)
             return None, None
 
+    @staticmethod
+    def _attachment_extension(filename: str | None, content_type: str | None) -> str:
+        ext = Path((filename or "").strip()).suffix.lower()
+        if ext:
+            return ext
+        ctype = (content_type or "").split(";", 1)[0].strip().lower()
+        return (mimetypes.guess_extension(ctype) or "").lower()
+
+    @classmethod
+    def _attachment_kind(cls, filename: str | None, content_type: str | None) -> str:
+        ctype = (content_type or "").split(";", 1)[0].strip().lower()
+        ext = cls._attachment_extension(filename, content_type)
+        if ctype.startswith("audio/") or ext in _AUDIO_EXTS:
+            return "audio"
+        if ctype.startswith("image/") or ext in _IMAGE_EXTS:
+            return "image"
+        return "file"
+
+    async def _prepare_audio_for_transcription(self, file_path: str) -> str:
+        path = Path(file_path)
+        if path.suffix.lower() in _TRANSCRIBE_READY_EXTS:
+            return str(path)
+
+        if self._is_silk_audio(path):
+            converted = path.with_suffix(".wav")
+            if not PILK_AVAILABLE:
+                logger.warning("QQ audio is SILK but pilk is not installed: {}", path.name)
+                return str(path)
+            try:
+                await asyncio.to_thread(pilk.silk_to_wav, str(path), str(converted))
+                return str(converted)
+            except Exception as e:
+                logger.warning("QQ SILK decode failed for {}: {}", path.name, e)
+                return str(path)
+
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            return str(path)
+
+        converted = path.with_suffix(".wav")
+        try:
+            await asyncio.to_thread(
+                subprocess.run,
+                [ffmpeg, "-y", "-i", str(path), str(converted)],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return str(converted)
+        except Exception as e:
+            logger.warning("QQ audio conversion failed for {}: {}", path.name, e)
+            return str(path)
+
+    @staticmethod
+    def _is_silk_audio(path: Path) -> bool:
+        if path.suffix.lower() in {".silk", ".slk"}:
+            return True
+        try:
+            with path.open("rb") as f:
+                return f.read(len(_SILK_HEADER)) == _SILK_HEADER
+        except OSError:
+            return False
+
     # https://github.com/tencent-connect/botpy/issues/198
     # https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/send-receive/rich-media.html
     async def _post_base64file(
@@ -471,7 +547,10 @@ class QQChannel(BaseChannel):
         # the data used by tests don't contain attachments property
         # so we use getattr with a default of [] to avoid AttributeError in tests
         attachments = getattr(data, "attachments", None) or []
-        media_paths, recv_lines, att_meta = await self._handle_attachments(attachments)
+        media_paths, recv_lines, att_meta, attachment_parts = await self._handle_attachments(attachments)
+
+        if attachment_parts:
+            content = "\n".join([part for part in [content, *attachment_parts] if part]).strip()
 
         # Compose content that always contains actionable saved paths
         if recv_lines:
@@ -496,23 +575,26 @@ class QQChannel(BaseChannel):
     async def _handle_attachments(
         self,
         attachments: list[BaseMessage._Attachments],
-    ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+    ) -> tuple[list[str], list[str], list[dict[str, Any]], list[str]]:
         """Extract, download (chunked), and format attachments for agent consumption."""
         media_paths: list[str] = []
         recv_lines: list[str] = []
         att_meta: list[dict[str, Any]] = []
+        content_parts: list[str] = []
 
         if not attachments:
-            return media_paths, recv_lines, att_meta
+            return media_paths, recv_lines, att_meta, content_parts
 
         for att in attachments:
             url, filename, ctype = att.url, att.filename, att.content_type
+            kind = self._attachment_kind(filename, ctype)
 
             logger.info("Downloading file from QQ: {}", filename or url)
             local_path = await self._download_to_media_dir_chunked(url, filename_hint=filename)
 
             att_meta.append(
                 {
+                    "type": kind,
                     "url": url,
                     "filename": filename,
                     "content_type": ctype,
@@ -524,11 +606,19 @@ class QQChannel(BaseChannel):
                 media_paths.append(local_path)
                 shown_name = filename or os.path.basename(local_path)
                 recv_lines.append(f"- {shown_name}\n  saved: {local_path}")
+                if kind == "audio":
+                    prepared_path = await self._prepare_audio_for_transcription(local_path)
+                    transcription = await self.transcribe_audio(prepared_path)
+                    if transcription:
+                        content_parts.append(f"[transcription: {transcription}]")
+                    else:
+                        content_parts.append(f"[audio: {local_path}]")
             else:
                 shown_name = filename or url
                 recv_lines.append(f"- {shown_name}\n  saved: [download failed]")
+                content_parts.append(f"[{kind}: {shown_name} - download failed]")
 
-        return media_paths, recv_lines, att_meta
+        return media_paths, recv_lines, att_meta, content_parts
 
     async def _download_to_media_dir_chunked(
         self,
@@ -573,6 +663,16 @@ class QQChannel(BaseChannel):
                         ext = ".gif"
                     elif "webp" in ctype:
                         ext = ".webp"
+                    elif "mpeg" in ctype or "mp3" in ctype:
+                        ext = ".mp3"
+                    elif "wav" in ctype:
+                        ext = ".wav"
+                    elif "ogg" in ctype:
+                        ext = ".ogg"
+                    elif "amr" in ctype:
+                        ext = ".amr"
+                    elif "opus" in ctype:
+                        ext = ".opus"
                     elif "pdf" in ctype:
                         ext = ".pdf"
                     else:

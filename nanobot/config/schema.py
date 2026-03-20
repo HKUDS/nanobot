@@ -91,6 +91,13 @@ class ProvidersConfig(Base):
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
 
 
+class TranscriptionConfig(Base):
+    """Configuration for audio transcription backends."""
+
+    provider: Literal["auto", "groq", "openai", "custom"] = "auto"
+    model: str = ""
+
+
 class HeartbeatConfig(Base):
     """Heartbeat service configuration."""
 
@@ -166,6 +173,7 @@ class Config(BaseSettings):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
+    transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
 

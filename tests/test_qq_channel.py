@@ -46,6 +46,71 @@ async def test_on_group_message_routes_to_group_chat_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_on_c2c_audio_attachment_uses_transcription_when_text_is_empty(monkeypatch) -> None:
+    channel = QQChannel(QQConfig(app_id="app", secret="secret", allow_from=["*"]), MessageBus())
+
+    async def fake_download(_url: str, filename_hint: str = "") -> str:
+        assert filename_hint == "voice.amr"
+        return "/tmp/nanobot/qq/audio.amr"
+
+    async def fake_prepare(path: str) -> str:
+        return path
+
+    async def fake_transcribe(_path: str) -> str:
+        return "voice transcript"
+
+    monkeypatch.setattr(channel, "_download_to_media_dir_chunked", fake_download)
+    monkeypatch.setattr(channel, "_prepare_audio_for_transcription", fake_prepare)
+    monkeypatch.setattr(channel, "transcribe_audio", fake_transcribe)
+
+    data = SimpleNamespace(
+        id="msg-audio",
+        content="",
+        attachments=[
+            SimpleNamespace(
+                url="https://example.com/voice.amr",
+                filename="voice.amr",
+                content_type="audio/amr",
+            )
+        ],
+        author=SimpleNamespace(user_openid="user123"),
+    )
+
+    await channel._on_message(data, is_group=False)
+
+    msg = await channel.bus.consume_inbound()
+    assert msg.sender_id == "user123"
+    assert msg.chat_id == "user123"
+    assert "[transcription: voice transcript]" in msg.content
+    assert "Received files:" in msg.content
+    assert msg.media == ["/tmp/nanobot/qq/audio.amr"]
+    assert msg.metadata["attachments"][0]["type"] == "audio"
+    assert msg.metadata["attachments"][0]["saved_path"] == "/tmp/nanobot/qq/audio.amr"
+
+
+@pytest.mark.asyncio
+async def test_prepare_audio_for_transcription_decodes_silk_header(monkeypatch, tmp_path) -> None:
+    channel = QQChannel(QQConfig(app_id="app", secret="secret", allow_from=["*"]), MessageBus())
+    silk_path = tmp_path / "voice.amr"
+    silk_path.write_bytes(b"\x02#!SILK_V3payload")
+
+    calls: list[tuple[str, str]] = []
+
+    def fake_silk_to_wav(src: str, dst: str) -> None:
+        calls.append((src, dst))
+        Path(dst).write_bytes(b"RIFF")
+
+    monkeypatch.setattr("nanobot.channels.qq.PILK_AVAILABLE", True)
+    monkeypatch.setattr("nanobot.channels.qq.pilk.silk_to_wav", fake_silk_to_wav)
+
+    prepared = await channel._prepare_audio_for_transcription(str(silk_path))
+
+    assert prepared.endswith(".wav")
+    assert Path(prepared).exists()
+    assert calls == [(str(silk_path), prepared)]
+
+
+@pytest.mark.asyncio
 async def test_send_group_message_uses_plain_text_group_api_with_msg_seq() -> None:
     channel = QQChannel(QQConfig(app_id="app", secret="secret", allow_from=["*"]), MessageBus())
     channel._client = _FakeClient()

@@ -23,6 +23,9 @@ class BaseChannel(ABC):
     name: str = "base"
     display_name: str = "Base"
     transcription_api_key: str = ""
+    transcription_provider: str = "auto"
+    transcription_model: str = ""
+    transcription_provider_configs: dict[str, Any] = {}
 
     def __init__(self, config: Any, bus: MessageBus):
         """
@@ -37,17 +40,59 @@ class BaseChannel(ABC):
         self._running = False
 
     async def transcribe_audio(self, file_path: str | Path) -> str:
-        """Transcribe an audio file via Groq Whisper. Returns empty string on failure."""
-        if not self.transcription_api_key:
-            return ""
+        """Transcribe an audio file via the configured provider(s)."""
         try:
-            from nanobot.providers.transcription import GroqTranscriptionProvider
+            from nanobot.providers.transcription import (
+                CustomTranscriptionProvider,
+                GroqTranscriptionProvider,
+                OpenAITranscriptionProvider,
+            )
 
-            provider = GroqTranscriptionProvider(api_key=self.transcription_api_key)
-            return await provider.transcribe(file_path)
+            providers = {
+                "groq": GroqTranscriptionProvider,
+                "openai": OpenAITranscriptionProvider,
+                "custom": CustomTranscriptionProvider,
+            }
+
+            requested = self.transcription_provider or "auto"
+            provider_order = ["groq", "openai", "custom"]
+            if requested in providers:
+                provider_order = [requested] + [name for name in provider_order if name != requested]
+
+            for name in provider_order:
+                cfg = self._transcription_provider_config(name)
+                if name == "groq" and not cfg.get("api_key") and self.transcription_api_key:
+                    cfg["api_key"] = self.transcription_api_key
+                provider = providers[name](
+                    api_key=cfg.get("api_key"),
+                    api_base=cfg.get("api_base"),
+                    model=self.transcription_model,
+                    extra_headers=cfg.get("extra_headers"),
+                )
+                if not provider.is_configured():
+                    continue
+                transcription = await provider.transcribe(file_path)
+                if transcription:
+                    return transcription
+            return ""
         except Exception as e:
             logger.warning("{}: audio transcription failed: {}", self.name, e)
             return ""
+
+    def _transcription_provider_config(self, name: str) -> dict[str, Any]:
+        """Normalize a configured transcription provider into a plain dict."""
+        cfg = (self.transcription_provider_configs or {}).get(name)
+        if cfg is None:
+            return {}
+        if isinstance(cfg, dict):
+            return dict(cfg)
+        if hasattr(cfg, "model_dump"):
+            return cfg.model_dump()  # type: ignore[no-any-return]
+        return {
+            "api_key": getattr(cfg, "api_key", ""),
+            "api_base": getattr(cfg, "api_base", None),
+            "extra_headers": getattr(cfg, "extra_headers", None),
+        }
 
     @abstractmethod
     async def start(self) -> None:
