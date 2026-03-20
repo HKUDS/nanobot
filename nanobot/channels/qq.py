@@ -37,6 +37,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
+from nanobot.security.network import validate_url_target
 
 try:
     from nanobot.config.paths import get_media_dir
@@ -77,14 +78,6 @@ _IMAGE_EXTS = {
 
 # Replace unsafe characters with "_", keep Chinese and common safe punctuation.
 _SAFE_NAME_RE = re.compile(r"[^\w.\-()\[\]（）【】\u4e00-\u9fff]+", re.UNICODE)
-
-
-def _is_http_url(value: str) -> bool:
-    """Return True if value looks like an http(s) URL."""
-    try:
-        return urlparse(value).scheme in ("http", "https")
-    except Exception:
-        return False
 
 
 def _sanitize_filename(name: str) -> str:
@@ -374,27 +367,31 @@ class QQChannel(BaseChannel):
         if not media_ref:
             return None, None
 
-        # URL
-        if _is_http_url(media_ref):
-            if not self._http:
-                self._http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120))
-            try:
-                async with self._http.get(media_ref, allow_redirects=True) as resp:
-                    if resp.status >= 400:
-                        logger.warning(
-                            "QQ outbound media download failed status={} url={}",
-                            resp.status,
-                            media_ref,
-                        )
-                        return None, None
-                    data = await resp.read()
-                    if not data:
-                        return None, None
-                    filename = os.path.basename(urlparse(media_ref).path) or "file.bin"
-                    return data, filename
-            except Exception as e:
-                logger.warning("QQ outbound media download error url={} err={}", media_ref, e)
-                return None, None
+        ok, err = validate_url_target(media_ref)
+
+        if not ok:
+            logger.warning("QQ outbound media URL validation failed url={} err={}", media_ref, err)
+            return None, None
+
+        if not self._http:
+            self._http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120))
+        try:
+            async with self._http.get(media_ref, allow_redirects=True) as resp:
+                if resp.status >= 400:
+                    logger.warning(
+                        "QQ outbound media download failed status={} url={}",
+                        resp.status,
+                        media_ref,
+                    )
+                    return None, None
+                data = await resp.read()
+                if not data:
+                    return None, None
+                filename = os.path.basename(urlparse(media_ref).path) or "file.bin"
+                return data, filename
+        except Exception as e:
+            logger.warning("QQ outbound media download error url={} err={}", media_ref, e)
+            return None, None
 
         # Local file
         try:
