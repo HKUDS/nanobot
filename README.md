@@ -836,6 +836,43 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -
 
 </details>
 
+
+<details>
+<summary><b>Github Copilot (OAuth)</b></summary>
+
+Github Copilot uses OAuth instead of API keys. Requires a [Github account with a plan](https://github.com/features/copilot/plans) configured.
+
+**1. Login:**
+```bash
+nanobot provider login github_copilot
+```
+
+**2. Set model** (merge into `~/.nanobot/config.json`):
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "github-copilot/gpt-4.1"
+    }
+  }
+}
+```
+
+**3. Chat:**
+```bash
+nanobot agent -m "Hello!"
+
+# Target a specific workspace/config locally
+nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello!"
+
+# One-off workspace override on top of that config
+nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -m "Hello!"
+```
+
+> Docker users: use `docker run -it` for interactive OAuth login.
+
+</details>
+
 <details>
 <summary><b>Custom Provider (Any OpenAI-compatible API)</b></summary>
 
