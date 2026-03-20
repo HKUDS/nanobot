@@ -2068,13 +2068,21 @@ class MemoryStore:
                     norm = self._norm_text(item)
                     entry = section_meta.get(norm)
                     if not isinstance(entry, dict):
+                        fallback_ts = data.get("updated_at") or self._utc_now_iso()
                         section_meta[norm] = {
+                            "id": self._generate_belief_id(key, norm, fallback_ts),
                             "text": item,
                             "confidence": 0.65,
                             "evidence_count": 1,
                             "status": self.PROFILE_STATUS_ACTIVE,
-                            "last_seen_at": data.get("updated_at") or self._utc_now_iso(),
+                            "created_at": fallback_ts,
+                            "last_seen_at": fallback_ts,
                         }
+                    elif not entry.get("id"):
+                        # Backfill stable ID on legacy entries.
+                        created = entry.get("last_seen_at") or self._utc_now_iso()
+                        entry.setdefault("created_at", created)
+                        entry["id"] = self._generate_belief_id(key, norm, entry["created_at"])
             return data
         if self.profile_file.exists():
             logger.warning("Failed to parse memory profile, resetting")
@@ -2098,19 +2106,33 @@ class MemoryStore:
             profile["meta"][key] = section
         return section
 
+    @staticmethod
+    def _generate_belief_id(section: str, norm_text: str, created_at: str) -> str:
+        """Generate a deterministic stable ID for a profile item."""
+        raw = f"{section}|{norm_text}|{created_at}"
+        return "bf-" + hashlib.sha1(raw.encode()).hexdigest()[:8]
+
     def _meta_entry(self, profile: dict[str, Any], key: str, text: str) -> dict[str, Any]:
         norm = self._norm_text(text)
         section = self._meta_section(profile, key)
         entry = section.get(norm)
         if not isinstance(entry, dict):
+            now = self._utc_now_iso()
             entry = {
+                "id": self._generate_belief_id(key, norm, now),
                 "text": text,
                 "confidence": 0.65,
                 "evidence_count": 1,
                 "status": self.PROFILE_STATUS_ACTIVE,
-                "last_seen_at": self._utc_now_iso(),
+                "created_at": now,
+                "last_seen_at": now,
             }
             section[norm] = entry
+        elif not entry.get("id"):
+            # Backfill stable ID on legacy entries (migration-on-read).
+            created = entry.get("last_seen_at") or self._utc_now_iso()
+            entry.setdefault("created_at", created)
+            entry["id"] = self._generate_belief_id(key, norm, entry["created_at"])
         return entry
 
     def _touch_meta_entry(
@@ -4316,6 +4338,38 @@ class MemoryStore:
 ## Conversation to Process
 {chr(10).join(lines)}"""
 
+    _PINNED_START = "<!-- user-pinned -->"
+    _PINNED_END = "<!-- end-user-pinned -->"
+
+    @classmethod
+    def _extract_pinned_section(cls, text: str) -> str | None:
+        """Extract user-pinned content from MEMORY.md, if present."""
+        start = text.find(cls._PINNED_START)
+        end = text.find(cls._PINNED_END)
+        if start == -1 or end == -1 or end <= start:
+            return None
+        return text[start : end + len(cls._PINNED_END)]
+
+    @classmethod
+    def _restore_pinned_section(cls, new_text: str, pinned: str) -> str:
+        """Re-insert a pinned section into new MEMORY.md content.
+
+        If the new text already contains a pinned fence, replace it.
+        Otherwise insert the pinned block after the first heading.
+        """
+        existing = cls._extract_pinned_section(new_text)
+        if existing:
+            return new_text.replace(existing, pinned)
+        # Insert after the first heading line (or at the top).
+        lines = new_text.split("\n")
+        insert_at = 0
+        for i, line in enumerate(lines):
+            if line.startswith("#"):
+                insert_at = i + 1
+                break
+        lines.insert(insert_at, pinned)
+        return "\n".join(lines)
+
     def _apply_save_memory_tool_result(self, *, args: dict[str, Any], current_memory: str) -> None:
         if entry := args.get("history_entry"):
             if not isinstance(entry, str):
@@ -4324,6 +4378,10 @@ class MemoryStore:
         if update := args.get("memory_update"):
             if not isinstance(update, str):
                 update = json.dumps(update, ensure_ascii=False)
+            # Preserve user-pinned sections during consolidation (LAN-199).
+            pinned = self._extract_pinned_section(current_memory)
+            if pinned:
+                update = self._restore_pinned_section(update, pinned)
             if update != current_memory:
                 self.write_long_term(update)
 
