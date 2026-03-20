@@ -509,6 +509,78 @@ class ProfileManager:
         return True
 
     # ------------------------------------------------------------------
+    # Evidence-quality verification (LAN-209)
+    # ------------------------------------------------------------------
+
+    def verify_beliefs(self) -> dict[str, Any]:
+        """Assess belief health based on evidence quality, not just timestamps.
+
+        Returns a report with beliefs classified as healthy, weak, contradicted,
+        or stale, plus a summary dict with counts.
+        """
+        profile = self.read_profile()
+        report: dict[str, Any] = {
+            "healthy": [],
+            "weak": [],
+            "contradicted": [],
+            "stale": [],
+        }
+
+        for field in PROFILE_KEYS:
+            for item in self._to_str_list(profile.get(field)):
+                norm = self._norm_text(item)
+                meta = profile.get("meta", {}).get(field, {}).get(norm, {})
+
+                confidence = self._safe_float(meta.get("confidence"), 0.65)
+                evidence_count = int(meta.get("evidence_count", 1))
+                status = str(meta.get("status", PROFILE_STATUS_ACTIVE))
+                superseded_by = meta.get("superseded_by_id")
+
+                if superseded_by or status in ("stale", "retracted"):
+                    report["stale"].append(
+                        {
+                            "field": field,
+                            "text": item,
+                            "reason": "superseded or retracted",
+                        }
+                    )
+                elif status == PROFILE_STATUS_CONFLICTED:
+                    report["contradicted"].append(
+                        {
+                            "field": field,
+                            "text": item,
+                            "reason": "has open conflict",
+                        }
+                    )
+                elif confidence < 0.4 or evidence_count < 2:
+                    report["weak"].append(
+                        {
+                            "field": field,
+                            "text": item,
+                            "reason": (
+                                f"low evidence (count={evidence_count}, conf={confidence:.2f})"
+                            ),
+                        }
+                    )
+                else:
+                    report["healthy"].append(
+                        {
+                            "field": field,
+                            "text": item,
+                            "confidence": confidence,
+                        }
+                    )
+
+        report["summary"] = {
+            "total": sum(len(v) for v in report.values() if isinstance(v, list)),
+            "healthy": len(report["healthy"]),
+            "weak": len(report["weak"]),
+            "contradicted": len(report["contradicted"]),
+            "stale": len(report["stale"]),
+        }
+        return report
+
+    # ------------------------------------------------------------------
     # Profile mutation (legacy helpers)
     # ------------------------------------------------------------------
 

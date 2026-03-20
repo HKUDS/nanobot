@@ -87,3 +87,65 @@ making it easy to introduce inconsistencies.
 - `events.jsonl` remains append-only — no migration of existing data required, only
   validation of new writes.
 - `MEMORY.md` snapshot format unchanged.
+
+## Amendment: Belief State Layer (2026-03-20)
+
+### Context
+
+The original architecture left profile.json as a mutable dict of string lists with a
+separate `meta` sidecar keyed by normalized text. This created four concrete failure modes:
+
+1. **Metadata orphaning** — rewording a fact during consolidation loses accumulated confidence
+   and evidence count (the meta key changes but the metadata stays under the old key).
+2. **No provenance chain** — `evidence_count` was an integer with no link to which events
+   in `events.jsonl` actually supported the belief.
+3. **No supersession audit trail** — when conflicts were resolved, there was no record of
+   what replaced what.
+4. **MEMORY.md dual-write** — both an LLM-generated path and a deterministic `rebuild_memory_snapshot`
+   could write MEMORY.md, producing inconsistent content.
+
+### Decision
+
+Evolve `profile.json` into a belief store rather than introducing a separate `beliefs.jsonl`
+file (which would create another source of truth):
+
+1. **Stable belief IDs** — each profile item gets a deterministic UUID (`bf-{sha1[:8]}`)
+   that survives text rewording. Backfilled lazily on read (migration-on-read).
+
+2. **Evidence linking** — `evidence_event_ids: list[str]` links each belief to its
+   supporting events in `events.jsonl` (capped at 10 most recent).
+
+3. **Supersession chains** — `supersedes_id` / `superseded_by_id` on profile metadata
+   create an auditable trail when conflicts are resolved.
+
+4. **BeliefRecord model** — a Pydantic model (`nanobot/agent/memory/event.py`) providing
+   type-safe access to profile metadata with all belief fields.
+
+5. **Explicit mutation API** — `ProfileManager.add_belief()`, `update_belief()`,
+   `retract_belief()` replace 4+ ad-hoc mutation paths with 3 well-defined methods.
+
+6. **MEMORY.md as pure projection** — `rebuild_memory_snapshot()` is now the single writer;
+   the LLM-generated `memory_update` path was removed. User-pinned sections are preserved
+   via `<!-- user-pinned -->` fence markers.
+
+7. **MemoryStore decomposition** — the 4,487-line monolith was decomposed into:
+   - `ProfileManager` — belief CRUD and mutation API
+   - `ConflictManager` — conflict lifecycle
+   - `RetrievalPlanner` — intent classification and policy
+   - `ContextAssembler` — prompt rendering
+   - `EvalRunner` — evaluation and observability (CLI only)
+
+### Alternatives rejected
+
+- **Separate `beliefs.jsonl`** — creates another source of truth. Profile.json already has
+  the bones of a belief store (confidence, status, pinned).
+- **`BeliefStore` class** — unnecessary abstraction. `ProfileManager` already coordinates
+  belief operations.
+- **Database** — premature for current scale. JSONL files remain the persistence layer.
+
+### Consequences
+
+- All profile mutations now record evidence and maintain supersession trails.
+- `MemoryStore` is reduced to ~3,000 lines (coordinator role only).
+- mem0 is treated as a retrieval index, not a source of truth (configurable).
+- Verification can assess evidence quality, not just timestamp staleness.

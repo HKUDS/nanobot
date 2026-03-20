@@ -2717,6 +2717,8 @@ class MemoryStore:
             and str(c.get("status", self.CONFLICT_STATUS_OPEN)).strip().lower()
             in {self.CONFLICT_STATUS_OPEN, self.CONFLICT_STATUS_NEEDS_USER}
         ]
+        belief_quality = self.verify_beliefs()
+
         report = {
             "events": len(events),
             "profile_items": sum(len(self._to_str_list(profile.get(k))) for k in self.PROFILE_KEYS),
@@ -2725,8 +2727,16 @@ class MemoryStore:
             "stale_profile_items": stale_profile_items,
             "ttl_tracked_events": total_ttl,
             "last_verified_at": profile.get("last_verified_at"),
+            "belief_quality": belief_quality["summary"],
         }
         return report
+
+    def verify_beliefs(self) -> dict[str, Any]:
+        """Assess belief health based on evidence quality, not just timestamps.
+
+        Delegates to ``ProfileManager.verify_beliefs`` — see LAN-209.
+        """
+        return self.profile_mgr.verify_beliefs()
 
     def _select_messages_for_consolidation(
         self,

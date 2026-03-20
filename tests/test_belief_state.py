@@ -253,3 +253,154 @@ class TestSupersessionChains:
         assert old_meta.get("status") == "stale"
         assert old_meta.get("superseded_by_id") == new_meta.get("id")
         assert new_meta.get("supersedes_id") == old_meta.get("id")
+
+
+# ---------------------------------------------------------------------------
+# LAN-209: Evidence-quality based verification
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyBeliefs:
+    def test_empty_profile_returns_zero_summary(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path)
+        report = store.verify_beliefs()
+        assert report["summary"]["total"] == 0
+        assert report["summary"]["healthy"] == 0
+        assert report["summary"]["weak"] == 0
+        assert report["summary"]["contradicted"] == 0
+        assert report["summary"]["stale"] == 0
+
+    def test_single_new_belief_classified_weak(self, tmp_path: Path) -> None:
+        """A brand-new belief with default confidence and evidence_count=1 is weak."""
+        store = MemoryStore(tmp_path)
+        profile = store.read_profile()
+        profile["stable_facts"] = ["User uses Python"]
+        store._meta_entry(profile, "stable_facts", "User uses Python")
+        store.write_profile(profile)
+
+        report = store.verify_beliefs()
+        assert report["summary"]["weak"] == 1
+        assert report["summary"]["healthy"] == 0
+        assert report["weak"][0]["field"] == "stable_facts"
+
+    def test_well_evidenced_belief_classified_healthy(self, tmp_path: Path) -> None:
+        """A belief with high confidence and multiple evidence counts is healthy."""
+        store = MemoryStore(tmp_path)
+        profile = store.read_profile()
+        profile["preferences"] = ["prefers dark mode"]
+        entry = store._meta_entry(profile, "preferences", "prefers dark mode")
+        entry["confidence"] = 0.85
+        entry["evidence_count"] = 5
+        entry["evidence_event_ids"] = ["evt-1", "evt-2", "evt-3", "evt-4", "evt-5"]
+        entry["status"] = "active"
+        store.write_profile(profile)
+
+        report = store.verify_beliefs()
+        assert report["summary"]["healthy"] == 1
+        assert report["healthy"][0]["confidence"] == 0.85
+
+    def test_conflicted_belief_classified_contradicted(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path)
+        profile = store.read_profile()
+        profile["stable_facts"] = ["User likes cats"]
+        entry = store._meta_entry(profile, "stable_facts", "User likes cats")
+        entry["status"] = "conflicted"
+        entry["confidence"] = 0.5
+        entry["evidence_count"] = 3
+        store.write_profile(profile)
+
+        report = store.verify_beliefs()
+        assert report["summary"]["contradicted"] == 1
+        assert report["contradicted"][0]["reason"] == "has open conflict"
+
+    def test_superseded_belief_classified_stale(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path)
+        profile = store.read_profile()
+        profile["stable_facts"] = ["User uses vim"]
+        entry = store._meta_entry(profile, "stable_facts", "User uses vim")
+        entry["superseded_by_id"] = "bf-aaaaaaaa"
+        entry["status"] = "active"
+        entry["confidence"] = 0.9
+        entry["evidence_count"] = 10
+        store.write_profile(profile)
+
+        report = store.verify_beliefs()
+        assert report["summary"]["stale"] == 1
+        assert report["stale"][0]["reason"] == "superseded or retracted"
+
+    def test_retracted_status_classified_stale(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path)
+        profile = store.read_profile()
+        profile["constraints"] = ["no shellfish"]
+        entry = store._meta_entry(profile, "constraints", "no shellfish")
+        entry["status"] = "retracted"
+        store.write_profile(profile)
+
+        report = store.verify_beliefs()
+        assert report["summary"]["stale"] == 1
+
+    def test_low_confidence_classified_weak(self, tmp_path: Path) -> None:
+        """Even with multiple evidence, low confidence => weak."""
+        store = MemoryStore(tmp_path)
+        profile = store.read_profile()
+        profile["stable_facts"] = ["User likes tea"]
+        entry = store._meta_entry(profile, "stable_facts", "User likes tea")
+        entry["confidence"] = 0.3
+        entry["evidence_count"] = 5
+        store.write_profile(profile)
+
+        report = store.verify_beliefs()
+        assert report["summary"]["weak"] == 1
+
+    def test_verify_memory_includes_belief_quality(self, tmp_path: Path) -> None:
+        """verify_memory report should include a belief_quality summary."""
+        store = MemoryStore(tmp_path)
+        profile = store.read_profile()
+        profile["stable_facts"] = ["User uses Rust"]
+        entry = store._meta_entry(profile, "stable_facts", "User uses Rust")
+        entry["confidence"] = 0.9
+        entry["evidence_count"] = 4
+        store.write_profile(profile)
+
+        report = store.verify_memory()
+        assert "belief_quality" in report
+        assert report["belief_quality"]["healthy"] == 1
+
+    def test_mixed_beliefs_all_buckets(self, tmp_path: Path) -> None:
+        """Profile with beliefs in every bucket produces correct summary."""
+        store = MemoryStore(tmp_path)
+        profile = store.read_profile()
+
+        # healthy: high confidence + evidence
+        profile["preferences"] = ["dark mode"]
+        e = store._meta_entry(profile, "preferences", "dark mode")
+        e["confidence"] = 0.88
+        e["evidence_count"] = 3
+
+        # weak: low evidence
+        profile["stable_facts"] = ["uses Python"]
+        e2 = store._meta_entry(profile, "stable_facts", "uses Python")
+        e2["confidence"] = 0.65
+        e2["evidence_count"] = 1
+
+        # contradicted
+        profile["constraints"] = ["no dairy"]
+        e3 = store._meta_entry(profile, "constraints", "no dairy")
+        e3["status"] = "conflicted"
+        e3["confidence"] = 0.5
+        e3["evidence_count"] = 3
+
+        # stale
+        profile["relationships"] = ["knows Alice"]
+        e4 = store._meta_entry(profile, "relationships", "knows Alice")
+        e4["status"] = "retracted"
+
+        store.write_profile(profile)
+
+        report = store.verify_beliefs()
+        s = report["summary"]
+        assert s["healthy"] == 1
+        assert s["weak"] == 1
+        assert s["contradicted"] == 1
+        assert s["stale"] == 1
+        assert s["total"] == 4
