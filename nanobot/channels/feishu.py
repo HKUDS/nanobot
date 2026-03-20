@@ -474,7 +474,7 @@ class FeishuChannel(BaseChannel):
             return [c.strip() for c in _line.strip("|").split("|")]
         headers = [cls._strip_md_formatting(h) for h in split(lines[0])]
         rows = [[cls._strip_md_formatting(c) for c in split(_line)] for _line in lines[2:]]
-        columns = [{"tag": "column", "name": f"c{i}", "display_name": h, "width": "auto"}
+        columns = [{"tag": "column", "name": f"c{i}", "display_name": h, "width": "auto", "data_type": "lark_md"}
                    for i, h in enumerate(headers)]
         return {
             "tag": "table",
