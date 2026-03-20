@@ -14,9 +14,13 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
-from nanobot.agent.memory import MemoryConsolidator
+from nanobot.agent.memory import MemoryConsolidator, MemoryStore
+from nanobot.agent.registry import AgentRegistry, NamedAgent
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
+from nanobot.agent.tools.delegate import DelegateTool
+from nanobot.agent.tools.discuss import DiscussTool
+from nanobot.agent.tools.manage_agents import ManageAgentsTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
@@ -113,7 +117,26 @@ class AgentLoop:
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
         )
+
+        # Named agent registry (always created so runtime registration works)
+        named_configs = config.agents.named if config else {}
+        self.agent_registry = AgentRegistry(
+                workspace=workspace,
+                named_configs=named_configs,
+                main_model=self.model,
+                web_search_config=self.web_search_config,
+                web_proxy=web_proxy,
+                exec_config=self.exec_config,
+                restrict_to_workspace=restrict_to_workspace,
+            )
+
         self._register_default_tools()
+        self._update_agents_prompt()
+
+    def _update_agents_prompt(self) -> None:
+        """Inject available agents summary into the main agent's system prompt (dynamic)."""
+        if self.agent_registry:
+            self.context.extra_system_sections = [self.agent_registry.build_agents_summary]
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -134,6 +157,19 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+
+        # Named agent tools
+        if self.agent_registry:
+            agent_names = lambda: [a.name for a in self.agent_registry.list_agents()]
+            self.tools.register(DelegateTool(
+                run_callback=self._run_named_agent,
+                list_callback=agent_names,
+            ))
+            self.tools.register(DiscussTool(
+                run_callback=self._run_named_agent,
+                list_callback=agent_names,
+            ))
+            self.tools.register(ManageAgentsTool(registry=self.agent_registry))
 
         # Discover and register external tool plugins
         if self._config:
@@ -259,7 +295,7 @@ class AgentLoop:
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
-        for name in ("message", "spawn", "cron"):
+        for name in ("message", "spawn", "cron", "delegate", "discuss"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
@@ -541,6 +577,15 @@ class AgentLoop:
                 result = self._handle_model_command(cmd_arg)
                 return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=result)
 
+        # @mention routing to named agents
+        if self.agent_registry:
+            match = self.agent_registry.match_mention(raw)
+            if match:
+                agent_name, stripped_msg = match
+                return await self._process_named_agent_message(
+                    msg, agent_name, stripped_msg, on_progress=on_progress,
+                )
+
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
@@ -584,6 +629,142 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=msg.metadata or {},
         )
+
+    def _get_provider_for_model(self, model: str) -> LLMProvider:
+        """Get the appropriate provider for a model, creating a new one if needed."""
+        main_prefix = self.model.split("/", 1)[0] if "/" in self.model else ""
+        agent_prefix = model.split("/", 1)[0] if "/" in model else ""
+
+        if agent_prefix == main_prefix or not agent_prefix:
+            return self.provider
+
+        # Different provider prefix — try to build a new provider
+        if self._config:
+            saved_model = self._config.agents.defaults.model
+            self._config.agents.defaults.model = model
+            try:
+                from nanobot.cli.commands import _make_provider
+                provider = _make_provider(self._config)
+                return provider
+            except Exception as e:
+                logger.warning("Failed to create provider for model {}: {}, falling back", model, e)
+            finally:
+                self._config.agents.defaults.model = saved_model
+
+        return self.provider
+
+    async def _process_named_agent_message(
+        self,
+        msg: InboundMessage,
+        agent_name: str,
+        content: str,
+        on_progress: Callable[[str], Awaitable[None]] | None = None,
+    ) -> OutboundMessage | None:
+        """Process a message routed directly to a named agent via @mention."""
+        agent = self.agent_registry.get(agent_name)
+        if not agent:
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content=f"Agent '{agent_name}' not found.",
+            )
+
+        logger.info("Routing @{} message from {}:{}", agent_name, msg.channel, msg.chat_id)
+        result = await self._run_named_agent(
+            agent_name, content, msg.channel, msg.chat_id,
+            media=msg.media if msg.media else None,
+        )
+        return OutboundMessage(
+            channel=msg.channel, chat_id=msg.chat_id,
+            content=result, metadata=msg.metadata or {},
+        )
+
+    async def _run_named_agent(
+        self,
+        agent_name: str,
+        task: str,
+        channel: str,
+        chat_id: str,
+        media: list[str] | None = None,
+    ) -> str:
+        """Run a named agent with its own session, context, and tools. Used by delegate/discuss/mention."""
+        agent = self.agent_registry.get(agent_name)
+        if not agent:
+            return f"Agent '{agent_name}' not found."
+
+        model = self.agent_registry.get_model(agent)
+        provider = self._get_provider_for_model(model)
+        session_key = f"{channel}:{chat_id}:agent:{agent_name}"
+        session = self.sessions.get_or_create(session_key)
+
+        # Memory consolidation for this agent's session
+        consolidator = MemoryConsolidator(
+            workspace=agent.workspace,
+            provider=provider,
+            model=model,
+            sessions=self.sessions,
+            context_window_tokens=self.context_window_tokens,
+            build_messages=agent.context.build_messages,
+            get_tool_definitions=agent.tools.get_definitions,
+        )
+        await consolidator.maybe_consolidate_by_tokens(session)
+
+        history = session.get_history(max_messages=0)
+        messages = agent.context.build_messages(
+            history=history,
+            current_message=task,
+            media=media,
+            channel=channel,
+            chat_id=chat_id,
+        )
+
+        # Run the agent iteration loop with the named agent's tools
+        iteration = 0
+        max_iterations = agent.config.max_iterations
+        final_content = None
+
+        while iteration < max_iterations:
+            iteration += 1
+            tool_defs = agent.tools.get_definitions()
+            response = await provider.chat_with_retry(
+                messages=messages, tools=tool_defs, model=model,
+            )
+
+            if response.has_tool_calls:
+                tool_call_dicts = [tc.to_openai_tool_call() for tc in response.tool_calls]
+                messages = agent.context.add_assistant_message(
+                    messages, response.content, tool_call_dicts,
+                    reasoning_content=response.reasoning_content,
+                    thinking_blocks=response.thinking_blocks,
+                )
+                for tool_call in response.tool_calls:
+                    args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+                    logger.debug("[{}] Tool: {}({})", agent_name, tool_call.name, args_str[:200])
+                    result = await agent.tools.execute(tool_call.name, tool_call.arguments)
+                    messages = agent.context.add_tool_result(
+                        messages, tool_call.id, tool_call.name, result,
+                    )
+            else:
+                final_content = self._strip_think(response.content)
+                if response.finish_reason == "error":
+                    final_content = final_content or "Agent encountered an error."
+                else:
+                    messages = agent.context.add_assistant_message(
+                        messages, final_content,
+                        reasoning_content=response.reasoning_content,
+                        thinking_blocks=response.thinking_blocks,
+                    )
+                break
+
+        if final_content is None:
+            final_content = f"Agent '{agent_name}' reached max iterations ({max_iterations})."
+
+        # Save turn to the agent's session
+        self._save_turn(session, messages, 1 + len(history))
+        self.sessions.save(session)
+        self._schedule_background(consolidator.maybe_consolidate_by_tokens(session))
+
+        logger.info("[{}] completed, response: {}", agent_name, (final_content or "")[:120])
+        return final_content
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""

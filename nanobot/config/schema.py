@@ -41,10 +41,21 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
 
 
+class NamedAgentConfig(Base):
+    """Configuration for a named long-lived agent."""
+
+    aliases: list[str] = Field(default_factory=list)  # Alternative names for @mention routing
+    identity: str = ""  # Custom system prompt; empty = use default template
+    model: str | None = None  # Override model; None = inherit from main agent
+    max_iterations: int = 15
+    tools: list[str] | None = None  # Tool whitelist; None = default set (no spawn/delegate)
+
+
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    named: dict[str, NamedAgentConfig] = Field(default_factory=dict)
 
 
 class ModelConfig(Base):
