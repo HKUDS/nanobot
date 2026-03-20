@@ -265,9 +265,9 @@ class AgentLoop:
             except asyncio.TimeoutError:
                 continue
             except asyncio.CancelledError:
-                # anyio/MCP cancel scopes surface as CancelledError (a BaseException subclass).
-                # Re-raise only if the loop itself is being shut down; otherwise keep running.
-                if not self._running:
+                # Preserve real task cancellation so shutdown can complete cleanly.
+                # Only ignore non-task CancelledError signals that may leak from integrations.
+                if not self._running or asyncio.current_task().cancelling():
                     raise
                 continue
             except Exception as e:
