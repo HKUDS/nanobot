@@ -1753,6 +1753,7 @@ class AgentLoop:
             self.max_iterations = role.max_iterations
         self.context.role_system_prompt = role.system_prompt or ""
         self.role_name = role.name
+        self._dispatcher.role_name = role.name  # Keep dispatcher in sync (LAN-194)
 
         # Apply role-specific tool filtering
         self._filter_tools_for_role(role)
@@ -1784,6 +1785,7 @@ class AgentLoop:
         self.max_iterations = ctx.max_iterations
         self.context.role_system_prompt = ctx.role_prompt
         self.role_name = self.role_config.name if self.role_config else ""
+        self._dispatcher.role_name = self.role_name  # Keep dispatcher in sync (LAN-194)
         # Restore full tool set (only non-None — None means no filtering was applied)
         if ctx.tools is not None:
             self.tools.restore(ctx.tools)
