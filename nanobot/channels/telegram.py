@@ -162,6 +162,7 @@ class TelegramConfig(Base):
     enabled: bool = False
     token: str = ""
     allow_from: list[str] = Field(default_factory=list)
+    block_from: list[str] = Field(default_factory=list, alias="blockFrom")
     proxy: str | None = None
     reply_to_message: bool = False
     group_policy: Literal["open", "mention"] = "mention"
@@ -207,30 +208,19 @@ class TelegramChannel(BaseChannel):
         self._bot_user_id: int | None = None
         self._bot_username: str | None = None
 
-    def is_allowed(self, sender_id: str) -> bool:
-        """Preserve Telegram's legacy id|username allowlist matching."""
-        if super().is_allowed(sender_id):
-            return True
-
-        allow_list = getattr(self.config, "allow_from", [])
-        if not allow_list or "*" in allow_list:
-            return False
-
-        sender_str = str(sender_id)
-        if sender_str.count("|") != 1:
-            return False
-
-        sid, username = sender_str.split("|", 1)
-        if not sid.isdigit() or not username:
-            return False
-
-        return sid in allow_list or username in allow_list
-
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
         if not self.config.token:
             logger.error("Telegram bot token not configured")
             return
+
+        # Security checks for mutable usernames
+        for user in getattr(self.config, "allow_from", []):
+            if not user.isdigit():
+                logger.warning("SECURITY RISK: allow_from contains username '{}'. Use immutable numeric id instead.", user)
+        for user in getattr(self.config, "block_from", []):
+            if not user.isdigit():
+                logger.warning("SECURITY RISK: block_from contains username '{}'. Use immutable numeric id instead.", user)
 
         self._running = True
 
@@ -344,6 +334,10 @@ class TelegramChannel(BaseChannel):
         """Send a message through Telegram."""
         if not self._app:
             logger.warning("Telegram bot not running")
+            return
+
+        if self.is_blocked(msg.chat_id):
+            logger.warning("Blocked sending message to {}", msg.chat_id)
             return
 
         # Only stop typing indicator for final responses
@@ -695,6 +689,11 @@ class TelegramChannel(BaseChannel):
             return
         message = update.message
         user = update.effective_user
+
+        if self.is_blocked(self._sender_id(user)):
+            logger.info("Dropped command from blocked user: {}", self._sender_id(user))
+            return
+
         self._remember_thread_context(message)
         await self._handle_message(
             sender_id=self._sender_id(user),
@@ -713,6 +712,11 @@ class TelegramChannel(BaseChannel):
         user = update.effective_user
         chat_id = message.chat_id
         sender_id = self._sender_id(user)
+
+        if self.is_blocked(sender_id):
+            logger.info("Dropped incoming message from blocked user: {}", sender_id)
+            return
+
         self._remember_thread_context(message)
 
         # Store chat_id for replies

@@ -263,6 +263,7 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
       "allowFrom": ["YOUR_USER_ID"],
+      "blockFrom": ["ABUSIVE_USER_ID"],
       "silentToolHints": false
     }
   }
@@ -652,6 +653,7 @@ Uses **Socket Mode** — no public URL required.
       "botToken": "xoxb-...",
       "appToken": "xapp-...",
       "allowFrom": ["YOUR_SLACK_USER_ID"],
+      "blockFrom": ["ABUSIVE_SLACK_USER_ID"],
       "groupPolicy": "mention"
     }
   }
@@ -1313,6 +1315,7 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
 | `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
+| `channels.*.blockFrom` | `[]` (empty) | Explicit deny list of immutable numeric user IDs. Evaluated before `allowFrom`. |
 
 
 ## 🧩 Multiple Instances

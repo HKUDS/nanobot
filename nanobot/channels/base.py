@@ -76,6 +76,19 @@ class BaseChannel(ABC):
         """
         pass
 
+    def is_blocked(self, sender_id: str) -> bool:
+        """Check if *sender_id* is explicitly blocked."""
+        block_list = getattr(self.config, "block_from", [])
+        if not block_list:
+            return False
+
+        sender_str = str(sender_id)
+        parts = sender_str.split("|", 1)
+        sid = parts[0]
+        username = parts[1] if len(parts) > 1 else None
+
+        return sid in block_list or (username and username in block_list)
+
     def is_allowed(self, sender_id: str) -> bool:
         """Check if *sender_id* is permitted.  Empty list → deny all; ``"*"`` → allow all."""
         allow_list = getattr(self.config, "allow_from", [])
@@ -84,7 +97,13 @@ class BaseChannel(ABC):
             return False
         if "*" in allow_list:
             return True
-        return str(sender_id) in allow_list
+            
+        sender_str = str(sender_id)
+        parts = sender_str.split("|", 1)
+        sid = parts[0]
+        username = parts[1] if len(parts) > 1 else None
+
+        return sid in allow_list or (username and username in allow_list)
 
     async def _handle_message(
         self,
@@ -108,6 +127,13 @@ class BaseChannel(ABC):
             metadata: Optional channel-specific metadata.
             session_key: Optional session key override (e.g. thread-scoped sessions).
         """
+        if self.is_blocked(sender_id):
+            logger.info(
+                "Dropped incoming message from blocked user {} on channel {}",
+                sender_id, self.name,
+            )
+            return
+
         if not self.is_allowed(sender_id):
             logger.warning(
                 "Access denied for sender {} on channel {}. "

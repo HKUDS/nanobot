@@ -25,6 +25,7 @@ class SlackDMConfig(Base):
     enabled: bool = True
     policy: str = "open"
     allow_from: list[str] = Field(default_factory=list)
+    block_from: list[str] = Field(default_factory=list, alias="blockFrom")
 
 
 class SlackConfig(Base):
@@ -40,6 +41,7 @@ class SlackConfig(Base):
     react_emoji: str = "eyes"
     done_emoji: str = "white_check_mark"
     allow_from: list[str] = Field(default_factory=list)
+    block_from: list[str] = Field(default_factory=list, alias="blockFrom")
     group_policy: str = "mention"
     group_allow_from: list[str] = Field(default_factory=list)
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
@@ -63,6 +65,22 @@ class SlackChannel(BaseChannel):
         self._web_client: AsyncWebClient | None = None
         self._socket_client: SocketModeClient | None = None
         self._bot_user_id: str | None = None
+
+    def is_blocked(self, sender_id: str) -> bool:
+        """Check if a user is explicitly blocked."""
+        if super().is_blocked(sender_id):
+            return True
+            
+        dm_block_list = getattr(getattr(self.config, "dm", None), "block_from", [])
+        if not dm_block_list:
+            return False
+
+        sender_str = str(sender_id)
+        parts = sender_str.split("|", 1)
+        sid = parts[0]
+        username = parts[1] if len(parts) > 1 else None
+
+        return sid in dm_block_list or (username and username in dm_block_list)
 
     async def start(self) -> None:
         """Start the Slack Socket Mode client."""
@@ -112,6 +130,11 @@ class SlackChannel(BaseChannel):
         if not self._web_client:
             logger.warning("Slack client not running")
             return
+
+        if self.is_blocked(msg.chat_id):
+            logger.warning("Blocked sending message to {}", msg.chat_id)
+            return
+
         try:
             slack_meta = msg.metadata.get("slack", {}) if msg.metadata else {}
             thread_ts = slack_meta.get("thread_ts")
@@ -194,6 +217,10 @@ class SlackChannel(BaseChannel):
             text[:80],
         )
         if not sender_id or not chat_id:
+            return
+
+        if self.is_blocked(sender_id):
+            logger.info("Dropped incoming message from blocked user: {}", sender_id)
             return
 
         channel_type = event.get("channel_type") or ""

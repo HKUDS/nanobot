@@ -36,7 +36,7 @@ chmod 600 ~/.nanobot/config.json
 
 ### 2. Channel Access Control
 
-**IMPORTANT**: Always configure `allowFrom` lists for production use.
+**IMPORTANT**: Always configure `allowFrom` lists for production use. You can also use `blockFrom` to explicitly block malicious users.
 
 ```json
 {
@@ -44,7 +44,8 @@ chmod 600 ~/.nanobot/config.json
     "telegram": {
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["123456789", "987654321"]
+      "allowFrom": ["123456789", "987654321"],
+      "blockFrom": ["111111111"]
     },
     "whatsapp": {
       "enabled": true,
@@ -56,7 +57,8 @@ chmod 600 ~/.nanobot/config.json
 
 **Security Notes:**
 - In `v0.1.4.post3` and earlier, an empty `allowFrom` allowed all users. Since `v0.1.4.post4`, empty `allowFrom` denies all access by default — set `["*"]` to explicitly allow everyone.
-- Get your Telegram user ID from `@userinfobot`
+- The `blockFrom` list enforces an explicit deny which takes precedence over `allowFrom` lists. Avoid using usernames in `blockFrom` when possible, as users can change their usernames to evade bans.
+- Get your immutable numeric Telegram user ID from `@userinfobot`
 - Use full phone numbers with country code for WhatsApp
 - Review access logs regularly for unauthorized access attempts
 
@@ -213,6 +215,7 @@ If you suspect a security breach:
 
 ✅ **Authentication**
 - Allow-list based access control — in `v0.1.4.post3` and earlier empty `allowFrom` allowed all; since `v0.1.4.post4` it denies all (`["*"]` explicitly allows all)
+- Block-list based access control — explicit deny capabilities using `blockFrom`.
 - Failed authentication attempt logging
 
 ✅ **Resource Protection**
@@ -241,7 +244,7 @@ Before deploying nanobot:
 
 - [ ] API keys stored securely (not in code)
 - [ ] Config file permissions set to 0600
-- [ ] `allowFrom` lists configured for all channels
+- [ ] `allowFrom` and `blockFrom` lists configured for all channels
 - [ ] Running as non-root user
 - [ ] File system permissions properly restricted
 - [ ] Dependencies updated to latest secure versions
