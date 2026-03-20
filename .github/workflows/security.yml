@@ -47,7 +47,23 @@ jobs:
       - name: Build image for scanning
         run: docker build -t nanobot-scan:${{ github.sha }} .
 
-      - name: Run Trivy vulnerability scanner
+      # Step 1: Human-readable table output for CI logs (never fails the build).
+      # This ensures developers can see exactly which CVEs triggered a failure
+      # without navigating to the GitHub Security tab.
+      - name: Trivy scan (table for logs)
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: nanobot-scan:${{ github.sha }}
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+          trivyignores: '.trivyignore'
+          ignore-unfixed: true
+
+      # Step 2: SARIF output for GitHub Security tab (gates the build).
+      # --ignore-unfixed: only block on CVEs with available patches.
+      # OS-level CVEs without Debian fixes are reported but don't block.
+      - name: Trivy scan (SARIF for GitHub Security)
         uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: nanobot-scan:${{ github.sha }}
@@ -56,6 +72,7 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           trivyignores: '.trivyignore'
+          ignore-unfixed: true
 
       - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@v3

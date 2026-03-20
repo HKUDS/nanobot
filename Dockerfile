@@ -1,35 +1,50 @@
+# ============== STAGE 1: Builder ==============
+# Build tools (pip, setuptools, wheel, hatchling) live here and never
+# reach the runtime image — eliminating their CVEs from Trivy scans.
+FROM python:3.11-slim-bookworm AS builder
+
+WORKDIR /build
+
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Copy build metadata + bridge source (~10KB).
+# bridge/ is required by pyproject.toml [tool.hatch.build.targets.wheel.force-include]
+# which maps "bridge" → "nanobot/bridge" inside the wheel.
+COPY pyproject.toml README.md LICENSE ./
+COPY bridge/ bridge/
+
+# Dependency cache layer: stub package satisfies hatchling discovery,
+# --prefix=/install isolates installed packages for clean COPY later.
+RUN mkdir -p nanobot && touch nanobot/__init__.py && \
+    pip install --no-cache-dir --prefix=/install .
+
+# Application layer: only rebuilds when nanobot/ source changes.
+# --no-deps skips dependency resolution (already installed above).
+COPY nanobot/ nanobot/
+RUN pip install --no-cache-dir --no-deps --prefix=/install .
+
+
+# ============== STAGE 2: Runtime ==============
+# Clean image: only curl, ca-certificates, Python stdlib, and installed packages.
+# No pip, setuptools, wheel, or hatchling — no build-tool CVEs.
 FROM python:3.11-slim-bookworm
 
-# Runtime system dependencies (no Node.js — WhatsApp bridge is optional)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Upgrade build tooling to patch known CVEs in the base image's bundled
-# pip/wheel/setuptools (CVE-2026-24049, CVE-2026-23949, CVE-2026-1703).
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+# Merge the --prefix=/install tree (site-packages + bin/ scripts) into system Python.
+COPY --from=builder /install /usr/local
 
-# --- Dependency cache layer ---
-# Copy only build metadata and the bridge source (~10KB).
-# bridge/ is required because pyproject.toml [tool.hatch.build.targets.wheel.force-include]
-# maps "bridge" → "nanobot/bridge" — hatchling fails if the directory is missing.
-# A stub nanobot/__init__.py satisfies package discovery so pip can resolve deps
-# without the real source tree.  This layer only rebuilds when deps change.
-COPY pyproject.toml README.md LICENSE ./
-COPY bridge/ bridge/
-RUN mkdir -p nanobot && touch nanobot/__init__.py && \
-    pip install --no-cache-dir . && \
-    rm -rf nanobot __pycache__
+# Remove build tools that ship with the base image — they are not needed at runtime
+# and create unnecessary CVE surface for Trivy scans.
+RUN pip uninstall -y pip setuptools 2>/dev/null; \
+    rm -rf /usr/local/lib/python3.11/ensurepip /usr/local/lib/python3.11/distutils; \
+    true
 
-# --- Application layer ---
-# Only rebuilds when Python source changes.
-# --no-deps: all dependencies are already installed above; skip the resolver.
-COPY nanobot/ nanobot/
-RUN pip install --no-cache-dir --no-deps .
-
-# Non-root user and config directory
+# Non-root user
 RUN groupadd --gid 1001 nanobot && \
     useradd --uid 1001 --gid nanobot --shell /bin/bash --create-home nanobot && \
     mkdir -p /home/nanobot/.nanobot && \

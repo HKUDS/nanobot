@@ -1,15 +1,22 @@
-# Trivy ignore file — add CVE IDs or misconfiguration IDs to suppress known
-# accepted false positives.  Each entry should include a comment explaining
-# the reason for suppression and a review date.
+# Trivy Ignore File — Nanobot
+#
+# POLICY (established 2026-03-20):
+#
+# 1. CI uses --ignore-unfixed, so CVEs without available patches do NOT
+#    need entries here — they are automatically skipped.
+#
+# 2. Add entries here ONLY for:
+#    (a) FALSE POSITIVES — CVE detected but does not apply to our usage
+#    (b) ACCEPTED RISK — fix exists but upgrading would break functionality
+#    (c) DISPUTED — CVE is disputed or contested by the maintainer
+#
+# 3. Every entry MUST include: reason, review date, reviewer.
+#
+# 4. Review all entries quarterly. Remove entries whose CVE has been
+#    fixed or whose package was removed from the image.
 #
 # Format:
-#   CVE-YYYY-NNNNN  # reason — reviewed YYYY-MM-DD
+#   CVE-YYYY-NNNNN  # [FALSE_POSITIVE|ACCEPTED_RISK|DISPUTED] reason — reviewed YYYY-MM-DD @reviewer
 #
-# Example:
-#   CVE-2023-12345  # only affects feature X which we don't use — reviewed 2026-03-18
-
-# OS-level: nghttp2 in python:3.11-slim-bookworm base image.
-# Fix not yet available in Debian bookworm repos. Nanobot does not use
-# nghttp2 directly; it is pulled in as a transitive dependency of libcurl.
-# Will be resolved when the base image publishes an updated package.
-CVE-2026-27135  # nghttp2 in base image, no fix available — reviewed 2026-03-20
+# (Currently empty — unfixed OS CVEs handled by --ignore-unfixed flag,
+#  build-tool CVEs eliminated by multi-stage Docker build.)
