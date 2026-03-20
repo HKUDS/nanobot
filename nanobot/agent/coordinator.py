@@ -252,8 +252,8 @@ class Coordinator:
                 if classify_obs is not None:
                     try:
                         classify_obs.update(output=raw[:200])
-                    except Exception:  # crash-barrier: tracing is optional
-                        pass
+                    except Exception as exc:  # crash-barrier: tracing is optional
+                        logger.debug("Langfuse span update failed: {}", exc)
                 classification_total.labels(result_role=role_name).inc()
                 return role_name, confidence
             except Exception:  # crash-barrier: LLM-based classification

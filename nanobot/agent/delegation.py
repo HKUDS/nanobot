@@ -211,6 +211,27 @@ class DelegationDispatcher:
         # JSONL persistence for routing trace (LAN-130). Set by loop._ensure_scratchpad.
         self._trace_path: Path | None = None
 
+        # Pre-built stateless tool instances — shared across delegations to avoid
+        # per-call object construction overhead (LAN-138).
+        _allowed_dir = self.workspace if self.restrict_to_workspace else None
+        _tools: list[Tool] = [
+            ReadFileTool(workspace=self.workspace, allowed_dir=_allowed_dir),
+            ListDirTool(workspace=self.workspace, allowed_dir=_allowed_dir),
+            WriteFileTool(workspace=self.workspace, allowed_dir=_allowed_dir),
+            EditFileTool(workspace=self.workspace, allowed_dir=_allowed_dir),
+        ]
+        if self.exec_config is not None:
+            _tools.append(
+                ExecTool(
+                    working_dir=str(self.workspace),
+                    timeout=self.exec_config.timeout,
+                    restrict_to_workspace=self.restrict_to_workspace,
+                    shell_mode=self.exec_config.shell_mode,
+                )
+            )
+        _tools.extend([WebSearchTool(api_key=self.brave_api_key), WebFetchTool()])
+        self._cached_tools: dict[str, Tool] = {t.name: t for t in _tools}
+
     # ------------------------------------------------------------------
     # Wiring
     # ------------------------------------------------------------------
@@ -653,8 +674,8 @@ class DelegationDispatcher:
                         "task_title": task[:120],
                     },
                 )
-            except Exception:  # crash-barrier: never let event emission block delegation
-                pass
+            except Exception as exc:  # crash-barrier: never let event emission block delegation
+                logger.debug("delegate_start event emission failed: {}", exc)
 
         t0 = time.monotonic()
         token = _delegation_ancestry.set((*ancestry, role.name))
@@ -691,8 +712,8 @@ class DelegationDispatcher:
                             "success": True,
                         },
                     )
-                except Exception:  # crash-barrier: never let event emission block delegation
-                    pass
+                except Exception as exc:  # crash-barrier: never let event emission block delegation
+                    logger.debug("delegate_end event emission failed: {}", exc)
             return DelegationResult(content=result, tools_used=used_tools)
         except Exception:  # crash-barrier: delegation must record trace on any error
             latency_ms = (time.monotonic() - t0) * 1000
@@ -715,8 +736,8 @@ class DelegationDispatcher:
                             "success": False,
                         },
                     )
-                except Exception:  # crash-barrier: never let event emission block delegation
-                    pass
+                except Exception as exc:  # crash-barrier: never let event emission block delegation
+                    logger.debug("delegate_end (failure) event emission failed: {}", exc)
             raise
         finally:
             _delegation_ancestry.reset(token)
@@ -763,39 +784,15 @@ class DelegationDispatcher:
             return True
 
         tools = ToolRegistry()
-        allowed_dir = self.workspace if self.restrict_to_workspace else None
 
-        # Read-only filesystem tools always considered (grant() decides inclusion)
-        for ro_cls in (ReadFileTool, ListDirTool):
-            ro_t = ro_cls(workspace=self.workspace, allowed_dir=allowed_dir)
-            if _grant(ro_t.name):
-                tools.register(ro_t)
-
-        # Write filesystem tools — privileged
-        for rw_cls in (WriteFileTool, EditFileTool):
-            rw_t = rw_cls(workspace=self.workspace, allowed_dir=allowed_dir)
-            if _grant(rw_t.name):
-                tools.register(rw_t)
-
-        # Exec — privileged; forward shell_mode so allowlist policy applies to
-        # delegated agents (LAN-120).
-        exec_t = ExecTool(
-            working_dir=str(self.workspace),
-            timeout=self.exec_config.timeout,
-            restrict_to_workspace=self.restrict_to_workspace,
-            shell_mode=self.exec_config.shell_mode,
-        )
-        if _grant(exec_t.name):
-            tools.register(exec_t)
-
-        # Web tools — apply _grant() like every other tool so that denied_tools
-        # config is respected in delegated agents (LAN-118).
-        ws_tool = WebSearchTool(api_key=self.brave_api_key)
-        if _grant(ws_tool.name):
-            tools.register(ws_tool)
-        wf_tool = WebFetchTool()
-        if _grant(wf_tool.name):
-            tools.register(wf_tool)
+        # Register pre-cached stateless tool instances (LAN-138); grant() filters
+        # by role allowed/denied lists.  Privileged tools (exec, write_file,
+        # edit_file) are blocked by _grant() unless explicitly in allowed_tools.
+        # Web tools respect denied_tools config (LAN-118); shell_mode forwarded
+        # to ExecTool via the cached instance (LAN-120).
+        for _t in self._cached_tools.values():
+            if _grant(_t.name):
+                tools.register(_t)
 
         # Re-delegation — privileged
         child_delegate = DelegateTool()

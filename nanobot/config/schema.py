@@ -216,6 +216,9 @@ class AgentDefaults(Base):
     # Missions
     mission: MissionConfig = Field(default_factory=MissionConfig)
 
+    # Cost guardrails
+    max_session_cost_usd: float = 0.0  # 0 = disabled; >0 raises BudgetExceededError when exceeded
+
 
 class AgentConfig(Base):
     """Unified agent runtime configuration.
@@ -318,6 +321,9 @@ class AgentConfig(Base):
     mission_max_iterations: int = 15
     mission_result_max_chars: int = 4000
 
+    # Cost guardrails
+    max_session_cost_usd: float = 0.0  # 0 = disabled; >0 raises BudgetExceededError when exceeded
+
     @classmethod
     def from_defaults(cls, defaults: "AgentDefaults", **overrides: Any) -> "AgentConfig":
         """Build an ``AgentConfig`` from the ``AgentDefaults`` section of the config file.
@@ -376,6 +382,7 @@ class AgentConfig(Base):
             "mission_max_concurrent": defaults.mission.max_concurrent,
             "mission_max_iterations": defaults.mission.max_iterations,
             "mission_result_max_chars": defaults.mission.result_max_chars,
+            "max_session_cost_usd": defaults.max_session_cost_usd,
         }
         data.update(overrides)
         return cls(**data)  # type: ignore[arg-type]

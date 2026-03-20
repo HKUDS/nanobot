@@ -128,8 +128,8 @@ async def run_tool_loop(
                 max_tokens=max_tokens,
             )
             final_result = summary_resp.content
-        except Exception:  # crash-barrier: LLM provider errors
-            pass
+        except Exception as exc:  # crash-barrier: LLM provider errors
+            logger.debug("Summary LLM call failed: {}", exc)
 
     if not final_result:
         # Last resort: collect recent tool results as the answer

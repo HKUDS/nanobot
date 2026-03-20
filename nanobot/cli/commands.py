@@ -347,6 +347,7 @@ def _make_provider(config: Config) -> Any:
         provider_name=provider_name,
         llm_timeout_s=config.llm.timeout_s,
         llm_max_retries=config.llm.max_retries,
+        max_budget_usd=config.agents.defaults.max_session_cost_usd,
     )
 
 
@@ -1496,6 +1497,96 @@ def routing_metrics_cmd() -> None:
         "\n[dim]Note: New routing metrics are captured by Langfuse. "
         "This shows legacy on-disk data only.[/dim]"
     )
+
+
+@routing_app.command("dlq")
+def routing_dlq(
+    last: int = typer.Option(50, "--last", "-n", help="Number of recent trace entries to scan"),
+    threshold: float = typer.Option(
+        0.5, "--threshold", "-t", help="Confidence threshold — entries below this are flagged"
+    ),
+) -> None:
+    """Show failed or low-confidence routing decisions (dead-letter queue).
+
+    Scans routing_trace.jsonl for delegation failures, cycle blocks, depth
+    blocks, and classifications below the confidence threshold.
+    """
+    import json
+
+    from nanobot.config.loader import load_config
+
+    config = load_config()
+    trace_path = config.workspace_path / "memory" / "routing_trace.jsonl"
+    if not trace_path.exists():
+        console.print("[dim]No routing trace found.[/dim]")
+        raise typer.Exit(0)
+
+    entries: list[dict] = []
+    for line in trace_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    if not entries:
+        console.print("[dim]Trace file is empty.[/dim]")
+        raise typer.Exit(0)
+
+    # Scan the last N entries for failures or low-confidence decisions
+    recent = entries[-last:]
+    flagged: list[dict] = []
+    for e in recent:
+        is_failure = not e.get("success", True)
+        is_low_conf = e.get("confidence", 1.0) > 0.0 and e.get("confidence", 1.0) < threshold
+        event = e.get("event", "")
+        is_block = event in ("delegate_cycle_blocked", "delegate_depth_blocked")
+        if is_failure or is_low_conf or is_block:
+            flagged.append(e)
+
+    if not flagged:
+        console.print(
+            f"[green]No routing issues found in last {len(recent)} trace entries.[/green]"
+        )
+        raise typer.Exit(0)
+
+    table = Table(title=f"Routing DLQ ({len(flagged)} issues in last {len(recent)} entries)")
+    table.add_column("Time", style="dim", max_width=19)
+    table.add_column("Event", style="red")
+    table.add_column("Role", style="green")
+    table.add_column("Conf", style="yellow", justify="right")
+    table.add_column("Depth", style="magenta", justify="right")
+    table.add_column("From", style="blue")
+    table.add_column("Issue", style="red", max_width=30)
+
+    for e in flagged:
+        ts = str(e.get("timestamp", ""))[:19]
+        conf = f"{e.get('confidence', 0.0):.2f}" if e.get("confidence") else ""
+        depth = str(e.get("depth", ""))
+        event = e.get("event", "")
+
+        # Determine issue reason
+        if event == "delegate_cycle_blocked":
+            issue = "cycle detected"
+        elif event == "delegate_depth_blocked":
+            issue = "max depth reached"
+        elif not e.get("success", True):
+            issue = "delegation failed"
+        else:
+            issue = f"low confidence ({conf})"
+
+        table.add_row(
+            ts,
+            event,
+            str(e.get("role", "")),
+            conf,
+            depth,
+            str(e.get("from_role", "")),
+            issue,
+        )
+    console.print(table)
 
 
 # ============================================================================

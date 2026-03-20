@@ -345,8 +345,8 @@ class ToolResultCache:
             if len(lines) > _MAX_DISK_ENTRIES:
                 keep = lines[-_MAX_DISK_ENTRIES:]
                 self._disk_path.write_text("\n".join(keep) + "\n", encoding="utf-8")
-        except Exception:
-            pass
+        except Exception as exc:  # crash-barrier: disk trim is best-effort
+            logger.debug("Disk cache trim failed: {}", exc)
 
 
 # ---------------------------------------------------------------------------

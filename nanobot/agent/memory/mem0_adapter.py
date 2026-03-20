@@ -175,8 +175,8 @@ class _Mem0Adapter:
             mem0_base.mem0_dir = str(local_mem0_dir)
             mem0_setup.mem0_dir = str(local_mem0_dir)
             mem0_main.mem0_dir = str(local_mem0_dir)
-        except Exception:  # crash-barrier: mem0 SDK
-            pass
+        except Exception as exc:  # crash-barrier: mem0 SDK
+            logger.debug("mem0 local dir configuration failed: {}", exc)
         api_key = os.getenv("MEM0_API_KEY", "").strip()
 
         if api_key and Mem0MemoryClient is not None:

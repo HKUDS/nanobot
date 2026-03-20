@@ -160,8 +160,8 @@ def init_langfuse(config: LangfuseConfig) -> None:
                     return "ended span" not in msg and "set_status on an ended span" not in msg
 
             logging.getLogger("opentelemetry.sdk.trace").addFilter(_EndedSpanFilter())
-        except Exception:  # crash-barrier: filter setup is optional
-            pass
+        except Exception as exc:  # crash-barrier: filter setup is optional
+            logger.debug("OTel ended-span filter setup failed: {}", exc)
 
     except Exception:  # crash-barrier: langfuse init should never crash the agent
         logger.opt(exception=True).warning("Failed to initialize Langfuse — disabled")
