@@ -150,6 +150,7 @@ class ToolsConfig(Base):
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     input_limits: InputLimitsConfig = Field(default_factory=InputLimitsConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
+    projects: str | None = None
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
@@ -166,6 +167,11 @@ class Config(BaseSettings):
     def workspace_path(self) -> Path:
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
+
+    @property
+    def projects_path(self) -> Path:
+        """Get expanded projects path."""
+        return Path(self.tools.projects).expanduser() if self.tools.projects else None
 
     def _match_provider(
         self, model: str | None = None
