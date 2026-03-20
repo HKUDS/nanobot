@@ -7,6 +7,10 @@ RUN apt-get update && \
 
 WORKDIR /app
 
+# Upgrade build tooling to patch known CVEs in the base image's bundled
+# pip/wheel/setuptools (CVE-2026-24049, CVE-2026-23949, CVE-2026-1703).
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
 # --- Dependency cache layer ---
 # Copy only build metadata and the bridge source (~10KB).
 # bridge/ is required because pyproject.toml [tool.hatch.build.targets.wheel.force-include]
