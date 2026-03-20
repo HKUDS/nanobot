@@ -77,7 +77,7 @@ class Capability:
     unavailability_reason: str | None
     fallback_priority: int                 # lower = preferred for same intent
     tool: Tool | None = None               # kind="tool"
-    skill_name: str | None = None          # kind="skill"
+    skill_path: str | None = None          # kind="skill"
     role_config: AgentRoleConfig | None = None  # kind="delegate_role"
 ```
 
@@ -99,8 +99,8 @@ A single registry that internally **composes** (not replaces) the existing regis
 
 ### 4. Delegation validation
 
-`DelegateTool.parameters` schema dynamically constrains `target_role` to registered
-role names (via `enum` in JSON Schema). Unknown roles are rejected immediately with:
+`DelegateTool` validates `target_role` at runtime against the registry (not via
+JSON Schema `enum` at parse time). Unknown roles are rejected immediately with:
 
 ```
 ToolResult.fail("Unknown role 'web'. Available roles: code, research, writing, system, pm, general",

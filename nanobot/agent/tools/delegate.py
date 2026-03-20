@@ -15,6 +15,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
+from nanobot.agent.failure import _CycleError
 from nanobot.agent.tools.base import Tool, ToolResult
 
 
@@ -260,5 +261,9 @@ class DelegateParallelTool(Tool):
         return ToolResult.ok("\n".join(parts))
 
 
-class _CycleError(Exception):
-    """Raised when a delegation cycle is detected."""
+__all__ = [
+    "DelegateTool",
+    "DelegateParallelTool",
+    "DelegationResult",
+    "_CycleError",
+]

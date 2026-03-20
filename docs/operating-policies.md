@@ -62,6 +62,39 @@ Allowlist mode (`shell_mode = "allowlist"`) restricts to an explicit set of safe
 
 ## Multi-Agent Delegation
 
+### Coordinator Classification Flow
+
+Every inbound message is classified by the `Coordinator` before agent processing begins:
+
+1. **Prompt assembly** — `Coordinator._build_classify_prompt()` lists all registered
+   roles (name + description) and wraps the user message in `<user_message>` tags.
+2. **LLM classification** — A lightweight LLM call (temperature 0, max 128 tokens)
+   returns JSON with `role`, `confidence`, `needs_orchestration`, and `relevant_roles`.
+3. **Confidence filter** — If the response is valid JSON (`from_json=True`) and
+   `confidence < confidence_threshold` (default 0.6), the role falls back to the
+   configured `default_role` (typically `general`).  Text-scan fallback responses
+   (`from_json=False`) bypass this filter because they are already a last-resort
+   heuristic.
+4. **Orchestration override** — When the classified role is not `pm` or `general`,
+   the role is overridden to `pm` if either `needs_orchestration=True` **or**
+   `len(relevant_roles) >= 2`.  The relevant-roles count is the authoritative signal
+   for multi-specialist tasks.
+5. **Role lookup** — The final role name is resolved via `AgentRegistry.get()`.  If
+   the role is missing or disabled (`enabled=False`), the registry default is used.
+
+### Role Configuration
+
+Roles are defined via `AgentRoleConfig` in `config/schema.py`.  Key fields:
+
+| Field | Effect |
+|-------|--------|
+| `name` | Unique identifier used in classification and delegation |
+| `enabled` | When `False`, the role is excluded from classification candidates and `route_direct()` returns `None` |
+| `model` | Per-role model override (falls back to agent default) |
+| `temperature` | Per-role temperature override |
+| `allowed_tools` | Explicit tool allowlist for delegated agents (see below) |
+| `denied_tools` | Tool denylist — always respected, overrides allowlist |
+
 ### Delegation Limits
 
 Nanobot enforces **two independent delegation limits** (LAN-132):
@@ -86,6 +119,18 @@ Delegated sub-agents receive a **restricted tool set** governed by `AgentRoleCon
 
 > **Web tools (`web_search`, `web_fetch`)** are available by default but can be blocked via
 > `denied_tools`. Roles intended for network-isolated analysis should set `denied_tools: ["web_search", "web_fetch"]`.
+
+**Resolution order** for each tool in a delegated agent:
+
+1. If the tool name appears in `denied_tools` — **denied** (highest priority).
+2. If the tool is privileged (`exec`, `write_file`, `edit_file`, `delegate`) and
+   `allowed_tools` is `null` (the default) — **denied**.  Privileged tools require
+   an explicit grant.
+3. If `allowed_tools` is a non-null list and the tool is not in it — **denied**.
+4. Otherwise — **allowed**.
+
+This means a role with `allowed_tools: ["exec", "web_search"]` and
+`denied_tools: ["web_search"]` will have `exec` available but `web_search` blocked.
 
 ### Classification Security
 

@@ -35,6 +35,7 @@ import json
 import time
 import uuid
 import weakref
+from collections import deque
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -420,37 +421,41 @@ class AgentLoop:
         self._turn_llm_calls = 0
 
     # --- Delegation state proxied to _dispatcher ---
+    # The properties below are ADR-002 extraction fossils: they exist so that
+    # call-sites written before the DelegationDispatcher extraction can still
+    # access delegation state via ``self._delegation_count`` etc. without a
+    # broad rename.  New code should access ``self._dispatcher`` directly.
 
     @property
     def _consolidation_locks(self) -> weakref.WeakValueDictionary[str, asyncio.Lock]:
         return self._consolidator._locks
 
     @property
-    def _delegation_count(self) -> int:
+    def _delegation_count(self) -> int:  # ADR-002 fossil
         return self._dispatcher.delegation_count
 
     @_delegation_count.setter
-    def _delegation_count(self, value: int) -> None:
+    def _delegation_count(self, value: int) -> None:  # ADR-002 fossil
         self._dispatcher.delegation_count = value
 
     @property
-    def _max_delegations(self) -> int:
+    def _max_delegations(self) -> int:  # ADR-002 fossil
         return self._dispatcher.max_delegations
 
     @_max_delegations.setter
-    def _max_delegations(self, value: int) -> None:
+    def _max_delegations(self, value: int) -> None:  # ADR-002 fossil
         self._dispatcher.max_delegations = value
 
     @property
-    def _routing_trace(self) -> list[dict[str, Any]]:
+    def _routing_trace(self) -> deque[dict[str, Any]]:  # ADR-002 fossil
         return self._dispatcher.routing_trace
 
     @property
-    def _active_messages(self) -> list[dict[str, Any]] | None:
+    def _active_messages(self) -> list[dict[str, Any]] | None:  # ADR-002 fossil
         return self._dispatcher.active_messages
 
     @_active_messages.setter
-    def _active_messages(self, value: list[dict[str, Any]] | None) -> None:
+    def _active_messages(self, value: list[dict[str, Any]] | None) -> None:  # ADR-002 fossil
         self._dispatcher.active_messages = value
 
     def _build_tools(self) -> None:
@@ -1174,8 +1179,26 @@ class AgentLoop:
                     )
                     logger.debug("Parallel structure nudge injected")
 
+        _wall_time_limit = self.config.max_session_wall_time_seconds
+        _wall_time_start = time.monotonic()
+
         while iteration < self.max_iterations:
             iteration += 1
+
+            # Wall-time guardrail (LAN-193)
+            if _wall_time_limit > 0:
+                elapsed = time.monotonic() - _wall_time_start
+                if elapsed >= _wall_time_limit:
+                    logger.warning(
+                        "Session wall-time limit reached: {:.0f}s >= {}s",
+                        elapsed,
+                        _wall_time_limit,
+                    )
+                    final_content = (
+                        f"Session duration limit reached ({_wall_time_limit}s). "
+                        "Please start a new conversation."
+                    )
+                    break
 
             # --- Context compression: keep messages within budget ----------
             # Skip the (expensive) compression pass when well under budget.

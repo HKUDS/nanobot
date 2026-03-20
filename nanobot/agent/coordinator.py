@@ -7,8 +7,10 @@ and returns the matching ``AgentRoleConfig`` for the agent loop to use.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -22,10 +24,6 @@ from nanobot.metrics import classification_fallback_total, classification_total
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
-
-
-# Single point of change for the project name used in classification logic.
-_PROJECT_NAME: str = "nanobot"
 
 
 # ------------------------------------------------------------------
@@ -142,6 +140,10 @@ class Coordinator:
         self._classifier_model = classifier_model
         self._default_role = default_role
         self._confidence_threshold = confidence_threshold
+        # LRU classification cache — avoids redundant LLM calls for identical
+        # messages within the same session (LAN-148).
+        self._classify_cache: OrderedDict[str, tuple[str, float]] = OrderedDict()
+        self._classify_cache_maxsize: int = 128
         # Startup validation: warn if default_role is not registered (LAN-108).
         if default_role and registry.get(default_role) is None:
             logger.warning(
@@ -172,10 +174,29 @@ class Coordinator:
         """Classify a message and return ``(role_name, confidence)``.
 
         Uses a lightweight LLM call. Falls back to *default_role* on any
-        error or unrecognised response.  When the classifier reports that
-        the task needs orchestration (multiple specialists), the role is
-        overridden to ``pm``.
+        error or unrecognised response.
+
+        Post-classification filters:
+
+        * **Confidence threshold** — when the LLM returns valid JSON
+          (``from_json=True``), a ``confidence`` below
+          ``self._confidence_threshold`` causes a fallback to
+          *default_role*.  Text-scan responses (``from_json=False``) bypass
+          this filter because they are already a last-resort heuristic.
+        * **Orchestration override** — the classified role is overridden to
+          ``pm`` when either ``needs_orchestration=True`` *or*
+          ``len(relevant_roles) >= 2``, unless the role is already ``pm``
+          or ``general``.  The relevant-roles count is the authoritative
+          signal for multi-specialist tasks.
         """
+        # LRU cache check — skip LLM call for recently classified identical messages.
+        cache_key = hashlib.md5(message[:200].encode()).hexdigest()
+        if cache_key in self._classify_cache:
+            self._classify_cache.move_to_end(cache_key)
+            cached_role, cached_conf = self._classify_cache[cache_key]
+            classification_total.labels(result_role=cached_role).inc()
+            return cached_role, cached_conf
+
         model = self._classifier_model or self._provider.get_default_model()
         user_prompt = self._build_classify_prompt(message)
 
@@ -255,9 +276,15 @@ class Coordinator:
                     except Exception as exc:  # crash-barrier: tracing is optional
                         logger.debug("Langfuse span update failed: {}", exc)
                 classification_total.labels(result_role=role_name).inc()
+                # Populate LRU cache (LAN-148).
+                self._classify_cache[cache_key] = (role_name, confidence)
+                if len(self._classify_cache) > self._classify_cache_maxsize:
+                    self._classify_cache.popitem(last=False)
                 return role_name, confidence
             except Exception:  # crash-barrier: LLM-based classification
-                logger.warning("Coordinator classification failed, using default role")
+                logger.opt(exception=True).warning(
+                    "Coordinator classification failed, using default role"
+                )
                 classification_fallback_total.labels(reason="llm_error").inc()
                 return self._default_role, 0.0
 

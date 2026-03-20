@@ -18,6 +18,7 @@ import contextvars
 import json
 import re
 import time
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -183,6 +184,56 @@ class DelegationDispatcher:
         mcp_tools: list[Tool] | None = None,
         on_progress: Callable[..., Awaitable[None]] | None = None,
     ) -> None:
+        """Initialise the delegation dispatcher.
+
+        Parameters
+        ----------
+        provider:
+            LLM provider used for delegated agent tool loops.
+        workspace:
+            Absolute path to the project workspace root.  Used for filesystem
+            tool containment and project-context injection.
+        model:
+            Default LLM model identifier; may be overridden per-role via
+            ``AgentRoleConfig.model``.
+        temperature:
+            Default sampling temperature; may be overridden per-role.
+        max_tokens:
+            Maximum tokens per LLM completion in delegated agents.
+        max_iterations:
+            Upper bound on tool-loop iterations for delegated agents (further
+            capped by task-type-specific limits).
+        restrict_to_workspace:
+            When ``True``, filesystem tools restrict paths to *workspace*.
+        brave_api_key:
+            API key for the Brave web-search tool; ``None`` disables it.
+        exec_config:
+            Shell execution configuration (timeout, shell_mode, deny/allow
+            patterns).  Forwarded to ``ExecTool`` instances.
+        role_name:
+            Name of the *parent* agent role that owns this dispatcher.
+        coordinator:
+            Coordinator instance used to classify and route delegation
+            targets.  ``None`` disables delegation (calls to ``dispatch``
+            will raise).
+        scratchpad:
+            Shared scratchpad for inter-agent artifact exchange.  Delegated
+            agents read prior findings from and write results to this
+            scratchpad.
+        active_messages:
+            Reference to the parent agent's message list, used to extract
+            recent tool results and the original user request for context
+            injection into delegation contracts.
+        tools:
+            Parent ``ToolExecutor`` used to locate delegate/delegate_parallel
+            tool instances during ``wire_delegate_tools``.
+        mcp_tools:
+            Additional MCP-provided tool instances to include in delegated
+            agent tool sets (subject to role allow/deny filtering).
+        on_progress:
+            Optional async callback invoked with delegation start/end events
+            for progress reporting.
+        """
         self.provider = provider
         self.workspace = workspace
         self.model = model
@@ -200,7 +251,7 @@ class DelegationDispatcher:
         # This is a structural hard cap enforced in dispatch(), not an advisory prompt nudge.
         # Distinct from MAX_DELEGATION_DEPTH which caps the ancestry chain length.
         self.max_delegations: int = 8
-        self.routing_trace: list[dict[str, Any]] = []
+        self.routing_trace: deque[dict[str, Any]] = deque(maxlen=1000)
 
         self.coordinator: Coordinator | None = coordinator
         self.scratchpad: Scratchpad | None = scratchpad
@@ -419,7 +470,35 @@ class DelegationDispatcher:
 
     @staticmethod
     def classify_task_type(role: str, task: str) -> str:
-        """Classify a delegation task into a task type from the taxonomy."""
+        """Classify a delegation task into a task type from the taxonomy.
+
+        Returns one of the keys from ``TASK_TYPES``: ``report_writing``,
+        ``bug_investigation``, ``repo_architecture``, ``local_code_analysis``,
+        ``web_research``, or ``general``.
+
+        Signal evaluation order and tiebreaking:
+
+        1. **Role override** — ``writing`` role always returns
+           ``report_writing`` regardless of task content.
+        2. **Bug signals** — checked only when ``role == "code"``.  If any
+           bug keyword matches, returns ``bug_investigation``.
+        3. **Architecture signals** — if any architecture keyword matches,
+           returns ``repo_architecture`` (regardless of role).
+        4. **Code signals** — if any code keyword matches *or*
+           ``role == "code"``, returns ``local_code_analysis``.
+        5. **Web signals** — if any web keyword matches, the result depends
+           on whether project-scoped keywords are also present: project
+           keywords present yields ``repo_architecture``; otherwise
+           ``web_research``.
+        6. **Research role fallback** — ``role == "research"`` routes to
+           ``repo_architecture`` when project keywords are present, else
+           ``web_research``.
+        7. **Default** — ``general``.
+
+        For hybrid tasks (e.g. code analysis *and* web research), the first
+        matching signal in the evaluation order wins.  There is no weighted
+        scoring; the order above acts as the tiebreaker.
+        """
         task_lower = task.lower()
         if role == "writing":
             return "report_writing"

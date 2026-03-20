@@ -4,9 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'Docker image tag to deploy (e.g., sha-abc1234 or latest)'
-        required: false
-        default: 'latest'
+        description: 'Docker image tag to deploy (SHA-based, e.g., sha-abc1234). "latest" is rejected.'
+        required: true
       rollback:
         description: 'Rollback to previous image?'
         required: false
@@ -28,6 +27,15 @@ jobs:
       url: https://nanobot.internal
 
     steps:
+      - name: Validate image tag (LAN-170)
+        run: |
+          TAG="${{ inputs.image_tag }}"
+          if [ "$TAG" = "latest" ]; then
+            echo "::error::Deploying 'latest' to production is not allowed. Use an explicit SHA-based tag (e.g., sha-abc1234)."
+            exit 1
+          fi
+          echo "Deploying tag: ${TAG}"
+
       - name: Checkout
         uses: actions/checkout@v4
 
