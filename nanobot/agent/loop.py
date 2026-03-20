@@ -304,6 +304,7 @@ class AgentLoop:
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        turn_start_index = len(initial_messages) - 1
 
         # Wrap on_stream with stateful think-tag filter so downstream
         # consumers (CLI, channels) never see <think> blocks.
@@ -325,20 +326,23 @@ class AgentLoop:
 
             tool_defs = self.tools.get_definitions()
 
+            send_messages = self._trim_history_for_budget(
+                messages, turn_start_index, iteration,
+            )
+
             if on_stream:
                 response = await self.provider.chat_stream_with_retry(
-                    messages=messages,
+                    messages=send_messages,
                     tools=tool_defs,
                     model=self.model,
                     on_content_delta=_filtered_stream,
                 )
             else:
                 response = await self.provider.chat_with_retry(
-                    messages=messages,
+                    messages=send_messages,
                     tools=tool_defs,
                     model=self.model,
                 )
-
             usage = response.usage or {}
             self._last_usage = {
                 "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
