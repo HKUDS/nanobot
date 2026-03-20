@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from nanobot.agent.tools.base import Tool, ToolResult
 
@@ -18,30 +18,22 @@ class ScratchpadWriteTool(Tool):
     def __init__(self, scratchpad: Scratchpad) -> None:
         self._scratchpad = scratchpad
 
-    @property
-    def name(self) -> str:
-        return "write_scratchpad"
-
-    @property
-    def description(self) -> str:
-        return "Write a labeled artifact to the session scratchpad for other agents to read."
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "label": {
-                    "type": "string",
-                    "description": "Short label for the entry.",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "Content to store.",
-                },
+    name = "write_scratchpad"
+    description = "Write a labeled artifact to the session scratchpad for other agents to read."
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "label": {
+                "type": "string",
+                "description": "Short label for the entry.",
             },
-            "required": ["label", "content"],
-        }
+            "content": {
+                "type": "string",
+                "description": "Content to store.",
+            },
+        },
+        "required": ["label", "content"],
+    }
 
     async def execute(self, *, label: str, content: str, **_: Any) -> ToolResult:  # type: ignore[override]
         entry_id = await self._scratchpad.write(
@@ -60,26 +52,22 @@ class ScratchpadReadTool(Tool):
     def __init__(self, scratchpad: Scratchpad) -> None:
         self._scratchpad = scratchpad
 
-    @property
-    def name(self) -> str:
-        return "read_scratchpad"
-
-    @property
-    def description(self) -> str:
-        return "Read entries from the session scratchpad. Omit entry_id to list all entries."
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "entry_id": {
-                    "type": "string",
-                    "description": "Optional entry ID to read a specific entry.",
-                },
+    name = "read_scratchpad"
+    description = "Read entries from the session scratchpad. Omit entry_id to list all entries."
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "entry_id": {
+                "type": "string",
+                "description": "Optional entry ID to read a specific entry.",
             },
-        }
+        },
+    }
 
     async def execute(self, *, entry_id: str = "", **_: Any) -> ToolResult:  # type: ignore[override]
         result = self._scratchpad.read(entry_id or None)
+        if result is None:
+            if entry_id:
+                return ToolResult.ok(f"Entry {entry_id} not found.")
+            return ToolResult.ok("Scratchpad is empty.")
         return ToolResult.ok(result)

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import FakeProvider
 
 from nanobot.agent.coordinator import Coordinator, build_default_registry
 from nanobot.agent.tools.delegate import (
@@ -24,26 +25,11 @@ from nanobot.agent.tools.delegate import (
     _CycleError,
 )
 from nanobot.config.schema import AgentConfig
-from nanobot.providers.base import LLMProvider, LLMResponse
+from nanobot.providers.base import LLMResponse
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-class FakeProvider(LLMProvider):
-    def __init__(self, responses: list[str] | None = None) -> None:
-        super().__init__()
-        self._responses = responses or ['{"role": "general"}']
-        self._idx = 0
-
-    def get_default_model(self) -> str:
-        return "fake-model"
-
-    async def chat(self, **kwargs: Any) -> LLMResponse:
-        text = self._responses[min(self._idx, len(self._responses) - 1)]
-        self._idx += 1
-        return LLMResponse(content=text)
 
 
 def _make_agent_config(tmp_path: Path, **overrides: Any) -> AgentConfig:
@@ -327,3 +313,15 @@ class TestDelegationDispatch:
         result = await loop._dispatch_delegation("code", "task A", None)
         assert result
         assert _delegation_ancestry.get() == ()  # Restored after completion
+
+    async def test_max_delegation_depth_respected(self, tmp_path: Path) -> None:
+        """max_delegation_depth from config caps self.max_delegations on the dispatcher."""
+        from nanobot.agent.loop import AgentLoop
+        from nanobot.bus.queue import MessageBus
+
+        provider = FakeProvider(["result"])
+        bus = MessageBus()
+        config = _make_agent_config(tmp_path, max_delegation_depth=3)
+        loop = AgentLoop(bus, provider, config)
+
+        assert loop._dispatcher.max_delegations == 3

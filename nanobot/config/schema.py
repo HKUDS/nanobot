@@ -116,6 +116,7 @@ class WebChannelConfig(Base):
     host: str = "127.0.0.1"  # Bind address for the web UI server
     port: int = 8000  # Web UI port (separate from gateway health port)
     api_key: str = ""  # SEC-06: Bearer token for /api/* routes; empty = no auth (dev only)
+    rate_limit_per_minute: int = 60  # Max API requests per IP per minute (0 = disabled)
 
 
 class ChannelsConfig(Base):
@@ -219,6 +220,9 @@ class AgentDefaults(Base):
     # Cost guardrails
     max_session_cost_usd: float = 0.0  # 0 = disabled; >0 raises BudgetExceededError when exceeded
     max_session_wall_time_seconds: int = 0  # 0 = disabled; >0 terminates session after N seconds
+
+    # Delegation cost guard (LAN-83)
+    max_delegation_depth: int = 8  # Max total delegations per turn (0 = unlimited)
 
 
 class AgentConfig(Base):
@@ -326,6 +330,9 @@ class AgentConfig(Base):
     max_session_cost_usd: float = 0.0  # 0 = disabled; >0 raises BudgetExceededError when exceeded
     max_session_wall_time_seconds: int = 0  # 0 = disabled; >0 terminates session after N seconds
 
+    # Delegation cost guard (LAN-83)
+    max_delegation_depth: int = 8  # Max total delegations per turn (0 = unlimited)
+
     @classmethod
     def from_defaults(cls, defaults: "AgentDefaults", **overrides: Any) -> "AgentConfig":
         """Build an ``AgentConfig`` from the ``AgentDefaults`` section of the config file.
@@ -386,6 +393,7 @@ class AgentConfig(Base):
             "mission_result_max_chars": defaults.mission.result_max_chars,
             "max_session_cost_usd": defaults.max_session_cost_usd,
             "max_session_wall_time_seconds": defaults.max_session_wall_time_seconds,
+            "max_delegation_depth": defaults.max_delegation_depth,
         }
         data.update(overrides)
         return cls(**data)  # type: ignore[arg-type]

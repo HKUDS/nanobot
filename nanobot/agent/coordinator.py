@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
@@ -111,7 +112,18 @@ DEFAULT_ROLES: list[AgentRoleConfig] = [
 
 
 def build_default_registry(default_role: str = "general") -> AgentRegistry:
-    """Create a registry pre-loaded with the built-in agent roles."""
+    """Create a registry pre-loaded with the built-in agent roles.
+
+    Built-in roles (code, research, writing, system, pm, general) are always
+    registered first. When the caller then calls ``registry.merge_register()``
+    with user-configured roles from ``config.json``, only the fields that the
+    user explicitly set overwrite the built-in defaults — unset fields keep
+    their built-in values. This means adding a custom role name in config
+    *merges with* the built-in role, not replaces it wholesale.
+
+    If you want to start with an empty registry (no built-in roles), instantiate
+    ``AgentRegistry`` directly and register roles manually.
+    """
     registry = AgentRegistry(default_role=default_role)
     for role in DEFAULT_ROLES:
         registry.register(role)
@@ -152,10 +164,17 @@ class Coordinator:
                 "which may be unexpected.",
                 default_role,
             )
+        self._role_patterns: dict[str, re.Pattern[str]] = {}
 
     @property
     def registry(self) -> AgentRegistry:
         return self._registry
+
+    def _get_role_pattern(self, name: str) -> re.Pattern[str]:
+        """Return a cached word-boundary regex for *name* (avoids false-positive substring hits)."""
+        if name not in self._role_patterns:
+            self._role_patterns[name] = re.compile(rf"\b{re.escape(name)}\b", re.IGNORECASE)
+        return self._role_patterns[name]
 
     def _build_classify_prompt(self, message: str) -> str:
         """Build the classification user prompt listing available roles."""
@@ -311,10 +330,9 @@ class Coordinator:
                 return role, min(max(confidence, 0.0), 1.0), needs_orch, relevant, True
         except (json.JSONDecodeError, ValueError):
             pass
-        # Fallback: look for a known role name in the raw text
-        lower = raw.lower()
+        # Fallback: word-boundary regex scan to avoid false positives (e.g. "code" in "decode")
         for name in self._registry.role_names():
-            if name in lower:
+            if self._get_role_pattern(name).search(raw):
                 return name, 0.5, False, [], False  # Text-scan: not subject to threshold
         return self._default_role, 0.0, False, [], False
 

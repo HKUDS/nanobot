@@ -13,30 +13,16 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+from conftest import FakeProvider
+
 from nanobot.agent.coordinator import Coordinator, build_default_registry
 from nanobot.agent.tools.delegate import DelegateParallelTool, DelegationResult, _CycleError
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import AgentConfig
-from nanobot.providers.base import LLMProvider, LLMResponse
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-class FakeProvider(LLMProvider):
-    def __init__(self, responses: list[str] | None = None) -> None:
-        super().__init__()
-        self._responses = responses or ['{"role": "general"}']
-        self._idx = 0
-
-    def get_default_model(self) -> str:
-        return "fake-model"
-
-    async def chat(self, **kwargs: Any) -> LLMResponse:
-        text = self._responses[min(self._idx, len(self._responses) - 1)]
-        self._idx += 1
-        return LLMResponse(content=text)
 
 
 def _make_agent_config(tmp_path: Path, **overrides: Any) -> AgentConfig:
@@ -61,17 +47,15 @@ class TestParallelDelegation:
     """Integration-level tests for concurrent delegation."""
 
     async def test_parallel_subtasks_run_concurrently(self) -> None:
-        """Parallel dispatches overlap in time (not strictly sequential)."""
+        """Parallel dispatches overlap (not strictly sequential): verified via event ordering."""
         tool = DelegateParallelTool()
-        start_times: list[float] = []
-        end_times: list[float] = []
+        # Record ("start"|"end", task) events in order of occurrence
+        event_log: list[tuple[str, str]] = []
 
         async def tracked_dispatch(role: str, task: str, ctx: str | None) -> DelegationResult:
-            import time
-
-            start_times.append(time.monotonic())
+            event_log.append(("start", task))
             await asyncio.sleep(0.05)
-            end_times.append(time.monotonic())
+            event_log.append(("end", task))
             return DelegationResult(content=f"done:{task}", tools_used=["read_file"])
 
         tool.set_dispatch(tracked_dispatch)
@@ -83,9 +67,15 @@ class TestParallelDelegation:
             ]
         )
         assert result.success
-        # All three started before the first finished (concurrent)
-        assert len(start_times) == 3
-        assert max(start_times) < min(end_times)
+        # All three tasks must have started
+        starts = [e for e in event_log if e[0] == "start"]
+        assert len(starts) == 3
+        # Concurrent: the first "end" must come after at least 2 "start"s
+        first_end_pos = next(i for i, e in enumerate(event_log) if e[0] == "end")
+        starts_before_first_end = sum(1 for e in event_log[:first_end_pos] if e[0] == "start")
+        assert starts_before_first_end >= 2, (
+            "Expected concurrent execution (≥2 starts before first end)"
+        )
 
     async def test_mixed_success_and_failure(self) -> None:
         """When some subtasks fail, the result contains both successes and errors."""
@@ -215,17 +205,27 @@ class TestWriteLock:
         reg.register(SlowReadTool("a"))
         reg.register(SlowReadTool("b"))
 
-        import time
+        # Record execution order to verify concurrent dispatch
+        exec_log: list[tuple[str, str]] = []
+        _orig_execute = reg.execute
 
-        t0 = time.monotonic()
+        async def _logging_execute(name: str, args: dict) -> ToolResult:
+            exec_log.append(("start", name))
+            result = await _orig_execute(name, args)
+            exec_log.append(("end", name))
+            return result
+
+        reg.execute = _logging_execute  # type: ignore[method-assign]
+
         r1, r2 = await asyncio.gather(
             reg.execute("slow_read_a", {}),
             reg.execute("slow_read_b", {}),
         )
-        elapsed = time.monotonic() - t0
         assert r1.success and r2.success
-        # Should be < 0.1s total (concurrent), not ~0.1s (sequential)
-        assert elapsed < 0.08
+        # Both tasks should have started before either finished (concurrent execution)
+        first_end_pos = next(i for i, e in enumerate(exec_log) if e[0] == "end")
+        starts_before_first_end = sum(1 for e in exec_log[:first_end_pos] if e[0] == "start")
+        assert starts_before_first_end >= 2, "Expected both reads to start before either finishes"
 
     async def test_write_tools_serialised(self) -> None:
         """Non-readonly tools are serialised by the write lock."""

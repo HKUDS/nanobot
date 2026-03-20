@@ -39,8 +39,7 @@ jobs:
     name: Container image scan
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Only scan when image might have changed
-    if: github.event_name == 'push' || github.event_name == 'schedule'
+    # Run on push, PRs, and scheduled scans — non-blocking (exit-code: '0')
     steps:
       - uses: actions/checkout@v4
 

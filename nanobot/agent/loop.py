@@ -63,6 +63,7 @@ from nanobot.agent.observability import (
     update_current_span,
 )
 from nanobot.agent.prompt_loader import prompts
+from nanobot.agent.reaction import classify_reaction
 from nanobot.agent.scratchpad import Scratchpad
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
 from nanobot.agent.tool_executor import ToolExecutor
@@ -396,6 +397,7 @@ class AgentLoop:
                 role_name=self.role_name,
             ),
             provider=provider,
+            max_delegation_depth=config.max_delegation_depth,
         )
         self._dispatcher.tools = self.tools
 
@@ -1464,7 +1466,7 @@ class AgentLoop:
         The reaction is mapped to positive/negative and persisted via the
         feedback tool.
         """
-        rating = reaction.rating
+        rating = classify_reaction(reaction.emoji)
         if rating is None:
             logger.debug("Ignoring unmapped reaction emoji: {}", reaction.emoji)
             return

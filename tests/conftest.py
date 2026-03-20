@@ -3,10 +3,30 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 from unittest.mock import patch
 
 import pytest
 from loguru import logger as _loguru_logger
+
+from nanobot.providers.base import LLMProvider, LLMResponse
+
+
+class FakeProvider(LLMProvider):
+    """Scripted LLM provider for tests — cycles through a fixed list of responses."""
+
+    def __init__(self, responses: list[str] | None = None) -> None:
+        super().__init__()
+        self._responses = responses or ['{"role": "general"}']
+        self._idx = 0
+
+    def get_default_model(self) -> str:
+        return "fake-model"
+
+    async def chat(self, **kwargs: Any) -> LLMResponse:
+        text = self._responses[min(self._idx, len(self._responses) - 1)]
+        self._idx += 1
+        return LLMResponse(content=text)
 
 
 def _noop_init_client(self):

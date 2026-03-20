@@ -6,6 +6,29 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **Path disclosure hardening**: `DelegationDispatcher` now exposes only the workspace directory name (not the full absolute path) in delegation contracts (`delegation.py`)
+- **Task input sanitisation**: `DelegateTool` and `DelegateParallelTool` now strip C0/C1 control characters and enforce a 4,000-character maximum before forwarding tasks to specialist agents (`delegate.py`)
+- **Trivy scans on PRs**: Container image vulnerability scanning now runs on all pull requests, not only on push/schedule events (`.github/workflows/security.yml`)
+
+### Added
+- **`classify_reaction()` in agent layer**: Emoji → rating classification moved from `bus/events.py` to `nanobot/agent/reaction.py`, preserving the module boundary rule that `bus/` must not import from `agent/` (`reaction.py`, `loop.py`)
+- **`FakeProvider` shared fixture**: Common scripted LLM provider consolidated into `tests/conftest.py` and re-used by `test_delegate.py`, `test_parallel_delegation.py`, and `test_routing_metrics.py`
+- **Concurrent session isolation test**: `TestConcurrentProcessMessage.test_concurrent_sessions_independent` verifies that simultaneous `_process_message()` calls for different sessions do not corrupt each other's history (`test_agent_loop.py`)
+- **Deploy-staging skip notification**: `notify-skipped` job emits a CI annotation when the upstream build did not succeed, making silent skips visible (`.github/workflows/deploy-staging.yml`)
+
+### Changed
+- **`run_tool_loop` context compression**: Message list is trimmed to the most recent 20 exchanges (preserving system messages) when it exceeds 40 messages, preventing unbounded token growth (`tool_loop.py`)
+- **`AgentRegistry` caching**: `list_roles()` and `role_names()` now cache their results and invalidate on `register()` / `merge_register()`, eliminating repeated dict comprehension on every routing decision (`registry.py`)
+- **Role-name matching uses word-boundary regex**: `Coordinator` text-scan fallback now uses a compiled `\b<role>\b` pattern (cached per role) instead of substring containment, reducing false positives (`coordinator.py`)
+- **Swallowed exception now logged**: Silent `except Exception: pass` in coordinator span update replaced with `logger.debug(...)` for observability (`coordinator.py`)
+- **`build_default_registry()` documented**: Docstring added explaining merge-over-defaults behaviour (`coordinator.py`)
+- **`Scratchpad.read()` returns `None`**: Returns `str | None` instead of sentinel strings for missing/empty state; callers (`ScratchpadReadTool`) produce the human-readable messages (`scratchpad.py`, `tools/scratchpad.py`)
+- **Import-check CI step installs package first**: `pip install -e ".[dev]"` added before the boundary-violation check so the module graph is populated correctly (`.github/workflows/ci.yml`)
+
+### Fixed
+- **Flaky parallel delegation tests**: Replaced wall-clock timing assertions (`elapsed < 0.08 s`) with event-log ordering checks that are robust under CI load (`test_parallel_delegation.py`)
+
 ### Added
 - **`FailureClass` enum**: six-way failure classification (`PERMANENT_CONFIG`, `PERMANENT_AUTH`, `TRANSIENT_TIMEOUT`, `TRANSIENT_ERROR`, `LOGICAL_ERROR`, `UNKNOWN`) with `is_permanent` property for immediate tool suppression
 - **`classify_failure()`**: static method on `ToolCallTracker` — classifies tool errors from `error_type` metadata and keyword context; narrows `"no such"` / `"not found"` matches to command/binary context only to avoid false-positive permanent disabling on file-not-found errors

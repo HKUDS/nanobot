@@ -12,30 +12,16 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import FakeProvider
 
 from nanobot.agent.coordinator import Coordinator, build_default_registry
 from nanobot.agent.tools.delegate import _CycleError
 from nanobot.config.schema import AgentConfig
-from nanobot.providers.base import LLMProvider, LLMResponse
+from nanobot.providers.base import LLMProvider
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-class FakeProvider(LLMProvider):
-    def __init__(self, responses: list[str] | None = None) -> None:
-        super().__init__()
-        self._responses = responses or ['{"role": "general"}']
-        self._idx = 0
-
-    def get_default_model(self) -> str:
-        return "fake-model"
-
-    async def chat(self, **kwargs: Any) -> LLMResponse:
-        text = self._responses[min(self._idx, len(self._responses) - 1)]
-        self._idx += 1
-        return LLMResponse(content=text)
 
 
 def _make_agent_config(tmp_path: Path, **overrides: Any) -> AgentConfig:

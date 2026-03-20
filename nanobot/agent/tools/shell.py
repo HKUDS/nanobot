@@ -24,7 +24,7 @@ import asyncio
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.errors import ToolPermissionError, ToolTimeoutError
@@ -96,30 +96,22 @@ class ExecTool(Tool):
         )
         self.restrict_to_workspace = restrict_to_workspace
 
-    @property
-    def name(self) -> str:
-        return "exec"
-
-    @property
-    def description(self) -> str:
-        return "Execute a shell command and return its output. Use with caution."
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "The shell command to execute (alias: cmd)",
-                },
-                "working_dir": {
-                    "type": "string",
-                    "description": "Optional working directory for the command",
-                },
+    name = "exec"
+    description = "Execute a shell command and return its output. Use with caution."
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "command": {
+                "type": "string",
+                "description": "The shell command to execute (alias: cmd)",
             },
-            "required": ["command"],
-        }
+            "working_dir": {
+                "type": "string",
+                "description": "Optional working directory for the command",
+            },
+        },
+        "required": ["command"],
+    }
 
     async def execute(
         self,

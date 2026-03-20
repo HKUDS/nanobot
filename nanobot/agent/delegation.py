@@ -203,6 +203,7 @@ class DelegationDispatcher:
         tools: ToolExecutor | None = None,
         mcp_tools: list[Tool] | None = None,
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        max_delegation_depth: int = 8,
     ) -> None:
         """Initialise the delegation dispatcher.
 
@@ -255,7 +256,7 @@ class DelegationDispatcher:
         # Per-session delegation budget — raises _CycleError when exhausted (LAN-121/132).
         # This is a structural hard cap enforced in dispatch(), not an advisory prompt nudge.
         # Distinct from MAX_DELEGATION_DEPTH which caps the ancestry chain length.
-        self.max_delegations: int = 8
+        self.max_delegations: int = max_delegation_depth
         self.routing_trace: deque[dict[str, Any]] = deque(maxlen=1000)
 
         self.coordinator: Coordinator | None = coordinator
@@ -633,7 +634,7 @@ class DelegationDispatcher:
         sections.append(f"## Your Mission\n{task}")
         if context:
             sections.append(f"### Additional Context\n{context}")
-        sections.append(f"## Project Root\n`{self.workspace}`")
+        sections.append(f"## Project Root\n`{self.workspace.name}`")
 
         non_goals: list[str] = []
         avoid = tt.get("avoid_first", [])

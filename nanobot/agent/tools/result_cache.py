@@ -13,7 +13,7 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 
 from loguru import logger
 
@@ -397,39 +397,31 @@ class CacheGetSliceTool(Tool):
     def __init__(self, cache: ToolResultCache) -> None:
         self._cache = cache
 
-    @property
-    def name(self) -> str:
-        return "cache_get_slice"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Retrieve a slice (rows or lines) from a previously cached tool result. "
-            "Use the cache_key from a prior tool call's summary to access the full data."
-        )
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "cache_key": {
-                    "type": "string",
-                    "description": "The cache key from a prior tool result summary.",
-                },
-                "start": {
-                    "type": "integer",
-                    "description": "Start index (0-based row or line number). Default 0.",
-                    "minimum": 0,
-                },
-                "end": {
-                    "type": "integer",
-                    "description": "End index (exclusive). Default 25.",
-                    "minimum": 1,
-                },
+    name = "cache_get_slice"
+    description = (
+        "Retrieve a slice (rows or lines) from a previously cached tool result. "
+        "Use the cache_key from a prior tool call's summary to access the full data."
+    )
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "cache_key": {
+                "type": "string",
+                "description": "The cache key from a prior tool result summary.",
             },
-            "required": ["cache_key"],
-        }
+            "start": {
+                "type": "integer",
+                "description": "Start index (0-based row or line number). Default 0.",
+                "minimum": 0,
+            },
+            "end": {
+                "type": "integer",
+                "description": "End index (exclusive). Default 25.",
+                "minimum": 1,
+            },
+        },
+        "required": ["cache_key"],
+    }
 
     async def execute(  # type: ignore[override]
         self,

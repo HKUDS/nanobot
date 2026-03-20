@@ -54,6 +54,8 @@ class ReactionEvent:
 
     Channels that support reactions (Telegram, Discord, Slack) can
     emit this event so the agent loop can translate it into feedback.
+    Classification of the reaction sentiment (positive/negative) is handled
+    by ``nanobot.agent.reaction.classify_reaction`` in the agent layer.
     """
 
     channel: str

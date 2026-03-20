@@ -18,6 +18,11 @@ from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider
 
+# Compress the message list when it exceeds this threshold to prevent unbounded growth.
+# Keeps system-role messages + the most recent exchanges.
+_MAX_MESSAGES_BEFORE_COMPRESS = 40
+_MESSAGES_TO_KEEP_AFTER_COMPRESS = 20
+
 
 async def run_tool_loop(
     *,
@@ -43,6 +48,21 @@ async def run_tool_loop(
 
     while iteration < max_iterations:
         iteration += 1
+
+        # Compress context if the message list has grown too large to prevent token
+        # budget exhaustion. Preserve system-role messages and keep recent exchanges.
+        if len(messages) > _MAX_MESSAGES_BEFORE_COMPRESS:
+            original_count = len(messages)
+            system_msgs = [m for m in messages if m.get("role") == "system"]
+            recent_msgs = messages[-_MESSAGES_TO_KEEP_AFTER_COMPRESS:]
+            recent_ids = {id(m) for m in recent_msgs}
+            prefix = [m for m in system_msgs if id(m) not in recent_ids]
+            messages = prefix + recent_msgs
+            logger.debug(
+                "run_tool_loop: compressed context {} → {} messages",
+                original_count,
+                len(messages),
+            )
 
         response = await provider.chat(
             messages=messages,

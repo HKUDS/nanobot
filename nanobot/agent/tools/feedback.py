@@ -7,7 +7,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from nanobot.agent.tools.base import Tool, ToolResult
 
@@ -59,41 +59,33 @@ class FeedbackTool(Tool):
     # Tool schema
     # ------------------------------------------------------------------
 
-    @property
-    def name(self) -> str:
-        return "feedback"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Record user feedback on an answer or interaction. "
-            "Use this when the user explicitly expresses satisfaction or dissatisfaction, "
-            "gives a correction, or reacts with thumbs-up/down. "
-            "rating: 'positive' or 'negative'. "
-            "comment: optional free-text with the user's correction or remark."
-        )
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "rating": {
-                    "type": "string",
-                    "enum": ["positive", "negative"],
-                    "description": "Positive (thumbs-up) or negative (thumbs-down) rating.",
-                },
-                "comment": {
-                    "type": "string",
-                    "description": "Optional free-text with the user's correction or remark.",
-                },
-                "topic": {
-                    "type": "string",
-                    "description": "Brief topic or label for what the feedback is about.",
-                },
+    name = "feedback"
+    description = (
+        "Record user feedback on an answer or interaction. "
+        "Use this when the user explicitly expresses satisfaction or dissatisfaction, "
+        "gives a correction, or reacts with thumbs-up/down. "
+        "rating: 'positive' or 'negative'. "
+        "comment: optional free-text with the user's correction or remark."
+    )
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "rating": {
+                "type": "string",
+                "enum": ["positive", "negative"],
+                "description": "Positive (thumbs-up) or negative (thumbs-down) rating.",
             },
-            "required": ["rating"],
-        }
+            "comment": {
+                "type": "string",
+                "description": "Optional free-text with the user's correction or remark.",
+            },
+            "topic": {
+                "type": "string",
+                "description": "Brief topic or label for what the feedback is about.",
+            },
+        },
+        "required": ["rating"],
+    }
 
     # ------------------------------------------------------------------
     # Execution
