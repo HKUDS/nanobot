@@ -134,11 +134,12 @@ class AgentLoop:
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
-    def _resolve_event_agent_workspace(self, sender_id: str) -> tuple[ContextBuilder, SessionManager] | None:
+    def _resolve_event_agent_workspace(self, sender_id: str) -> tuple[ContextBuilder, SessionManager, frozenset[str]] | None:
         """Check if sender_id is an event agent (guest) and return event-specific context + sessions.
 
         Reads event_agent_acl.json from the main workspace. If the sender matches,
-        returns a ContextBuilder and SessionManager pointing to the event_agent/ subdirectory.
+        returns a (ContextBuilder, SessionManager, blocked_tools) tuple pointing to the
+        event_agent/ subdirectory.
         """
         acl_path = self.workspace / "event_agent_acl.json"
         if not acl_path.exists():
@@ -167,11 +168,24 @@ class AgentLoop:
 
         # Cache event_agent context + sessions to avoid re-creating per message
         if event_agent_workspace not in self._event_agent_cache:
+            blocked = self._load_blocked_tools(event_agent_workspace)
             self._event_agent_cache[event_agent_workspace] = (
                 ContextBuilder(event_agent_workspace),
                 SessionManager(event_agent_workspace),
+                blocked,
             )
         return self._event_agent_cache[event_agent_workspace]
+
+    @staticmethod
+    def _load_blocked_tools(workspace: Path) -> frozenset[str]:
+        """Load blocked tool names from blocked_tools.json in the workspace, if present."""
+        path = workspace / "blocked_tools.json"
+        if not path.exists():
+            return frozenset()
+        try:
+            return frozenset(json.loads(path.read_text(encoding="utf-8")))
+        except (json.JSONDecodeError, OSError, TypeError):
+            return frozenset()
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -259,8 +273,11 @@ class AgentLoop:
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
         session_key: str | None = None,
+        context: ContextBuilder | None = None,
+        blocked_tools: frozenset[str] = frozenset(),
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
+        ctx = context or self.context
         messages = initial_messages
         iteration = 0
         final_content = None
@@ -296,7 +313,7 @@ class AgentLoop:
                     }
                     for tc in response.tool_calls
                 ]
-                messages = self.context.add_assistant_message(
+                messages = ctx.add_assistant_message(
                     messages, response.content, tool_call_dicts,
                     reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
@@ -306,12 +323,16 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    if tool_call.name in blocked_tools:
+                        logger.warning("Blocked tool call '{}' in sandboxed context", tool_call.name)
+                        result = f"Error: tool '{tool_call.name}' is not available in this context."
+                    else:
+                        result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     self._audit_tool_call(
                         tool_call.name, tool_call.arguments, result,
                         tool_call_id=tool_call.id, session_key=session_key,
                     )
-                    messages = self.context.add_tool_result(
+                    messages = ctx.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
             else:
@@ -322,7 +343,7 @@ class AgentLoop:
                     logger.error("LLM returned error: {}", (clean or "")[:200])
                     final_content = clean or "Sorry, I encountered an error calling the AI model."
                     break
-                messages = self.context.add_assistant_message(
+                messages = ctx.add_assistant_message(
                     messages, clean, reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
                 )
@@ -442,6 +463,7 @@ class AgentLoop:
         guest = self._resolve_event_agent_workspace(msg.sender_id) if msg.sender_id else None
         context = guest[0] if guest else self.context
         sessions = guest[1] if guest else self.sessions
+        blocked_tools = guest[2] if guest else frozenset()
 
         key = session_key or msg.session_key
         session = sessions.get_or_create(key)
@@ -521,6 +543,7 @@ class AgentLoop:
 
         final_content, _, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress, session_key=key,
+            context=context, blocked_tools=blocked_tools,
         )
 
         if final_content is None:
