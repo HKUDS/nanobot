@@ -449,57 +449,54 @@ class QQChannel(BaseChannel):
 
     async def _on_message(self, data: C2CMessage | GroupMessage, is_group: bool = False) -> None:
         """Parse inbound message, download attachments, and publish to the bus."""
-        try:
-            if data.id in self._processed_ids:
-                return
-            self._processed_ids.append(data.id)
+        if data.id in self._processed_ids:
+            return
+        self._processed_ids.append(data.id)
 
-            if is_group:
-                chat_id = data.group_openid
-                user_id = data.author.member_openid
-                self._chat_type_cache[chat_id] = "group"
-            else:
-                chat_id = str(
-                    getattr(data.author, "id", None)
-                    or getattr(data.author, "user_openid", "unknown")
-                )
-                user_id = chat_id
-                self._chat_type_cache[chat_id] = "c2c"
-
-            content = (data.content or "").strip()
-
-            # the data used by tests don't contain attachments property
-            # so we use getattr with a default of [] to avoid AttributeError in tests
-            attachments = getattr(data, "attachments", None) or []
-            media_paths, recv_lines, att_meta = await self._handle_attachments(attachments)
-
-            # Compose content that always contains actionable saved paths
-            if recv_lines:
-                tag = (
-                    "[Image]"
-                    if any(_is_image_name(Path(p).name) for p in media_paths)
-                    else "[File]"
-                )
-                file_block = "Received files:\n" + "\n".join(recv_lines)
-                content = (
-                    f"{content}\n\n{file_block}".strip() if content else f"{tag}\n{file_block}"
-                )
-
-            if not content and not media_paths:
-                return
-
-            await self._handle_message(
-                sender_id=user_id,
-                chat_id=chat_id,
-                content=content,
-                media=media_paths if media_paths else None,
-                metadata={
-                    "message_id": data.id,
-                    "attachments": att_meta,
-                },
+        if is_group:
+            chat_id = data.group_openid
+            user_id = data.author.member_openid
+            self._chat_type_cache[chat_id] = "group"
+        else:
+            chat_id = str(
+                getattr(data.author, "id", None)
+                or getattr(data.author, "user_openid", "unknown")
             )
-        except Exception:
-            logger.exception("Error handling QQ message")
+            user_id = chat_id
+            self._chat_type_cache[chat_id] = "c2c"
+
+        content = (data.content or "").strip()
+
+        # the data used by tests don't contain attachments property
+        # so we use getattr with a default of [] to avoid AttributeError in tests
+        attachments = getattr(data, "attachments", None) or []
+        media_paths, recv_lines, att_meta = await self._handle_attachments(attachments)
+
+        # Compose content that always contains actionable saved paths
+        if recv_lines:
+            tag = (
+                "[Image]"
+                if any(_is_image_name(Path(p).name) for p in media_paths)
+                else "[File]"
+            )
+            file_block = "Received files:\n" + "\n".join(recv_lines)
+            content = (
+                f"{content}\n\n{file_block}".strip() if content else f"{tag}\n{file_block}"
+            )
+
+        if not content and not media_paths:
+            return
+
+        await self._handle_message(
+            sender_id=user_id,
+            chat_id=chat_id,
+            content=content,
+            media=media_paths if media_paths else None,
+            metadata={
+                "message_id": data.id,
+                "attachments": att_meta,
+            },
+        )
 
     async def _handle_attachments(
         self,
