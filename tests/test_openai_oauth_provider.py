@@ -8,8 +8,9 @@ from nanobot.providers.openai_oauth_provider import OpenAIOAuthProvider, _strip_
 
 
 def test_strip_model_prefix_supports_hyphen_and_underscore():
-    assert _strip_model_prefix("openai-oauth/gpt-5.1") == "gpt-5.1"
-    assert _strip_model_prefix("openai_oauth/gpt-5.1") == "gpt-5.1"
+    assert _strip_model_prefix("openai-oauth/gpt-5.4") == "gpt-5.4"
+    assert _strip_model_prefix("openai_oauth/gpt-5.4") == "gpt-5.4"
+    assert _strip_model_prefix("openai-oauth/gpt-5.4-mini") == "gpt-5.4-mini"
 
 
 @pytest.mark.asyncio
@@ -53,7 +54,7 @@ async def test_openai_oauth_provider_uses_oauth_token_for_responses_api(monkeypa
     )
 
     with patch("nanobot.providers.openai_oauth_provider.AsyncOpenAI", return_value=base_client):
-        provider = OpenAIOAuthProvider(default_model="openai-oauth/gpt-5.1")
+        provider = OpenAIOAuthProvider(default_model="openai-oauth/gpt-5.4")
 
     response = await provider.chat(
         messages=[
@@ -80,7 +81,7 @@ async def test_openai_oauth_provider_uses_oauth_token_for_responses_api(monkeypa
     base_client.with_options.assert_called_once_with(api_key="access-token")
     configured_client.responses.create.assert_awaited_once()
     _, kwargs = configured_client.responses.create.await_args
-    assert kwargs["model"] == "gpt-5.1"
+    assert kwargs["model"] == "gpt-5.4"
     assert kwargs["instructions"] == "Be concise."
     assert kwargs["reasoning"] == {"effort": "medium"}
     assert kwargs["tool_choice"] == "auto"

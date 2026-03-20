@@ -857,7 +857,18 @@ nanobot provider login openai-oauth
 {
   "agents": {
     "defaults": {
-      "model": "openai-oauth/gpt-5.1"
+      "model": "openai-oauth/gpt-5.4"
+    }
+  }
+}
+```
+
+Use `gpt-5.4-mini` for a faster, lighter variant:
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "openai-oauth/gpt-5.4-mini"
     }
   }
 }
@@ -869,7 +880,7 @@ You can also force the provider explicitly and keep a bare model name:
   "agents": {
     "defaults": {
       "provider": "openai_oauth",
-      "model": "gpt-5.1"
+      "model": "gpt-5.4"
     }
   }
 }

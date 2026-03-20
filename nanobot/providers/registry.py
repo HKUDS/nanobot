@@ -333,6 +333,10 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
         is_oauth=True,
+        model_list=(
+            "openai-oauth/gpt-5.4",
+            "openai-oauth/gpt-5.4-mini",
+        ),
     ),
     # OpenAI Codex: uses OAuth, not API key.
     ProviderSpec(

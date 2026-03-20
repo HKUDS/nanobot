@@ -168,7 +168,7 @@ def test_config_matches_openai_codex_with_hyphen_prefix():
 
 def test_config_matches_openai_oauth_with_hyphen_prefix():
     config = Config()
-    config.agents.defaults.model = "openai-oauth/gpt-5.1"
+    config.agents.defaults.model = "openai-oauth/gpt-5.4"
 
     assert config.get_provider_name() == "openai_oauth"
 
@@ -254,7 +254,7 @@ def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
 def test_make_provider_uses_openai_oauth_provider():
     config = Config.model_validate(
         {
-            "agents": {"defaults": {"provider": "openai_oauth", "model": "gpt-5.1"}},
+            "agents": {"defaults": {"provider": "openai_oauth", "model": "gpt-5.4"}},
         }
     )
 
