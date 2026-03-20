@@ -449,6 +449,22 @@ def _print_deprecated_memory_window_notice(config: Config) -> None:
         )
 
 
+def _resolve_timezone(config: Config) -> str | None:
+    """Resolve timezone: config.json first, USER.md fallback with deprecation warning."""
+    tz = config.agents.defaults.timezone
+    if tz is not None:
+        return tz
+    from loguru import logger
+    from nanobot.utils.helpers import parse_user_timezone
+    tz = parse_user_timezone(config.workspace_path)
+    if tz:
+        logger.warning(
+            "Timezone in USER.md is deprecated. Move to config.json: "
+            '"agents": {{ "defaults": {{ "timezone": "{}" }} }}', tz
+        )
+    return tz
+
+
 # ============================================================================
 # Gateway / Server
 # ============================================================================
@@ -490,6 +506,7 @@ def gateway(
     cron = CronService(cron_store_path)
 
     # Create agent with cron service
+    tz = _resolve_timezone(config)
     agent = AgentLoop(
         bus=bus,
         provider=provider,
@@ -505,6 +522,7 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        timezone=tz,
     )
 
     # Set cron callback (needs agent)
@@ -605,6 +623,7 @@ def gateway(
         on_notify=on_heartbeat_notify,
         interval_s=hb_cfg.interval_s,
         enabled=hb_cfg.enabled,
+        timezone=tz,
     )
 
     if channels.enabled_channels:
@@ -696,6 +715,7 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        timezone=_resolve_timezone(config),
     )
 
     # Shared reference for progress callbacks

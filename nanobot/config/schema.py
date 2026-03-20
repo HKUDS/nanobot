@@ -41,6 +41,7 @@ class AgentDefaults(Base):
     # Deprecated compatibility field: accepted from old configs but ignored at runtime.
     memory_window: int | None = Field(default=None, exclude=True)
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    timezone: str | None = None  # IANA timezone (e.g. "Asia/Shanghai"), None = system time
 
     @property
     def should_warn_deprecated_memory_window(self) -> bool:

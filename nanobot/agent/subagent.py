@@ -33,6 +33,7 @@ class SubagentManager:
         web_proxy: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
+        timezone: str | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -44,6 +45,7 @@ class SubagentManager:
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
+        self.timezone = timezone
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
 
@@ -202,7 +204,7 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
         from nanobot.agent.context import ContextBuilder
         from nanobot.agent.skills import SkillsLoader
 
-        time_ctx = ContextBuilder._build_runtime_context(None, None)
+        time_ctx = ContextBuilder._build_runtime_context(None, None, tz_name=self.timezone)
         parts = [f"""# Subagent
 
 {time_ctx}

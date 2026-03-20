@@ -19,8 +19,9 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, timezone: str | None = None):
         self.workspace = workspace
+        self.timezone = timezone
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
@@ -98,9 +99,9 @@ Your workspace is at: {workspace_path}
 Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel."""
 
     @staticmethod
-    def _build_runtime_context(channel: str | None, chat_id: str | None) -> str:
+    def _build_runtime_context(channel: str | None, chat_id: str | None, tz_name: str | None = None) -> str:
         """Build untrusted runtime metadata block for injection before the user message."""
-        lines = [f"Current Time: {current_time_str()}"]
+        lines = [f"Current Time: {current_time_str(tz_name)}"]
         if channel and chat_id:
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
@@ -128,7 +129,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         current_role: str = "user",
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
-        runtime_ctx = self._build_runtime_context(channel, chat_id)
+        runtime_ctx = self._build_runtime_context(channel, chat_id, tz_name=self.timezone)
         user_content = self._build_user_content(current_message, media)
 
         # Merge runtime context and user content into a single user message

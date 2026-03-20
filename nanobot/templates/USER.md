@@ -5,7 +5,6 @@ Information about the user to help personalize interactions.
 ## Basic Information
 
 - **Name**: (your name)
-- **Timezone**: (your timezone, e.g., UTC+8)
 - **Language**: (preferred language)
 
 ## Preferences
