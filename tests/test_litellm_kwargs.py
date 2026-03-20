@@ -159,3 +159,50 @@ async def test_openrouter_native_model_id_gets_double_prefixed() -> None:
         "openrouter/free must become openrouter/openrouter/free — "
         "LiteLLM strips one layer so the API receives openrouter/free"
     )
+
+
+@pytest.mark.asyncio
+async def test_user_field_passed_to_acompletion() -> None:
+    """When user is set, it must be forwarded to acompletion for provider-side tracking."""
+    mock_acompletion = AsyncMock(return_value=_fake_response())
+
+    with patch("nanobot.providers.litellm_provider.acompletion", mock_acompletion):
+        provider = LiteLLMProvider(
+            api_key="sk-or-test-key",
+            api_base="https://openrouter.ai/api/v1",
+            default_model="anthropic/claude-sonnet-4-5",
+            provider_name="openrouter",
+            user="user_123",
+        )
+        await provider.chat(
+            messages=[{"role": "user", "content": "hello"}],
+            model="anthropic/claude-sonnet-4-5",
+        )
+
+    call_kwargs = mock_acompletion.call_args.kwargs
+    assert call_kwargs["extra_body"]["user"] == "user_123", (
+        "user field must be passed via extra_body for provider-side usage tracking"
+    )
+
+
+@pytest.mark.asyncio
+async def test_user_field_omitted_when_not_set() -> None:
+    """When user is not set, user key must not appear in acompletion kwargs."""
+    mock_acompletion = AsyncMock(return_value=_fake_response())
+
+    with patch("nanobot.providers.litellm_provider.acompletion", mock_acompletion):
+        provider = LiteLLMProvider(
+            api_key="sk-or-test-key",
+            api_base="https://openrouter.ai/api/v1",
+            default_model="anthropic/claude-sonnet-4-5",
+            provider_name="openrouter",
+        )
+        await provider.chat(
+            messages=[{"role": "user", "content": "hello"}],
+            model="anthropic/claude-sonnet-4-5",
+        )
+
+    call_kwargs = mock_acompletion.call_args.kwargs
+    assert "extra_body" not in call_kwargs or "user" not in call_kwargs.get("extra_body", {}), (
+        "user key must not be sent when not configured"
+    )
