@@ -29,6 +29,7 @@ Architecture
 
 from __future__ import annotations
 
+from .conflicts import ConflictManager
 from .eval import EvalRunner
 from .event import KnowledgeTriple, MemoryEvent
 from .extractor import MemoryExtractor
@@ -53,6 +54,7 @@ from .reranker import CrossEncoderReranker
 from .store import MemoryStore
 
 __all__ = [
+    "ConflictManager",
     "EvalRunner",
     "KnowledgeTriple",
     "MemoryEvent",
