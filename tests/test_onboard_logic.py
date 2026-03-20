@@ -4,22 +4,38 @@ These tests focus on the business logic behind the onboard wizard,
 without testing the interactive UI components.
 """
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
-import pytest
 from pydantic import BaseModel, Field
+
+from nanobot.cli import onboard_wizard
 
 # Import functions to test
 from nanobot.cli.commands import _merge_missing_defaults
 from nanobot.cli.onboard_wizard import (
+    _BACK_PRESSED,
+    _configure_pydantic_model,
     _format_value,
     _get_field_display_name,
     _get_field_type_info,
+    run_onboard,
 )
+from nanobot.config.schema import Config
 from nanobot.utils.helpers import sync_workspace_templates
+
+
+class _SimpleDraftModel(BaseModel):
+    api_key: str = ""
+
+
+class _NestedDraftModel(BaseModel):
+    api_key: str = ""
+
+
+class _OuterDraftModel(BaseModel):
+    nested: _NestedDraftModel = Field(default_factory=_NestedDraftModel)
 
 
 class TestMergeMissingDefaults:
@@ -192,6 +208,7 @@ class TestGetFieldTypeInfo:
 
     def test_handles_none_annotation(self):
         """Field with None annotation defaults to str."""
+
         class Model(BaseModel):
             field: Any = None
 
@@ -371,3 +388,104 @@ class TestProviderChannelInfo:
         for provider_name, value in info.items():
             assert isinstance(value, tuple)
             assert len(value) == 4  # (display_name, needs_api_key, needs_api_base, env_var)
+
+
+class TestConfigurePydanticModelDrafts:
+    @staticmethod
+    def _patch_prompt_helpers(monkeypatch, tokens, text_value="secret"):
+        sequence = iter(tokens)
+
+        def fake_select(_prompt, choices, default=None):
+            token = next(sequence)
+            if token == "first":
+                return choices[0]
+            if token == "done":
+                return "✓ Done"
+            if token == "back":
+                return _BACK_PRESSED
+            return token
+
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select)
+        monkeypatch.setattr(onboard_wizard, "_show_config_panel", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(
+            onboard_wizard, "_input_with_existing", lambda *_args, **_kwargs: text_value
+        )
+
+    def test_discarding_section_keeps_original_model_unchanged(self, monkeypatch):
+        model = _SimpleDraftModel()
+        self._patch_prompt_helpers(monkeypatch, ["first", "back"])
+
+        result = _configure_pydantic_model(model, "Simple")
+
+        assert result is None
+        assert model.api_key == ""
+
+    def test_completing_section_returns_updated_draft(self, monkeypatch):
+        model = _SimpleDraftModel()
+        self._patch_prompt_helpers(monkeypatch, ["first", "done"])
+
+        result = _configure_pydantic_model(model, "Simple")
+
+        assert result is not None
+        updated = cast(_SimpleDraftModel, result)
+        assert updated.api_key == "secret"
+        assert model.api_key == ""
+
+    def test_nested_section_back_discards_nested_edits(self, monkeypatch):
+        model = _OuterDraftModel()
+        self._patch_prompt_helpers(monkeypatch, ["first", "first", "back", "done"])
+
+        result = _configure_pydantic_model(model, "Outer")
+
+        assert result is not None
+        updated = cast(_OuterDraftModel, result)
+        assert updated.nested.api_key == ""
+        assert model.nested.api_key == ""
+
+    def test_nested_section_done_commits_nested_edits(self, monkeypatch):
+        model = _OuterDraftModel()
+        self._patch_prompt_helpers(monkeypatch, ["first", "first", "done", "done"])
+
+        result = _configure_pydantic_model(model, "Outer")
+
+        assert result is not None
+        updated = cast(_OuterDraftModel, result)
+        assert updated.nested.api_key == "secret"
+        assert model.nested.api_key == ""
+
+
+class TestRunOnboardExitBehavior:
+    def test_main_menu_interrupt_can_discard_unsaved_session_changes(self, monkeypatch):
+        initial_config = Config()
+
+        responses = iter(
+            [
+                "🤖 Configure Agent Settings",
+                KeyboardInterrupt(),
+                "🗑️ Exit Without Saving",
+            ]
+        )
+
+        class FakePrompt:
+            def __init__(self, response):
+                self.response = response
+
+            def ask(self):
+                if isinstance(self.response, BaseException):
+                    raise self.response
+                return self.response
+
+        def fake_select(*_args, **_kwargs):
+            return FakePrompt(next(responses))
+
+        def fake_configure_agents(config):
+            config.agents.defaults.model = "test/provider-model"
+
+        monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
+        monkeypatch.setattr(onboard_wizard.questionary, "select", fake_select)
+        monkeypatch.setattr(onboard_wizard, "_configure_agents", fake_configure_agents)
+
+        result = run_onboard(initial_config=initial_config)
+
+        assert result.should_save is False
+        assert result.config.model_dump(by_alias=True) == initial_config.model_dump(by_alias=True)

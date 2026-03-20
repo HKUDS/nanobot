@@ -246,34 +246,23 @@ class AgentLoop:
                     thinking_blocks=response.thinking_blocks,
                 )
 
-                for tool_call in response.tool_calls:
-                    tools_used.append(tool_call.name)
-                    args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                    logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
-                    
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                for tc in response.tool_calls:
+                    tools_used.append(tc.name)
+                    args_str = json.dumps(tc.arguments, ensure_ascii=False)
+                    logger.info("Tool call: {}({})", tc.name, args_str[:200])
 
-                    # Record message tool usage in corresponding session
-                    if tool_call.name == "message" and result is not None:
-                        content = tool_call.arguments.get("content")
-                        if content:
+                # Execute all tool calls concurrently — the LLM batches
+                # independent calls in a single response on purpose.
+                # return_exceptions=True ensures all results are collected
+                # even if one tool is cancelled or raises BaseException.
+                results = await asyncio.gather(*(
+                    self.tools.execute(tc.name, tc.arguments)
+                    for tc in response.tool_calls
+                ), return_exceptions=True)
 
-                            # Find the session id of the session the message was sent to (wasn't available as tool call argument, for some reason)
-                            match = re.search(r"Message sent to (\S+)", result) # Example: Message sent to telegram:123456789 with 1 attachments
-                            finalMessageSessionId = match.group(1) if match else None
-
-                            if (
-                                finalMessageSessionId is not None and
-                                any(s.get("key") == finalMessageSessionId for s in self.sessions.list_sessions())
-                            ):
-                                finalMessageSession = self.sessions.get_or_create(finalMessageSessionId)
-                            else:
-                                finalMessageSession = session # If the session id is not found, use the current session as fallback
-                            
-                            if finalMessageSession is not None:
-                                finalMessageSession.add_message("assistant", content, via_tool="message")
-                                self.sessions.save(finalMessageSession)
-                    
+                for tool_call, result in zip(response.tool_calls, results):
+                    if isinstance(result, BaseException):
+                        result = f"Error: {type(result).__name__}: {result}"
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )

@@ -2,7 +2,8 @@
 
 import json
 import types
-from typing import Any, Callable, get_args, get_origin
+from dataclasses import dataclass
+from typing import Any, get_args, get_origin
 
 import questionary
 from loguru import logger
@@ -20,6 +21,15 @@ from nanobot.config.loader import get_config_path, load_config
 from nanobot.config.schema import Config
 
 console = Console()
+
+
+@dataclass
+class OnboardResult:
+    """Result of an onboarding session."""
+
+    config: Config
+    should_save: bool
+
 
 # --- Field Hints for Select Fields ---
 # Maps field names to (choices, hint_text)
@@ -128,10 +138,12 @@ def _select_with_back(
         event.app.exit()
 
     # Style
-    style = Style.from_dict({
-        "selected": "fg:green bold",
-        "question": "fg:cyan",
-    })
+    style = Style.from_dict(
+        {
+            "selected": "fg:green bold",
+            "question": "fg:cyan",
+        }
+    )
 
     app = Application(layout=layout, key_bindings=bindings, style=style)
     try:
@@ -141,6 +153,7 @@ def _select_with_back(
         return None
 
     return state["result"]
+
 
 # --- Type Introspection ---
 
@@ -268,9 +281,7 @@ def _show_main_menu_header() -> None:
     # Use Align.CENTER for the single line of text
     from rich.align import Align
 
-    console.print(
-        Align.center(f"{__logo__} [bold cyan]nanobot[{__version__}][/bold cyan]")
-    )
+    console.print(Align.center(f"{__logo__} [bold cyan]nanobot[{__version__}][/bold cyan]"))
     console.print()
 
 
@@ -329,9 +340,7 @@ def _input_text(display_name: str, current: Any, field_type: str) -> Any:
     return value
 
 
-def _input_with_existing(
-    display_name: str, current: Any, field_type: str
-) -> Any:
+def _input_with_existing(display_name: str, current: Any, field_type: str) -> Any:
     """Handle input with 'keep existing' option for non-empty values."""
     has_existing = current is not None and current != "" and current != {} and current != []
 
@@ -357,12 +366,8 @@ def _get_current_provider(model: BaseModel) -> str:
     return "auto"
 
 
-def _input_model_with_autocomplete(
-    display_name: str, current: Any, provider: str
-) -> str | None:
-    """Get model input with autocomplete suggestions.
-
-    """
+def _input_model_with_autocomplete(display_name: str, current: Any, provider: str) -> str | None:
+    """Get model input with autocomplete suggestions."""
     from prompt_toolkit.completion import Completer, Completion
 
     default = str(current) if current else ""
@@ -431,7 +436,9 @@ def _input_context_window_with_recommendation(
         context_limit = get_model_context_limit(model_name, provider)
 
         if context_limit:
-            console.print(f"[green]✓ Recommended context window: {format_token_count(context_limit)} tokens[/green]")
+            console.print(
+                f"[green]✓ Recommended context window: {format_token_count(context_limit)} tokens[/green]"
+            )
             return context_limit
         else:
             console.print("[yellow]⚠ Could not fetch model info, please enter manually[/yellow]")
@@ -458,83 +465,88 @@ def _configure_pydantic_model(
     display_name: str,
     *,
     skip_fields: set[str] | None = None,
-    finalize_hook: Callable | None = None,
-) -> None:
-    """Configure a Pydantic model interactively."""
+) -> BaseModel | None:
+    """Configure a Pydantic model interactively.
+
+    Returns the updated model only when the user explicitly selects "Done".
+    Back and cancel actions discard the section draft.
+    """
     skip_fields = skip_fields or set()
+    working_model = model.model_copy(deep=True)
 
     fields = []
-    for field_name, field_info in type(model).model_fields.items():
+    for field_name, field_info in type(working_model).model_fields.items():
         if field_name in skip_fields:
             continue
         fields.append((field_name, field_info))
 
     if not fields:
         console.print(f"[dim]{display_name}: No configurable fields[/dim]")
-        return
+        return working_model
 
     def get_choices() -> list[str]:
         choices = []
         for field_name, field_info in fields:
-            value = getattr(model, field_name, None)
+            value = getattr(working_model, field_name, None)
             display = _get_field_display_name(field_name, field_info)
             formatted = _format_value(value, rich=False)
             choices.append(f"{display}: {formatted}")
         return choices + ["✓ Done"]
 
     while True:
-        _show_config_panel(display_name, model, fields)
+        _show_config_panel(display_name, working_model, fields)
         choices = get_choices()
 
         answer = _select_with_back("Select field to configure:", choices)
 
-        if answer is _BACK_PRESSED:
-            # User pressed Escape or Left arrow - go back
-            if finalize_hook:
-                finalize_hook(model)
-            break
+        if answer is _BACK_PRESSED or answer is None:
+            return None
 
-        if answer == "✓ Done" or answer is None:
-            if finalize_hook:
-                finalize_hook(model)
-            break
+        if answer == "✓ Done":
+            return working_model
 
         field_idx = next((i for i, c in enumerate(choices) if c == answer), -1)
         if field_idx < 0 or field_idx >= len(fields):
-            break
+            return None
 
         field_name, field_info = fields[field_idx]
-        current_value = getattr(model, field_name, None)
+        current_value = getattr(working_model, field_name, None)
         field_type, _ = _get_field_type_info(field_info)
         field_display = _get_field_display_name(field_name, field_info)
 
         if field_type == "model":
             nested_model = current_value
+            created_nested_model = nested_model is None
             if nested_model is None:
                 _, nested_cls = _get_field_type_info(field_info)
                 if nested_cls:
                     nested_model = nested_cls()
-                    setattr(model, field_name, nested_model)
 
             if nested_model and isinstance(nested_model, BaseModel):
-                _configure_pydantic_model(nested_model, field_display)
+                updated_nested_model = _configure_pydantic_model(nested_model, field_display)
+                if updated_nested_model is not None:
+                    setattr(working_model, field_name, updated_nested_model)
+                elif created_nested_model:
+                    setattr(working_model, field_name, None)
             continue
 
         # Special handling for model field (autocomplete)
         if field_name == "model":
-            provider = _get_current_provider(model)
+            provider = _get_current_provider(working_model)
             new_value = _input_model_with_autocomplete(field_display, current_value, provider)
             if new_value is not None and new_value != current_value:
-                setattr(model, field_name, new_value)
+                setattr(working_model, field_name, new_value)
                 # Auto-fill context_window_tokens if it's at default value
-                _try_auto_fill_context_window(model, new_value)
+                _try_auto_fill_context_window(working_model, new_value)
             continue
 
         # Special handling for context_window_tokens field
         if field_name == "context_window_tokens":
-            new_value = _input_context_window_with_recommendation(field_display, current_value, model)
+            new_value = _input_context_window_with_recommendation(
+                field_display, current_value, working_model
+            )
             if new_value is not None:
-                setattr(model, field_name, new_value)
+                setattr(working_model, field_name, new_value)
             continue
 
         # Special handling for select fields with hints (e.g., reasoning_effort)
@@ -542,23 +554,25 @@ def _configure_pydantic_model(
             choices_list, hint = _SELECT_FIELD_HINTS[field_name]
             select_choices = choices_list + ["(clear/unset)"]
             console.print(f"[dim]  Hint: {hint}[/dim]")
-            new_value = _select_with_back(field_display, select_choices, default=current_value or select_choices[0])
+            new_value = _select_with_back(
+                field_display, select_choices, default=current_value or select_choices[0]
+            )
             if new_value is _BACK_PRESSED:
                 continue
             if new_value == "(clear/unset)":
-                setattr(model, field_name, None)
+                setattr(working_model, field_name, None)
             elif new_value is not None:
-                setattr(model, field_name, new_value)
+                setattr(working_model, field_name, new_value)
             continue
 
         if field_type == "bool":
             new_value = _input_bool(field_display, current_value)
             if new_value is not None:
-                setattr(model, field_name, new_value)
+                setattr(working_model, field_name, new_value)
         else:
             new_value = _input_with_existing(field_display, current_value, field_type)
             if new_value is not None:
-                setattr(model, field_name, new_value)
+                setattr(working_model, field_name, new_value)
 
 
 def _try_auto_fill_context_window(model: BaseModel, new_model_name: str) -> None:
@@ -589,7 +603,9 @@ def _try_auto_fill_context_window(model: BaseModel, new_model_name: str) -> None
 
     if context_limit:
         setattr(model, "context_window_tokens", context_limit)
-        console.print(f"[green]✓ Auto-filled context window: {format_token_count(context_limit)} tokens[/green]")
+        console.print(
+            f"[green]✓ Auto-filled context window: {format_token_count(context_limit)} tokens[/green]"
+        )
     else:
         console.print("[dim]ℹ Could not auto-fill context window (model not in database)[/dim]")
 
@@ -637,10 +653,12 @@ def _configure_provider(config: Config, provider_name: str) -> None:
     if default_api_base and not provider_config.api_base:
         provider_config.api_base = default_api_base
 
-    _configure_pydantic_model(
+    updated_provider = _configure_pydantic_model(
         provider_config,
         display_name,
     )
+    if updated_provider is not None:
+        setattr(config.providers, provider_name, updated_provider)
 
 
 def _configure_providers(config: Config) -> None:
@@ -747,15 +765,13 @@ def _configure_channel(config: Config, channel_name: str) -> None:
 
     model = config_cls.model_validate(channel_dict) if channel_dict else config_cls()
 
-    def finalize(model: BaseModel):
-        new_dict = model.model_dump(by_alias=True, exclude_none=True)
-        setattr(config.channels, channel_name, new_dict)
-
-    _configure_pydantic_model(
+    updated_channel = _configure_pydantic_model(
         model,
         display_name,
-        finalize_hook=finalize,
     )
+    if updated_channel is not None:
+        new_dict = updated_channel.model_dump(by_alias=True, exclude_none=True)
+        setattr(config.channels, channel_name, new_dict)
 
 
 def _configure_channels(config: Config) -> None:
@@ -798,13 +814,25 @@ def _configure_general_settings(config: Config, section: str) -> None:
     model, display_name = section_map[section]
 
     if section == "Tools":
-        _configure_pydantic_model(
+        updated_model = _configure_pydantic_model(
             model,
             display_name,
             skip_fields={"mcp_servers"},
         )
     else:
-        _configure_pydantic_model(model, display_name)
+        updated_model = _configure_pydantic_model(model, display_name)
+
+    if updated_model is None:
+        return
+
+    if section == "Agent Settings":
+        config.agents.defaults = updated_model
+    elif section == "Gateway":
+        config.gateway = updated_model
+    elif section == "Tools":
+        config.tools = updated_model
+    elif section == "Channel Common":
+        config.channels = updated_model
 
 
 def _configure_agents(config: Config) -> None:
@@ -938,7 +966,35 @@ def _show_summary(config: Config) -> None:
 # --- Main Entry Point ---
 
 
-def run_onboard(initial_config: Config | None = None) -> Config:
+def _has_unsaved_changes(original: Config, current: Config) -> bool:
+    """Return True when the onboarding session has committed changes."""
+    return original.model_dump(by_alias=True) != current.model_dump(by_alias=True)
+
+
+def _prompt_main_menu_exit(has_unsaved_changes: bool) -> str:
+    """Resolve how to leave the main menu."""
+    if not has_unsaved_changes:
+        return "discard"
+
+    answer = questionary.select(
+        "You have unsaved changes. What would you like to do?",
+        choices=[
+            "💾 Save and Exit",
+            "🗑️ Exit Without Saving",
+            "↩ Resume Editing",
+        ],
+        default="↩ Resume Editing",
+        qmark="→",
+    ).ask()
+
+    if answer == "💾 Save and Exit":
+        return "save"
+    if answer == "🗑️ Exit Without Saving":
+        return "discard"
+    return "resume"
+
+
+def run_onboard(initial_config: Config | None = None) -> OnboardResult:
     """Run the interactive onboarding questionnaire.
 
     Args:
@@ -946,18 +1002,21 @@ def run_onboard(initial_config: Config | None = None) -> Config:
                        If None, loads from config file or creates new default.
     """
     if initial_config is not None:
-        config = initial_config
+        base_config = initial_config.model_copy(deep=True)
     else:
         config_path = get_config_path()
         if config_path.exists():
-            config = load_config()
+            base_config = load_config()
         else:
-            config = Config()
+            base_config = Config()
+
+    original_config = base_config.model_copy(deep=True)
+    config = base_config.model_copy(deep=True)
 
     while True:
-        try:
-            _show_main_menu_header()
+        _show_main_menu_header()
 
+        try:
             answer = questionary.select(
                 "What would you like to configure?",
                 choices=[
@@ -969,30 +1028,36 @@ def run_onboard(initial_config: Config | None = None) -> Config:
                     "🔧 Configure Tools",
                     "📋 View Configuration Summary",
                     "💾 Save and Exit",
+                    "🗑️ Exit Without Saving",
                 ],
                 qmark="→",
             ).ask()
-
-            if answer == "🔌 Configure LLM Provider":
-                _configure_providers(config)
-            elif answer == "💬 Configure Chat Channel":
-                _configure_channels(config)
-            elif answer == "⚙️ Configure Channel Common":
-                _configure_general_settings(config, "Channel Common")
-            elif answer == "🤖 Configure Agent Settings":
-                _configure_agents(config)
-            elif answer == "🌐 Configure Gateway":
-                _configure_gateway(config)
-            elif answer == "🔧 Configure Tools":
-                _configure_tools(config)
-            elif answer == "📋 View Configuration Summary":
-                _show_summary(config)
-            elif answer == "💾 Save and Exit":
-                break
         except KeyboardInterrupt:
-            console.print(
-                "\n\n[yellow]Operation cancelled. Use 'Save and Exit' to save changes.[/yellow]"
-            )
-            break
+            answer = None
 
-    return config
+        if answer is None:
+            action = _prompt_main_menu_exit(_has_unsaved_changes(original_config, config))
+            if action == "save":
+                return OnboardResult(config=config, should_save=True)
+            if action == "discard":
+                return OnboardResult(config=original_config, should_save=False)
+            continue
+
+        if answer == "🔌 Configure LLM Provider":
+            _configure_providers(config)
+        elif answer == "💬 Configure Chat Channel":
+            _configure_channels(config)
+        elif answer == "⚙️ Configure Channel Common":
+            _configure_general_settings(config, "Channel Common")
+        elif answer == "🤖 Configure Agent Settings":
+            _configure_agents(config)
+        elif answer == "🌐 Configure Gateway":
+            _configure_gateway(config)
+        elif answer == "🔧 Configure Tools":
+            _configure_tools(config)
+        elif answer == "📋 View Configuration Summary":
+            _show_summary(config)
+        elif answer == "💾 Save and Exit":
+            return OnboardResult(config=config, should_save=True)
+        elif answer == "🗑️ Exit Without Saving":
+            return OnboardResult(config=original_config, should_save=False)
