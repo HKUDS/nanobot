@@ -125,7 +125,8 @@ class TestPinnedSectionProtection:
         assert "Old." not in result
         assert "Other." in result
 
-    def test_apply_save_memory_preserves_pinned(self, tmp_path: Path) -> None:
+    def test_apply_save_memory_ignores_memory_update(self, tmp_path: Path) -> None:
+        """LAN-206: _apply_save_memory_tool_result no longer writes MEMORY.md."""
         store = MemoryStore(tmp_path)
         current = (
             "# Memory\n<!-- user-pinned -->\nDO NOT DELETE\n<!-- end-user-pinned -->\nOld summary."
@@ -134,9 +135,23 @@ class TestPinnedSectionProtection:
             args={"memory_update": "# Memory\nNew summary from LLM."},
             current_memory=current,
         )
+        # memory_update should be ignored — MEMORY.md is not written
+        written = store.read_long_term()
+        assert written == ""
+
+    def test_rebuild_memory_snapshot_preserves_pinned(self, tmp_path: Path) -> None:
+        """LAN-206: rebuild_memory_snapshot preserves user-pinned sections."""
+        store = MemoryStore(tmp_path)
+        pinned_content = (
+            "# Memory\n"
+            "<!-- user-pinned -->\nDO NOT DELETE\n<!-- end-user-pinned -->\n"
+            "Old summary.\n"
+        )
+        store.write_long_term(pinned_content)
+        snapshot = store.rebuild_memory_snapshot(write=True)
+        assert "DO NOT DELETE" in snapshot
         written = store.read_long_term()
         assert "DO NOT DELETE" in written
-        assert "New summary from LLM." in written
 
 
 # ---------------------------------------------------------------------------

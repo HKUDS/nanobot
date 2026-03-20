@@ -207,7 +207,8 @@ class TestConsolidationHelpers:
             args={"history_entry": {"x": 1}, "memory_update": {"y": 2}}, current_memory=""
         )
         assert store.history_file.exists()
-        assert store.memory_file.exists()
+        # LAN-206: memory_update is ignored; MEMORY.md not written by this method
+        assert not store.memory_file.exists()
 
     async def test_consolidate_no_tool_call(self, tmp_path: Path) -> None:
         store = _store(tmp_path)

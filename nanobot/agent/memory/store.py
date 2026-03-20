@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
 import sqlite3
 import time
@@ -48,6 +47,7 @@ from .profile import ProfileManager
 from .reranker import DEFAULT_MODEL as _DEFAULT_RERANKER_MODEL
 from .reranker import CrossEncoderReranker
 from .retrieval import _local_retrieve, _topic_fallback_retrieve
+from .retrieval_planner import RetrievalPlanner
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -124,6 +124,9 @@ class MemoryStore:
         # Conflict manager (LAN-203) — delegates conflict resolution to ConflictManager.
         self.conflict_mgr = ConflictManager(self.profile_mgr, self.mem0)
         self.conflict_mgr._store = self
+
+        # Retrieval planner (LAN-207) — intent classification + policy + routing.
+        self._planner = RetrievalPlanner()
 
         # _ensure_vector_health() moved to async ensure_health() — called from
         # AgentLoop.run() to avoid blocking the event loop at instantiation (LAN-101).
@@ -490,189 +493,19 @@ class MemoryStore:
         lowered = str(text or "").lower()
         return any(needle in lowered for needle in needles)
 
+    # ── Thin wrappers delegating to RetrievalPlanner (LAN-207) ──────────
+
     @staticmethod
     def _infer_retrieval_intent(query: str) -> str:
-        text = str(query or "").strip().lower()
-        if not text:
-            return "fact_lookup"
-
-        debug_markers = (
-            "what happened",
-            "last time",
-            "failed",
-            "failure",
-            "error",
-            "incident",
-            "debug",
-            "timeline",
-            "yesterday",
-            "what did we try",
-            "correction",
-            "corrected",
-            "post-mortem",
-            "postmortem",
-            "root cause",
-            "outage",
-        )
-        reflection_markers = (
-            "reflect",
-            "reflection",
-            "lesson",
-            "learned",
-            "retrospective",
-            "insight",
-            "insights",
-        )
-        planning_markers = (
-            "plan",
-            "next step",
-            "roadmap",
-            "todo",
-            "should we",
-            "what should",
-            "task",
-            "tasks",
-            "decision",
-            "decisions",
-            "in progress",
-            "still open",
-            "resolved",
-            "completed",
-            "closed",
-            "project",
-            "projects",
-            "active",
-        )
-        architecture_markers = (
-            "architecture",
-            "architectural",
-            "design decision",
-            "memory architecture",
-        )
-        constraints_markers = ("constraint", "must", "cannot", "before running commands")
-        conflict_markers = ("conflict", "needs_user", "unresolved decision")
-        rollout_markers = ("rollout", "router", "shadow mode", "memory behavior enabled")
-
-        if any(marker in text for marker in reflection_markers):
-            return "reflection"
-        if any(marker in text for marker in rollout_markers):
-            return "rollout_status"
-        if any(marker in text for marker in conflict_markers):
-            return "conflict_review"
-        if any(marker in text for marker in constraints_markers):
-            return "constraints_lookup"
-        if any(marker in text for marker in debug_markers):
-            return "debug_history"
-        if any(marker in text for marker in architecture_markers):
-            return "planning"
-        if any(marker in text for marker in planning_markers):
-            return "planning"
-        return "fact_lookup"
+        return RetrievalPlanner.infer_retrieval_intent(query)
 
     @staticmethod
     def _retrieval_policy(intent: str) -> dict[str, Any]:
-        policy = {
-            "fact_lookup": {
-                "candidate_multiplier": 3,
-                "half_life_days": 120.0,
-                "type_boost": {"semantic": 0.18, "episodic": -0.05, "reflection": -0.12},
-                "fallback_topics": [
-                    "knowledge",
-                    "user_preference",
-                    "relationship",
-                    "profile_update",
-                ],
-                "fallback_types": ["semantic"],
-            },
-            "debug_history": {
-                "candidate_multiplier": 4,
-                "half_life_days": 21.0,
-                "type_boost": {"semantic": -0.04, "episodic": 0.22, "reflection": -0.1},
-                "fallback_topics": ["infra", "user_correction"],
-                "fallback_types": ["episodic"],
-            },
-            "planning": {
-                "candidate_multiplier": 3,
-                "half_life_days": 45.0,
-                "type_boost": {"semantic": 0.1, "episodic": 0.08, "reflection": -0.06},
-                "fallback_topics": ["task_progress", "decision_log", "project"],
-                "fallback_types": ["episodic"],
-            },
-            "reflection": {
-                "candidate_multiplier": 3,
-                "half_life_days": 60.0,
-                "type_boost": {"semantic": 0.03, "episodic": -0.03, "reflection": 0.2},
-                "fallback_topics": ["reflection"],
-                "fallback_types": ["reflection"],
-            },
-            "constraints_lookup": {
-                "candidate_multiplier": 4,
-                "half_life_days": 180.0,
-                "type_boost": {"semantic": 0.24, "episodic": -0.1, "reflection": -0.14},
-                "fallback_topics": ["constraint"],
-                "fallback_types": ["semantic"],
-            },
-            "conflict_review": {
-                "candidate_multiplier": 4,
-                "half_life_days": 90.0,
-                "type_boost": {"semantic": 0.05, "episodic": 0.15, "reflection": -0.08},
-                "fallback_topics": ["decision_log"],
-                "fallback_types": ["episodic"],
-            },
-            "rollout_status": {
-                "candidate_multiplier": 2,
-                "half_life_days": 365.0,
-                "type_boost": {"semantic": 0.3, "episodic": -0.16, "reflection": -0.2},
-                "fallback_topics": ["rollout"],
-                "fallback_types": ["semantic"],
-            },
-        }
-        return policy.get(intent, policy["fact_lookup"])
+        return RetrievalPlanner.retrieval_policy(intent)
 
     @staticmethod
     def _query_routing_hints(query: str) -> dict[str, Any]:
-        text = str(query or "").strip().lower()
-        open_markers = (
-            "still open",
-            "open task",
-            "open tasks",
-            "pending",
-            "in progress",
-            "unresolved",
-            "needs user",
-        )
-        resolved_markers = ("resolved", "completed", "closed", "finished", "done")
-        planning_markers = ("plan", "next step", "roadmap", "todo", "planning")
-        architecture_markers = (
-            "architecture",
-            "architectural",
-            "design decision",
-            "memory architecture",
-        )
-        task_decision_markers = ("task", "tasks", "decision", "decisions")
-
-        requires_open = any(marker in text for marker in open_markers)
-        requires_resolved = any(marker in text for marker in resolved_markers)
-        if requires_open and requires_resolved:
-            # If query mixes both terms, prefer broader task/decision focus without status hard-filter.
-            requires_open = False
-            requires_resolved = False
-
-        focus_architecture = any(marker in text for marker in architecture_markers)
-        focus_planning = focus_architecture or any(marker in text for marker in planning_markers)
-        focus_task_decision = (
-            requires_open
-            or requires_resolved
-            or any(marker in text for marker in task_decision_markers)
-        )
-
-        return {
-            "requires_open": requires_open,
-            "requires_resolved": requires_resolved,
-            "focus_planning": focus_planning,
-            "focus_architecture": focus_architecture,
-            "focus_task_decision": focus_task_decision,
-        }
+        return RetrievalPlanner.query_routing_hints(query)
 
     def _status_matches_query_hint(
         self,
@@ -682,55 +515,18 @@ class MemoryStore:
         requires_open: bool,
         requires_resolved: bool,
     ) -> bool:
-        status_norm = str(status or "").strip().lower()
-        summary_text = str(summary or "")
-        open_statuses = {"open", "in_progress", "pending", "active", "needs_user"}
-        resolved_statuses = {"resolved", "completed", "closed", "done", "superseded"}
-        summary_is_resolved = self._is_resolved_task_or_decision(summary_text)
-
-        if requires_open:
-            if status_norm in resolved_statuses:
-                return False
-            if status_norm in open_statuses:
-                return True
-            return not summary_is_resolved
-        if requires_resolved:
-            if status_norm in resolved_statuses:
-                return True
-            if status_norm in open_statuses:
-                return False
-            return summary_is_resolved
-        return True
+        return RetrievalPlanner.status_matches_query_hint(
+            status=status,
+            summary=summary,
+            requires_open=requires_open,
+            requires_resolved=requires_resolved,
+        )
 
     def _memory_type_for_item(self, item: dict[str, Any]) -> str:
-        memory_type = str(item.get("memory_type", "")).strip().lower()
-        if memory_type in self.MEMORY_TYPES:
-            return memory_type
-        # Check metadata as fallback for raw JSONL events.
-        meta = item.get("metadata")
-        if isinstance(meta, dict):
-            meta_type = str(meta.get("memory_type", "")).strip().lower()
-            if meta_type in self.MEMORY_TYPES:
-                return meta_type
-        event_type = str(item.get("type", "")).strip().lower()
-        if event_type in {"task", "decision"}:
-            return "episodic"
-        if event_type in {"preference", "fact", "constraint", "relationship"}:
-            return "semantic"
-        return "episodic"
+        return RetrievalPlanner.memory_type_for_item(item)
 
     def _recency_signal(self, timestamp: str, *, half_life_days: float) -> float:
-        ts = self._to_datetime(timestamp)
-        if ts is None:
-            return 0.0
-        now = datetime.now(timezone.utc)
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-        age_days = max((now - ts).total_seconds() / 86400.0, 0.0)
-        if half_life_days <= 0:
-            return 0.0
-        decay = math.exp(-math.log(2) * age_days / half_life_days)
-        return max(min(decay, 1.0), 0.0)
+        return RetrievalPlanner.recency_signal(timestamp, half_life_days=half_life_days)
 
     def _default_topic_for_event_type(self, event_type: str) -> str:
         topic_by_event_type = {
@@ -1982,16 +1778,12 @@ class MemoryStore:
         # Local BM25 retrieval with intent routing when mem0 is unavailable.
         if not self.mem0.enabled:
             events = self.read_events()
-            intent = self._infer_retrieval_intent(query)
-            policy = self._retrieval_policy(intent)
+            plan = self._planner.plan(query)
+            policy = plan.policy
             candidate_k = max(1, min(top_k * int(policy.get("candidate_multiplier", 3)), 60))
             half_life = recency_half_life_days or float(policy.get("half_life_days", 60.0))
 
-            # Detect queries about superseded/stale items.
-            q_lower = str(query or "").lower()
-            wants_superseded = any(
-                m in q_lower for m in ("supersede", "stale", "older fact", "replaced")
-            )
+            wants_superseded = plan.include_superseded
 
             # Graph query augmentation: expand search terms with related entities.
             augmented_query = query
@@ -2158,8 +1950,13 @@ class MemoryStore:
         type_separation_enabled: bool,
         reflection_enabled: bool,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        intent = self._infer_retrieval_intent(query) if router_enabled else "fact_lookup"
-        policy = self._retrieval_policy(intent)
+        planner = RetrievalPlanner(
+            router_enabled=router_enabled,
+            type_separation_enabled=type_separation_enabled,
+        )
+        plan = planner.plan(query)
+        intent = plan.intent
+        policy = plan.policy
         candidate_multiplier = (
             max(int(policy.get("candidate_multiplier", 3)), 1) if router_enabled else 1
         )
@@ -2319,7 +2116,7 @@ class MemoryStore:
         adjusted: list[dict[str, Any]] = []
         reflection_filtered_non_reflection_intent = 0
         reflection_filtered_no_evidence = 0
-        routing_hints = self._query_routing_hints(query)
+        routing_hints = plan.routing_hints
         for item in retrieved:
             event_type = str(item.get("type", "fact"))
             memory_type = self._memory_type_for_item(item)
@@ -3219,6 +3016,10 @@ class MemoryStore:
         profile = self.read_profile()
         events = self.read_events(limit=max_events)
 
+        # Preserve user-pinned sections across rebuilds (LAN-199 / LAN-206).
+        existing_memory = self.read_long_term()
+        pinned = self._extract_pinned_section(existing_memory) if existing_memory else None
+
         parts = ["# Memory", ""]
         section_lines = self._profile_section_lines(profile, max_items_per_section=8)
         if section_lines:
@@ -3238,6 +3039,10 @@ class MemoryStore:
                 ts = str(event.get("timestamp", ""))[:16]
                 parts.append(f"- [{ts}] ({event.get('type', 'fact')}) {event.get('summary', '')}")
         snapshot = "\n".join(parts).strip() + "\n"
+
+        if pinned:
+            snapshot = self._restore_pinned_section(snapshot, pinned)
+
         if write:
             self.write_long_term(snapshot)
         return snapshot
@@ -3350,7 +3155,7 @@ class MemoryStore:
 
     @staticmethod
     def _build_consolidation_prompt(current_memory: str, lines: list[str]) -> str:
-        return f"""Process this conversation and call the save_memory tool with your consolidation.
+        return f"""Process this conversation and call the save_memory tool with a history_entry summarizing key events, decisions, and topics.
 
 ## Current Long-term Memory
 {current_memory or "(empty)"}
@@ -3395,15 +3200,8 @@ class MemoryStore:
             if not isinstance(entry, str):
                 entry = json.dumps(entry, ensure_ascii=False)
             self.append_history(entry)
-        if update := args.get("memory_update"):
-            if not isinstance(update, str):
-                update = json.dumps(update, ensure_ascii=False)
-            # Preserve user-pinned sections during consolidation (LAN-199).
-            pinned = self._extract_pinned_section(current_memory)
-            if pinned:
-                update = self._restore_pinned_section(update, pinned)
-            if update != current_memory:
-                self.write_long_term(update)
+        # memory_update is intentionally ignored (LAN-206): MEMORY.md is now a
+        # pure projection rebuilt deterministically via rebuild_memory_snapshot().
 
     def _finalize_consolidation(
         self, session: Session, *, archive_all: bool, keep_count: int
@@ -3499,8 +3297,8 @@ class MemoryStore:
             if profile_added > 0:
                 self.auto_resolve_conflicts(max_items=10)
 
-            # Keep LLM-managed MEMORY.md content stable; snapshot can be generated on-demand.
-            self.rebuild_memory_snapshot(write=False)
+            # MEMORY.md is a pure projection from profile + events (LAN-206).
+            self.rebuild_memory_snapshot(write=True)
 
             if self.mem0.enabled:
                 for m in old_messages:
