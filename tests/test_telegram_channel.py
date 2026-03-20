@@ -18,6 +18,10 @@ class _FakeHTTPXRequest:
         self.kwargs = kwargs
         self.__class__.instances.append(self)
 
+    @classmethod
+    def clear(cls) -> None:
+        cls.instances.clear()
+
 
 class _FakeUpdater:
     def __init__(self, on_start_polling) -> None:
@@ -30,6 +34,7 @@ class _FakeUpdater:
 class _FakeBot:
     def __init__(self) -> None:
         self.sent_messages: list[dict] = []
+        self.sent_media: list[dict] = []
         self.get_me_calls = 0
 
     async def get_me(self):
@@ -41,6 +46,18 @@ class _FakeBot:
 
     async def send_message(self, **kwargs) -> None:
         self.sent_messages.append(kwargs)
+
+    async def send_photo(self, **kwargs) -> None:
+        self.sent_media.append({"kind": "photo", **kwargs})
+
+    async def send_voice(self, **kwargs) -> None:
+        self.sent_media.append({"kind": "voice", **kwargs})
+
+    async def send_audio(self, **kwargs) -> None:
+        self.sent_media.append({"kind": "audio", **kwargs})
+
+    async def send_document(self, **kwargs) -> None:
+        self.sent_media.append({"kind": "document", **kwargs})
 
     async def send_chat_action(self, **kwargs) -> None:
         pass
@@ -131,7 +148,8 @@ def _make_telegram_update(
 
 
 @pytest.mark.asyncio
-async def test_start_uses_request_proxy_without_builder_proxy(monkeypatch) -> None:
+async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
+    _FakeHTTPXRequest.clear()
     config = TelegramConfig(
         enabled=True,
         token="123:abc",
@@ -151,10 +169,106 @@ async def test_start_uses_request_proxy_without_builder_proxy(monkeypatch) -> No
 
     await channel.start()
 
-    assert len(_FakeHTTPXRequest.instances) == 1
-    assert _FakeHTTPXRequest.instances[0].kwargs["proxy"] == config.proxy
-    assert builder.request_value is _FakeHTTPXRequest.instances[0]
-    assert builder.get_updates_request_value is _FakeHTTPXRequest.instances[0]
+    assert len(_FakeHTTPXRequest.instances) == 2
+    api_req, poll_req = _FakeHTTPXRequest.instances
+    assert api_req.kwargs["proxy"] == config.proxy
+    assert poll_req.kwargs["proxy"] == config.proxy
+    assert api_req.kwargs["connection_pool_size"] == 32
+    assert poll_req.kwargs["connection_pool_size"] == 4
+    assert builder.request_value is api_req
+    assert builder.get_updates_request_value is poll_req
+
+
+@pytest.mark.asyncio
+async def test_start_respects_custom_pool_config(monkeypatch) -> None:
+    _FakeHTTPXRequest.clear()
+    config = TelegramConfig(
+        enabled=True,
+        token="123:abc",
+        allow_from=["*"],
+        connection_pool_size=32,
+        pool_timeout=10.0,
+    )
+    bus = MessageBus()
+    channel = TelegramChannel(config, bus)
+    app = _FakeApp(lambda: setattr(channel, "_running", False))
+    builder = _FakeBuilder(app)
+
+    monkeypatch.setattr("nanobot.channels.telegram.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.Application",
+        SimpleNamespace(builder=lambda: builder),
+    )
+
+    await channel.start()
+
+    api_req = _FakeHTTPXRequest.instances[0]
+    poll_req = _FakeHTTPXRequest.instances[1]
+    assert api_req.kwargs["connection_pool_size"] == 32
+    assert api_req.kwargs["pool_timeout"] == 10.0
+    assert poll_req.kwargs["pool_timeout"] == 10.0
+
+
+@pytest.mark.asyncio
+async def test_send_text_retries_on_timeout() -> None:
+    """_send_text retries on TimedOut before succeeding."""
+    from telegram.error import TimedOut
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    call_count = 0
+    original_send = channel._app.bot.send_message
+
+    async def flaky_send(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 2:
+            raise TimedOut()
+        return await original_send(**kwargs)
+
+    channel._app.bot.send_message = flaky_send
+
+    import nanobot.channels.telegram as tg_mod
+    orig_delay = tg_mod._SEND_RETRY_BASE_DELAY
+    tg_mod._SEND_RETRY_BASE_DELAY = 0.01
+    try:
+        await channel._send_text(123, "hello", None, {})
+    finally:
+        tg_mod._SEND_RETRY_BASE_DELAY = orig_delay
+
+    assert call_count == 3
+    assert len(channel._app.bot.sent_messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_send_text_gives_up_after_max_retries() -> None:
+    """_send_text raises TimedOut after exhausting all retries."""
+    from telegram.error import TimedOut
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    async def always_timeout(**kwargs):
+        raise TimedOut()
+
+    channel._app.bot.send_message = always_timeout
+
+    import nanobot.channels.telegram as tg_mod
+    orig_delay = tg_mod._SEND_RETRY_BASE_DELAY
+    tg_mod._SEND_RETRY_BASE_DELAY = 0.01
+    try:
+        await channel._send_text(123, "hello", None, {})
+    finally:
+        tg_mod._SEND_RETRY_BASE_DELAY = orig_delay
+
+    assert channel._app.bot.sent_messages == []
 
 
 def test_derive_topic_session_key_uses_thread_id() -> None:
@@ -229,6 +343,65 @@ async def test_send_reply_infers_topic_from_message_id_cache() -> None:
 
     assert channel._app.bot.sent_messages[0]["message_thread_id"] == 42
     assert channel._app.bot.sent_messages[0]["reply_parameters"].message_id == 10
+
+
+@pytest.mark.asyncio
+async def test_send_remote_media_url_after_security_validation(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    monkeypatch.setattr("nanobot.channels.telegram.validate_url_target", lambda url: (True, ""))
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="",
+            media=["https://example.com/cat.jpg"],
+        )
+    )
+
+    assert channel._app.bot.sent_media == [
+        {
+            "kind": "photo",
+            "chat_id": 123,
+            "photo": "https://example.com/cat.jpg",
+            "reply_parameters": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_blocks_unsafe_remote_media_url(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.validate_url_target",
+        lambda url: (False, "Blocked: example.com resolves to private/internal address 127.0.0.1"),
+    )
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="",
+            media=["http://example.com/internal.jpg"],
+        )
+    )
+
+    assert channel._app.bot.sent_media == []
+    assert channel._app.bot.sent_messages == [
+        {
+            "chat_id": 123,
+            "text": "[Failed to send: internal.jpg]",
+            "reply_parameters": None,
+        }
+    ]
 
 
 @pytest.mark.asyncio
