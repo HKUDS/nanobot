@@ -373,7 +373,12 @@ def _make_provider(config: Config):
 
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
-        provider = OpenAICodexProvider(default_model=model)
+        provider = OpenAICodexProvider(
+            default_model=model,
+            api_base=p.api_base if p else None,
+            api_key=p.api_key if p else None,
+            extra_headers=p.extra_headers if p else None,
+        )
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
     elif provider_name == "custom":
         from nanobot.providers.custom_provider import CustomProvider

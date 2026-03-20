@@ -20,9 +20,16 @@ DEFAULT_ORIGINATOR = "nanobot"
 class OpenAICodexProvider(LLMProvider):
     """Use Codex OAuth to call the Responses API."""
 
-    def __init__(self, default_model: str = "openai-codex/gpt-5.1-codex"):
-        super().__init__(api_key=None, api_base=None)
+    def __init__(
+        self,
+        default_model: str = "openai-codex/gpt-5.1-codex",
+        api_base: str | None = None,
+        api_key: str | None = None,
+        extra_headers: dict[str, str] | None = None,
+    ):
+        super().__init__(api_key=api_key, api_base=api_base)
         self.default_model = default_model
+        self.extra_headers = extra_headers or {}
 
     async def chat(
         self,
@@ -37,8 +44,19 @@ class OpenAICodexProvider(LLMProvider):
         model = model or self.default_model
         system_prompt, input_items = _convert_messages(messages)
 
-        token = await asyncio.to_thread(get_codex_token)
-        headers = _build_headers(token.account_id, token.access)
+        if self.api_key:
+            headers = _build_headers(
+                token=self.api_key,
+                account_id=self.extra_headers.get("chatgpt-account-id"),
+                extra_headers=self.extra_headers,
+            )
+        else:
+            token = await asyncio.to_thread(get_codex_token)
+            headers = _build_headers(
+                token=token.access,
+                account_id=token.account_id,
+                extra_headers=self.extra_headers,
+            )
 
         body: dict[str, Any] = {
             "model": _strip_model_prefix(model),
@@ -59,7 +77,7 @@ class OpenAICodexProvider(LLMProvider):
         if tools:
             body["tools"] = _convert_tools(tools)
 
-        url = DEFAULT_CODEX_URL
+        url = self.api_base or DEFAULT_CODEX_URL
 
         try:
             try:
@@ -90,16 +108,24 @@ def _strip_model_prefix(model: str) -> str:
     return model
 
 
-def _build_headers(account_id: str, token: str) -> dict[str, str]:
-    return {
+def _build_headers(
+    token: str,
+    account_id: str | None = None,
+    extra_headers: dict[str, str] | None = None,
+) -> dict[str, str]:
+    headers = {
         "Authorization": f"Bearer {token}",
-        "chatgpt-account-id": account_id,
         "OpenAI-Beta": "responses=experimental",
         "originator": DEFAULT_ORIGINATOR,
         "User-Agent": "nanobot (python)",
         "accept": "text/event-stream",
         "content-type": "application/json",
     }
+    if account_id:
+        headers["chatgpt-account-id"] = account_id
+    if extra_headers:
+        headers.update(extra_headers)
+    return headers
 
 
 async def _request_codex(
