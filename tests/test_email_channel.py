@@ -133,6 +133,49 @@ def test_fetch_new_messages_retries_once_when_imap_connection_goes_stale(monkeyp
     assert fake_instances[1].search_calls == 1
 
 
+def test_fetch_new_messages_keeps_messages_collected_before_stale_retry(monkeypatch) -> None:
+    raw_first = _make_raw_email(subject="First", body="First body")
+    raw_second = _make_raw_email(subject="Second", body="Second body")
+    mailbox_state = {
+        b"1": {"uid": b"123", "raw": raw_first, "seen": False},
+        b"2": {"uid": b"124", "raw": raw_second, "seen": False},
+    }
+    fail_once = {"pending": True}
+
+    class FlakyIMAP:
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"2"]
+
+        def search(self, *_args):
+            unseen_ids = [imap_id for imap_id, item in mailbox_state.items() if not item["seen"]]
+            return "OK", [b" ".join(unseen_ids)]
+
+        def fetch(self, imap_id: bytes, _parts: str):
+            if imap_id == b"2" and fail_once["pending"]:
+                fail_once["pending"] = False
+                raise imaplib.IMAP4.abort("socket error")
+            item = mailbox_state[imap_id]
+            header = b"%s (UID %s BODY[] {200})" % (imap_id, item["uid"])
+            return "OK", [(header, item["raw"]), b")"]
+
+        def store(self, imap_id: bytes, _op: str, _flags: str):
+            mailbox_state[imap_id]["seen"] = True
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: FlakyIMAP())
+
+    channel = EmailChannel(_make_config(), MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert [item["subject"] for item in items] == ["First", "Second"]
+
+
 def test_fetch_new_messages_skips_missing_mailbox(monkeypatch) -> None:
     class MissingMailboxIMAP:
         def login(self, _user: str, _pw: str):

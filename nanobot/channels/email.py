@@ -282,13 +282,26 @@ class EmailChannel(BaseChannel):
         dedupe: bool,
         limit: int,
     ) -> list[dict[str, Any]]:
-        try:
-            return self._fetch_messages_once(search_criteria, mark_seen, dedupe, limit)
-        except Exception as exc:
-            if not self._is_stale_imap_error(exc):
-                raise
-            logger.warning("Email IMAP connection went stale, retrying once: {}", exc)
-            return self._fetch_messages_once(search_criteria, mark_seen, dedupe, limit)
+        messages: list[dict[str, Any]] = []
+        cycle_uids: set[str] = set()
+
+        for attempt in range(2):
+            try:
+                self._fetch_messages_once(
+                    search_criteria,
+                    mark_seen,
+                    dedupe,
+                    limit,
+                    messages,
+                    cycle_uids,
+                )
+                return messages
+            except Exception as exc:
+                if attempt == 1 or not self._is_stale_imap_error(exc):
+                    raise
+                logger.warning("Email IMAP connection went stale, retrying once: {}", exc)
+
+        return messages
 
     def _fetch_messages_once(
         self,
@@ -296,9 +309,10 @@ class EmailChannel(BaseChannel):
         mark_seen: bool,
         dedupe: bool,
         limit: int,
-    ) -> list[dict[str, Any]]:
+        messages: list[dict[str, Any]],
+        cycle_uids: set[str],
+    ) -> None:
         """Fetch messages by arbitrary IMAP search criteria."""
-        messages: list[dict[str, Any]] = []
         mailbox = self.config.imap_mailbox or "INBOX"
 
         if self.config.imap_use_ssl:
@@ -336,6 +350,8 @@ class EmailChannel(BaseChannel):
                     continue
 
                 uid = self._extract_uid(fetched)
+                if uid and uid in cycle_uids:
+                    continue
                 if dedupe and uid and uid in self._processed_uids:
                     continue
 
@@ -378,6 +394,8 @@ class EmailChannel(BaseChannel):
                     }
                 )
 
+                if uid:
+                    cycle_uids.add(uid)
                 if dedupe and uid:
                     self._processed_uids.add(uid)
                     # mark_seen is the primary dedup; this set is a safety net
@@ -392,8 +410,6 @@ class EmailChannel(BaseChannel):
                 client.logout()
             except Exception:
                 pass
-
-        return messages
 
     @classmethod
     def _is_stale_imap_error(cls, exc: Exception) -> bool:
