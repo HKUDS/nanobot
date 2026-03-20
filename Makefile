@@ -1,4 +1,4 @@
-.PHONY: install install-all test test-verbose test-cov lint format typecheck check ci pre-push import-check prompt-check memory-eval live-eval clean worktree-clean pre-commit-install
+.PHONY: install install-all test test-verbose test-cov lint format typecheck check ci pre-push import-check prompt-check coverage-check memory-eval live-eval clean worktree-clean pre-commit-install
 
 PYTHON ?= python3
 
@@ -16,7 +16,7 @@ test-verbose:
 	$(PYTHON) -m pytest tests/ -v
 
 test-cov:
-	$(PYTHON) -m pytest tests/ --cov=nanobot --cov-report=term-missing --cov-fail-under=85
+	$(PYTHON) -m pytest tests/ --cov=nanobot --cov-report=term-missing --cov-report=json --cov-fail-under=85
 
 lint:
 	ruff check nanobot/ tests/
@@ -31,7 +31,7 @@ typecheck:
 
 check: lint typecheck import-check prompt-check test
 
-ci: lint typecheck import-check prompt-check test-cov
+ci: lint typecheck import-check prompt-check test-cov coverage-check
 
 pre-push: ## Full CI validation + merge-readiness check (run before pushing PRs)
 	@echo "=== Syncing with origin/main ==="
@@ -50,6 +50,9 @@ import-check:
 
 prompt-check:
 	$(PYTHON) scripts/check_prompt_manifest.py
+
+coverage-check:
+	$(PYTHON) scripts/check_module_coverage.py
 
 memory-eval:
 	$(PYTHON) scripts/memory_eval_ci.py \

@@ -13,7 +13,8 @@ from nanobot.agent.delegation import (
     DelegationDispatcher,
     _cap_scratchpad_for_injection,
 )
-from nanobot.config.schema import ExecToolConfig
+from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
+from nanobot.providers.base import LLMProvider, LLMResponse
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -198,6 +199,34 @@ class TestClassifyTaskType:
         result = DelegationDispatcher.classify_task_type("random", "do something")
         assert result == "general"
 
+    def test_hybrid_web_plus_arch_signals(self) -> None:
+        """Web + architecture signals -> hybrid, not repo_architecture."""
+        result = DelegationDispatcher.classify_task_type(
+            "research", "architecture of best practice DI frameworks"
+        )
+        assert result == "hybrid"
+
+    def test_hybrid_web_plus_project_signals(self) -> None:
+        """Web + project signals -> hybrid, not repo_architecture."""
+        result = DelegationDispatcher.classify_task_type(
+            "research", "compare our codebase with current industry best practices"
+        )
+        assert result == "hybrid"
+
+    def test_hybrid_web_plus_code_signals(self) -> None:
+        """Web + code signals -> hybrid, not local_code_analysis."""
+        result = DelegationDispatcher.classify_task_type(
+            "research", "latest best practices for Python module structure"
+        )
+        assert result == "hybrid"
+
+    def test_pure_web_still_web_research(self) -> None:
+        """Pure web signals without local signals -> web_research."""
+        result = DelegationDispatcher.classify_task_type(
+            "research", "what are the current industry trends"
+        )
+        assert result == "web_research"
+
     def test_task_types_dict_complete(self):
         """All expected task types exist in TASK_TYPES."""
         expected = {
@@ -206,6 +235,7 @@ class TestClassifyTaskType:
             "web_research",
             "report_writing",
             "bug_investigation",
+            "hybrid",
             "general",
         }
         assert set(TASK_TYPES.keys()) == expected
@@ -502,3 +532,179 @@ class TestBuildExecutionContext:
         lines = ctx.split("\n")
         dir_lines = [line for line in lines if line.startswith("  file_")]
         assert len(dir_lines) == 50
+
+
+# ---------------------------------------------------------------------------
+# Shared stubs for execute_delegated_agent retry tests (LAN-159)
+# ---------------------------------------------------------------------------
+
+
+class _StubProvider(LLMProvider):
+    """Minimal LLM provider returning a fixed stub response."""
+
+    def get_default_model(self) -> str:
+        return "stub"
+
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        metadata: dict[str, Any] | None = None,
+    ) -> LLMResponse:
+        return LLMResponse(content="stub")
+
+
+def _make_call_counter_tool_loop(
+    responses: list[tuple[str | None, list[str], list[dict[str, Any]]]],
+) -> tuple[Any, list[dict[str, Any]]]:
+    """Return a stateful async fake for ``run_tool_loop`` and a call log.
+
+    Each invocation pops the next response from *responses*.  The call log
+    records the keyword arguments of every invocation so tests can assert on
+    ``max_iterations`` etc.
+    """
+    call_log: list[dict[str, Any]] = []
+
+    async def _fake(
+        *,
+        provider: Any,
+        tools: Any,
+        messages: Any,
+        model: Any,
+        temperature: Any,
+        max_tokens: Any,
+        max_iterations: Any,
+    ) -> tuple[str | None, list[str], list[dict[str, Any]]]:
+        call_log.append(
+            {
+                "provider": provider,
+                "tools": tools,
+                "messages": messages,
+                "model": model,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "max_iterations": max_iterations,
+            }
+        )
+        idx = len(call_log) - 1
+        if idx < len(responses):
+            return responses[idx]
+        # Fallback — should not be reached in well-designed tests
+        return ("fallback", [], [])
+
+    return _fake, call_log
+
+
+# ---------------------------------------------------------------------------
+# execute_delegated_agent retry path (LAN-159)
+# ---------------------------------------------------------------------------
+
+
+class TestExecuteDelegatedAgentRetry:
+    """Tests for the tool-use retry gate in execute_delegated_agent."""
+
+    async def test_retry_succeeds_when_first_attempt_uses_no_tools(self, tmp_path: Path) -> None:
+        """When the first call returns no tools, a retry fires and its result is used."""
+        import nanobot.agent.delegation as delegation_mod
+
+        msgs: list[dict[str, Any]] = [{"role": "assistant", "content": "ok"}]
+        fake, call_log = _make_call_counter_tool_loop(
+            [
+                ("first answer", [], msgs),
+                ("retry answer", ["read_file"], msgs),
+            ]
+        )
+
+        d = _make_dispatcher(tmp_path, provider=_StubProvider())
+        role = AgentRoleConfig(name="research", description="research role")
+
+        original = delegation_mod.run_tool_loop
+        delegation_mod.run_tool_loop = fake  # type: ignore[assignment]
+        try:
+            summary, tools_used = await d.execute_delegated_agent(
+                role, "analyze the codebase structure", None
+            )
+        finally:
+            delegation_mod.run_tool_loop = original
+
+        assert len(call_log) == 2
+        assert "retry answer" in summary
+        assert "read_file" in tools_used
+        assert call_log[1]["max_iterations"] <= 6
+
+    async def test_no_retry_for_report_writing_task_type(self, tmp_path: Path) -> None:
+        """report_writing tasks skip the retry even when no tools are used."""
+        import nanobot.agent.delegation as delegation_mod
+
+        msgs: list[dict[str, Any]] = [{"role": "assistant", "content": "ok"}]
+        fake, call_log = _make_call_counter_tool_loop(
+            [
+                ("writing answer", [], msgs),
+                ("should not reach", ["read_file"], msgs),
+            ]
+        )
+
+        d = _make_dispatcher(tmp_path, provider=_StubProvider())
+        role = AgentRoleConfig(name="writing", description="writing role")
+
+        original = delegation_mod.run_tool_loop
+        delegation_mod.run_tool_loop = fake  # type: ignore[assignment]
+        try:
+            summary, tools_used = await d.execute_delegated_agent(
+                role, "write a report about the project", None
+            )
+        finally:
+            delegation_mod.run_tool_loop = original
+
+        assert len(call_log) == 1
+
+    async def test_no_retry_when_max_iter_is_2(self, tmp_path: Path) -> None:
+        """When max_iterations <= 2, retry is suppressed."""
+        import nanobot.agent.delegation as delegation_mod
+
+        msgs: list[dict[str, Any]] = [{"role": "assistant", "content": "ok"}]
+        fake, call_log = _make_call_counter_tool_loop(
+            [
+                ("answer", [], msgs),
+                ("should not reach", ["read_file"], msgs),
+            ]
+        )
+
+        d = _make_dispatcher(tmp_path, provider=_StubProvider(), max_iterations=2)
+        role = AgentRoleConfig(name="research", description="research role")
+
+        original = delegation_mod.run_tool_loop
+        delegation_mod.run_tool_loop = fake  # type: ignore[assignment]
+        try:
+            await d.execute_delegated_agent(role, "analyze the codebase structure", None)
+        finally:
+            delegation_mod.run_tool_loop = original
+
+        assert len(call_log) == 1
+
+    async def test_retry_not_applied_when_first_attempt_uses_tools(self, tmp_path: Path) -> None:
+        """When the first call already used tools, no retry is attempted."""
+        import nanobot.agent.delegation as delegation_mod
+
+        msgs: list[dict[str, Any]] = [{"role": "assistant", "content": "ok"}]
+        fake, call_log = _make_call_counter_tool_loop(
+            [
+                ("answer", ["read_file"], msgs),
+                ("should not reach", [], msgs),
+            ]
+        )
+
+        d = _make_dispatcher(tmp_path, provider=_StubProvider())
+        role = AgentRoleConfig(name="research", description="research role")
+
+        original = delegation_mod.run_tool_loop
+        delegation_mod.run_tool_loop = fake  # type: ignore[assignment]
+        try:
+            await d.execute_delegated_agent(role, "analyze the codebase structure", None)
+        finally:
+            delegation_mod.run_tool_loop = original
+
+        assert len(call_log) == 1

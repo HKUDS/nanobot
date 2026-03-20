@@ -29,6 +29,7 @@ artifacts/
 node_modules/
 bridge/node_modules/
 .coverage
+coverage.json
 .vscode/
 .ruff_cache/
 .mypy_cache/

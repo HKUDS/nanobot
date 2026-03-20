@@ -1589,6 +1589,105 @@ def routing_dlq(
     console.print(table)
 
 
+@routing_app.command("replay")
+def routing_replay(
+    session: str = typer.Option(..., help="Session key (e.g. 'telegram:123456789')"),
+    role: str = typer.Option(..., help="Corrected role name (e.g. 'code', 'research')"),
+    message: str | None = typer.Option(None, help="Override message text"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without executing"),
+    no_save: bool = typer.Option(False, "--no-save", help="Don't persist to session history"),
+) -> None:
+    """Replay a misrouted message with a corrected role."""
+    from loguru import logger
+
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.loader import get_data_dir, load_config
+    from nanobot.cron.service import CronService
+
+    config = load_config()
+
+    channel, _, chat_id = session.partition(":")
+    if not chat_id:
+        console.print("[red]Invalid session key — expected 'channel:chat_id' format.[/red]")
+        raise typer.Exit(1)
+
+    content = message
+    if content is None:
+        # Load last user message from session history
+        from nanobot.session.manager import SessionManager
+
+        sm = SessionManager(config.workspace_path)
+        sess = sm.get_or_create(session)
+        for m in reversed(sess.messages):
+            if m.get("role") == "user":
+                content = m.get("content", "")
+                break
+        if not content:
+            console.print("[red]No user message found in session history.[/red]")
+            console.print("[dim]Use --message to provide the message text explicitly.[/dim]")
+            raise typer.Exit(1)
+
+    if dry_run:
+        console.print(f"[cyan]Role:[/cyan]    {role}")
+        console.print(f"[cyan]Session:[/cyan] {session}")
+        console.print(f"[cyan]Message:[/cyan] {content}")
+        console.print("\n[dim]Dry run — no agent execution.[/dim]")
+        return
+
+    # Initialize observability
+    from nanobot.agent.observability import init_langfuse
+    from nanobot.agent.observability import shutdown as shutdown_langfuse
+
+    init_langfuse(config.langfuse)
+
+    bus = MessageBus()
+    provider = _make_provider(config)
+
+    cron_store_path = get_data_dir() / "cron" / "jobs.json"
+    cron = CronService(cron_store_path)
+
+    logger.disable("nanobot")
+    _configure_log_sink(config, logger)
+
+    agent_loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        config=_make_agent_config(config),
+        brave_api_key=config.tools.web.search.api_key or None,
+        exec_config=config.tools.exec,
+        cron_service=cron,
+        mcp_servers=config.tools.mcp_servers,
+        channels_config=config.channels,
+        routing_config=config.agents.routing,
+    )
+
+    # Use a distinct session key when --no-save to avoid polluting history
+    replay_session = f"{session}:replay" if no_save else session
+
+    async def _run_replay() -> None:
+        try:
+            response = await agent_loop.process_direct(
+                content,
+                session_key=replay_session,
+                channel=channel,
+                chat_id=chat_id,
+                forced_role=role,
+            )
+            _print_agent_response(response, render_markdown=True)
+        finally:
+            agent_loop.stop()
+            try:
+                await asyncio.wait_for(agent_loop.close_mcp(), timeout=5.0)
+            except TimeoutError:
+                console.print(
+                    "[yellow]Warning:[/yellow] timed out while closing provider/MCP resources."
+                )
+            shutdown_langfuse()
+
+    asyncio.run(_run_replay())
+
+
 # ============================================================================
 # Status Commands
 # ============================================================================

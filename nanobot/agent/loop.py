@@ -291,7 +291,9 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         role_config: AgentRoleConfig | None = None,
         routing_config: RoutingConfig | None = None,
+        tool_registry: ToolRegistry | None = None,
     ):
+        self._injected_tool_registry = tool_registry
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
@@ -467,7 +469,10 @@ class AgentLoop:
         are ready.  Extracted from the constructor to keep ``__init__`` focused on
         pure attribute assignment (LAN-103).
         """
-        _tool_registry = ToolRegistry()
+        if self._injected_tool_registry is not None:
+            _tool_registry = self._injected_tool_registry
+        else:
+            _tool_registry = ToolRegistry()
         self._capabilities = CapabilityRegistry(
             tool_registry=_tool_registry,
             skills_loader=self.context.skills,
@@ -494,7 +499,8 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=self.config.restrict_to_workspace,
         )
-        self._register_default_tools()
+        if self._injected_tool_registry is None:
+            self._register_default_tools()
         # Cache typed tool references for O(1) context updates in _set_tool_context.
         # Populated once at construction — no per-message isinstance checks needed.
         _msg_t = self.tools.get("message")
@@ -1641,11 +1647,14 @@ class AgentLoop:
         if self._coordinator is not None:
             return
 
-        from nanobot.agent.coordinator import Coordinator, build_default_registry
+        from nanobot.agent.coordinator import DEFAULT_ROLES, Coordinator
 
-        registry = build_default_registry(self._routing_config.default_role)
+        for role in DEFAULT_ROLES:
+            self._capabilities.register_role(role)
         for role_cfg in self._routing_config.roles:
-            registry.merge_register(role_cfg)
+            self._capabilities.merge_register_role(role_cfg)
+        registry = self._capabilities.agent_registry
+        registry._default_role = self._routing_config.default_role
         self._coordinator = Coordinator(
             provider=self.provider,
             registry=registry,
@@ -1656,9 +1665,6 @@ class AgentLoop:
         self._dispatcher.coordinator = self._coordinator
         self.missions.coordinator = self._coordinator
         self._wire_delegate_tools()
-
-        # Wire agent registry into the unified capability registry via public API
-        self._capabilities.wire_agent_registry(registry)
 
         logger.info(
             "Multi-agent routing enabled with {} roles",
@@ -2346,26 +2352,49 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        forced_role: str | None = None,
     ) -> str:
-        """Process a message directly (for CLI or cron usage)."""
+        """Process a message directly (for CLI or cron usage).
+
+        When *forced_role* is provided the coordinator is initialised but
+        classification is skipped — the named role is applied directly for
+        this turn.  This is used by ``nanobot routing replay`` to re-process
+        a misrouted message under a corrected role.
+        """
         await self._connect_mcp()
         self._ensure_coordinator()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        async with trace_request(
-            name="request",
-            input=content[:200],
-            session_id=session_key,
-            user_id="cli",
-            tags=[channel],
-            metadata={
-                "channel": channel,
-                "sender": "user",
-                "session_key": session_key,
-                "model": self.model,
-                "role": self.role_name,
-            },
-        ):
-            response = await self._process_message(
-                msg, session_key=session_key, on_progress=on_progress
-            )
+
+        # Resolve forced role (if any) before entering the trace context so
+        # that the role name is included in the trace metadata.
+        turn_ctx: TurnContext | None = None
+        if forced_role:
+            role = self._coordinator.route_direct(forced_role) if self._coordinator else None
+            if role is None:
+                logger.warning(
+                    "Unknown forced role '{}' — available roles not matched", forced_role
+                )
+                return f"Unknown role: {forced_role}"
+            turn_ctx = self._apply_role_for_turn(role)
+
+        try:
+            async with trace_request(
+                name="request",
+                input=content[:200],
+                session_id=session_key,
+                user_id="cli",
+                tags=[channel],
+                metadata={
+                    "channel": channel,
+                    "sender": "user",
+                    "session_key": session_key,
+                    "model": self.model,
+                    "role": self.role_name,
+                },
+            ):
+                response = await self._process_message(
+                    msg, session_key=session_key, on_progress=on_progress
+                )
+        finally:
+            self._reset_role_after_turn(turn_ctx)
         return response.content if response else ""

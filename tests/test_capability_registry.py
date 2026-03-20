@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from nanobot.agent.capability import CapabilityRegistry
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.registry import ToolRegistry
@@ -158,6 +160,17 @@ class TestRegistration:
     def test_unregister_nonexistent_is_noop(self) -> None:
         reg = CapabilityRegistry()
         reg.unregister("nonexistent")  # should not raise
+
+    def test_capability_is_immutable(self) -> None:
+        """Capability dataclass is frozen — direct mutation raises FrozenInstanceError."""
+        from dataclasses import FrozenInstanceError
+
+        reg = CapabilityRegistry()
+        reg.register_tool(_AvailableTool())
+        cap = reg.get("avail_tool")
+        assert cap is not None
+        with pytest.raises(FrozenInstanceError):
+            cap.health = "unavailable"  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
@@ -371,9 +384,72 @@ class TestIntrospection:
         assert len(all_caps) == 3
 
     def test_property_accessors(self) -> None:
+        from nanobot.agent.registry import AgentRegistry
+
         tr = ToolRegistry()
         reg = CapabilityRegistry(tool_registry=tr)
 
         assert reg.tool_registry is tr
         assert reg.skills_loader is None
-        assert reg.agent_registry is None
+        assert isinstance(reg.agent_registry, AgentRegistry)
+
+    def test_register_role_always_propagates_to_agent_registry(self) -> None:
+        """register_role writes to both _capabilities and agent_registry."""
+        reg = CapabilityRegistry()
+        role = _make_role("research", "Research specialist")
+        reg.register_role(role, intents=["research"])
+
+        # Capability side
+        cap = reg.get("research")
+        assert cap is not None
+        assert cap.kind == "delegate_role"
+        assert cap.health == "healthy"
+
+        # AgentRegistry side
+        ar_role = reg.agent_registry.get("research")
+        assert ar_role is not None
+        assert ar_role.name == "research"
+        assert ar_role.description == "Research specialist"
+
+    def test_merge_register_role_updates_both_registries(self) -> None:
+        """merge_register_role updates both _capabilities and agent_registry."""
+        from nanobot.config.schema import AgentRoleConfig
+
+        reg = CapabilityRegistry()
+        # Register a base role
+        reg.register_role(_make_role("code", "Code generation"))
+        # Merge an override with a new description
+        override = AgentRoleConfig(name="code", description="Advanced code generation")
+        reg.merge_register_role(override, intents=["coding"])
+
+        cap = reg.get("code")
+        assert cap is not None
+        assert cap.description == "Advanced code generation"
+        assert cap.intents == ["coding"]
+
+        ar_role = reg.agent_registry.get("code")
+        assert ar_role is not None
+        assert ar_role.description == "Advanced code generation"
+
+    def test_register_role_then_merge_preserves_override(self) -> None:
+        """Register default, merge user override, verify merged config wins."""
+        from nanobot.config.schema import AgentRoleConfig
+
+        reg = CapabilityRegistry()
+        # Register default
+        default_role = _make_role("research", "Default research")
+        reg.register_role(default_role, intents=["research"])
+
+        # Merge user override (only description set explicitly)
+        user_override = AgentRoleConfig(name="research", description="Custom research")
+        reg.merge_register_role(user_override)
+
+        cap = reg.get("research")
+        assert cap is not None
+        assert cap.description == "Custom research"
+        # Intents should be preserved from existing capability (no new intents passed)
+        assert cap.intents == ["research"]
+
+        ar_role = reg.agent_registry.get("research")
+        assert ar_role is not None
+        assert ar_role.description == "Custom research"

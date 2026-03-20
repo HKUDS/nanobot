@@ -54,6 +54,23 @@ def test_classify_task_type_paths() -> None:
         == "repo_architecture"
     )
     assert AgentLoop._classify_task_type("general", "hello world") == "general"
+    # hybrid: web + arch/code/project signals combined
+    assert (
+        AgentLoop._classify_task_type("research", "architecture of best practice DI frameworks")
+        == "hybrid"
+    )
+    assert (
+        AgentLoop._classify_task_type(
+            "research", "compare our codebase with current industry best practices"
+        )
+        == "hybrid"
+    )
+    assert (
+        AgentLoop._classify_task_type(
+            "research", "latest best practices for Python module structure"
+        )
+        == "hybrid"
+    )
 
 
 def test_extract_plan_and_user_request(tmp_path: Path) -> None:
@@ -151,3 +168,60 @@ async def test_attempt_recovery_missing_or_error_paths(tmp_path: Path) -> None:
     loop.provider = SimpleNamespace(chat=_raise_chat)
     msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
     assert await loop._attempt_recovery(SimpleNamespace(channel="c", chat_id="id"), msgs) is None
+
+
+# ---------------------------------------------------------------------------
+# Tool registry injection (LAN-149)
+# ---------------------------------------------------------------------------
+
+
+def _make_loop_via_init(
+    tmp_path: Path,
+    provider: object,
+    *,
+    tool_registry: object | None = None,
+) -> AgentLoop:
+    """Build an AgentLoop through its real __init__ with minimal config."""
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.schema import AgentConfig
+
+    bus = MessageBus()
+    config = AgentConfig(
+        workspace=str(tmp_path),
+        model="test-model",
+        memory_window=10,
+        max_iterations=5,
+        planning_enabled=False,
+        verification_mode="off",
+    )
+    kwargs: dict[str, object] = {}
+    if tool_registry is not None:
+        kwargs["tool_registry"] = tool_registry
+    return AgentLoop(bus, provider, config, **kwargs)  # type: ignore[arg-type]
+
+
+class _StubProvider:
+    """Minimal stand-in satisfying LLMProvider duck-typing for construction."""
+
+    def get_default_model(self) -> str:
+        return "stub-model"
+
+    async def chat(self, **kwargs: object) -> object:  # noqa: ARG002
+        return SimpleNamespace(content="", tool_calls=None, usage=None)
+
+
+class TestToolRegistryInjection:
+    def test_injected_registry_skips_default_tools(self, tmp_path: Path) -> None:
+        """When tool_registry is provided, _register_default_tools is skipped."""
+        from nanobot.agent.tools.registry import ToolRegistry
+
+        reg = ToolRegistry()
+        loop = _make_loop_via_init(tmp_path, _StubProvider(), tool_registry=reg)
+        # The injected registry should be used — no default tools registered.
+        assert len(loop.tools) == 0
+
+    def test_default_registry_has_tools(self, tmp_path: Path) -> None:
+        """Without injection, default tools are registered as before."""
+        loop = _make_loop_via_init(tmp_path, _StubProvider())
+        # Default registration adds at least the filesystem + exec tools.
+        assert len(loop.tools) > 0

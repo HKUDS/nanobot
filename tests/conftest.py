@@ -42,6 +42,14 @@ def _restore_loguru_namespaces():
 
 
 @pytest.fixture()
+def minimal_tool_registry():
+    """A bare ToolRegistry with no tools registered."""
+    from nanobot.agent.tools.registry import ToolRegistry
+
+    return ToolRegistry()
+
+
+@pytest.fixture()
 def propagate_loguru_to_caplog(caplog):
     """Route loguru output through stdlib logging so pytest ``caplog`` can capture it.
 

@@ -11,16 +11,16 @@ Phase E: health tracking with transition detection + heartbeat integration.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
+from nanobot.agent.registry import AgentRegistry
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
-    from nanobot.agent.registry import AgentRegistry
     from nanobot.agent.skills import SkillsLoader
     from nanobot.config.schema import AgentRoleConfig
 
@@ -51,7 +51,7 @@ class HealthRefreshResult:
         return len(self.changes) > 0
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, frozen=True)
 class Capability:
     """A single capability the agent can use."""
 
@@ -85,7 +85,7 @@ class CapabilityRegistry:
     ) -> None:
         self._tools = tool_registry if tool_registry is not None else ToolRegistry()
         self._skills = skills_loader
-        self._agents = agent_registry
+        self._agents = agent_registry if agent_registry is not None else AgentRegistry()
         self._capabilities: dict[str, Capability] = {}
 
     # ------------------------------------------------------------------
@@ -101,7 +101,7 @@ class CapabilityRegistry:
         return self._skills
 
     @property
-    def agent_registry(self) -> AgentRegistry | None:
+    def agent_registry(self) -> AgentRegistry:
         return self._agents
 
     # ------------------------------------------------------------------
@@ -159,8 +159,7 @@ class CapabilityRegistry:
         intents: list[str] | None = None,
     ) -> None:
         """Register a delegation role as a capability."""
-        if self._agents is not None:
-            self._agents.register(role)
+        self._agents.register(role)
         health: CapabilityHealth = "healthy" if role.enabled else "unavailable"
         self._capabilities[role.name] = Capability(
             name=role.name,
@@ -172,26 +171,27 @@ class CapabilityRegistry:
             role_config=role,
         )
 
-    def wire_agent_registry(self, registry: "AgentRegistry") -> None:
-        """Attach an already-built AgentRegistry and populate Capability entries.
-
-        Use this instead of directly mutating ``_agents`` and ``_capabilities``
-        from outside the class (fixes CQ-M4 / SEC-M2 / AR-M2).
-        """
-        self._agents = registry
-        for role_name in registry.role_names():
-            role = registry.get(role_name)
-            if role is not None and role.name not in self:
-                health: CapabilityHealth = "healthy" if role.enabled else "unavailable"
-                self._capabilities[role.name] = Capability(
-                    name=role.name,
-                    kind="delegate_role",
-                    description=role.description,
-                    intents=[],
-                    health=health,
-                    unavailability_reason=None if role.enabled else "role disabled",
-                    role_config=role,
-                )
+    def merge_register_role(
+        self,
+        role: AgentRoleConfig,
+        *,
+        intents: list[str] | None = None,
+    ) -> None:
+        """Merge a role config, updating an existing entry if present."""
+        self._agents.merge_register(role)
+        merged = self._agents.get(role.name)
+        if merged is not None:
+            health: CapabilityHealth = "healthy" if merged.enabled else "unavailable"
+            existing = self._capabilities.get(merged.name)
+            self._capabilities[merged.name] = Capability(
+                name=merged.name,
+                kind="delegate_role",
+                description=merged.description,
+                intents=intents if intents is not None else (existing.intents if existing else []),
+                health=health,
+                unavailability_reason=None if merged.enabled else "role disabled",
+                role_config=merged,
+            )
 
     def unregister(self, name: str) -> None:
         """Remove a capability (and its underlying tool if applicable)."""
@@ -294,23 +294,27 @@ class CapabilityRegistry:
         """
         health_map: dict[str, CapabilityHealth] = {}
         changes: list[HealthChange] = []
-        for cap in self._capabilities.values():
+        for name, cap in list(self._capabilities.items()):
             old_health = cap.health
+            new_health = cap.health
+            new_reason = cap.unavailability_reason
             if cap.kind == "tool" and cap.tool is not None:
                 available, reason = cap.tool.check_available()
-                cap.health = "healthy" if available else "unavailable"
-                cap.unavailability_reason = reason
-            if cap.health != old_health:
+                new_health = "healthy" if available else "unavailable"
+                new_reason = reason
+            if new_health != old_health:
+                cap = replace(cap, health=new_health, unavailability_reason=new_reason)
+                self._capabilities[name] = cap
                 change = HealthChange(
                     name=cap.name,
                     kind=cap.kind,
                     old_health=old_health,
-                    new_health=cap.health,
-                    reason=cap.unavailability_reason,
+                    new_health=new_health,
+                    reason=new_reason,
                 )
                 changes.append(change)
                 self._log_transition(change)
-            health_map[cap.name] = cap.health
+            health_map[name] = cap.health
         return HealthRefreshResult(health=health_map, changes=changes)
 
     @staticmethod

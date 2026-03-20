@@ -141,6 +141,13 @@ TASK_TYPES: dict[str, dict[str, Any]] = {
             "Do not guess root causes without evidence."
         ),
     },
+    "hybrid": {
+        "prefer": ["web_search", "web_fetch", "read_file", "list_dir"],
+        "avoid_first": ["exec", "write_file"],
+        "evidence": "URLs + file paths, cross-referenced",
+        "completion": "Stop after gathering external sources AND verifying against local codebase.",
+        "anti_hallucination": "Cite URLs for external claims, file paths for local claims.",
+    },
     "general": {
         "prefer": [],
         "avoid_first": [],
@@ -436,7 +443,7 @@ class DelegationDispatcher:
                 parts.append("Directory layout:\n" + "\n".join(tree_lines))
         except OSError:
             pass
-        if task_type in ("local_code_analysis", "repo_architecture", "bug_investigation"):
+        if task_type in ("local_code_analysis", "repo_architecture", "bug_investigation", "hybrid"):
             for name in ("AGENTS.md", "README.md", "SOUL.md"):
                 path = self.workspace / name
                 try:
@@ -471,35 +478,35 @@ class DelegationDispatcher:
         """Classify a delegation task into a task type from the taxonomy.
 
         Returns one of the keys from ``TASK_TYPES``: ``report_writing``,
-        ``bug_investigation``, ``repo_architecture``, ``local_code_analysis``,
-        ``web_research``, or ``general``.
+        ``bug_investigation``, ``hybrid``, ``repo_architecture``,
+        ``local_code_analysis``, ``web_research``, or ``general``.
 
-        Signal evaluation order and tiebreaking:
+        Uses a two-pass approach: first computes boolean flags for each
+        signal category, then applies priority rules.
 
-        1. **Role override** — ``writing`` role always returns
-           ``report_writing`` regardless of task content.
-        2. **Bug signals** — checked only when ``role == "code"``.  If any
-           bug keyword matches, returns ``bug_investigation``.
-        3. **Architecture signals** — if any architecture keyword matches,
-           returns ``repo_architecture`` (regardless of role).
-        4. **Code signals** — if any code keyword matches *or*
-           ``role == "code"``, returns ``local_code_analysis``.
-        5. **Web signals** — if any web keyword matches, the result depends
-           on whether project-scoped keywords are also present: project
-           keywords present yields ``repo_architecture``; otherwise
-           ``web_research``.
-        6. **Research role fallback** — ``role == "research"`` routes to
-           ``repo_architecture`` when project keywords are present, else
-           ``web_research``.
-        7. **Default** — ``general``.
+        **Pass 1 — Flags:**
 
-        For hybrid tasks (e.g. code analysis *and* web research), the first
-        matching signal in the evaluation order wins.  There is no weighted
-        scoring; the order above acts as the tiebreaker.
+        - ``has_bug`` — bug/error/crash keywords (only when ``role == "code"``)
+        - ``has_arch`` — architecture/design/structure keywords
+        - ``has_code`` — code/module/file/function keywords
+        - ``has_web`` — latest/current/news/trend/benchmark keywords
+        - ``has_project`` — our/this project/nanobot/workspace/codebase keywords
+
+        **Pass 2 — Priority rules:**
+
+        1. ``role == "writing"`` → ``report_writing``
+        2. ``role == "code" and has_bug`` → ``bug_investigation``
+        3. ``has_web and (has_arch or has_code or has_project)`` → ``hybrid``
+        4. ``has_arch`` → ``repo_architecture``
+        5. ``has_code or role == "code"`` → ``local_code_analysis``
+        6. ``has_web`` → ``web_research``
+        7. ``role == "research" and has_project`` → ``repo_architecture``
+        8. ``role == "research"`` → ``web_research``
+        9. else → ``general``
         """
         task_lower = task.lower()
-        if role == "writing":
-            return "report_writing"
+
+        # -- Signal tuples --
         code_signals = (
             "code",
             "module",
@@ -549,19 +556,30 @@ class DelegationDispatcher:
             "workspace",
             "codebase",
         )
-        if role == "code" and any(s in task_lower for s in bug_signals):
+
+        # -- Pass 1: compute boolean flags --
+        has_bug = role == "code" and any(s in task_lower for s in bug_signals)
+        has_arch = any(s in task_lower for s in arch_signals)
+        has_code = any(s in task_lower for s in code_signals)
+        has_web = any(s in task_lower for s in web_signals)
+        has_project = any(s in task_lower for s in project_signals)
+
+        # -- Pass 2: priority rules --
+        if role == "writing":
+            return "report_writing"
+        if has_bug:
             return "bug_investigation"
-        if any(s in task_lower for s in arch_signals):
+        if has_web and (has_arch or has_code or has_project):
+            return "hybrid"
+        if has_arch:
             return "repo_architecture"
-        if any(s in task_lower for s in code_signals) or role == "code":
+        if has_code or role == "code":
             return "local_code_analysis"
-        if any(s in task_lower for s in web_signals):
-            if not any(s in task_lower for s in project_signals):
-                return "web_research"
+        if has_web:
+            return "web_research"
+        if role == "research" and has_project:
             return "repo_architecture"
         if role == "research":
-            if any(s in task_lower for s in project_signals):
-                return "repo_architecture"
             return "web_research"
         return "general"
 
