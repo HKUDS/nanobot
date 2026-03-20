@@ -1,7 +1,10 @@
 """WeCom (Enterprise WeChat) channel implementation using wecom_aibot_sdk."""
 
 import asyncio
+import base64
+import hashlib
 import importlib.util
+import mimetypes
 import os
 from collections import OrderedDict
 from typing import Any
@@ -336,6 +339,73 @@ class WecomChannel(BaseChannel):
             logger.error("Error downloading media: {}", e)
             return None
 
+    async def _upload_media_ws(
+        self, client: Any, file_path: str,
+    ) -> "tuple[str, str] | tuple[None, None]":
+        """Upload a local file to WeCom via WebSocket 3-step protocol (base64).
+
+        Steps: upload_init → base64 chunks → upload_finish.
+        Returns (media_id, media_type) on success, (None, None) on failure.
+        """
+        try:
+            raw = open(file_path, "rb").read()
+            fname = os.path.basename(file_path)
+            md5 = hashlib.md5(raw).hexdigest()
+            mime = mimetypes.guess_type(fname)[0] or "application/octet-stream"
+            if mime.startswith("image/"):
+                media_type = "image"
+            elif mime.startswith("video/"):
+                media_type = "video"
+            elif mime.startswith("audio/"):
+                media_type = "voice"
+            else:
+                media_type = "file"
+
+            CHUNK = 512 * 1024  # 512 KB chunks
+            total = len(raw)
+            chunks = (total + CHUNK - 1) // CHUNK
+
+            # Step 1: init
+            init_resp = await client.upload_file(
+                "upload_init",
+                {"filename": fname, "filetype": media_type, "filesize": total,
+                 "md5": md5, "chunk_count": chunks},
+            )
+            upload_id = (
+                init_resp.get("upload_id", "")
+                if isinstance(init_resp, dict) else getattr(init_resp, "upload_id", "")
+            )
+            if not upload_id:
+                logger.error("WeCom upload_init failed: {}", init_resp)
+                return None, None
+
+            # Step 2: send chunks
+            for i in range(chunks):
+                chunk_data = raw[i * CHUNK : (i + 1) * CHUNK]
+                b64 = base64.b64encode(chunk_data).decode()
+                await client.upload_file(
+                    "upload_part",
+                    {"upload_id": upload_id, "chunk_id": i + 1,
+                     "chunk_data": b64, "chunk_size": len(chunk_data)},
+                )
+
+            # Step 3: finish
+            fin_resp = await client.upload_file(
+                "upload_finish", {"upload_id": upload_id},
+            )
+            media_id = (
+                fin_resp.get("media_id", "")
+                if isinstance(fin_resp, dict) else getattr(fin_resp, "media_id", "")
+            )
+            if media_id:
+                logger.debug("WeCom uploaded {} → media_id={}", fname, media_id[:20])
+                return media_id, media_type
+            logger.error("WeCom upload_finish failed: {}", fin_resp)
+            return None, None
+        except Exception as e:
+            logger.error("WeCom file upload error for {}: {}", file_path, e)
+            return None, None
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through WeCom."""
         if not self._client:
@@ -343,14 +413,30 @@ class WecomChannel(BaseChannel):
             return
 
         try:
-            content = msg.content.strip()
-            if not content:
-                return
+            content = (msg.content or "").strip()
 
             # Get the stored frame for this chat
             frame = self._chat_frames.get(msg.chat_id)
             if not frame:
                 logger.warning("No frame found for chat {}, cannot reply", msg.chat_id)
+                return
+
+            # Send media files via WebSocket upload
+            for file_path in msg.media or []:
+                if not os.path.isfile(file_path):
+                    logger.warning("WeCom media file not found: {}", file_path)
+                    continue
+                media_id, media_type = await self._upload_media_ws(self._client, file_path)
+                if media_id:
+                    await self._client.reply(frame, {
+                        "msgtype": media_type,
+                        media_type: {"media_id": media_id},
+                    })
+                    logger.debug("WeCom sent {} → {}", media_type, msg.chat_id)
+                else:
+                    content += f"\n[file upload failed: {os.path.basename(file_path)}]"
+
+            if not content:
                 return
 
             # Use streaming reply for better UX
