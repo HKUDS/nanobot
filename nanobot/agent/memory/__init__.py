@@ -51,6 +51,7 @@ from .ontology import (
 from .persistence import MemoryPersistence
 from .profile import ProfileManager
 from .reranker import CrossEncoderReranker
+from .retrieval_planner import RetrievalPlan, RetrievalPlanner
 from .store import MemoryStore
 
 __all__ = [
@@ -60,6 +61,8 @@ __all__ = [
     "KnowledgeTriple",
     "MemoryEvent",
     "MemoryStore",
+    "RetrievalPlan",
+    "RetrievalPlanner",
     "ProfileManager",
     "MemoryExtractor",
     "MemoryPersistence",
