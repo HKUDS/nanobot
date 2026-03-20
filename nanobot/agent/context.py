@@ -6,12 +6,10 @@ import platform
 from pathlib import Path
 from typing import Any
 
-from nanobot.utils.helpers import current_time_str
-
-from nanobot.agent.memory import MemoryStore
+from nanobot.agent.memory import MemoryProvider, MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.config.schema import InputLimitsConfig
-from nanobot.utils.helpers import build_assistant_message, detect_image_mime
+from nanobot.utils.helpers import build_assistant_message, current_time_str, detect_image_mime
 
 
 class ContextBuilder:
@@ -20,9 +18,14 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
 
-    def __init__(self, workspace: Path, input_limits: InputLimitsConfig | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        input_limits: InputLimitsConfig | None = None,
+        memory_provider: MemoryProvider | None = None,
+    ):
         self.workspace = workspace
-        self.memory = MemoryStore(workspace)
+        self.memory = memory_provider or MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
         self.input_limits = input_limits or InputLimitsConfig()
 
@@ -160,8 +163,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         if extra_count:
             noun = "image" if extra_count == 1 else "images"
             notes.append(
-                f"[Skipped {extra_count} {noun}: "
-                f"only the first {max_images} images are included]"
+                f"[Skipped {extra_count} {noun}: only the first {max_images} images are included]"
             )
 
         for path in media[:max_images]:
@@ -185,11 +187,13 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
                 notes.append(f"[Skipped image: unsupported or invalid image format ({p.name})]")
                 continue
             b64 = base64.b64encode(raw).decode()
-            images.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime};base64,{b64}"},
-                "_meta": {"path": str(p)},
-            })
+            images.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{b64}"},
+                    "_meta": {"path": str(p)},
+                }
+            )
 
         note_text = "\n".join(notes).strip()
         text_block = text if not note_text else (f"{note_text}\n\n{text}" if text else note_text)
@@ -199,25 +203,33 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         return images + [{"type": "text", "text": text_block}]
 
     def add_tool_result(
-        self, messages: list[dict[str, Any]],
-        tool_call_id: str, tool_name: str, result: str,
+        self,
+        messages: list[dict[str, Any]],
+        tool_call_id: str,
+        tool_name: str,
+        result: str,
     ) -> list[dict[str, Any]]:
         """Add a tool result to the message list."""
-        messages.append({"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result})
+        messages.append(
+            {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result}
+        )
         return messages
 
     def add_assistant_message(
-        self, messages: list[dict[str, Any]],
+        self,
+        messages: list[dict[str, Any]],
         content: str | None,
         tool_calls: list[dict[str, Any]] | None = None,
         reasoning_content: str | None = None,
         thinking_blocks: list[dict] | None = None,
     ) -> list[dict[str, Any]]:
         """Add an assistant message to the message list."""
-        messages.append(build_assistant_message(
-            content,
-            tool_calls=tool_calls,
-            reasoning_content=reasoning_content,
-            thinking_blocks=thinking_blocks,
-        ))
+        messages.append(
+            build_assistant_message(
+                content,
+                tool_calls=tool_calls,
+                reasoning_content=reasoning_content,
+                thinking_blocks=thinking_blocks,
+            )
+        )
         return messages

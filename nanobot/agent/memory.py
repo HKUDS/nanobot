@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import weakref
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
@@ -16,6 +18,82 @@ from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session, SessionManager
+
+
+@dataclass
+class MemoryStats:
+    """Statistics about the memory store's current state."""
+
+    long_term_size_bytes: int = 0
+    history_size_bytes: int = 0
+    long_term_token_estimate: int = 0
+    history_entries: int = 0
+    last_consolidation: str | None = None
+
+
+class MemoryProvider(ABC):
+    """Abstract interface for memory storage backends.
+
+    Implement this to plug in custom storage (e.g. SQLite, Redis, vector DB)
+    while keeping the rest of the agent's memory pipeline unchanged.
+    """
+
+    @abstractmethod
+    def read_long_term(self) -> str:
+        """Read long-term memory content."""
+
+    @abstractmethod
+    def write_long_term(self, content: str) -> None:
+        """Overwrite long-term memory with new content."""
+
+    @abstractmethod
+    def append_history(self, entry: str) -> None:
+        """Append an entry to the history log."""
+
+    def get_memory_context(self) -> str:
+        """Format long-term memory for inclusion in the system prompt."""
+        long_term = self.read_long_term()
+        return f"## Long-term Memory\n{long_term}" if long_term else ""
+
+    def get_stats(self) -> MemoryStats:
+        """Return statistics about the current memory state."""
+        return MemoryStats()
+
+
+class FileMemoryProvider(MemoryProvider):
+    """File-based memory provider using MEMORY.md and HISTORY.md."""
+
+    def __init__(self, workspace: Path):
+        self.memory_dir = ensure_dir(workspace / "memory")
+        self.memory_file = self.memory_dir / "MEMORY.md"
+        self.history_file = self.memory_dir / "HISTORY.md"
+
+    def read_long_term(self) -> str:
+        if self.memory_file.exists():
+            return self.memory_file.read_text(encoding="utf-8")
+        return ""
+
+    def write_long_term(self, content: str) -> None:
+        self.memory_file.write_text(content, encoding="utf-8")
+
+    def append_history(self, entry: str) -> None:
+        with open(self.history_file, "a", encoding="utf-8") as f:
+            f.write(entry.rstrip() + "\n\n")
+
+    def get_stats(self) -> MemoryStats:
+        long_term = self.read_long_term()
+        history_bytes = self.history_file.stat().st_size if self.history_file.exists() else 0
+        history_text = (
+            self.history_file.read_text(encoding="utf-8") if self.history_file.exists() else ""
+        )
+        entry_count = history_text.count("\n[") + (1 if history_text.startswith("[") else 0)
+        token_estimate = max(1, len(long_term) // 4) if long_term else 0
+        return MemoryStats(
+            long_term_size_bytes=len(long_term.encode("utf-8")),
+            history_size_bytes=history_bytes,
+            long_term_token_estimate=token_estimate,
+            history_entries=entry_count,
+        )
 
 
 _SAVE_MEMORY_TOOL = [
@@ -58,6 +136,7 @@ def _normalize_save_memory_args(args: Any) -> dict[str, Any] | None:
         return args[0] if args and isinstance(args[0], dict) else None
     return args if isinstance(args, dict) else None
 
+
 _TOOL_CHOICE_ERROR_MARKERS = (
     "tool_choice",
     "toolchoice",
@@ -72,32 +151,18 @@ def _is_tool_choice_unsupported(content: str | None) -> bool:
     return any(m in text for m in _TOOL_CHOICE_ERROR_MARKERS)
 
 
-class MemoryStore:
-    """Two-layer memory: MEMORY.md (long-term facts) + HISTORY.md (grep-searchable log)."""
+class MemoryStore(FileMemoryProvider):
+    """Two-layer memory with LLM-driven consolidation.
+
+    Extends FileMemoryProvider with consolidation logic that uses the LLM
+    to summarize conversations into long-term memory and history entries.
+    """
 
     _MAX_FAILURES_BEFORE_RAW_ARCHIVE = 3
 
     def __init__(self, workspace: Path):
-        self.memory_dir = ensure_dir(workspace / "memory")
-        self.memory_file = self.memory_dir / "MEMORY.md"
-        self.history_file = self.memory_dir / "HISTORY.md"
+        super().__init__(workspace)
         self._consecutive_failures = 0
-
-    def read_long_term(self) -> str:
-        if self.memory_file.exists():
-            return self.memory_file.read_text(encoding="utf-8")
-        return ""
-
-    def write_long_term(self, content: str) -> None:
-        self.memory_file.write_text(content, encoding="utf-8")
-
-    def append_history(self, entry: str) -> None:
-        with open(self.history_file, "a", encoding="utf-8") as f:
-            f.write(entry.rstrip() + "\n\n")
-
-    def get_memory_context(self) -> str:
-        long_term = self.read_long_term()
-        return f"## Long-term Memory\n{long_term}" if long_term else ""
 
     @staticmethod
     def _format_messages(messages: list[dict]) -> str:
@@ -105,7 +170,9 @@ class MemoryStore:
         for message in messages:
             if not message.get("content"):
                 continue
-            tools = f" [tools: {', '.join(message['tools_used'])}]" if message.get("tools_used") else ""
+            tools = (
+                f" [tools: {', '.join(message['tools_used'])}]" if message.get("tools_used") else ""
+            )
             lines.append(
                 f"[{message.get('timestamp', '?')[:16]}] {message['role'].upper()}{tools}: {message['content']}"
             )
@@ -131,7 +198,10 @@ class MemoryStore:
 {self._format_messages(messages)}"""
 
         chat_messages = [
-            {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
+            {
+                "role": "system",
+                "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation.",
+            },
             {"role": "user", "content": prompt},
         ]
 
@@ -144,9 +214,7 @@ class MemoryStore:
                 tool_choice=forced,
             )
 
-            if response.finish_reason == "error" and _is_tool_choice_unsupported(
-                response.content
-            ):
+            if response.finish_reason == "error" and _is_tool_choice_unsupported(response.content):
                 logger.warning("Forced tool_choice unsupported, retrying with auto")
                 response = await provider.chat_with_retry(
                     messages=chat_messages,
@@ -178,7 +246,9 @@ class MemoryStore:
             update = args["memory_update"]
 
             if entry is None or update is None:
-                logger.warning("Memory consolidation: save_memory payload contains null required fields")
+                logger.warning(
+                    "Memory consolidation: save_memory payload contains null required fields"
+                )
                 return self._fail_or_raw_archive(messages)
 
             entry = _ensure_text(entry).strip()
@@ -211,12 +281,20 @@ class MemoryStore:
         """Fallback: dump raw messages to HISTORY.md without LLM summarization."""
         ts = datetime.now().strftime("%Y-%m-%d %H:%M")
         self.append_history(
-            f"[{ts}] [RAW] {len(messages)} messages\n"
-            f"{self._format_messages(messages)}"
+            f"[{ts}] [RAW] {len(messages)} messages\n{self._format_messages(messages)}"
         )
-        logger.warning(
-            "Memory consolidation degraded: raw-archived {} messages", len(messages)
-        )
+        logger.warning("Memory consolidation degraded: raw-archived {} messages", len(messages))
+
+
+def create_memory_provider(workspace: Path, provider_name: str = "file") -> MemoryStore:
+    """Create a memory provider by name.
+
+    Currently only "file" is supported. Custom backends can be added by
+    extending MemoryProvider and registering them here.
+    """
+    if provider_name == "file":
+        return MemoryStore(workspace)
+    raise ValueError(f"Unknown memory provider: {provider_name!r}. Available: 'file'")
 
 
 class MemoryConsolidator:
@@ -233,8 +311,9 @@ class MemoryConsolidator:
         context_window_tokens: int,
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
+        memory_store: MemoryStore | None = None,
     ):
-        self.store = MemoryStore(workspace)
+        self.store = memory_store or MemoryStore(workspace)
         self.provider = provider
         self.model = model
         self.sessions = sessions
@@ -276,7 +355,7 @@ class MemoryConsolidator:
     def estimate_session_prompt_tokens(self, session: Session) -> tuple[int, str]:
         """Estimate current prompt size for the normal session history view."""
         history = session.get_history(max_messages=0)
-        channel, chat_id = (session.key.split(":", 1) if ":" in session.key else (None, None))
+        channel, chat_id = session.key.split(":", 1) if ":" in session.key else (None, None)
         probe_messages = self._build_messages(
             history=history,
             current_message="[token-probe]",
@@ -334,7 +413,7 @@ class MemoryConsolidator:
                     return
 
                 end_idx = boundary[0]
-                chunk = session.messages[session.last_consolidated:end_idx]
+                chunk = session.messages[session.last_consolidated : end_idx]
                 if not chunk:
                     return
 
