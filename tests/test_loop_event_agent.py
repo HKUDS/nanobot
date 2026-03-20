@@ -21,10 +21,12 @@ def _write_acl(workspace: Path, acl: dict) -> None:
     )
 
 
-def _make_event_agent_workspace(workspace: Path) -> Path:
+def _make_event_agent_workspace(workspace: Path, blocked_tools: list[str] | None = None) -> Path:
     ea_ws = workspace / "event_agent"
-    ea_ws.mkdir()
+    ea_ws.mkdir(exist_ok=True)
     (ea_ws / "SOUL.md").write_text("# Event Agent\n")
+    if blocked_tools is not None:
+        (ea_ws / "blocked_tools.json").write_text(json.dumps(blocked_tools))
     return ea_ws
 
 
@@ -51,9 +53,10 @@ def test_matches_full_jid(tmp_path: Path) -> None:
     loop = _mk_loop(tmp_path)
     result = loop._resolve_event_agent_workspace("15551234567@s.whatsapp.net")
     assert result is not None
-    ctx, sess = result
+    ctx, sess, blocked = result
     assert isinstance(ctx, ContextBuilder)
     assert isinstance(sess, SessionManager)
+    assert isinstance(blocked, frozenset)
 
 
 # ── Sender matched by phone prefix (without @s.whatsapp.net) ─────────────────
@@ -123,3 +126,42 @@ def test_non_guest_not_matched_with_multiple_guests(tmp_path: Path) -> None:
     _make_event_agent_workspace(tmp_path)
     loop = _mk_loop(tmp_path)
     assert loop._resolve_event_agent_workspace("99999999999@s.whatsapp.net") is None
+
+
+# ── blocked_tools loading ─────────────────────────────────────────────────────
+
+def test_blocked_tools_loaded_from_workspace(tmp_path: Path) -> None:
+    _write_acl(tmp_path, {"15551234567@s.whatsapp.net": {"name": "Jake", "event_id": "trip"}})
+    _make_event_agent_workspace(tmp_path, blocked_tools=["write_file", "edit_file", "gmail_fetch"])
+    loop = _mk_loop(tmp_path)
+    _, _, blocked = loop._resolve_event_agent_workspace("15551234567@s.whatsapp.net")
+    assert blocked == frozenset({"write_file", "edit_file", "gmail_fetch"})
+
+
+def test_blocked_tools_empty_when_no_file(tmp_path: Path) -> None:
+    _write_acl(tmp_path, {"15551234567@s.whatsapp.net": {"name": "Jake", "event_id": "trip"}})
+    _make_event_agent_workspace(tmp_path)  # no blocked_tools.json
+    loop = _mk_loop(tmp_path)
+    _, _, blocked = loop._resolve_event_agent_workspace("15551234567@s.whatsapp.net")
+    assert blocked == frozenset()
+
+
+def test_blocked_tools_empty_on_corrupt_file(tmp_path: Path) -> None:
+    _write_acl(tmp_path, {"15551234567@s.whatsapp.net": {"name": "Jake", "event_id": "trip"}})
+    ea_ws = _make_event_agent_workspace(tmp_path)
+    (ea_ws / "blocked_tools.json").write_text("not json")
+    loop = _mk_loop(tmp_path)
+    _, _, blocked = loop._resolve_event_agent_workspace("15551234567@s.whatsapp.net")
+    assert blocked == frozenset()
+
+
+# ── _load_blocked_tools ───────────────────────────────────────────────────────
+
+def test_load_blocked_tools_reads_file(tmp_path: Path) -> None:
+    (tmp_path / "blocked_tools.json").write_text(json.dumps(["read_file", "exec"]))
+    result = AgentLoop._load_blocked_tools(tmp_path)
+    assert result == frozenset({"read_file", "exec"})
+
+
+def test_load_blocked_tools_missing_file(tmp_path: Path) -> None:
+    assert AgentLoop._load_blocked_tools(tmp_path) == frozenset()
