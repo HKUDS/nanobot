@@ -64,6 +64,13 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        # Accept extra kwargs from webui for forward-compatibility
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        memory_window: int | None = None,
+        reasoning_effort: str | None = None,
+        brave_api_key: str | None = None,
+        **_kwargs: Any,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -101,7 +108,7 @@ class AgentLoop:
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
-        self._processing_lock = asyncio.Lock()
+        self._session_locks: dict[str, asyncio.Lock] = {}  # per-session so different sessions run concurrently
         self.memory_consolidator = MemoryConsolidator(
             workspace=workspace,
             provider=provider,
@@ -184,22 +191,32 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
-    ) -> tuple[str | None, list[str], list[dict]]:
-        """Run the agent iteration loop."""
+    ) -> tuple[str | None, list[str], list[dict], bool]:
+        """Run the agent iteration loop.
+
+        Returns (final_content, tools_used, messages, was_streamed).
+        was_streamed=True means the final response was forwarded token-by-token
+        via on_progress; the channel should close the open stream without
+        appending the full content again.
+        """
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        was_streamed = False
 
         while iteration < self.max_iterations:
             iteration += 1
 
             tool_defs = self.tools.get_definitions()
 
-            response = await self.provider.chat_with_retry(
+            response = await self.provider.chat_stream(
                 messages=messages,
                 tools=tool_defs,
                 model=self.model,
+                # on_token only receives plain text tokens; on_progress supports
+                # extra kwargs (tool_hint=) so we wrap it to strip those.
+                on_token=(lambda t: on_progress(t)) if on_progress else None,
             )
 
             if response.has_tool_calls:
@@ -242,6 +259,7 @@ class AgentLoop:
                     thinking_blocks=response.thinking_blocks,
                 )
                 final_content = clean
+                was_streamed = response.was_streamed
                 break
 
         if final_content is None and iteration >= self.max_iterations:
@@ -251,7 +269,7 @@ class AgentLoop:
                 "without completing the task. You can try breaking the task into smaller steps."
             )
 
-        return final_content, tools_used, messages
+        return final_content, tools_used, messages, was_streamed
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
@@ -308,9 +326,13 @@ class AgentLoop:
 
         asyncio.create_task(_do_restart())
 
+    def _session_lock(self, session_key: str) -> asyncio.Lock:
+        """Per-session lock: same session serialized, different sessions concurrent."""
+        return self._session_locks.setdefault(session_key, asyncio.Lock())
+
     async def _dispatch(self, msg: InboundMessage) -> None:
-        """Process a message under the global lock."""
-        async with self._processing_lock:
+        """Process a message under the session lock (concurrent across sessions)."""
+        async with self._session_lock(msg.session_key):
             try:
                 response = await self._process_message(msg)
                 if response is not None:
@@ -377,7 +399,7 @@ class AgentLoop:
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, _, all_msgs, _ = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
@@ -437,7 +459,7 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
+        final_content, _, all_msgs, _ = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
         )
 
@@ -503,8 +525,15 @@ class AgentLoop:
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> str:
-        """Process a message directly (for CLI or cron usage)."""
+        """Process a message directly (for CLI, cron, or WebUI usage).
+
+        Uses the per-session lock so that different sessions run concurrently
+        while messages within the same session are serialized.  This prevents
+        shared tool-context corruption (e.g. _set_tool_context) when multiple
+        WebSocket connections send messages to different sessions simultaneously.
+        """
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+        async with self._session_lock(session_key):
+            response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
         return response.content if response else ""

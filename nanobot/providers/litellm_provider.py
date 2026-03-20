@@ -4,6 +4,7 @@ import hashlib
 import os
 import secrets
 import string
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import json_repair
@@ -348,6 +349,149 @@ class LiteLLMProvider(LLMProvider):
             usage=usage,
             reasoning_content=reasoning_content,
             thinking_blocks=thinking_blocks,
+        )
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: object = None,
+        temperature: object = None,
+        reasoning_effort: object = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        on_token: Callable[[str], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        """Stream chat completion via LiteLLM.
+
+        Calls on_token for each text delta when the response has no tool calls.
+        Tokens are buffered into ~30-char chunks before forwarding to reduce
+        the number of downstream messages.  If tool calls are detected the
+        buffer is discarded and on_token is never called.
+        """
+        from nanobot.providers.base import _SENTINEL  # local import to avoid circular
+
+        if max_tokens is None or max_tokens is _SENTINEL:
+            max_tokens = self.generation.max_tokens
+        if temperature is None or temperature is _SENTINEL:
+            temperature = self.generation.temperature
+        if reasoning_effort is None or reasoning_effort is _SENTINEL:
+            reasoning_effort = self.generation.reasoning_effort
+
+        original_model = model or self.default_model
+        resolved_model = self._resolve_model(original_model)
+        extra_msg_keys = self._extra_msg_keys(original_model, resolved_model)
+
+        msgs = self._sanitize_messages(
+            self._sanitize_empty_content(messages), extra_keys=extra_msg_keys
+        )
+        if self._supports_cache_control(original_model):
+            msgs, tools = self._apply_cache_control(msgs, tools)
+
+        kwargs: dict[str, Any] = {
+            "model": resolved_model,
+            "messages": msgs,
+            "max_tokens": max(1, int(max_tokens)),
+            "temperature": float(temperature),
+            "stream": True,
+        }
+        if self._gateway:
+            kwargs.update(self._gateway.litellm_kwargs)
+        self._apply_model_overrides(resolved_model, kwargs)
+        if self._langsmith_enabled:
+            kwargs.setdefault("callbacks", []).append("langsmith")
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+        if self.extra_headers:
+            kwargs["extra_headers"] = self.extra_headers
+        if reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
+            kwargs["drop_params"] = True
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = tool_choice or "auto"
+
+        try:
+            stream = await acompletion(**kwargs)
+        except Exception as e:
+            return LLMResponse(content=f"Error calling LLM: {e}", finish_reason="error")
+
+        content_parts: list[str] = []
+        tool_builders: dict[int, dict[str, str]] = {}
+        finish_reason = "stop"
+        has_tool_calls = False
+
+        # Token buffer: flush every ~30 chars or at sentence boundaries
+        _buf: list[str] = []
+        _buf_len = 0
+        _FLUSH_AT = 30
+        _SENTENCE_END = frozenset("。！？.!?\n")
+
+        async def _flush() -> None:
+            nonlocal _buf, _buf_len
+            if _buf and on_token and not has_tool_calls:
+                await on_token("".join(_buf))
+            _buf = []
+            _buf_len = 0
+
+        try:
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                choice = chunk.choices[0]
+                delta = choice.delta
+
+                if delta.content:
+                    content_parts.append(delta.content)
+                    if not has_tool_calls:
+                        _buf.append(delta.content)
+                        _buf_len += len(delta.content)
+                        if _buf_len >= _FLUSH_AT or any(c in delta.content for c in _SENTENCE_END):
+                            await _flush()
+
+                if getattr(delta, "tool_calls", None):
+                    has_tool_calls = True
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+                        if idx not in tool_builders:
+                            tool_builders[idx] = {"id": "", "name": "", "arguments": ""}
+                        b = tool_builders[idx]
+                        if tc_delta.id:
+                            b["id"] = tc_delta.id
+                        if tc_delta.function:
+                            if tc_delta.function.name:
+                                b["name"] += tc_delta.function.name
+                            if tc_delta.function.arguments:
+                                b["arguments"] += tc_delta.function.arguments
+
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
+
+        except Exception as e:
+            logger.error("Streaming error: {}", e)
+            return LLMResponse(content=f"Error calling LLM: {e}", finish_reason="error")
+
+        await _flush()
+
+        tool_calls: list[ToolCallRequest] = []
+        for idx in sorted(tool_builders):
+            b = tool_builders[idx]
+            try:
+                args = json_repair.loads(b["arguments"]) if b["arguments"] else {}
+            except Exception:
+                args = {}
+            tool_calls.append(ToolCallRequest(
+                id=_short_tool_id(), name=b["name"], arguments=args,
+            ))
+
+        was_streamed = bool(on_token and not has_tool_calls and content_parts)
+        return LLMResponse(
+            content="".join(content_parts) or None,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason or "stop",
+            was_streamed=was_streamed,
         )
 
     def get_default_model(self) -> str:

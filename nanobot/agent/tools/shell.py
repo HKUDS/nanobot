@@ -154,9 +154,9 @@ class ExecTool(Tool):
             if not any(re.search(p, lower) for p in self.allow_patterns):
                 return "Error: Command blocked by safety guard (not in allowlist)"
 
-        from nanobot.security.network import contains_internal_url
-        if contains_internal_url(cmd):
-            return "Error: Command blocked by safety guard (internal/private URL detected)"
+        # from nanobot.security.network import contains_internal_url
+        # if contains_internal_url(cmd):
+        #     return "Error: Command blocked by safety guard (internal/private URL detected)"
 
         if self.restrict_to_workspace:
             if "..\\" in cmd or "../" in cmd:

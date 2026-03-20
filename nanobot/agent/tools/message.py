@@ -42,7 +42,11 @@ class MessageTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Send a message to the user. Use this when you want to communicate something."
+        return (
+            "Send a message (and optionally files/images) to the user. "
+            "Use this when you want to communicate something, or deliver generated files. "
+            "Pass local file paths in the 'media' parameter to attach images or documents."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -64,7 +68,7 @@ class MessageTool(Tool):
                 "media": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional: list of file paths to attach (images, audio, documents)"
+                    "description": "List of ABSOLUTE local file paths to send as attachments (images, documents, any file). USE THIS when the user wants to receive a file — do NOT paste file contents as text. Example: [\"/root/.nanobot/workspace/report.md\"]"
                 }
             },
             "required": ["content"]

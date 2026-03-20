@@ -617,6 +617,24 @@ def gateway(
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
 
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
+    console.print(f"[green]✓[/green] HTTP API: http://{config.gateway.host}:{port}")
+    if config.gateway.api_key:
+        console.print("[green]✓[/green] API auth: enabled (Bearer token required)")
+    else:
+        console.print("[yellow]⚠[/yellow] API auth: [bold red]OPEN[/bold red] — set gateway.apiKey in config.json to secure")
+
+    # Build HTTP API server context
+    from nanobot.api.server import GatewayContext, start_api_server
+
+    gateway_ctx = GatewayContext(
+        agent=agent,
+        bus=bus,
+        channels=channels,
+        session_manager=session_manager,
+        cron=cron,
+        heartbeat=heartbeat,
+        config=config,
+    )
 
     async def run():
         try:
@@ -625,6 +643,7 @@ def gateway(
             await asyncio.gather(
                 agent.run(),
                 channels.start_all(),
+                start_api_server(gateway_ctx, config.gateway.host, port),
             )
         except KeyboardInterrupt:
             console.print("\nShutting down...")

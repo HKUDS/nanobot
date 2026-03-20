@@ -3,10 +3,14 @@
 import asyncio
 import json
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from loguru import logger
+
+# Module-level sentinel for unset optional parameters (also set as class attribute below)
+_SENTINEL = object()
 
 
 @dataclass
@@ -44,7 +48,8 @@ class LLMResponse:
     usage: dict[str, int] = field(default_factory=dict)
     reasoning_content: str | None = None  # Kimi, DeepSeek-R1 etc.
     thinking_blocks: list[dict] | None = None  # Anthropic extended thinking
-    
+    was_streamed: bool = False  # True when content was forwarded token-by-token via on_token
+
     @property
     def has_tool_calls(self) -> bool:
         """Check if response contains tool calls."""
@@ -187,6 +192,41 @@ class LLMProvider(ABC):
         """
         pass
 
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: object = _SENTINEL,
+        temperature: object = _SENTINEL,
+        reasoning_effort: object = _SENTINEL,
+        tool_choice: str | dict[str, Any] | None = None,
+        on_token: Callable[[str], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        """Stream chat completion, calling on_token for each text delta.
+
+        Default implementation falls back to chat_with_retry() and replays the
+        full content via on_token when there are no tool calls.  Override in
+        providers that natively support streaming (e.g. LiteLLMProvider).
+        """
+        response = await self.chat_with_retry(
+            messages=messages, tools=tools, model=model,
+            max_tokens=max_tokens, temperature=temperature,
+            reasoning_effort=reasoning_effort, tool_choice=tool_choice,
+        )
+        if on_token and response.content and not response.has_tool_calls:
+            await on_token(response.content)
+            return LLMResponse(
+                content=response.content,
+                tool_calls=response.tool_calls,
+                finish_reason=response.finish_reason,
+                usage=response.usage,
+                reasoning_content=response.reasoning_content,
+                thinking_blocks=response.thinking_blocks,
+                was_streamed=True,
+            )
+        return response
+
     @classmethod
     def _is_transient_error(cls, content: str | None) -> bool:
         err = (content or "").lower()
@@ -215,8 +255,22 @@ class LLMProvider(ABC):
         return result if found else None
 
     async def _safe_chat(self, **kwargs: Any) -> LLMResponse:
-        """Call chat() and convert unexpected exceptions to error responses."""
+        """Call chat() and convert unexpected exceptions to error responses.
+
+        Automatically drops kwargs not accepted by the current chat() method
+        so that external patches (e.g. webui's provider patch) that strip some
+        parameters don't cause hard TypeErrors.
+        """
+        import inspect as _inspect
         try:
+            sig = _inspect.signature(self.chat)
+            has_var_kw = any(
+                p.kind == _inspect.Parameter.VAR_KEYWORD
+                for p in sig.parameters.values()
+            )
+            if not has_var_kw:
+                accepted = set(sig.parameters)
+                kwargs = {k: v for k, v in kwargs.items() if k in accepted}
             return await self.chat(**kwargs)
         except asyncio.CancelledError:
             raise

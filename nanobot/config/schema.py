@@ -25,6 +25,26 @@ class ChannelsConfig(Base):
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
 
+    def __getattr__(self, name: str):
+        # Called only when normal attribute lookup fails (extra fields).
+        val = super().__getattr__(name)
+        # Lazily coerce known channel config dicts to typed pydantic models
+        # so webui can access .enabled / .model_dump() without AttributeError.
+        if isinstance(val, dict):
+            if name == "qq":
+                from nanobot.channels.qq import QQConfig
+                obj = QQConfig.model_validate(val)
+                if self.__pydantic_extra__ is not None:
+                    self.__pydantic_extra__[name] = obj
+                return obj
+            if name == "wecom":
+                from nanobot.channels.wecom import WecomConfig
+                obj = WecomConfig.model_validate(val)
+                if self.__pydantic_extra__ is not None:
+                    self.__pydantic_extra__[name] = obj
+                return obj
+        return val
+
 
 class AgentDefaults(Base):
     """Default agent configuration."""
@@ -101,6 +121,7 @@ class GatewayConfig(Base):
 
     host: str = "0.0.0.0"
     port: int = 18790
+    api_key: str = ""  # Bearer token for downstream clients (web UI, etc.)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 

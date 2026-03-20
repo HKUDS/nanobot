@@ -67,9 +67,13 @@ class Session:
         return start
 
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
-        """Return unconsolidated messages for LLM input, aligned to a legal tool-call boundary."""
+        """Return unconsolidated messages for LLM input, aligned to a legal tool-call boundary.
+        max_messages <= 0 means no limit (return full unconsolidated history)."""
         unconsolidated = self.messages[self.last_consolidated:]
-        sliced = unconsolidated[-max_messages:]
+        if max_messages <= 0:
+            sliced = unconsolidated
+        else:
+            sliced = unconsolidated[-max_messages:]
 
         # Drop leading non-user messages to avoid starting mid-turn when possible.
         for i, message in enumerate(sliced):

@@ -166,7 +166,11 @@ class WriteFileTool(_FsTool):
             fp = self._resolve(path)
             fp.parent.mkdir(parents=True, exist_ok=True)
             fp.write_text(content, encoding="utf-8")
-            return f"Successfully wrote {len(content)} bytes to {fp}"
+            return (
+                f"Successfully wrote {len(content)} bytes to {fp}\n"
+                f"[HINT: If the user asked you to send/deliver this file, call: "
+                f"message(content=\"Here is your file!\", media=[\"{fp}\"])]"
+            )
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
