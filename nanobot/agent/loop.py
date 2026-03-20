@@ -31,6 +31,7 @@ from nanobot.utils.helpers import build_status_content
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
+from nanobot.utils.helpers import estimate_message_tokens
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, InputLimitsConfig, WebSearchConfig
@@ -231,6 +232,57 @@ class AgentLoop:
             ),
             metadata={"render_as": "text"},
         )
+
+    def _trim_history_for_budget(
+        self,
+        messages: list[dict],
+        turn_start_index: int,
+        iteration: int,
+    ) -> list[dict]:
+        """Trim old session history to fit within context_budget_tokens.
+
+        Returns the original list unchanged when no trimming is needed.
+        Only trims on iteration >= 2 when context_budget_tokens > 0.
+        Current-turn messages (from turn_start_index onward) are never trimmed.
+        """
+        if self.context_budget_tokens <= 0 or iteration <= 1:
+            return messages
+        if turn_start_index <= 1:
+            return messages  # no old history to trim
+
+        system = messages[:1]
+        old_history = messages[1:turn_start_index]
+        current_turn = messages[turn_start_index:]
+
+        # Pre-compute token counts to avoid double-estimation
+        token_counts = [estimate_message_tokens(m) for m in old_history]
+        total = sum(token_counts)
+        if total <= self.context_budget_tokens:
+            return messages  # fits, no trim needed
+
+        # Find cut index (O(n) scan, then single slice)
+        cut = 0
+        removed_tokens = 0
+        while cut < len(old_history) and total > self.context_budget_tokens:
+            removed_tokens += token_counts[cut]
+            total -= token_counts[cut]
+            cut += 1
+        old_history = old_history[cut:]
+
+        # Fix orphaned tool results after trimming
+        legal_start = Session._find_legal_start(old_history)
+        if legal_start > 0:
+            old_history = old_history[legal_start:]
+
+        removed_count = turn_start_index - 1 - len(old_history)
+        if removed_count > 0:
+            logger.debug(
+                "Context budget: trimmed {} history messages ({} tokens) for iteration {}",
+                removed_count, removed_tokens, iteration,
+            )
+
+        return system + old_history + current_turn
+
 
     async def _run_agent_loop(
         self,
