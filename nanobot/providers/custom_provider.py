@@ -5,10 +5,24 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+import httpx
 import json_repair
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, _types as openai_types
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+
+
+class _StainlessStripTransport(httpx.AsyncBaseTransport):
+    """Wraps an async transport and strips X-Stainless-* headers before sending."""
+
+    def __init__(self, transport: httpx.AsyncBaseTransport):
+        self._inner = transport
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        keys_to_remove = [k for k in request.headers.keys() if k.lower().startswith("x-stainless")]
+        for k in keys_to_remove:
+            del request.headers[k]
+        return await self._inner.handle_async_request(request)
 
 
 class CustomProvider(LLMProvider):
@@ -22,17 +36,37 @@ class CustomProvider(LLMProvider):
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
-        # Keep affinity stable for this provider instance to improve backend cache locality,
-        # while still letting users attach provider-specific headers for custom gateways.
-        default_headers = {
-            "x-session-affinity": uuid.uuid4().hex,
-            **(extra_headers or {}),
+        # Keep affinity stable for this provider instance to improve backend cache locality.
+        headers: dict[str, str | openai_types.Omit] = {"x-session-affinity": uuid.uuid4().hex}
+        strip_stainless = False
+        if extra_headers:
+            headers.update(extra_headers)
+            # When User-Agent is explicitly set (e.g. for Kimi Code compatibility),
+            # strip SDK fingerprint headers that reveal the true client identity.
+            if "User-Agent" in extra_headers:
+                strip_stainless = True
+                for key in (
+                    "X-Stainless-Lang",
+                    "X-Stainless-Package-Version",
+                    "X-Stainless-OS",
+                    "X-Stainless-Arch",
+                    "X-Stainless-Runtime",
+                    "X-Stainless-Runtime-Version",
+                    "X-Stainless-Async",
+                ):
+                    headers[key] = openai_types.Omit()
+
+        kwargs: dict[str, Any] = {
+            "api_key": api_key,
+            "base_url": api_base,
+            "default_headers": headers,
         }
-        self._client = AsyncOpenAI(
-            api_key=api_key,
-            base_url=api_base,
-            default_headers=default_headers,
-        )
+        if strip_stainless:
+            # Use a custom transport to strip dynamically injected X-Stainless-* headers
+            base_transport = httpx.AsyncHTTPTransport()
+            kwargs["http_client"] = httpx.AsyncClient(transport=_StainlessStripTransport(base_transport))
+
+        self._client = AsyncOpenAI(**kwargs)
 
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
                    model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,

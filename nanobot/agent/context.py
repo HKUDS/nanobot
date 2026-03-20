@@ -3,6 +3,7 @@
 import base64
 import mimetypes
 import platform
+import time
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,15 @@ from nanobot.utils.helpers import current_time_str
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.utils.helpers import build_assistant_message, detect_image_mime
+
+# AgentScope monitoring
+try:
+    from nanobot.agent.monitoring import (
+        add_prompt_building_step,
+        _AGENTSCOPE_AVAILABLE
+    )
+except ImportError:
+    _AGENTSCOPE_AVAILABLE = False
 
 
 class ContextBuilder:
@@ -128,6 +138,8 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         current_role: str = "user",
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
+        start_time = time.time()
+        
         runtime_ctx = self._build_runtime_context(channel, chat_id)
         user_content = self._build_user_content(current_message, media)
 
@@ -138,11 +150,24 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
-        return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+        system_prompt = self.build_system_prompt(skill_names)
+        messages = [
+            {"role": "system", "content": system_prompt},
             *history,
             {"role": current_role, "content": merged},
         ]
+        
+        # AgentScope: Record prompt building
+        if _AGENTSCOPE_AVAILABLE:
+            total_chars = sum(len(str(m.get('content', ''))) for m in messages)
+            add_prompt_building_step(
+                system_prompt=system_prompt[:500],
+                history_count=len(history),
+                context_length=total_chars,
+                max_context=128000  # Approximate for most models
+            )
+        
+        return messages
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
         """Build user message content with optional base64-encoded images."""

@@ -13,6 +13,38 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+# AgentScope monitoring integration
+from nanobot.agent.monitoring import (
+    init_monitor,
+    start_trace,
+    finish_trace,
+    add_context_building_step,
+    add_llm_call_step,
+    add_tool_execution_step,
+    add_skill_trigger_step,
+    add_memory_step,
+    add_prompt_building_step,
+    add_context_window_step,
+    add_retry_step,
+    add_rate_limit_step,
+    add_session_lifecycle_step,
+    add_skill_loading_step,
+    get_trace,
+    _AGENTSCOPE_AVAILABLE,
+)
+
+# Import TraceEvent for type hints
+try:
+    from agentscope.models import TraceEvent, ExecutionStep, StepType, Status
+    from agentscope.monitor import _send_trace, set_current_trace
+except ImportError:
+    TraceEvent = None
+    ExecutionStep = None
+    StepType = None
+    Status = None
+    _send_trace = None
+    set_current_trace = None
+
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.subagent import SubagentManager
@@ -112,6 +144,14 @@ class AgentLoop:
             get_tool_definitions=self.tools.get_definitions,
         )
         self._register_default_tools()
+        
+        # Initialize AgentScope monitoring
+        if _AGENTSCOPE_AVAILABLE:
+            try:
+                init_monitor("http://localhost:8000")
+                logger.info("AgentScope monitoring enabled")
+            except Exception as e:
+                logger.debug(f"AgentScope init failed: {e}")
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -196,11 +236,27 @@ class AgentLoop:
 
             tool_defs = self.tools.get_definitions()
 
+            # AgentScope: Record LLM call
+            import time
+            llm_start = time.time()
             response = await self.provider.chat_with_retry(
                 messages=messages,
                 tools=tool_defs,
                 model=self.model,
             )
+            llm_latency = (time.time() - llm_start) * 1000
+            
+            if _AGENTSCOPE_AVAILABLE:
+                add_llm_call_step(
+                    model=self.model,
+                    messages_count=len(messages),
+                    tools_count=len(tool_defs),
+                    response_content=response.content if not response.has_tool_calls else None,
+                    tool_calls=[{"name": tc.name, "args": tc.arguments} for tc in response.tool_calls] if response.has_tool_calls else [],
+                    tokens_in=response.usage.get('prompt_tokens', 0) if response.usage else 0,
+                    tokens_out=response.usage.get('completion_tokens', 0) if response.usage else 0,
+                    latency_ms=llm_latency,
+                )
 
             if response.has_tool_calls:
                 if on_progress:
@@ -225,7 +281,31 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    
+                    # AgentScope: Record tool execution
+                    tool_start = time.time()
+                    try:
+                        result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                        tool_latency = (time.time() - tool_start) * 1000
+                        if _AGENTSCOPE_AVAILABLE:
+                            add_tool_execution_step(
+                                tool_name=tool_call.name,
+                                arguments=tool_call.arguments,
+                                result=result,
+                                latency_ms=tool_latency,
+                            )
+                    except Exception as e:
+                        tool_latency = (time.time() - tool_start) * 1000
+                        if _AGENTSCOPE_AVAILABLE:
+                            add_tool_execution_step(
+                                tool_name=tool_call.name,
+                                arguments=tool_call.arguments,
+                                result=None,
+                                error=str(e),
+                                latency_ms=tool_latency,
+                            )
+                        raise
+                    
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -359,6 +439,33 @@ class AgentLoop:
         self._running = False
         logger.info("Agent loop stopping")
 
+    def _finish_agentscope_trace(self, trace: TraceEvent | None, content: str | None, error: Exception | None = None):
+        """Finish and send AgentScope trace."""
+        if not trace or not _AGENTSCOPE_AVAILABLE:
+            return
+        try:
+            if error:
+                trace.add_step(ExecutionStep(
+                    type=StepType.ERROR,
+                    content=str(error)[:500],
+                    status=Status.ERROR,
+                ))
+                trace.finish(Status.ERROR)
+                logger.debug(f"AgentScope: Trace finished with error: {error}")
+            else:
+                trace.output_result = content[:500] if content else ""
+                trace.add_step(ExecutionStep(
+                    type=StepType.OUTPUT,
+                    content=trace.output_result,
+                    status=Status.SUCCESS,
+                ))
+                trace.finish(Status.SUCCESS)
+                logger.debug(f"AgentScope: Trace finished successfully")
+            _send_trace(trace)
+            logger.debug("AgentScope: Trace sent to backend")
+        except Exception as e:
+            logger.warning(f"AgentScope trace finish failed: {e}")
+
     async def _process_message(
         self,
         msg: InboundMessage,
@@ -366,6 +473,32 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
+        # AgentScope monitoring start
+        _as_trace = None
+        _should_trace = _AGENTSCOPE_AVAILABLE and msg.channel not in ("system", "inter_agent")
+        
+        if _should_trace:
+            _as_trace = start_trace("nanobot_message", ["nanobot", msg.channel], msg.content)
+            if _as_trace:
+                logger.info(f"AgentScope: Started trace {_as_trace.id} for {msg.channel}")
+        
+        try:
+            result = await self._process_message_impl(msg, session_key, on_progress)
+            if _should_trace:
+                finish_trace(_as_trace, result.content if result else None)
+            return result
+        except Exception as e:
+            if _should_trace:
+                finish_trace(_as_trace, None, e)
+            raise
+
+    async def _process_message_impl(
+        self,
+        msg: InboundMessage,
+        session_key: str | None = None,
+        on_progress: Callable[[str], Awaitable[None]] | None = None,
+    ) -> OutboundMessage | None:
+        """Inner implementation of message processing."""
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id

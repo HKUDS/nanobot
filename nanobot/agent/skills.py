@@ -4,10 +4,20 @@ import json
 import os
 import re
 import shutil
+import time
 from pathlib import Path
 
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
+
+# AgentScope monitoring
+try:
+    from nanobot.agent.monitoring import (
+        add_skill_loading_step,
+        _AGENTSCOPE_AVAILABLE
+    )
+except ImportError:
+    _AGENTSCOPE_AVAILABLE = False
 
 
 class SkillsLoader:
@@ -89,12 +99,28 @@ class SkillsLoader:
         Returns:
             Formatted skills content.
         """
+        start_time = time.time()
         parts = []
+        loaded_count = 0
+        failed_count = 0
+        
         for name in skill_names:
             content = self.load_skill(name)
             if content:
                 content = self._strip_frontmatter(content)
                 parts.append(f"### Skill: {name}\n\n{content}")
+                loaded_count += 1
+            else:
+                failed_count += 1
+
+        # AgentScope: Record skill loading
+        if _AGENTSCOPE_AVAILABLE and skill_names:
+            add_skill_loading_step(
+                skills=skill_names,
+                loaded_count=loaded_count,
+                failed_count=failed_count,
+                total_time_ms=(time.time() - start_time) * 1000
+            )
 
         return "\n\n---\n\n".join(parts) if parts else ""
 
