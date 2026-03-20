@@ -618,10 +618,22 @@ def gateway(
 
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
+    # 初始化插件管理器
+    from nanobot.plugins.manager import PluginManager
+    from nanobot.bus.events import SystemEvent
+    plugins = PluginManager(config, bus)
+
     async def run():
         try:
             await cron.start()
             await heartbeat.start()
+
+            # 初始化插件
+            await plugins.initialize()
+
+            # 发布网关就绪事件
+            await bus.publish_system(SystemEvent(event_type="gateway_ready"))
+
             await asyncio.gather(
                 agent.run(),
                 channels.start_all(),
@@ -633,6 +645,8 @@ def gateway(
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
+            # 发布网关关闭事件
+            await bus.publish_system(SystemEvent(event_type="gateway_shutdown"))
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()

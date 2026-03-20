@@ -13,6 +13,19 @@ class Base(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
+
+class StartupGreetingConfig(Base):
+    """启动问候插件配置"""
+    enabled: bool = False
+    system_prompt: str = "👋 你好！我已上线，随时准备协助你。"
+    target_chat_ids: dict[str, str] = Field(default_factory=dict)  # 频道名 -> chat_id，如 {"feishu": "ou_xxx"}，不填则不发
+    delay_seconds: int = 2  # 网关就绪后等待的秒数
+
+
+class PluginsConfig(Base):
+    """内置插件配置"""
+    startup_greeting: StartupGreetingConfig = Field(default_factory=StartupGreetingConfig)
+
 class ChannelsConfig(Base):
     """Configuration for chat channels.
 
@@ -158,6 +171,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    plugins: PluginsConfig = Field(default_factory=PluginsConfig)
 
     @property
     def workspace_path(self) -> Path:
