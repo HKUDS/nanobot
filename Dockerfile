@@ -10,12 +10,12 @@ WORKDIR /app
 # Install Python dependencies first (cached layer)
 COPY pyproject.toml README.md LICENSE ./
 RUN mkdir -p nanobot && touch nanobot/__init__.py && \
-    pip install --no-cache-dir -e . && \
+    pip install --no-cache-dir . && \
     rm -rf nanobot
 
 # Copy the full source and install
 COPY nanobot/ nanobot/
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir .
 
 # Create a non-root user and config directory
 RUN groupadd --gid 1001 nanobot && \
