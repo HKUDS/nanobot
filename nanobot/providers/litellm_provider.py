@@ -2,8 +2,6 @@
 
 import hashlib
 import os
-import secrets
-import string
 from typing import Any
 
 import json_repair
@@ -11,17 +9,12 @@ import litellm
 from litellm import acompletion
 from loguru import logger
 
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest, short_tool_id
 from nanobot.providers.registry import find_by_model, find_gateway
 
 # Standard chat-completion message keys.
 _ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content"})
 _ANTHROPIC_EXTRA_KEYS = frozenset({"thinking_blocks"})
-_ALNUM = string.ascii_letters + string.digits
-
-def _short_tool_id() -> str:
-    """Generate a 9-char alphanumeric ID compatible with all providers (incl. Mistral)."""
-    return "".join(secrets.choice(_ALNUM) for _ in range(9))
 
 
 class LiteLLMProvider(LLMProvider):
@@ -323,7 +316,7 @@ class LiteLLMProvider(LLMProvider):
             )
 
             tool_calls.append(ToolCallRequest(
-                id=_short_tool_id(),
+                id=short_tool_id(),
                 name=tc.function.name,
                 arguments=args,
                 provider_specific_fields=provider_specific_fields,

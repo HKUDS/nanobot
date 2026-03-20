@@ -26,8 +26,9 @@ from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import LLMProvider
+from nanobot.providers.base import LLMProvider, ToolCallRequest
 from nanobot.session.manager import Session, SessionManager
+from nanobot.utils.helpers import parse_text_tool_calls, strip_text_tool_calls
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
@@ -201,6 +202,20 @@ class AgentLoop:
                 tools=tool_defs,
                 model=self.model,
             )
+
+            # Fallback: some models emit tool calls as XML text instead of
+            # using the structured function-calling API.  Parse them here so
+            # the rest of the loop can handle them normally.
+            if (
+                not response.has_tool_calls
+                and response.content
+                and "<tool_call>" in response.content
+            ):
+                parsed = parse_text_tool_calls(response.content)
+                if parsed:
+                    logger.info("Parsed {} text-format tool call(s) from response", len(parsed))
+                    response.tool_calls = parsed
+                    response.content = strip_text_tool_calls(response.content)
 
             if response.has_tool_calls:
                 if on_progress:
