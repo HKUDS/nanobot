@@ -29,6 +29,7 @@ Architecture
 
 from __future__ import annotations
 
+from .eval import EvalRunner
 from .event import KnowledgeTriple, MemoryEvent
 from .extractor import MemoryExtractor
 from .graph import KnowledgeGraph
@@ -51,6 +52,7 @@ from .reranker import CrossEncoderReranker
 from .store import MemoryStore
 
 __all__ = [
+    "EvalRunner",
     "KnowledgeTriple",
     "MemoryEvent",
     "MemoryStore",
