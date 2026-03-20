@@ -468,7 +468,9 @@ class QQChannel(BaseChannel):
 
             content = (data.content or "").strip()
 
-            attachments = data.attachments
+            # the data used by tests don't contain attachments property
+            # so we use getattr with a default of [] to avoid AttributeError in tests
+            attachments = getattr(data, "attachments", None) or []
             media_paths, recv_lines, att_meta = await self._handle_attachments(attachments)
 
             # Compose content that always contains actionable saved paths
