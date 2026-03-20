@@ -24,6 +24,18 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
+    @staticmethod
+    def _merge_skill_names(
+        always_skills: list[str],
+        selected_skills: list[str] | None,
+    ) -> list[str]:
+        """Merge skill names while preserving first-seen order."""
+        merged: list[str] = []
+        for name in [*always_skills, *(selected_skills or [])]:
+            if name and name not in merged:
+                merged.append(name)
+        return merged
+
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
@@ -37,10 +49,11 @@ class ContextBuilder:
             parts.append(f"# Memory\n\n{memory}")
 
         always_skills = self.skills.get_always_skills()
-        if always_skills:
-            always_content = self.skills.load_skills_for_context(always_skills)
-            if always_content:
-                parts.append(f"# Active Skills\n\n{always_content}")
+        active_skills = self._merge_skill_names(always_skills, skill_names)
+        if active_skills:
+            active_content = self.skills.load_skills_for_context(active_skills)
+            if active_content:
+                parts.append(f"# Active Skills\n\n{active_content}")
 
         skills_summary = self.skills.build_skills_summary()
         if skills_summary:
