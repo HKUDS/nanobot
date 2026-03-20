@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
+FROM python:3.11-slim-bookworm
 
 # Install runtime dependencies only (no Node.js — WhatsApp bridge is optional)
 RUN apt-get update && \
@@ -8,14 +8,14 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Install Python dependencies first (cached layer)
-COPY pyproject.toml README.md LICENSE uv.lock ./
-RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
-    uv sync --system --no-dev --frozen && \
-    rm -rf nanobot bridge
+COPY pyproject.toml README.md LICENSE ./
+RUN mkdir -p nanobot && touch nanobot/__init__.py && \
+    pip install --no-cache-dir -e . && \
+    rm -rf nanobot
 
 # Copy the full source and install
 COPY nanobot/ nanobot/
-RUN mkdir -p bridge && uv sync --system --no-dev --frozen
+RUN pip install --no-cache-dir -e .
 
 # Create a non-root user and config directory
 RUN groupadd --gid 1001 nanobot && \
