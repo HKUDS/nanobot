@@ -247,12 +247,20 @@ def _mask_value(value: str) -> str:
 
 
 def _format_value(value: Any, rich: bool = True, field_name: str = "") -> str:
-    """Format a value for display, masking sensitive fields."""
+    """Single recursive entry point for safe value display. Handles any depth."""
     if value is None or value == "" or value == {} or value == []:
         return "[dim]not set[/dim]" if rich else "[not set]"
-    if field_name and _is_sensitive_field(field_name) and isinstance(value, str):
+    if _is_sensitive_field(field_name) and isinstance(value, str):
         masked = _mask_value(value)
         return f"[dim]{masked}[/dim]" if rich else masked
+    if isinstance(value, BaseModel):
+        parts = []
+        for fname, _finfo in type(value).model_fields.items():
+            fval = getattr(value, fname, None)
+            formatted = _format_value(fval, rich=False, field_name=fname)
+            if formatted != "[not set]":
+                parts.append(f"{fname}={formatted}")
+        return ", ".join(parts) if parts else ("[dim]not set[/dim]" if rich else "[not set]")
     if isinstance(value, list):
         return ", ".join(str(v) for v in value)
     if isinstance(value, dict):
@@ -543,6 +551,7 @@ def _configure_pydantic_model(
         return items + ["[Done]"]
 
     while True:
+        console.clear()
         _show_config_panel(display_name, working_model, fields)
         choices = get_choices()
         answer = _select_with_back("Select field to configure:", choices)
@@ -688,7 +697,6 @@ def _configure_provider(config: Config, provider_name: str) -> None:
 
 def _configure_providers(config: Config) -> None:
     """Configure LLM providers."""
-    _show_section_header("LLM Providers", "Select a provider to configure API key and endpoint")
 
     def get_provider_choices() -> list[str]:
         """Build provider choices with config status indicators."""
@@ -703,6 +711,8 @@ def _configure_providers(config: Config) -> None:
 
     while True:
         try:
+            console.clear()
+            _show_section_header("LLM Providers", "Select a provider to configure API key and endpoint")
             choices = get_provider_choices()
             answer = _select_with_back("Select provider:", choices)
 
@@ -738,18 +748,9 @@ def _get_channel_info() -> dict[str, tuple[str, type[BaseModel]]]:
     for name, channel_cls in discover_all().items():
         try:
             mod = importlib.import_module(f"nanobot.channels.{name}")
-            config_cls = next(
-                (
-                    attr
-                    for attr in vars(mod).values()
-                    if isinstance(attr, type)
-                    and issubclass(attr, BaseModel)
-                    and attr is not BaseModel
-                    and attr.__name__.endswith("Config")
-                ),
-                None,
-            )
-            if config_cls:
+            config_name = channel_cls.__name__.replace("Channel", "Config")
+            config_cls = getattr(mod, config_name, None)
+            if config_cls and isinstance(config_cls, type) and issubclass(config_cls, BaseModel):
                 display_name = getattr(channel_cls, "display_name", name.capitalize())
                 result[name] = (display_name, config_cls)
         except Exception:
@@ -795,13 +796,13 @@ def _configure_channel(config: Config, channel_name: str) -> None:
 
 def _configure_channels(config: Config) -> None:
     """Configure chat channels."""
-    _show_section_header("Chat Channels", "Select a channel to configure connection settings")
-
     channel_names = list(_get_channel_names().keys())
     choices = channel_names + ["<- Back"]
 
     while True:
         try:
+            console.clear()
+            _show_section_header("Chat Channels", "Select a channel to configure connection settings")
             answer = _select_with_back("Select channel:", choices)
 
             if answer is _BACK_PRESSED or answer is None or answer == "<- Back":
@@ -842,8 +843,6 @@ def _configure_general_settings(config: Config, section: str) -> None:
     if not meta:
         return
     display_name, subtitle, skip = meta
-    _show_section_header(section, subtitle)
-
     model = _SETTINGS_GETTER[section](config)
     updated = _configure_pydantic_model(model, display_name, skip_fields=skip)
     if updated is not None:
@@ -975,6 +974,7 @@ def run_onboard(initial_config: Config | None = None) -> OnboardResult:
     config = base_config.model_copy(deep=True)
 
     while True:
+        console.clear()
         _show_main_menu_header()
 
         try:

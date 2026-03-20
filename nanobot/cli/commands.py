@@ -322,9 +322,6 @@ def onboard(
             console.print(f"[red]✗[/red] Error during configuration: {e}")
             console.print("[yellow]Please run 'nanobot onboard' again to complete setup.[/yellow]")
             raise typer.Exit(1)
-    else:
-        console.print("[dim]Config template now uses `maxTokens` + `contextWindowTokens`; `memoryWindow` is no longer a runtime setting.[/dim]")
-
     _onboard_plugins(config_path)
 
     # Create workspace, preferring the configured workspace path.
@@ -464,19 +461,28 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
         console.print(f"[dim]Using config: {config_path}[/dim]")
 
     loaded = load_config(config_path)
+    _warn_deprecated_config_keys(config_path)
     if workspace:
         loaded.agents.defaults.workspace = workspace
     return loaded
 
 
-def _print_deprecated_memory_window_notice(config: Config) -> None:
-    """Warn when running with old memoryWindow-only config."""
-    if config.agents.defaults.should_warn_deprecated_memory_window:
+def _warn_deprecated_config_keys(config_path: Path | None) -> None:
+    """Hint users to remove obsolete keys from their config file."""
+    import json
+    from nanobot.config.loader import get_config_path
+
+    path = config_path or get_config_path()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if "memoryWindow" in raw.get("agents", {}).get("defaults", {}):
         console.print(
-            "[yellow]Hint:[/yellow] Detected deprecated `memoryWindow` without "
-            "`contextWindowTokens`. `memoryWindow` is ignored; run "
-            "[cyan]nanobot onboard[/cyan] to refresh your config template."
+            "[dim]Hint: `memoryWindow` in your config is no longer used "
+            "and can be safely removed.[/dim]"
         )
+
 
 
 # ============================================================================
@@ -506,7 +512,6 @@ def gateway(
         logging.basicConfig(level=logging.DEBUG)
 
     config = _load_runtime_config(config, workspace)
-    _print_deprecated_memory_window_notice(config)
     port = port if port is not None else config.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
@@ -697,7 +702,6 @@ def agent(
     from nanobot.cron.service import CronService
 
     config = _load_runtime_config(config, workspace)
-    _print_deprecated_memory_window_notice(config)
     sync_workspace_templates(config.workspace_path)
 
     bus = MessageBus()

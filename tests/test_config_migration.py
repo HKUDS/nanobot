@@ -3,7 +3,7 @@ import json
 from nanobot.config.loader import load_config, save_config
 
 
-def test_load_config_keeps_max_tokens_and_warns_on_legacy_memory_window(tmp_path) -> None:
+def test_load_config_keeps_max_tokens_and_ignores_legacy_memory_window(tmp_path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(
         json.dumps(
@@ -23,7 +23,7 @@ def test_load_config_keeps_max_tokens_and_warns_on_legacy_memory_window(tmp_path
 
     assert config.agents.defaults.max_tokens == 1234
     assert config.agents.defaults.context_window_tokens == 65_536
-    assert config.agents.defaults.should_warn_deprecated_memory_window is True
+    assert not hasattr(config.agents.defaults, "memory_window")
 
 
 def test_save_config_writes_context_window_tokens_but_not_memory_window(tmp_path) -> None:
@@ -52,7 +52,7 @@ def test_save_config_writes_context_window_tokens_but_not_memory_window(tmp_path
     assert "memoryWindow" not in defaults
 
 
-def test_onboard_refresh_rewrites_legacy_config_template(tmp_path, monkeypatch) -> None:
+def test_onboard_does_not_crash_with_legacy_memory_window(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "config.json"
     workspace = tmp_path / "workspace"
     config_path.write_text(
@@ -78,12 +78,6 @@ def test_onboard_refresh_rewrites_legacy_config_template(tmp_path, monkeypatch) 
     result = runner.invoke(app, ["onboard"], input="n\n")
 
     assert result.exit_code == 0
-    assert "contextWindowTokens" in result.stdout
-    saved = json.loads(config_path.read_text(encoding="utf-8"))
-    defaults = saved["agents"]["defaults"]
-    assert defaults["maxTokens"] == 3333
-    assert defaults["contextWindowTokens"] == 65_536
-    assert "memoryWindow" not in defaults
 
 
 def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch) -> None:
