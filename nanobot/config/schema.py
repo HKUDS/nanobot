@@ -213,6 +213,7 @@ class AgentDefaults(Base):
 
     # mem0
     mem0: Mem0Config = Field(default_factory=Mem0Config)
+    mem0_raw_turn_ingestion: bool = True  # LAN-208: gate raw conversation turn ingestion
 
     # Missions
     mission: MissionConfig = Field(default_factory=MissionConfig)
@@ -314,6 +315,7 @@ class AgentConfig(Base):
     mem0_add_debug: bool = False
     mem0_verify_write: bool = True
     mem0_force_infer_true: bool = False
+    mem0_raw_turn_ingestion: bool = True  # LAN-208: gate raw conversation turn ingestion
 
     # Vision / multimodal
     vision_model: str = "gpt-4o-mini"
@@ -387,6 +389,7 @@ class AgentConfig(Base):
             "mem0_add_debug": defaults.mem0.add_debug,
             "mem0_verify_write": defaults.mem0.verify_write,
             "mem0_force_infer_true": defaults.mem0.force_infer_true,
+            "mem0_raw_turn_ingestion": defaults.mem0_raw_turn_ingestion,
             "vision_model": defaults.vision_model,
             "mission_max_concurrent": defaults.mission.max_concurrent,
             "mission_max_iterations": defaults.mission.max_iterations,

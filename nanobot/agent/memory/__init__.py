@@ -30,6 +30,7 @@ Architecture
 from __future__ import annotations
 
 from .conflicts import ConflictManager
+from .context_assembler import ContextAssembler
 from .eval import EvalRunner
 from .event import BeliefRecord, KnowledgeTriple, MemoryEvent
 from .extractor import MemoryExtractor
@@ -57,6 +58,7 @@ from .store import MemoryStore
 __all__ = [
     "BeliefRecord",
     "ConflictManager",
+    "ContextAssembler",
     "EvalRunner",
     "KnowledgeTriple",
     "MemoryEvent",
