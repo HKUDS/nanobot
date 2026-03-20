@@ -48,6 +48,7 @@ from .ontology import (
     validate_triple_types,
 )
 from .persistence import MemoryPersistence
+from .profile import ProfileManager
 from .reranker import CrossEncoderReranker
 from .store import MemoryStore
 
@@ -56,6 +57,7 @@ __all__ = [
     "KnowledgeTriple",
     "MemoryEvent",
     "MemoryStore",
+    "ProfileManager",
     "MemoryExtractor",
     "MemoryPersistence",
     "CrossEncoderReranker",
