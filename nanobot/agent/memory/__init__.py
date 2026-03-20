@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from .conflicts import ConflictManager
 from .eval import EvalRunner
-from .event import KnowledgeTriple, MemoryEvent
+from .event import BeliefRecord, KnowledgeTriple, MemoryEvent
 from .extractor import MemoryExtractor
 from .graph import KnowledgeGraph
 from .mem0_adapter import _Mem0Adapter, _Mem0RuntimeInfo
@@ -54,6 +54,7 @@ from .reranker import CrossEncoderReranker
 from .store import MemoryStore
 
 __all__ = [
+    "BeliefRecord",
     "ConflictManager",
     "EvalRunner",
     "KnowledgeTriple",

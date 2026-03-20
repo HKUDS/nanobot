@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from .event import BeliefRecord
+
 if TYPE_CHECKING:
     from .mem0_adapter import _Mem0Adapter
     from .persistence import MemoryPersistence
@@ -244,7 +246,270 @@ class ProfileManager:
         return key
 
     # ------------------------------------------------------------------
-    # Profile mutation
+    # Belief mutation API (LAN-205)
+    # ------------------------------------------------------------------
+
+    def _belief_from_meta(self, field: str, entry: dict[str, Any]) -> BeliefRecord:
+        """Construct a BeliefRecord from a raw meta entry dict."""
+        return BeliefRecord(
+            id=entry.get("id", ""),
+            field=field,
+            text=entry.get("text", ""),
+            confidence=self._safe_float(entry.get("confidence"), 0.65),
+            evidence_count=int(entry.get("evidence_count", 1)),
+            evidence_event_ids=list(entry.get("evidence_event_ids", [])),
+            status=str(entry.get("status", PROFILE_STATUS_ACTIVE)),
+            created_at=str(entry.get("created_at", "")),
+            last_seen_at=str(entry.get("last_seen_at", "")),
+            pinned=bool(entry.get("pinned", False)),
+            supersedes_id=entry.get("supersedes_id"),
+            superseded_by_id=entry.get("superseded_by_id"),
+        )
+
+    def _find_belief_by_id(
+        self, profile: dict[str, Any], belief_id: str
+    ) -> tuple[str, str, dict[str, Any]] | None:
+        """Scan all profile meta sections for an entry with matching id.
+
+        Returns ``(section_key, norm_text, entry_dict)`` or ``None``.
+        """
+        for section_key in self.PROFILE_KEYS:
+            section = self._meta_section(profile, section_key)
+            for norm_text, entry in section.items():
+                if isinstance(entry, dict) and entry.get("id") == belief_id:
+                    return section_key, norm_text, entry
+        return None
+
+    def get_belief_by_id(
+        self, belief_id: str, *, profile: dict[str, Any] | None = None
+    ) -> BeliefRecord | None:
+        """Public accessor: look up a belief by its stable ID.
+
+        If *profile* is ``None`` it will be read from disk.
+        """
+        if profile is None:
+            profile = self.read_profile()
+        result = self._find_belief_by_id(profile, belief_id)
+        if result is None:
+            return None
+        section_key, _norm_text, entry = result
+        return self._belief_from_meta(section_key, entry)
+
+    def add_belief(
+        self,
+        field: str,
+        text: str,
+        *,
+        confidence: float = 0.65,
+        evidence_event_ids: list[str] | None = None,
+        source: str = "consolidation",
+    ) -> BeliefRecord:
+        """Create a new belief, append it to the profile list, and return a BeliefRecord.
+
+        This is the canonical way to add a new item to a profile section.
+        It validates the field, creates the metadata entry, sets confidence
+        and evidence links, and appends the text to ``profile[field]``.
+
+        NOTE: this operates on a *fresh* profile read; callers that need to
+        batch several mutations on a single profile dict should use the
+        internal ``_add_belief_to_profile`` variant instead.
+        """
+        profile = self.read_profile()
+        record = self._add_belief_to_profile(
+            profile,
+            field,
+            text,
+            confidence=confidence,
+            evidence_event_ids=evidence_event_ids,
+            source=source,
+        )
+        self.write_profile(profile)
+        return record
+
+    def _add_belief_to_profile(
+        self,
+        profile: dict[str, Any],
+        field: str,
+        text: str,
+        *,
+        confidence: float = 0.65,
+        evidence_event_ids: list[str] | None = None,
+        source: str = "consolidation",
+    ) -> BeliefRecord:
+        """In-memory variant of ``add_belief`` — mutates *profile* without writing."""
+        key = self._validate_profile_field(field)
+        value = str(text or "").strip()
+        if not value:
+            raise ValueError("Belief text must not be empty")
+
+        entry = self._meta_entry(profile, key, value)
+        entry["confidence"] = min(max(confidence, 0.05), 0.99)
+        now = self._utc_now_iso()
+        entry.setdefault("created_at", now)
+        entry["last_seen_at"] = now
+        entry["status"] = PROFILE_STATUS_ACTIVE
+        entry.setdefault("source", source)
+
+        if evidence_event_ids:
+            refs = entry.setdefault("evidence_event_ids", [])
+            for eid in evidence_event_ids:
+                if eid not in refs:
+                    refs.append(eid)
+            if len(refs) > self._MAX_EVIDENCE_REFS:
+                del refs[: len(refs) - self._MAX_EVIDENCE_REFS]
+
+        # Append to the profile list if not already present.
+        values = self._to_str_list(profile.get(key))
+        norm = self._norm_text(value)
+        if norm not in {self._norm_text(v) for v in values}:
+            values.append(value)
+            profile[key] = values
+
+        return self._belief_from_meta(key, entry)
+
+    def update_belief(
+        self,
+        belief_id: str,
+        *,
+        confidence_delta: float = 0.0,
+        new_evidence_ids: list[str] | None = None,
+        new_text: str | None = None,
+        status: str | None = None,
+    ) -> BeliefRecord | None:
+        """Update an existing belief by its stable ID.
+
+        Returns the updated ``BeliefRecord``, or ``None`` if not found.
+        """
+        profile = self.read_profile()
+        record = self._update_belief_in_profile(
+            profile,
+            belief_id,
+            confidence_delta=confidence_delta,
+            new_evidence_ids=new_evidence_ids,
+            new_text=new_text,
+            status=status,
+        )
+        if record is not None:
+            self.write_profile(profile)
+        return record
+
+    def _update_belief_in_profile(
+        self,
+        profile: dict[str, Any],
+        belief_id: str,
+        *,
+        confidence_delta: float = 0.0,
+        new_evidence_ids: list[str] | None = None,
+        new_text: str | None = None,
+        status: str | None = None,
+    ) -> BeliefRecord | None:
+        """In-memory variant of ``update_belief`` — mutates *profile* without writing."""
+        result = self._find_belief_by_id(profile, belief_id)
+        if result is None:
+            return None
+
+        section_key, old_norm, entry = result
+        section = self._meta_section(profile, section_key)
+
+        # If new_text is provided, update the text in the profile list and
+        # re-key the meta dict entry.
+        if new_text is not None:
+            new_text = new_text.strip()
+            if new_text:
+                new_norm = self._norm_text(new_text)
+                old_text = entry.get("text", "")
+
+                # Update the profile list: replace old text with new.
+                values = self._to_str_list(profile.get(section_key))
+                old_norm_check = self._norm_text(old_text) if old_text else old_norm
+                profile[section_key] = [
+                    new_text if self._norm_text(v) == old_norm_check else v for v in values
+                ]
+
+                # Re-key in meta dict.
+                if new_norm != old_norm:
+                    del section[old_norm]
+                    section[new_norm] = entry
+                entry["text"] = new_text
+
+        # Apply confidence/evidence/status deltas.
+        evidence_id = new_evidence_ids[0] if new_evidence_ids else None
+        self._touch_meta_entry(
+            entry,
+            confidence_delta=confidence_delta,
+            status=status,
+            evidence_event_id=evidence_id,
+        )
+        # Append any additional evidence IDs beyond the first (which
+        # _touch_meta_entry already handled).
+        if new_evidence_ids and len(new_evidence_ids) > 1:
+            refs = entry.setdefault("evidence_event_ids", [])
+            for eid in new_evidence_ids[1:]:
+                if eid not in refs:
+                    refs.append(eid)
+            if len(refs) > self._MAX_EVIDENCE_REFS:
+                del refs[: len(refs) - self._MAX_EVIDENCE_REFS]
+
+        return self._belief_from_meta(section_key, entry)
+
+    def retract_belief(
+        self,
+        belief_id: str,
+        *,
+        reason: str = "",
+        replacement_id: str | None = None,
+    ) -> bool:
+        """Retract a belief by its stable ID.
+
+        Sets the status to ``"stale"`` (or ``"retracted"``), optionally sets
+        ``superseded_by_id``, and removes the text from the profile list.
+
+        Returns ``True`` if the belief was found and retracted.
+        """
+        profile = self.read_profile()
+        ok = self._retract_belief_in_profile(
+            profile,
+            belief_id,
+            reason=reason,
+            replacement_id=replacement_id,
+        )
+        if ok:
+            self.write_profile(profile)
+        return ok
+
+    def _retract_belief_in_profile(
+        self,
+        profile: dict[str, Any],
+        belief_id: str,
+        *,
+        reason: str = "",
+        replacement_id: str | None = None,
+    ) -> bool:
+        """In-memory variant of ``retract_belief`` — mutates *profile* without writing."""
+        result = self._find_belief_by_id(profile, belief_id)
+        if result is None:
+            return False
+
+        section_key, _norm_text_key, entry = result
+
+        entry["status"] = "retracted" if reason else PROFILE_STATUS_STALE
+        entry["last_seen_at"] = self._utc_now_iso()
+        if replacement_id:
+            entry["superseded_by_id"] = replacement_id
+        if reason:
+            entry["retract_reason"] = reason
+
+        # Remove from profile list.
+        old_text = entry.get("text", "")
+        if old_text:
+            values = self._to_str_list(profile.get(section_key))
+            old_norm = self._norm_text(old_text)
+            profile[section_key] = [v for v in values if self._norm_text(v) != old_norm]
+
+        return True
+
+    # ------------------------------------------------------------------
+    # Profile mutation (legacy helpers)
     # ------------------------------------------------------------------
 
     def set_item_pin(self, field: str, text: str, *, pinned: bool) -> bool:
@@ -324,7 +589,7 @@ class ProfileManager:
         # Use the first source event ID as evidence link for all updates in this
         # batch.  More granular per-item linking requires changes to the extractor
         # output format (future work).
-        evidence_id = source_event_ids[0] if source_event_ids else None
+        evidence_ids = [source_event_ids[0]] if source_event_ids else None
 
         for key in self.PROFILE_KEYS:
             values = self._to_str_list(profile.get(key))
@@ -335,19 +600,49 @@ class ProfileManager:
                     continue
 
                 if normalized in seen:
+                    # Existing belief — bump confidence.
                     entry = self._meta_entry(profile, key, candidate)
-                    self._touch_meta_entry(
-                        entry,
-                        confidence_delta=0.03,
-                        status=self.PROFILE_STATUS_ACTIVE,
-                        evidence_event_id=evidence_id,
-                    )
+                    belief_id = entry.get("id", "")
+                    if belief_id:
+                        self._update_belief_in_profile(
+                            profile,
+                            belief_id,
+                            confidence_delta=0.03,
+                            new_evidence_ids=evidence_ids,
+                            status=self.PROFILE_STATUS_ACTIVE,
+                        )
+                    else:
+                        self._touch_meta_entry(
+                            entry,
+                            confidence_delta=0.03,
+                            status=self.PROFILE_STATUS_ACTIVE,
+                            evidence_event_id=evidence_ids[0] if evidence_ids else None,
+                        )
                     touched += 1
                     continue
 
+                # Check for contradictions against the existing values
+                # (before appending the candidate).
+                existing_values_snapshot = list(values)
+
+                # Use _add_belief_to_profile to create the entry and append
+                # to the profile list.
+                self._add_belief_to_profile(
+                    profile,
+                    key,
+                    candidate,
+                    confidence=0.65,
+                    evidence_event_ids=evidence_ids,
+                    source="consolidation",
+                )
+                # Reconcile: _add_belief_to_profile appends to profile[key],
+                # keep local values/seen in sync.
+                values = self._to_str_list(profile.get(key))
+                seen.add(normalized)
+
                 has_conflict = False
                 if enable_contradiction_check:
-                    for existing in values:
+                    for existing in existing_values_snapshot:
                         if self._conflict_pair(existing, candidate):
                             has_conflict = True
                             old_entry = self._meta_entry(profile, key, existing)
@@ -362,7 +657,7 @@ class ProfileManager:
                                 confidence_delta=-0.2,
                                 min_confidence=0.35,
                                 status=self.PROFILE_STATUS_CONFLICTED,
-                                evidence_event_id=evidence_id,
+                                evidence_event_id=evidence_ids[0] if evidence_ids else None,
                             )
                             # Include belief IDs in conflict record (LAN-198).
                             profile["conflicts"].append(
@@ -386,15 +681,14 @@ class ProfileManager:
                             touched += 2
                             break
 
-                values.append(candidate)
-                seen.add(normalized)
-                entry = self._meta_entry(profile, key, candidate)
                 if not has_conflict:
+                    # Boost confidence for non-conflicted new beliefs.
+                    entry = self._meta_entry(profile, key, candidate)
                     self._touch_meta_entry(
                         entry,
                         confidence_delta=0.1,
                         status=self.PROFILE_STATUS_ACTIVE,
-                        evidence_event_id=evidence_id,
+                        evidence_event_id=evidence_ids[0] if evidence_ids else None,
                     )
                     touched += 1
                 added += 1
@@ -497,8 +791,17 @@ class ProfileManager:
                 if not new_norm:
                     continue
 
+                # Add or touch the new belief via the mutation API.
                 if new_norm not in by_norm:
-                    values.append(new_value)
+                    self._add_belief_to_profile(
+                        profile,
+                        field,
+                        new_value,
+                        confidence=0.65,
+                        source="live_correction",
+                    )
+                    # Sync local tracking structures after add.
+                    values = self._to_str_list(profile.get(field))
                     by_norm[new_norm] = new_value
                     local_applied += 1
 

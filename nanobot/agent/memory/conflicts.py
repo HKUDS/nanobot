@@ -372,6 +372,13 @@ class ConflictManager:
         store = self._store
         selected = str(action or "").strip().lower()
         mem0_ok = False
+
+        # Look up belief IDs for the old and new values.
+        old_entry = self.profile_mgr._meta_entry(profile, key, old_value)
+        new_entry = self.profile_mgr._meta_entry(profile, key, new_value)
+        old_belief_id = old_entry.get("id", "")
+        new_belief_id = new_entry.get("id", "")
+
         if selected == "keep_old":
             if new_memory_id:
                 mem0_ok = self.mem0.delete(new_memory_id)
@@ -380,20 +387,20 @@ class ConflictManager:
                 mem0_ok = True
                 result["mem0_operation"] = "none"
             values = _remove_value(values, new_value)
-            old_entry = self.profile_mgr._meta_entry(profile, key, old_value)
-            self.profile_mgr._touch_meta_entry(
-                old_entry,
+            # Boost winner confidence via update_belief.
+            self.profile_mgr._update_belief_in_profile(
+                profile,
+                old_belief_id,
                 confidence_delta=0.08,
                 status=self.profile_mgr.PROFILE_STATUS_ACTIVE,
             )
-            new_entry = self.profile_mgr._meta_entry(profile, key, new_value)
+            # Mark loser as stale.
             new_entry["status"] = self.profile_mgr.PROFILE_STATUS_STALE
+            new_entry["last_seen_at"] = self._utc_now_iso()
             # Supersession chain (LAN-198).
-            winner_id = old_entry.get("id", "")
-            loser_id = new_entry.get("id", "")
-            if winner_id and loser_id:
-                new_entry["superseded_by_id"] = winner_id
-                old_entry.setdefault("supersedes_id", loser_id)
+            if old_belief_id and new_belief_id:
+                new_entry["superseded_by_id"] = old_belief_id
+                old_entry.setdefault("supersedes_id", new_belief_id)
         elif selected == "keep_new":
             clean_new_value = (
                 store._sanitize_mem0_text(new_value, allow_archival=False) or new_value
@@ -429,27 +436,33 @@ class ConflictManager:
                 if mem0_ok:
                     result["mem0_operation"] = "add_new"
             values = _remove_value(values, old_value)
-            new_entry = self.profile_mgr._meta_entry(profile, key, new_value)
-            self.profile_mgr._touch_meta_entry(
-                new_entry,
+            # Boost winner confidence via update_belief.
+            self.profile_mgr._update_belief_in_profile(
+                profile,
+                new_belief_id,
                 confidence_delta=0.08,
                 status=self.profile_mgr.PROFILE_STATUS_ACTIVE,
             )
-            old_entry = self.profile_mgr._meta_entry(profile, key, old_value)
+            # Mark loser as stale.
             old_entry["status"] = self.profile_mgr.PROFILE_STATUS_STALE
+            old_entry["last_seen_at"] = self._utc_now_iso()
             # Supersession chain (LAN-198).
-            winner_id = new_entry.get("id", "")
-            loser_id = old_entry.get("id", "")
-            if winner_id and loser_id:
-                old_entry["superseded_by_id"] = winner_id
-                new_entry.setdefault("supersedes_id", loser_id)
+            if new_belief_id and old_belief_id:
+                old_entry["superseded_by_id"] = new_belief_id
+                new_entry.setdefault("supersedes_id", old_belief_id)
         elif selected == "dismiss":
             mem0_ok = True
             result["mem0_operation"] = "none"
-            old_entry = self.profile_mgr._meta_entry(profile, key, old_value)
-            new_entry = self.profile_mgr._meta_entry(profile, key, new_value)
-            old_entry["status"] = self.profile_mgr.PROFILE_STATUS_ACTIVE
-            new_entry["status"] = self.profile_mgr.PROFILE_STATUS_ACTIVE
+            self.profile_mgr._update_belief_in_profile(
+                profile,
+                old_belief_id,
+                status=self.profile_mgr.PROFILE_STATUS_ACTIVE,
+            )
+            self.profile_mgr._update_belief_in_profile(
+                profile,
+                new_belief_id,
+                status=self.profile_mgr.PROFILE_STATUS_ACTIVE,
+            )
         else:
             return result
 

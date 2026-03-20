@@ -34,6 +34,25 @@ class KnowledgeTriple(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class BeliefRecord(BaseModel):
+    """A single belief about the user, with evidence and lifecycle tracking."""
+
+    id: str
+    field: (
+        str  # "preferences" | "stable_facts" | "active_projects" | "relationships" | "constraints"
+    )
+    text: str
+    confidence: float = 0.65
+    evidence_count: int = 1
+    evidence_event_ids: list[str] = Field(default_factory=list)
+    status: str = "active"  # active | conflicted | stale | retracted
+    created_at: str = ""
+    last_seen_at: str = ""
+    pinned: bool = False
+    supersedes_id: str | None = None
+    superseded_by_id: str | None = None
+
+
 class MemoryEvent(BaseModel):
     """Typed, validated representation of a memory event.
 
