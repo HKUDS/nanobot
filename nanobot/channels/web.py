@@ -128,7 +128,9 @@ class WebChannel(BaseChannel):
         logger.info("Web outbound dispatcher started")
         while self._running:
             try:
-                msg = await asyncio.wait_for(self.bus.consume_outbound(), timeout=1.0)
+                # Block until a message is available — no timeout needed because
+                # task cancellation (via stop) handles shutdown cleanly.
+                msg = await self.bus.consume_outbound()
 
                 if msg.channel != self.name:
                     # Not for us — in a full gateway the ChannelManager handles
@@ -138,8 +140,6 @@ class WebChannel(BaseChannel):
 
                 await self.send(msg)
 
-            except asyncio.TimeoutError:
-                continue
             except asyncio.CancelledError:
                 break
             except Exception:  # crash-barrier: keep dispatcher alive

@@ -71,4 +71,6 @@ class AgentRegistry:
         return len(self._roles)
 
     def __contains__(self, name: str) -> bool:
-        return name in self._roles
+        # Respect the enabled flag so disabled roles cannot be routed to (LAN-123).
+        role = self._roles.get(name)
+        return role is not None and role.enabled

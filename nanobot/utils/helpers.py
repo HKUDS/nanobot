@@ -1,7 +1,9 @@
 """Utility functions for nanobot."""
 
+from __future__ import annotations
+
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -46,7 +48,7 @@ def get_skills_path(workspace: Path | None = None) -> Path:
 
 def timestamp() -> str:
     """Get current timestamp in ISO format."""
-    return datetime.now().isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def truncate_string(s: str, max_len: int = 100, suffix: str = "...") -> str:

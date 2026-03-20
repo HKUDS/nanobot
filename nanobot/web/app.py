@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -10,11 +11,32 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
 
 from nanobot.web.routes import router
 
 if TYPE_CHECKING:
     from nanobot.channels.web import WebChannel
+
+
+class _ApiKeyMiddleware(BaseHTTPMiddleware):
+    """Require Authorization: Bearer <api_key> for all /api/* routes (SEC-06)."""
+
+    def __init__(self, app: Any, api_key: str) -> None:
+        super().__init__(app)
+        self._api_key_bytes = api_key.encode()
+
+    async def dispatch(  # type: ignore[override]
+        self, request: StarletteRequest, call_next: Any
+    ) -> Any:
+        if request.url.path.startswith("/api/"):
+            auth = request.headers.get("Authorization", "")
+            token = auth.removeprefix("Bearer ").strip().encode()
+            # Constant-time comparison prevents timing-based key enumeration
+            if not hmac.compare_digest(token, self._api_key_bytes):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+        return await call_next(request)
 
 
 def create_app(
@@ -25,6 +47,7 @@ def create_app(
     static_dir: Path | None = None,
     uploads_dir: Path | None = None,
     owns_lifecycle: bool = False,
+    api_key: str = "",
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -39,7 +62,7 @@ def create_app(
     """
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI):  # type: ignore[misc]
         yield
         if owns_lifecycle:
             try:
@@ -79,14 +102,18 @@ def create_app(
         expose_headers=["X-Thread-Id"],
     )
 
+    # API key authentication middleware (SEC-06) — only active when api_key is set
+    if api_key:
+        app.add_middleware(_ApiKeyMiddleware, api_key=api_key)
+
     # Health check routes (outside /api — used by Docker HEALTHCHECK & probes)
     @app.get("/health", tags=["health"])
-    async def health():
+    async def health() -> dict:
         """Liveness probe — returns 200 if the process is alive."""
         return {"status": "ok"}
 
     @app.get("/ready", tags=["health"])
-    async def ready():
+    async def ready():  # type: ignore[return]
         """Readiness probe — returns 200 if the agent loop is accepting work."""
         loop = app.state.agent_loop
         if loop and getattr(loop, "_running", False):
@@ -95,6 +122,15 @@ def create_app(
 
     # API routes
     app.include_router(router)
+
+    # Optional Prometheus /metrics endpoint — only active when prometheus_client is installed.
+    try:
+        from prometheus_client import make_asgi_app
+
+        metrics_app = make_asgi_app()
+        app.mount("/metrics", metrics_app)
+    except ImportError:
+        pass
 
     # Serve built frontend if available
     if static_dir and static_dir.is_dir():

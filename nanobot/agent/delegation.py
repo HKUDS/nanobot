@@ -15,9 +15,10 @@ Extracted per ADR-002 to keep AgentLoop focused on orchestration.
 from __future__ import annotations
 
 import contextvars
+import json
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -41,8 +42,10 @@ from nanobot.agent.tools.filesystem import (
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+from nanobot.agent.tracing import sanitize_for_trace
 from nanobot.config.schema import AgentRoleConfig
 from nanobot.errors import NanobotError
+from nanobot.metrics import delegation_latency_seconds, delegation_total
 
 if TYPE_CHECKING:
     from nanobot.agent.coordinator import Coordinator
@@ -57,10 +60,13 @@ _delegation_ancestry: contextvars.ContextVar[tuple[str, ...]] = contextvars.Cont
     "_delegation_ancestry", default=()
 )
 
-# Maximum number of distinct roles that may be chained in a single delegation path.
-# Prevents runaway recursive delegation: each level runs up to max_iterations LLM
-# calls, so uncapped chains multiply cost exponentially.
+# Hard structural depth cap — raises _CycleError if the ancestry chain exceeds
+# this limit. Cannot be ignored by the LLM. Each level can run up to
+# max_iterations LLM calls, so uncapped chains multiply cost exponentially.
+# Compare with DelegationDispatcher.max_delegations, which is a per-session
+# budget enforced in dispatch() (LAN-132).
 MAX_DELEGATION_DEPTH: int = 3
+_SCRATCHPAD_INJECTION_LIMIT: int = 4_000
 
 # ---------------------------------------------------------------------------
 # Task type taxonomy
@@ -144,6 +150,16 @@ TASK_TYPES: dict[str, dict[str, Any]] = {
 }
 
 
+def _cap_scratchpad_for_injection(content: str, limit: int = _SCRATCHPAD_INJECTION_LIMIT) -> str:
+    """Truncate scratchpad content for delegation injection to avoid context bloat."""
+    if len(content) <= limit:
+        return content
+    return (
+        content[:limit] + f"\n\n[truncated — {len(content) - limit:,} chars omitted. "
+        "Use scratchpad_read tool for full content.]"
+    )
+
+
 class DelegationDispatcher:
     """Manages delegation routing, contract construction, execution, and tracing."""
 
@@ -160,6 +176,12 @@ class DelegationDispatcher:
         brave_api_key: str | None,
         exec_config: ExecToolConfig,
         role_name: str,
+        coordinator: Coordinator | None = None,
+        scratchpad: Scratchpad | None = None,
+        active_messages: list[dict[str, Any]] | None = None,
+        tools: ToolExecutor | None = None,
+        mcp_tools: list[Tool] | None = None,
+        on_progress: Callable[..., Awaitable[None]] | None = None,
     ) -> None:
         self.provider = provider
         self.workspace = workspace
@@ -174,18 +196,20 @@ class DelegationDispatcher:
 
         # Mutable per-session state
         self.delegation_count: int = 0
+        # Per-session delegation budget — raises _CycleError when exhausted (LAN-121/132).
+        # This is a structural hard cap enforced in dispatch(), not an advisory prompt nudge.
+        # Distinct from MAX_DELEGATION_DEPTH which caps the ancestry chain length.
         self.max_delegations: int = 8
         self.routing_trace: list[dict[str, Any]] = []
 
-        # Set by AgentLoop after construction
-        self.coordinator: Coordinator | None = None
-        self.scratchpad: Scratchpad | None = None
-        self.active_messages: list[dict[str, Any]] | None = None
-        self.tools: ToolExecutor | None = None  # for wire_delegate_tools
-        # MCP tools injected lazily by AgentLoop after _connect_mcp()
-        self.mcp_tools: list[Tool] = []
-        # Per-turn progress callback — set by AgentLoop._process_message, cleared after turn.
-        self.on_progress: Callable[..., Awaitable[None]] | None = None
+        self.coordinator: Coordinator | None = coordinator
+        self.scratchpad: Scratchpad | None = scratchpad
+        self.active_messages: list[dict[str, Any]] | None = active_messages
+        self.tools: ToolExecutor | None = tools
+        self.mcp_tools: list[Tool] = mcp_tools if mcp_tools is not None else []
+        self.on_progress: Callable[..., Awaitable[None]] | None = on_progress
+        # JSONL persistence for routing trace (LAN-130). Set by loop._ensure_scratchpad.
+        self._trace_path: Path | None = None
 
     # ------------------------------------------------------------------
     # Wiring
@@ -207,7 +231,7 @@ class DelegationDispatcher:
             return
         for name in ("delegate", "delegate_parallel"):
             tool = self.tools.get(name)
-            if isinstance(tool, (DelegateTool, DelegateParallelTool)):
+            if isinstance(tool, DelegateTool | DelegateParallelTool):
                 tool.set_dispatch(self.dispatch)
                 if available_roles_fn is not None:
                     tool.set_available_roles_fn(available_roles_fn)
@@ -238,13 +262,20 @@ class DelegationDispatcher:
             "from_role": from_role,
             "depth": depth,
             "success": success,
-            "message": message_excerpt[:80],
-            "timestamp": datetime.now().isoformat(),
+            "message": sanitize_for_trace(message_excerpt[:80]),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         if tools_used is not None:
             entry["tools_used"] = tools_used
             entry["tools_used_count"] = len(tools_used)
         self.routing_trace.append(entry)
+        if self._trace_path is not None:
+            try:
+                self._trace_path.parent.mkdir(parents=True, exist_ok=True)
+                with self._trace_path.open("a", encoding="utf-8") as _fh:
+                    _fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            except OSError:
+                logger.warning("Failed to persist route trace to {}", self._trace_path)
 
     def get_routing_trace(self) -> list[dict[str, Any]]:
         """Return a copy of the routing trace."""
@@ -255,12 +286,25 @@ class DelegationDispatcher:
     # ------------------------------------------------------------------
 
     def gather_recent_tool_results(self, max_results: int = 15, max_chars: int = 8000) -> str:
-        """Extract recent tool results from the active message list."""
+        """Extract recent tool results from the current turn only.
+
+        Takes a snapshot of active_messages at call time to guard against
+        concurrent mutation (LAN-110). Scopes results to messages after the
+        last user message to prevent cross-turn bleed (LAN-111).
+        """
         if not self.active_messages:
             return ""
+        # Snapshot to prevent mutation during iteration (LAN-110).
+        messages = list(self.active_messages)
+        # Find the start of the current turn: last user message (LAN-111).
+        turn_start = 0
+        for i, m in enumerate(messages):
+            if m.get("role") == "user":
+                turn_start = i
+        current_turn = messages[turn_start:]
         tool_results: list[str] = []
         total_chars = 0
-        for m in reversed(self.active_messages):
+        for m in reversed(current_turn):
             if m.get("role") != "tool":
                 continue
             name = m.get("name", "unknown")
@@ -284,7 +328,7 @@ class DelegationDispatcher:
         if not self.active_messages:
             return ""
         found_plan_prompt = False
-        for m in self.active_messages:
+        for m in list(self.active_messages):  # snapshot for LAN-110
             if found_plan_prompt and m.get("role") == "assistant":
                 content = m.get("content", "")
                 if isinstance(content, str) and content.strip():
@@ -302,7 +346,7 @@ class DelegationDispatcher:
         """Pull the original user message from active_messages."""
         if not self.active_messages:
             return ""
-        for m in self.active_messages:
+        for m in list(self.active_messages):  # snapshot for LAN-110
             if m.get("role") == "user":
                 content = m.get("content", "")
                 if isinstance(content, str):
@@ -425,27 +469,26 @@ class DelegationDispatcher:
 
     @staticmethod
     def has_parallel_structure(text: str) -> bool:
-        """Detect enumerated independent subtasks in the user message."""
+        """Detect enumerated independent subtasks in the user message.
+
+        Returns True when any of the five structural patterns are present.
+        Each pattern is specific enough to avoid false positives on natural prose.
+        """
         text_lower = text.strip().lower()
-        count_words = re.search(
+        if re.search(
             r"\b(two|three|four|five|six|seven|eight|nine|ten|\d+)\s+"
             r"(areas?|parts?|aspects?|sections?|components?|topics?|items?|tasks?"
             r"|dimensions?|categories?|modules?|files?|layers?)",
             text_lower,
-        )
-        if count_words:
+        ):
             return True
-        enum_pattern = re.search(r"(?:[^,]+,\s*){2,}(?:and|&)\s+[^,.]+", text_lower)
-        if enum_pattern:
+        if re.search(r"(?:[^,]+,\s*){2,}(?:and|&)\s+[^,.]+", text_lower):
             return True
-        colon_list = re.search(r":\s*[^,]+(?:,\s*[^,]+){2,}", text_lower)
-        if colon_list:
+        if re.search(r":\s*[^,]+(?:,\s*[^,]+){2,}", text_lower):
             return True
-        numbered = re.findall(r"(?:^|\s)(?:\d+[.)\]]|[a-z][.)\]])\s", text_lower)
-        if len(numbered) >= 3:
+        if len(re.findall(r"(?:^|\s)(?:\d+[.)\]]|[a-z][.)\]])\s", text_lower)) >= 3:
             return True
-        across_pattern = re.search(r"\bacross\b.+,.+(?:,|and)\s+", text_lower)
-        if across_pattern:
+        if re.search(r"\bacross\b.+,.+(?:,|and)\s+", text_lower):
             return True
         return False
 
@@ -509,9 +552,11 @@ class DelegationDispatcher:
         plan_text = self.extract_plan_text()
         if plan_text:
             sections.append(f"## Overall Plan (for context)\n{plan_text}")
-        execution_ctx = self.build_execution_context(task_type)
-        if execution_ctx:
-            sections.append(f"## Project Context\n{execution_ctx}")
+        # Skip workspace I/O for synthesis-only tasks where context is unused (LAN-126).
+        if task_type != "report_writing":
+            execution_ctx = self.build_execution_context(task_type)
+            if execution_ctx:
+                sections.append(f"## Project Context\n{execution_ctx}")
         parent_findings = self.gather_recent_tool_results()
         if parent_findings:
             sections.append(f"## Prior Results\n{parent_findings}")
@@ -549,6 +594,14 @@ class DelegationDispatcher:
         if role is None:
             role = await self.coordinator.route(task)
 
+        # Session budget guard — hard cap on total delegations (LAN-121).
+        max_del = getattr(self, "max_delegations", 8)
+        if self.delegation_count >= max_del:
+            raise _CycleError(
+                f"Delegation budget exhausted: {self.delegation_count}/{max_del} "
+                "delegations used this session"
+            )
+
         # Depth and cycle guard
         ancestry = _delegation_ancestry.get()
         depth = len(ancestry)
@@ -584,7 +637,10 @@ class DelegationDispatcher:
             message_excerpt=task,
         )
 
-        delegation_id = f"del_{self.delegation_count + 1:03d}"
+        # Increment atomically before any await so parallel dispatches under
+        # asyncio.gather each get a unique ID (LAN-117).
+        self.delegation_count += 1
+        delegation_id = f"del_{self.delegation_count:03d}"
 
         # Emit canonical delegation start event if a progress callback is wired.
         if self.on_progress:
@@ -601,12 +657,11 @@ class DelegationDispatcher:
                 pass
 
         t0 = time.monotonic()
-        self.delegation_count += 1
         token = _delegation_ancestry.set((*ancestry, role.name))
         try:
             async with langfuse_span(
                 name="delegate",
-                input=task[:200],
+                input=sanitize_for_trace(task[:200]),
                 metadata={
                     "target_role": role.name,
                     "from_role": from_role,
@@ -615,6 +670,8 @@ class DelegationDispatcher:
             ):
                 result, used_tools = await self.execute_delegated_agent(role, task, context)
             latency_ms = (time.monotonic() - t0) * 1000
+            delegation_total.labels(from_role=from_role, to_role=role.name, success="true").inc()
+            delegation_latency_seconds.labels(to_role=role.name).observe(latency_ms / 1000)
             self.record_route_trace(
                 "delegate_complete",
                 role=role.name,
@@ -639,6 +696,8 @@ class DelegationDispatcher:
             return DelegationResult(content=result, tools_used=used_tools)
         except Exception:  # crash-barrier: delegation must record trace on any error
             latency_ms = (time.monotonic() - t0) * 1000
+            delegation_total.labels(from_role=from_role, to_role=role.name, success="false").inc()
+            delegation_latency_seconds.labels(to_role=role.name).observe(latency_ms / 1000)
             self.record_route_trace(
                 "delegate_complete",
                 role=role.name,
@@ -718,17 +777,25 @@ class DelegationDispatcher:
             if _grant(rw_t.name):
                 tools.register(rw_t)
 
-        # Exec — privileged
+        # Exec — privileged; forward shell_mode so allowlist policy applies to
+        # delegated agents (LAN-120).
         exec_t = ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
+            shell_mode=self.exec_config.shell_mode,
         )
         if _grant(exec_t.name):
             tools.register(exec_t)
 
-        tools.register(WebSearchTool(api_key=self.brave_api_key))
-        tools.register(WebFetchTool())
+        # Web tools — apply _grant() like every other tool so that denied_tools
+        # config is respected in delegated agents (LAN-118).
+        ws_tool = WebSearchTool(api_key=self.brave_api_key)
+        if _grant(ws_tool.name):
+            tools.register(ws_tool)
+        wf_tool = WebFetchTool()
+        if _grant(wf_tool.name):
+            tools.register(wf_tool)
 
         # Re-delegation — privileged
         child_delegate = DelegateTool()
@@ -749,11 +816,17 @@ class DelegationDispatcher:
             task_type=task_type,
         )
 
-        # For synthesizing roles, inject scratchpad as primary input
-        if role.name in ("pm", "writing", "general") and self.scratchpad:
+        # Inject scratchpad for all delegated agents so prior findings are visible.
+        # Previously restricted to pm/writing/general; code and research agents now
+        # also receive prior results to avoid re-searching facts already discovered
+        # by peers in the same delegation chain (LAN-112).
+        if self.scratchpad:
             scratchpad_content = self.scratchpad.read()
             if scratchpad_content and scratchpad_content != "Scratchpad is empty.":
-                user_content += f"\n\n## Prior Agent Findings (Scratchpad)\n{scratchpad_content}"
+                user_content += (
+                    "\n\n## Prior Agent Findings (Scratchpad)\n"
+                    + _cap_scratchpad_for_injection(scratchpad_content)
+                )
 
         # Build system prompt
         avail_tools = ", ".join(tools.tool_names)
@@ -772,6 +845,10 @@ class DelegationDispatcher:
             {"role": "user", "content": user_content},
         ]
 
+        # Hard iteration cap for delegated agents (LAN-109).
+        # Without this cap, nested delegation trees multiply LLM cost exponentially:
+        # parent (40 iters) × child (40 iters) = up to 1,600 calls per turn.
+        # Synthesis tasks need fewer iterations; investigation tasks get more.
         if task_type in ("report_writing", "general"):
             iter_cap = 8
         else:

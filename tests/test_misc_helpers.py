@@ -4,6 +4,8 @@ import importlib
 import runpy
 from pathlib import Path
 
+import pytest
+
 import nanobot.skills
 from nanobot.utils.helpers import (
     ensure_dir,
@@ -53,11 +55,8 @@ def test_utils_paths_and_helpers(tmp_path: Path, monkeypatch) -> None:
 
 def test_parse_session_key_validation() -> None:
     assert parse_session_key("cli:direct") == ("cli", "direct")
-    try:
+    with pytest.raises(ValueError):
         parse_session_key("invalid")
-        assert False, "expected ValueError"
-    except ValueError:
-        assert True
 
 
 def test_skills_package_import_covered() -> None:

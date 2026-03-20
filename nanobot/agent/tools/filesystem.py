@@ -16,6 +16,13 @@ _SENSITIVE_PATHS: tuple[Path, ...] = tuple(
     for raw in (
         "~/.ssh",
         "~/.gnupg",
+        "~/.aws/credentials",
+        "~/.aws/config",
+        "~/.aws",
+        "~/.gcp",
+        "~/.config/gcloud",
+        "~/.azure",
+        "~/.kube/config",
         "~/.nanobot/config.json",
         "/etc/shadow",
         "/etc/passwd",
@@ -53,7 +60,9 @@ def _resolve_path(
         try:
             resolved.relative_to(allowed_dir.resolve())
         except ValueError:
-            raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
+            raise PermissionError(
+                f"Path {path} is outside allowed directory {allowed_dir}"
+            ) from None
     return resolved
 
 

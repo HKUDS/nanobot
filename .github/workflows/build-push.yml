@@ -15,7 +15,20 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # CI-H1: Ensure CI passes before building/pushing Docker image
+  wait-for-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for CI workflow to succeed
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.sha }}
+          check-name: 'CI'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 20
+
   build-push:
+    needs: wait-for-ci
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:

@@ -85,7 +85,7 @@ class OpenAICodexProvider(LLMProvider):
         return self.default_model
 
 
-def _get_codex_token():
+def _get_codex_token() -> Any:
     try:
         from oauth_cli_kit import get_token as get_codex_token
     except ImportError as e:

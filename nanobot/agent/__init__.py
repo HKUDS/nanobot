@@ -1,5 +1,7 @@
 """Agent core module."""
 
+from __future__ import annotations
+
 from nanobot.agent.consolidation import ConsolidationOrchestrator
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.coordinator import Coordinator

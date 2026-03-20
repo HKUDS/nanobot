@@ -1,11 +1,15 @@
 """LiteLLM provider implementation for multi-provider support."""
 
+from __future__ import annotations
+
+import time
 from typing import Any, AsyncIterator
 
 import json_repair
 import litellm
 from litellm import acompletion
 
+from nanobot.metrics import llm_calls_total, llm_latency_seconds
 from nanobot.providers.base import LLMProvider, LLMResponse, StreamChunk, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
 
@@ -258,10 +262,17 @@ class LiteLLMProvider(LLMProvider):
         if metadata:
             kwargs["metadata"] = metadata
 
+        t0 = time.monotonic()
         try:
             response = await acompletion(**kwargs)
+            elapsed = time.monotonic() - t0
+            llm_calls_total.labels(model=model, role="chat", success="True").inc()
+            llm_latency_seconds.labels(model=model, role="chat").observe(elapsed)
             return self._parse_response(response)
         except Exception as e:  # crash-barrier: LLM provider errors are varied
+            elapsed = time.monotonic() - t0
+            llm_calls_total.labels(model=model, role="chat", success="False").inc()
+            llm_latency_seconds.labels(model=model, role="chat").observe(elapsed)
             # Return error as content for graceful handling
             return LLMResponse(
                 content=f"Error calling LLM: {str(e)}",
@@ -358,8 +369,12 @@ class LiteLLMProvider(LLMProvider):
         if metadata:
             kwargs["metadata"] = metadata
 
+        t0 = time.monotonic()
         try:
             response = await acompletion(**kwargs)
+            elapsed = time.monotonic() - t0
+            llm_calls_total.labels(model=resolved, role="stream", success="True").inc()
+            llm_latency_seconds.labels(model=resolved, role="stream").observe(elapsed)
 
             # Accumulators for tool-call fragments
             tc_fragments: dict[int, dict[str, Any]] = {}
@@ -431,6 +446,9 @@ class LiteLLMProvider(LLMProvider):
                 )
 
         except Exception as e:  # crash-barrier: streaming errors are varied
+            elapsed = time.monotonic() - t0
+            llm_calls_total.labels(model=resolved, role="stream", success="False").inc()
+            llm_latency_seconds.labels(model=resolved, role="stream").observe(elapsed)
             yield StreamChunk(
                 content_delta=f"Error calling LLM: {e}",
                 finish_reason="error",

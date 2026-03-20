@@ -167,7 +167,7 @@ class ContextOverflowError(NanobotError):
 # ---------------------------------------------------------------------------
 
 
-class MemoryError(NanobotError):  # noqa: A001 — shadows built-in intentionally
+class MemorySubsystemError(NanobotError):
     """A memory subsystem operation failed."""
 
     def __init__(self, operation: str, cause: str, *, recoverable: bool = True):
@@ -176,14 +176,17 @@ class MemoryError(NanobotError):  # noqa: A001 — shadows built-in intentionall
         self.cause = cause
 
 
-class MemoryRetrievalError(MemoryError):
+MemoryError = MemorySubsystemError  # backward-compat alias
+
+
+class MemoryRetrievalError(MemorySubsystemError):
     """Memory retrieval failed."""
 
     def __init__(self, cause: str):
         super().__init__("retrieval", cause, recoverable=True)
 
 
-class MemoryConsolidationError(MemoryError):
+class MemoryConsolidationError(MemorySubsystemError):
     """Memory consolidation failed."""
 
     def __init__(self, cause: str):

@@ -8,14 +8,14 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Install Python dependencies first (cached layer)
-COPY pyproject.toml README.md LICENSE ./
+COPY pyproject.toml README.md LICENSE uv.lock ./
 RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
-    uv pip install --system --no-cache . && \
+    uv sync --system --no-dev --frozen && \
     rm -rf nanobot bridge
 
 # Copy the full source and install
 COPY nanobot/ nanobot/
-RUN mkdir -p bridge && uv pip install --system --no-cache .
+RUN mkdir -p bridge && uv sync --system --no-dev --frozen
 
 # Create a non-root user and config directory
 RUN groupadd --gid 1001 nanobot && \
@@ -26,8 +26,9 @@ RUN groupadd --gid 1001 nanobot && \
 USER nanobot
 
 # Health check for orchestrators (Docker, Compose, Kubernetes)
+# Uses NANOBOT_GATEWAY__PORT if set (e.g. staging uses 18791), falls back to 18790.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -sf http://localhost:18790/health || exit 1
+    CMD curl -sf "http://localhost:${NANOBOT_GATEWAY__PORT:-18790}/health" || exit 1
 
 # Gateway default port
 EXPOSE 18790

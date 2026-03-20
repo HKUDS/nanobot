@@ -88,7 +88,8 @@ async def test_mcp_wrapper_execute_success_and_timeout(monkeypatch: pytest.Monke
 
     wrapper = MCPToolWrapper(_Session(), "demo", tool_def, tool_timeout=1)
     out = await wrapper.execute(x="hello")
-    assert out == "hello\n7"
+    assert out.output == "hello\n7"  # type: ignore[union-attr]
+    assert out.success is True  # type: ignore[union-attr]
 
     class _SlowSession:
         async def call_tool(self, _name: str, arguments: dict):
@@ -97,7 +98,8 @@ async def test_mcp_wrapper_execute_success_and_timeout(monkeypatch: pytest.Monke
 
     slow_wrapper = MCPToolWrapper(_SlowSession(), "demo", tool_def, tool_timeout=0)
     timeout_out = await slow_wrapper.execute(x="x")
-    assert "timed out" in timeout_out
+    assert not timeout_out.success  # type: ignore[union-attr]
+    assert "timed out" in (timeout_out.error or "")  # type: ignore[union-attr]
 
 
 async def test_connect_mcp_servers_command_url_skip_and_error(

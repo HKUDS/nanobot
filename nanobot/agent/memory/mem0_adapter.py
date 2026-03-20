@@ -647,7 +647,7 @@ class _Mem0Adapter:
             )
             return any(marker in text for marker in markers)
 
-        def _attempt(mode: str, fn) -> bool:
+        def _attempt(mode: str, fn: Any) -> bool:
             try:
                 fn()
             except Exception as exc:  # crash-barrier: mem0 SDK

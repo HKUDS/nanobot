@@ -1,5 +1,7 @@
 """MCP client: connects to MCP servers and wraps their tools as native nanobot tools."""
 
+from __future__ import annotations
+
 import asyncio
 from contextlib import AsyncExitStack
 from typing import Any
@@ -7,7 +9,7 @@ from typing import Any
 import httpx
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.registry import ToolRegistry
 
 
@@ -34,7 +36,7 @@ class MCPToolWrapper(Tool):
     def parameters(self) -> dict[str, Any]:
         return self._parameters
 
-    async def execute(self, **kwargs: Any) -> str:
+    async def execute(self, **kwargs: Any) -> ToolResult:
         from mcp import types
 
         try:
@@ -44,14 +46,16 @@ class MCPToolWrapper(Tool):
             )
         except asyncio.TimeoutError:
             logger.warning("MCP tool '{}' timed out after {}s", self._name, self._tool_timeout)
-            return f"(MCP tool call timed out after {self._tool_timeout}s)"
+            return ToolResult.fail(
+                f"MCP tool timed out after {self._tool_timeout}s", error_type="timeout"
+            )
         parts = []
         for block in result.content:
             if isinstance(block, types.TextContent):
                 parts.append(block.text)
             else:
                 parts.append(str(block))
-        return "\n".join(parts) or "(no output)"
+        return ToolResult.ok("\n".join(parts) or "(no output)")
 
 
 async def connect_mcp_servers(

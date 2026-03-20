@@ -100,14 +100,14 @@ class WhatsAppChannel(BaseChannel):
             # Extract just the phone number or lid as chat_id
             user_id = pn if pn else sender
             sender_id = user_id.split("@")[0] if "@" in user_id else user_id
-            logger.info("Sender {}", sender)
+            logger.debug("Sender {}", sender)  # SEC-20: phone numbers at DEBUG only
 
             # Handle voice transcription if it's a voice message
             if content == "[Voice Message]":
-                logger.info(
+                logger.debug(
                     "Voice message received from {}, but direct download from bridge is not yet supported.",
                     sender_id,
-                )
+                )  # SEC-20: sender_id at DEBUG only
                 content = "[Voice Message: Transcription not available for WhatsApp yet]"
 
             await self._handle_message(

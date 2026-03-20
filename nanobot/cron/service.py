@@ -1,5 +1,7 @@
 """Cron service for scheduling agent tasks."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import time
@@ -216,7 +218,7 @@ class CronService:
         delay_ms = max(0, next_wake - _now_ms())
         delay_s = delay_ms / 1000
 
-        async def tick():
+        async def tick() -> None:
             await asyncio.sleep(delay_s)
             if self._running:
                 await self._on_timer()

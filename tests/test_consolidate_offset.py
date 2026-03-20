@@ -519,7 +519,8 @@ class TestConsolidationDeduplicationGuard:
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="hello")
         await loop._process_message(msg)
         await loop._process_message(msg)
-        await asyncio.sleep(0.1)
+        # Wait for background consolidation tasks to complete (Pattern A)
+        await asyncio.gather(*loop._consolidation_tasks.copy())
 
         assert consolidation_calls == 1, (
             f"Expected exactly 1 consolidation, got {consolidation_calls}"
@@ -569,7 +570,8 @@ class TestConsolidationDeduplicationGuard:
 
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
         await loop._process_message(new_msg)
-        await asyncio.sleep(0.1)
+        # Wait for background consolidation tasks to complete (Pattern A)
+        await asyncio.gather(*loop._consolidation_tasks.copy())
 
         assert consolidation_calls == 2, (
             f"Expected normal + /new consolidations, got {consolidation_calls}"
@@ -615,7 +617,8 @@ class TestConsolidationDeduplicationGuard:
         await started.wait()
         assert len(loop._consolidation_tasks) == 1, "Task must be referenced while in-flight"
 
-        await asyncio.sleep(0.15)
+        # Await the in-flight consolidation task directly (Pattern A)
+        await asyncio.gather(*loop._consolidation_tasks.copy())
         assert len(loop._consolidation_tasks) == 0, (
             "Task reference must be removed after completion"
         )
@@ -667,7 +670,8 @@ class TestConsolidationDeduplicationGuard:
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
         pending_new = asyncio.create_task(loop._process_message(new_msg))
 
-        await asyncio.sleep(0.02)
+        # Yield to event loop so pending_new task can be scheduled and block on the lock
+        await asyncio.sleep(0)
         assert not pending_new.done(), "/new should wait while consolidation is in-flight"
 
         release.set()
@@ -768,7 +772,8 @@ class TestConsolidationDeduplicationGuard:
 
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
         pending_new = asyncio.create_task(loop._process_message(new_msg))
-        await asyncio.sleep(0.02)
+        # Yield to event loop so pending_new task can be scheduled and block on the lock
+        await asyncio.sleep(0)
         assert not pending_new.done()
 
         release.set()

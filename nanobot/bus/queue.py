@@ -1,8 +1,14 @@
 """Async message queue for decoupled channel-agent communication."""
 
+from __future__ import annotations
+
 import asyncio
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
+
+# Maximum messages held in each queue before back-pressure kicks in.
+# Prevents unbounded memory growth under sustained load.
+_QUEUE_MAXSIZE: int = 1000
 
 
 class MessageBus:
@@ -13,9 +19,9 @@ class MessageBus:
     them and pushes responses to the outbound queue.
     """
 
-    def __init__(self):
-        self.inbound: asyncio.Queue[InboundMessage] = asyncio.Queue()
-        self.outbound: asyncio.Queue[OutboundMessage] = asyncio.Queue()
+    def __init__(self) -> None:
+        self.inbound: asyncio.Queue[InboundMessage] = asyncio.Queue(maxsize=_QUEUE_MAXSIZE)
+        self.outbound: asyncio.Queue[OutboundMessage] = asyncio.Queue(maxsize=_QUEUE_MAXSIZE)
 
     async def publish_inbound(self, msg: InboundMessage) -> None:
         """Publish a message from a channel to the agent."""

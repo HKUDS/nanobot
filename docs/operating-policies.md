@@ -45,6 +45,10 @@ Blocked patterns (case-insensitive, hex-escape normalised):
 Allowlist mode (`shell_mode = "allowlist"`) restricts to an explicit set of safe commands
 (file ops, dev tools, network utilities).
 
+> **Delegated agents inherit `shell_mode`** from the parent `ExecToolConfig`. An operator
+> configuring `shell_mode: "allowlist"` will have that policy applied to all delegated
+> sub-agents. The `shell_mode` field is part of `ExecToolConfig` in `config/schema.py`.
+
 ### Filesystem
 
 - Paths resolved via `_resolve_path()` with symlink following
@@ -55,6 +59,40 @@ Allowlist mode (`shell_mode = "allowlist"`) restricts to an explicit set of safe
 
 - WhatsApp bridge binds `127.0.0.1` only
 - API keys never hardcoded — stored in `~/.nanobot/config.json` (0600 permissions)
+
+## Multi-Agent Delegation
+
+### Delegation Limits
+
+Nanobot enforces **two independent delegation limits** (LAN-132):
+
+| Limit | Default | Behaviour | Configurable? |
+|-------|---------|-----------|---------------|
+| `MAX_DELEGATION_DEPTH` | `3` | Hard structural cap on ancestry chain length. Raises `_CycleError` — cannot be overridden by the LLM. | Source constant in `delegation.py` |
+| `max_delegations` | `8` | Per-session budget on total delegations. Raises `_CycleError` when `delegation_count >= max_delegations`. | `DelegationDispatcher.max_delegations` |
+
+**Key distinction**: `MAX_DELEGATION_DEPTH` prevents deep recursive chains (A→B→C→D would fail at depth 3).
+`max_delegations` caps total spend across all parallel branches in a session.
+
+### Tool Permissions in Delegated Agents
+
+Delegated sub-agents receive a **restricted tool set** governed by `AgentRoleConfig`:
+
+- `allowed_tools: null` (default) — reads files, lists dirs, uses web tools; shell/write/re-delegation are **denied by default**
+- `allowed_tools: ["exec", "write_file", ...]` — explicitly grant privileged tools
+- `denied_tools: ["web_search", "web_fetch"]` — block specific tools even if otherwise permitted
+
+`denied_tools` is always respected: it overrides both the default-allow set and any `allowed_tools` grant.
+
+> **Web tools (`web_search`, `web_fetch`)** are available by default but can be blocked via
+> `denied_tools`. Roles intended for network-isolated analysis should set `denied_tools: ["web_search", "web_fetch"]`.
+
+### Classification Security
+
+The routing classification prompt wraps user messages in `<user_message>` XML tags.
+The classifier is instructed to treat content inside these tags as opaque data and ignore
+any instructions that appear within them. This prevents prompt injection from routing a
+malicious message to a privileged role (CWE-77).
 
 ## Memory System
 

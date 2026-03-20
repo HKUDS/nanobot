@@ -7,14 +7,27 @@ from types import SimpleNamespace
 
 import pytest
 
+import nanobot.agent.tools.web as _web_mod
 from nanobot.agent.tools.web import (
     WebFetchTool,
     WebSearchTool,
+    _check_ssrf_host,
     _normalize,
     _strip_tags,
     _url_cache,
     _validate_url,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_web_module_state():
+    """Reset module-level shared state between tests to prevent cross-test pollution."""
+    _url_cache.clear()
+    _web_mod._http_client = None
+    yield
+    _url_cache.clear()
+    _web_mod._http_client = None
+
 
 # ---------------------------------------------------------------------------
 # WebSearchTool
@@ -127,6 +140,87 @@ def test_web_helpers() -> None:
 
 
 # ---------------------------------------------------------------------------
+# SSRF protection tests (SEC-02, T-C1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1/",
+        "http://127.0.0.1:8080/secret",
+        "http://0.0.0.0/",
+        "http://10.0.0.1/",
+        "http://10.255.255.255/",
+        "http://172.16.0.1/",
+        "http://172.31.255.255/",
+        "http://192.168.1.1/",
+        "http://169.254.169.254/",  # AWS/GCP/Azure IMDS
+        "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+        "http://169.254.0.1/",
+        "http://[::1]/",  # IPv6 loopback
+        "http://[fc00::1]/",  # IPv6 ULA (private)
+    ],
+)
+def test_validate_url_blocks_private_ips(url: str) -> None:
+    """_validate_url must reject IP literals that are private/loopback/link-local (SEC-02)."""
+    valid, err = _validate_url(url)
+    assert not valid, f"Expected {url!r} to be blocked, but was allowed"
+    assert "private" in err.lower() or "not permitted" in err.lower() or "metadata" in err.lower()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://metadata.google.internal/",
+        "http://metadata.azure.com/",
+        "http://100.100.100.200/",  # Alibaba Cloud metadata
+    ],
+)
+def test_validate_url_blocks_cloud_metadata_hosts(url: str) -> None:
+    """_validate_url must block known cloud metadata service hostnames (SEC-02)."""
+    valid, err = _validate_url(url)
+    assert not valid, f"Expected {url!r} to be blocked"
+    assert "not permitted" in err.lower() or "metadata" in err.lower()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com/",
+        "https://api.github.com/",
+        "http://httpbin.org/get",
+    ],
+)
+def test_validate_url_allows_public_urls(url: str) -> None:
+    """_validate_url must allow legitimate public URLs."""
+    valid, _ = _validate_url(url)
+    assert valid, f"Expected {url!r} to be allowed"
+
+
+async def test_check_ssrf_host_blocks_private_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_check_ssrf_host must block hosts that DNS-resolve to private addresses (SEC-02)."""
+    import asyncio
+
+    async def _fake_getaddrinfo(host: str, port: object, **kwargs: object) -> list:  # type: ignore[override]
+        return [(None, None, None, None, ("10.0.0.1", 0))]
+
+    monkeypatch.setattr(asyncio.get_event_loop(), "getaddrinfo", _fake_getaddrinfo)
+    result = await _check_ssrf_host("evil-internal.example.com")
+    assert result is not None
+    assert "private" in result.lower() or "10.0.0.1" in result
+
+
+async def test_web_fetch_blocks_private_ip_url() -> None:
+    """WebFetchTool.execute must reject private IP URLs before making any HTTP request (SEC-02)."""
+    tool = WebFetchTool()
+    result = await tool.execute(url="http://192.168.1.1/admin")
+    assert not result.success
+    payload = json.loads(result.output)
+    assert "private" in payload["error"].lower() or "not permitted" in payload["error"].lower()
+
+
+# ---------------------------------------------------------------------------
 # WebFetchTool
 # ---------------------------------------------------------------------------
 
@@ -222,9 +316,6 @@ async def test_web_fetch_html_and_error(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda **kwargs: _Client())
     monkeypatch.setitem(__import__("sys").modules, "readability", SimpleNamespace(Document=_Doc))
 
-    # Clear URL cache from prior tests
-    _url_cache.clear()
-
     tool = WebFetchTool(max_chars=20)
     out = await tool.execute(url="https://example.com", extractMode="markdown")
     assert out.success
@@ -244,6 +335,7 @@ async def test_web_fetch_html_and_error(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda **kwargs: _BadClient())
     _url_cache.clear()  # clear cached success for same URL
+    _web_mod._http_client = None  # force _BadClient to be picked up
     fail = await tool.execute(url="https://example.com")
     assert not fail.success
 

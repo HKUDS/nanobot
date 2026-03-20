@@ -250,7 +250,7 @@ class TelegramChannel(BaseChannel):
         try:
             chat_id = int(msg.chat_id)
         except ValueError:
-            raise DeliverySkippedError(f"Invalid Telegram chat_id: {msg.chat_id}")
+            raise DeliverySkippedError(f"Invalid Telegram chat_id: {msg.chat_id}") from None
 
         reply_params = None
         if self.config.reply_to_message:
@@ -405,7 +405,7 @@ class TelegramChannel(BaseChannel):
         )
 
     @staticmethod
-    def _sender_id(user) -> str:
+    def _sender_id(user: Any) -> str:
         """Build sender_id with username for allowlist matching."""
         sid = str(user.id)
         return f"{sid}|{user.username}" if user.username else sid
@@ -429,6 +429,15 @@ class TelegramChannel(BaseChannel):
         user = update.effective_user
         chat_id = message.chat_id
         sender_id = self._sender_id(user)
+
+        # SEC-13: ACL check before any media download — reject unauthorized users early
+        if not self.is_allowed(sender_id):
+            logger.warning(
+                "Access denied for sender {} on Telegram channel. "
+                "Add them to allowFrom list in config to grant access.",
+                sender_id,
+            )
+            return
 
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id

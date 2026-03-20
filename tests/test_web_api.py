@@ -359,3 +359,33 @@ class TestStripAttachments:
         saved = [f for f in tmp_path.iterdir() if f.name.startswith("dup_")]
         assert len(saved) == 1
         assert saved[0].read_text() == "new content"
+
+    # T-H1: Path traversal tests (SEC-07)
+    def test_blocks_path_traversal_in_filename(self, tmp_path):
+        """Attachment filenames with path traversal sequences must be sanitized (SEC-07)."""
+        from nanobot.web.routes import _strip_attachments
+
+        text = '<attachment name="../../etc/cron.d/evil">malicious</attachment>'
+        _strip_attachments(text, tmp_path)
+        # The dangerous path must NOT exist
+        assert not (tmp_path / "../../etc/cron.d/evil").exists()
+        assert not (tmp_path.parent.parent / "etc/cron.d/evil").exists()
+        # The safe basename should be saved within uploads_dir
+        saved = list(tmp_path.iterdir())
+        assert len(saved) == 1
+        # Should be saved as just "evil" (basename only)
+        assert saved[0].name == "evil"
+        assert saved[0].read_text() == "malicious"
+
+    def test_blocks_absolute_path_in_filename(self, tmp_path):
+        """Absolute paths in attachment filenames must be stripped to basename (SEC-07)."""
+        from nanobot.web.routes import _strip_attachments
+
+        text = '<attachment name="/etc/passwd">root:x:0:0:root</attachment>'
+        _strip_attachments(text, tmp_path)
+        # /etc/passwd must not be touched
+        assert not (tmp_path / "etc" / "passwd").exists()
+        # Should be saved as just "passwd"
+        saved = list(tmp_path.iterdir())
+        assert len(saved) == 1
+        assert saved[0].name == "passwd"

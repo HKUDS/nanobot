@@ -23,9 +23,16 @@ from loguru import logger
 class Scratchpad:
     """Per-session JSONL-backed scratchpad."""
 
-    def __init__(self, session_dir: Path, *, max_entries: int = 50) -> None:
+    # Default per-entry content size cap (bytes). Prevents a single large delegated
+    # output from overflowing downstream agents' context windows (LAN-113).
+    MAX_ENTRY_CHARS: int = 5_000
+
+    def __init__(
+        self, session_dir: Path, *, max_entries: int = 50, max_entry_chars: int = 5_000
+    ) -> None:
         self._path = session_dir / "scratchpad.jsonl"
         self._max_entries = max_entries
+        self._max_entry_chars = max_entry_chars
         self._lock = asyncio.Lock()
         self._entries: list[dict[str, Any]] = []
         self._loaded = False
@@ -37,7 +44,14 @@ class Scratchpad:
     async def write(
         self, *, role: str, label: str, content: str, metadata: dict[str, Any] | None = None
     ) -> str:
-        """Append an entry and return its ID."""
+        """Append an entry and return its ID.
+
+        Content exceeding ``max_entry_chars`` is truncated with a notice to prevent
+        downstream agents from exceeding their context window (LAN-113).
+        """
+        if len(content) > self._max_entry_chars:
+            truncated = content[: self._max_entry_chars]
+            content = truncated + f"\n…[truncated: {len(content)} chars total]"
         entry_id = uuid.uuid4().hex[:8]
         entry: dict[str, Any] = {
             "id": entry_id,
@@ -51,10 +65,12 @@ class Scratchpad:
         async with self._lock:
             self._ensure_loaded()
             self._entries.append(entry)
-            # Evict oldest if over cap
+            # Evict oldest if over cap — full rewrite needed on eviction (LAN-128).
             if len(self._entries) > self._max_entries:
                 self._entries = self._entries[-self._max_entries :]
-            self._flush()
+                self._flush(full_rewrite=True)
+            else:
+                self._flush(full_rewrite=False)
         return entry_id
 
     def read(self, entry_id: str | None = None) -> str:
@@ -117,13 +133,23 @@ class Scratchpad:
         except (json.JSONDecodeError, OSError):
             logger.warning("Failed to load scratchpad {}", self._path)
 
-    def _flush(self) -> None:
-        """Rewrite the JSONL file from in-memory entries."""
+    def _flush(self, *, full_rewrite: bool = True) -> None:
+        """Write scratchpad entries to disk.
+
+        When *full_rewrite* is False, append only the latest entry (faster for
+        the common non-eviction case). When True, rewrite the entire file (used
+        after eviction). Keeping I/O minimal avoids blocking the event loop
+        under parallel agent writes (LAN-128).
+        """
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(
-                "\n".join(json.dumps(e, ensure_ascii=False) for e in self._entries) + "\n",
-                encoding="utf-8",
-            )
+            if full_rewrite or not self._path.exists():
+                self._path.write_text(
+                    "\n".join(json.dumps(e, ensure_ascii=False) for e in self._entries) + "\n",
+                    encoding="utf-8",
+                )
+            else:
+                with self._path.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(self._entries[-1], ensure_ascii=False) + "\n")
         except OSError:
             logger.warning("Failed to flush scratchpad {}", self._path)

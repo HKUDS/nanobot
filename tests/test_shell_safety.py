@@ -130,6 +130,23 @@ class TestShellDenyPatterns:
     def test_blocks_bypass_attempts(self, tool, cmd):
         assert tool._guard_command(cmd, "/tmp") is not None
 
+    # SEC-01: generic pipe-to-shell bypass (not sourced from curl/wget/base64)
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "echo 'rm -rf /' | bash -s",  # generic echo | bash -s
+            "echo 'id' | sh -c id",  # echo | sh -c
+            "printf 'payload' | zsh",  # printf | zsh
+            "cat /tmp/script | bash",  # cat | bash
+            "cat /tmp/evil | sh",  # cat | sh
+            "python -c 'print(\"rm -rf /\")' | bash",  # python | bash
+            "echo payload | dash",  # echo | dash
+        ],
+    )
+    def test_blocks_generic_pipe_to_shell(self, tool, cmd):
+        """Generic pipe-to-interpreter must be blocked regardless of pipe source (SEC-01)."""
+        assert tool._guard_command(cmd, "/tmp") is not None
+
     @pytest.mark.parametrize(
         "cmd",
         [

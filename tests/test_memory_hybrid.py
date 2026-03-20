@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.memory.persistence import MemoryPersistence
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 
@@ -794,3 +795,49 @@ class TestHybridMemoryStore:
         assert len(retrieved) == 2
         # The more recent event should rank first due to recency boost
         assert retrieved[0]["id"] == "new-ev"
+
+    def test_retrieve_reads_events_file_at_most_once(self, tmp_path: Path) -> None:
+        """retrieve() must not issue more than one events.jsonl read per call (LAN-67).
+
+        The MemoryStore uses an mtime-based cache so a single retrieve() call
+        should result in at most one underlying file read even when the
+        retrieval path internally calls read_events() multiple times.
+        """
+        store = MemoryStore(tmp_path, embedding_provider="hash")
+        store.mem0.enabled = False  # Force local BM25 path
+
+        store.append_events(
+            [
+                {
+                    "id": "bound-ev-1",
+                    "timestamp": "2026-03-01T00:00:00+00:00",
+                    "channel": "cli",
+                    "chat_id": "direct",
+                    "type": "fact",
+                    "summary": "Test event for I/O bound verification.",
+                    "entities": ["test"],
+                    "salience": 0.8,
+                    "confidence": 0.9,
+                    "source_span": [0, 1],
+                    "ttl_days": 365,
+                }
+            ]
+        )
+
+        # Invalidate the in-memory cache so the first retrieve() must hit disk.
+        store._events_cache = None
+
+        real_read_jsonl = MemoryPersistence.read_jsonl
+
+        with patch.object(
+            MemoryPersistence,
+            "read_jsonl",
+            wraps=real_read_jsonl,
+        ) as mock_read:
+            store.retrieve("test event", top_k=3, embedding_provider="hash")
+
+        # The events file should have been read at most once.
+        assert mock_read.call_count <= 1, (
+            f"read_jsonl was called {mock_read.call_count} times during a single retrieve(); "
+            "expected at most 1 (I/O should be bounded by the mtime cache)"
+        )

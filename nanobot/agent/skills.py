@@ -1,5 +1,7 @@
 """Skills loader for agent capabilities."""
 
+from __future__ import annotations
+
 import importlib.util
 import inspect
 import json
@@ -7,8 +9,9 @@ import os
 import re
 import shutil
 import sys
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import yaml  # type: ignore[import-untyped]
 from loguru import logger
@@ -17,6 +20,16 @@ from nanobot.agent.tools.base import Tool
 
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
+
+# P-04/P-14: process-lifetime cache for shutil.which() — binary locations are
+# stable for the process lifetime and repeated calls are unnecessary syscalls.
+_which_cache: dict[str, str | None] = {}
+
+
+def _which(binary: str) -> str | None:
+    if binary not in _which_cache:
+        _which_cache[binary] = shutil.which(binary)
+    return _which_cache[binary]
 
 
 class SkillsLoader:
@@ -27,10 +40,17 @@ class SkillsLoader:
     specific tools or perform certain tasks.
     """
 
+    # P-04: TTL for the skills list cache (builtin skills never change at
+    # runtime; workspace skills rarely do).  30 s is well below any perceptible
+    # latency while avoiding repeated rglob + YAML parses per turn.
+    _LIST_CACHE_TTL: ClassVar[float] = 30.0
+
     def __init__(self, workspace: Path, builtin_skills_dir: Path | None = None):
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
+        self._list_cache: list[dict[str, str]] | None = None
+        self._list_cache_ts: float = 0.0
 
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """
@@ -42,7 +62,22 @@ class SkillsLoader:
         Returns:
             List of skill info dicts with 'name', 'path', 'source'.
         """
-        skills = []
+        # P-04: serve from TTL cache — rglob + YAML parses are expensive per turn.
+        now = time.monotonic()
+        if self._list_cache is None or (now - self._list_cache_ts) > self._LIST_CACHE_TTL:
+            self._list_cache = self._discover_skills()
+            self._list_cache_ts = now
+
+        skills = self._list_cache
+
+        # Filter by requirements
+        if filter_unavailable:
+            return [s for s in skills if self._check_requirements(self._get_skill_meta(s["name"]))]
+        return list(skills)
+
+    def _discover_skills(self) -> list[dict[str, str]]:
+        """Perform the actual filesystem scan for SKILL.md files."""
+        skills: list[dict[str, str]] = []
         seen_names: set[str] = set()
 
         # Workspace skills (highest priority) — recursive discovery
@@ -69,9 +104,6 @@ class SkillsLoader:
                 )
                 seen_names.add(skill_dir.name)
 
-        # Filter by requirements
-        if filter_unavailable:
-            return [s for s in skills if self._check_requirements(self._get_skill_meta(s["name"]))]
         return skills
 
     def load_skill(self, name: str) -> str | None:
@@ -109,44 +141,22 @@ class SkillsLoader:
         return "\n\n---\n\n".join(parts) if parts else ""
 
     def build_skills_summary(self) -> str:
-        """
-        Build a summary of all skills (name, description, path, availability).
+        """Build a compact plain-text listing of all skills (one line per skill).
 
-        This is used for progressive loading - the agent can read the full
-        skill content using read_file when needed.
-
-        Returns:
-            XML-formatted skills summary.
+        Used for progressive loading — the agent can read the full skill content
+        via read_file when needed.
         """
         all_skills = self.list_skills(filter_unavailable=False)
         if not all_skills:
             return ""
 
-        def escape_xml(s: str) -> str:
-            return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-        lines = ["<skills>"]
+        lines = ["## Available Skills"]
         for s in all_skills:
-            name = escape_xml(s["name"])
-            path = s["path"]
-            desc = escape_xml(self._get_skill_description(s["name"]))
             skill_meta = self._get_skill_meta(s["name"])
             available = self._check_requirements(skill_meta)
-
-            lines.append(f'  <skill available="{str(available).lower()}">')
-            lines.append(f"    <name>{name}</name>")
-            lines.append(f"    <description>{desc}</description>")
-            lines.append(f"    <location>{path}</location>")
-
-            # Show missing requirements for unavailable skills
-            if not available:
-                missing = self._get_missing_requirements(skill_meta)
-                if missing:
-                    lines.append(f"    <requires>{escape_xml(missing)}</requires>")
-
-            lines.append("  </skill>")
-        lines.append("</skills>")
-
+            status = "✓" if available else "✗"
+            desc = self._get_skill_description(s["name"])
+            lines.append(f"- {status} **{s['name']}**: {desc}")
         return "\n".join(lines)
 
     def _get_missing_requirements(self, skill_meta: dict) -> str:
@@ -154,7 +164,7 @@ class SkillsLoader:
         missing = []
         requires = skill_meta.get("requires", {})
         for b in requires.get("bins", []):
-            if not shutil.which(b):
+            if not _which(b):
                 missing.append(f"CLI: {b}")
         for env in requires.get("env", []):
             if not os.environ.get(env):
@@ -201,7 +211,7 @@ class SkillsLoader:
         """Check if skill requirements are met (bins, env vars)."""
         requires = skill_meta.get("requires", {})
         for b in requires.get("bins", []):
-            if not shutil.which(b):
+            if not _which(b):
                 return False
         for env in requires.get("env", []):
             if not os.environ.get(env):

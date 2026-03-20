@@ -69,7 +69,7 @@ def _strip_attachments(text: str, uploads_dir: Path) -> str:
     notes: list[str] = []
 
     def _save(m: re.Match[str]) -> str:
-        fname = m.group(1)
+        fname = Path(m.group(1)).name  # SEC-07: strip any path components to prevent traversal
         data = m.group(2).strip()
         dest = uploads_dir / fname
         # Avoid overwriting — append uuid suffix when needed

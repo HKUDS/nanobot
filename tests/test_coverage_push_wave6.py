@@ -793,7 +793,7 @@ async def test_loop_dispatch_delegation_route_and_exception_paths(tmp_path: Path
     dispatcher.record_route_trace = MagicMock()
     loop._dispatcher = dispatcher
 
-    with pytest.raises(Exception):
+    with pytest.raises(Exception, match="."):  # noqa: B017 — any exception signals correct guard
         await loop._dispatch_delegation("", "task", None)
 
     class _Coord:

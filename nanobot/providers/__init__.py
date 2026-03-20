@@ -1,5 +1,7 @@
 """LLM provider abstraction module."""
 
+from __future__ import annotations
+
 from nanobot.providers.base import LLMProvider, LLMResponse, StreamChunk
 from nanobot.providers.litellm_provider import LiteLLMProvider
 

@@ -4,7 +4,7 @@
 and handles:
 
 - Non-streaming fallback when no progress callback is given.
-- Periodic flushing of partial content for progressive display.
+- Streaming with full-response progress delivery on completion.
 - Trace logging of latency, token usage, and tool calls.
 
 ``strip_think`` is a utility for removing ``<think>…</think>`` blocks
@@ -27,12 +27,16 @@ from nanobot.agent.tracing import bind_trace
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider, LLMResponse
 
+# LAN-90: pre-compile static regexes to avoid recompilation on every call.
+_THINK_RE = re.compile(r"<think>[\s\S]*?</think>")
+_ANALYSIS_PREFIX_RE = re.compile(r"^(assistant\s*)?analysis[^\n]*\n?", re.IGNORECASE)
+
 
 def strip_think(text: str | None) -> str | None:
     """Remove ``<think>…</think>`` blocks that some models embed in content."""
     if not text:
         return None
-    clean = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
+    clean = _THINK_RE.sub("", text).strip()
     if not clean:
         logger.warning(
             "strip_think removed all content from non-empty response (first 100 chars): {}",
@@ -41,9 +45,7 @@ def strip_think(text: str | None) -> str | None:
         return None
     # Strip common reasoning prefixes that sometimes leak into final answers.
     while True:
-        stripped = re.sub(
-            r"^(assistant\s*)?analysis[^\n]*\n?", "", clean, flags=re.IGNORECASE
-        ).lstrip()
+        stripped = _ANALYSIS_PREFIX_RE.sub("", clean).lstrip()
         if stripped == clean:
             break
         clean = stripped
@@ -52,8 +54,6 @@ def strip_think(text: str | None) -> str | None:
 
 class StreamingLLMCaller:
     """Handles LLM calls with optional streaming and progress flushing."""
-
-    STREAM_FLUSH_INTERVAL = 12  # flush partial content every N chunks
 
     def __init__(
         self,
@@ -135,6 +135,13 @@ class StreamingLLMCaller:
         full_content = "".join(content_parts) or None
         full_reasoning = "".join(reasoning_parts) or None
         full_clean = strip_think(full_content) if full_content else None
+
+        # LAN-5: some providers omit completion_tokens from streaming chunks.
+        # Fall back to a character-based estimate (≈ 1 token per 4 chars) so
+        # Langfuse spans record a non-zero output count instead of 0.
+        if not usage.get("completion_tokens") and full_content:
+            usage = dict(usage)  # don't mutate the chunk's dict
+            usage["completion_tokens"] = max(1, len(full_content) // 4)
 
         if tool_calls:
             # Intermediate LLM call — text is thinking/planning, not the final

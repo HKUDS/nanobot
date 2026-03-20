@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.memory.store import MemoryStore
 
 
 def _workspace(tmp_path: Path) -> Path:
@@ -13,18 +15,18 @@ def _workspace(tmp_path: Path) -> Path:
     return ws
 
 
-def test_build_user_content_ignores_non_images(tmp_path: Path) -> None:
+async def test_build_user_content_ignores_non_images(tmp_path: Path) -> None:
     ws = _workspace(tmp_path)
     builder = ContextBuilder(ws)
 
     text_file = ws / "note.txt"
     text_file.write_text("hello", encoding="utf-8")
 
-    out = builder._build_user_content("question", [str(text_file)])
+    out = await builder._build_user_content("question", [str(text_file)])
     assert out == "question"
 
 
-def test_build_user_content_embeds_image(tmp_path: Path) -> None:
+async def test_build_user_content_embeds_image(tmp_path: Path) -> None:
     ws = _workspace(tmp_path)
     builder = ContextBuilder(ws)
 
@@ -32,7 +34,7 @@ def test_build_user_content_embeds_image(tmp_path: Path) -> None:
     # Minimal PNG signature bytes are enough for base64 path coverage.
     png.write_bytes(b"\x89PNG\r\n\x1a\n")
 
-    out = builder._build_user_content("describe", [str(png)])
+    out = await builder._build_user_content("describe", [str(png)])
     assert isinstance(out, list)
     assert out[-1]["type"] == "text"
     assert out[-1]["text"] == "describe"
@@ -83,3 +85,38 @@ def test_build_system_prompt_memory_failure_fallback(
     prompt = builder.build_system_prompt(current_message="hello")
     assert "# nanobot" in prompt
     assert "**Answer from these facts first.**" not in prompt
+
+
+def test_bootstrap_files_cached_across_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-L1 (LAN-93): bootstrap files must be read at most once when mtime hasn't changed."""
+    ws = _workspace(tmp_path)
+    (ws / "SOUL.md").write_text("soul content", encoding="utf-8")
+    builder = ContextBuilder(ws)
+
+    read_count = 0
+    original_read_text = Path.read_text
+
+    def counting_read_text(self: Path, *args, **kwargs) -> str:
+        nonlocal read_count
+        if self.name == "SOUL.md":
+            read_count += 1
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counting_read_text)
+
+    # Call build_system_prompt three times — SOUL.md should only be read once
+    builder.build_system_prompt(current_message="first")
+    builder.build_system_prompt(current_message="second")
+    builder.build_system_prompt(current_message="third")
+
+    assert read_count == 1, f"SOUL.md read {read_count} times; expected 1 (cache miss only)"
+
+
+def test_injected_memory_store_is_used(tmp_path: Path) -> None:
+    """LAN-105: when memory= is passed, ContextBuilder uses that instance, not a new one."""
+    ws = _workspace(tmp_path)
+    mock_store = MagicMock(spec=MemoryStore)
+    builder = ContextBuilder(ws, memory=mock_store)
+    assert builder.memory is mock_store

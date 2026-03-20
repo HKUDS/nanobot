@@ -23,6 +23,7 @@ from nanobot.agent.coordinator import (
 from nanobot.agent.registry import AgentRegistry
 from nanobot.config.schema import AgentConfig, AgentRoleConfig, RoutingConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
+from tests.helpers import ScriptedProvider
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -218,7 +219,7 @@ class TestRoute:
 class TestParseResponse:
     def test_json_object(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, confidence, needs_orch, relevant = coordinator._parse_response('{"role": "code"}')
+        role, confidence, needs_orch, relevant, _ = coordinator._parse_response('{"role": "code"}')
         assert role == "code"
         assert confidence == 1.0
         assert needs_orch is False
@@ -226,18 +227,20 @@ class TestParseResponse:
 
     def test_json_with_confidence_field(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, confidence, _, _ = coordinator._parse_response('{"role": "code", "confidence": 0.75}')
+        role, confidence, _, _, _ = coordinator._parse_response(
+            '{"role": "code", "confidence": 0.75}'
+        )
         assert role == "code"
         assert confidence == 0.75
 
     def test_json_uppercase_normalised(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, _, _, _ = coordinator._parse_response('{"role": "CODE"}')
+        role, _, _, _, _ = coordinator._parse_response('{"role": "CODE"}')
         assert role == "code"
 
     def test_plain_text_fallback(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, confidence, needs_orch, relevant = coordinator._parse_response(
+        role, confidence, needs_orch, relevant, _ = coordinator._parse_response(
             "Use the research agent"
         )
         assert role == "research"
@@ -247,7 +250,7 @@ class TestParseResponse:
 
     def test_no_match_returns_default(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, confidence, needs_orch, relevant = coordinator._parse_response("something random")
+        role, confidence, needs_orch, relevant, _ = coordinator._parse_response("something random")
         assert role == "general"
         assert confidence == 0.0
         assert needs_orch is False
@@ -255,14 +258,14 @@ class TestParseResponse:
 
     def test_confidence_clamped(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        _, conf, _, _ = coordinator._parse_response('{"role": "code", "confidence": 1.5}')
+        _, conf, _, _, _ = coordinator._parse_response('{"role": "code", "confidence": 1.5}')
         assert conf == 1.0
-        _, conf2, _, _ = coordinator._parse_response('{"role": "code", "confidence": -0.5}')
+        _, conf2, _, _, _ = coordinator._parse_response('{"role": "code", "confidence": -0.5}')
         assert conf2 == 0.0
 
     def test_needs_orchestration_parsed(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, confidence, needs_orch, relevant = coordinator._parse_response(
+        role, confidence, needs_orch, relevant, _ = coordinator._parse_response(
             '{"role": "code", "confidence": 0.9, '
             '"needs_orchestration": true, "relevant_roles": ["code", "writing"]}'
         )
@@ -273,7 +276,7 @@ class TestParseResponse:
 
     def test_needs_orchestration_false_when_absent(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        _, _, needs_orch, relevant = coordinator._parse_response(
+        _, _, needs_orch, relevant, _ = coordinator._parse_response(
             '{"role": "code", "confidence": 0.8}'
         )
         assert needs_orch is False
@@ -281,7 +284,7 @@ class TestParseResponse:
 
     def test_malformed_relevant_roles_ignored(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        _, _, _, relevant = coordinator._parse_response(
+        _, _, _, relevant, _ = coordinator._parse_response(
             '{"role": "code", "relevant_roles": "not-a-list"}'
         )
         assert relevant == []
@@ -346,6 +349,109 @@ class TestOrchestrationOverride:
 
 
 # ---------------------------------------------------------------------------
+# Confidence threshold tests (LAN-107 / LAN-116)
+# ---------------------------------------------------------------------------
+
+
+class TestConfidenceThreshold:
+    """classify() must fall back to default_role when confidence is below threshold."""
+
+    async def test_low_confidence_falls_back_to_default(self) -> None:
+        """JSON response with confidence below threshold → default role."""
+        provider = FakeProvider('{"role": "code", "confidence": 0.3}')
+        registry = build_default_registry("general")
+        coordinator = Coordinator(
+            provider, registry, default_role="general", confidence_threshold=0.6
+        )
+        role, conf = await coordinator.classify("Fix the bug")
+        assert role == "general", "Low-confidence result must fall back to default role"
+        assert conf == 0.3  # Original confidence returned for logging/auditing
+
+    async def test_exactly_at_threshold_is_accepted(self) -> None:
+        """Confidence exactly at threshold is accepted (>= not >)."""
+        provider = FakeProvider('{"role": "code", "confidence": 0.6}')
+        registry = build_default_registry("general")
+        coordinator = Coordinator(
+            provider, registry, default_role="general", confidence_threshold=0.6
+        )
+        role, _conf = await coordinator.classify("Fix the bug")
+        assert role == "code"
+
+    async def test_text_scan_exempt_from_threshold(self) -> None:
+        """Text-scan fallback (confidence=0.5) is exempt from the threshold."""
+        provider = FakeProvider("the code agent should handle this")
+        registry = build_default_registry("general")
+        coordinator = Coordinator(
+            provider, registry, default_role="general", confidence_threshold=0.6
+        )
+        role, conf = await coordinator.classify("Fix the bug")
+        assert role == "code", "Text-scan result must not be filtered by confidence threshold"
+        assert conf == 0.5
+
+    async def test_zero_threshold_accepts_all(self) -> None:
+        """A threshold of 0.0 accepts any classification including zero-confidence."""
+        provider = FakeProvider('{"role": "code", "confidence": 0.0}')
+        registry = build_default_registry("general")
+        coordinator = Coordinator(
+            provider, registry, default_role="general", confidence_threshold=0.0
+        )
+        role, _conf = await coordinator.classify("Fix the bug")
+        assert role == "code"
+
+
+# ---------------------------------------------------------------------------
+# Orchestration override edge-case tests (LAN-116)
+# ---------------------------------------------------------------------------
+
+
+class TestOrchestrationOverrideEdgeCases:
+    """Additional edge cases for the orchestration override path."""
+
+    async def test_override_skipped_when_pm_disabled(self) -> None:
+        """When pm role is disabled, orchestration override must not fire."""
+        from nanobot.config.schema import AgentRoleConfig
+
+        provider = FakeProvider(
+            '{"role": "code", "confidence": 0.9, '
+            '"needs_orchestration": true, "relevant_roles": ["code", "research"]}'
+        )
+        registry = build_default_registry("general")
+        # Disable pm
+        registry.register(AgentRoleConfig(name="pm", description="disabled pm", enabled=False))
+        coordinator = Coordinator(provider, registry, default_role="general")
+        role, _conf = await coordinator.classify("Do multiple things")
+        assert role == "code", "Override to disabled pm must not fire"
+
+    async def test_override_skipped_when_pm_not_registered(self) -> None:
+        """When pm role is absent from the registry, override must not fire."""
+        from nanobot.agent.registry import AgentRegistry
+        from nanobot.config.schema import AgentRoleConfig
+
+        provider = FakeProvider(
+            '{"role": "code", "confidence": 0.9, '
+            '"needs_orchestration": true, "relevant_roles": ["code", "research"]}'
+        )
+        registry = AgentRegistry(default_role="general")
+        registry.register(AgentRoleConfig(name="general", description="general"))
+        registry.register(AgentRoleConfig(name="code", description="code"))
+        registry.register(AgentRoleConfig(name="research", description="research"))
+        coordinator = Coordinator(provider, registry, default_role="general")
+        role, _conf = await coordinator.classify("Do multiple things")
+        assert role == "code", "Override must not fire when pm is not registered"
+
+    async def test_override_does_not_trigger_with_single_role(self) -> None:
+        """exactly 1 relevant role + no orchestration signal → no override."""
+        provider = FakeProvider(
+            '{"role": "code", "confidence": 0.9, '
+            '"needs_orchestration": false, "relevant_roles": ["code"]}'
+        )
+        registry = build_default_registry("general")
+        coordinator = Coordinator(provider, registry, default_role="general")
+        role, _conf = await coordinator.classify("Review the code")
+        assert role == "code"
+
+
+# ---------------------------------------------------------------------------
 # Integration: AgentLoop + Coordinator (full message flow)
 # ---------------------------------------------------------------------------
 
@@ -361,35 +467,6 @@ def _make_agent_config(tmp_path: Path, **overrides: Any) -> AgentConfig:
     )
     defaults.update(overrides)
     return AgentConfig(**defaults)
-
-
-class ScriptedProvider(LLMProvider):
-    """Provider that returns scripted responses in order."""
-
-    def __init__(self, responses: list[LLMResponse]) -> None:
-        super().__init__()
-        self._responses = list(responses)
-        self._index = 0
-        self.call_log: list[dict[str, Any]] = []
-
-    def get_default_model(self) -> str:
-        return "test-model"
-
-    async def chat(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        model: str | None = None,
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
-        metadata: dict[str, Any] | None = None,
-    ) -> LLMResponse:
-        self.call_log.append({"model": model, "temperature": temperature})
-        if self._index >= len(self._responses):
-            return LLMResponse(content="(no more scripted responses)")
-        resp = self._responses[self._index]
-        self._index += 1
-        return resp
 
 
 class TestIntegrationRoutedFlow:

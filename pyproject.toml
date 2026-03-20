@@ -48,7 +48,7 @@ dependencies = [
 
 [project.optional-dependencies]
 oauth = [
-    "oauth-cli-kit>=0.1.3,<1.0.0",
+    "oauth-cli-kit>=0.1.3,<1.0.0; python_version >= '3.11'",
 ]
 
 reranker = [
@@ -61,6 +61,10 @@ graph = [
 
 pptx = [
     "python-pptx>=1.0.0,<2.0.0",
+]
+
+prometheus = [
+    "prometheus-client>=0.20",
 ]
 
 dev = [
@@ -112,8 +116,13 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W"]
-ignore = ["E501"]
+select = ["E", "F", "I", "N", "W", "B", "UP"]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "UP035",  # typing → collections.abc imports (large-scale, deferred)
+    "UP037",  # quoted annotations (deferred — needs audit per file)
+    "B905",   # zip() strict= (deferred — low risk)
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -130,39 +139,15 @@ warn_return_any = true
 warn_unused_configs = true
 check_untyped_defs = true
 ignore_missing_imports = true
-disallow_untyped_defs = false
+disallow_untyped_defs = true
 no_implicit_optional = true
 
+# FastAPI route handlers and web glue use complex return types (StreamingResponse,
+# JSONResponse, async generators) that are difficult to annotate without importing
+# starlette internals. Suppress here; tighten in a follow-up.
 [[tool.mypy.overrides]]
-module = "nanobot.errors"
-disallow_untyped_defs = true
-
-[[tool.mypy.overrides]]
-module = "nanobot.config.*"
-disallow_untyped_defs = true
-
-[[tool.mypy.overrides]]
-module = "nanobot.agent.tools.base"
-disallow_untyped_defs = true
-
-[[tool.mypy.overrides]]
-module = [
-    "nanobot.agent.capability",
-    "nanobot.agent.consolidation",
-    "nanobot.agent.delegation",
-    "nanobot.agent.failure",
-    "nanobot.agent.loop",
-    "nanobot.agent.mission",
-    "nanobot.agent.scratchpad",
-    "nanobot.agent.skills",
-    "nanobot.agent.streaming",
-    "nanobot.agent.tool_executor",
-    "nanobot.agent.tool_loop",
-    "nanobot.agent.tracing",
-    "nanobot.agent.verifier",
-    "nanobot.agent.tools.*",
-]
-disallow_untyped_defs = true
+module = "nanobot.web.*"
+disallow_untyped_defs = false
 
 [tool.coverage.run]
 source = ["nanobot"]

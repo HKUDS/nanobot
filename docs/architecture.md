@@ -1,7 +1,7 @@
 # Nanobot Architecture
 
 > Living document. Updated as the codebase evolves.
-> Last updated: 2026-03-16.
+> Last updated: 2026-03-18.
 
 ## Overview
 
@@ -56,6 +56,8 @@ Each module has a clear responsibility, a public API, and boundaries it must not
 | `tool_loop.py` | Shared lightweight think→act→observe loop | `run_tool_loop()` | `channels/`, `cli/` |
 | `observability.py` | Langfuse OTEL tracing: init, shutdown, spans, scoring | `init_langfuse()`, `shutdown()`, `trace_request()`, `tool_span()`, `span()`, `reset_trace_context()`, `tracing_health()`, `flush()` | `channels/`, `cli/` |
 | `tracing.py` | Correlation IDs via contextvars, structured log binding | `TraceContext`, `bind_trace()` | `channels/`, `cli/` |
+| `capability.py` | Unified capability registry (ADR-009): composes ToolRegistry, SkillsLoader, AgentRegistry with health tracking | `CapabilityRegistry` | `channels/`, `cli/` |
+| `failure.py` | Failure classification and tool-call loop detection | `FailureClass`, `ToolCallTracker`, `_build_failure_prompt()` | `channels/`, `cli/` |
 
 ### `agent/memory/` — Memory Subsystem
 
@@ -198,6 +200,7 @@ See [docs/adr/](adr/) for Architecture Decision Records:
 - [ADR-006: Configuration Strategy](adr/ADR-006-configuration-strategy.md)
 - [ADR-007: Channel Adapter Model](adr/ADR-007-channel-adapter-model.md)
 - [ADR-008: Prompt Management](adr/ADR-008-prompt-management.md)
+- [ADR-009: Capability Registry](adr/ADR-009-capability-registry.md)
 
 ## Dependency Rules
 
@@ -226,6 +229,12 @@ These imports **must never exist** (enforced by `scripts/check_imports.py` in CI
 | `bus/*` | `agent/*`, `channels/*`, `providers/*` |
 | `agent/tools/*` | `channels/*` |
 | `agent/memory/*` | `channels/*`, `agent/tools/*` |
+
+### Approved Exceptions
+
+| Exception | Location | Reason |
+|---|---|---|
+| `config/schema.py` imports `providers.registry` | `NanobotConfig._match_provider()` and `.get_api_base()` | These are **deferred** (inside method bodies, not at module top-level), so the import only happens at call time. `config` must look up provider metadata to resolve model-to-key mappings. Extracting this lookup into a separate `config/provider_bridge.py` helper was considered but rejected as over-engineering for a single query; the deferred import is the approved pattern. |
 
 ## Failure Modes & Recovery
 

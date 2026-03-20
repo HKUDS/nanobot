@@ -1,10 +1,12 @@
 """Session management for conversation history."""
 
+from __future__ import annotations
+
 import hashlib
 import json
 import shutil
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +33,7 @@ def _clamp_tool_id(raw: str, cache: dict[str, str]) -> str:
     return short
 
 
-@dataclass
+@dataclass(slots=True)
 class Session:
     """
     A conversation session.
@@ -45,16 +47,21 @@ class Session:
 
     key: str  # channel:chat_id
     messages: list[dict[str, Any]] = field(default_factory=list)
-    created_at: datetime = field(default_factory=datetime.now)
-    updated_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
 
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
-        msg = {"role": role, "content": content, "timestamp": datetime.now().isoformat(), **kwargs}
+        msg = {
+            "role": role,
+            "content": content,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **kwargs,
+        }
         self.messages.append(msg)
-        self.updated_at = datetime.now()
+        self.updated_at = datetime.now(timezone.utc)
 
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
         """Return unconsolidated messages for LLM input, aligned to a user turn."""
@@ -107,7 +114,7 @@ class Session:
         """Clear all messages and reset session to initial state."""
         self.messages = []
         self.last_consolidated = 0
-        self.updated_at = datetime.now()
+        self.updated_at = datetime.now(timezone.utc)
 
 
 class SessionManager:
@@ -196,7 +203,7 @@ class SessionManager:
             return Session(
                 key=key,
                 messages=messages,
-                created_at=created_at or datetime.now(),
+                created_at=created_at or datetime.now(timezone.utc),
                 metadata=metadata,
                 last_consolidated=last_consolidated,
             )

@@ -36,12 +36,12 @@ class ToolExecutor:
 
     @property
     def _tools(self) -> dict[str, Any]:
-        """Expose internal dict for role-based save/restore in AgentLoop."""
-        return self._registry._tools
+        """Expose tool dict for role-based save/restore in AgentLoop."""
+        return self._registry.get_all()
 
     @_tools.setter
     def _tools(self, value: dict[str, Any]) -> None:
-        self._registry._tools = value
+        self._registry.restore(value)
 
     def get(self, name: str) -> Tool | None:
         return self._registry.get(name)

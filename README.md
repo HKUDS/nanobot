@@ -4,7 +4,7 @@
   <p>
     <a href="https://pypi.org/project/nanobot-ai/"><img src="https://img.shields.io/pypi/v/nanobot-ai" alt="PyPI"></a>
     <a href="https://pepy.tech/project/nanobot-ai"><img src="https://static.pepy.tech/badge/nanobot-ai" alt="Downloads"></a>
-    <img src="https://img.shields.io/badge/python-≥3.11-blue" alt="Python">
+    <img src="https://img.shields.io/badge/python-≥3.10-blue" alt="Python">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
     <a href="./COMMUNICATION.md"><img src="https://img.shields.io/badge/WeChat-Group-C5EAB4?style=flat&logo=wechat&logoColor=white" alt="WeChat"></a>
     <a href="https://discord.gg/MnCvHqpUGB"><img src="https://img.shields.io/badge/Discord-Community-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
@@ -396,11 +396,11 @@ These features were added in the `feat/mem0-memory-integration` branch and are c
 | Feature | Config Key | Default | Description |
 |---------|-----------|---------|-------------|
 | Planning | `planning_enabled` | `true` | Decomposes complex tasks into sub-steps before acting |
-| Self-critique | `verification_mode` | `"auto"` | Verifies tool outputs for correctness (`auto`/`always`/`off`) |
-| Streaming | `streaming` | `false` | Stream LLM responses token-by-token |
+| Self-critique | `verification_mode` | `"on_uncertainty"` | Verifies tool outputs for correctness (`on_uncertainty`/`always`/`off`) |
+| Streaming | `streaming` | `true` | Stream LLM responses token-by-token |
 | Summary compression | `summary_model` | `""` | LLM model for context window compression (empty = use main model) |
-| Memory cap | `memory_md_token_cap` | `800` | Max tokens injected from MEMORY.md into system prompt |
-| Shell mode | `shell_mode` | `"strict"` | Shell command security (`strict` blocks destructive commands) |
+| Memory cap | `memory_md_token_cap` | `1500` | Max tokens injected from MEMORY.md into system prompt |
+| Shell mode | `shell_mode` | `"denylist"` | Shell command security (`denylist` blocks destructive commands, `allowlist` for strict allowlisting) |
 
 **Rollout flags** (environment variables):
 
@@ -867,30 +867,38 @@ python scripts/memory_eval_ci.py \
 
 ```
 nanobot/
-├── agent/          # 🧠 Core agent logic
-│   ├── loop.py     #    Agent loop (plan→act→observe→reflect)
-│   ├── context.py  #    Prompt builder + summarization compressor
-│   ├── skills.py   #    Skills loader + custom tool discovery
-│   ├── subagent.py #    Background task execution
-│   ├── memory/     #    Persistent memory (decomposed package)
-│   │   ├── store.py       # MemoryStore — main API
-│   │   ├── extractor.py   # LLM + heuristic event extraction
-│   │   ├── mem0_adapter.py # mem0 wrapper with fallback chain
-│   │   ├── reranker.py    # Cross-encoder re-ranker (optional)
-│   │   ├── retrieval.py   # Local keyword search fallback
-│   │   ├── persistence.py # File I/O helpers
-│   │   └── constants.py   # Tool schema definitions
-│   └── tools/      #    Built-in tools (incl. feedback, spawn)
-├── errors.py       # 🛡️ Structured error taxonomy
-├── skills/         # 🎯 Bundled skills (github, weather, tmux...)
-├── channels/       # 📱 Chat channel integrations
-├── bus/            # 🚌 Message routing (+ dead-letter queue)
-├── cron/           # ⏰ Scheduled tasks
-├── heartbeat/      # 💓 Proactive wake-up
-├── providers/      # 🤖 LLM providers (streaming support)
-├── session/        # 💬 Conversation sessions
-├── config/         # ⚙️ Configuration (Pydantic schemas)
-└── cli/            # 🖥️ Commands
+├── agent/               # 🧠 Core agent logic
+│   ├── loop.py          #    Agent loop (plan→act→observe→reflect)
+│   ├── context.py       #    Prompt builder + summarization compressor
+│   ├── skills.py        #    Skills loader + custom tool discovery
+│   ├── coordinator.py   #    Multi-agent intent routing + role classification
+│   ├── delegation.py    #    Sub-agent dispatch, cycle detection
+│   ├── capability.py    #    Unified capability registry (ADR-009)
+│   ├── failure.py       #    Failure classification + loop detection
+│   ├── mission.py       #    Background mission manager
+│   ├── tool_loop.py     #    Shared lightweight think→act→observe loop
+│   ├── scratchpad.py    #    Session-scoped JSONL artifact sharing
+│   ├── observability.py #    Langfuse OTEL tracing
+│   ├── tracing.py       #    Correlation IDs + structured log binding
+│   ├── memory/          #    Persistent memory (decomposed package)
+│   │   ├── store.py         # MemoryStore — main API
+│   │   ├── extractor.py     # LLM + heuristic event extraction
+│   │   ├── mem0_adapter.py  # mem0 wrapper with fallback chain
+│   │   ├── reranker.py      # Cross-encoder re-ranker (optional)
+│   │   ├── retrieval.py     # Local keyword search fallback
+│   │   ├── persistence.py   # File I/O helpers
+│   │   └── constants.py     # Tool schema definitions
+│   └── tools/           #    Built-in tools (shell, fs, web, mcp, ...)
+├── errors.py            # 🛡️ Structured error taxonomy
+├── skills/              # 🎯 Bundled skills (github, weather, tmux...)
+├── channels/            # 📱 Chat channel integrations
+├── bus/                 # 🚌 Message routing (+ dead-letter queue)
+├── cron/                # ⏰ Scheduled tasks
+├── heartbeat/           # 💓 Proactive wake-up
+├── providers/           # 🤖 LLM providers (streaming support)
+├── session/             # 💬 Conversation sessions
+├── config/              # ⚙️ Configuration (Pydantic schemas)
+└── cli/                 # 🖥️ Commands
 ```
 
 ## 🤝 Contribute & Roadmap

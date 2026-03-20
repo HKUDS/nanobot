@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
@@ -45,6 +46,14 @@ class FeedbackTool(Tool):
         self._session_key = session_key or f"{channel}:{chat_id}"
         if events_file is not None:
             self._events_file = events_file
+
+    def _write_event(self, event: dict[str, Any]) -> None:
+        """Blocking write — called via asyncio.to_thread."""
+        if self._events_file is None:
+            return
+        self._events_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self._events_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
     # ------------------------------------------------------------------
     # Tool schema
@@ -112,12 +121,10 @@ class FeedbackTool(Tool):
         if topic:
             event["topic"] = topic
 
-        # Persist to events.jsonl
+        # Persist to events.jsonl (offloaded to thread to avoid blocking the event loop)
         if self._events_file is not None:
             try:
-                self._events_file.parent.mkdir(parents=True, exist_ok=True)
-                with open(self._events_file, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(event, ensure_ascii=False) + "\n")
+                await asyncio.to_thread(self._write_event, event)
             except OSError as exc:
                 return ToolResult.fail(f"Failed to persist feedback: {exc}")
 

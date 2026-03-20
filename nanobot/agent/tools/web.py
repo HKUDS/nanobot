@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import html
+import ipaddress
 import json
 import os
 import re
+import socket
 import time
+from collections import OrderedDict
 from typing import Any
 from urllib.parse import urlparse
 
@@ -26,9 +29,41 @@ _RETRY_ATTEMPTS = 2  # Total attempts for transient failures
 _RETRY_BACKOFF = 1.0  # Seconds between retries
 _CACHE_TTL = 300  # 5 min in-memory URL cache
 _COMPACT_THRESHOLD = 500  # Output below this length omits verbose metadata
+_URL_CACHE_MAX = 200  # C-3: cap LRU cache to prevent unbounded memory growth
 
-# In-memory URL cache: url+ua → (timestamp, ToolResult)
-_url_cache: dict[str, tuple[float, ToolResult]] = {}
+# Cloud metadata service hostnames that must never be reachable (SEC-02)
+_BLOCKED_HOSTS: frozenset[str] = frozenset(
+    {
+        "169.254.169.254",  # AWS/GCP/Azure IMDS
+        "metadata.google.internal",  # GCP metadata
+        "metadata.azure.com",  # Azure IMDS
+        "100.100.100.200",  # Alibaba Cloud ECS metadata
+    }
+)
+
+# In-memory URL cache: url+ua → (timestamp, ToolResult) — LRU-capped at 200 entries (C-3)
+_url_cache: OrderedDict[str, tuple[float, ToolResult]] = OrderedDict()
+
+# Shared httpx client — created lazily on first use and reused across calls (LAN-60)
+_http_client: httpx.AsyncClient | None = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    """Return the module-level shared httpx.AsyncClient, creating it on first call.
+
+    Uses the more conservative browser timeout as the default; per-request
+    timeout overrides are passed via ``httpx.Request`` when needed.
+    follow_redirects and max_redirects are set here so every fetch benefits
+    from redirect following without per-call configuration.
+    """
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(
+            follow_redirects=True,
+            max_redirects=MAX_REDIRECTS,
+            timeout=_BROWSER_TIMEOUT,
+        )
+    return _http_client
 
 
 def _strip_tags(text: str) -> str:
@@ -45,17 +80,57 @@ def _normalize(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
+def _is_private_ip(ip_str: str) -> bool:
+    """Return True if the IP address is private, loopback, link-local, or multicast."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
+    except ValueError:
+        return False
+
+
 def _validate_url(url: str) -> tuple[bool, str]:
-    """Validate URL: must be http(s) with valid domain."""
+    """Validate URL: must be http(s) with valid non-private domain (SEC-02)."""
     try:
         p = urlparse(url)
         if p.scheme not in ("http", "https"):
             return False, f"Only http/https allowed, got '{p.scheme or 'none'}'"
         if not p.netloc:
             return False, "Missing domain"
+
+        host = p.hostname or ""
+
+        # Block known cloud metadata service hostnames
+        if host in _BLOCKED_HOSTS:
+            return False, f"Access to '{host}' is not permitted (cloud metadata service)"
+
+        # If the host is an IP literal, check it immediately without DNS
+        if _is_private_ip(host):
+            return False, "Access to private/internal addresses is not permitted"
+
         return True, ""
     except ValueError as e:
         return False, str(e)
+
+
+async def _check_ssrf_host(host: str) -> str | None:
+    """Resolve host and return an error string if it resolves to a private address (SEC-02).
+
+    Returns None if the host is safe, or an error message if it should be blocked.
+    DNS failures are ignored — the actual HTTP request will fail naturally.
+    """
+    if not host:
+        return None
+    try:
+        loop = asyncio.get_event_loop()
+        addr_info = await loop.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+        for _, _, _, _, sockaddr in addr_info:
+            ip_str = sockaddr[0]
+            if _is_private_ip(ip_str):
+                return f"Access to private/internal addresses is not permitted (resolved {host} → {ip_str})"
+    except OSError:
+        pass  # DNS failure — let the HTTP request fail naturally
+    return None
 
 
 class WebSearchTool(Tool):
@@ -180,7 +255,7 @@ class WebFetchTool(Tool):
         max_chars = kwargs.pop("maxChars", max_chars) or self.max_chars  # type: ignore[assignment]
         user_agent = kwargs.pop("userAgent", user_agent)  # type: ignore[assignment]
 
-        # Validate URL before fetching
+        # Validate URL before fetching (scheme, domain, blocked hosts, IP literals)
         is_valid, error_msg = _validate_url(url)
         if not is_valid:
             return ToolResult.fail(
@@ -189,12 +264,24 @@ class WebFetchTool(Tool):
                 )
             )
 
-        # Check in-memory cache
+        # SSRF: async DNS resolution check — block if host resolves to private IP (SEC-02)
+        parsed_host = urlparse(url).hostname or ""
+        ssrf_error = await _check_ssrf_host(parsed_host)
+        if ssrf_error:
+            return ToolResult.fail(
+                json.dumps(
+                    {"error": f"URL validation failed: {ssrf_error}", "url": url},
+                    ensure_ascii=False,
+                )
+            )
+
+        # Check in-memory cache (LRU-capped at _URL_CACHE_MAX entries, C-3)
         cache_key = f"{url}|{user_agent}"
         cached = _url_cache.get(cache_key)
         if cached:
             ts, result = cached
             if time.monotonic() - ts < _CACHE_TTL:
+                _url_cache.move_to_end(cache_key)  # LRU: mark as recently used
                 return result
             del _url_cache[cache_key]
 
@@ -204,13 +291,15 @@ class WebFetchTool(Tool):
         # Fetch with internal retry for transient failures
         last_err: Exception | None = None
         r: httpx.Response | None = None
+        client = _get_http_client()
         for attempt in range(_RETRY_ATTEMPTS):
             try:
-                async with httpx.AsyncClient(
-                    follow_redirects=True, max_redirects=MAX_REDIRECTS, timeout=timeout
-                ) as client:
-                    r = await client.get(url, headers={"User-Agent": ua_string})
-                    r.raise_for_status()
+                r = await client.get(
+                    url,
+                    headers={"User-Agent": ua_string},
+                    timeout=timeout,
+                )
+                r.raise_for_status()
                 break
             except (httpx.TimeoutException, httpx.NetworkError) as e:
                 last_err = e
@@ -240,8 +329,11 @@ class WebFetchTool(Tool):
         except Exception as e:  # crash-barrier: readability / markdownify errors
             return ToolResult.fail(json.dumps({"error": str(e), "url": url}, ensure_ascii=False))
 
-        # Store in cache
+        # Store in LRU cache — evict oldest entry if at capacity (C-3)
         _url_cache[cache_key] = (time.monotonic(), result)
+        _url_cache.move_to_end(cache_key)
+        if len(_url_cache) > _URL_CACHE_MAX:
+            _url_cache.popitem(last=False)  # remove oldest
 
         return result
 

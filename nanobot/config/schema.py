@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from nanobot.config.providers_registry import PROVIDERS, find_by_name
+
 
 class Base(BaseModel):
     """Base model that accepts both camelCase and snake_case keys."""
@@ -113,6 +115,7 @@ class WebChannelConfig(Base):
     enabled: bool = False
     host: str = "127.0.0.1"  # Bind address for the web UI server
     port: int = 8000  # Web UI port (separate from gateway health port)
+    api_key: str = ""  # SEC-06: Bearer token for /api/* routes; empty = no auth (dev only)
 
 
 class ChannelsConfig(Base):
@@ -195,7 +198,13 @@ class AgentDefaults(Base):
     # Knowledge graph
     graph_enabled: bool = False
     graph_neo4j_uri: str = "bolt://localhost:7687"
-    graph_neo4j_auth: str = "neo4j/nanobot_graph"
+    graph_neo4j_auth: str = Field(
+        default="",
+        description=(
+            "Neo4j credentials in 'user/password' format. "
+            "No default — must be configured explicitly before enabling the knowledge graph."
+        ),
+    )
     graph_neo4j_database: str = "neo4j"
 
     # Reranker
@@ -280,7 +289,13 @@ class AgentConfig(Base):
     # Knowledge graph
     graph_enabled: bool = False
     graph_neo4j_uri: str = "bolt://localhost:7687"
-    graph_neo4j_auth: str = "neo4j/nanobot_graph"
+    graph_neo4j_auth: str = Field(
+        default="",
+        description=(
+            "Neo4j credentials in 'user/password' format. "
+            "No default — must be configured explicitly before enabling the knowledge graph."
+        ),
+    )
     graph_neo4j_database: str = "neo4j"
 
     # Reranker / mem0
@@ -296,7 +311,7 @@ class AgentConfig(Base):
     vision_model: str = "gpt-4o-mini"
 
     # Tools
-    restrict_to_workspace: bool = False
+    restrict_to_workspace: bool = True
 
     # Missions
     mission_max_concurrent: int = 3
@@ -305,7 +320,18 @@ class AgentConfig(Base):
 
     @classmethod
     def from_defaults(cls, defaults: "AgentDefaults", **overrides: Any) -> "AgentConfig":
-        """Build an ``AgentConfig`` from the ``AgentDefaults`` section of the config file."""
+        """Build an ``AgentConfig`` from the ``AgentDefaults`` section of the config file.
+
+        .. warning:: Adding a new config field requires **three** coordinated steps:
+
+            1. Add the field to :class:`AgentDefaults` with its default value.
+            2. Add the corresponding mapping entry in the ``data`` dict below
+               (``"agent_config_key": defaults.agent_defaults_key``).
+            3. Add the field to :class:`AgentConfig` with a matching type.
+
+            Skipping any step causes silent misconfiguration — the field will
+            silently use the ``AgentConfig`` default instead of the user's value.
+        """
         data = {
             "workspace": defaults.workspace,
             "model": defaults.model,
@@ -460,6 +486,7 @@ class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
     timeout: int = 60
+    shell_mode: str = "denylist"  # "denylist" | "allowlist" — propagated to delegated agents
 
 
 class MCPServerConfig(Base):
@@ -478,7 +505,7 @@ class ToolsConfig(Base):
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
-    restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
+    restrict_to_workspace: bool = True  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
@@ -550,8 +577,6 @@ class Config(BaseSettings):
         self, model: str | None = None
     ) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
-        from nanobot.providers.registry import PROVIDERS
-
         model_lower = (model or self.agents.defaults.model).lower()
         model_normalized = model_lower.replace("-", "_")
         model_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else ""
@@ -602,8 +627,6 @@ class Config(BaseSettings):
 
     def get_api_base(self, model: str | None = None) -> str | None:
         """Get API base URL for the given model. Applies default URLs for known gateways."""
-        from nanobot.providers.registry import find_by_name
-
         p, name = self._match_provider(model)
         if p and p.api_base:
             return p.api_base

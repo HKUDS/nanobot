@@ -34,9 +34,10 @@ import asyncio
 import json
 import time
 import uuid
+import weakref
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal, Protocol
 
 from loguru import logger
@@ -362,33 +363,9 @@ class AgentLoop:
             role_system_prompt=role_config.system_prompt if role_config else "",
         )
         self.sessions = session_manager or SessionManager(self.workspace)
-        _tool_registry = ToolRegistry()
-        self._capabilities = CapabilityRegistry(
-            tool_registry=_tool_registry,
-            skills_loader=self.context.skills,
-        )
-        self.tools = ToolExecutor(_tool_registry)
-        self.result_cache = ToolResultCache(workspace=self.workspace)
-        self._capabilities.tool_registry.set_cache(
-            self.result_cache,
-            provider=provider,
-            summary_model=config.tool_summary_model or None,
-        )
-        self.context.set_unavailable_tools_fn(self._capabilities.get_unavailable_summary)
-        self.missions = MissionManager(
-            provider=provider,
-            workspace=self.workspace,
-            bus=bus,
-            model=self.model,
-            temperature=self.temperature,
-            max_tokens=self.config.max_tokens,
-            max_iterations=config.mission_max_iterations,
-            max_concurrent=config.mission_max_concurrent,
-            result_max_chars=config.mission_result_max_chars,
-            brave_api_key=brave_api_key,
-            exec_config=self.exec_config,
-            restrict_to_workspace=self.config.restrict_to_workspace,
-        )
+        self._build_tools()
+        self._wire_memory()
+        self._register_handlers()
 
         self._running = False
         self._stop_event: asyncio.Event | None = None  # created lazily in run()
@@ -396,26 +373,6 @@ class AgentLoop:
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
-        self._consolidating: set[str] = set()  # Session keys with consolidation in progress
-        self._consolidation_tasks: set[asyncio.Task[None]] = set()  # Strong refs to in-flight tasks
-        self._consolidation_sem = asyncio.Semaphore(3)  # Cap concurrent consolidation LLM calls
-        self._register_default_tools()
-        # Cache typed tool references for O(1) context updates in _set_tool_context.
-        # Populated once at construction — no per-message isinstance checks needed.
-        _msg_t = self.tools.get("message")
-        self._ctx_message_tool: MessageTool | None = (
-            _msg_t if isinstance(_msg_t, MessageTool) else None
-        )
-        _fb_t = self.tools.get("feedback")
-        self._ctx_feedback_tool: FeedbackTool | None = (
-            _fb_t if isinstance(_fb_t, FeedbackTool) else None
-        )
-        _ms_t = self.tools.get("mission_start")
-        self._ctx_mission_tool: MissionStartTool | None = (
-            _ms_t if isinstance(_ms_t, MissionStartTool) else None
-        )
-        _cr_t = self.tools.get("cron")
-        self._ctx_cron_tool: CronTool | None = _cr_t if isinstance(_cr_t, CronTool) else None
 
         # Multi-agent coordinator (initialized lazily in run() if routing enabled)
         self._routing_config = routing_config
@@ -456,7 +413,6 @@ class AgentLoop:
             memory_uncertainty_threshold=self.config.memory_uncertainty_threshold,
             memory_store=self.context.memory,
         )
-        self._consolidator = ConsolidationOrchestrator(self.context.memory)
 
         # Per-turn token accumulators (reset in _run_agent_loop)
         self._turn_tokens_prompt = 0
@@ -466,7 +422,7 @@ class AgentLoop:
     # --- Delegation state proxied to _dispatcher ---
 
     @property
-    def _consolidation_locks(self) -> dict[str, asyncio.Lock]:
+    def _consolidation_locks(self) -> weakref.WeakValueDictionary[str, asyncio.Lock]:
         return self._consolidator._locks
 
     @property
@@ -496,6 +452,77 @@ class AgentLoop:
     @_active_messages.setter
     def _active_messages(self, value: list[dict[str, Any]] | None) -> None:
         self._dispatcher.active_messages = value
+
+    def _build_tools(self) -> None:
+        """Construct and wire the tool/capability layer.
+
+        Called once from ``__init__`` after ``ContextBuilder`` and ``SessionManager``
+        are ready.  Extracted from the constructor to keep ``__init__`` focused on
+        pure attribute assignment (LAN-103).
+        """
+        _tool_registry = ToolRegistry()
+        self._capabilities = CapabilityRegistry(
+            tool_registry=_tool_registry,
+            skills_loader=self.context.skills,
+        )
+        self.tools = ToolExecutor(_tool_registry)
+        self.result_cache = ToolResultCache(workspace=self.workspace)
+        self._capabilities.tool_registry.set_cache(
+            self.result_cache,
+            provider=self.provider,
+            summary_model=self.config.tool_summary_model or None,
+        )
+        self.context.set_unavailable_tools_fn(self._capabilities.get_unavailable_summary)
+        self.missions = MissionManager(
+            provider=self.provider,
+            workspace=self.workspace,
+            bus=self.bus,
+            model=self.model,
+            temperature=self.temperature,
+            max_tokens=self.config.max_tokens,
+            max_iterations=self.config.mission_max_iterations,
+            max_concurrent=self.config.mission_max_concurrent,
+            result_max_chars=self.config.mission_result_max_chars,
+            brave_api_key=self.brave_api_key,
+            exec_config=self.exec_config,
+            restrict_to_workspace=self.config.restrict_to_workspace,
+        )
+        self._register_default_tools()
+        # Cache typed tool references for O(1) context updates in _set_tool_context.
+        # Populated once at construction — no per-message isinstance checks needed.
+        _msg_t = self.tools.get("message")
+        self._ctx_message_tool: MessageTool | None = (
+            _msg_t if isinstance(_msg_t, MessageTool) else None
+        )
+        _fb_t = self.tools.get("feedback")
+        self._ctx_feedback_tool: FeedbackTool | None = (
+            _fb_t if isinstance(_fb_t, FeedbackTool) else None
+        )
+        _ms_t = self.tools.get("mission_start")
+        self._ctx_mission_tool: MissionStartTool | None = (
+            _ms_t if isinstance(_ms_t, MissionStartTool) else None
+        )
+        _cr_t = self.tools.get("cron")
+        self._ctx_cron_tool: CronTool | None = _cr_t if isinstance(_cr_t, CronTool) else None
+
+    def _wire_memory(self) -> None:
+        """Set up the memory consolidation subsystem.
+
+        Called once from __init__ after _build_tools(). Initialises consolidation
+        state and the ConsolidationOrchestrator that wraps self.context.memory.
+        """
+        self._consolidating: set[str] = set()  # Session keys with consolidation in progress
+        self._consolidation_tasks: set[asyncio.Task[None]] = set()  # Strong refs to in-flight tasks
+        self._consolidation_sem = asyncio.Semaphore(3)  # Cap concurrent consolidation LLM calls
+        self._consolidator = ConsolidationOrchestrator(self.context.memory)
+
+    def _register_handlers(self) -> None:
+        """Register bus message handlers.
+
+        This agent uses a pull-based bus model (consume_inbound() in run()), so
+        no pub/sub subscriptions are set up at construction time. This method
+        exists as a named seam for future extension or subclass overrides.
+        """
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools, filtered by role config."""
@@ -699,6 +726,7 @@ class AgentLoop:
         session_dir.mkdir(parents=True, exist_ok=True)
         self._scratchpad = Scratchpad(session_dir)
         self._dispatcher.scratchpad = self._scratchpad
+        self._dispatcher._trace_path = session_dir / "routing_trace.jsonl"
         self.missions.scratchpad = self._scratchpad
 
         # Update scratchpad tool references
@@ -1423,6 +1451,7 @@ class AgentLoop:
         self._stop_event = asyncio.Event()
         await self._connect_mcp()
         self._ensure_coordinator()
+        await self.context.memory.ensure_health()  # LAN-101: non-blocking vector health check
 
         logger.info("Agent loop started")
 
@@ -1430,8 +1459,8 @@ class AgentLoop:
             try:
                 # Race consume_inbound against the stop event so that stop()
                 # wakes the loop immediately instead of waiting up to 5 s.
-                _consume = asyncio.ensure_future(self.bus.consume_inbound())
-                _stop_wait = asyncio.ensure_future(self._stop_event.wait())  # type: ignore[union-attr]
+                _consume = asyncio.create_task(self.bus.consume_inbound())
+                _stop_wait = asyncio.create_task(self._stop_event.wait())  # type: ignore[union-attr]
                 done, pending = await asyncio.wait(
                     {_consume, _stop_wait},
                     timeout=5.0,
@@ -1597,6 +1626,7 @@ class AgentLoop:
             registry=registry,
             classifier_model=self._routing_config.classifier_model,
             default_role=self._routing_config.default_role,
+            confidence_threshold=self._routing_config.confidence_threshold,
         )
         self._dispatcher.coordinator = self._coordinator
         self.missions.coordinator = self._coordinator
@@ -1970,7 +2000,7 @@ class AgentLoop:
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=self.config.memory_window)
             skill_names = self.context.skills.detect_relevant_skills(msg.content)
-            messages = self.context.build_messages(
+            messages = await self.context.build_messages(
                 history=history,
                 current_message=msg.content,
                 skill_names=skill_names,
@@ -2099,7 +2129,11 @@ class AgentLoop:
             self._consolidation_tasks.add(_task)
             _task.add_done_callback(self._consolidation_tasks.discard)
             _task.add_done_callback(
-                lambda t: logger.exception("Consolidation task failed") if t.exception() else None
+                lambda t: (
+                    logger.exception("Consolidation task failed")
+                    if not t.cancelled() and t.exception()
+                    else None
+                )
             )
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
@@ -2111,7 +2145,7 @@ class AgentLoop:
         history = session.get_history(max_messages=self.config.memory_window)
         verify_before_answer = self._should_force_verification(msg.content)
         skill_names = self.context.skills.detect_relevant_skills(msg.content)
-        initial_messages = self.context.build_messages(
+        initial_messages = await self.context.build_messages(
             history=history,
             current_message=msg.content,
             skill_names=skill_names,
@@ -2263,9 +2297,9 @@ class AgentLoop:
                 content = entry["content"]
                 if len(content) > max_chars:
                     entry["content"] = content[:max_chars] + "\n... (truncated)"
-            entry.setdefault("timestamp", datetime.now().isoformat())
+            entry.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
             session.messages.append(entry)
-        session.updated_at = datetime.now()
+        session.updated_at = datetime.now(timezone.utc)
 
     async def _consolidate_memory(self, session: Session, archive_all: bool = False) -> bool:
         """Delegate to ConsolidationOrchestrator."""

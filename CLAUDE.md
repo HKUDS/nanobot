@@ -51,6 +51,8 @@ nanobot/
 │   ├── scratchpad.py    # Session-scoped JSONL artifact sharing (multi-agent)
 │   ├── skills.py        # Skill discovery and loading
 │   ├── mission.py       # Background mission manager (async delegated tasks)
+│   ├── capability.py    # Unified capability registry (ADR-009): ToolRegistry + SkillsLoader + AgentRegistry
+│   ├── failure.py       # Failure classification + tool-call loop detection (FailureClass, ToolCallTracker)
 │   ├── tool_loop.py     # Shared lightweight think→act→observe loop
 │   ├── observability.py # Langfuse OTEL tracing: init, shutdown, spans, scoring
 │   ├── tracing.py       # Correlation IDs via contextvars, structured log binding
@@ -208,3 +210,7 @@ make pre-commit-install  # Install pre-commit hooks
 - Preserve `__all__` exports without an ADR
 - No speculative abstraction
 - Run `make lint && make typecheck` after every edit
+
+## Known Gotchas
+
+- **`MemorySubsystemError` (formerly `MemoryError`)**: `nanobot/errors.py` previously defined `MemoryError` which shadowed Python's built-in `MemoryError`. It was renamed to `MemorySubsystemError` (LAN-57). A backward-compat alias remains in `errors.py`. Never reintroduce a class named `MemoryError` in this codebase.

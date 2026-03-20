@@ -46,6 +46,13 @@ if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session
 
+# Intents that benefit from scanning recent unresolved events.
+# For all other intents (fact_lookup, chitchat, …) the scan is skipped.
+_UNRESOLVED_INTENTS: frozenset[str] = frozenset(
+    {"planning", "debug", "conflict", "reflection", "task"}
+)
+_COUNT_CACHE_TTL: float = 60.0  # seconds — SQLite counts change infrequently (LAN-102)
+
 
 class MemoryStore:
     """mem0-first memory store with structured profile/events maintenance."""
@@ -103,7 +110,12 @@ class MemoryStore:
             force_infer_true=bool(self.rollout.get("mem0_force_infer_true", False)),
         )
 
-        self._ensure_vector_health()
+        # _ensure_vector_health() moved to async ensure_health() — called from
+        # AgentLoop.run() to avoid blocking the event loop at instantiation (LAN-101).
+
+        # TTL caches for SQLite count queries — avoids re-opening connections on every call (LAN-102)
+        self._vector_count_cache: tuple[float, int] | None = None
+        self._history_count_cache: tuple[float, int] | None = None
 
         # Cross-encoder re-ranker (Step 7)
         reranker_alpha = float(self.rollout.get("reranker_alpha", 0.5))
@@ -129,6 +141,11 @@ class MemoryStore:
         self.conflict_auto_resolve_gap: float = float(
             self.rollout.get("conflict_auto_resolve_gap", 0.25)
         )
+
+        # P-01/P-02: mtime-based cache for events.jsonl — avoids re-reading the
+        # file on every BM25 retrieval call within the same turn.
+        self._events_cache: list[dict[str, Any]] | None = None
+        self._events_cache_mtime: float = -1.0
 
     @staticmethod
     def _utc_now_iso() -> str:
@@ -894,13 +911,13 @@ class MemoryStore:
         for key, value in metadata.items():
             if value is None:
                 continue
-            if isinstance(value, (str, int, float, bool)):
+            if isinstance(value, str | int | float | bool):
                 clean[key] = value
                 continue
             if isinstance(value, list):
                 items: list[str | int | float | bool] = []
                 for item in value:
-                    if isinstance(item, (str, int, float, bool)):
+                    if isinstance(item, str | int | float | bool):
                         items.append(item)
                     elif item is not None:
                         items.append(str(item))
@@ -940,10 +957,17 @@ class MemoryStore:
         return self.mem0._rows(raw)
 
     def _vector_points_count(self) -> int:
+        now = time.monotonic()
+        if self._vector_count_cache is not None:
+            ts, cached = self._vector_count_cache
+            if now - ts < _COUNT_CACHE_TTL:
+                return cached
         local_mem0_dir = self.mem0._local_mem0_dir or (self.workspace / "memory" / "mem0")
         base = local_mem0_dir / "qdrant" / "collection"
         if not base.exists() or not base.is_dir():
-            return 0
+            result = 0
+            self._vector_count_cache = (now, result)
+            return result
         total = 0
         for child in base.iterdir():
             if not child.is_dir():
@@ -959,12 +983,20 @@ class MemoryStore:
                 conn.close()
             except (sqlite3.Error, OSError):
                 continue
-        return max(total, 0)
+        result = max(total, 0)
+        self._vector_count_cache = (now, result)
+        return result
 
     def _history_row_count(self) -> int:
+        now = time.monotonic()
+        if self._history_count_cache is not None:
+            ts, cached = self._history_count_cache
+            if now - ts < _COUNT_CACHE_TTL:
+                return cached
         local_mem0_dir = self.mem0._local_mem0_dir or (self.workspace / "memory" / "mem0")
         history_db = local_mem0_dir / "history.db"
         if not history_db.exists():
+            self._history_count_cache = (now, 0)
             return 0
         try:
             conn = sqlite3.connect(history_db)
@@ -979,7 +1011,9 @@ class MemoryStore:
             )
             count = int(cur.fetchone()[0])
             conn.close()
-            return max(count, 0)
+            result = max(count, 0)
+            self._history_count_cache = (now, result)
+            return result
         except (sqlite3.Error, OSError):
             return 0
 
@@ -1223,6 +1257,17 @@ class MemoryStore:
             "seeded_events": len(seeded_events),
             "reindex": result,
         }
+
+    async def ensure_health(self) -> None:
+        """Run vector health check asynchronously (non-blocking).
+
+        Must be awaited from an async context after instantiation.
+        Called by ``AgentLoop.run()`` at startup instead of running
+        synchronously in ``__init__`` (LAN-101).
+        """
+        import asyncio
+
+        await asyncio.to_thread(self._ensure_vector_health)
 
     def _ensure_vector_health(self) -> None:
         if not bool(self.rollout.get("memory_vector_health_enabled", True)):
@@ -1592,7 +1637,17 @@ class MemoryStore:
         }
 
     def read_events(self, limit: int | None = None) -> list[dict[str, Any]]:
-        out = self.persistence.read_jsonl(self.events_file)
+        # P-01/P-02: serve from cache when events_file has not been modified.
+        try:
+            current_mtime = self.events_file.stat().st_mtime if self.events_file.exists() else -1.0
+        except OSError:
+            current_mtime = -1.0
+
+        if self._events_cache is None or current_mtime != self._events_cache_mtime:
+            self._events_cache = self.persistence.read_jsonl(self.events_file)
+            self._events_cache_mtime = current_mtime
+
+        out = self._events_cache
         if limit is not None and limit > 0:
             return out[-limit:]
         return out
@@ -2761,17 +2816,21 @@ class MemoryStore:
                     type_separation_enabled=type_separation_enabled,
                     reflection_enabled=reflection_enabled,
                 )
-                primary_ids = [
+                primary_ids = {
                     str(item.get("id", "")) for item in final if str(item.get("id", "")).strip()
-                ]
-                shadow_ids = [
+                }
+                shadow_ids = {
                     str(item.get("id", ""))
                     for item in shadow_final
                     if str(item.get("id", "")).strip()
-                ]
+                }
                 if primary_ids or shadow_ids:
-                    _overlap = len(set(primary_ids) & set(shadow_ids)) / max(
-                        len(set(primary_ids) | set(shadow_ids)), 1
+                    overlap = len(primary_ids & shadow_ids) / max(len(primary_ids | shadow_ids), 1)
+                    bind_trace().debug(
+                        "Shadow retrieve overlap={:.2f} primary={} shadow={}",
+                        overlap,
+                        len(primary_ids),
+                        len(shadow_ids),
                     )
         bind_trace().debug(
             "Memory retrieve source=mem0 results={} intent={} duration_ms={:.0f}",
@@ -3652,10 +3711,6 @@ class MemoryStore:
         # ── Phase 1: build raw (untruncated) content for every section ──
 
         long_term_text = long_term.strip() if long_term else ""
-        if long_term_text and memory_md_token_cap > 0:
-            long_term_text = self._cap_long_term_text(
-                long_term_text, memory_md_token_cap, query or ""
-            )
 
         profile_lines = self._profile_section_lines(profile)
         profile_text = "\n".join(profile_lines).strip() if profile_lines else ""
@@ -3682,7 +3737,11 @@ class MemoryStore:
                 max_tokens=budget,
             )
 
-        unresolved = self._recent_unresolved(self.read_events(limit=60), max_items=6)
+        unresolved: list[dict[str, Any]] = (
+            self._recent_unresolved(self.read_events(limit=60), max_items=6)
+            if intent in _UNRESOLVED_INTENTS
+            else []
+        )
         raw_unresolved: list[str] = []
         if include_episodic and unresolved:
             for item in unresolved:
@@ -3693,8 +3752,15 @@ class MemoryStore:
 
         # ── Phase 2: measure raw sizes and allocate budget ──
 
+        raw_long_term_tokens = self._estimate_tokens(long_term_text)
+        capped_long_term_tokens = (
+            min(raw_long_term_tokens, memory_md_token_cap)
+            if memory_md_token_cap > 0
+            else raw_long_term_tokens
+        )
+
         section_sizes: dict[str, int] = {
-            "long_term": self._estimate_tokens(long_term_text),
+            "long_term": capped_long_term_tokens,
             "profile": self._estimate_tokens(profile_text),
             "semantic": self._estimate_tokens("\n".join(raw_semantic)),
             "episodic": self._estimate_tokens("\n".join(raw_episodic)) if include_episodic else 0,
