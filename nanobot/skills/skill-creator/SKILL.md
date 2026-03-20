@@ -61,7 +61,7 @@ Check available MCPs - if useful for research (searching docs, finding similar s
 
 When creating a new skill from scratch, run the `init_skill.py` script to generate a template skill directory. Skip this step if the skill already exists and you're iterating on it.
 
-For `nanobot`, custom skills must live under the workspace `skills/` directory so they can be discovered automatically at runtime. The default workspace path is `~/.hiperone/workspace`, so skills go in `~/.hiperone/workspace/skills/<skill-name>/SKILL.md`. If the user has a custom workspace configured, use that instead.
+Custom skills must live under the workspace `skills/` directory so they can be discovered automatically at runtime. The default workspace path is `~/.hiperone/workspace`, so skills go in `~/.hiperone/workspace/skills/<skill-name>/SKILL.md`. If the user has a custom workspace configured, use that instead.
 
 ```bash
 scripts/init_skill.py <skill-name> --path ~/.hiperone/workspace/skills [--resources scripts,references,assets] [--examples]
@@ -348,9 +348,9 @@ This is optional, requires subagents, and most users won't need it. The human re
 
 ---
 
-## Nanobot-specific instructions
+## Additional Instructions
 
-In nanobot, the core workflow is the same (draft → test → review → improve → repeat), but some mechanics differ from Claude Code:
+The core workflow is the same (draft → test → review → improve → repeat), but some mechanics differ:
 
 **Running test cases**: For each test case, read the skill's SKILL.md, then follow its instructions to accomplish the test prompt. Do them one at a time. This is less rigorous than independent subagents but it's a useful sanity check — and the human review step compensates. Skip the baseline runs — just use the skill to complete the task as requested.
 
