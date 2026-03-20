@@ -15,6 +15,7 @@ Extracted per ADR-002 to keep AgentLoop focused on orchestration.
 from __future__ import annotations
 
 import contextvars
+import json
 import re
 import time
 from datetime import datetime, timezone
@@ -41,8 +42,10 @@ from nanobot.agent.tools.filesystem import (
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+from nanobot.agent.tracing import sanitize_for_trace
 from nanobot.config.schema import AgentRoleConfig
 from nanobot.errors import NanobotError
+from nanobot.metrics import delegation_latency_seconds, delegation_total
 
 if TYPE_CHECKING:
     from nanobot.agent.coordinator import Coordinator
@@ -205,6 +208,8 @@ class DelegationDispatcher:
         self.tools: ToolExecutor | None = tools
         self.mcp_tools: list[Tool] = mcp_tools if mcp_tools is not None else []
         self.on_progress: Callable[..., Awaitable[None]] | None = on_progress
+        # JSONL persistence for routing trace (LAN-130). Set by loop._ensure_scratchpad.
+        self._trace_path: Path | None = None
 
     # ------------------------------------------------------------------
     # Wiring
@@ -257,13 +262,20 @@ class DelegationDispatcher:
             "from_role": from_role,
             "depth": depth,
             "success": success,
-            "message": message_excerpt[:80],
+            "message": sanitize_for_trace(message_excerpt[:80]),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         if tools_used is not None:
             entry["tools_used"] = tools_used
             entry["tools_used_count"] = len(tools_used)
         self.routing_trace.append(entry)
+        if self._trace_path is not None:
+            try:
+                self._trace_path.parent.mkdir(parents=True, exist_ok=True)
+                with self._trace_path.open("a", encoding="utf-8") as _fh:
+                    _fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            except OSError:
+                logger.warning("Failed to persist route trace to {}", self._trace_path)
 
     def get_routing_trace(self) -> list[dict[str, Any]]:
         """Return a copy of the routing trace."""
@@ -649,7 +661,7 @@ class DelegationDispatcher:
         try:
             async with langfuse_span(
                 name="delegate",
-                input=task[:200],
+                input=sanitize_for_trace(task[:200]),
                 metadata={
                     "target_role": role.name,
                     "from_role": from_role,
@@ -658,6 +670,8 @@ class DelegationDispatcher:
             ):
                 result, used_tools = await self.execute_delegated_agent(role, task, context)
             latency_ms = (time.monotonic() - t0) * 1000
+            delegation_total.labels(from_role=from_role, to_role=role.name, success="true").inc()
+            delegation_latency_seconds.labels(to_role=role.name).observe(latency_ms / 1000)
             self.record_route_trace(
                 "delegate_complete",
                 role=role.name,
@@ -682,6 +696,8 @@ class DelegationDispatcher:
             return DelegationResult(content=result, tools_used=used_tools)
         except Exception:  # crash-barrier: delegation must record trace on any error
             latency_ms = (time.monotonic() - t0) * 1000
+            delegation_total.labels(from_role=from_role, to_role=role.name, success="false").inc()
+            delegation_latency_seconds.labels(to_role=role.name).observe(latency_ms / 1000)
             self.record_route_trace(
                 "delegate_complete",
                 role=role.name,

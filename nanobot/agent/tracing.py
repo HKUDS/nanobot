@@ -24,6 +24,7 @@ See ADR-005 for the observability strategy.
 from __future__ import annotations
 
 import contextvars
+import re
 import uuid
 from typing import Any
 
@@ -87,6 +88,50 @@ class TraceContext:
         _session_id.set(session_id)
         _agent_id.set(agent_id)
         return rid
+
+
+# ---------------------------------------------------------------------------
+# PII / credential sanitizer (LAN-131)
+# ---------------------------------------------------------------------------
+
+# Patterns ordered from most-specific to least-specific.
+_PII_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    # JWT (three base64url segments separated by dots — header.payload.sig)
+    (re.compile(r"\beyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\b"), "[JWT]"),
+    # Bearer / token in Authorization-style headers
+    (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9\-_.~+/]+=*"), "Bearer [REDACTED]"),
+    # Key=value credential pairs (password, token, secret, api_key, …)
+    (
+        re.compile(
+            r"(?i)(?:password|passwd|pwd|secret|token|api[_\-]?key|apikey|auth"
+            r"|access[_\-]?key|private[_\-]?key)\s*[=:]\s*\S+"
+        ),
+        r"[CREDENTIAL REDACTED]",
+    ),
+    # Email addresses
+    (
+        re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"),
+        "[EMAIL]",
+    ),
+    # Standalone "sk-…" style API key tokens (OpenAI, Anthropic, etc.)
+    (re.compile(r"\bsk-[A-Za-z0-9\-_]{10,}\b"), "[API_KEY]"),
+]
+
+
+def sanitize_for_trace(text: str) -> str:
+    """Redact common PII and credential patterns from a string.
+
+    Intended for message excerpts sent to external tracing systems (Langfuse)
+    so that user credentials and personal information are not inadvertently
+    transmitted (LAN-131).
+
+    The function is deliberately conservative — it redacts only well-known
+    credential shapes rather than attempting heuristic PII detection, to avoid
+    false-positive redactions that would make traces unintelligible.
+    """
+    for pattern, replacement in _PII_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 def bind_trace() -> Any:

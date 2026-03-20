@@ -16,7 +16,9 @@ from loguru import logger
 from nanobot.agent.observability import span as langfuse_span
 from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.registry import AgentRegistry
+from nanobot.agent.tracing import sanitize_for_trace
 from nanobot.config.schema import AgentRoleConfig
+from nanobot.metrics import classification_fallback_total, classification_total
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -180,7 +182,7 @@ class Coordinator:
         t0 = time.monotonic()
         async with langfuse_span(
             name="classify",
-            input=message[:200],
+            input=sanitize_for_trace(message[:200]),
             metadata={"model": model},
         ) as classify_obs:
             try:
@@ -212,6 +214,7 @@ class Coordinator:
                             parsed_role,
                             self._default_role,
                         )
+                        classification_fallback_total.labels(reason="low_confidence").inc()
                         role_name = self._default_role
                     else:
                         role_name = parsed_role
@@ -251,9 +254,11 @@ class Coordinator:
                         classify_obs.update(output=raw[:200])
                     except Exception:  # crash-barrier: tracing is optional
                         pass
+                classification_total.labels(result_role=role_name).inc()
                 return role_name, confidence
             except Exception:  # crash-barrier: LLM-based classification
                 logger.warning("Coordinator classification failed, using default role")
+                classification_fallback_total.labels(reason="llm_error").inc()
                 return self._default_role, 0.0
 
     def _parse_response(self, raw: str) -> tuple[str, float, bool, list[str], bool]:

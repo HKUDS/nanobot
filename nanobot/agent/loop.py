@@ -726,6 +726,7 @@ class AgentLoop:
         session_dir.mkdir(parents=True, exist_ok=True)
         self._scratchpad = Scratchpad(session_dir)
         self._dispatcher.scratchpad = self._scratchpad
+        self._dispatcher._trace_path = session_dir / "routing_trace.jsonl"
         self.missions.scratchpad = self._scratchpad
 
         # Update scratchpad tool references

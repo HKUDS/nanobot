@@ -21,6 +21,27 @@ try:
     tool_latency_seconds = Histogram(
         "nanobot_tool_latency_seconds", "Tool call duration in seconds", ["tool_name"]
     )
+    # Multi-agent delegation and routing metrics (LAN-129)
+    delegation_total = Counter(
+        "nanobot_delegation_total",
+        "Total delegations dispatched",
+        ["from_role", "to_role", "success"],
+    )
+    delegation_latency_seconds = Histogram(
+        "nanobot_delegation_latency_seconds",
+        "Delegation execution duration in seconds",
+        ["to_role"],
+    )
+    classification_total = Counter(
+        "nanobot_classification_total",
+        "Total routing classifications performed",
+        ["result_role"],
+    )
+    classification_fallback_total = Counter(
+        "nanobot_classification_fallback_total",
+        "Classifications that fell back to default_role (LLM error or low confidence)",
+        ["reason"],  # "llm_error" | "low_confidence"
+    )
     _METRICS_AVAILABLE = True
 except ImportError:
     _METRICS_AVAILABLE = False
@@ -40,6 +61,10 @@ except ImportError:
     llm_latency_seconds = _NoOp()  # type: ignore[assignment]
     tool_calls_total = _NoOp()  # type: ignore[assignment]
     tool_latency_seconds = _NoOp()  # type: ignore[assignment]
+    delegation_total = _NoOp()  # type: ignore[assignment]
+    delegation_latency_seconds = _NoOp()  # type: ignore[assignment]
+    classification_total = _NoOp()  # type: ignore[assignment]
+    classification_fallback_total = _NoOp()  # type: ignore[assignment]
 
 __all__ = [
     "_METRICS_AVAILABLE",
@@ -47,4 +72,8 @@ __all__ = [
     "llm_latency_seconds",
     "tool_calls_total",
     "tool_latency_seconds",
+    "delegation_total",
+    "delegation_latency_seconds",
+    "classification_total",
+    "classification_fallback_total",
 ]
