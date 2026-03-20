@@ -36,6 +36,7 @@ from nanobot import __logo__, __version__
 from nanobot.config.paths import get_workspace_path
 from nanobot.config.schema import Config
 from nanobot.utils.helpers import sync_workspace_templates
+from nanobot.cli.pidlock import acquire_gateway_lock, release_gateway_lock
 
 app = typer.Typer(
     name="nanobot",
@@ -477,6 +478,7 @@ def gateway(
 
     config = _load_runtime_config(config, workspace)
     _print_deprecated_memory_window_notice(config)
+    lock_file = acquire_gateway_lock()
     port = port if port is not None else config.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
@@ -633,6 +635,7 @@ def gateway(
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
+            release_gateway_lock(lock_file)
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
