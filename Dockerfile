@@ -23,6 +23,19 @@ RUN mkdir -p nanobot && touch nanobot/__init__.py && \
 COPY nanobot/ nanobot/
 RUN pip install --no-cache-dir --no-deps --prefix=/install .
 
+# Strip build-only packages from the install tree.  pip/setuptools/wheel/hatchling
+# are needed to build wheels but must not reach the runtime image (CVE surface).
+RUN pip install --prefix=/install pip && \
+    PYTHONPATH=/install/lib/python3.11/site-packages /install/bin/pip \
+        uninstall -y --root=/install pip setuptools wheel hatchling \
+        hatchling pathspec pluggy trove-classifiers editables 2>/dev/null; \
+    rm -rf /install/bin/pip* /install/bin/wheel 2>/dev/null; true
+# Fallback: brute-force remove any remaining dist-info for build tools.
+RUN cd /install/lib/python3.11/site-packages && \
+    rm -rf pip* setuptools* wheel* hatchling* _distutils_hack* \
+           pkg_resources* distutils* pathspec* pluggy* \
+           trove_classifiers* editables* 2>/dev/null; true
+
 
 # ============== STAGE 2: Runtime ==============
 # Clean image: only curl, ca-certificates, Python stdlib, and installed packages.
@@ -38,11 +51,16 @@ WORKDIR /app
 # Merge the --prefix=/install tree (site-packages + bin/ scripts) into system Python.
 COPY --from=builder /install /usr/local
 
-# Remove build tools that ship with the base image — they are not needed at runtime
-# and create unnecessary CVE surface for Trivy scans.
-RUN pip uninstall -y pip setuptools 2>/dev/null; \
-    rm -rf /usr/local/lib/python3.11/ensurepip /usr/local/lib/python3.11/distutils; \
-    true
+# Remove build tools that ship with the base image (separate from builder overlay).
+RUN rm -rf /usr/local/lib/python3.11/ensurepip \
+           /usr/local/lib/python3.11/distutils \
+           /usr/local/lib/python3.11/site-packages/pip* \
+           /usr/local/lib/python3.11/site-packages/setuptools* \
+           /usr/local/lib/python3.11/site-packages/wheel* \
+           /usr/local/lib/python3.11/site-packages/pkg_resources* \
+           /usr/local/lib/python3.11/site-packages/_distutils_hack* \
+           /usr/local/lib/python3.11/site-packages/distutils-precedence.pth \
+           /usr/local/bin/pip* 2>/dev/null; true
 
 # Non-root user
 RUN groupadd --gid 1001 nanobot && \
