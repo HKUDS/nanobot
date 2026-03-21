@@ -599,7 +599,7 @@ class TestRetrieveAndContextBranches:
                 },
             )
         )
-        final, stats = store._retrieve_core(
+        final, stats = store.retriever._retrieve_core(
             query="nothing",
             top_k=3,
             router_enabled=True,
@@ -623,7 +623,7 @@ class TestRetrieveAndContextBranches:
                 },
             )
         )
-        final, stats = store._retrieve_core(
+        final, stats = store.retriever._retrieve_core(
             query="rollout status",
             top_k=2,
             router_enabled=True,
@@ -656,7 +656,7 @@ class TestRetrieveAndContextBranches:
                 },
             )
         )
-        final, stats = store._retrieve_core(
+        final, stats = store.retriever._retrieve_core(
             query="reflect",
             top_k=3,
             router_enabled=True,

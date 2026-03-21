@@ -180,10 +180,14 @@ def test_store_retrieve_core_router_branches(
     )
     store.graph.enabled = True
     store.graph.get_related_entity_names_sync = MagicMock(return_value={"oauth2"})
-    store.read_events = MagicMock(
+    _events_fn = MagicMock(
         return_value=[{"id": "extra", "summary": "oauth2 rollout", "entities": []}]
     )
-    monkeypatch.setattr("nanobot.agent.memory.store._local_retrieve", lambda *args, **kwargs: [])
+    store.read_events = _events_fn
+    store.retriever._read_events_fn = _events_fn
+    monkeypatch.setattr(
+        "nanobot.agent.memory.retriever._local_retrieve", lambda *args, **kwargs: []
+    )
 
     class _Reranker:
         available = True
@@ -197,8 +201,9 @@ def test_store_retrieve_core_router_branches(
             return 0.4
 
     store._reranker = _Reranker()
+    store.retriever._reranker = _Reranker()
 
-    final, meta = store._retrieve_core(
+    final, meta = store.retriever._retrieve_core(
         query="what is rollout status",
         top_k=2,
         router_enabled=True,
@@ -209,7 +214,7 @@ def test_store_retrieve_core_router_branches(
     assert meta["counts"]["retrieval_returned"] >= 1
 
     # Reflection intent includes reflection rows.
-    final_reflect, _meta_reflect = store._retrieve_core(
+    final_reflect, _meta_reflect = store.retriever._retrieve_core(
         query="reflect on failures",
         top_k=3,
         router_enabled=True,
@@ -386,7 +391,7 @@ def test_store_retrieve_core_router_off_and_rollout_status(tmp_path: Path) -> No
     store.mem0.search = MagicMock(return_value=[])
     store.graph.enabled = False
 
-    rows, meta = store._retrieve_core(
+    rows, meta = store.retriever._retrieve_core(
         query="what is rollout status",
         top_k=1,
         router_enabled=False,
@@ -403,7 +408,7 @@ def test_store_retrieve_core_router_off_and_rollout_status(tmp_path: Path) -> No
             {"source_vector": 0, "source_get_all": 0, "source_history": 0, "rejected_blob_like": 0},
         )
     )
-    rows2, meta2 = store._retrieve_core(
+    rows2, meta2 = store.retriever._retrieve_core(
         query="rollout status",
         top_k=1,
         router_enabled=True,
@@ -589,11 +594,13 @@ def test_store_retrieve_core_reranker_enabled_and_type_counts(
     )
     store.graph.enabled = True
     store.graph.get_related_entity_names_sync = MagicMock(return_value={"oauth2"})
-    store.read_events = MagicMock(
+    _events_fn2 = MagicMock(
         return_value=[{"id": "z1", "summary": "oauth2 semantic", "entities": []}]
     )
+    store.read_events = _events_fn2
+    store.retriever._read_events_fn = _events_fn2
     monkeypatch.setattr(
-        "nanobot.agent.memory.store._local_retrieve",
+        "nanobot.agent.memory.retriever._local_retrieve",
         lambda *_args, **_kwargs: [
             {"id": "graph-new", "summary": "g", "retrieval_reason": "bad", "score": 0.9}
         ],
@@ -607,8 +614,9 @@ def test_store_retrieve_core_reranker_enabled_and_type_counts(
             return list(reversed(items))
 
     store._reranker = _EnabledReranker()
+    store.retriever._reranker = _EnabledReranker()
 
-    final, meta = store._retrieve_core(
+    final, meta = store.retriever._retrieve_core(
         query="open tasks and reflection",
         top_k=4,
         router_enabled=True,
@@ -872,8 +880,9 @@ def test_store_retrieve_core_profile_adjustment_paths(tmp_path: Path) -> None:
         },
     }
     store.read_profile = MagicMock(return_value=profile)
+    store.retriever._profile_mgr.read_profile = MagicMock(return_value=profile)
 
-    final, _meta = store._retrieve_core(
+    final, _meta = store.retriever._retrieve_core(
         query="find constraints",
         top_k=2,
         router_enabled=True,
@@ -1076,6 +1085,9 @@ def test_store_routing_hint_and_reflection_filters(tmp_path: Path) -> None:
     )
     store.read_events = MagicMock(return_value=[])
     store.read_profile = MagicMock(return_value={"conflicts": [], "meta": {}})
+    store.retriever._profile_mgr.read_profile = MagicMock(
+        return_value={"conflicts": [], "meta": {}}
+    )
     store._query_routing_hints = MagicMock(
         return_value={
             "focus_task_decision": False,
@@ -1086,7 +1098,7 @@ def test_store_routing_hint_and_reflection_filters(tmp_path: Path) -> None:
         }
     )
     store._status_matches_query_hint = MagicMock(return_value=True)
-    out, _meta = store._retrieve_core(
+    out, _meta = store.retriever._retrieve_core(
         query="planning architecture",
         top_k=2,
         router_enabled=True,

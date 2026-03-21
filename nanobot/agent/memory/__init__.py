@@ -58,6 +58,7 @@ from .persistence import MemoryPersistence
 from .profile import ProfileManager
 from .reranker import CompositeReranker, Reranker
 from .retrieval_planner import RetrievalPlan, RetrievalPlanner
+from .retriever import MemoryRetriever
 from .rollout import RolloutConfig
 from .store import MemoryStore
 
@@ -69,6 +70,7 @@ __all__ = [
     "EvalRunner",
     "KnowledgeTriple",
     "MemoryEvent",
+    "MemoryRetriever",
     "MemoryStore",
     "RetrievalPlan",
     "RetrievalPlanner",

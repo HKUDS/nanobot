@@ -603,7 +603,8 @@ class TestHybridMemoryStore:
             },
         ]
         store.persistence.write_jsonl(store.events_file, events)
-        store.retriever.rebuild_event_embeddings(events, embedding_provider="hash")
+        # rebuild_event_embeddings was a no-op on the old _Mem0RuntimeInfo.
+        # After extraction, MemoryRetriever doesn't own this method; skip it.
 
         profile = store.read_profile()
         profile["stable_facts"] = ["Deployment region is eu-west-1"]
