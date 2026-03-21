@@ -377,7 +377,7 @@ class AgentLoop:
 
                     await self._emit(
                         "tool_call", agent_name,
-                        tool=tool_call.name, args=args_str[:500],
+                        tool=tool_call.name, args=args_str[:2000],
                     )
 
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
@@ -385,7 +385,7 @@ class AgentLoop:
                     await self._emit(
                         "tool_result", agent_name,
                         tool=tool_call.name,
-                        preview=result[:300] if result else "",
+                        preview=result[:2000] if result else "",
                     )
 
                     messages = self.context.add_tool_result(
