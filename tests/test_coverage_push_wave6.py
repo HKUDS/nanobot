@@ -487,8 +487,10 @@ async def test_loop_run_agent_loop_delegation_and_failure_reflection_paths(tmp_p
     loop.tools.execute_batch = _exec  # type: ignore[method-assign]
     final, _tools, msgs = await loop._run_agent_loop([{"role": "user", "content": "Do A then B."}])
     assert final == "done"
+    # After a delegation batch with budget exhausted, the advisor issues a
+    # SYNTHESIZE action which injects the nudge_post_delegation prompt.
     assert any(
-        "Delegation budget exhausted" in str(m.get("content", ""))
+        "Delegation(s) complete" in str(m.get("content", ""))
         for m in msgs
         if m.get("role") == "system"
     )

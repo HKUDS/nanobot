@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+from nanobot.agent.coordinator import ClassificationResult
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -162,7 +163,11 @@ async def test_run_with_routing_low_confidence_and_none_response(tmp_path: Path)
         "_Coord",
         (),
         {
-            "classify": staticmethod(lambda _text: asyncio.sleep(0, result=("code", 0.1))),
+            "classify": staticmethod(
+                lambda _text: asyncio.sleep(
+                    0, result=ClassificationResult(role_name="code", confidence=0.1)
+                )
+            ),
             "route_direct": staticmethod(lambda _name: None),
             "registry": type("_Reg", (), {"get_default": staticmethod(lambda: default_role)})(),
         },
