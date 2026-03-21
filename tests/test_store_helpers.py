@@ -28,7 +28,7 @@ class TestMemoryStoreExtraHelpers:
 
     def test_rollout_overrides_and_status(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
-        store._apply_rollout_overrides(
+        store._rollout_config.apply_overrides(
             {
                 "memory_rollout_mode": "shadow",
                 "memory_shadow_mode": True,

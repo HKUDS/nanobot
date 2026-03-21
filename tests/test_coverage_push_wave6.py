@@ -515,15 +515,15 @@ async def test_loop_run_agent_loop_delegation_and_failure_reflection_paths(tmp_p
 def test_store_load_rollout_config_env_overrides(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify rollout overrides flow through _apply_rollout_overrides correctly.
+    """Verify rollout overrides flow through RolloutConfig.apply_overrides correctly.
 
-    Legacy NANOBOT_* env vars no longer read directly by _load_rollout_config;
+    Legacy NANOBOT_* env vars no longer read directly by _load_defaults;
     config flows through schema → pydantic-settings → rollout_overrides dict.
     """
     store = _store(tmp_path)
 
     # Simulate what AgentLoop passes via rollout_overrides
-    store._apply_rollout_overrides(
+    store._rollout_config.apply_overrides(
         {
             "memory_rollout_mode": "shadow",
             "memory_fallback_allowed_sources": ["events", "profile"],
@@ -534,7 +534,7 @@ def test_store_load_rollout_config_env_overrides(
     assert store.rollout["memory_fallback_allowed_sources"] == ["events", "profile"]
     assert store.rollout["reranker_mode"] == "enabled"
 
-    store._apply_rollout_overrides(
+    store._rollout_config.apply_overrides(
         {
             "memory_shadow_sample_rate": "bad",
             "memory_fallback_max_summary_chars": "bad",
