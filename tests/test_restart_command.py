@@ -66,6 +66,18 @@ class TestRestartCommand:
             mock_handle.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_run_propagates_external_cancellation(self):
+        """External task cancellation should not be swallowed by the inbound wait loop."""
+        loop, _bus = _make_loop()
+
+        run_task = asyncio.create_task(loop.run())
+        await asyncio.sleep(0.1)
+        run_task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(run_task, timeout=1.0)
+
+    @pytest.mark.asyncio
     async def test_help_includes_restart(self):
         loop, bus = _make_loop()
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/help")
