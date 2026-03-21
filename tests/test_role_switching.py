@@ -153,3 +153,33 @@ class TestReset:
         original_tools = dict(loop.tools._tools)
         manager.reset(ctx)
         assert loop.tools._tools == original_tools
+
+
+class TestFilterTools:
+    def test_allowed_whitelist(self, manager: TurnRoleManager, loop: FakeLoop) -> None:
+        role = AgentRoleConfig(name="limited", description="", allowed_tools=["exec"])
+        ctx = manager.apply(role)
+        assert loop.tools.tool_names == ["exec"]
+        assert ctx.tools is not None  # snapshot was taken
+
+    def test_denied_blacklist(self, manager: TurnRoleManager, loop: FakeLoop) -> None:
+        role = AgentRoleConfig(name="safe", description="", denied_tools=["exec"])
+        manager.apply(role)
+        assert "exec" not in loop.tools.tool_names
+        assert "read_file" in loop.tools.tool_names
+        assert "web_search" in loop.tools.tool_names
+
+    def test_noop_when_unset(self, manager: TurnRoleManager, loop: FakeLoop) -> None:
+        role = AgentRoleConfig(name="open", description="")
+        ctx = manager.apply(role)
+        assert ctx.tools is None
+        assert set(loop.tools.tool_names) == {"read_file", "exec", "web_search"}
+
+    def test_reset_restores_filtered_tools(self, manager: TurnRoleManager, loop: FakeLoop) -> None:
+        original_names = set(loop.tools.tool_names)
+        role = AgentRoleConfig(name="limited", description="", allowed_tools=["exec"])
+        ctx = manager.apply(role)
+        assert loop.tools.tool_names == ["exec"]
+
+        manager.reset(ctx)
+        assert set(loop.tools.tool_names) == original_names
