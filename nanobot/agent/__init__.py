@@ -6,6 +6,7 @@ from nanobot.agent.consolidation import ConsolidationOrchestrator
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.coordinator import ClassificationResult, Coordinator
 from nanobot.agent.delegation import DelegationDispatcher
+from nanobot.agent.delegation_advisor import DelegationAdvisor
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.mission import MissionManager
@@ -27,6 +28,7 @@ __all__ = [
     "ConsolidationOrchestrator",
     "ContextBuilder",
     "Coordinator",
+    "DelegationAdvisor",
     "DelegationDispatcher",
     "MemoryStore",
     "MissionManager",

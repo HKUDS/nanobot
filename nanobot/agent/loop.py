@@ -85,7 +85,8 @@ from nanobot.providers.base import LLMProvider, LLMResponse
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.agent.coordinator import Coordinator
+    from nanobot.agent.coordinator import ClassificationResult, Coordinator
+    from nanobot.agent.delegation_advisor import DelegationAction
     from nanobot.config.schema import ChannelsConfig, RoutingConfig
     from nanobot.cron.service import CronService
 
@@ -364,6 +365,12 @@ class AgentLoop:
             max_delegation_depth=config.max_delegation_depth,
         )
         self._dispatcher.tools = self.tools
+
+        # Unified delegation decision point (replaces 3 independent triggers)
+        from nanobot.agent.delegation_advisor import DelegationAdvisor
+
+        self._delegation_advisor = DelegationAdvisor()
+        self._last_classification_result: ClassificationResult | None = None
 
         # Per-turn role switching (LAN-214)
         self._role_manager = TurnRoleManager(self)
@@ -824,25 +831,58 @@ class AgentLoop:
         turn_tool_calls: int,
         user_text: str,
         nudged_for_final: bool,
-    ) -> bool:
+        iteration: int,
+        previous_advice: "DelegationAction | None",
+    ) -> tuple[bool, "DelegationAction | None", list[dict]]:
         """Append REFLECT-phase system messages based on the current turn state.
 
-        Mutates *messages* in-place; returns the (potentially updated)
-        *nudged_for_final* flag.
+        Mutates *messages* in-place; returns a tuple of:
+        - updated *nudged_for_final* flag
+        - the latest delegation advice action (for escalation tracking)
+        - potentially filtered *_tools_def_cache* (when delegate tools removed)
         """
+        from nanobot.agent.delegation_advisor import DelegationAction
+
         had_delegations = any(tc.name in _DELEGATION_TOOL_NAMES for tc in response.tool_calls)
 
-        if (
-            had_delegations
-            and self._dispatcher.delegation_count >= self._dispatcher.max_delegations
-        ):
+        # --- Delegation advisor (replaces 3 independent triggers) ---
+        delegation_advice = self._delegation_advisor.advise_reflect_phase(
+            role_name=self.role_name,
+            turn_tool_calls=turn_tool_calls,
+            delegation_count=self._dispatcher.delegation_count,
+            max_delegations=self._dispatcher.max_delegations,
+            had_delegations_this_batch=had_delegations,
+            used_sequential_delegate=had_delegations
+            and not any(tc.name == "delegate_parallel" for tc in response.tool_calls),
+            has_parallel_structure=DelegationDispatcher.has_parallel_structure(user_text),
+            any_ungrounded=any(
+                "grounded=False" in (m.get("content") or "")
+                for m in messages[-len(response.tool_calls) :]
+                if m.get("role") == "tool"
+            ),
+            any_failed=any_failed,
+            iteration=iteration,
+            previous_advice=previous_advice,
+        )
+        _last_advice = delegation_advice.action
+
+        # --- Render delegation advice OR fall through to other nudges ---
+        if delegation_advice.action == DelegationAction.HARD_GATE:
             messages.append(
-                {
-                    "role": "system",
-                    "content": prompts.get("nudge_delegation_exhausted"),
-                }
+                {"role": "system", "content": prompts.get("nudge_delegation_exhausted")}
             )
+        elif delegation_advice.action == DelegationAction.SYNTHESIZE:
+            nudge = prompts.get("nudge_post_delegation")
+            if delegation_advice.warn_ungrounded:
+                nudge += "\n\n" + prompts.get("nudge_ungrounded_warning")
+            messages.append({"role": "system", "content": nudge})
+        elif delegation_advice.action in (DelegationAction.SOFT_NUDGE, DelegationAction.HARD_NUDGE):
+            if delegation_advice.suggested_mode == "delegate_parallel":
+                messages.append({"role": "system", "content": prompts.get("nudge_use_parallel")})
+            else:
+                messages.append({"role": "system", "content": delegation_advice.reason})
         elif any_failed:
+            # PRESERVED: failure handling (advisor returns NONE when any_failed=True)
             _permanent = tracker.permanent_failures
             _available = [
                 t["function"]["name"]
@@ -859,43 +899,8 @@ class AgentLoop:
                     ),
                 }
             )
-        elif had_delegations:
-            _ungrounded = any(
-                "grounded=False" in (m.get("content") or "")
-                for m in messages[-len(response.tool_calls) :]
-                if m.get("role") == "tool"
-            )
-            nudge = prompts.get("nudge_post_delegation")
-            if _ungrounded:
-                nudge += "\n\n" + prompts.get("nudge_ungrounded_warning")
-            # If the agent used sequential delegate for an inherently parallel
-            # request, nudge it to switch to delegate_parallel next round.
-            if not any(
-                tc.name == "delegate_parallel" for tc in response.tool_calls
-            ) and DelegationDispatcher.has_parallel_structure(user_text):
-                nudge += "\n\n" + prompts.get("nudge_use_parallel")
-            messages.append({"role": "system", "content": nudge})
-        elif (
-            has_plan
-            and not had_delegations
-            and turn_tool_calls >= 5
-            and self._dispatcher.delegation_count == 0
-            and self.tools.get("delegate_parallel")
-        ):
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        f"You have executed {turn_tool_calls} tool calls "
-                        "solo without delegating. STOP doing the work "
-                        "yourself. Use `delegate_parallel` NOW to distribute "
-                        "remaining work to specialist agents. This is "
-                        "required for multi-part tasks (unless delegation "
-                        "budget is exhausted)."
-                    ),
-                }
-            )
         elif has_plan and len(response.tool_calls) >= 1:
+            # PRESERVED: progress nudge (not delegation-related)
             messages.append(
                 {
                     "role": "system",
@@ -903,6 +908,7 @@ class AgentLoop:
                 }
             )
         elif len(response.tool_calls) >= 3:
+            # PRESERVED: reflect nudge (not delegation-related)
             messages.append(
                 {
                     "role": "system",
@@ -910,7 +916,13 @@ class AgentLoop:
                 }
             )
 
-        return nudged_for_final
+        # Remove delegate tools when advisor says budget is exhausted
+        if delegation_advice.remove_delegate_tools:
+            _tools_def_cache = [
+                t for t in _tools_def_cache if t["function"]["name"] not in _DELEGATION_TOOL_NAMES
+            ]
+
+        return nudged_for_final, _last_advice, _tools_def_cache
 
     async def _run_agent_loop(
         self,
@@ -968,6 +980,10 @@ class AgentLoop:
                 break
 
         # --- PLAN phase: inject planning prompt for complex tasks ----------
+        from nanobot.agent.delegation_advisor import DelegationAction
+
+        _last_delegation_advice: DelegationAction | None = None
+
         if self.config.planning_enabled:
             if self._needs_planning(user_text):
                 messages.append(
@@ -978,16 +994,24 @@ class AgentLoop:
                 )
                 has_plan = True
                 logger.debug("Planning prompt injected for: {}...", user_text[:60])
-                # Parallel structure nudge: when the request lists independent
-                # subtasks, explicitly instruct parallel delegation.
-                if DelegationDispatcher.has_parallel_structure(user_text):
+                # Delegation advisor plan-phase: replaces the old
+                # DelegationDispatcher.has_parallel_structure() check.
+                cr = self._last_classification_result
+                plan_advice = self._delegation_advisor.advise_plan_phase(
+                    role_name=self.role_name,
+                    needs_orchestration=cr.needs_orchestration if cr else False,
+                    relevant_roles=cr.relevant_roles if cr else [],
+                    user_text=user_text,
+                    delegate_tools_available=bool(self.tools.get("delegate_parallel")),
+                )
+                if plan_advice.action != DelegationAction.NONE:
                     messages.append(
                         {
                             "role": "system",
                             "content": prompts.get("nudge_parallel_structure"),
                         }
                     )
-                    logger.debug("Parallel structure nudge injected")
+                    logger.debug("Delegation advisor plan-phase: {}", plan_advice.reason)
 
         _wall_time_limit = self.config.max_session_wall_time_seconds
         _wall_time_start = time.monotonic()
@@ -1155,17 +1179,21 @@ class AgentLoop:
                 _last_tool_call_msg_idx = batch.last_tool_call_msg_idx
 
                 # --- REFLECT: evaluate progress and inject guidance ---------
-                nudged_for_final = self._evaluate_progress(
-                    response,
-                    messages,
-                    tracker,
-                    _tools_def_cache,
-                    batch.any_failed,
-                    batch.failed_this_batch,
-                    has_plan,
-                    turn_tool_calls,
-                    user_text,
-                    nudged_for_final,
+                nudged_for_final, _last_delegation_advice, _tools_def_cache = (
+                    self._evaluate_progress(
+                        response,
+                        messages,
+                        tracker,
+                        _tools_def_cache,
+                        batch.any_failed,
+                        batch.failed_this_batch,
+                        has_plan,
+                        turn_tool_calls,
+                        user_text,
+                        nudged_for_final,
+                        iteration,
+                        _last_delegation_advice,
+                    )
                 )
 
             else:
@@ -1316,6 +1344,7 @@ class AgentLoop:
                         if self._coordinator and msg.channel != "system":
                             t0_classify = time.monotonic()
                             cls_result = await self._coordinator.classify(msg.content)
+                            self._last_classification_result = cls_result
                             role_name, confidence = cls_result.role_name, cls_result.confidence
                             classify_latency_ms = (time.monotonic() - t0_classify) * 1000
                             # Confidence-aware: fall back to default on low confidence
@@ -1917,6 +1946,7 @@ class AgentLoop:
         """
         await self._connect_mcp()
         self._ensure_coordinator()
+        self._last_classification_result = None
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
 
         # Resolve forced role (if any) before entering the trace context so
