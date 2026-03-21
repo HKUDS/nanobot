@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
-def _make_loop():
+def _make_loop(*, exec_config=None):
     """Create a minimal AgentLoop with mocked dependencies."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
@@ -23,7 +23,7 @@ def _make_loop():
          patch("nanobot.agent.loop.SessionManager"), \
          patch("nanobot.agent.loop.SubagentManager") as MockSubMgr:
         MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
-        loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
+        loop = AgentLoop(bus=bus, provider=provider, workspace=workspace, exec_config=exec_config)
     return loop, bus
 
 
@@ -90,6 +90,13 @@ class TestHandleStop:
 
 
 class TestDispatch:
+    def test_exec_tool_not_registered_when_disabled(self):
+        from nanobot.config.schema import ExecToolConfig
+
+        loop, _bus = _make_loop(exec_config=ExecToolConfig(enable=False))
+
+        assert loop.tools.get("exec") is None
+
     @pytest.mark.asyncio
     async def test_dispatch_processes_and_publishes(self):
         from nanobot.bus.events import InboundMessage, OutboundMessage
