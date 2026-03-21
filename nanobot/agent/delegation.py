@@ -62,6 +62,12 @@ _delegation_ancestry: contextvars.ContextVar[tuple[str, ...]] = contextvars.Cont
     "_delegation_ancestry", default=()
 )
 
+
+def get_delegation_depth() -> int:
+    """Return the current delegation ancestry depth (0 = top-level agent)."""
+    return len(_delegation_ancestry.get())
+
+
 # Hard structural depth cap — raises _CycleError if the ancestry chain exceeds
 # this limit. Cannot be ignored by the LLM. Each level can run up to
 # max_iterations LLM calls, so uncapped chains multiply cost exponentially.

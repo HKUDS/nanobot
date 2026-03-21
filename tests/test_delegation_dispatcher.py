@@ -13,6 +13,8 @@ from nanobot.agent.delegation import (
     DelegationConfig,
     DelegationDispatcher,
     _cap_scratchpad_for_injection,
+    _delegation_ancestry,
+    get_delegation_depth,
 )
 from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
@@ -709,3 +711,20 @@ class TestExecuteDelegatedAgentRetry:
             _delegation_mod.run_tool_loop = original
 
         assert len(call_log) == 1
+
+
+# ---------------------------------------------------------------------------
+# get_delegation_depth
+# ---------------------------------------------------------------------------
+
+
+class TestGetDelegationDepth:
+    def test_depth_zero_at_top_level(self) -> None:
+        assert get_delegation_depth() == 0
+
+    def test_depth_reflects_ancestry(self) -> None:
+        token = _delegation_ancestry.set(("code", "research"))
+        try:
+            assert get_delegation_depth() == 2
+        finally:
+            _delegation_ancestry.reset(token)
