@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import nanobot.agent.prompt_loader as _prompt_loader_mod
-from nanobot.agent.prompt_loader import PromptLoader
+
+PromptLoader = _prompt_loader_mod.PromptLoader
 
 # ---------------------------------------------------------------------------
 # Helpers
