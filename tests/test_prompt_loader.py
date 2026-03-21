@@ -247,12 +247,9 @@ class TestRender:
 
 class TestModuleSingleton:
     def test_singleton_exists(self):
-        from nanobot.agent.prompt_loader import prompts
-
-        assert isinstance(prompts, PromptLoader)
+        assert isinstance(_prompt_loader_mod.prompts, PromptLoader)
 
     def test_singleton_is_stable(self):
-        from nanobot.agent.prompt_loader import prompts as p1
-        from nanobot.agent.prompt_loader import prompts as p2
-
+        p1 = _prompt_loader_mod.prompts
+        p2 = _prompt_loader_mod.prompts
         assert p1 is p2
