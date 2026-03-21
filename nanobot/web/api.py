@@ -263,17 +263,6 @@ def _format_session_messages(raw_messages: list[dict]) -> list[dict[str, Any]]:
     return messages
 
 
-def _truncate_content(content: Any, max_len: int = 1000) -> Any:
-    """Truncate content for API response."""
-    if isinstance(content, str):
-        return content[:max_len] + "..." if len(content) > max_len else content
-    if isinstance(content, list):
-        result = []
-        for item in content:
-            if isinstance(item, dict) and item.get("type") == "text":
-                text = item.get("text", "")
-                result.append({**item, "text": text[:max_len]})
-            else:
-                result.append(item)
-        return result
+def _truncate_content(content: Any) -> Any:
+    """Pass through content for API response (no truncation)."""
     return content

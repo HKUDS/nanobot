@@ -74,7 +74,7 @@ class DashboardEventBus:
             "channel": msg.channel,
             "chat_id": msg.chat_id,
             "sender": msg.sender_id,
-            "content": content[:2000],
+            "content": content,
             "timestamp": msg.timestamp.isoformat(),
             "session_key": msg.session_key,
         })
@@ -92,7 +92,7 @@ class DashboardEventBus:
             "agent": agent,
             "channel": msg.channel,
             "chat_id": msg.chat_id,
-            "content": msg.content[:2000] if msg.content else "",
+            "content": msg.content if msg.content else "",
             "is_tool_hint": is_tool_hint,
             "session_key": f"{msg.channel}:{msg.chat_id}",
         })
