@@ -59,8 +59,6 @@ class DelegationAdvice:
 @dataclass(slots=True, frozen=True)
 class RolePolicy:
     solo_tool_threshold: int = 5       # Tool calls before solo-work nudge fires
-    delegation_affinity: float = 0.5   # 0.0 = never suggest, 1.0 = always suggest
-    can_sub_delegate: bool = True      # False for leaf specialists
     exempt_from_nudge: bool = False    # True = never inject delegation nudges
 ```
 
@@ -91,6 +89,8 @@ class DelegationAdvisor:
         and whether to inject the parallel-structure nudge. Replaces the
         unconditional plan.md delegation text and the duplicated
         has_parallel_structure() calls in loop.py.
+
+        Reads delegation depth internally via get_delegation_depth().
         """
 
     def advise_reflect_phase(
@@ -101,17 +101,22 @@ class DelegationAdvisor:
         delegation_count: int,
         max_delegations: int,
         had_delegations_this_batch: bool,
+        used_sequential_delegate: bool,
+        has_parallel_structure: bool,
+        any_ungrounded: bool,
         any_failed: bool,
         iteration: int,
-        delegation_depth: int,
         previous_advice: DelegationAction | None = None,
     ) -> DelegationAdvice:
         """Called after each tool batch in the reflect phase.
 
         Evaluates all runtime signals and returns a single coherent
         advisory. Replaces the runtime counter nudge (loop.py:899-917),
-        the budget exhaustion nudge (loop.py:835-849), and the
-        delegation-complete synthesis nudge.
+        the budget exhaustion nudge (loop.py:835-849), the ungrounded
+        warning (loop.py:868-886), and the sequential-to-parallel nudge
+        (loop.py:887-897).
+
+        Reads delegation depth internally via get_delegation_depth().
         """
 ```
 
@@ -150,9 +155,6 @@ return NONE  # single-domain task, no delegation suggestion
 ### Reflect Phase
 
 ```
-if delegation_count >= max_delegations:
-    return HARD_GATE(remove_delegate_tools=True, reason="budget exhausted")
-
 if delegation_depth > 0:
     return NONE  # delegated agents never get nudges
 
@@ -160,10 +162,23 @@ if any_failed:
     return NONE  # let failure handling take priority
 
 if had_delegations_this_batch:
-    if delegation_count >= max_delegations:
-        return SYNTHESIZE(remove_delegate_tools=True)
+    # Check for ungrounded results (specialist returned without using tools)
+    if any_ungrounded:
+        advice = SYNTHESIZE(warn_ungrounded=True, reason="delegation complete, ungrounded results")
+    elif delegation_count >= max_delegations:
+        advice = SYNTHESIZE(remove_delegate_tools=True, reason="budget exhausted after delegation")
     else:
-        return NONE  # delegation happening, don't interfere
+        advice = NONE  # delegation in progress, don't interfere
+
+    # Check if sequential delegate was used but parallel would be better
+    if used_sequential_delegate and has_parallel_structure:
+        advice = SOFT_NUDGE(suggested_mode="delegate_parallel",
+                            reason="parallel structure detected, switch to delegate_parallel")
+
+    return advice
+
+if delegation_count >= max_delegations:
+    return HARD_GATE(remove_delegate_tools=True, reason="budget exhausted")
 
 policy = get_policy(role_name)
 if policy.exempt_from_nudge:
@@ -190,13 +205,13 @@ The caller tracks `previous_advice` as loop state (same pattern as existing
 
 ## Default Role Policies
 
-| Role | solo_tool_threshold | delegation_affinity | can_sub_delegate | exempt_from_nudge |
-|------|--------------------:|--------------------:|-----------------:|------------------:|
-| pm | 3 | 0.8 | true | false |
-| general | 5 | 0.5 | true | false |
-| code | 10 | 0.2 | false | false |
-| research | 8 | 0.3 | false | false |
-| writing | 6 | 0.3 | false | false |
+| Role | solo_tool_threshold | exempt_from_nudge |
+|------|--------------------:|------------------:|
+| pm | 3 | false |
+| general | 5 | false |
+| code | 10 | false |
+| research | 8 | false |
+| writing | 6 | false |
 
 These are defaults. Users can override via `AgentRoleConfig` in their config file.
 
@@ -302,13 +317,35 @@ Use `@pytest.mark.parametrize` tables consistent with existing test patterns.
 - **Role policy tuning**: The default thresholds are estimates. May need adjustment
   based on real-world agent traces.
 
+## Accessing Delegation Depth
+
+Delegation depth is tracked via a contextvar (`_delegation_ancestry` in
+`delegation.py:60`), not as an attribute on AgentLoop. Add a public function:
+
+```python
+# In nanobot/agent/delegation.py
+def get_delegation_depth() -> int:
+    """Return the current delegation ancestry depth (0 = top-level agent)."""
+    return len(_delegation_ancestry.get())
+```
+
+The advisor calls this internally — the caller does not need to pass it.
+Remove `delegation_depth` from the `advise_reflect_phase` parameter list and
+have the advisor read the contextvar directly. This keeps the interface simpler
+and the depth always accurate.
+
+Similarly, `advise_plan_phase` reads the contextvar internally instead of
+receiving it as a parameter.
+
 ## Files Affected
 
 | File | Change |
 |------|--------|
 | `nanobot/agent/delegation_advisor.py` | New — DelegationAdvisor, DelegationAdvice, RolePolicy |
+| `nanobot/agent/delegation.py` | Add `get_delegation_depth()` public function |
 | `nanobot/agent/loop.py` | Remove 3 trigger blocks, add advisor calls |
 | `nanobot/agent/coordinator.py` | Return ClassificationResult instead of tuple |
+| `nanobot/agent/__init__.py` | Add DelegationAdvisor to `__all__` exports |
 | `nanobot/templates/prompts/plan.md` | Remove delegation paragraph |
 | `nanobot/config/schema.py` | Add RolePolicy to AgentRoleConfig (optional) |
 | `tests/test_delegation_advisor.py` | New — comprehensive parametrized tests |
