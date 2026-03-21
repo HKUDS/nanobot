@@ -25,7 +25,6 @@ def _make_snapshot(
     mem0 = _Mem0Adapter(workspace=tmp_path)
     profile_mgr = ProfileManager(persistence, persistence.profile_file, mem0)
 
-    _profile = profile or {}
     _events = events or []
     _long_term: dict[str, str] = {"content": ""}
 

@@ -142,13 +142,13 @@ class RolloutConfig:
                     min(int(overrides["memory_fallback_max_summary_chars"]), 4000),
                 )
             except (TypeError, ValueError):
-                pass
+                pass  # keep default on bad input
         if "memory_shadow_sample_rate" in overrides:
             try:
                 rate = float(overrides["memory_shadow_sample_rate"])
                 self.rollout["memory_shadow_sample_rate"] = min(max(rate, 0.0), 1.0)
             except (TypeError, ValueError):
-                pass
+                pass  # keep default on bad input
         if isinstance(overrides.get("rollout_gates"), dict):
             gates = self.rollout.get("rollout_gates")
             if not isinstance(gates, dict):
@@ -177,7 +177,7 @@ class RolloutConfig:
                     max(float(overrides["reranker_alpha"]), 0.0), 1.0
                 )
             except (TypeError, ValueError):
-                pass
+                pass  # keep default on bad input
         if "reranker_model" in overrides:
             self.rollout["reranker_model"] = str(overrides["reranker_model"]).strip()
         # mem0 overrides

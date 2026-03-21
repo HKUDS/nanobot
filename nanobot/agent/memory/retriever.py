@@ -645,7 +645,8 @@ class MemoryRetriever:
                 shadow_items = self._reranker.rerank(query, shadow_items)
                 heuristic_ids = [str(it.get("id", "")) for it in adjusted]
                 reranked_ids = [str(it.get("id", "")) for it in shadow_items]
-                _delta = self._reranker.compute_rank_delta(heuristic_ids, reranked_ids)
+                # Rank delta computed for observability logging; result intentionally unused.
+                self._reranker.compute_rank_delta(heuristic_ids, reranked_ids)
 
         adjusted.sort(key=lambda item: item.get("score", 0.0), reverse=True)
         final = adjusted[: max(1, top_k)]

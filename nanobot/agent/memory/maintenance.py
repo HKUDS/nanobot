@@ -151,8 +151,8 @@ class MemoryMaintenance:
         vector_rows = len(self._mem0_get_all_rows(limit=25))
         vector_points = self._vector_points_count()
         history_rows = self._history_row_count()
-        # Explicit probe requested in rollout plan.
-        _probe_result = self.mem0.search("__health__", top_k=1, allow_history_fallback=False)
+        # Explicit probe — side-effect is health check; result intentionally unused.
+        self.mem0.search("__health__", top_k=1, allow_history_fallback=False)
         degraded = history_rows > 0 and vector_rows == 0 and vector_points == 0
         if not degraded:
             return
