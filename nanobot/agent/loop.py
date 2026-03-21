@@ -37,10 +37,20 @@ import uuid
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal
 
 from loguru import logger
 
+from nanobot.agent.callbacks import (
+    DelegateEndEvent,
+    DelegateStartEvent,
+    ProgressCallback,
+    ProgressEvent,
+    StatusEvent,
+    TextChunk,
+    ToolCallEvent,
+    ToolResultEvent,
+)
 from nanobot.agent.capability import CapabilityRegistry
 from nanobot.agent.consolidation import ConsolidationOrchestrator
 from nanobot.agent.context import (
@@ -142,30 +152,6 @@ _PLANNING_SIGNALS: tuple[str, ...] = (
     " schedule ",
     " organize ",
 )
-
-
-class ProgressCallback(Protocol):
-    """Signature for progress callbacks passed through the agent call chain.
-
-    Matches the ``_bus_progress`` closure created in ``_process_message``.
-    External callers may pass a simpler ``async def cb(content: str) -> None``
-    via ``process_direct``; that path does not use keyword arguments.
-    """
-
-    async def __call__(
-        self,
-        content: str,
-        *,
-        tool_hint: bool = ...,
-        streaming: bool = ...,
-        tool_call: dict | None = ...,
-        tool_result: dict | None = ...,
-        delegate_start: dict | None = ...,
-        delegate_end: dict | None = ...,
-        status_code: str = ...,
-        status_label: str = ...,
-    ) -> None:
-        pass
 
 
 @dataclass(slots=True)
@@ -657,7 +643,7 @@ class AgentLoop:
                 messages[:] = self.context.add_assistant_message(messages, final_content)
                 return "break", consecutive_errors, final_content
             if on_progress:
-                await on_progress("", status_code="retrying")
+                await on_progress(StatusEvent(status_code="retrying"))
             await asyncio.sleep(min(2**consecutive_errors, 10))
             return "continue", consecutive_errors, None
 
@@ -750,11 +736,11 @@ class AgentLoop:
                 bind_trace().debug("tool_exec args | {}({})", tool_call.name, args_str[:200])
             if on_progress:
                 await on_progress(
-                    "",
-                    tool_result={
-                        "toolCallId": tool_call.id,
-                        "result": result.to_llm_string(),
-                    },
+                    ToolResultEvent(
+                        tool_call_id=tool_call.id,
+                        result=result.to_llm_string(),
+                        tool_name=tool_call.name,
+                    )
                 )
             messages[:] = self.context.add_tool_result(
                 messages, tool_call.id, tool_call.name, result.to_llm_string()
@@ -1064,7 +1050,7 @@ class AgentLoop:
             # --- LLM call (streaming when a progress callback exists) ------
             if on_progress and iteration > 1:
                 # Emit "thinking" status on subsequent iterations (first is implicit from run.start)
-                await on_progress("", status_code="thinking")
+                await on_progress(StatusEvent(status_code="thinking"))
             response = await self._llm_caller.call(
                 messages,
                 active_tools,
@@ -1152,15 +1138,14 @@ class AgentLoop:
                 if on_progress:
                     # Note: StreamingLLMCaller already routed response.content as
                     # a status event (Option B) — do NOT re-emit here as text.
-                    await on_progress("", status_code="calling_tool")
+                    await on_progress(StatusEvent(status_code="calling_tool"))
                     for tc in response.tool_calls:
                         await on_progress(
-                            "",
-                            tool_call={
-                                "toolCallId": tc.id,
-                                "toolName": tc.name,
-                                "args": tc.arguments,
-                            },
+                            ToolCallEvent(
+                                tool_call_id=tc.id,
+                                tool_name=tc.name,
+                                args=tc.arguments,
+                            )
                         )
 
                 # --- ACT + OBSERVE: execute tools and process results ------
@@ -1534,69 +1519,50 @@ class AgentLoop:
         even if the caller rebinds its local variables.
         """
 
-        async def _progress(
-            content: str,
-            *,
-            tool_hint: bool = False,
-            streaming: bool = False,
-            tool_call: dict | None = None,
-            tool_result: dict | None = None,
-            delegate_start: dict | None = None,
-            delegate_end: dict | None = None,
-            status_code: str = "",
-            status_label: str = "",
-        ) -> None:
-            meta = dict(base_meta)
-            meta["_tool_hint"] = tool_hint
-            meta["_streaming"] = streaming
-            if tool_call:
-                meta["_tool_call"] = tool_call
-                meta["_canonical"] = canonical_builder.tool_call(
-                    tool_call_id=tool_call["toolCallId"],
-                    tool_name=tool_call["toolName"],
-                    args=tool_call.get("args", {}),
-                )
-            elif tool_result:
-                meta["_tool_result"] = tool_result
-                meta["_canonical"] = canonical_builder.tool_result(
-                    tool_call_id=tool_result["toolCallId"],
-                    tool_name=tool_result.get("toolName", ""),
-                    result=tool_result.get("result", ""),
-                )
-            elif delegate_start:
-                meta["_canonical"] = canonical_builder.delegate_start(
-                    delegation_id=delegate_start["delegation_id"],
-                    child_role=delegate_start["child_role"],
-                    task_title=delegate_start.get("task_title", ""),
-                )
-            elif delegate_end:
-                meta["_canonical"] = canonical_builder.delegate_end(
-                    delegation_id=delegate_end["delegation_id"],
-                    success=delegate_end.get("success", True),
-                )
-            elif status_code:
-                meta["_canonical"] = canonical_builder.status(status_code, label=status_label)
-            elif content:
-                # on_progress always delivers cumulative text (the full text
-                # assembled so far), regardless of the streaming flag.
-                # text_flush() deduplicates against what was already sent.
-                meta["_canonical"] = canonical_builder.text_flush(content)
+        async def _progress(event: ProgressEvent) -> None:
+            meta = dict(base_meta)  # inherits _progress=True from base_meta
+            match event:
+                case TextChunk(content=content, streaming=streaming):
+                    meta["_streaming"] = streaming
+                    if content:
+                        meta["_canonical"] = canonical_builder.text_flush(content)
+                case ToolCallEvent(tool_call_id=tcid, tool_name=name, args=args):
+                    meta["_tool_hint"] = True  # preserved for ChannelManager gate
+                    meta["_tool_call"] = {"toolCallId": tcid, "toolName": name, "args": args}
+                    meta["_canonical"] = canonical_builder.tool_call(
+                        tool_call_id=tcid, tool_name=name, args=args
+                    )
+                case ToolResultEvent(tool_call_id=tcid, result=result, tool_name=name):
+                    meta["_tool_result"] = {"toolCallId": tcid, "result": result}
+                    meta["_canonical"] = canonical_builder.tool_result(
+                        tool_call_id=tcid, tool_name=name, result=result
+                    )
+                case DelegateStartEvent(delegation_id=did, child_role=role, task_title=title):
+                    meta["_canonical"] = canonical_builder.delegate_start(
+                        delegation_id=did, child_role=role, task_title=title
+                    )
+                case DelegateEndEvent(delegation_id=did, success=success):
+                    meta["_canonical"] = canonical_builder.delegate_end(
+                        delegation_id=did, success=success
+                    )
+                case StatusEvent(status_code=code, label=label):
+                    meta["_canonical"] = canonical_builder.status(code, label=label)
             await self.bus.publish_outbound(
                 OutboundMessage(
                     channel=channel,
                     chat_id=chat_id,
-                    content=content,
+                    content=event.content if isinstance(event, TextChunk) else "",
                     metadata=meta,
                 )
             )
 
-        return _progress  # type: ignore[return-value]
+        return _progress
 
     async def _process_message(
         self,
         msg: InboundMessage,
         session_key: str | None = None,
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         t0_request = time.monotonic()
@@ -1807,10 +1773,7 @@ class AgentLoop:
 
         final_content, tools_used, all_msgs = await self._run_agent_loop(
             initial_messages,
-            # External on_progress (e.g. _cli_progress) may only implement the
-            # simplified (content: str) signature; ProgressCallback is the full
-            # internal signature. BP-M2: tracked for a future wrapper.
-            on_progress=(on_progress or _bus_progress) if self.config.streaming_enabled else None,  # type: ignore[arg-type]
+            on_progress=(on_progress or _bus_progress) if self.config.streaming_enabled else None,
         )
 
         # Clear the per-turn callback to prevent cross-turn leakage.
@@ -1934,7 +1897,7 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_progress: ProgressCallback | None = None,
         forced_role: str | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage).
