@@ -21,36 +21,9 @@ from typing import Any
 
 import pytest
 
-from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentConfig
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
-from tests.helpers import ScriptedProvider
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_config(tmp_path: Path, **overrides) -> AgentConfig:
-    defaults = dict(
-        workspace=str(tmp_path),
-        model="test-model",
-        memory_window=10,
-        max_iterations=5,
-        planning_enabled=False,
-        verification_mode="off",
-    )
-    defaults.update(overrides)
-    return AgentConfig(**defaults)
-
-
-def _make_loop(tmp_path: Path, provider: LLMProvider, **config_overrides) -> AgentLoop:
-    bus = MessageBus()
-    config = _make_config(tmp_path, **config_overrides)
-    loop = AgentLoop(bus, provider, config)
-    return loop
+from tests.helpers import ScriptedProvider, _make_loop
 
 
 def _make_inbound(text: str, channel: str = "cli", chat_id: str = "test-user") -> InboundMessage:

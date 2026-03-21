@@ -7,8 +7,13 @@ functions that tests import explicitly.
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from typing import Any
 
+from nanobot.agent.loop import AgentLoop
+from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import AgentConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
 
 
@@ -68,3 +73,39 @@ class ScriptedProvider(LLMProvider):
         resp = self._responses[self._index]
         self._index += 1
         return resp
+
+
+def _make_config(tmp_path: Path, **overrides: object) -> AgentConfig:
+    """Build a minimal AgentConfig for tests."""
+    defaults: dict[str, object] = dict(
+        workspace=str(tmp_path),
+        model="test-model",
+        memory_window=10,
+        max_iterations=5,
+        planning_enabled=False,
+        verification_mode="off",
+    )
+    defaults.update(overrides)
+    return AgentConfig(**defaults)  # type: ignore[arg-type]
+
+
+def _make_loop(tmp_path: Path, provider: LLMProvider, **config_overrides: object) -> AgentLoop:
+    """Build a minimal AgentLoop for tests."""
+    bus = MessageBus()
+    config = _make_config(tmp_path, **config_overrides)
+    return AgentLoop(bus, provider, config)
+
+
+def make_agent_loop(provider: LLMProvider, **config_overrides: object) -> AgentLoop:
+    """Construct a minimal AgentLoop backed by the given provider.
+
+    Uses a temporary directory for workspace. Suitable for integration tests
+    that do not receive a pytest tmp_path fixture.
+    """
+    tmp = Path(tempfile.mkdtemp())
+    return _make_loop(tmp, provider, **config_overrides)
+
+
+def error_response(message: str = "quota exceeded") -> LLMResponse:
+    """Return an LLMResponse that triggers the retry path in _handle_llm_error."""
+    return LLMResponse(content=message, finish_reason="error")
