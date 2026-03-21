@@ -499,7 +499,8 @@ class AgentLoop:
                 msg.metadata.get("message_thread_id")
             )
             history = session.get_history(max_messages=0)
-            current_role = "assistant" if msg.sender_id == "subagent" else "user"
+            # Subagent results and other system messages use user role to trigger LLM response
+            current_role = "user"
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
