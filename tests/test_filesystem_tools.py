@@ -59,6 +59,19 @@ class TestReadFileTool:
         assert "Empty file" in result
 
     @pytest.mark.asyncio
+    async def test_image_file_returns_multimodal_blocks(self, tool, tmp_path):
+        f = tmp_path / "pixel.png"
+        f.write_bytes(b"\x89PNG\r\n\x1a\nfake-png-data")
+
+        result = await tool.execute(path=str(f))
+
+        assert isinstance(result, list)
+        assert result[0]["type"] == "image_url"
+        assert result[0]["image_url"]["url"].startswith("data:image/png;base64,")
+        assert result[0]["_meta"]["path"] == str(f)
+        assert result[1] == {"type": "text", "text": f"(Image file: {f})"}
+
+    @pytest.mark.asyncio
     async def test_file_not_found(self, tool, tmp_path):
         result = await tool.execute(path=str(tmp_path / "nope.txt"))
         assert "Error" in result
