@@ -596,20 +596,6 @@ class AgentLoop:
         if isinstance(read_tool, ScratchpadReadTool):
             read_tool._scratchpad = self._scratchpad
 
-    @staticmethod
-    def _strip_think(text: str | None) -> str | None:
-        """Remove <think>…</think> blocks — delegates to streaming module."""
-        return strip_think(text)
-
-    async def _call_llm(
-        self,
-        messages: list[dict],
-        tools: list[dict[str, Any]] | None,
-        on_progress: ProgressCallback | None,
-    ) -> LLMResponse:
-        """Call the LLM — delegates to StreamingLLMCaller."""
-        return await self._llm_caller.call(messages, tools, on_progress)
-
     # ------------------------------------------------------------------
     # Agent loop (Plan → Act → Observe → Reflect)
     # ------------------------------------------------------------------
@@ -1084,7 +1070,7 @@ class AgentLoop:
             if on_progress and iteration > 1:
                 # Emit "thinking" status on subsequent iterations (first is implicit from run.start)
                 await on_progress("", status_code="thinking")
-            response = await self._call_llm(
+            response = await self._llm_caller.call(
                 messages,
                 active_tools,
                 on_progress,
@@ -1158,7 +1144,7 @@ class AgentLoop:
                             }
                         )
                         continue
-                    final_content = self._strip_think(response.content)
+                    final_content = strip_think(response.content)
                     messages = self.context.add_assistant_message(
                         messages,
                         final_content,
@@ -1236,7 +1222,7 @@ class AgentLoop:
                         "Tool results present but no final text; retrying once for final answer."
                     )
                     continue
-                final_content = self._strip_think(response.content)
+                final_content = strip_think(response.content)
                 messages = self.context.add_assistant_message(
                     messages,
                     final_content,
@@ -1254,26 +1240,13 @@ class AgentLoop:
 
         # --- Verification pass ---------------------------------------------
         if final_content is not None:
-            final_content, messages = await self._verify_answer(
+            final_content, messages = await self._verifier.verify(
                 user_text,
                 final_content,
                 messages,
             )
 
         return final_content, tools_used, messages
-
-    # ------------------------------------------------------------------
-    # Self-critique / verification (Step 2)
-    # ------------------------------------------------------------------
-
-    async def _verify_answer(
-        self,
-        user_text: str,
-        candidate: str,
-        messages: list[dict],
-    ) -> tuple[str, list[dict]]:
-        """Run a verification pass — delegates to AnswerVerifier."""
-        return await self._verifier.verify(user_text, candidate, messages)
 
     # ------------------------------------------------------------------
     # Reaction handling (Step 8 — Feedback loop)
@@ -1509,17 +1482,13 @@ class AgentLoop:
         )
         self._dispatcher.coordinator = self._coordinator
         self.missions.coordinator = self._coordinator
-        self._wire_delegate_tools()
+        self._dispatcher.wire_delegate_tools(
+            available_roles_fn=self._capabilities.role_names,
+        )
 
         logger.info(
             "Multi-agent routing enabled with {} roles",
             len(registry),
-        )
-
-    def _wire_delegate_tools(self) -> None:
-        """Set the dispatch callback and role validation on delegate tools."""
-        self._dispatcher.wire_delegate_tools(
-            available_roles_fn=self._capabilities.role_names,
         )
 
     async def close_mcp(self) -> None:
@@ -1547,13 +1516,6 @@ class AgentLoop:
             self._stop_event.set()
         logger.info("Agent loop stopping")
 
-    def _get_consolidation_lock(self, session_key: str) -> asyncio.Lock:
-        return self._consolidator.get_lock(session_key)
-
-    def _prune_consolidation_lock(self, session_key: str, lock: asyncio.Lock) -> None:
-        """Drop lock entry if no longer in use."""
-        self._consolidator.prune_lock(session_key, lock)
-
     async def _run_consolidation_task(self, session: Session, lock: asyncio.Lock) -> None:
         """Run one consolidation pass; holds the semaphore and per-session lock."""
         try:
@@ -1562,106 +1524,7 @@ class AgentLoop:
                     await self._consolidate_memory(session)
         finally:
             self._consolidating.discard(session.key)
-            self._prune_consolidation_lock(session.key, lock)
-
-    def _should_force_verification(self, text: str) -> bool:
-        return self._verifier.should_force_verification(text)
-
-    async def _attempt_recovery(
-        self,
-        msg: InboundMessage,
-        all_msgs: list[dict[str, Any]],
-    ) -> str | None:
-        """Try a single recovery LLM call with minimal context when the main loop produced None.
-
-        Uses only the system prompt and the original user message (no tool history)
-        with tools disabled to force a direct text answer.
-        """
-        # Extract the system prompt and the last user message from the conversation.
-        system_msg = next((m for m in all_msgs if m.get("role") == "system"), None)
-        user_msg = None
-        for m in reversed(all_msgs):
-            if m.get("role") == "user":
-                user_msg = m
-                break
-
-        if not system_msg or not user_msg:
-            logger.warning("Recovery skipped: missing system or user message")
-            return None
-
-        recovery_messages = [
-            system_msg,
-            user_msg,
-            {
-                "role": "system",
-                "content": (
-                    "Your previous attempt to answer did not produce a response. "
-                    "Answer the user's message directly without calling any tools. "
-                    "If you truly cannot answer, say what you know and suggest next steps."
-                ),
-            },
-        ]
-
-        logger.info("Attempting recovery LLM call for {}:{}", msg.channel, msg.chat_id)
-        try:
-            response = await self.provider.chat(
-                messages=recovery_messages,
-                tools=None,
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.config.max_tokens,
-            )
-        except Exception:  # crash-barrier: recovery LLM call
-            logger.exception("Recovery LLM call failed")
-            return None
-
-        if response.finish_reason == "error":
-            logger.warning("Recovery LLM call returned error: {}", response.content)
-            return None
-
-        content = self._strip_think(response.content)
-        if content:
-            logger.info("Recovery succeeded, returning answer")
-        else:
-            logger.warning("Recovery LLM call produced no usable content")
-        return content
-
-    @staticmethod
-    def _build_no_answer_explanation(user_text: str, messages: list[dict[str, Any]]) -> str:
-        """Explain why the agent could not produce an answer on this turn."""
-        tool_results = [m for m in messages if m.get("role") == "tool"]
-        last_tool = tool_results[-1] if tool_results else None
-        last_tool_name = str(last_tool.get("name", "")) if last_tool else ""
-        last_tool_content = str(last_tool.get("content", "")) if last_tool else ""
-        lowered = last_tool_content.lower()
-
-        reasons: list[str] = []
-        if not tool_results:
-            reasons.append("The model did not produce a response for this message.")
-        if "exit code: 1" in lowered or "no such file" in lowered or "not found" in lowered:
-            reasons.append(
-                f"My last check with `{last_tool_name or 'a tool'}` returned no matching data."
-            )
-        if "permission denied" in lowered:
-            reasons.append("The lookup failed due to a local permission error.")
-        if "insufficient_quota" in lowered or "429" in lowered:
-            reasons.append("A provider quota/rate limit blocked part of the retrieval.")
-        if not reasons:
-            reasons.append("The model returned no final answer text after tool execution.")
-
-        question = (user_text or "").strip()
-        _question_words = {"who", "what", "when", "where", "why", "how", "is", "are", "can", "do"}
-        looks_like_question = "?" in question or (
-            question.split()[0].lower() in _question_words if question else False
-        )
-        help_line = (
-            "Please try rephrasing your question or asking again."
-            if looks_like_question
-            else "Please share the fact directly and I can save it to memory."
-        )
-
-        primary_reason = reasons[0]
-        return f"Sorry, I couldn't answer that just now. {primary_reason} {help_line}"
+            self._consolidator.prune_lock(session.key, lock)
 
     def _make_bus_progress(
         self,
@@ -1789,7 +1652,7 @@ class AgentLoop:
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
-            lock = self._get_consolidation_lock(session.key)
+            lock = self._consolidator.get_lock(session.key)
             self._consolidating.add(session.key)
             try:
                 async with lock:
@@ -1813,7 +1676,7 @@ class AgentLoop:
                 )
             finally:
                 self._consolidating.discard(session.key)
-                self._prune_consolidation_lock(session.key, lock)
+                self._consolidator.prune_lock(session.key, lock)
 
             session.clear()
             self.sessions.save(session)
@@ -1883,7 +1746,7 @@ class AgentLoop:
             and session.key not in self._consolidating
         ):
             self._consolidating.add(session.key)
-            lock = self._get_consolidation_lock(session.key)
+            lock = self._consolidator.get_lock(session.key)
             _task = asyncio.create_task(self._run_consolidation_task(session, lock))
             self._consolidation_tasks.add(_task)
             _task.add_done_callback(self._consolidation_tasks.discard)
@@ -1902,7 +1765,7 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=self.config.memory_window)
-        verify_before_answer = self._should_force_verification(msg.content)
+        verify_before_answer = self._verifier.should_force_verification(msg.content)
         skill_names = self.context.skills.detect_relevant_skills(msg.content)
         initial_messages = await self.context.build_messages(
             history=history,
@@ -1964,10 +1827,14 @@ class AgentLoop:
         self._dispatcher.on_progress = None
 
         if final_content is None:
-            final_content = await self._attempt_recovery(msg, all_msgs)
+            final_content = await self._verifier.attempt_recovery(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                all_msgs=all_msgs,
+            )
 
         if final_content is None:
-            final_content = self._build_no_answer_explanation(msg.content, all_msgs)
+            final_content = AnswerVerifier.build_no_answer_explanation(msg.content, all_msgs)
             # Ensure fallback responses are recorded in the session log.
             all_msgs = self.context.add_assistant_message(all_msgs, final_content)
 

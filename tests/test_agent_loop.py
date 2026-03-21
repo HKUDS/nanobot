@@ -775,7 +775,7 @@ class TestDelegationDepthLimit:
 
 
 # ---------------------------------------------------------------------------
-# TEST-M3: _apply_role_for_turn / _reset_role_after_turn
+# TEST-M3: TurnRoleManager.apply / TurnRoleManager.reset
 # ---------------------------------------------------------------------------
 
 
@@ -802,7 +802,7 @@ class TestRoleSwitching:
         orig_temp = loop.temperature
         orig_iters = loop.max_iterations
 
-        ctx = loop._apply_role_for_turn(role)
+        ctx = loop._role_manager.apply(role)
 
         assert ctx.model == orig_model
         assert ctx.temperature == orig_temp
@@ -810,7 +810,7 @@ class TestRoleSwitching:
 
     def test_apply_overrides_settings(self, tmp_path: Path):
         loop, role = self._make_loop_with_role(tmp_path)
-        loop._apply_role_for_turn(role)
+        loop._role_manager.apply(role)
 
         assert loop.model == "override-model"
         assert loop.temperature == pytest.approx(0.1)
@@ -823,18 +823,18 @@ class TestRoleSwitching:
         orig_temp = loop.temperature
         orig_iters = loop.max_iterations
 
-        ctx = loop._apply_role_for_turn(role)
-        loop._reset_role_after_turn(ctx)
+        ctx = loop._role_manager.apply(role)
+        loop._role_manager.reset(ctx)
 
         assert loop.model == orig_model
         assert loop.temperature == pytest.approx(orig_temp)
         assert loop.max_iterations == orig_iters
 
     def test_reset_without_apply_is_noop(self, tmp_path: Path):
-        """_reset_role_after_turn must be safe to call with no prior apply."""
+        """TurnRoleManager.reset must be safe to call with no prior apply."""
         loop = _make_loop(tmp_path, ScriptedProvider([]))
         orig_model = loop.model
-        loop._reset_role_after_turn(None)  # must not raise
+        loop._role_manager.reset(None)  # must not raise
         assert loop.model == orig_model
 
     def test_apply_tool_filter_saved_and_restored(self, tmp_path: Path):
@@ -846,11 +846,11 @@ class TestRoleSwitching:
         orig_names = set(loop.tools.tool_names)
 
         role = AgentRoleConfig(name="limited", allowed_tools=["read_file"])
-        ctx = loop._apply_role_for_turn(role)
+        ctx = loop._role_manager.apply(role)
         # After filtering, only read_file should remain
         assert set(loop.tools.tool_names) == {"read_file"}
 
-        loop._reset_role_after_turn(ctx)
+        loop._role_manager.reset(ctx)
         # Full tool set must be restored
         assert set(loop.tools.tool_names) == orig_names
 
@@ -860,7 +860,7 @@ class TestRoleSwitching:
 
         loop = _make_loop(tmp_path, ScriptedProvider([]))
         role = AgentRoleConfig(name="passthrough")
-        ctx = loop._apply_role_for_turn(role)
+        ctx = loop._role_manager.apply(role)
         assert ctx.tools is None
 
 

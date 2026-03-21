@@ -198,7 +198,7 @@ class TestDelegationDispatch:
             provider=provider, registry=registry, default_role="general"
         )
         loop._dispatcher.coordinator = loop._coordinator
-        loop._wire_delegate_tools()
+        loop._dispatcher.wire_delegate_tools(available_roles_fn=loop._capabilities.role_names)
 
         # Simulate being inside a "code" delegation via ContextVar
         token = _delegation_ancestry.set(("code",))
@@ -223,7 +223,7 @@ class TestDelegationDispatch:
             provider=provider, registry=registry, default_role="general"
         )
         loop._dispatcher.coordinator = loop._coordinator
-        loop._wire_delegate_tools()
+        loop._dispatcher.wire_delegate_tools(available_roles_fn=loop._capabilities.role_names)
 
         # Currently inside "code" role via ContextVar
         token = _delegation_ancestry.set(("code",))
@@ -258,7 +258,7 @@ class TestDelegationDispatch:
             provider=provider, registry=registry, default_role="general"
         )
         loop._dispatcher.coordinator = loop._coordinator
-        loop._wire_delegate_tools()
+        loop._dispatcher.wire_delegate_tools(available_roles_fn=loop._capabilities.role_names)
 
         call_count = 0
         result = await loop._dispatcher.dispatch("code", "write code", None)
@@ -281,7 +281,7 @@ class TestDelegationDispatch:
             provider=provider, registry=registry, default_role="general"
         )
         loop._dispatcher.coordinator = loop._coordinator
-        loop._wire_delegate_tools()
+        loop._dispatcher.wire_delegate_tools(available_roles_fn=loop._capabilities.role_names)
 
         await loop._dispatcher.dispatch("code", "write tests", None)
 
@@ -306,7 +306,7 @@ class TestDelegationDispatch:
             provider=provider, registry=registry, default_role="general"
         )
         loop._dispatcher.coordinator = loop._coordinator
-        loop._wire_delegate_tools()
+        loop._dispatcher.wire_delegate_tools(available_roles_fn=loop._capabilities.role_names)
 
         # Ancestry is empty (depth 0) — same-role delegation should succeed
         assert _delegation_ancestry.get() == ()

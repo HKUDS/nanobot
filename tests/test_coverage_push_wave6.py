@@ -482,7 +482,7 @@ async def test_loop_run_agent_loop_malformed_then_final_nudge(tmp_path: Path) ->
         LLMResponse(content="final answer", tool_calls=[], finish_reason="stop"),
     ]
 
-    loop._call_llm = AsyncMock(side_effect=responses)  # type: ignore[method-assign]
+    loop._llm_caller.call = AsyncMock(side_effect=responses)  # type: ignore[method-assign]
     loop.tools.execute_batch = AsyncMock(return_value=[ToolResult.ok("ok")])  # type: ignore[method-assign]
 
     final, _tools, messages = await loop._run_agent_loop(
@@ -509,7 +509,7 @@ async def test_loop_run_agent_loop_delegation_and_failure_reflection_paths(tmp_p
         loop._dispatcher.delegation_count = loop._dispatcher.max_delegations
         return [ToolResult.ok("delegated")]
 
-    loop._call_llm = AsyncMock(side_effect=responses)  # type: ignore[method-assign]
+    loop._llm_caller.call = AsyncMock(side_effect=responses)  # type: ignore[method-assign]
     loop.tools.execute_batch = _exec  # type: ignore[method-assign]
     final, _tools, msgs = await loop._run_agent_loop([{"role": "user", "content": "Do A then B."}])
     assert final == "done"
@@ -527,7 +527,7 @@ async def test_loop_run_agent_loop_delegation_and_failure_reflection_paths(tmp_p
         ),
         LLMResponse(content="done2", tool_calls=[], finish_reason="stop"),
     ]
-    loop._call_llm = AsyncMock(side_effect=responses2)  # type: ignore[method-assign]
+    loop._llm_caller.call = AsyncMock(side_effect=responses2)  # type: ignore[method-assign]
     loop.tools.execute_batch = AsyncMock(return_value=[ToolResult.fail("boom")])  # type: ignore[method-assign]
     final2, _tools2, msgs2 = await loop._run_agent_loop([{"role": "user", "content": "Read file."}])
     assert final2 == "done2"

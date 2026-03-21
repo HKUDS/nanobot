@@ -811,7 +811,7 @@ class TestConsolidationDeduplicationGuard:
         loop.sessions.save(session)
 
         # Ensure lock exists before /new.
-        _ = loop._get_consolidation_lock(session.key)
+        _ = loop._consolidator.get_lock(session.key)
         assert session.key in loop._consolidator._locks
 
         async def _ok_consolidate(sess, archive_all: bool = False) -> bool:

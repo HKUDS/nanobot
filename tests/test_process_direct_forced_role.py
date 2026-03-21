@@ -34,7 +34,7 @@ def _make_loop(tmp_path: Path, provider: ScriptedProvider, **overrides: Any) -> 
 
 
 class TestProcessDirectForcedRole:
-    """process_direct applies forced_role via _apply_role_for_turn."""
+    """process_direct applies forced_role via TurnRoleManager.apply."""
 
     async def test_forced_role_applies_role_and_resets(self, tmp_path: Path) -> None:
         """When forced_role is given, the named role should be applied for the turn."""
@@ -62,13 +62,13 @@ class TestProcessDirectForcedRole:
 
         # Track role application
         applied_roles: list[str] = []
-        original_apply = loop._apply_role_for_turn
+        original_apply = loop._role_manager.apply
 
         def tracking_apply(role: AgentRoleConfig) -> Any:
             applied_roles.append(role.name)
             return original_apply(role)
 
-        loop._apply_role_for_turn = tracking_apply  # type: ignore[assignment]
+        loop._role_manager.apply = tracking_apply  # type: ignore[assignment]
 
         # Suppress trace_request context manager
         @contextlib.asynccontextmanager

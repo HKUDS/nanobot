@@ -10,13 +10,16 @@
 The critique asks the LLM to evaluate its own answer and, if issues are
 found, generates a revised response before delivery.
 
+Recovery and fallback explanation logic also lives here so that
+``AgentLoop`` can delegate all answer-quality concerns to this class.
+
 Extracted from ``AgentLoop`` per ADR-002 to isolate verification logic.
 """
 
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -199,3 +202,115 @@ class AnswerVerifier:
         except (TypeError, ValueError):
             score = 0.0
         return max(0.0, min(1.0, score))
+
+    # ------------------------------------------------------------------
+    # Recovery & fallback explanation (moved from AgentLoop, LAN-215)
+    # ------------------------------------------------------------------
+
+    async def attempt_recovery(
+        self,
+        *,
+        channel: str,
+        chat_id: str,
+        all_msgs: list[dict[str, Any]],
+    ) -> str | None:
+        """Try a single recovery LLM call with minimal context when the main loop produced None.
+
+        Uses only the system prompt and the original user message (no tool history)
+        with tools disabled to force a direct text answer.
+        """
+        system_msg = next((m for m in all_msgs if m.get("role") == "system"), None)
+        user_msg = None
+        for m in reversed(all_msgs):
+            if m.get("role") == "user":
+                user_msg = m
+                break
+
+        if not system_msg or not user_msg:
+            logger.warning("Recovery skipped: missing system or user message")
+            return None
+
+        recovery_messages = [
+            system_msg,
+            user_msg,
+            {
+                "role": "system",
+                "content": (
+                    "Your previous attempt to answer did not produce a response. "
+                    "Answer the user's message directly without calling any tools. "
+                    "If you truly cannot answer, say what you know and suggest next steps."
+                ),
+            },
+        ]
+
+        logger.info("Attempting recovery LLM call for {}:{}", channel, chat_id)
+        try:
+            response = await self.provider.chat(
+                messages=recovery_messages,
+                tools=None,
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+        except Exception:  # crash-barrier: recovery LLM call
+            logger.exception("Recovery LLM call failed")
+            return None
+
+        if response.finish_reason == "error":
+            logger.warning("Recovery LLM call returned error: {}", response.content)
+            return None
+
+        content = strip_think(response.content)
+        if content:
+            logger.info("Recovery succeeded, returning answer")
+        else:
+            logger.warning("Recovery LLM call produced no usable content")
+        return content
+
+    @staticmethod
+    def build_no_answer_explanation(user_text: str, messages: list[dict[str, Any]]) -> str:
+        """Explain why the agent could not produce an answer on this turn."""
+        tool_results = [m for m in messages if m.get("role") == "tool"]
+        last_tool = tool_results[-1] if tool_results else None
+        last_tool_name = str(last_tool.get("name", "")) if last_tool else ""
+        last_tool_content = str(last_tool.get("content", "")) if last_tool else ""
+        lowered = last_tool_content.lower()
+
+        reasons: list[str] = []
+        if not tool_results:
+            reasons.append("The model did not produce a response for this message.")
+        if "exit code: 1" in lowered or "no such file" in lowered or "not found" in lowered:
+            reasons.append(
+                f"My last check with `{last_tool_name or 'a tool'}` returned no matching data."
+            )
+        if "permission denied" in lowered:
+            reasons.append("The lookup failed due to a local permission error.")
+        if "insufficient_quota" in lowered or "429" in lowered:
+            reasons.append("A provider quota/rate limit blocked part of the retrieval.")
+        if not reasons:
+            reasons.append("The model returned no final answer text after tool execution.")
+
+        question = (user_text or "").strip()
+        _question_words = {
+            "who",
+            "what",
+            "when",
+            "where",
+            "why",
+            "how",
+            "is",
+            "are",
+            "can",
+            "do",
+        }
+        looks_like_question = "?" in question or (
+            question.split()[0].lower() in _question_words if question else False
+        )
+        help_line = (
+            "Please try rephrasing your question or asking again."
+            if looks_like_question
+            else "Please share the fact directly and I can save it to memory."
+        )
+
+        primary_reason = reasons[0]
+        return f"Sorry, I couldn't answer that just now. {primary_reason} {help_line}"

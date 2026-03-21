@@ -150,28 +150,26 @@ def test_verification_helpers_and_lock_lifecycle(tmp_path: Path) -> None:
     v._memory = SimpleNamespace(retrieve=lambda *_a, **_k: [{"score": 0.2}])
     assert v.should_force_verification("What is this") is True
 
-    lock = loop._get_consolidation_lock("s1")
+    lock = loop._consolidator.get_lock("s1")
     assert isinstance(lock, asyncio.Lock)
-    loop._prune_consolidation_lock("s1", lock)
+    loop._consolidator.prune_lock("s1", lock)
     assert "s1" not in loop._consolidator._locks
 
 
 async def test_attempt_recovery_missing_or_error_paths(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path)
-    loop.provider = SimpleNamespace(chat=None)
-    loop.model = "m"
-    loop.temperature = 0.0
-    loop.config.max_tokens = 32
+    verifier = loop._verifier
+    verifier.provider = SimpleNamespace(chat=None)
 
     # Missing system/user pair -> skip recovery.
-    assert await loop._attempt_recovery(SimpleNamespace(channel="c", chat_id="id"), []) is None
+    assert await verifier.attempt_recovery(channel="c", chat_id="id", all_msgs=[]) is None
 
     async def _raise_chat(**_kwargs):
         raise RuntimeError("boom")
 
-    loop.provider = SimpleNamespace(chat=_raise_chat)
+    verifier.provider = SimpleNamespace(chat=_raise_chat)
     msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
-    assert await loop._attempt_recovery(SimpleNamespace(channel="c", chat_id="id"), msgs) is None
+    assert await verifier.attempt_recovery(channel="c", chat_id="id", all_msgs=msgs) is None
 
 
 # ---------------------------------------------------------------------------
