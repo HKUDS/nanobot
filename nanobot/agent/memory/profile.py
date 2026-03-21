@@ -11,14 +11,13 @@ through ``_Mem0Adapter``.
 from __future__ import annotations
 
 import hashlib
-import re
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from .event import BeliefRecord
+from .helpers import _norm_text, _safe_float, _to_str_list, _tokenize, _utc_now_iso
 
 if TYPE_CHECKING:
     from .mem0_adapter import _Mem0Adapter
@@ -78,39 +77,12 @@ class ProfileManager:
         # etc.).
         self._store: Any = None
 
-    # ------------------------------------------------------------------
-    # Static helpers (duplicated from MemoryStore so ProfileManager is
-    # self-contained; the originals remain on MemoryStore for other callers)
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _utc_now_iso() -> str:
-        return datetime.now(timezone.utc).isoformat()
-
-    @staticmethod
-    def _safe_float(value: Any, default: float) -> float:
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return default
-
-    @staticmethod
-    def _norm_text(value: str) -> str:
-        return re.sub(r"\s+", " ", value.strip().lower())
-
-    @staticmethod
-    def _tokenize(value: str) -> set[str]:
-        return {t for t in re.findall(r"[a-zA-Z0-9_\-]+", value.lower()) if len(t) > 1}
-
-    @staticmethod
-    def _to_str_list(value: Any) -> list[str]:
-        if not isinstance(value, list):
-            return []
-        out: list[str] = []
-        for item in value:
-            if isinstance(item, str) and item.strip():
-                out.append(item.strip())
-        return out
+    # -- Shared helpers imported from .helpers --------------------------------
+    _utc_now_iso = staticmethod(_utc_now_iso)
+    _safe_float = staticmethod(_safe_float)
+    _norm_text = staticmethod(_norm_text)
+    _tokenize = staticmethod(_tokenize)
+    _to_str_list = staticmethod(_to_str_list)
 
     @staticmethod
     def _generate_belief_id(section: str, norm_text: str, created_at: str) -> str:

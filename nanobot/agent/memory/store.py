@@ -43,6 +43,18 @@ from .context_assembler import ContextAssembler
 from .eval import EvalRunner
 from .extractor import MemoryExtractor
 from .graph import KnowledgeGraph
+from .helpers import (
+    _GRAPH_QUERY_STOPWORDS,
+    _contains_any,
+    _estimate_tokens,
+    _extract_query_keywords,
+    _norm_text,
+    _safe_float,
+    _to_datetime,
+    _to_str_list,
+    _tokenize,
+    _utc_now_iso,
+)
 from .mem0_adapter import _Mem0Adapter, _Mem0RuntimeInfo
 from .persistence import MemoryPersistence
 from .profile import ProfileManager
@@ -193,155 +205,18 @@ class MemoryStore:
             get_backend_stats_fn=lambda: self._backend_stats_for_eval(),
         )
 
-    @staticmethod
-    def _utc_now_iso() -> str:
-        return datetime.now(timezone.utc).isoformat()
-
-    @staticmethod
-    def _safe_float(value: Any, default: float) -> float:
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return default
-
-    @staticmethod
-    def _norm_text(value: str) -> str:
-        return re.sub(r"\s+", " ", value.strip().lower())
-
-    @staticmethod
-    def _tokenize(value: str) -> set[str]:
-        return {t for t in re.findall(r"[a-zA-Z0-9_\-]+", value.lower()) if len(t) > 1}
-
-    # Stopwords excluded when extracting query keywords for graph lookups.
-    _GRAPH_QUERY_STOPWORDS = frozenset(
-        {
-            "the",
-            "this",
-            "that",
-            "then",
-            "than",
-            "they",
-            "them",
-            "there",
-            "these",
-            "those",
-            "what",
-            "when",
-            "where",
-            "which",
-            "while",
-            "who",
-            "whom",
-            "whose",
-            "why",
-            "how",
-            "also",
-            "and",
-            "but",
-            "for",
-            "from",
-            "into",
-            "just",
-            "like",
-            "not",
-            "only",
-            "some",
-            "such",
-            "very",
-            "will",
-            "with",
-            "would",
-            "could",
-            "should",
-            "about",
-            "after",
-            "before",
-            "been",
-            "being",
-            "have",
-            "here",
-            "more",
-            "most",
-            "much",
-            "over",
-            "same",
-            "still",
-            "each",
-            "even",
-            "every",
-            "other",
-            "are",
-            "was",
-            "were",
-            "had",
-            "has",
-            "does",
-            "did",
-            "any",
-            "its",
-            "can",
-            "may",
-            "is",
-            "it",
-            "an",
-            "or",
-            "no",
-            "do",
-            "so",
-            "if",
-            "my",
-            "me",
-            "his",
-            "her",
-            "our",
-            "your",
-            "their",
-            "a",
-            "of",
-            "in",
-            "on",
-            "to",
-            "at",
-            "by",
-            "currently",
-            "involved",
-            "caused",
-            "resolved",
-            "apply",
-        }
-    )
-
-    @classmethod
-    def _extract_query_keywords(cls, query: str) -> set[str]:
-        """Extract significant keywords from a query for graph entity lookup."""
-        tokens = {t for t in re.findall(r"[a-zA-Z0-9_\-]+", query.lower()) if len(t) > 2}
-        return tokens - cls._GRAPH_QUERY_STOPWORDS
-
-    @staticmethod
-    def _to_str_list(value: Any) -> list[str]:
-        if not isinstance(value, list):
-            return []
-        out: list[str] = []
-        for item in value:
-            if isinstance(item, str) and item.strip():
-                out.append(item.strip())
-        return out
-
-    @staticmethod
-    def _to_datetime(value: str | None) -> datetime | None:
-        if not value:
-            return None
-        try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-
-    @staticmethod
-    def _estimate_tokens(text: str) -> int:
-        value = str(text or "")
-        if not value:
-            return 0
-        return max(1, len(value) // 4)
+    # -- Shared helpers imported from .helpers --------------------------------
+    # Kept as class attributes for backward compatibility with any external
+    # callers that use ``MemoryStore._utc_now_iso()`` etc.
+    _utc_now_iso = staticmethod(_utc_now_iso)
+    _safe_float = staticmethod(_safe_float)
+    _norm_text = staticmethod(_norm_text)
+    _tokenize = staticmethod(_tokenize)
+    _GRAPH_QUERY_STOPWORDS = _GRAPH_QUERY_STOPWORDS
+    _extract_query_keywords = staticmethod(_extract_query_keywords)  # type: ignore[assignment]
+    _to_str_list = staticmethod(_to_str_list)
+    _to_datetime = staticmethod(_to_datetime)
+    _estimate_tokens = staticmethod(_estimate_tokens)
 
     def _load_rollout_config(self) -> dict[str, Any]:
         defaults: dict[str, Any] = {
@@ -509,10 +384,7 @@ class MemoryStore:
             if bk in overrides:
                 self.rollout[bk] = bool(overrides[bk])
 
-    @staticmethod
-    def _contains_any(text: str, needles: tuple[str, ...]) -> bool:
-        lowered = str(text or "").lower()
-        return any(needle in lowered for needle in needles)
+    _contains_any = staticmethod(_contains_any)
 
     # ── Thin wrappers delegating to RetrievalPlanner (LAN-207) ──────────
 

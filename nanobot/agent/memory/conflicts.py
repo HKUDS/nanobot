@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from .helpers import _norm_text, _safe_float, _tokenize, _utc_now_iso
 from .profile import ProfileManager
 
 if TYPE_CHECKING:
@@ -59,32 +60,11 @@ class ConflictManager:
         # MemoryStore at wiring time.
         self.conflict_auto_resolve_gap: float = 0.25
 
-    # -- helpers (delegated) ------------------------------------------------
-
-    @staticmethod
-    def _norm_text(value: str) -> str:
-        import re
-
-        return re.sub(r"\s+", " ", value.strip().lower())
-
-    @staticmethod
-    def _safe_float(value: Any, default: float) -> float:
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return default
-
-    @staticmethod
-    def _tokenize(value: str) -> set[str]:
-        import re
-
-        return {t for t in re.findall(r"[a-zA-Z0-9_\-]+", value.lower()) if len(t) > 1}
-
-    @staticmethod
-    def _utc_now_iso() -> str:
-        from datetime import datetime, timezone
-
-        return datetime.now(timezone.utc).isoformat()
+    # -- Shared helpers imported from .helpers --------------------------------
+    _norm_text = staticmethod(_norm_text)
+    _safe_float = staticmethod(_safe_float)
+    _tokenize = staticmethod(_tokenize)
+    _utc_now_iso = staticmethod(_utc_now_iso)
 
     # -- public API ---------------------------------------------------------
 
