@@ -63,9 +63,9 @@ nanobot/
 │   │   ├── extractor.py # LLM + heuristic event extraction
 │   │   ├── persistence.py # JSONL events + profile.json + MEMORY.md file I/O
 │   │   ├── mem0_adapter.py # mem0 vector store adapter with health checks
-│   │   ├── reranker.py  # Optional cross-encoder re-ranking
+│   │   ├── reranker.py  # Cross-encoder re-ranking via ONNX Runtime
 │   │   ├── constants.py # Shared constants and tool schemas
-│   │   ├── graph.py     # Knowledge graph support (optional, needs neo4j)
+│   │   ├── graph.py     # Knowledge graph support via networkx
 │   │   ├── ontology.py  # Ontology management (re-exports classifier, linker)
 │   │   ├── entity_classifier.py # Entity type classification
 │   │   └── entity_linker.py    # Entity linking and resolution
@@ -129,7 +129,7 @@ nanobot/
 The memory subsystem (`nanobot/agent/memory/`) uses a **mem0-first strategy**:
 
 1. **Write path**: Events extracted by `MemoryExtractor` (LLM-based) → stored in mem0 vector store + appended to `events.jsonl` (local backup)
-2. **Read path**: Query mem0 first → fallback to local keyword search (`retrieval.py`) → optional cross-encoder re-ranking (`reranker.py`)
+2. **Read path**: Query mem0 first → fallback to local keyword search (`retrieval.py`) → cross-encoder re-ranking via ONNX Runtime (`reranker.py`, `onnx_reranker.py`)
 3. **Persistence**: `MemoryPersistence` manages `events.jsonl` (append-only JSONL), `profile.json` (user profile state), `MEMORY.md` (active knowledge snapshot), `HISTORY.md` (event log)
 4. **Consolidation**: Periodic pass merges events, updates profile, compacts MEMORY.md
 

@@ -2284,6 +2284,80 @@ def memory_outdated(
     console.print(f"[green]✓[/green] Marked memory item as outdated in '{field}'")
 
 
+@memory_app.command("migrate-graph")
+def migrate_graph(
+    neo4j_uri: str = typer.Option("bolt://localhost:7687", help="Neo4j server URI"),
+    neo4j_auth: str = typer.Option("neo4j/password", help="Neo4j auth (user/password)"),
+    neo4j_database: str = typer.Option("neo4j", help="Neo4j database name"),
+) -> None:
+    """Migrate knowledge graph from Neo4j to local networkx JSON file.
+
+    Requires neo4j package: pip install neo4j
+    """
+    try:
+        from neo4j import GraphDatabase  # type: ignore[import-untyped]
+    except ImportError:
+        console.print("[red]neo4j package not installed.[/red]")
+        console.print("Install it first: pip install neo4j")
+        raise typer.Exit(1) from None
+
+    from nanobot.config.loader import load_config
+
+    config = load_config()
+    workspace = config.workspace_path
+
+    # Parse auth
+    parts = neo4j_auth.split("/", 1)
+    user, password = parts[0], parts[1] if len(parts) > 1 else ""
+
+    console.print(f"Connecting to Neo4j at {neo4j_uri}...")
+    driver = None
+    try:
+        driver = GraphDatabase.driver(neo4j_uri, auth=(user, password))
+        with driver.session(database=neo4j_database) as session:
+            # Read all nodes
+            nodes = session.run("MATCH (n) RETURN n").data()
+            # Read all relationships
+            rels = session.run(
+                "MATCH ()-[r]->() RETURN r, type(r) as type,"
+                " startNode(r).name as src, endNode(r).name as tgt"
+            ).data()
+    except Exception as exc:  # crash-barrier: neo4j connection errors are opaque
+        console.print(f"[red]Failed to connect to Neo4j: {exc}[/red]")
+        raise typer.Exit(1) from None
+    finally:
+        if driver is not None:
+            driver.close()
+
+    # Build networkx graph
+    from nanobot.agent.memory.graph import KnowledgeGraph
+
+    graph = KnowledgeGraph(workspace=workspace)
+
+    node_count = 0
+    for record in nodes:
+        node = record["n"]
+        props = dict(node.items())
+        name = props.pop("name", str(node.id))
+        graph._graph.add_node(name.lower(), **props)
+        node_count += 1
+
+    edge_count = 0
+    for record in rels:
+        src = record.get("src", "").lower()
+        tgt = record.get("tgt", "").lower()
+        rel_type = record.get("type", "RELATED_TO")
+        if src and tgt:
+            graph._graph.add_edge(src, tgt, type=rel_type)
+            edge_count += 1
+
+    graph._save()
+    console.print(
+        f"[green]Migration complete: {node_count} entities, {edge_count} relationships[/green]"
+    )
+    console.print(f"Saved to: {graph._json_path}")
+
+
 @app.command("replay-deadletters")
 def replay_deadletters(
     dry_run: bool = typer.Option(
