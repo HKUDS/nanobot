@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from loguru import logger
 
+from nanobot.agent.prompt_loader import prompts
+
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
@@ -93,7 +95,7 @@ class HeartbeatService:
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision.",
+                    "content": prompts.get("heartbeat"),
                 },
                 {
                     "role": "user",

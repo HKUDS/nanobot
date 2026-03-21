@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from nanobot.agent.prompt_loader import prompts
+
 from .constants import _SAVE_EVENTS_TOOL
 
 if TYPE_CHECKING:
@@ -458,7 +460,7 @@ class MemoryExtractor:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a structured memory extractor. Call save_events with events and profile_updates.",
+                        "content": prompts.get("extractor"),
                     },
                     {"role": "user", "content": prompt},
                 ],

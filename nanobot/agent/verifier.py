@@ -121,12 +121,7 @@ class AnswerVerifier:
                 messages.append(
                     {
                         "role": "system",
-                        "content": (
-                            f"Self-check found potential issues with your answer:\n"
-                            f"{issue_text}\n\n"
-                            "Please revise your answer addressing these concerns. "
-                            "If you're uncertain about a claim, say so explicitly."
-                        ),
+                        "content": prompts.render("revision_request", issue_text=issue_text),
                     }
                 )
 
@@ -235,11 +230,7 @@ class AnswerVerifier:
             user_msg,
             {
                 "role": "system",
-                "content": (
-                    "Your previous attempt to answer did not produce a response. "
-                    "Answer the user's message directly without calling any tools. "
-                    "If you truly cannot answer, say what you know and suggest next steps."
-                ),
+                "content": prompts.get("recovery"),
             },
         ]
 

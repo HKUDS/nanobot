@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.tracing import bind_trace
 
 from .conflicts import (
@@ -2901,7 +2902,7 @@ class MemoryStore:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation.",
+                        "content": prompts.get("consolidation"),
                     },
                     {"role": "user", "content": prompt},
                 ],
