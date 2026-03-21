@@ -1,11 +1,12 @@
 """Cron tool for scheduling reminders and tasks."""
 
 from contextvars import ContextVar
+from datetime import datetime, timezone
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
 from nanobot.cron.service import CronService
-from nanobot.cron.types import CronSchedule
+from nanobot.cron.types import CronJobState, CronSchedule
 
 
 class CronTool(Tool):
@@ -143,11 +144,51 @@ class CronTool(Tool):
         )
         return f"Created job '{job.name}' (id: {job.id})"
 
+    @staticmethod
+    def _format_timing(schedule: CronSchedule) -> str:
+        """Format schedule as a human-readable timing string."""
+        if schedule.kind == "cron":
+            tz = f" ({schedule.tz})" if schedule.tz else ""
+            return f"cron: {schedule.expr}{tz}"
+        if schedule.kind == "every" and schedule.every_ms:
+            ms = schedule.every_ms
+            if ms % 3_600_000 == 0:
+                return f"every {ms // 3_600_000}h"
+            if ms % 60_000 == 0:
+                return f"every {ms // 60_000}m"
+            if ms % 1000 == 0:
+                return f"every {ms // 1000}s"
+            return f"every {ms}ms"
+        if schedule.kind == "at" and schedule.at_ms:
+            dt = datetime.fromtimestamp(schedule.at_ms / 1000, tz=timezone.utc)
+            return f"at {dt.isoformat()}"
+        return schedule.kind
+
+    @staticmethod
+    def _format_state(state: CronJobState) -> list[str]:
+        """Format job run state as display lines."""
+        lines: list[str] = []
+        if state.last_run_at_ms:
+            last_dt = datetime.fromtimestamp(state.last_run_at_ms / 1000, tz=timezone.utc)
+            info = f"  Last run: {last_dt.isoformat()} — {state.last_status or 'unknown'}"
+            if state.last_error:
+                info += f" ({state.last_error})"
+            lines.append(info)
+        if state.next_run_at_ms:
+            next_dt = datetime.fromtimestamp(state.next_run_at_ms / 1000, tz=timezone.utc)
+            lines.append(f"  Next run: {next_dt.isoformat()}")
+        return lines
+
     def _list_jobs(self) -> str:
         jobs = self._cron.list_jobs()
         if not jobs:
             return "No scheduled jobs."
-        lines = [f"- {j.name} (id: {j.id}, {j.schedule.kind})" for j in jobs]
+        lines = []
+        for j in jobs:
+            timing = self._format_timing(j.schedule)
+            parts = [f"- {j.name} (id: {j.id}, {timing})"]
+            parts.extend(self._format_state(j.state))
+            lines.append("\n".join(parts))
         return "Scheduled jobs:\n" + "\n".join(lines)
 
     def _remove_job(self, job_id: str | None) -> str:
