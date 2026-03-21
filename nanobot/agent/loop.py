@@ -839,12 +839,7 @@ class AgentLoop:
             messages.append(
                 {
                     "role": "system",
-                    "content": (
-                        "Delegation budget exhausted. You have completed all "
-                        "delegated sub-tasks. Do NOT delegate any more work. "
-                        "Synthesize the results you have and produce your "
-                        "final answer NOW."
-                    ),
+                    "content": prompts.get("nudge_delegation_exhausted"),
                 }
             )
         elif any_failed:
@@ -870,31 +865,15 @@ class AgentLoop:
                 for m in messages[-len(response.tool_calls) :]
                 if m.get("role") == "tool"
             )
-            nudge = (
-                "Delegation(s) complete. Review the results above. "
-                "If all planned delegations are done, produce your "
-                "final answer synthesizing the results. Do NOT start "
-                "another round of delegations unless the results are "
-                "clearly insufficient (e.g. empty or errored)."
-            )
+            nudge = prompts.get("nudge_post_delegation")
             if _ungrounded:
-                nudge += (
-                    "\n\nWARNING: One or more specialists completed their "
-                    "task without using any tools. Those results may be "
-                    "unverified. Consider cross-checking critical claims "
-                    "before including them in your answer."
-                )
+                nudge += "\n\n" + prompts.get("nudge_ungrounded_warning")
             # If the agent used sequential delegate for an inherently parallel
             # request, nudge it to switch to delegate_parallel next round.
             if not any(
                 tc.name == "delegate_parallel" for tc in response.tool_calls
             ) and DelegationDispatcher.has_parallel_structure(user_text):
-                nudge += (
-                    "\n\nYou used sequential `delegate` but the user's "
-                    "request lists independent sub-tasks. For the "
-                    "remaining work, switch to `delegate_parallel` "
-                    "to execute them concurrently."
-                )
+                nudge += "\n\n" + prompts.get("nudge_use_parallel")
             messages.append({"role": "system", "content": nudge})
         elif (
             has_plan
@@ -911,7 +890,8 @@ class AgentLoop:
                         "solo without delegating. STOP doing the work "
                         "yourself. Use `delegate_parallel` NOW to distribute "
                         "remaining work to specialist agents. This is "
-                        "required for multi-part tasks."
+                        "required for multi-part tasks (unless delegation "
+                        "budget is exhausted)."
                     ),
                 }
             )
@@ -1004,13 +984,7 @@ class AgentLoop:
                     messages.append(
                         {
                             "role": "system",
-                            "content": (
-                                "The user's request lists multiple INDEPENDENT "
-                                "sub-tasks or areas. Use `delegate_parallel` (NOT "
-                                "sequential `delegate`) to fan them out concurrently. "
-                                "Sequential `delegate` is only appropriate when task B "
-                                "depends on task A's output."
-                            ),
+                            "content": prompts.get("nudge_parallel_structure"),
                         }
                     )
                     logger.debug("Parallel structure nudge injected")
@@ -1107,10 +1081,7 @@ class AgentLoop:
                     messages.append(
                         {
                             "role": "system",
-                            "content": (
-                                "You were asked to produce a plan before acting. "
-                                "Please outline your plan first, then proceed with tool calls."
-                            ),
+                            "content": prompts.get("nudge_plan_enforcement"),
                         }
                     )
                     logger.debug("Plan enforcement: nudging model to produce plan first")
@@ -1133,11 +1104,7 @@ class AgentLoop:
                         messages.append(
                             {
                                 "role": "system",
-                                "content": (
-                                    "Your previous tool calls were malformed (empty name or "
-                                    "arguments). Produce the final answer directly without "
-                                    "calling any more tools."
-                                ),
+                                "content": prompts.get("nudge_malformed_fallback"),
                             }
                         )
                         continue
@@ -1208,11 +1175,7 @@ class AgentLoop:
                     messages.append(
                         {
                             "role": "system",
-                            "content": (
-                                "You have already used tools in this turn. "
-                                "Now produce the final answer summarizing the tool results. "
-                                "Do not call any more tools."
-                            ),
+                            "content": prompts.get("nudge_final_answer"),
                         }
                     )
                     logger.info(
