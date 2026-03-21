@@ -21,6 +21,7 @@ from typing import Any
 
 import pytest
 
+from nanobot.agent.callbacks import ProgressEvent, ToolCallEvent
 from nanobot.bus.events import InboundMessage
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from tests.helpers import ScriptedProvider, _make_loop
@@ -888,3 +889,29 @@ class TestConcurrentProcessMessage:
         assert not any("hello-from-A" in c for c in contents_b), (
             "B's session must not leak A's content"
         )
+
+
+class TestProgressEvents:
+    """Test that the agent emits correct typed progress events."""
+
+    async def test_tool_call_emits_tool_call_event(self, tmp_path: Path) -> None:
+        """ToolCallEvent is emitted with correct tool_name when a tool is invoked."""
+        provider = ScriptedProvider(
+            [
+                LLMResponse(
+                    content=None,
+                    tool_calls=[ToolCallRequest(id="tc1", name="read_file", arguments={"path": "/tmp/x"})]
+                ),
+                LLMResponse(content="Done."),
+            ]
+        )
+        received: list[ProgressEvent] = []
+
+        async def tracking(event: ProgressEvent) -> None:
+            received.append(event)
+
+        loop = _make_loop(tmp_path, provider)
+        await loop.process_direct("read a file", on_progress=tracking)
+
+        tool_events = [e for e in received if isinstance(e, ToolCallEvent)]
+        assert any(e.tool_name == "read_file" for e in tool_events)
