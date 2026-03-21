@@ -35,47 +35,24 @@ DEFAULT_ROLES: list[AgentRoleConfig] = [
     AgentRoleConfig(
         name="code",
         description="Code generation, debugging, refactoring, and programming tasks.",
-        system_prompt=(
-            "You are a senior software engineer. Focus on writing clean, correct, "
-            "well-tested code. Prefer concrete implementations over explanations.\n\n"
-            "IMPORTANT: You MUST use tools (read_file, list_dir, exec) to inspect the "
-            "actual codebase. Never guess about code structure, line counts, or content "
-            "— always verify with tools first."
-        ),
+        system_prompt="",
     ),
     AgentRoleConfig(
         name="research",
         description="Web search, document analysis, codebase exploration, and fact-finding.",
-        system_prompt=(
-            "You are a research specialist. Gather information thoroughly, cite sources, "
-            "and present findings in a structured format.\n\n"
-            "IMPORTANT: You MUST use tools (web_search, web_fetch, read_file, list_dir) "
-            "to gather real information. Always ground your findings in actual tool "
-            "output — never fabricate data or statistics."
-        ),
+        system_prompt="",
         denied_tools=["write_file", "edit_file"],
     ),
     AgentRoleConfig(
         name="writing",
         description="Documentation, emails, summaries, and content creation.",
-        system_prompt=(
-            "You are a skilled technical writer. Produce clear, well-structured prose. "
-            "Match the appropriate tone and format for the audience.\n\n"
-            "IMPORTANT: Use read_scratchpad to review other agents' findings before "
-            "writing. Base all content on real data from prior agent outputs — never "
-            "invent facts or statistics."
-        ),
+        system_prompt="",
         denied_tools=["exec"],
     ),
     AgentRoleConfig(
         name="system",
         description="Shell commands, deployment, infrastructure, and DevOps tasks.",
-        system_prompt=(
-            "You are a systems engineer and DevOps specialist. Execute commands carefully, "
-            "verify results, and explain what each step does.\n\n"
-            "IMPORTANT: Always use the exec tool to run commands and verify results. "
-            "Never assume command output — execute and report actual results."
-        ),
+        system_prompt="",
     ),
     AgentRoleConfig(
         name="pm",
@@ -83,24 +60,7 @@ DEFAULT_ROLES: list[AgentRoleConfig] = [
             "Project planning, task breakdown, comprehensive analysis reports, "
             "health assessments, sprint management, and multi-faceted coordination."
         ),
-        system_prompt=(
-            "You are a project manager and orchestration lead. Break down goals "
-            "into actionable steps, track progress, identify blockers, and "
-            "coordinate deliverables.\n\n"
-            "ORCHESTRATION PATTERN — Gather then Synthesise:\n"
-            "  1. Use `delegate_parallel` to fan out data-gathering tasks "
-            "(code analysis, research, investigation) to specialist agents.\n"
-            "  2. Wait for all gathering results to return.\n"
-            "  3. THEN compile/synthesise the findings yourself, or delegate "
-            "synthesis to a writing agent as a SEPARATE call.\n"
-            "  NEVER mix gathering and synthesis tasks in the same "
-            "`delegate_parallel` — synthesis agents would see empty scratchpads.\n\n"
-            "  For large background investigations or scheduled audits, use "
-            "`mission_start` to launch an async mission that reports back when done.\n\n"
-            "IMPORTANT: Use read_scratchpad to review other agents' findings before "
-            "compiling reports. Synthesize from actual data — never fabricate metrics "
-            "or statistics."
-        ),
+        system_prompt="",
         denied_tools=["exec"],
     ),
     AgentRoleConfig(
@@ -109,6 +69,26 @@ DEFAULT_ROLES: list[AgentRoleConfig] = [
         system_prompt="",
     ),
 ]
+
+
+def _ensure_role_prompts_loaded() -> None:
+    """Lazy-load role system prompts from .md files on first access.
+
+    Called by ``build_default_registry`` after ``PromptLoader`` workspace is set.
+    """
+    _role_prompt_map = {
+        "code": "role_code",
+        "research": "role_research",
+        "writing": "role_writing",
+        "system": "role_system",
+        "pm": "role_pm",
+    }
+    for role in DEFAULT_ROLES:
+        prompt_name = _role_prompt_map.get(role.name)
+        if prompt_name and not role.system_prompt:
+            loaded = prompts.get(prompt_name)
+            if loaded:
+                role.system_prompt = loaded
 
 
 def build_default_registry(default_role: str = "general") -> AgentRegistry:
@@ -124,6 +104,7 @@ def build_default_registry(default_role: str = "general") -> AgentRegistry:
     If you want to start with an empty registry (no built-in roles), instantiate
     ``AgentRegistry`` directly and register roles manually.
     """
+    _ensure_role_prompts_loaded()
     registry = AgentRegistry(default_role=default_role)
     for role in DEFAULT_ROLES:
         registry.register(role)
