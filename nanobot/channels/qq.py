@@ -242,43 +242,46 @@ class QQChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send attachments first, then text."""
-        if not self._client:
-            logger.warning("QQ client not initialized")
-            return
+        try:
+            if not self._client:
+                logger.warning("QQ client not initialized")
+                return
 
-        msg_id = msg.metadata.get("message_id")
-        chat_type = self._chat_type_cache.get(msg.chat_id, "c2c")
-        is_group = chat_type == "group"
+            msg_id = msg.metadata.get("message_id")
+            chat_type = self._chat_type_cache.get(msg.chat_id, "c2c")
+            is_group = chat_type == "group"
 
-        # 1) Send media
-        for media_ref in msg.media or []:
-            ok = await self._send_media(
-                chat_id=msg.chat_id,
-                media_ref=media_ref,
-                msg_id=msg_id,
-                is_group=is_group,
-            )
-            if not ok:
-                filename = (
-                    os.path.basename(urlparse(media_ref).path)
-                    or os.path.basename(media_ref)
-                    or "file"
+            # 1) Send media
+            for media_ref in msg.media or []:
+                ok = await self._send_media(
+                    chat_id=msg.chat_id,
+                    media_ref=media_ref,
+                    msg_id=msg_id,
+                    is_group=is_group,
                 )
+                if not ok:
+                    filename = (
+                        os.path.basename(urlparse(media_ref).path)
+                        or os.path.basename(media_ref)
+                        or "file"
+                    )
+                    await self._send_text_only(
+                        chat_id=msg.chat_id,
+                        is_group=is_group,
+                        msg_id=msg_id,
+                        content=f"[Attachment send failed: {filename}]",
+                    )
+
+            # 2) Send text
+            if msg.content and msg.content.strip():
                 await self._send_text_only(
                     chat_id=msg.chat_id,
                     is_group=is_group,
                     msg_id=msg_id,
-                    content=f"[Attachment send failed: {filename}]",
+                    content=msg.content.strip(),
                 )
-
-        # 2) Send text
-        if msg.content and msg.content.strip():
-            await self._send_text_only(
-                chat_id=msg.chat_id,
-                is_group=is_group,
-                msg_id=msg_id,
-                content=msg.content.strip(),
-            )
+        except Exception:
+            logger.exception("Error sending QQ message to chat_id={}", msg.chat_id)
 
     async def _send_text_only(
         self,
@@ -438,15 +441,26 @@ class QQChannel(BaseChannel):
             endpoint = "/v2/users/{openid}/files"
             id_key = "openid"
 
-        payload = {
+        payload: dict[str, Any] = {
             id_key: chat_id,
             "file_type": file_type,
             "file_data": file_data,
-            "file_name": file_name,
             "srv_send_msg": srv_send_msg,
         }
+        # Only pass file_name for non-image types (file_type=4).
+        # Passing file_name for images causes QQ client to render them as
+        # file attachments instead of inline images.
+        if file_type != QQ_FILE_TYPE_IMAGE and file_name:
+            payload["file_name"] = file_name
+
         route = Route("POST", endpoint, **{id_key: chat_id})
-        return await self._client.api._http.request(route, json=payload)
+        result = await self._client.api._http.request(route, json=payload)
+
+        # Extract only the file_info field to avoid extra fields (file_uuid, ttl, etc.)
+        # that may confuse QQ client when sending the media object.
+        if isinstance(result, dict) and "file_info" in result:
+            return {"file_info": result["file_info"]}
+        return result
 
     # ---------------------------
     # Inbound (receive)
@@ -454,58 +468,68 @@ class QQChannel(BaseChannel):
 
     async def _on_message(self, data: C2CMessage | GroupMessage, is_group: bool = False) -> None:
         """Parse inbound message, download attachments, and publish to the bus."""
-        if data.id in self._processed_ids:
-            return
-        self._processed_ids.append(data.id)
+        try:
+            if data.id in self._processed_ids:
+                return
+            self._processed_ids.append(data.id)
 
-        if is_group:
-            chat_id = data.group_openid
-            user_id = data.author.member_openid
-            self._chat_type_cache[chat_id] = "group"
-        else:
-            chat_id = str(
-                getattr(data.author, "id", None) or getattr(data.author, "user_openid", "unknown")
-            )
-            user_id = chat_id
-            self._chat_type_cache[chat_id] = "c2c"
-
-        content = (data.content or "").strip()
-
-        # the data used by tests don't contain attachments property
-        # so we use getattr with a default of [] to avoid AttributeError in tests
-        attachments = getattr(data, "attachments", None) or []
-        media_paths, recv_lines, att_meta = await self._handle_attachments(attachments)
-
-        # Compose content that always contains actionable saved paths
-        if recv_lines:
-            tag = "[Image]" if any(_is_image_name(Path(p).name) for p in media_paths) else "[File]"
-            file_block = "Received files:\n" + "\n".join(recv_lines)
-            content = f"{content}\n\n{file_block}".strip() if content else f"{tag}\n{file_block}"
-
-        if not content and not media_paths:
-            return
-
-        if self.config.ack_message:
-            try:
-                await self._send_text_only(
-                    chat_id=chat_id,
-                    is_group=is_group,
-                    msg_id=data.id,
-                    content=self.config.ack_message,
+            if is_group:
+                chat_id = data.group_openid
+                user_id = data.author.member_openid
+                self._chat_type_cache[chat_id] = "group"
+            else:
+                chat_id = str(
+                    getattr(data.author, "id", None)
+                    or getattr(data.author, "user_openid", "unknown")
                 )
-            except Exception:
-                logger.debug("QQ ack message failed for chat_id={}", chat_id)
+                user_id = chat_id
+                self._chat_type_cache[chat_id] = "c2c"
 
-        await self._handle_message(
-            sender_id=user_id,
-            chat_id=chat_id,
-            content=content,
-            media=media_paths if media_paths else None,
-            metadata={
-                "message_id": data.id,
-                "attachments": att_meta,
-            },
-        )
+            content = (data.content or "").strip()
+
+            # the data used by tests don't contain attachments property
+            # so we use getattr with a default of [] to avoid AttributeError in tests
+            attachments = getattr(data, "attachments", None) or []
+            media_paths, recv_lines, att_meta = await self._handle_attachments(attachments)
+
+            # Compose content that always contains actionable saved paths
+            if recv_lines:
+                tag = (
+                    "[Image]"
+                    if any(_is_image_name(Path(p).name) for p in media_paths)
+                    else "[File]"
+                )
+                file_block = "Received files:\n" + "\n".join(recv_lines)
+                content = (
+                    f"{content}\n\n{file_block}".strip() if content else f"{tag}\n{file_block}"
+                )
+
+            if not content and not media_paths:
+                return
+
+            if self.config.ack_message:
+                try:
+                    await self._send_text_only(
+                        chat_id=chat_id,
+                        is_group=is_group,
+                        msg_id=data.id,
+                        content=self.config.ack_message,
+                    )
+                except Exception:
+                    logger.debug("QQ ack message failed for chat_id={}", chat_id)
+
+            await self._handle_message(
+                sender_id=user_id,
+                chat_id=chat_id,
+                content=content,
+                media=media_paths if media_paths else None,
+                metadata={
+                    "message_id": data.id,
+                    "attachments": att_meta,
+                },
+            )
+        except Exception:
+            logger.exception("Error handling QQ inbound message id={}", getattr(data, "id", "?"))
 
     async def _handle_attachments(
         self,
@@ -520,7 +544,9 @@ class QQChannel(BaseChannel):
             return media_paths, recv_lines, att_meta
 
         for att in attachments:
-            url, filename, ctype = att.url, att.filename, att.content_type
+            url = getattr(att, "url", None) or ""
+            filename = getattr(att, "filename", None) or ""
+            ctype = getattr(att, "content_type", None) or ""
 
             logger.info("Downloading file from QQ: {}", filename or url)
             local_path = await self._download_to_media_dir_chunked(url, filename_hint=filename)
@@ -555,6 +581,10 @@ class QQChannel(BaseChannel):
         Enforces a max download size and writes to a .part temp file
         that is atomically renamed on success.
         """
+        # Handle protocol-relative URLs (e.g. "//multimedia.nt.qq.com/...")
+        if url.startswith("//"):
+            url = f"https:{url}"
+
         if not self._http:
             self._http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120))
 
