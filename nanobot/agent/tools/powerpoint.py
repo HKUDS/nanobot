@@ -417,7 +417,7 @@ class ReadPptxTool(Tool):
             token_estimate=len(full_json) // 4,
         )
 
-    async def execute(self, path: str, **kwargs: Any) -> ToolResult:  # type: ignore[override]
+    async def execute(self, *, path: str, **kwargs: Any) -> ToolResult:  # type: ignore[override]
         try:
             file_path = _resolve_path(str(path), self._workspace, self._allowed_dir)
         except PermissionError as exc:
@@ -543,6 +543,7 @@ class AnalyzePptxTool(Tool):
 
     async def execute(  # type: ignore[override]
         self,
+        *,
         path: str,
         model: str | None = None,
         output_path: str | None = None,
@@ -683,6 +684,7 @@ class PptxGetSlideTool(Tool):
 
     async def execute(  # type: ignore[override]
         self,
+        *,
         cache_key: str,
         **kwargs: Any,
     ) -> ToolResult:

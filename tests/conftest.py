@@ -23,7 +23,7 @@ class FakeProvider(LLMProvider):
     def get_default_model(self) -> str:
         return "fake-model"
 
-    async def chat(self, **kwargs: Any) -> LLMResponse:
+    async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> LLMResponse:
         text = self._responses[min(self._idx, len(self._responses) - 1)]
         self._idx += 1
         return LLMResponse(content=text)

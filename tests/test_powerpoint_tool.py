@@ -297,20 +297,6 @@ async def test_analyze_pptx_text_only(
     tmp_path: Path,
 ) -> None:
     """Analyze in text-only mode (no LibreOffice available)."""
-    call_count = 0
-
-    async def _mock_acompletion(**kwargs):
-        nonlocal call_count
-        call_count += 1
-        mock_resp = MagicMock()
-        mock_resp.choices = [MagicMock()]
-        # Return slide analysis for per-slide calls, synthesis for deck call
-        if call_count <= 3:  # 3 slides
-            mock_resp.choices[0].message.content = json.dumps(_SLIDE_ANALYSIS)
-        else:
-            mock_resp.choices[0].message.content = json.dumps(_DECK_SYNTHESIS)
-        return mock_resp
-
     with (
         patch("nanobot.agent.tools.powerpoint._call_llm") as mock_llm,
         patch("nanobot.agent.tools.powerpoint._render_slides", return_value=None),
