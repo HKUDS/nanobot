@@ -22,6 +22,7 @@ from typing import Any
 import pytest
 
 from nanobot.agent.coordinator import Coordinator, build_default_registry
+from nanobot.agent.delegation import DelegationDispatcher
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -55,7 +56,7 @@ def _loop(tmp_path: Path, provider: LLMProvider, **kw: Any) -> AgentLoop:
     registry = build_default_registry("general")
     loop._coordinator = Coordinator(provider=provider, registry=registry, default_role="general")
     loop._dispatcher.coordinator = loop._coordinator
-    loop._wire_delegate_tools()
+    loop._dispatcher.wire_delegate_tools(available_roles_fn=loop._capabilities.role_names)
     return loop
 
 
@@ -119,7 +120,7 @@ class TestParallelStructureDetection:
         ],
     )
     def test_has_parallel_structure(self, text: str, expected: bool) -> None:
-        assert AgentLoop._has_parallel_structure(text) is expected
+        assert DelegationDispatcher.has_parallel_structure(text) is expected
 
 
 class TestParallelDelegationE2E:
@@ -223,7 +224,7 @@ class TestParallelDelegationE2E:
         assert "csv" in result.content.lower() or "DictReader" in result.content
 
         # Verify routing trace recorded both delegations
-        trace = loop.get_routing_trace()
+        trace = loop._dispatcher.get_routing_trace()
         delegate_events = [e for e in trace if e["event"] == "delegate"]
         complete_events = [e for e in trace if e["event"] == "delegate_complete"]
 
@@ -302,7 +303,7 @@ class TestSequentialDelegationChain:
         assert "FastAPI" in result.content
 
         # Trace shows delegate → delegate_complete for research
-        trace = loop.get_routing_trace()
+        trace = loop._dispatcher.get_routing_trace()
         assert any(e["event"] == "delegate" and e["role"] == "research" for e in trace)
         assert any(
             e["event"] == "delegate_complete" and e["role"] == "research" and e["success"]
@@ -448,10 +449,10 @@ class TestCycleDetectionInMultiAgent:
             from nanobot.agent.tools.delegate import _CycleError
 
             with pytest.raises(_CycleError, match="cycle"):
-                await loop._dispatch_delegation("code", "Write more code", None)
+                await loop._dispatcher.dispatch("code", "Write more code", None)
 
             # Trace should record the blocked cycle
-            trace = loop.get_routing_trace()
+            trace = loop._dispatcher.get_routing_trace()
             blocked = [e for e in trace if e["event"] == "delegate_cycle_blocked"]
             assert len(blocked) == 1
             assert blocked[0]["role"] == "code"
@@ -479,7 +480,7 @@ class TestCycleDetectionInMultiAgent:
         token = _delegation_ancestry.set(("code",))
         try:
             # Delegating to "research" should succeed (code → research, no cycle)
-            result = await loop._dispatch_delegation(
+            result = await loop._dispatcher.dispatch(
                 "research", "Find performance benchmarks", None
             )
 
@@ -501,9 +502,9 @@ class TestMultiAgentRoutingTrace:
         provider = ScriptedProvider([LLMResponse(content="Done with research")])
 
         loop = _loop(tmp_path, provider, planning_enabled=False)
-        await loop._dispatch_delegation("research", "quick task", None)
+        await loop._dispatcher.dispatch("research", "quick task", None)
 
-        trace = loop.get_routing_trace()
+        trace = loop._dispatcher.get_routing_trace()
         complete = [e for e in trace if e["event"] == "delegate_complete"]
         assert len(complete) == 1
         assert complete[0]["latency_ms"] >= 0
@@ -547,7 +548,7 @@ class TestMultiAgentRoutingTrace:
         result = await loop._process_message(msg)
 
         assert result is not None
-        trace = loop.get_routing_trace()
+        trace = loop._dispatcher.get_routing_trace()
         delegate_events = [e for e in trace if e["event"] == "delegate"]
         complete_events = [e for e in trace if e["event"] == "delegate_complete"]
 

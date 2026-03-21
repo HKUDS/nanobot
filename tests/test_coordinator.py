@@ -517,10 +517,10 @@ class TestIntegrationRoutedFlow:
         )
 
         role = await loop._coordinator.route(msg.content)
-        ctx = loop._apply_role_for_turn(role)
+        ctx = loop._role_manager.apply(role)
         assert loop.role_name == "code"
         response = await loop._process_message(msg)
-        loop._reset_role_after_turn(ctx)
+        loop._role_manager.reset(ctx)
 
         assert response is not None
         assert "function" in response.content.lower() or "foo" in response.content.lower()
@@ -545,7 +545,7 @@ class TestIntegrationRoutedFlow:
             description="Research",
             denied_tools=["write_file", "edit_file"],
         )
-        ctx = loop._apply_role_for_turn(research_role)
+        ctx = loop._role_manager.apply(research_role)
 
         # Verify write tools are gone
         filtered_names = loop.tools.tool_names
@@ -554,7 +554,7 @@ class TestIntegrationRoutedFlow:
         assert "read_file" in filtered_names  # Still available
 
         # Reset and verify tools are restored
-        loop._reset_role_after_turn(ctx)
+        loop._role_manager.reset(ctx)
         restored_names = loop.tools.tool_names
         assert "write_file" in restored_names
         assert "edit_file" in restored_names
@@ -573,11 +573,11 @@ class TestIntegrationRoutedFlow:
             description="Minimal",
             allowed_tools=["read_file", "list_dir"],
         )
-        ctx = loop._apply_role_for_turn(role)
+        ctx = loop._role_manager.apply(role)
         names = loop.tools.tool_names
         assert set(names) == {"read_file", "list_dir"}
 
-        loop._reset_role_after_turn(ctx)
+        loop._role_manager.reset(ctx)
         assert len(loop.tools.tool_names) > 2
 
 

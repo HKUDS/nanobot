@@ -34,8 +34,6 @@ import asyncio
 import json
 import time
 import uuid
-import weakref
-from collections import deque
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -64,34 +62,19 @@ from nanobot.agent.observability import (
 )
 from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.reaction import classify_reaction
+from nanobot.agent.role_switching import TurnContext, TurnRoleManager
 from nanobot.agent.scratchpad import Scratchpad
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
 from nanobot.agent.tool_executor import ToolExecutor
+from nanobot.agent.tool_setup import register_default_tools
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool, DelegationResult
 from nanobot.agent.tools.email import CheckEmailTool
-from nanobot.agent.tools.excel import (
-    DescribeDataTool,
-    ExcelFindTool,
-    ExcelGetRowsTool,
-    QueryDataTool,
-    ReadSpreadsheetTool,
-)
 from nanobot.agent.tools.feedback import FeedbackTool
-from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
-from nanobot.agent.tools.mission import (
-    MissionCancelTool,
-    MissionListTool,
-    MissionStartTool,
-    MissionStatusTool,
-)
-from nanobot.agent.tools.powerpoint import AnalyzePptxTool, PptxGetSlideTool, ReadPptxTool
+from nanobot.agent.tools.mission import MissionStartTool
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.result_cache import CacheGetSliceTool, ToolResultCache
+from nanobot.agent.tools.result_cache import ToolResultCache
 from nanobot.agent.tools.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
-from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.agent.tracing import TraceContext, bind_trace
 from nanobot.agent.verifier import AnswerVerifier
 from nanobot.bus.canonical import CanonicalEventBuilder
@@ -182,22 +165,6 @@ class ProgressCallback(Protocol):
         status_label: str = ...,
     ) -> None:
         pass
-
-
-@dataclass(slots=True)
-class TurnContext:
-    """Snapshot of agent settings overridden for a single routed turn.
-
-    Created by ``_apply_role_for_turn`` and consumed by ``_reset_role_after_turn``
-    to cleanly restore the original configuration without touching shared state
-    between turns.
-    """
-
-    model: str
-    temperature: float
-    max_iterations: int
-    role_prompt: str
-    tools: dict[str, Any] | None  # None → no tool filtering was applied
 
 
 @dataclass(slots=True)
@@ -401,6 +368,9 @@ class AgentLoop:
         )
         self._dispatcher.tools = self.tools
 
+        # Per-turn role switching (LAN-214)
+        self._role_manager = TurnRoleManager(self)
+
         # Legacy aliases — kept for backward compat with tests
         self._delegation_stack: list[str] = []
         self._scratchpad: Scratchpad | None = None
@@ -426,44 +396,6 @@ class AgentLoop:
         self._turn_tokens_prompt = 0
         self._turn_tokens_completion = 0
         self._turn_llm_calls = 0
-
-    # --- Delegation state proxied to _dispatcher ---
-    # The properties below are ADR-002 extraction fossils: they exist so that
-    # call-sites written before the DelegationDispatcher extraction can still
-    # access delegation state via ``self._delegation_count`` etc. without a
-    # broad rename.  New code should access ``self._dispatcher`` directly.
-
-    @property
-    def _consolidation_locks(self) -> weakref.WeakValueDictionary[str, asyncio.Lock]:
-        return self._consolidator._locks
-
-    @property
-    def _delegation_count(self) -> int:  # ADR-002 fossil
-        return self._dispatcher.delegation_count
-
-    @_delegation_count.setter
-    def _delegation_count(self, value: int) -> None:  # ADR-002 fossil
-        self._dispatcher.delegation_count = value
-
-    @property
-    def _max_delegations(self) -> int:  # ADR-002 fossil
-        return self._dispatcher.max_delegations
-
-    @_max_delegations.setter
-    def _max_delegations(self, value: int) -> None:  # ADR-002 fossil
-        self._dispatcher.max_delegations = value
-
-    @property
-    def _routing_trace(self) -> deque[dict[str, Any]]:  # ADR-002 fossil
-        return self._dispatcher.routing_trace
-
-    @property
-    def _active_messages(self) -> list[dict[str, Any]] | None:  # ADR-002 fossil
-        return self._dispatcher.active_messages
-
-    @_active_messages.setter
-    def _active_messages(self, value: list[dict[str, Any]] | None) -> None:  # ADR-002 fossil
-        self._dispatcher.active_messages = value
 
     def _build_tools(self) -> None:
         """Construct and wire the tool/capability layer.
@@ -542,134 +474,23 @@ class AgentLoop:
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools, filtered by role config."""
-        role = self.role_config
-        allowed = set(role.allowed_tools) if role and role.allowed_tools is not None else None
-        denied = set(role.denied_tools) if role and role.denied_tools else set()
-        allowed_dir = self.workspace if self.config.restrict_to_workspace else None
-
-        def _should_register(name: str) -> bool:
-            if allowed is not None and name not in allowed:
-                return False
-            return name not in denied
-
-        for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
-            tool = cls(workspace=self.workspace, allowed_dir=allowed_dir)
-            if _should_register(tool.name):
-                self.tools.register(tool)
-
-        spreadsheet_tool = ReadSpreadsheetTool(
+        register_default_tools(
+            tools=self.tools,
+            role_config=self.role_config,
             workspace=self.workspace,
-            allowed_dir=allowed_dir,
-            cache=self.result_cache,
-        )
-        if _should_register(spreadsheet_tool.name):
-            self.tools.register(spreadsheet_tool)
-
-        # PowerPoint tools
-        pptx_read = ReadPptxTool(
-            workspace=self.workspace,
-            allowed_dir=allowed_dir,
-            cache=self.result_cache,
-        )
-        if _should_register(pptx_read.name):
-            self.tools.register(pptx_read)
-
-        pptx_analyze = AnalyzePptxTool(
-            workspace=self.workspace,
-            allowed_dir=allowed_dir,
-            cache=self.result_cache,
-            vision_model=self.config.vision_model,
-        )
-        if _should_register(pptx_analyze.name):
-            self.tools.register(pptx_analyze)
-
-        exec_tool = ExecTool(
-            working_dir=str(self.workspace),
-            timeout=self.exec_config.timeout,
             restrict_to_workspace=self.config.restrict_to_workspace,
             shell_mode=self.config.shell_mode,
+            vision_model=self.config.vision_model,
+            exec_config=self.exec_config,
+            brave_api_key=self.brave_api_key,
+            publish_outbound=self.bus.publish_outbound,
+            cron_service=self.cron_service,
+            delegation_enabled=self.config.delegation_enabled,
+            missions=self.missions,
+            result_cache=self.result_cache,
+            skills_enabled=self.config.skills_enabled,
+            skills_loader=self.context.skills,
         )
-        if _should_register(exec_tool.name):
-            self.tools.register(exec_tool)
-
-        for extra_tool in (
-            WebSearchTool(api_key=self.brave_api_key),
-            WebFetchTool(),
-            MessageTool(send_callback=self.bus.publish_outbound),
-            FeedbackTool(events_file=self.workspace / "memory" / "events.jsonl"),
-        ):
-            if _should_register(extra_tool.name):
-                self.tools.register(extra_tool)
-
-        # Email checking tool (callback set later by gateway via set_email_fetch)
-        email_tool = CheckEmailTool()
-        if _should_register(email_tool.name):
-            self.tools.register(email_tool)
-
-        if self.cron_service:
-            cron_tool = CronTool(self.cron_service)
-            if _should_register(cron_tool.name):
-                self.tools.register(cron_tool)
-
-        # Delegation tools
-        if self.config.delegation_enabled:
-            delegate_tool = DelegateTool()
-            if _should_register(delegate_tool.name):
-                self.tools.register(delegate_tool)
-            delegate_parallel_tool = DelegateParallelTool()
-            if _should_register(delegate_parallel_tool.name):
-                self.tools.register(delegate_parallel_tool)
-            mission_tool = MissionStartTool(manager=self.missions)
-            if _should_register(mission_tool.name):
-                self.tools.register(mission_tool)
-            mission_status = MissionStatusTool(manager=self.missions)
-            if _should_register(mission_status.name):
-                self.tools.register(mission_status)
-            mission_list = MissionListTool(manager=self.missions)
-            if _should_register(mission_list.name):
-                self.tools.register(mission_list)
-            mission_cancel = MissionCancelTool(manager=self.missions)
-            if _should_register(mission_cancel.name):
-                self.tools.register(mission_cancel)
-
-        # Scratchpad tools (scratchpad instance swapped per session in _ensure_scratchpad)
-        placeholder_pad = Scratchpad(self.workspace / "sessions" / "_placeholder")
-        for st in (
-            ScratchpadWriteTool(placeholder_pad),
-            ScratchpadReadTool(placeholder_pad),
-        ):
-            if _should_register(st.name):
-                self.tools.register(st)
-
-        # Skill-provided custom tools (Step 14)
-        if self.config.skills_enabled:
-            for skill_tool in self.context.skills.discover_tools():
-                self.tools.register(skill_tool)
-
-        # Cache retrieval tools
-        cache_slice = CacheGetSliceTool(cache=self.result_cache)
-        if _should_register(cache_slice.name):
-            self.tools.register(cache_slice)
-
-        excel_rows = ExcelGetRowsTool(cache=self.result_cache)
-        if _should_register(excel_rows.name):
-            self.tools.register(excel_rows)
-
-        excel_find = ExcelFindTool(cache=self.result_cache)
-        if _should_register(excel_find.name):
-            self.tools.register(excel_find)
-
-        pptx_get_slide = PptxGetSlideTool(cache=self.result_cache)
-        if _should_register(pptx_get_slide.name):
-            self.tools.register(pptx_get_slide)
-
-        query_tool = QueryDataTool(cache=self.result_cache)
-        if _should_register(query_tool.name):
-            self.tools.register(query_tool)
-
-        describe_tool = DescribeDataTool(cache=self.result_cache)
-        if _should_register(describe_tool.name):
-            self.tools.register(describe_tool)
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -775,20 +596,6 @@ class AgentLoop:
         if isinstance(read_tool, ScratchpadReadTool):
             read_tool._scratchpad = self._scratchpad
 
-    @staticmethod
-    def _strip_think(text: str | None) -> str | None:
-        """Remove <think>…</think> blocks — delegates to streaming module."""
-        return strip_think(text)
-
-    async def _call_llm(
-        self,
-        messages: list[dict],
-        tools: list[dict[str, Any]] | None,
-        on_progress: ProgressCallback | None,
-    ) -> LLMResponse:
-        """Call the LLM — delegates to StreamingLLMCaller."""
-        return await self._llm_caller.call(messages, tools, on_progress)
-
     # ------------------------------------------------------------------
     # Agent loop (Plan → Act → Observe → Reflect)
     # ------------------------------------------------------------------
@@ -814,10 +621,6 @@ class AgentLoop:
             return False
         # Explicit multi-step indicators
         return any(signal in text_lower for signal in _PLANNING_SIGNALS)
-
-    @staticmethod
-    def _has_parallel_structure(text: str) -> bool:
-        return DelegationDispatcher.has_parallel_structure(text)
 
     # ------------------------------------------------------------------
     # _run_agent_loop helpers (extracted for readability)
@@ -1032,7 +835,10 @@ class AgentLoop:
         """
         had_delegations = any(tc.name in _DELEGATION_TOOL_NAMES for tc in response.tool_calls)
 
-        if had_delegations and self._delegation_count >= self._max_delegations:
+        if (
+            had_delegations
+            and self._dispatcher.delegation_count >= self._dispatcher.max_delegations
+        ):
             messages.append(
                 {
                     "role": "system",
@@ -1085,7 +891,7 @@ class AgentLoop:
             # request, nudge it to switch to delegate_parallel next round.
             if not any(
                 tc.name == "delegate_parallel" for tc in response.tool_calls
-            ) and self._has_parallel_structure(user_text):
+            ) and DelegationDispatcher.has_parallel_structure(user_text):
                 nudge += (
                     "\n\nYou used sequential `delegate` but the user's "
                     "request lists independent sub-tasks. For the "
@@ -1097,7 +903,7 @@ class AgentLoop:
             has_plan
             and not had_delegations
             and turn_tool_calls >= 5
-            and self._delegation_count == 0
+            and self._dispatcher.delegation_count == 0
             and self.tools.get("delegate_parallel")
         ):
             messages.append(
@@ -1139,8 +945,8 @@ class AgentLoop:
         Returns (final_content, tools_used, messages).
         """
         messages = initial_messages
-        self._active_messages = messages
-        self._delegation_count = 0
+        self._dispatcher.active_messages = messages
+        self._dispatcher.delegation_count = 0
         iteration = 0
         final_content = None
         tools_used: list[str] = []
@@ -1197,7 +1003,7 @@ class AgentLoop:
                 logger.debug("Planning prompt injected for: {}...", user_text[:60])
                 # Parallel structure nudge: when the request lists independent
                 # subtasks, explicitly instruct parallel delegation.
-                if self._has_parallel_structure(user_text):
+                if DelegationDispatcher.has_parallel_structure(user_text):
                     messages.append(
                         {
                             "role": "system",
@@ -1264,7 +1070,7 @@ class AgentLoop:
             if on_progress and iteration > 1:
                 # Emit "thinking" status on subsequent iterations (first is implicit from run.start)
                 await on_progress("", status_code="thinking")
-            response = await self._call_llm(
+            response = await self._llm_caller.call(
                 messages,
                 active_tools,
                 on_progress,
@@ -1338,7 +1144,7 @@ class AgentLoop:
                             }
                         )
                         continue
-                    final_content = self._strip_think(response.content)
+                    final_content = strip_think(response.content)
                     messages = self.context.add_assistant_message(
                         messages,
                         final_content,
@@ -1416,7 +1222,7 @@ class AgentLoop:
                         "Tool results present but no final text; retrying once for final answer."
                     )
                     continue
-                final_content = self._strip_think(response.content)
+                final_content = strip_think(response.content)
                 messages = self.context.add_assistant_message(
                     messages,
                     final_content,
@@ -1434,26 +1240,13 @@ class AgentLoop:
 
         # --- Verification pass ---------------------------------------------
         if final_content is not None:
-            final_content, messages = await self._verify_answer(
+            final_content, messages = await self._verifier.verify(
                 user_text,
                 final_content,
                 messages,
             )
 
         return final_content, tools_used, messages
-
-    # ------------------------------------------------------------------
-    # Self-critique / verification (Step 2)
-    # ------------------------------------------------------------------
-
-    async def _verify_answer(
-        self,
-        user_text: str,
-        candidate: str,
-        messages: list[dict],
-    ) -> tuple[str, list[dict]]:
-        """Run a verification pass — delegates to AnswerVerifier."""
-        return await self._verifier.verify(user_text, candidate, messages)
 
     # ------------------------------------------------------------------
     # Reaction handling (Step 8 — Feedback loop)
@@ -1500,7 +1293,7 @@ class AgentLoop:
         each inbound message is first classified by the coordinator.  The
         coordinator returns an ``AgentRoleConfig`` whose overrides
         (model, system prompt, tool filters) are applied for that turn
-        via ``_apply_role_for_turn``.  When routing is disabled the loop
+        via ``TurnRoleManager.apply``.  When routing is disabled the loop
         behaves exactly as before.
         """
         self._running = True
@@ -1587,14 +1380,14 @@ class AgentLoop:
                                 or self._coordinator.registry.get_default()
                                 or AgentRoleConfig(name=role_name, description="General assistant")
                             )
-                            self._record_route_trace(
+                            self._dispatcher.record_route_trace(
                                 "route",
                                 role=role.name,
                                 confidence=confidence,
                                 latency_ms=classify_latency_ms,
                                 message_excerpt=msg.content,
                             )
-                            turn_ctx = self._apply_role_for_turn(role)
+                            turn_ctx = self._role_manager.apply(role)
 
                         # Wrap with timeout to prevent infinite processing
                         timeout = (
@@ -1628,7 +1421,7 @@ class AgentLoop:
                                 ),
                             )
 
-                    self._reset_role_after_turn(turn_ctx)
+                    self._role_manager.reset(turn_ctx)
 
                     if response is not None:
                         await self.bus.publish_outbound(response)
@@ -1650,7 +1443,7 @@ class AgentLoop:
 
                 except Exception as e:  # crash-barrier: message processing
                     logger.exception("Error processing message")
-                    self._reset_role_after_turn(turn_ctx)
+                    self._role_manager.reset(turn_ctx)
                     await self.bus.publish_outbound(
                         OutboundMessage(
                             channel=msg.channel,
@@ -1689,137 +1482,14 @@ class AgentLoop:
         )
         self._dispatcher.coordinator = self._coordinator
         self.missions.coordinator = self._coordinator
-        self._wire_delegate_tools()
+        self._dispatcher.wire_delegate_tools(
+            available_roles_fn=self._capabilities.role_names,
+        )
 
         logger.info(
             "Multi-agent routing enabled with {} roles",
             len(registry),
         )
-
-    def _wire_delegate_tools(self) -> None:
-        """Set the dispatch callback and role validation on delegate tools."""
-        self._dispatcher.wire_delegate_tools(
-            available_roles_fn=self._capabilities.role_names,
-        )
-
-    def _record_route_trace(self, event: str, **kwargs: Any) -> None:
-        """Forward to dispatcher."""
-        self._dispatcher.record_route_trace(event, **kwargs)
-
-    def get_routing_trace(self) -> list[dict[str, Any]]:
-        """Return a copy of the routing trace."""
-        return self._dispatcher.get_routing_trace()
-
-    def _gather_recent_tool_results(self, max_results: int = 15, max_chars: int = 8000) -> str:
-        return self._dispatcher.gather_recent_tool_results(max_results, max_chars)
-
-    async def _dispatch_delegation(
-        self,
-        target_role: str,
-        task: str,
-        context: str | None,
-    ) -> DelegationResult:
-        return await self._dispatcher.dispatch(target_role, task, context)
-
-    @staticmethod
-    def _classify_task_type(role: str, task: str) -> str:
-        return DelegationDispatcher.classify_task_type(role, task)
-
-    def _extract_plan_text(self) -> str:
-        return self._dispatcher.extract_plan_text()
-
-    def _extract_user_request(self) -> str:
-        return self._dispatcher.extract_user_request()
-
-    def _build_execution_context(self, task_type: str) -> str:
-        return self._dispatcher.build_execution_context(task_type)
-
-    def _build_parallel_work_summary(self, role: str) -> str:
-        return self._dispatcher.build_parallel_work_summary(role)
-
-    def _build_delegation_contract(
-        self,
-        role: str,
-        task: str,
-        context: str | None,
-        task_type: str,
-    ) -> tuple[str, str]:
-        return self._dispatcher.build_delegation_contract(role, task, context, task_type)
-
-    async def _execute_delegated_agent(
-        self,
-        role: AgentRoleConfig,
-        task: str,
-        context: str | None,
-    ) -> tuple[str, list[str]]:
-        return await self._dispatcher.execute_delegated_agent(role, task, context)
-
-    # ------------------------------------------------------------------
-    # Per-turn role switching (multi-agent routing)
-    # ------------------------------------------------------------------
-
-    def _apply_role_for_turn(self, role: AgentRoleConfig) -> TurnContext:
-        """Temporarily override agent settings for the current turn.
-
-        Returns a ``TurnContext`` snapshot that must be passed to
-        ``_reset_role_after_turn`` to restore the original configuration.
-        """
-        # Only copy the tool registry when filtering will actually be applied.
-        # Roles with no allowed/denied lists leave the registry unchanged, so
-        # copying is wasted allocation.
-        _will_filter = role.allowed_tools is not None or bool(role.denied_tools)
-        ctx = TurnContext(
-            model=self.model,
-            temperature=self.temperature,
-            max_iterations=self.max_iterations,
-            role_prompt=self.context.role_system_prompt,
-            tools=self.tools.snapshot() if _will_filter else None,
-        )
-
-        if role.model:
-            self.model = role.model
-        if role.temperature is not None:
-            self.temperature = role.temperature
-        if role.max_iterations is not None:
-            self.max_iterations = role.max_iterations
-        self.context.role_system_prompt = role.system_prompt or ""
-        self.role_name = role.name
-        self._dispatcher.role_name = role.name  # Keep dispatcher in sync (LAN-194)
-
-        # Apply role-specific tool filtering
-        self._filter_tools_for_role(role)
-        logger.debug("Applied role '{}' for turn (model={})", role.name, self.model)
-        return ctx
-
-    def _filter_tools_for_role(self, role: AgentRoleConfig) -> None:
-        """Remove tools that the role's allowed/denied lists exclude."""
-        allowed = set(role.allowed_tools) if role.allowed_tools is not None else None
-        denied = set(role.denied_tools) if role.denied_tools else set()
-        if allowed is None and not denied:
-            return
-        for name in list(self.tools.tool_names):
-            if allowed is not None and name not in allowed:
-                self.tools.unregister(name)
-            elif name in denied:
-                self.tools.unregister(name)
-
-    def _reset_role_after_turn(self, ctx: TurnContext | None) -> None:
-        """Restore original agent settings after a routed turn.
-
-        ``ctx`` is the ``TurnContext`` returned by ``_apply_role_for_turn``.
-        Passing ``None`` is a no-op (safe to call when no role was applied).
-        """
-        if ctx is None:
-            return
-        self.model = ctx.model
-        self.temperature = ctx.temperature
-        self.max_iterations = ctx.max_iterations
-        self.context.role_system_prompt = ctx.role_prompt
-        self.role_name = self.role_config.name if self.role_config else ""
-        self._dispatcher.role_name = self.role_name  # Keep dispatcher in sync (LAN-194)
-        # Restore full tool set (only non-None — None means no filtering was applied)
-        if ctx.tools is not None:
-            self.tools.restore(ctx.tools)
 
     async def close_mcp(self) -> None:
         """Close MCP connections and other async resources."""
@@ -1846,13 +1516,6 @@ class AgentLoop:
             self._stop_event.set()
         logger.info("Agent loop stopping")
 
-    def _get_consolidation_lock(self, session_key: str) -> asyncio.Lock:
-        return self._consolidator.get_lock(session_key)
-
-    def _prune_consolidation_lock(self, session_key: str, lock: asyncio.Lock) -> None:
-        """Drop lock entry if no longer in use."""
-        self._consolidator.prune_lock(session_key, lock)
-
     async def _run_consolidation_task(self, session: Session, lock: asyncio.Lock) -> None:
         """Run one consolidation pass; holds the semaphore and per-session lock."""
         try:
@@ -1861,106 +1524,7 @@ class AgentLoop:
                     await self._consolidate_memory(session)
         finally:
             self._consolidating.discard(session.key)
-            self._prune_consolidation_lock(session.key, lock)
-
-    def _should_force_verification(self, text: str) -> bool:
-        return self._verifier.should_force_verification(text)
-
-    async def _attempt_recovery(
-        self,
-        msg: InboundMessage,
-        all_msgs: list[dict[str, Any]],
-    ) -> str | None:
-        """Try a single recovery LLM call with minimal context when the main loop produced None.
-
-        Uses only the system prompt and the original user message (no tool history)
-        with tools disabled to force a direct text answer.
-        """
-        # Extract the system prompt and the last user message from the conversation.
-        system_msg = next((m for m in all_msgs if m.get("role") == "system"), None)
-        user_msg = None
-        for m in reversed(all_msgs):
-            if m.get("role") == "user":
-                user_msg = m
-                break
-
-        if not system_msg or not user_msg:
-            logger.warning("Recovery skipped: missing system or user message")
-            return None
-
-        recovery_messages = [
-            system_msg,
-            user_msg,
-            {
-                "role": "system",
-                "content": (
-                    "Your previous attempt to answer did not produce a response. "
-                    "Answer the user's message directly without calling any tools. "
-                    "If you truly cannot answer, say what you know and suggest next steps."
-                ),
-            },
-        ]
-
-        logger.info("Attempting recovery LLM call for {}:{}", msg.channel, msg.chat_id)
-        try:
-            response = await self.provider.chat(
-                messages=recovery_messages,
-                tools=None,
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.config.max_tokens,
-            )
-        except Exception:  # crash-barrier: recovery LLM call
-            logger.exception("Recovery LLM call failed")
-            return None
-
-        if response.finish_reason == "error":
-            logger.warning("Recovery LLM call returned error: {}", response.content)
-            return None
-
-        content = self._strip_think(response.content)
-        if content:
-            logger.info("Recovery succeeded, returning answer")
-        else:
-            logger.warning("Recovery LLM call produced no usable content")
-        return content
-
-    @staticmethod
-    def _build_no_answer_explanation(user_text: str, messages: list[dict[str, Any]]) -> str:
-        """Explain why the agent could not produce an answer on this turn."""
-        tool_results = [m for m in messages if m.get("role") == "tool"]
-        last_tool = tool_results[-1] if tool_results else None
-        last_tool_name = str(last_tool.get("name", "")) if last_tool else ""
-        last_tool_content = str(last_tool.get("content", "")) if last_tool else ""
-        lowered = last_tool_content.lower()
-
-        reasons: list[str] = []
-        if not tool_results:
-            reasons.append("The model did not produce a response for this message.")
-        if "exit code: 1" in lowered or "no such file" in lowered or "not found" in lowered:
-            reasons.append(
-                f"My last check with `{last_tool_name or 'a tool'}` returned no matching data."
-            )
-        if "permission denied" in lowered:
-            reasons.append("The lookup failed due to a local permission error.")
-        if "insufficient_quota" in lowered or "429" in lowered:
-            reasons.append("A provider quota/rate limit blocked part of the retrieval.")
-        if not reasons:
-            reasons.append("The model returned no final answer text after tool execution.")
-
-        question = (user_text or "").strip()
-        _question_words = {"who", "what", "when", "where", "why", "how", "is", "are", "can", "do"}
-        looks_like_question = "?" in question or (
-            question.split()[0].lower() in _question_words if question else False
-        )
-        help_line = (
-            "Please try rephrasing your question or asking again."
-            if looks_like_question
-            else "Please share the fact directly and I can save it to memory."
-        )
-
-        primary_reason = reasons[0]
-        return f"Sorry, I couldn't answer that just now. {primary_reason} {help_line}"
+            self._consolidator.prune_lock(session.key, lock)
 
     def _make_bus_progress(
         self,
@@ -2088,7 +1652,7 @@ class AgentLoop:
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
-            lock = self._get_consolidation_lock(session.key)
+            lock = self._consolidator.get_lock(session.key)
             self._consolidating.add(session.key)
             try:
                 async with lock:
@@ -2112,7 +1676,7 @@ class AgentLoop:
                 )
             finally:
                 self._consolidating.discard(session.key)
-                self._prune_consolidation_lock(session.key, lock)
+                self._consolidator.prune_lock(session.key, lock)
 
             session.clear()
             self.sessions.save(session)
@@ -2182,7 +1746,7 @@ class AgentLoop:
             and session.key not in self._consolidating
         ):
             self._consolidating.add(session.key)
-            lock = self._get_consolidation_lock(session.key)
+            lock = self._consolidator.get_lock(session.key)
             _task = asyncio.create_task(self._run_consolidation_task(session, lock))
             self._consolidation_tasks.add(_task)
             _task.add_done_callback(self._consolidation_tasks.discard)
@@ -2201,7 +1765,7 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=self.config.memory_window)
-        verify_before_answer = self._should_force_verification(msg.content)
+        verify_before_answer = self._verifier.should_force_verification(msg.content)
         skill_names = self.context.skills.detect_relevant_skills(msg.content)
         initial_messages = await self.context.build_messages(
             history=history,
@@ -2263,10 +1827,14 @@ class AgentLoop:
         self._dispatcher.on_progress = None
 
         if final_content is None:
-            final_content = await self._attempt_recovery(msg, all_msgs)
+            final_content = await self._verifier.attempt_recovery(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                all_msgs=all_msgs,
+            )
 
         if final_content is None:
-            final_content = self._build_no_answer_explanation(msg.content, all_msgs)
+            final_content = AnswerVerifier.build_no_answer_explanation(msg.content, all_msgs)
             # Ensure fallback responses are recorded in the session log.
             all_msgs = self.context.add_assistant_message(all_msgs, final_content)
 
@@ -2400,7 +1968,7 @@ class AgentLoop:
                     "Unknown forced role '{}' — available roles not matched", forced_role
                 )
                 return f"Unknown role: {forced_role}"
-            turn_ctx = self._apply_role_for_turn(role)
+            turn_ctx = self._role_manager.apply(role)
 
         try:
             async with trace_request(
@@ -2421,5 +1989,5 @@ class AgentLoop:
                     msg, session_key=session_key, on_progress=on_progress
                 )
         finally:
-            self._reset_role_after_turn(turn_ctx)
+            self._role_manager.reset(turn_ctx)
         return response.content if response else ""

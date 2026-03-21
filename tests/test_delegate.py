@@ -198,13 +198,13 @@ class TestDelegationDispatch:
             provider=provider, registry=registry, default_role="general"
         )
         loop._dispatcher.coordinator = loop._coordinator
-        loop._wire_delegate_tools()
+        loop._dispatcher.wire_delegate_tools(available_roles_fn=loop._capabilities.role_names)
 
         # Simulate being inside a "code" delegation via ContextVar
         token = _delegation_ancestry.set(("code",))
         try:
             with pytest.raises(_CycleError, match="cycle"):
-                await loop._dispatch_delegation("code", "do more code", None)
+                await loop._dispatcher.dispatch("code", "do more code", None)
         finally:
             _delegation_ancestry.reset(token)
 
@@ -223,13 +223,13 @@ class TestDelegationDispatch:
             provider=provider, registry=registry, default_role="general"
         )
         loop._dispatcher.coordinator = loop._coordinator
-        loop._wire_delegate_tools()
+        loop._dispatcher.wire_delegate_tools(available_roles_fn=loop._capabilities.role_names)
 
         # Currently inside "code" role via ContextVar
         token = _delegation_ancestry.set(("code",))
         try:
             # Delegating to "research" should work (no cycle)
-            result = await loop._dispatch_delegation("research", "find info", None)
+            result = await loop._dispatcher.dispatch("research", "find info", None)
             assert result  # Got a result
             # Ancestry restored after delegation completes
             assert _delegation_ancestry.get() == ("code",)
@@ -258,10 +258,10 @@ class TestDelegationDispatch:
             provider=provider, registry=registry, default_role="general"
         )
         loop._dispatcher.coordinator = loop._coordinator
-        loop._wire_delegate_tools()
+        loop._dispatcher.wire_delegate_tools(available_roles_fn=loop._capabilities.role_names)
 
         call_count = 0
-        result = await loop._dispatch_delegation("code", "write code", None)
+        result = await loop._dispatcher.dispatch("code", "write code", None)
         # Direct role: no classifier call.  Expect 2 calls: 1 for the agent
         # execution + 1 for the tool-use retry (since no tools were used).
         assert call_count == 2
@@ -281,11 +281,11 @@ class TestDelegationDispatch:
             provider=provider, registry=registry, default_role="general"
         )
         loop._dispatcher.coordinator = loop._coordinator
-        loop._wire_delegate_tools()
+        loop._dispatcher.wire_delegate_tools(available_roles_fn=loop._capabilities.role_names)
 
-        await loop._dispatch_delegation("code", "write tests", None)
+        await loop._dispatcher.dispatch("code", "write tests", None)
 
-        trace = loop.get_routing_trace()
+        trace = loop._dispatcher.get_routing_trace()
         assert len(trace) >= 2
         assert trace[0]["event"] == "delegate"
         assert trace[0]["role"] == "code"
@@ -306,11 +306,11 @@ class TestDelegationDispatch:
             provider=provider, registry=registry, default_role="general"
         )
         loop._dispatcher.coordinator = loop._coordinator
-        loop._wire_delegate_tools()
+        loop._dispatcher.wire_delegate_tools(available_roles_fn=loop._capabilities.role_names)
 
         # Ancestry is empty (depth 0) — same-role delegation should succeed
         assert _delegation_ancestry.get() == ()
-        result = await loop._dispatch_delegation("code", "task A", None)
+        result = await loop._dispatcher.dispatch("code", "task A", None)
         assert result
         assert _delegation_ancestry.get() == ()  # Restored after completion
 

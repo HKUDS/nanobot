@@ -58,7 +58,7 @@ async def test_verify_answer_revise_and_parse_fallback(tmp_path: Path) -> None:
     )
     loop = _make_loop(tmp_path, provider, verification_mode="always")
 
-    revised, msgs = await loop._verify_answer(
+    revised, msgs = await loop._verifier.verify(
         "what changed?",
         "candidate",
         [{"role": "assistant", "content": "candidate"}],
@@ -66,7 +66,7 @@ async def test_verify_answer_revise_and_parse_fallback(tmp_path: Path) -> None:
     assert revised == "revised answer"
     assert any(m.get("role") == "system" for m in msgs)
 
-    kept, _ = await loop._verify_answer(
+    kept, _ = await loop._verifier.verify(
         "what changed?",
         "candidate",
         [{"role": "assistant", "content": "candidate"}],
@@ -77,8 +77,8 @@ async def test_verify_answer_revise_and_parse_fallback(tmp_path: Path) -> None:
 async def test_verify_answer_on_uncertainty_skip(tmp_path: Path) -> None:
     provider = _ScriptedProvider([LLMResponse(content='{"confidence": 5, "issues": []}')])
     loop = _make_loop(tmp_path, provider, verification_mode="on_uncertainty")
-    loop._should_force_verification = lambda _text: False  # type: ignore[method-assign]
-    out, _ = await loop._verify_answer("hi", "candidate", [])
+    loop._verifier.should_force_verification = lambda _text: False  # type: ignore[method-assign]
+    out, _ = await loop._verifier.verify("hi", "candidate", [])
     assert out == "candidate"
 
 
@@ -174,13 +174,13 @@ async def test_run_with_routing_low_confidence_and_none_response(tmp_path: Path)
     )()
 
     role_calls = {"applied": 0, "reset": 0}
-    loop._record_route_trace = lambda *a, **k: None  # type: ignore[method-assign]
-    loop._apply_role_for_turn = lambda _r: role_calls.__setitem__(
+    loop._dispatcher.record_route_trace = lambda *a, **k: None  # type: ignore[method-assign]
+    loop._role_manager.apply = lambda _r: role_calls.__setitem__(  # type: ignore[method-assign]
         "applied", role_calls["applied"] + 1
-    )  # type: ignore[method-assign]
-    loop._reset_role_after_turn = lambda _ctx: role_calls.__setitem__(
+    )
+    loop._role_manager.reset = lambda _ctx: role_calls.__setitem__(  # type: ignore[method-assign]
         "reset", role_calls["reset"] + 1
-    )  # type: ignore[method-assign]
+    )
 
     async def _none_response(_msg):
         return None

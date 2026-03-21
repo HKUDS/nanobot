@@ -5,7 +5,7 @@ Covers:
 - Recovery falls through to explanation when recovery also fails
 - content_filter finish_reason is detected and retried
 - length finish_reason with empty content is retried
-- _strip_think warns when stripping non-empty content to None
+- strip_think warns when stripping non-empty content to None
 - _build_no_answer_explanation returns correct help_line for questions vs statements
 """
 
@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.streaming import strip_think
+from nanobot.agent.verifier import AnswerVerifier
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig
@@ -198,28 +200,28 @@ class TestContentFilterHandling:
 
 
 # ---------------------------------------------------------------------------
-# _strip_think logging tests
+# strip_think logging tests
 # ---------------------------------------------------------------------------
 
 
 class TestStripThink:
-    """Test _strip_think behavior."""
+    """Test strip_think behavior."""
 
     def test_think_only_returns_none(self):
         """Stripping a <think>-only response returns None."""
-        assert AgentLoop._strip_think("<think>Some reasoning here</think>") is None
+        assert strip_think("<think>Some reasoning here</think>") is None
 
     def test_normal_content_preserved(self):
         """Normal content is returned unchanged."""
-        assert AgentLoop._strip_think("Hello world") == "Hello world"
+        assert strip_think("Hello world") == "Hello world"
 
     def test_none_input_returns_none(self):
         """None input returns None."""
-        assert AgentLoop._strip_think(None) is None
+        assert strip_think(None) is None
 
     def test_mixed_think_and_text(self):
         """Content with <think> tags and text preserves only the text."""
-        result = AgentLoop._strip_think("<think>reasoning</think>The answer is 42.")
+        result = strip_think("<think>reasoning</think>The answer is 42.")
         assert result == "The answer is 42."
 
 
@@ -233,33 +235,33 @@ class TestBuildNoAnswerExplanation:
 
     def test_question_gets_rephrase_help(self):
         """A question should suggest rephrasing, not sharing a fact."""
-        result = AgentLoop._build_no_answer_explanation("How many cron jobs?", [])
+        result = AnswerVerifier.build_no_answer_explanation("How many cron jobs?", [])
         assert "rephras" in result.lower()
         assert "share the fact" not in result.lower()
 
     def test_question_mark_detected(self):
         """Any text with ? should be treated as a question."""
-        result = AgentLoop._build_no_answer_explanation("cron jobs?", [])
+        result = AnswerVerifier.build_no_answer_explanation("cron jobs?", [])
         assert "rephras" in result.lower()
 
     def test_statement_gets_share_fact_help(self):
         """A statement should suggest sharing a fact."""
-        result = AgentLoop._build_no_answer_explanation("My birthday is in March", [])
+        result = AnswerVerifier.build_no_answer_explanation("My birthday is in March", [])
         assert "share the fact" in result.lower()
 
     def test_no_tools_reason_improved(self):
         """When no tool results exist, the reason should not mention tools."""
-        result = AgentLoop._build_no_answer_explanation("What is 2+2?", [])
+        result = AnswerVerifier.build_no_answer_explanation("What is 2+2?", [])
         assert "did not produce a response" in result.lower()
         assert "tools or memory" not in result.lower()
 
     def test_tool_failure_reason(self):
         """When tool results include 'not found', the reason mentions it."""
         msgs = [{"role": "tool", "name": "read_file", "content": "Error: not found"}]
-        result = AgentLoop._build_no_answer_explanation("What is in test.txt?", msgs)
+        result = AnswerVerifier.build_no_answer_explanation("What is in test.txt?", msgs)
         assert "read_file" in result
 
     def test_empty_user_text(self):
         """Empty user text should still produce a valid fallback."""
-        result = AgentLoop._build_no_answer_explanation("", [])
+        result = AnswerVerifier.build_no_answer_explanation("", [])
         assert "Sorry" in result

@@ -49,7 +49,7 @@ def _make_loop(tmp_path: Path, provider: LLMProvider | None = None):
     registry = build_default_registry("general")
     loop._coordinator = Coordinator(provider=prov, registry=registry, default_role="general")
     loop._dispatcher.coordinator = loop._coordinator
-    loop._wire_delegate_tools()
+    loop._dispatcher.wire_delegate_tools(available_roles_fn=loop._capabilities.role_names)
 
     return loop
 
@@ -67,10 +67,12 @@ def _make_loop(tmp_path: Path, provider: LLMProvider | None = None):
 class TestRoutingTraceRecording:
     async def test_route_records_trace_entry(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
-        loop._record_route_trace("route", role="code", confidence=0.9, latency_ms=42.5)
-        loop._record_route_trace("route", role="research", confidence=0.8, latency_ms=30.0)
+        loop._dispatcher.record_route_trace("route", role="code", confidence=0.9, latency_ms=42.5)
+        loop._dispatcher.record_route_trace(
+            "route", role="research", confidence=0.8, latency_ms=30.0
+        )
 
-        trace = loop.get_routing_trace()
+        trace = loop._dispatcher.get_routing_trace()
         assert len(trace) == 2
         assert trace[0]["event"] == "route"
         assert trace[0]["role"] == "code"
@@ -79,9 +81,9 @@ class TestRoutingTraceRecording:
 
     async def test_delegate_records_trace_entry(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
-        loop._record_route_trace("delegate", role="research", from_role="code", depth=1)
+        loop._dispatcher.record_route_trace("delegate", role="research", from_role="code", depth=1)
 
-        trace = loop.get_routing_trace()
+        trace = loop._dispatcher.get_routing_trace()
         assert len(trace) == 1
         assert trace[0]["event"] == "delegate"
         assert trace[0]["from_role"] == "code"
@@ -89,30 +91,30 @@ class TestRoutingTraceRecording:
 
     async def test_cycle_blocked_records_trace_entry(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
-        loop._record_route_trace(
+        loop._dispatcher.record_route_trace(
             "delegate_cycle_blocked", role="code", from_role="code", success=False
         )
 
-        trace = loop.get_routing_trace()
+        trace = loop._dispatcher.get_routing_trace()
         assert len(trace) == 1
         assert trace[0]["event"] == "delegate_cycle_blocked"
         assert trace[0]["success"] is False
 
     async def test_delegate_complete_records_latency(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
-        loop._record_route_trace("delegate_complete", role="code", latency_ms=150.0)
-        loop._record_route_trace("delegate_complete", role="code", latency_ms=200.0)
+        loop._dispatcher.record_route_trace("delegate_complete", role="code", latency_ms=150.0)
+        loop._dispatcher.record_route_trace("delegate_complete", role="code", latency_ms=200.0)
 
-        trace = loop.get_routing_trace()
+        trace = loop._dispatcher.get_routing_trace()
         assert len(trace) == 2
         assert trace[0]["latency_ms"] == 150.0
         assert trace[1]["latency_ms"] == 200.0
 
     async def test_trace_entry_has_timestamp(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
-        loop._record_route_trace("route", role="code")
+        loop._dispatcher.record_route_trace("route", role="code")
 
-        trace = loop.get_routing_trace()
+        trace = loop._dispatcher.get_routing_trace()
         assert "timestamp" in trace[0]
         assert len(trace[0]["timestamp"]) > 0
 
@@ -126,11 +128,11 @@ class TestPerRoleTracking:
     async def test_role_invocations_tracked_via_trace(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
 
-        loop._record_route_trace("route", role="code")
-        loop._record_route_trace("route", role="code")
-        loop._record_route_trace("route", role="research")
+        loop._dispatcher.record_route_trace("route", role="code")
+        loop._dispatcher.record_route_trace("route", role="code")
+        loop._dispatcher.record_route_trace("route", role="research")
 
-        trace = loop.get_routing_trace()
+        trace = loop._dispatcher.get_routing_trace()
         code_routes = [t for t in trace if t["event"] == "route" and t["role"] == "code"]
         research_routes = [t for t in trace if t["event"] == "route" and t["role"] == "research"]
         assert len(code_routes) == 2
@@ -144,12 +146,12 @@ class TestPerRoleTracking:
 
 class TestDispatchRecordsTrace:
     async def test_dispatch_records_delegate_and_complete(self, tmp_path: Path) -> None:
-        """_dispatch_delegation records delegate + delegate_complete events."""
+        """dispatcher.dispatch records delegate + delegate_complete events."""
         loop = _make_loop(tmp_path, FakeProvider(["delegation result"]))
 
-        await loop._dispatch_delegation("code", "write some code", None)
+        await loop._dispatcher.dispatch("code", "write some code", None)
 
-        trace = loop.get_routing_trace()
+        trace = loop._dispatcher.get_routing_trace()
         complete_events = [t for t in trace if t["event"] == "delegate_complete"]
         assert len(complete_events) == 1
         assert complete_events[0]["success"] is True
@@ -163,10 +165,10 @@ class TestDispatchRecordsTrace:
         token = _delegation_ancestry.set(("code",))
         try:
             with pytest.raises(_CycleError):
-                await loop._dispatch_delegation("code", "cause cycle", None)
+                await loop._dispatcher.dispatch("code", "cause cycle", None)
         finally:
             _delegation_ancestry.reset(token)
 
-        trace = loop.get_routing_trace()
+        trace = loop._dispatcher.get_routing_trace()
         blocked = [t for t in trace if t["event"] == "delegate_cycle_blocked"]
         assert len(blocked) == 1
