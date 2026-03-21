@@ -475,9 +475,11 @@ class AgentLoop:
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
-        session_dir = self.workspace / key.replace(':', '_')
+
+        project = msg.metadata.get('project', session.metadata.get('project', None))
+        session_dir = self.workspace / project if project else self.workspace
         if msg.content == '':
-            session_dir.mkdir(exist_ok=True)
+            if project: session_dir.mkdir(exist_ok=True)
             return None
 
         session_tools = ToolRegistry()
