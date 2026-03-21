@@ -143,11 +143,17 @@ def test_verification_helpers_and_lock_lifecycle(tmp_path: Path) -> None:
 
     # Test _estimate_grounding_confidence via the verifier
     v = loop._verifier
-    v._memory = SimpleNamespace(retrieve=lambda *_a, **_k: [{"score": "x"}])
+    v._memory = SimpleNamespace(
+        retriever=SimpleNamespace(retrieve=lambda *_a, **_k: [{"score": "x"}])
+    )
     assert v._estimate_grounding_confidence("q") == 0.0
-    v._memory = SimpleNamespace(retrieve=lambda *_a, **_k: [{"score": 1.3}])
+    v._memory = SimpleNamespace(
+        retriever=SimpleNamespace(retrieve=lambda *_a, **_k: [{"score": 1.3}])
+    )
     assert v._estimate_grounding_confidence("q") == 1.0
-    v._memory = SimpleNamespace(retrieve=lambda *_a, **_k: [{"score": 0.2}])
+    v._memory = SimpleNamespace(
+        retriever=SimpleNamespace(retrieve=lambda *_a, **_k: [{"score": 0.2}])
+    )
     assert v.should_force_verification("What is this") is True
 
     lock = loop._consolidator.get_lock("s1")

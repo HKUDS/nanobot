@@ -891,7 +891,7 @@ class ProfileManager:
                     )
                     local_conflicts += 1
 
-                event = store._coerce_event(
+                event = store.ingester._coerce_event(
                     {
                         "timestamp": self._utc_now_iso(),
                         "type": event_type,
@@ -934,18 +934,18 @@ class ProfileManager:
         profile["last_verified_at"] = self._utc_now_iso()
         self.write_profile(profile)
 
-        events_written = store.append_events(events)
+        events_written = store.ingester.append_events(events)
 
         needs_user = 0
         question: str | None = None
         if conflicts > 0:
-            resolution = store.auto_resolve_conflicts(max_items=10)
+            resolution = store.conflict_mgr.auto_resolve_conflicts(max_items=10)
             needs_user = int(resolution.get("needs_user", 0))
             if needs_user > 0:
-                question = store.ask_user_for_conflict()
+                question = store.conflict_mgr.ask_user_for_conflict()
 
         if self.mem0.enabled:
-            correction_meta, _ = store._normalize_memory_metadata(
+            correction_meta, _ = store.ingester._normalize_memory_metadata(
                 {"topic": "user_correction", "memory_type": "episodic", "stability": "medium"},
                 event_type="fact",
                 summary=text,
@@ -959,8 +959,8 @@ class ProfileManager:
                     "chat_id": chat_id,
                 }
             )
-            correction_text = store._sanitize_mem0_text(text, allow_archival=False)
-            correction_meta = store._sanitize_mem0_metadata(correction_meta)
+            correction_text = store.ingester._sanitize_mem0_text(text, allow_archival=False)
+            correction_meta = store.ingester._sanitize_mem0_metadata(correction_meta)
             if correction_text:
                 self.mem0.add_text(
                     correction_text,
@@ -968,7 +968,7 @@ class ProfileManager:
                 )
 
         # Keep LLM-managed MEMORY.md content stable; snapshot can be generated on-demand.
-        store.rebuild_memory_snapshot(write=False)
+        store.snapshot.rebuild_memory_snapshot(write=False)
         return {
             "applied": applied,
             "conflicts": conflicts,

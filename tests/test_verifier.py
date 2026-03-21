@@ -101,13 +101,18 @@ class TestEstimateGroundingConfidence:
         v = self._make_verifier(memory=None)
         assert v._estimate_grounding_confidence("anything") == 0.0
 
+    @staticmethod
+    def _fake_memory(retrieve_fn):
+        retriever = type("FakeRetriever", (), {"retrieve": retrieve_fn})()
+        return type("FakeMemory", (), {"retriever": retriever})()
+
     def test_empty_results_returns_zero(self) -> None:
-        memory = type("FakeMemory", (), {"retrieve": lambda self, q, top_k=1: []})()
+        memory = self._fake_memory(lambda self, q, top_k=1: [])
         v = self._make_verifier(memory=memory)
         assert v._estimate_grounding_confidence("anything") == 0.0
 
     def test_score_clamped_to_unit_interval(self) -> None:
-        memory = type("FakeMemory", (), {"retrieve": lambda self, q, top_k=1: [{"score": 1.5}]})()
+        memory = self._fake_memory(lambda self, q, top_k=1: [{"score": 1.5}])
         v = self._make_verifier(memory=memory)
         assert v._estimate_grounding_confidence("anything") == 1.0
 
@@ -115,12 +120,12 @@ class TestEstimateGroundingConfidence:
         def _explode(q, top_k=1):
             raise RuntimeError("boom")
 
-        memory = type("FakeMemory", (), {"retrieve": _explode})()
+        memory = self._fake_memory(_explode)
         v = self._make_verifier(memory=memory)
         assert v._estimate_grounding_confidence("anything") == 0.0
 
     def test_normal_score_returned(self) -> None:
-        memory = type("FakeMemory", (), {"retrieve": lambda self, q, top_k=1: [{"score": 0.75}]})()
+        memory = self._fake_memory(lambda self, q, top_k=1: [{"score": 0.75}])
         v = self._make_verifier(memory=memory)
         assert v._estimate_grounding_confidence("anything") == 0.75
 

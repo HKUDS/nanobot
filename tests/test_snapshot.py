@@ -33,9 +33,9 @@ def _make_snapshot(
         profile_mgr=profile_mgr,
         persistence=persistence,
         read_events_fn=lambda **kw: _events[: kw.get("limit") or len(_events)],
-        profile_section_lines_fn=lambda p, **kw: ["## Preferences", "- test pref"]
-        if p.get("preferences")
-        else [],
+        profile_section_lines_fn=lambda p, **kw: (
+            ["## Preferences", "- test pref"] if p.get("preferences") else []
+        ),
         recent_unresolved_fn=lambda evts, **kw: [e for e in evts if e.get("status") == "open"][
             : kw.get("max_items", 8)
         ],

@@ -42,44 +42,48 @@ def run_retrieval_eval() -> None:
         # Q9: Preferences
         ("What are user preferences for response style?", ["concise", "bullet"]),
         # Q10: Multi-hop (knowledge graph target)
-        ("What caused the deployment failure and how was it resolved?",
-         ["eu-west-1", "policy", "us-east-1"]),
+        (
+            "What caused the deployment failure and how was it resolved?",
+            ["eu-west-1", "policy", "us-east-1"],
+        ),
         # Q11: Redis incident timeline (multi-step episodic)
-        ("What happened during the Redis incident?",
-         ["redis", "eviction", "oom", "maxmemory"]),
+        ("What happened during the Redis incident?", ["redis", "eviction", "oom", "maxmemory"]),
         # Q12: Cross-entity people + roles
-        ("Who are Alice and Bob and what do they do?",
-         ["alice", "platform", "bob", "infrastructure"]),
+        (
+            "Who are Alice and Bob and what do they do?",
+            ["alice", "platform", "bob", "infrastructure"],
+        ),
         # Q13: Rejected alternatives (negation/absence)
-        ("What memory backend alternatives were considered and rejected?",
-         ["elasticsearch", "rejected"]),
+        (
+            "What memory backend alternatives were considered and rejected?",
+            ["elasticsearch", "rejected"],
+        ),
         # Q14: Tech stack (multi-entity graph)
-        ("What databases does the nanobot project use?",
-         ["postgresql", "redis", "qdrant", "neo4j"]),
+        (
+            "What databases does the nanobot project use?",
+            ["postgresql", "redis", "qdrant", "neo4j"],
+        ),
         # Q15: Deployment tooling
-        ("What tools are used for infrastructure and deployment?",
-         ["terraform", "github actions"]),
+        ("What tools are used for infrastructure and deployment?", ["terraform", "github actions"]),
         # Q16: Reflection from Redis incident
-        ("What did we learn from the caching incidents?",
-         ["resource limit", "eviction", "monitoring"]),
+        (
+            "What did we learn from the caching incidents?",
+            ["resource limit", "eviction", "monitoring"],
+        ),
         # Q17: SLA and production constraints
-        ("What are the production SLA requirements?",
-         ["99.9%", "uptime", "5-minute"]),
+        ("What are the production SLA requirements?", ["99.9%", "uptime", "5-minute"]),
         # Q18: Post-mortem collaboration (cross-entity graph)
-        ("Who worked together on the Redis post-mortem?",
-         ["carlos", "bob", "post-mortem"]),
+        ("Who worked together on the Redis post-mortem?", ["carlos", "bob", "post-mortem"]),
         # Q19: Coding preferences
-        ("What Python coding style does the user prefer?",
-         ["type hints", "exception"]),
+        ("What Python coding style does the user prefer?", ["type hints", "exception"]),
         # Q20: Knowledge graph architecture
-        ("How does the knowledge graph integration work?",
-         ["neo4j", "docker", "graph"]),
+        ("How does the knowledge graph integration work?", ["neo4j", "docker", "graph"]),
     ]
 
     print("=" * 80)
     print("MEMORY RETRIEVAL EVALUATION")
-    print(f"Events loaded: {len(store.read_events())}")
-    profile = store.read_profile()
+    print(f"Events loaded: {len(store.ingester.read_events())}")
+    profile = store.profile_mgr.read_profile()
     print(f"Profile sections: {list(profile.keys())}")
     print("=" * 80)
 
@@ -90,7 +94,7 @@ def run_retrieval_eval() -> None:
         print(f"\n--- Q{i}: {query}")
 
         # Run retrieval
-        retrieved = store.retrieve(query, top_k=6)
+        retrieved = store.retriever.retrieve(query, top_k=6)
 
         # Build memory context (budget must be large enough to include
         # profile + BM25 events + entity graph section).
@@ -131,14 +135,16 @@ def run_retrieval_eval() -> None:
                 if line.startswith("- ") and "→" in line:
                     print(f"    {line}")
 
-        results.append({
-            "question": query,
-            "retrieved_count": len(retrieved),
-            "recall": recall,
-            "hits": hits,
-            "misses": misses,
-            "has_graph": "Entity Graph" in context,
-        })
+        results.append(
+            {
+                "question": query,
+                "retrieved_count": len(retrieved),
+                "recall": recall,
+                "hits": hits,
+                "misses": misses,
+                "has_graph": "Entity Graph" in context,
+            }
+        )
         total_score += recall
 
     # Summary

@@ -74,18 +74,18 @@ class TestAppendEventsContract:
 
     def test_append_returns_count(self, tmp_path: Path):
         store = _make_store(tmp_path)
-        count = store.append_events(_sample_events())
+        count = store.ingester.append_events(_sample_events())
         assert isinstance(count, int)
         assert count >= 1
 
     def test_append_empty_list(self, tmp_path: Path):
         store = _make_store(tmp_path)
-        count = store.append_events([])
+        count = store.ingester.append_events([])
         assert count == 0
 
     def test_events_persist_to_disk(self, tmp_path: Path):
         store = _make_store(tmp_path)
-        store.append_events(_sample_events())
+        store.ingester.append_events(_sample_events())
         assert store.events_file.exists()
         content = store.events_file.read_text(encoding="utf-8")
         assert "dark mode" in content
@@ -101,13 +101,13 @@ class TestRetrieveContract:
 
     def test_returns_list(self, tmp_path: Path):
         store = _make_store(tmp_path)
-        results = store.retrieve("anything", top_k=5)
+        results = store.retriever.retrieve("anything", top_k=5)
         assert isinstance(results, list)
 
     def test_retrieves_stored_events(self, tmp_path: Path):
         store = _make_store(tmp_path)
-        store.append_events(_sample_events())
-        results = store.retrieve("dark mode", top_k=5)
+        store.ingester.append_events(_sample_events())
+        results = store.retriever.retrieve("dark mode", top_k=5)
         assert isinstance(results, list)
         summaries = [r.get("summary", "").lower() for r in results]
         assert any("dark mode" in s for s in summaries), (
@@ -127,8 +127,8 @@ class TestRetrieveContract:
             }
             for i in range(20)
         ]
-        store.append_events(events)
-        results = store.retrieve("fact testing", top_k=3)
+        store.ingester.append_events(events)
+        results = store.retriever.retrieve("fact testing", top_k=3)
         assert len(results) <= 3
 
 
@@ -142,7 +142,7 @@ class TestProfileContract:
 
     def test_read_profile_returns_dict(self, tmp_path: Path):
         store = _make_store(tmp_path)
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         assert isinstance(profile, dict)
 
     def test_write_then_read_profile(self, tmp_path: Path):
@@ -159,10 +159,10 @@ class TestProfileContract:
             "stable_facts": [],
             "active_projects": [],
         }
-        store.write_profile(profile)
+        store.profile_mgr.write_profile(profile)
 
         # Re-read and verify
-        reloaded = store.read_profile()
+        reloaded = store.profile_mgr.read_profile()
         assert "preferences" in reloaded
         assert isinstance(reloaded["preferences"], list)
         assert len(reloaded["preferences"]) >= 1
@@ -179,7 +179,7 @@ class TestRoundtripConsistency:
 
     def test_preference_roundtrip(self, tmp_path: Path):
         store = _make_store(tmp_path)
-        store.append_events(
+        store.ingester.append_events(
             [
                 {
                     "id": "evt-pref-1",
@@ -190,13 +190,13 @@ class TestRoundtripConsistency:
                 }
             ]
         )
-        results = store.retrieve("TypeScript preference", top_k=5)
+        results = store.retriever.retrieve("TypeScript preference", top_k=5)
         summaries = " ".join(r.get("summary", "") for r in results).lower()
         assert "typescript" in summaries
 
     def test_fact_roundtrip(self, tmp_path: Path):
         store = _make_store(tmp_path)
-        store.append_events(
+        store.ingester.append_events(
             [
                 {
                     "id": "evt-fact-1",
@@ -207,6 +207,6 @@ class TestRoundtripConsistency:
                 }
             ]
         )
-        results = store.retrieve("where does user work", top_k=5)
+        results = store.retriever.retrieve("where does user work", top_k=5)
         summaries = " ".join(r.get("summary", "") for r in results).lower()
         assert "acme" in summaries

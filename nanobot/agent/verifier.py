@@ -186,7 +186,7 @@ class AnswerVerifier:
         if not self._memory:
             return 0.0
         try:
-            items = self._memory.retrieve(query, top_k=1)
+            items = self._memory.retriever.retrieve(query, top_k=1)
         except Exception:  # crash-barrier: memory subsystem
             return 0.0
         if not items:

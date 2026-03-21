@@ -140,11 +140,11 @@ class MemoryStore:
         # Context assembler (LAN-210) — prompt rendering extracted from MemoryStore.
         self._assembler = ContextAssembler(
             profile_mgr=self.profile_mgr,
-            retrieve_fn=lambda *a, **kw: self.retrieve(*a, **kw),
+            retrieve_fn=lambda *a, **kw: self.retriever.retrieve(*a, **kw),
             persistence=self.persistence,
             planner=self._planner,
             read_events_fn=lambda **kw: self.ingester.read_events(**kw),
-            read_long_term_fn=lambda: self.read_long_term(),
+            read_long_term_fn=lambda: self.persistence.read_text(self.memory_file),
             build_graph_context_lines_fn=lambda *a, **kw: self.retriever._build_graph_context_lines(
                 *a, **kw
             ),
@@ -157,7 +157,14 @@ class MemoryStore:
             rollout=self.rollout,
         )
         # Wire reindex callback so health check can trigger reindex.
-        self.maintenance._reindex_fn = lambda: self.reindex_from_structured_memory()
+        self.maintenance._reindex_fn = lambda: self.maintenance.reindex_from_structured_memory(
+            read_profile_fn=self.profile_mgr.read_profile,
+            read_events_fn=self.ingester.read_events,
+            ingester=self.ingester,
+            profile_keys=self.PROFILE_KEYS,
+            vector_points_count_fn=self.maintenance._vector_points_count,
+            mem0_get_all_rows_fn=self.maintenance._mem0_get_all_rows,
+        )
 
         # Cross-encoder re-ranker (Step 7)
         reranker_model = str(
@@ -221,32 +228,34 @@ class MemoryStore:
         self._events_cache_mtime: float = -1.0
 
         # Evaluation / observability helper (LAN-204)
-        # Use lambdas so that test-time MagicMock patches on the instance are honoured.
-        self._eval = EvalRunner(
-            retrieve_fn=lambda *a, **kw: self.retrieve(*a, **kw),
+        self.eval_runner = EvalRunner(
+            retrieve_fn=lambda *a, **kw: self.retriever.retrieve(*a, **kw),
             persistence=self.persistence,
             workspace=self.workspace,
-            get_rollout_status_fn=lambda: self.get_rollout_status(),
+            get_rollout_status_fn=lambda: self._rollout_config.get_status(),
             get_rollout_fn=lambda: self.rollout,
-            get_backend_stats_fn=lambda: self._backend_stats_for_eval(),
+            get_backend_stats_fn=lambda: self.maintenance._backend_stats_for_eval(),
         )
 
         # MemorySnapshot: rebuild MEMORY.md + verify memory integrity.
-        # Lambdas ensure store-level patches are honoured by tests.
         self.snapshot = MemorySnapshot(
             profile_mgr=self.profile_mgr,
             persistence=self.persistence,
             read_events_fn=lambda **kw: self.ingester.read_events(**kw),
-            profile_section_lines_fn=lambda profile, **kw: self._profile_section_lines(
+            profile_section_lines_fn=lambda profile, **kw: self._assembler._profile_section_lines(
                 profile, **kw
             ),
-            recent_unresolved_fn=lambda events, **kw: self._recent_unresolved(events, **kw),
-            read_long_term_fn=lambda: self.read_long_term(),
-            write_long_term_fn=lambda content: self.write_long_term(content),
+            recent_unresolved_fn=lambda events, **kw: self._assembler._recent_unresolved(
+                events, **kw
+            ),
+            read_long_term_fn=lambda: self.persistence.read_text(self.memory_file),
+            write_long_term_fn=lambda content: self.persistence.write_text(
+                self.memory_file, content
+            ),
             extract_pinned_section_fn=self._extract_pinned_section,
             restore_pinned_section_fn=self._restore_pinned_section,
-            verify_beliefs_fn=lambda: self.verify_beliefs(),
-            write_profile_fn=lambda profile: self.write_profile(profile),
+            verify_beliefs_fn=lambda: self.profile_mgr.verify_beliefs(),
+            write_profile_fn=lambda profile: self.profile_mgr.write_profile(profile),
             profile_keys=self.PROFILE_KEYS,
         )
 
@@ -262,451 +271,18 @@ class MemoryStore:
     _to_str_list = staticmethod(_to_str_list)
     _to_datetime = staticmethod(_to_datetime)
     _estimate_tokens = staticmethod(_estimate_tokens)
-
-    def get_rollout_status(self) -> dict[str, Any]:
-        """Return a snapshot of the current rollout config (delegates to RolloutConfig)."""
-        return self._rollout_config.get_status()
-
     _contains_any = staticmethod(_contains_any)
-
-    # ── Thin wrappers delegating to RetrievalPlanner (LAN-207) ──────────
-
-    @staticmethod
-    def _infer_retrieval_intent(query: str) -> str:
-        return RetrievalPlanner.infer_retrieval_intent(query)
-
-    @staticmethod
-    def _retrieval_policy(intent: str) -> dict[str, Any]:
-        return RetrievalPlanner.retrieval_policy(intent)
-
-    @staticmethod
-    def _query_routing_hints(query: str) -> dict[str, Any]:
-        return RetrievalPlanner.query_routing_hints(query)
-
-    def _status_matches_query_hint(
-        self,
-        *,
-        status: str,
-        summary: str,
-        requires_open: bool,
-        requires_resolved: bool,
-    ) -> bool:
-        return RetrievalPlanner.status_matches_query_hint(
-            status=status,
-            summary=summary,
-            requires_open=requires_open,
-            requires_resolved=requires_resolved,
-        )
-
-    def _memory_type_for_item(self, item: dict[str, Any]) -> str:
-        return RetrievalPlanner.memory_type_for_item(item)
-
-    def _recency_signal(self, timestamp: str, *, half_life_days: float) -> float:
-        return RetrievalPlanner.recency_signal(timestamp, half_life_days=half_life_days)
-
-    # Temporary aliases — will be removed in Task 7
-    def _default_topic_for_event_type(self, event_type: str) -> str:
-        return self.ingester._default_topic_for_event_type(event_type)
-
-    def _classify_memory_type(
-        self, *, event_type: str, summary: str, source: str
-    ) -> tuple[str, str, bool]:
-        return self.ingester._classify_memory_type(
-            event_type=event_type, summary=summary, source=source
-        )
-
-    def _distill_semantic_summary(self, summary: str) -> str:
-        return self.ingester._distill_semantic_summary(summary)
-
-    def _normalize_memory_metadata(
-        self,
-        metadata: dict[str, Any] | None,
-        *,
-        event_type: str,
-        summary: str,
-        source: str,
-    ) -> tuple[dict[str, Any], bool]:
-        return self.ingester._normalize_memory_metadata(
-            metadata, event_type=event_type, summary=summary, source=source
-        )
-
-    def _event_mem0_write_plan(self, event: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-        return self.ingester._event_mem0_write_plan(event)
-
-    @staticmethod
-    def _looks_blob_like_summary(summary: str) -> bool:
-        return EventIngester._looks_blob_like_summary(summary)
-
-    @staticmethod
-    def _sanitize_mem0_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-        return EventIngester._sanitize_mem0_metadata(metadata)
-
-    def _sanitize_mem0_text(self, text: str, *, allow_archival: bool = False) -> str:
-        return self.ingester._sanitize_mem0_text(text, allow_archival=allow_archival)
-
-    def _mem0_get_all_rows(self, *, limit: int = 200) -> list[dict[str, Any]]:
-        return self.maintenance._mem0_get_all_rows(limit=limit)
-
-    def _vector_points_count(self) -> int:
-        return self.maintenance._vector_points_count()
-
-    def _history_row_count(self) -> int:
-        return self.maintenance._history_row_count()
-
-    def _backend_stats_for_eval(self) -> dict[str, Any]:
-        return self.maintenance._backend_stats_for_eval()
-
-    def _event_compaction_key(self, event: dict[str, Any]) -> tuple[str, str, str, str]:
-        return MemoryMaintenance._event_compaction_key(event)
-
-    def _compact_events_for_reindex(
-        self, events: list[dict[str, Any]]
-    ) -> tuple[list[dict[str, Any]], dict[str, int]]:
-        return MemoryMaintenance._compact_events_for_reindex(events)
-
-    def reindex_from_structured_memory(
-        self,
-        *,
-        max_events: int | None = None,
-        reset_existing: bool = False,
-        compact: bool = False,
-    ) -> dict[str, Any]:
-        return self.maintenance.reindex_from_structured_memory(
-            max_events=max_events,
-            reset_existing=reset_existing,
-            compact=compact,
-            read_profile_fn=self.read_profile,
-            read_events_fn=self.ingester.read_events,
-            ingester=self.ingester,
-            profile_keys=self.PROFILE_KEYS,
-            vector_points_count_fn=self._vector_points_count,
-            mem0_get_all_rows_fn=self._mem0_get_all_rows,
-        )
-
-    def seed_structured_corpus(self, *, profile_path: Path, events_path: Path) -> dict[str, Any]:
-        return self.maintenance.seed_structured_corpus(
-            profile_path=profile_path,
-            events_path=events_path,
-            read_profile_fn=self.read_profile,
-            write_profile_fn=self.write_profile,
-            read_events_fn=self.ingester.read_events,
-            ingester=self.ingester,
-            profile_keys=self.PROFILE_KEYS,
-            vector_points_count_fn=self._vector_points_count,
-            mem0_get_all_rows_fn=self._mem0_get_all_rows,
-        )
-
-    async def ensure_health(self) -> None:
-        """Run vector health check asynchronously (non-blocking)."""
-        import asyncio
-
-        await asyncio.to_thread(self._ensure_vector_health)
-
-    def _ensure_vector_health(self) -> None:
-        """Backward-compat wrapper that calls store-level aliases.
-
-        Cannot simply delegate to ``maintenance._ensure_vector_health``
-        because existing callers/tests patch ``_history_row_count``,
-        ``_vector_points_count``, etc. on the store instance.
-        """
-        if not bool(self.rollout.get("memory_vector_health_enabled", True)):
-            return
-        if not self.mem0.enabled:
-            return
-        vector_rows = len(self._mem0_get_all_rows(limit=25))
-        vector_points = self._vector_points_count()
-        history_rows = self._history_row_count()
-        _probe_result = self.mem0.search("__health__", top_k=1, allow_history_fallback=False)
-        degraded = history_rows > 0 and vector_rows == 0 and vector_points == 0
-        if not degraded:
-            return
-        if not bool(self.rollout.get("memory_auto_reindex_on_empty_vector", True)):
-            return
-        self.reindex_from_structured_memory()
-
-    def get_observability_report(self) -> dict[str, Any]:
-        """Return backend health and rollout status.
-
-        Legacy per-counter metrics have been removed in favour of Langfuse.
-        The ``metrics`` and ``kpis`` keys are kept empty for backward
-        compatibility with callers that destructure the return value.
-        """
-        return self._eval.get_observability_report()
-
-    def evaluate_retrieval_cases(
-        self,
-        cases: list[dict[str, Any]],
-        *,
-        default_top_k: int = 6,
-        recency_half_life_days: float | None = None,
-        embedding_provider: str | None = None,
-    ) -> dict[str, Any]:
-        """Evaluate retrieval quality using labeled cases."""
-        return self._eval.evaluate_retrieval_cases(
-            cases,
-            default_top_k=default_top_k,
-            recency_half_life_days=recency_half_life_days,
-            embedding_provider=embedding_provider,
-        )
-
-    def save_evaluation_report(
-        self,
-        evaluation: dict[str, Any],
-        observability: dict[str, Any],
-        *,
-        rollout: dict[str, Any] | None = None,
-        output_file: str | None = None,
-    ) -> Path:
-        """Persist evaluation + observability report to disk and return the file path."""
-        return self._eval.save_evaluation_report(
-            evaluation,
-            observability,
-            rollout=rollout,
-            output_file=output_file,
-        )
-
-    def evaluate_rollout_gates(
-        self,
-        evaluation: dict[str, Any],
-        observability: dict[str, Any],
-    ) -> dict[str, Any]:
-        return self._eval.evaluate_rollout_gates(evaluation, observability)
-
-    # Temporary aliases — will be removed in Task 7
-    def read_events(self, **kw: Any) -> list[dict[str, Any]]:
-        return self.ingester.read_events(**kw)
-
-    @staticmethod
-    def _merge_source_span(base: list[int] | Any, incoming: list[int] | Any) -> list[int]:
-        return EventIngester._merge_source_span(base, incoming)
-
-    def _ensure_event_provenance(self, event: dict[str, Any]) -> dict[str, Any]:
-        return self.ingester._ensure_event_provenance(event)
-
-    def _event_similarity(self, left: dict[str, Any], right: dict[str, Any]) -> tuple[float, float]:
-        return self.ingester._event_similarity(left, right)
-
-    def _find_semantic_duplicate(
-        self,
-        candidate: dict[str, Any],
-        existing_events: list[dict[str, Any]],
-    ) -> tuple[int | None, float]:
-        return self.ingester._find_semantic_duplicate(candidate, existing_events)
-
-    def _find_semantic_supersession(
-        self,
-        candidate: dict[str, Any],
-        existing_events: list[dict[str, Any]],
-    ) -> int | None:
-        return self.ingester._find_semantic_supersession(candidate, existing_events)
-
-    def _merge_events(
-        self,
-        base: dict[str, Any],
-        incoming: dict[str, Any],
-        *,
-        similarity: float,
-    ) -> dict[str, Any]:
-        return self.ingester._merge_events(base, incoming, similarity=similarity)
-
-    def append_events(self, events: list[dict[str, Any]]) -> int:
-        return self.ingester.append_events(events)
-
-    # Temporary alias — will be removed in Task 7
-    async def _ingest_graph_triples(self, events: list[dict[str, Any]]) -> int:
-        return await self.ingester._ingest_graph_triples(events)
-
-    def read_profile(self) -> dict[str, Any]:
-        return self.profile_mgr.read_profile()
-
-    def _meta_section(self, profile: dict[str, Any], key: str) -> dict[str, Any]:
-        return self.profile_mgr._meta_section(profile, key)
-
-    @staticmethod
-    def _generate_belief_id(section: str, norm_text: str, created_at: str) -> str:
-        """Generate a deterministic stable ID for a profile item."""
-        return ProfileManager._generate_belief_id(section, norm_text, created_at)
-
-    def _meta_entry(self, profile: dict[str, Any], key: str, text: str) -> dict[str, Any]:
-        return self.profile_mgr._meta_entry(profile, key, text)
-
-    _MAX_EVIDENCE_REFS = 10  # Cap evidence_event_ids to avoid unbounded growth.
-
-    def _touch_meta_entry(
-        self,
-        entry: dict[str, Any],
-        *,
-        confidence_delta: float,
-        min_confidence: float = 0.05,
-        max_confidence: float = 0.99,
-        status: str | None = None,
-        evidence_event_id: str | None = None,
-    ) -> None:
-        self.profile_mgr._touch_meta_entry(
-            entry,
-            confidence_delta=confidence_delta,
-            min_confidence=min_confidence,
-            max_confidence=max_confidence,
-            status=status,
-            evidence_event_id=evidence_event_id,
-        )
-
-    def _validate_profile_field(self, field: str) -> str:
-        return self.profile_mgr._validate_profile_field(field)
-
-    def set_item_pin(self, field: str, text: str, *, pinned: bool) -> bool:
-        return self.profile_mgr.set_item_pin(field, text, pinned=pinned)
-
-    def mark_item_outdated(self, field: str, text: str) -> bool:
-        return self.profile_mgr.mark_item_outdated(field, text)
-
-    def list_conflicts(self, *, include_closed: bool = False) -> list[dict[str, Any]]:
-        return self.conflict_mgr.list_conflicts(include_closed=include_closed)
-
-    @staticmethod
-    def _parse_conflict_user_action(text: str) -> str | None:
-        return ConflictManager._parse_conflict_user_action(text)
-
-    # Language patterns indicating a correction (new value supersedes old).
-    _CORRECTION_MARKERS = ConflictManager._CORRECTION_MARKERS
-
-    def _auto_resolution_action(self, conflict: dict[str, Any]) -> str | None:
-        return self.conflict_mgr._auto_resolution_action(conflict)
-
-    def auto_resolve_conflicts(self, *, max_items: int = 10) -> dict[str, int]:
-        return self.conflict_mgr.auto_resolve_conflicts(max_items=max_items)
-
-    def get_next_user_conflict(self) -> dict[str, Any] | None:
-        return self.conflict_mgr.get_next_user_conflict()
-
-    def _conflict_relevant_to(self, conflict: dict[str, Any], user_message: str) -> bool:
-        return self.conflict_mgr._conflict_relevant_to(conflict, user_message)
-
-    def ask_user_for_conflict(
-        self,
-        *,
-        include_already_asked: bool = False,
-        user_message: str = "",
-    ) -> str | None:
-        return self.conflict_mgr.ask_user_for_conflict(
-            include_already_asked=include_already_asked,
-            user_message=user_message,
-        )
-
-    def handle_user_conflict_reply(self, text: str) -> dict[str, Any]:
-        return self.conflict_mgr.handle_user_conflict_reply(text)
-
-    def resolve_conflict_details(self, index: int, action: str) -> dict[str, Any]:
-        return self.conflict_mgr.resolve_conflict_details(index, action)
-
-    def resolve_conflict(self, index: int, action: str) -> bool:
-        return self.conflict_mgr.resolve_conflict(index, action)
-
-    def write_profile(self, profile: dict[str, Any]) -> None:
-        self.profile_mgr.write_profile(profile)
-
-    def _build_event_id(self, event_type: str, summary: str, timestamp: str) -> str:
-        return self.ingester._build_event_id(event_type, summary, timestamp)
-
-    def _infer_episodic_status(
-        self, *, event_type: str, summary: str, raw_status: Any = None
-    ) -> str | None:
-        return self.ingester._infer_episodic_status(
-            event_type=event_type, summary=summary, raw_status=raw_status
-        )
-
-    def _coerce_event(
-        self,
-        raw: dict[str, Any],
-        *,
-        source_span: list[int],
-        channel: str = "",
-        chat_id: str = "",
-    ) -> dict[str, Any] | None:
-        return self.ingester._coerce_event(
-            raw, source_span=source_span, channel=channel, chat_id=chat_id
-        )
-
-    # Temporary backward-compat alias — will be removed in Task 7
-    def retrieve(self, *a: Any, **kw: Any) -> list[dict[str, Any]]:
-        return self.retriever.retrieve(*a, **kw)
-
-    # Temporary backward-compat aliases — will be removed in Task 7
-    def _build_entity_index(self, events: list[dict[str, Any]]) -> set[str]:
-        return self.retriever._build_entity_index(events)
-
-    def _extract_query_entities(self, query: str, entity_index: set[str]) -> set[str]:
-        return self.retriever._extract_query_entities(query, entity_index)
-
-    def _build_graph_context_lines(
-        self,
-        query: str,
-        retrieved: list[dict[str, Any]],
-        max_tokens: int = 100,
-    ) -> list[str]:
-        return self.retriever._build_graph_context_lines(query, retrieved, max_tokens)
-
-    def _profile_section_lines(
-        self, profile: dict[str, Any], max_items_per_section: int = 6
-    ) -> list[str]:
-        return self._assembler._profile_section_lines(profile, max_items_per_section)
-
-    @staticmethod
-    def _is_resolved_task_or_decision(summary: str) -> bool:
-        return ContextAssembler._is_resolved_task_or_decision(summary)
-
-    def _recent_unresolved(
-        self, events: list[dict[str, Any]], max_items: int = 8
-    ) -> list[dict[str, Any]]:
-        return self._assembler._recent_unresolved(events, max_items)
-
-    @staticmethod
-    def _memory_item_line(item: dict[str, Any]) -> str:
-        return ContextAssembler._memory_item_line(item)
-
-    # ------------------------------------------------------------------
-    # MEMORY.md capping (Step 5) — delegates to ContextAssembler (LAN-210)
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _split_md_sections(text: str) -> list[tuple[str, str]]:
-        """Split markdown text into (heading, body) pairs.
-
-        Sections are delimited by ``## `` headings.  Text before the first
-        heading is returned with heading ``""``.
-        """
-        return ContextAssembler._split_md_sections(text)
-
-    def _cap_long_term_text(
-        self,
-        long_term_text: str,
-        token_cap: int,
-        query: str,
-    ) -> str:
-        """Return *long_term_text* capped to *token_cap* tokens."""
-        return self._assembler._cap_long_term_text(long_term_text, token_cap, query)
-
-    def _fit_lines_to_token_cap(self, lines: list[str], *, token_cap: int) -> list[str]:
-        return self._assembler._fit_lines_to_token_cap(lines, token_cap=token_cap)
-
-    # ------------------------------------------------------------------
-    # Budget-aware context section allocation — delegates to ContextAssembler
-    # ------------------------------------------------------------------
 
     # Keep class-level constants as aliases so test code referencing
     # MemoryStore._SECTION_PRIORITY_WEIGHTS / ._SECTION_MIN_TOKENS still works.
     _SECTION_PRIORITY_WEIGHTS = ContextAssembler._SECTION_PRIORITY_WEIGHTS
     _SECTION_MIN_TOKENS = ContextAssembler._SECTION_MIN_TOKENS
+    _MAX_EVIDENCE_REFS = 10  # Cap evidence_event_ids to avoid unbounded growth.
+    _CORRECTION_MARKERS = ConflictManager._CORRECTION_MARKERS
 
-    @classmethod
-    def _allocate_section_budgets(
-        cls,
-        total_budget: int,
-        intent: str,
-        section_sizes: dict[str, int],
-    ) -> dict[str, int]:
-        """Distribute *total_budget* tokens across named sections."""
-        return ContextAssembler._allocate_section_budgets(total_budget, intent, section_sizes)
+    # ------------------------------------------------------------------
+    # get_memory_context — facade method (lazy assembler init)
+    # ------------------------------------------------------------------
 
     def _ensure_assembler(self) -> ContextAssembler:
         """Return a ``ContextAssembler``, creating it lazily if needed.
@@ -714,10 +290,6 @@ class MemoryStore:
         Lazy creation supports test code that constructs ``MemoryStore`` via
         ``__new__`` (bypassing ``__init__``) and then monkeypatches methods
         before calling ``get_memory_context``.
-
-        All patchable helper methods are routed through lambdas that capture
-        ``self``, so monkeypatches applied to the store instance are always
-        honoured — even when applied after the assembler is first created.
         """
         # Fast path: already initialised (either by __init__ or a previous call).
         assembler = getattr(self, "_assembler", None)
@@ -732,17 +304,14 @@ class MemoryStore:
 
         self._assembler = ContextAssembler(
             profile_mgr=profile_mgr,  # type: ignore[arg-type]
-            retrieve_fn=lambda *a, **kw: self.retrieve(*a, **kw),
+            retrieve_fn=lambda *a, **kw: self.retriever.retrieve(*a, **kw),
             persistence=persistence,  # type: ignore[arg-type]
             planner=planner,
-            read_events_fn=lambda **kw: self.read_events(**kw),
-            read_long_term_fn=lambda: self.read_long_term(),
-            build_graph_context_lines_fn=lambda *a, **kw: self._build_graph_context_lines(*a, **kw),
-            cap_long_term_text_fn=lambda text, cap, query: self._cap_long_term_text(
-                text, cap, query
+            read_events_fn=lambda **kw: self.ingester.read_events(**kw),
+            read_long_term_fn=lambda: self.persistence.read_text(self.memory_file),
+            build_graph_context_lines_fn=lambda *a, **kw: self.retriever._build_graph_context_lines(
+                *a, **kw
             ),
-            profile_section_lines_fn=lambda profile, *a: self._profile_section_lines(profile, *a),
-            read_profile_fn=lambda: self.read_profile(),
         )
         return self._assembler
 
@@ -767,72 +336,9 @@ class MemoryStore:
             embedding_provider=embedding_provider,
         )
 
-    def _conflict_pair(self, old_value: str, new_value: str) -> bool:
-        return self.profile_mgr._conflict_pair(old_value, new_value)
-
-    def _apply_profile_updates(
-        self,
-        profile: dict[str, Any],
-        updates: dict[str, list[str]],
-        *,
-        enable_contradiction_check: bool,
-        source_event_ids: list[str] | None = None,
-    ) -> tuple[int, int, int]:
-        return self.profile_mgr._apply_profile_updates(
-            profile,
-            updates,
-            enable_contradiction_check=enable_contradiction_check,
-            source_event_ids=source_event_ids,
-        )
-
-    def _has_open_conflict(
-        self, profile: dict[str, Any], *, field: str, old_value: str, new_value: str
-    ) -> bool:
-        return self.profile_mgr._has_open_conflict(
-            profile, field=field, old_value=old_value, new_value=new_value
-        )
-
-    def _find_mem0_id_for_text(self, text: str, *, top_k: int = 8) -> str | None:
-        return self.profile_mgr._find_mem0_id_for_text(text, top_k=top_k)
-
-    def apply_live_user_correction(
-        self,
-        content: str,
-        *,
-        channel: str = "",
-        chat_id: str = "",
-        enable_contradiction_check: bool = True,
-    ) -> dict[str, Any]:
-        return self.profile_mgr.apply_live_user_correction(
-            content,
-            channel=channel,
-            chat_id=chat_id,
-            enable_contradiction_check=enable_contradiction_check,
-        )
-
-    def read_long_term(self) -> str:
-        return self.persistence.read_text(self.memory_file)
-
-    def write_long_term(self, content: str) -> None:
-        self.persistence.write_text(self.memory_file, content)
-
-    def append_history(self, entry: str) -> None:
-        self.persistence.append_text(self.history_file, entry.rstrip() + "\n\n")
-
-    def rebuild_memory_snapshot(self, *, max_events: int = 30, write: bool = True) -> str:
-        return self.snapshot.rebuild_memory_snapshot(max_events=max_events, write=write)
-
-    def verify_memory(
-        self, *, stale_days: int = 90, update_profile: bool = False
-    ) -> dict[str, Any]:
-        return self.snapshot.verify_memory(stale_days=stale_days, update_profile=update_profile)
-
-    def verify_beliefs(self) -> dict[str, Any]:
-        """Assess belief health based on evidence quality, not just timestamps.
-
-        Delegates to ``ProfileManager.verify_beliefs`` — see LAN-209.
-        """
-        return self.profile_mgr.verify_beliefs()
+    # ------------------------------------------------------------------
+    # Consolidation pipeline — coordination logic that stays on MemoryStore
+    # ------------------------------------------------------------------
 
     def _select_messages_for_consolidation(
         self,
@@ -920,7 +426,7 @@ class MemoryStore:
         if entry := args.get("history_entry"):
             if not isinstance(entry, str):
                 entry = json.dumps(entry, ensure_ascii=False)
-            self.append_history(entry)
+            self.persistence.append_text(self.history_file, entry.rstrip() + "\n\n")
         # memory_update is intentionally ignored (LAN-206): MEMORY.md is now a
         # pure projection rebuilt deterministically via rebuild_memory_snapshot().
 
@@ -933,10 +439,6 @@ class MemoryStore:
             len(session.messages),
             session.last_consolidated,
         )
-
-    # Temporary alias — will be removed in Task 7
-    def _sync_events_to_mem0(self, events: list[dict[str, Any]]) -> int:
-        return self.ingester._sync_events_to_mem0(events)
 
     async def consolidate(
         self,
@@ -965,7 +467,7 @@ class MemoryStore:
 
         lines = self._format_conversation_lines(old_messages)
 
-        current_memory = self.read_long_term()
+        current_memory = self.persistence.read_text(self.memory_file)
         prompt = self._build_consolidation_prompt(current_memory, lines)
 
         try:
@@ -994,7 +496,7 @@ class MemoryStore:
 
             self._apply_save_memory_tool_result(args=args, current_memory=current_memory)
 
-            profile = self.read_profile()
+            profile = self.profile_mgr.read_profile()
             events, profile_updates = await self.extractor.extract_structured_memory(
                 provider,
                 model,
@@ -1007,23 +509,23 @@ class MemoryStore:
             await self.ingester._ingest_graph_triples(events)
             # Thread event IDs into profile updates for evidence linking (LAN-197).
             event_ids = [e.get("id", "") for e in events if e.get("id")]
-            profile_added, _, profile_touched = self._apply_profile_updates(
+            profile_added, _, profile_touched = self.profile_mgr._apply_profile_updates(
                 profile,
                 profile_updates,
                 enable_contradiction_check=enable_contradiction_check,
                 source_event_ids=event_ids,
             )
             if events_written > 0 or profile_added > 0 or profile_touched > 0:
-                profile["last_verified_at"] = self._utc_now_iso()
-                self.write_profile(profile)
+                profile["last_verified_at"] = _utc_now_iso()
+                self.profile_mgr.write_profile(profile)
 
             # Track extraction source and per-type distribution
 
             if profile_added > 0:
-                self.auto_resolve_conflicts(max_items=10)
+                self.conflict_mgr.auto_resolve_conflicts(max_items=10)
 
             # MEMORY.md is a pure projection from profile + events (LAN-206).
-            self.rebuild_memory_snapshot(write=True)
+            self.snapshot.rebuild_memory_snapshot(write=True)
 
             # LAN-208: sync structured events to mem0 as the primary indexing
             # path — mem0 is a semantic index, not a raw transcript store.
@@ -1042,7 +544,7 @@ class MemoryStore:
                     if role == "user":
                         memory_type = (
                             "semantic"
-                            if self._contains_any(
+                            if _contains_any(
                                 content,
                                 (
                                     "prefer",
@@ -1075,7 +577,7 @@ class MemoryStore:
                         }
                     )
                     clean_content = self.ingester._sanitize_mem0_text(content, allow_archival=False)
-                    turn_meta = self.ingester._sanitize_mem0_metadata(turn_meta)
+                    turn_meta = EventIngester._sanitize_mem0_metadata(turn_meta)
                     if clean_content:
                         self.mem0.add_text(
                             clean_content,

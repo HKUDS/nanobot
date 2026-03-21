@@ -13,6 +13,7 @@ from nanobot.agent.memory.extractor import MemoryExtractor
 from nanobot.agent.memory.graph import KnowledgeGraph
 from nanobot.agent.memory.mem0_adapter import _Mem0Adapter
 from nanobot.agent.memory.persistence import MemoryPersistence
+from nanobot.agent.memory.retrieval_planner import RetrievalPlanner
 from nanobot.agent.tools.base import ToolResult
 from nanobot.bus.events import InboundMessage, ReactionEvent
 from nanobot.providers.base import LLMResponse, ToolCallRequest
@@ -70,7 +71,9 @@ async def test_loop_process_message_system_help_new_and_conflict_paths(
     assert "/new" in help_out.content
 
     # pending conflict branch (before normal loop)
-    loop.context.memory.ask_user_for_conflict = MagicMock(return_value="Please resolve conflict")
+    loop.context.memory.conflict_mgr.ask_user_for_conflict = MagicMock(
+        return_value="Please resolve conflict"
+    )
     conflict_out = await loop._process_message(
         InboundMessage(channel="cli", chat_id="room1", sender_id="u", content="hello")
     )
@@ -183,7 +186,7 @@ def test_store_retrieve_core_router_branches(
     _events_fn = MagicMock(
         return_value=[{"id": "extra", "summary": "oauth2 rollout", "entities": []}]
     )
-    store.read_events = _events_fn
+    store.ingester.read_events = _events_fn
     store.retriever._read_events_fn = _events_fn
     monkeypatch.setattr(
         "nanobot.agent.memory.retriever._local_retrieve", lambda *args, **kwargs: []
@@ -597,7 +600,7 @@ def test_store_retrieve_core_reranker_enabled_and_type_counts(
     _events_fn2 = MagicMock(
         return_value=[{"id": "z1", "summary": "oauth2 semantic", "entities": []}]
     )
-    store.read_events = _events_fn2
+    store.ingester.read_events = _events_fn2
     store.retriever._read_events_fn = _events_fn2
     monkeypatch.setattr(
         "nanobot.agent.memory.retriever._local_retrieve",
@@ -856,7 +859,7 @@ def test_store_retrieve_core_profile_adjustment_paths(tmp_path: Path) -> None:
             },
         )
     )
-    store.read_events = MagicMock(return_value=[])
+    store.ingester.read_events = MagicMock(return_value=[])
     store.graph.enabled = False
 
     profile = {
@@ -879,7 +882,7 @@ def test_store_retrieve_core_profile_adjustment_paths(tmp_path: Path) -> None:
             }
         },
     }
-    store.read_profile = MagicMock(return_value=profile)
+    store.profile_mgr.read_profile = MagicMock(return_value=profile)
     store.retriever._profile_mgr.read_profile = MagicMock(return_value=profile)
 
     final, _meta = store.retriever._retrieve_core(
@@ -1083,12 +1086,12 @@ def test_store_routing_hint_and_reflection_filters(tmp_path: Path) -> None:
             {"source_vector": 1, "source_get_all": 0, "source_history": 0, "rejected_blob_like": 0},
         )
     )
-    store.read_events = MagicMock(return_value=[])
-    store.read_profile = MagicMock(return_value={"conflicts": [], "meta": {}})
+    store.ingester.read_events = MagicMock(return_value=[])
+    store.profile_mgr.read_profile = MagicMock(return_value={"conflicts": [], "meta": {}})
     store.retriever._profile_mgr.read_profile = MagicMock(
         return_value={"conflicts": [], "meta": {}}
     )
-    store._query_routing_hints = MagicMock(
+    store._planner.query_routing_hints = MagicMock(
         return_value={
             "focus_task_decision": False,
             "focus_planning": True,
@@ -1125,14 +1128,12 @@ def test_extractor_entity_and_graph_exception_paths(tmp_path: Path) -> None:
 
 
 def test_store_query_hint_status_and_recency_helpers(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-
-    hints = store._query_routing_hints("show pending and completed tasks")
+    hints = RetrievalPlanner.query_routing_hints("show pending and completed tasks")
     assert hints["requires_open"] is False
     assert hints["requires_resolved"] is False
 
     assert (
-        store._status_matches_query_hint(
+        RetrievalPlanner.status_matches_query_hint(
             status="closed",
             summary="done",
             requires_open=True,
@@ -1141,7 +1142,7 @@ def test_store_query_hint_status_and_recency_helpers(tmp_path: Path) -> None:
         is False
     )
     assert (
-        store._status_matches_query_hint(
+        RetrievalPlanner.status_matches_query_hint(
             status="",
             summary="still in progress",
             requires_open=True,
@@ -1150,7 +1151,7 @@ def test_store_query_hint_status_and_recency_helpers(tmp_path: Path) -> None:
         is True
     )
     assert (
-        store._status_matches_query_hint(
+        RetrievalPlanner.status_matches_query_hint(
             status="open",
             summary="todo",
             requires_open=False,
@@ -1159,8 +1160,8 @@ def test_store_query_hint_status_and_recency_helpers(tmp_path: Path) -> None:
         is False
     )
 
-    assert store._recency_signal("", half_life_days=10.0) == 0.0
-    assert store._recency_signal("2026-01-01T00:00:00", half_life_days=0.0) == 0.0
+    assert RetrievalPlanner.recency_signal("", half_life_days=10.0) == 0.0
+    assert RetrievalPlanner.recency_signal("2026-01-01T00:00:00", half_life_days=0.0) == 0.0
 
 
 def test_mem0_remaining_helper_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

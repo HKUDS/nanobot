@@ -383,7 +383,7 @@ class ConflictManager:
                 old_entry.setdefault("supersedes_id", new_belief_id)
         elif selected == "keep_new":
             clean_new_value = (
-                store._sanitize_mem0_text(new_value, allow_archival=False) or new_value
+                store.ingester._sanitize_mem0_text(new_value, allow_archival=False) or new_value
             )
             if old_memory_id:
                 mem0_ok = self.mem0.update(old_memory_id, clean_new_value)
@@ -393,7 +393,7 @@ class ConflictManager:
                     conflict["new_memory_id"] = old_memory_id
                     result["new_memory_id"] = old_memory_id
             else:
-                conflict_metadata, _ = store._normalize_memory_metadata(
+                conflict_metadata, _ = store.ingester._normalize_memory_metadata(
                     {
                         "topic": "conflict_resolution",
                         "memory_type": "semantic",
@@ -404,7 +404,7 @@ class ConflictManager:
                     source="chat",
                 )
                 conflict_metadata.update({"event_type": "conflict_resolution", "field": key})
-                conflict_metadata = store._sanitize_mem0_metadata(conflict_metadata)
+                conflict_metadata = store.ingester._sanitize_mem0_metadata(conflict_metadata)
                 mem0_ok = (
                     self.mem0.add_text(
                         clean_new_value,
