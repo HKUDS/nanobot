@@ -192,6 +192,39 @@ def estimate_prompt_tokens_chain(
     return 0, "none"
 
 
+def build_status_content(
+    *,
+    version: str,
+    model: str,
+    start_time: float,
+    last_usage: dict[str, int],
+    context_window_tokens: int,
+    session_msg_count: int,
+    context_tokens_estimate: int,
+) -> str:
+    """Build a human-readable runtime status snapshot."""
+    uptime_s = int(time.time() - start_time)
+    uptime = (
+        f"{uptime_s // 3600}h {(uptime_s % 3600) // 60}m"
+        if uptime_s >= 3600
+        else f"{uptime_s // 60}m {uptime_s % 60}s"
+    )
+    last_in = last_usage.get("prompt_tokens", 0)
+    last_out = last_usage.get("completion_tokens", 0)
+    ctx_total = max(context_window_tokens, 0)
+    ctx_pct = int((context_tokens_estimate / ctx_total) * 100) if ctx_total > 0 else 0
+    ctx_used_str = f"{context_tokens_estimate // 1000}k" if context_tokens_estimate >= 1000 else str(context_tokens_estimate)
+    ctx_total_str = f"{ctx_total // 1024}k" if ctx_total > 0 else "n/a"
+    return "\n".join([
+        f"\U0001f408 nanobot v{version}",
+        f"\U0001f9e0 Model: {model}",
+        f"\U0001f4ca Tokens: {last_in} in / {last_out} out",
+        f"\U0001f4da Context: {ctx_used_str}/{ctx_total_str} ({ctx_pct}%)",
+        f"\U0001f4ac Session: {session_msg_count} messages",
+        f"\u23f1 Uptime: {uptime}",
+    ])
+
+
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
     """Sync bundled templates to workspace. Only creates missing files."""
     from importlib.resources import files as pkg_files
