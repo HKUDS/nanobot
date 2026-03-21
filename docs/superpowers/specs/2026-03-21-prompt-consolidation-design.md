@@ -244,6 +244,16 @@ separate analysis. Report written to `docs/contradiction-5-delegation-triggers.m
 - No behavioral changes — all prompts produce identical text to current inline
   versions (except the 4 contradiction fixes)
 
+## ADR-008 Amendment
+
+ADR-008 section 4 states: "Prompt files are static assets… They are NOT
+user-editable at runtime — user customization goes into `SOUL.md` and skill
+files." However, `PromptLoader` already implements workspace override resolution
+(user file takes precedence over built-in). This migration does not change that
+behavior — it simply brings more prompts under the same system. ADR-008 should
+be amended to reflect the existing workspace override capability and clarify
+that all 36 prompts are overridable via `<workspace>/prompts/<name>.md`.
+
 ## Out of Scope
 
 - Contradiction 5 (delegation trigger architecture) — separate report
