@@ -54,7 +54,7 @@ class Tool(ABC):
         pass
 
     @abstractmethod
-    async def execute(self, **kwargs: Any) -> str:
+    async def execute(self, **kwargs: Any) -> Any:
         """
         Execute the tool with given parameters.
 
@@ -62,7 +62,7 @@ class Tool(ABC):
             **kwargs: Tool-specific parameters.
 
         Returns:
-            String result of the tool execution.
+            Result of the tool execution (string or list of content blocks).
         """
         pass
 
