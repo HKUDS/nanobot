@@ -34,6 +34,8 @@ class AgentDefaults(Base):
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     )
+    vision_model: str | None = None
+    vision_provider: str | None = None
     max_tokens: int = 8192
     context_window_tokens: int = 65_536
     temperature: float = 0.1
@@ -59,6 +61,7 @@ class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
+    custom_vision: ProviderConfig = Field(default_factory=ProviderConfig)  # Dedicated OpenAI-compatible vision endpoint
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -158,12 +161,14 @@ class Config(BaseSettings):
         return Path(self.agents.defaults.workspace).expanduser()
 
     def _match_provider(
-        self, model: str | None = None
+        self,
+        model: str | None = None,
+        forced_provider: str | None = None,
     ) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
         from nanobot.providers.registry import PROVIDERS
 
-        forced = self.agents.defaults.provider
+        forced = forced_provider or self.agents.defaults.provider
         if forced != "auto":
             p = getattr(self.providers, forced, None)
             return (p, forced) if p else (None, None)
@@ -219,26 +224,42 @@ class Config(BaseSettings):
                 return p, spec.name
         return None, None
 
-    def get_provider(self, model: str | None = None) -> ProviderConfig | None:
+    def get_provider(
+        self,
+        model: str | None = None,
+        forced_provider: str | None = None,
+    ) -> ProviderConfig | None:
         """Get matched provider config (api_key, api_base, extra_headers). Falls back to first available."""
-        p, _ = self._match_provider(model)
+        p, _ = self._match_provider(model, forced_provider=forced_provider)
         return p
 
-    def get_provider_name(self, model: str | None = None) -> str | None:
+    def get_provider_name(
+        self,
+        model: str | None = None,
+        forced_provider: str | None = None,
+    ) -> str | None:
         """Get the registry name of the matched provider (e.g. "deepseek", "openrouter")."""
-        _, name = self._match_provider(model)
+        _, name = self._match_provider(model, forced_provider=forced_provider)
         return name
 
-    def get_api_key(self, model: str | None = None) -> str | None:
+    def get_api_key(
+        self,
+        model: str | None = None,
+        forced_provider: str | None = None,
+    ) -> str | None:
         """Get API key for the given model. Falls back to first available key."""
-        p = self.get_provider(model)
+        p = self.get_provider(model, forced_provider=forced_provider)
         return p.api_key if p else None
 
-    def get_api_base(self, model: str | None = None) -> str | None:
+    def get_api_base(
+        self,
+        model: str | None = None,
+        forced_provider: str | None = None,
+    ) -> str | None:
         """Get API base URL for the given model. Applies default URLs for gateway/local providers."""
         from nanobot.providers.registry import find_by_name
 
-        p, name = self._match_provider(model)
+        p, name = self._match_provider(model, forced_provider=forced_provider)
         if p and p.api_base:
             return p.api_base
         # Only gateways get a default api_base here. Standard providers
@@ -249,5 +270,37 @@ class Config(BaseSettings):
             if spec and (spec.is_gateway or spec.is_local) and spec.default_api_base:
                 return spec.default_api_base
         return None
+
+    def get_vision_model(self) -> str:
+        """Get the configured vision model, falling back to the default text model."""
+        return self.agents.defaults.vision_model or self.agents.defaults.model
+
+    def get_vision_provider(self) -> ProviderConfig | None:
+        """Get the configured provider for the vision model."""
+        return self.get_provider(
+            self.get_vision_model(),
+            forced_provider=self.agents.defaults.vision_provider,
+        )
+
+    def get_vision_provider_name(self) -> str | None:
+        """Get the registry name of the configured vision provider."""
+        return self.get_provider_name(
+            self.get_vision_model(),
+            forced_provider=self.agents.defaults.vision_provider,
+        )
+
+    def get_vision_api_key(self) -> str | None:
+        """Get API key for the configured vision model/provider."""
+        return self.get_api_key(
+            self.get_vision_model(),
+            forced_provider=self.agents.defaults.vision_provider,
+        )
+
+    def get_vision_api_base(self) -> str | None:
+        """Get API base URL for the configured vision model/provider."""
+        return self.get_api_base(
+            self.get_vision_model(),
+            forced_provider=self.agents.defaults.vision_provider,
+        )
 
     model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")

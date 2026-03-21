@@ -67,6 +67,8 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        vision_provider: LLMProvider | None = None,
+        vision_model: str | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -84,6 +86,8 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
+        self.vision_provider = vision_provider or provider
+        self.vision_model = vision_model or self.model
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -223,11 +227,12 @@ class AgentLoop:
             iteration += 1
 
             tool_defs = self.tools.get_definitions()
+            active_provider, active_model = self._select_provider_for_messages(messages)
 
-            response = await self.provider.chat_with_retry(
+            response = await active_provider.chat_with_retry(
                 messages=messages,
                 tools=tool_defs,
-                model=self.model,
+                model=active_model,
             )
             usage = response.usage or {}
             self._last_usage = {
@@ -283,8 +288,21 @@ class AgentLoop:
                 f"I reached the maximum number of tool call iterations ({self.max_iterations}) "
                 "without completing the task. You can try breaking the task into smaller steps."
             )
-
         return final_content, tools_used, messages
+
+    def _select_provider_for_messages(
+        self,
+        messages: list[dict[str, Any]],
+    ) -> tuple[LLMProvider, str]:
+        """Choose the vision provider/model when image content is present."""
+        for message in messages:
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "image_url":
+                    return self.vision_provider, self.vision_model
+        return self.provider, self.model
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""

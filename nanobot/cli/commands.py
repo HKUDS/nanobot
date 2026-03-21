@@ -407,25 +407,30 @@ def _onboard_plugins(config_path: Path) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-def _make_provider(config: Config):
+def _make_provider(
+    config: Config,
+    *,
+    model: str | None = None,
+    forced_provider: str | None = None,
+):
     """Create the appropriate LLM provider from config."""
     from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
     from nanobot.providers.base import GenerationSettings
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
-    model = config.agents.defaults.model
-    provider_name = config.get_provider_name(model)
-    p = config.get_provider(model)
+    model = model or config.agents.defaults.model
+    provider_name = config.get_provider_name(model, forced_provider=forced_provider)
+    p = config.get_provider(model, forced_provider=forced_provider)
 
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         provider = OpenAICodexProvider(default_model=model)
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
-    elif provider_name == "custom":
+    elif provider_name in {"custom", "custom_vision"}:
         from nanobot.providers.custom_provider import CustomProvider
         provider = CustomProvider(
             api_key=p.api_key if p else "no-key",
-            api_base=config.get_api_base(model) or "http://localhost:8000/v1",
+            api_base=config.get_api_base(model, forced_provider=forced_provider) or "http://localhost:8000/v1",
             default_model=model,
             extra_headers=p.extra_headers if p else None,
         )
@@ -464,6 +469,20 @@ def _make_provider(config: Config):
         reasoning_effort=defaults.reasoning_effort,
     )
     return provider
+
+
+def _make_vision_provider(config: Config):
+    """Create the dedicated vision provider when configured, otherwise fall back to the default provider."""
+    vision_model = config.agents.defaults.vision_model
+    vision_provider = config.agents.defaults.vision_provider
+    if not vision_model and not vision_provider:
+        return _make_provider(config)
+
+    return _make_provider(
+        config,
+        model=config.get_vision_model(),
+        forced_provider=vision_provider,
+    )
 
 
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
@@ -530,14 +549,15 @@ def gateway(
         import logging
         logging.basicConfig(level=logging.DEBUG)
 
-    config = _load_runtime_config(config, workspace)
-    port = port if port is not None else config.gateway.port
+    runtime_config = _load_runtime_config(config, workspace)
+    port = port if port is not None else runtime_config.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
-    sync_workspace_templates(config.workspace_path)
+    sync_workspace_templates(runtime_config.workspace_path)
     bus = MessageBus()
-    provider = _make_provider(config)
-    session_manager = SessionManager(config.workspace_path)
+    provider = _make_provider(runtime_config)
+    vision_provider = _make_vision_provider(runtime_config)
+    session_manager = SessionManager(runtime_config.workspace_path)
 
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_cron_dir() / "jobs.json"
@@ -547,18 +567,20 @@ def gateway(
     agent = AgentLoop(
         bus=bus,
         provider=provider,
-        workspace=config.workspace_path,
-        model=config.agents.defaults.model,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        context_window_tokens=config.agents.defaults.context_window_tokens,
-        web_search_config=config.tools.web.search,
-        web_proxy=config.tools.web.proxy or None,
-        exec_config=config.tools.exec,
+        vision_provider=vision_provider,
+        workspace=runtime_config.workspace_path,
+        model=runtime_config.agents.defaults.model,
+        vision_model=runtime_config.get_vision_model(),
+        max_iterations=runtime_config.agents.defaults.max_tool_iterations,
+        context_window_tokens=runtime_config.agents.defaults.context_window_tokens,
+        web_search_config=runtime_config.tools.web.search,
+        web_proxy=runtime_config.tools.web.proxy or None,
+        exec_config=runtime_config.tools.exec,
         cron_service=cron,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
+        restrict_to_workspace=runtime_config.tools.restrict_to_workspace,
         session_manager=session_manager,
-        mcp_servers=config.tools.mcp_servers,
-        channels_config=config.channels,
+        mcp_servers=runtime_config.tools.mcp_servers,
+        channels_config=runtime_config.channels,
     )
 
     # Set cron callback (needs agent)
@@ -610,7 +632,7 @@ def gateway(
     cron.on_job = on_cron_job
 
     # Create channel manager
-    channels = ChannelManager(config, bus)
+    channels = ChannelManager(runtime_config, bus)
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -653,9 +675,9 @@ def gateway(
             return  # No external channel available to deliver to
         await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
 
-    hb_cfg = config.gateway.heartbeat
+    hb_cfg = runtime_config.gateway.heartbeat
     heartbeat = HeartbeatService(
-        workspace=config.workspace_path,
+        workspace=runtime_config.workspace_path,
         provider=provider,
         model=agent.model,
         on_execute=on_heartbeat_execute,
@@ -723,11 +745,12 @@ def agent(
     from nanobot.config.paths import get_cron_dir
     from nanobot.cron.service import CronService
 
-    config = _load_runtime_config(config, workspace)
-    sync_workspace_templates(config.workspace_path)
+    runtime_config = _load_runtime_config(config, workspace)
+    sync_workspace_templates(runtime_config.workspace_path)
 
     bus = MessageBus()
-    provider = _make_provider(config)
+    provider = _make_provider(runtime_config)
+    vision_provider = _make_vision_provider(runtime_config)
 
     # Create cron service for tool usage (no callback needed for CLI unless running)
     cron_store_path = get_cron_dir() / "jobs.json"
@@ -741,17 +764,19 @@ def agent(
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
-        workspace=config.workspace_path,
-        model=config.agents.defaults.model,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        context_window_tokens=config.agents.defaults.context_window_tokens,
-        web_search_config=config.tools.web.search,
-        web_proxy=config.tools.web.proxy or None,
-        exec_config=config.tools.exec,
+        vision_provider=vision_provider,
+        workspace=runtime_config.workspace_path,
+        model=runtime_config.agents.defaults.model,
+        vision_model=runtime_config.get_vision_model(),
+        max_iterations=runtime_config.agents.defaults.max_tool_iterations,
+        context_window_tokens=runtime_config.agents.defaults.context_window_tokens,
+        web_search_config=runtime_config.tools.web.search,
+        web_proxy=runtime_config.tools.web.proxy or None,
+        exec_config=runtime_config.tools.exec,
         cron_service=cron,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
-        mcp_servers=config.tools.mcp_servers,
-        channels_config=config.channels,
+        restrict_to_workspace=runtime_config.tools.restrict_to_workspace,
+        mcp_servers=runtime_config.tools.mcp_servers,
+        channels_config=runtime_config.channels,
     )
 
     # Shared reference for progress callbacks
