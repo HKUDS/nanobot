@@ -221,6 +221,13 @@ export class WhatsAppClient {
       return `[Voice Message]`;
     }
 
+    // Contact card (vCard)
+    if (message.contactMessage) {
+      const name = message.contactMessage.displayName || 'Unknown';
+      const vcard = message.contactMessage.vcard || '';
+      return `[Contact: ${name}]\n${vcard}`;
+    }
+
     return null;
   }
 
