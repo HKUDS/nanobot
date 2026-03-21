@@ -506,7 +506,7 @@ async def test_loop_run_agent_loop_delegation_and_failure_reflection_paths(tmp_p
     ]
 
     async def _exec(_calls):
-        loop._delegation_count = loop._max_delegations
+        loop._dispatcher.delegation_count = loop._dispatcher.max_delegations
         return [ToolResult.ok("delegated")]
 
     loop._call_llm = AsyncMock(side_effect=responses)  # type: ignore[method-assign]
@@ -801,7 +801,7 @@ async def test_loop_dispatch_delegation_route_and_exception_paths(tmp_path: Path
     loop._dispatcher = dispatcher
 
     with pytest.raises(Exception, match="."):  # noqa: B017 — any exception signals correct guard
-        await loop._dispatch_delegation("", "task", None)
+        await loop._dispatcher.dispatch("", "task", None)
 
     class _Coord:
         @staticmethod
@@ -821,7 +821,7 @@ async def test_loop_dispatch_delegation_route_and_exception_paths(tmp_path: Path
     token = _delegation_ancestry.set(tuple())
     try:
         with pytest.raises(RuntimeError):
-            await loop._dispatch_delegation("missing", "find bug", "ctx")
+            await loop._dispatcher.dispatch("missing", "find bug", "ctx")
     finally:
         _delegation_ancestry.reset(token)
 

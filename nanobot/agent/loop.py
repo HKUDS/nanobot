@@ -34,8 +34,6 @@ import asyncio
 import json
 import time
 import uuid
-import weakref
-from collections import deque
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -68,7 +66,7 @@ from nanobot.agent.scratchpad import Scratchpad
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
 from nanobot.agent.tool_executor import ToolExecutor
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool, DelegationResult
+from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool
 from nanobot.agent.tools.email import CheckEmailTool
 from nanobot.agent.tools.excel import (
     DescribeDataTool,
@@ -427,44 +425,6 @@ class AgentLoop:
         self._turn_tokens_completion = 0
         self._turn_llm_calls = 0
 
-    # --- Delegation state proxied to _dispatcher ---
-    # The properties below are ADR-002 extraction fossils: they exist so that
-    # call-sites written before the DelegationDispatcher extraction can still
-    # access delegation state via ``self._delegation_count`` etc. without a
-    # broad rename.  New code should access ``self._dispatcher`` directly.
-
-    @property
-    def _consolidation_locks(self) -> weakref.WeakValueDictionary[str, asyncio.Lock]:
-        return self._consolidator._locks
-
-    @property
-    def _delegation_count(self) -> int:  # ADR-002 fossil
-        return self._dispatcher.delegation_count
-
-    @_delegation_count.setter
-    def _delegation_count(self, value: int) -> None:  # ADR-002 fossil
-        self._dispatcher.delegation_count = value
-
-    @property
-    def _max_delegations(self) -> int:  # ADR-002 fossil
-        return self._dispatcher.max_delegations
-
-    @_max_delegations.setter
-    def _max_delegations(self, value: int) -> None:  # ADR-002 fossil
-        self._dispatcher.max_delegations = value
-
-    @property
-    def _routing_trace(self) -> deque[dict[str, Any]]:  # ADR-002 fossil
-        return self._dispatcher.routing_trace
-
-    @property
-    def _active_messages(self) -> list[dict[str, Any]] | None:  # ADR-002 fossil
-        return self._dispatcher.active_messages
-
-    @_active_messages.setter
-    def _active_messages(self, value: list[dict[str, Any]] | None) -> None:  # ADR-002 fossil
-        self._dispatcher.active_messages = value
-
     def _build_tools(self) -> None:
         """Construct and wire the tool/capability layer.
 
@@ -815,10 +775,6 @@ class AgentLoop:
         # Explicit multi-step indicators
         return any(signal in text_lower for signal in _PLANNING_SIGNALS)
 
-    @staticmethod
-    def _has_parallel_structure(text: str) -> bool:
-        return DelegationDispatcher.has_parallel_structure(text)
-
     # ------------------------------------------------------------------
     # _run_agent_loop helpers (extracted for readability)
     # ------------------------------------------------------------------
@@ -1032,7 +988,10 @@ class AgentLoop:
         """
         had_delegations = any(tc.name in _DELEGATION_TOOL_NAMES for tc in response.tool_calls)
 
-        if had_delegations and self._delegation_count >= self._max_delegations:
+        if (
+            had_delegations
+            and self._dispatcher.delegation_count >= self._dispatcher.max_delegations
+        ):
             messages.append(
                 {
                     "role": "system",
@@ -1085,7 +1044,7 @@ class AgentLoop:
             # request, nudge it to switch to delegate_parallel next round.
             if not any(
                 tc.name == "delegate_parallel" for tc in response.tool_calls
-            ) and self._has_parallel_structure(user_text):
+            ) and DelegationDispatcher.has_parallel_structure(user_text):
                 nudge += (
                     "\n\nYou used sequential `delegate` but the user's "
                     "request lists independent sub-tasks. For the "
@@ -1097,7 +1056,7 @@ class AgentLoop:
             has_plan
             and not had_delegations
             and turn_tool_calls >= 5
-            and self._delegation_count == 0
+            and self._dispatcher.delegation_count == 0
             and self.tools.get("delegate_parallel")
         ):
             messages.append(
@@ -1139,8 +1098,8 @@ class AgentLoop:
         Returns (final_content, tools_used, messages).
         """
         messages = initial_messages
-        self._active_messages = messages
-        self._delegation_count = 0
+        self._dispatcher.active_messages = messages
+        self._dispatcher.delegation_count = 0
         iteration = 0
         final_content = None
         tools_used: list[str] = []
@@ -1197,7 +1156,7 @@ class AgentLoop:
                 logger.debug("Planning prompt injected for: {}...", user_text[:60])
                 # Parallel structure nudge: when the request lists independent
                 # subtasks, explicitly instruct parallel delegation.
-                if self._has_parallel_structure(user_text):
+                if DelegationDispatcher.has_parallel_structure(user_text):
                     messages.append(
                         {
                             "role": "system",
@@ -1587,7 +1546,7 @@ class AgentLoop:
                                 or self._coordinator.registry.get_default()
                                 or AgentRoleConfig(name=role_name, description="General assistant")
                             )
-                            self._record_route_trace(
+                            self._dispatcher.record_route_trace(
                                 "route",
                                 role=role.name,
                                 confidence=confidence,
@@ -1701,58 +1660,6 @@ class AgentLoop:
         self._dispatcher.wire_delegate_tools(
             available_roles_fn=self._capabilities.role_names,
         )
-
-    def _record_route_trace(self, event: str, **kwargs: Any) -> None:
-        """Forward to dispatcher."""
-        self._dispatcher.record_route_trace(event, **kwargs)
-
-    def get_routing_trace(self) -> list[dict[str, Any]]:
-        """Return a copy of the routing trace."""
-        return self._dispatcher.get_routing_trace()
-
-    def _gather_recent_tool_results(self, max_results: int = 15, max_chars: int = 8000) -> str:
-        return self._dispatcher.gather_recent_tool_results(max_results, max_chars)
-
-    async def _dispatch_delegation(
-        self,
-        target_role: str,
-        task: str,
-        context: str | None,
-    ) -> DelegationResult:
-        return await self._dispatcher.dispatch(target_role, task, context)
-
-    @staticmethod
-    def _classify_task_type(role: str, task: str) -> str:
-        return DelegationDispatcher.classify_task_type(role, task)
-
-    def _extract_plan_text(self) -> str:
-        return self._dispatcher.extract_plan_text()
-
-    def _extract_user_request(self) -> str:
-        return self._dispatcher.extract_user_request()
-
-    def _build_execution_context(self, task_type: str) -> str:
-        return self._dispatcher.build_execution_context(task_type)
-
-    def _build_parallel_work_summary(self, role: str) -> str:
-        return self._dispatcher.build_parallel_work_summary(role)
-
-    def _build_delegation_contract(
-        self,
-        role: str,
-        task: str,
-        context: str | None,
-        task_type: str,
-    ) -> tuple[str, str]:
-        return self._dispatcher.build_delegation_contract(role, task, context, task_type)
-
-    async def _execute_delegated_agent(
-        self,
-        role: AgentRoleConfig,
-        task: str,
-        context: str | None,
-    ) -> tuple[str, list[str]]:
-        return await self._dispatcher.execute_delegated_agent(role, task, context)
 
     # ------------------------------------------------------------------
     # Per-turn role switching (multi-agent routing)
