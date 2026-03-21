@@ -1,19 +1,16 @@
-"""mem0-first memory store with structured profile/events maintenance.
+"""Memory store facade — coordinates subsystem modules.
 
-This is the **primary public API** for all memory operations.  ``MemoryStore``
-orchestrates the full lifecycle:
+``MemoryStore`` is a thin facade that composes focused subsystem modules:
 
-1. **Retrieval** — queries mem0 vector store first; falls back to local
-   keyword search (``retrieval.py``) when mem0 is unavailable; optionally
-   re-ranks results via cross-encoder (``reranker.py``).
-2. **Consolidation** — after each conversation turn, extracts structured
-   events via ``MemoryExtractor``, persists them through
-   ``MemoryPersistence``, and updates ``MEMORY.md`` / ``profile.json``.
-3. **Compaction** — periodic LLM-driven merge of redundant events and
-   profile contradiction resolution.
+- ``EventIngester`` — event write path (classify, dedup, merge, append)
+- ``MemoryRetriever`` — retrieval read path (mem0, BM25, reranking)
+- ``MemoryMaintenance`` — reindex, seed, health checks
+- ``MemorySnapshot`` — rebuild and verify MEMORY.md
+- ``RolloutConfig`` — feature flag management
 
-All file I/O is delegated to ``MemoryPersistence``; all vector operations
-go through ``_Mem0Adapter``.  This module owns the coordination logic only.
+Cross-cutting coordination (``consolidate``, ``get_memory_context``) stays
+on ``MemoryStore``.  Callers access subsystems directly for specific
+operations: ``store.ingester.append_events(...)``.
 """
 
 from __future__ import annotations

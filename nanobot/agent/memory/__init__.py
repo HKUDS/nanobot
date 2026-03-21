@@ -1,20 +1,26 @@
 """Memory system for persistent agent memory.
 
-This package decomposes the monolithic memory module into focused sub-modules
-while preserving backward-compatible imports::
+This package decomposes the memory subsystem into focused modules while
+preserving backward-compatible imports::
 
-    from nanobot.agent.memory import MemoryStore      # primary public API
-    from nanobot.agent.memory import MemoryExtractor   # event extraction
-    from nanobot.agent.memory import MemoryPersistence  # file I/O
-    from nanobot.agent.memory import _Mem0Adapter      # internal, used by tests
+    from nanobot.agent.memory import MemoryStore      # facade (coordination)
+    from nanobot.agent.memory import EventIngester     # write path
+    from nanobot.agent.memory import MemoryRetriever   # read path
+    from nanobot.agent.memory import MemoryMaintenance # reindex, seed, health
+    from nanobot.agent.memory import MemorySnapshot    # MEMORY.md rebuild
+    from nanobot.agent.memory import RolloutConfig     # feature flags
 
 Architecture
 ------------
-- **store.py** — ``MemoryStore``: orchestrates retrieval, consolidation,
-  and persistence.  Uses mem0 as primary vector store with local keyword
-  fallback.
-- **retrieval.py** — Local keyword-based scoring used when mem0 is
-  unavailable or as a candidate generator for re-ranking.
+- **store.py** — ``MemoryStore``: thin facade composing subsystem modules;
+  owns cross-cutting coordination (consolidate, get_memory_context).
+- **ingester.py** — ``EventIngester``: event write path (classify, dedup,
+  merge, append).
+- **retriever.py** — ``MemoryRetriever``: retrieval read path (mem0, BM25
+  fallback, reranking).
+- **maintenance.py** — ``MemoryMaintenance``: reindex, seed, health checks.
+- **snapshot.py** — ``MemorySnapshot``: rebuild and verify MEMORY.md.
+- **rollout.py** — ``RolloutConfig``: feature flag management.
 - **extractor.py** — ``MemoryExtractor``: LLM + heuristic pipeline that
   converts raw conversation turns into structured memory events.
 - **persistence.py** — ``MemoryPersistence``: low-level I/O for
