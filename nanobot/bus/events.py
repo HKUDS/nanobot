@@ -6,6 +6,24 @@ from typing import Any
 
 
 @dataclass
+class DashboardEvent:
+    """Event emitted to the dashboard for real-time monitoring."""
+
+    type: str  # message_in, message_out, tool_call, tool_result, progress, response, status
+    agent: str = "main"
+    data: dict[str, Any] = field(default_factory=dict)
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": self.type,
+            "agent": self.agent,
+            "timestamp": self.timestamp.isoformat(),
+            **self.data,
+        }
+
+
+@dataclass
 class InboundMessage:
     """Message received from a chat channel."""
 

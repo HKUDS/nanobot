@@ -28,7 +28,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import DashboardEvent, InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
@@ -108,7 +108,9 @@ class AgentLoop:
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._sticky_agents: dict[str, str] = {}  # chat_key -> agent_name
         self._background_tasks: list[asyncio.Task] = []
-        self._processing_lock = asyncio.Lock()
+        # Per-agent locks: different agents process concurrently,
+        # same agent serializes to preserve conversation order.
+        self._agent_locks: dict[str, asyncio.Lock] = {}
         self.memory_consolidator = MemoryConsolidator(
             workspace=workspace,
             provider=provider,
@@ -321,16 +323,23 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    async def _emit(self, event_type: str, agent: str = "main", **data: Any) -> None:
+        """Emit a dashboard event via the message bus (fire-and-forget)."""
+        await self.bus.emit_dashboard_event(DashboardEvent(type=event_type, agent=agent, data=data))
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        agent_name: str = "main",
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+
+        await self._emit("agent_status", agent_name, status="processing")
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -348,6 +357,7 @@ class AgentLoop:
                     thought = self._strip_think(response.content)
                     if thought:
                         await on_progress(thought)
+                        await self._emit("progress", agent_name, content=thought)
                     tool_hint = self._tool_hint(response.tool_calls)
                     tool_hint = self._strip_think(tool_hint)
                     await on_progress(tool_hint, tool_hint=True)
@@ -366,7 +376,20 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+
+                    await self._emit(
+                        "tool_call", agent_name,
+                        tool=tool_call.name, args=args_str[:2000],
+                    )
+
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+
+                    await self._emit(
+                        "tool_result", agent_name,
+                        tool=tool_call.name,
+                        preview=result[:2000] if result else "",
+                    )
+
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -395,6 +418,7 @@ class AgentLoop:
                 "without completing the task. You can try breaking the task into smaller steps."
             )
 
+        await self._emit("agent_status", agent_name, status="idle")
         return final_content, tools_used, messages
 
     async def run(self) -> None:
@@ -458,9 +482,37 @@ class AgentLoop:
 
         asyncio.create_task(_do_restart())
 
+    def _resolve_dispatch_target(self, msg: InboundMessage) -> str:
+        """Determine which agent will handle this message (for lock selection).
+
+        Returns 'main' or a named agent name. This is a lightweight check
+        that mirrors the routing logic without modifying state.
+        """
+        if msg.channel == "system":
+            return "main"
+        raw = msg.content.strip()
+        key = msg.session_key_override or f"{msg.channel}:{msg.chat_id}"
+        if self.agent_registry:
+            match = self.agent_registry.match_mention(raw)
+            if match:
+                agent_name, _ = match
+                if agent_name not in self.agent_registry._RESERVED_NAMES:
+                    return agent_name
+                return "main"
+            if key in self._sticky_agents:
+                return self._sticky_agents[key]
+        return "main"
+
+    def _get_agent_lock(self, agent_name: str) -> asyncio.Lock:
+        """Get or create a per-agent lock."""
+        if agent_name not in self._agent_locks:
+            self._agent_locks[agent_name] = asyncio.Lock()
+        return self._agent_locks[agent_name]
+
     async def _dispatch(self, msg: InboundMessage) -> None:
-        """Process a message under the global lock."""
-        async with self._processing_lock:
+        """Process a message under a per-agent lock."""
+        target = self._resolve_dispatch_target(msg)
+        async with self._get_agent_lock(target):
             try:
                 response = await self._process_message(msg)
                 if response is not None:
@@ -591,7 +643,7 @@ class AgentLoop:
                     self._sticky_agents.pop(key, None)
                     msg = InboundMessage(
                         channel=msg.channel, chat_id=msg.chat_id,
-                        content=stripped_msg, sender=msg.sender,
+                        content=stripped_msg, sender_id=msg.sender_id,
                         media=msg.media, metadata=msg.metadata,
                     )
                 else:
@@ -693,9 +745,11 @@ class AgentLoop:
             agent_name, content, msg.channel, msg.chat_id,
             media=msg.media if msg.media else None,
         )
+        meta = dict(msg.metadata or {})
+        meta["_agent"] = agent_name
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id,
-            content=result, metadata=msg.metadata or {},
+            content=result, metadata=meta,
         )
 
     async def _run_named_agent(
