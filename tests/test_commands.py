@@ -213,6 +213,15 @@ def test_config_matches_openai_codex_with_hyphen_prefix():
     assert config.get_provider_name() == "openai_codex"
 
 
+def test_config_dump_excludes_oauth_provider_blocks():
+    config = Config()
+
+    providers = config.model_dump(by_alias=True)["providers"]
+
+    assert "openaiCodex" not in providers
+    assert "githubCopilot" not in providers
+
+
 def test_config_matches_explicit_ollama_prefix_without_api_key():
     config = Config()
     config.agents.defaults.model = "ollama/llama3.2"
