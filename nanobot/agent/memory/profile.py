@@ -40,8 +40,6 @@ PROFILE_STATUS_ACTIVE = "active"
 PROFILE_STATUS_CONFLICTED = "conflicted"
 PROFILE_STATUS_STALE = "stale"
 
-_MAX_EVIDENCE_REFS = 10  # Cap evidence_event_ids to avoid unbounded growth.
-
 
 # ---------------------------------------------------------------------------
 # ProfileManager
@@ -57,7 +55,7 @@ class ProfileManager:
     PROFILE_STATUS_ACTIVE = PROFILE_STATUS_ACTIVE
     PROFILE_STATUS_CONFLICTED = PROFILE_STATUS_CONFLICTED
     PROFILE_STATUS_STALE = PROFILE_STATUS_STALE
-    _MAX_EVIDENCE_REFS = _MAX_EVIDENCE_REFS
+    _MAX_EVIDENCE_REFS = 10  # Cap evidence_event_ids to avoid unbounded growth.
 
     # Conflict status constants (referenced by _apply_profile_updates /
     # _has_open_conflict / apply_live_user_correction).
