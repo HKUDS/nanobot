@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -61,6 +60,7 @@ from .reranker import CompositeReranker, Reranker
 from .retrieval_planner import RetrievalPlanner
 from .retriever import MemoryRetriever
 from .rollout import RolloutConfig
+from .snapshot import MemorySnapshot
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -229,6 +229,25 @@ class MemoryStore:
             get_rollout_status_fn=lambda: self.get_rollout_status(),
             get_rollout_fn=lambda: self.rollout,
             get_backend_stats_fn=lambda: self._backend_stats_for_eval(),
+        )
+
+        # MemorySnapshot: rebuild MEMORY.md + verify memory integrity.
+        # Lambdas ensure store-level patches are honoured by tests.
+        self.snapshot = MemorySnapshot(
+            profile_mgr=self.profile_mgr,
+            persistence=self.persistence,
+            read_events_fn=lambda **kw: self.ingester.read_events(**kw),
+            profile_section_lines_fn=lambda profile, **kw: self._profile_section_lines(
+                profile, **kw
+            ),
+            recent_unresolved_fn=lambda events, **kw: self._recent_unresolved(events, **kw),
+            read_long_term_fn=lambda: self.read_long_term(),
+            write_long_term_fn=lambda content: self.write_long_term(content),
+            extract_pinned_section_fn=self._extract_pinned_section,
+            restore_pinned_section_fn=self._restore_pinned_section,
+            verify_beliefs_fn=lambda: self.verify_beliefs(),
+            write_profile_fn=lambda profile: self.write_profile(profile),
+            profile_keys=self.PROFILE_KEYS,
         )
 
     # -- Shared helpers imported from .helpers --------------------------------
@@ -801,108 +820,12 @@ class MemoryStore:
         self.persistence.append_text(self.history_file, entry.rstrip() + "\n\n")
 
     def rebuild_memory_snapshot(self, *, max_events: int = 30, write: bool = True) -> str:
-        profile = self.read_profile()
-        events = self.ingester.read_events(limit=max_events)
-
-        # Preserve user-pinned sections across rebuilds (LAN-199 / LAN-206).
-        existing_memory = self.read_long_term()
-        pinned = self._extract_pinned_section(existing_memory) if existing_memory else None
-
-        parts = ["# Memory", ""]
-        section_lines = self._profile_section_lines(profile, max_items_per_section=8)
-        if section_lines:
-            parts.extend(section_lines)
-
-        unresolved = self._recent_unresolved(events, max_items=6)
-        if unresolved:
-            parts.append("## Open Tasks & Decisions")
-            for event in unresolved:
-                ts = str(event.get("timestamp", ""))[:16]
-                parts.append(f"- [{ts}] ({event.get('type', 'task')}) {event.get('summary', '')}")
-            parts.append("")
-
-        if events:
-            parts.append("## Recent Episodic Highlights")
-            for event in events[-max_events:]:
-                ts = str(event.get("timestamp", ""))[:16]
-                parts.append(f"- [{ts}] ({event.get('type', 'fact')}) {event.get('summary', '')}")
-        snapshot = "\n".join(parts).strip() + "\n"
-
-        if pinned:
-            snapshot = self._restore_pinned_section(snapshot, pinned)
-
-        if write:
-            self.write_long_term(snapshot)
-        return snapshot
+        return self.snapshot.rebuild_memory_snapshot(max_events=max_events, write=write)
 
     def verify_memory(
         self, *, stale_days: int = 90, update_profile: bool = False
     ) -> dict[str, Any]:
-        profile = self.read_profile()
-        events = self.ingester.read_events()
-        now = datetime.now(timezone.utc)
-        stale = 0
-        total_ttl = 0
-        for event in events:
-            ttl_days = event.get("ttl_days")
-            timestamp = self._to_datetime(str(event.get("timestamp", "")))
-            if not timestamp:
-                continue
-            if timestamp.tzinfo is None:
-                timestamp = timestamp.replace(tzinfo=timezone.utc)
-            age_days = (now - timestamp).total_seconds() / 86400.0
-            if isinstance(ttl_days, int) and ttl_days > 0:
-                total_ttl += 1
-                if age_days > ttl_days:
-                    stale += 1
-            elif age_days > stale_days:
-                stale += 1
-
-        stale_profile_items = 0
-        profile_touched = False
-        for key in self.PROFILE_KEYS:
-            section_meta = self._meta_section(profile, key)
-            for _, entry in section_meta.items():
-                if not isinstance(entry, dict):
-                    continue
-                last_seen = self._to_datetime(str(entry.get("last_seen_at", "")))
-                if not last_seen:
-                    continue
-                if last_seen.tzinfo is None:
-                    last_seen = last_seen.replace(tzinfo=timezone.utc)
-                age_days = max((now - last_seen).total_seconds() / 86400.0, 0.0)
-                if age_days > stale_days:
-                    stale_profile_items += 1
-                    if update_profile and entry.get("status") != self.PROFILE_STATUS_STALE:
-                        entry["status"] = self.PROFILE_STATUS_STALE
-                        profile_touched = True
-
-        if update_profile:
-            profile["last_verified_at"] = self._utc_now_iso()
-            profile_touched = True
-            if profile_touched:
-                self.write_profile(profile)
-
-        open_conflicts = [
-            c
-            for c in profile.get("conflicts", [])
-            if isinstance(c, dict)
-            and str(c.get("status", self.CONFLICT_STATUS_OPEN)).strip().lower()
-            in {self.CONFLICT_STATUS_OPEN, self.CONFLICT_STATUS_NEEDS_USER}
-        ]
-        belief_quality = self.verify_beliefs()
-
-        report = {
-            "events": len(events),
-            "profile_items": sum(len(self._to_str_list(profile.get(k))) for k in self.PROFILE_KEYS),
-            "open_conflicts": len(open_conflicts),
-            "stale_events": stale,
-            "stale_profile_items": stale_profile_items,
-            "ttl_tracked_events": total_ttl,
-            "last_verified_at": profile.get("last_verified_at"),
-            "belief_quality": belief_quality["summary"],
-        }
-        return report
+        return self.snapshot.verify_memory(stale_days=stale_days, update_profile=update_profile)
 
     def verify_beliefs(self) -> dict[str, Any]:
         """Assess belief health based on evidence quality, not just timestamps.

@@ -61,6 +61,7 @@ from .reranker import CompositeReranker, Reranker
 from .retrieval_planner import RetrievalPlan, RetrievalPlanner
 from .retriever import MemoryRetriever
 from .rollout import RolloutConfig
+from .snapshot import MemorySnapshot
 from .store import MemoryStore
 
 __all__ = [
@@ -73,6 +74,7 @@ __all__ = [
     "MemoryEvent",
     "MemoryMaintenance",
     "MemoryRetriever",
+    "MemorySnapshot",
     "MemoryStore",
     "RetrievalPlan",
     "RetrievalPlanner",
