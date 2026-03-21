@@ -45,14 +45,15 @@ from .graph import KnowledgeGraph
 from .mem0_adapter import _Mem0Adapter, _Mem0RuntimeInfo
 from .persistence import MemoryPersistence
 from .profile import ProfileManager
-from .reranker import DEFAULT_MODEL as _DEFAULT_RERANKER_MODEL
-from .reranker import CrossEncoderReranker
+from .reranker import CompositeReranker
 from .retrieval import _local_retrieve, _topic_fallback_retrieve
 from .retrieval_planner import RetrievalPlanner
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session
+
+    from .onnx_reranker import OnnxCrossEncoderReranker
 
 _COUNT_CACHE_TTL: float = 60.0  # seconds — SQLite counts change infrequently (LAN-102)
 
@@ -143,12 +144,19 @@ class MemoryStore:
         self._history_count_cache: tuple[float, int] | None = None
 
         # Cross-encoder re-ranker (Step 7)
+        reranker_model = str(
+            self.rollout.get("reranker_model", "onnx:ms-marco-MiniLM-L-6-v2")
+        ).strip()
         reranker_alpha = float(self.rollout.get("reranker_alpha", 0.5))
-        reranker_model = str(self.rollout.get("reranker_model", "")).strip() or None
-        self._reranker = CrossEncoderReranker(
-            model_name=reranker_model or _DEFAULT_RERANKER_MODEL,
-            alpha=reranker_alpha,
-        )
+        self._reranker: CompositeReranker | OnnxCrossEncoderReranker
+        if reranker_model.startswith("onnx:"):
+            from .onnx_reranker import OnnxCrossEncoderReranker
+
+            self._reranker = OnnxCrossEncoderReranker(
+                model_name=reranker_model.split(":", 1)[1], alpha=reranker_alpha
+            )
+        else:
+            self._reranker = CompositeReranker(alpha=reranker_alpha)
 
         # Knowledge graph (networkx + JSON persistence).
         graph_enabled = self.rollout.get("graph_enabled", False)
@@ -355,9 +363,9 @@ class MemoryStore:
                 "max_avg_memory_context_tokens": 1400.0,
                 "max_history_fallback_ratio": 0.05,
             },
-            "reranker_mode": "disabled",
+            "reranker_mode": "enabled",
             "reranker_alpha": 0.5,
-            "reranker_model": "",
+            "reranker_model": "onnx:ms-marco-MiniLM-L-6-v2",
             "mem0_user_id": "nanobot",
             "mem0_add_debug": False,
             "mem0_verify_write": True,
@@ -2300,7 +2308,7 @@ class MemoryStore:
         # Cross-encoder re-ranking (Step 7)
         # ------------------------------------------------------------------
         reranker_mode = str(self.rollout.get("reranker_mode", "disabled")).strip().lower()
-        if reranker_mode in ("enabled", "shadow") and adjusted and self._reranker.available:
+        if reranker_mode in ("enabled", "shadow") and adjusted:
             if reranker_mode == "enabled":
                 adjusted = self._reranker.rerank(query, adjusted)
             else:

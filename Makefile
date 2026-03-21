@@ -6,7 +6,7 @@ install:
 	$(PYTHON) -m pip install -e ".[dev]"
 
 install-all:
-	$(PYTHON) -m pip install -e ".[dev,reranker,oauth]"
+	$(PYTHON) -m pip install -e ".[dev,oauth]"
 	cd bridge && npm install
 
 test:

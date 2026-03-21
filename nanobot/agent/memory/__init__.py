@@ -22,9 +22,10 @@ Architecture
   ``HISTORY.md``.
 - **mem0_adapter.py** — ``_Mem0Adapter``: wraps the mem0 SDK with health
   checks and automatic fallback.
-- **reranker.py** — ``Reranker`` protocol, ``CrossEncoderReranker`` (requires
-  ``sentence-transformers``), and ``CompositeReranker`` (zero-dependency
-  lightweight alternative).
+- **reranker.py** — ``Reranker`` protocol and ``CompositeReranker``
+  (zero-dependency lightweight alternative).
+- **onnx_reranker.py** — ``OnnxCrossEncoderReranker`` (ONNX Runtime-based
+  cross-encoder, replaces the old sentence-transformers implementation).
 - **constants.py** — Shared constants and tool schemas.
 """
 
@@ -38,6 +39,7 @@ from .extractor import MemoryExtractor
 from .graph import KnowledgeGraph
 from .mem0_adapter import _Mem0Adapter, _Mem0RuntimeInfo
 from .onnx_reranker import OnnxCrossEncoderReranker
+from .onnx_reranker import OnnxCrossEncoderReranker as CrossEncoderReranker  # backward-compat
 from .ontology import (
     AGENT_NATIVE_TYPES,
     AGENT_RELATION_TYPES,
@@ -53,7 +55,7 @@ from .ontology import (
 )
 from .persistence import MemoryPersistence
 from .profile import ProfileManager
-from .reranker import CompositeReranker, CrossEncoderReranker, Reranker
+from .reranker import CompositeReranker, Reranker
 from .retrieval_planner import RetrievalPlan, RetrievalPlanner
 from .store import MemoryStore
 
