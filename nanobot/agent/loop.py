@@ -62,34 +62,19 @@ from nanobot.agent.observability import (
 )
 from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.reaction import classify_reaction
+from nanobot.agent.role_switching import TurnContext, TurnRoleManager
 from nanobot.agent.scratchpad import Scratchpad
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
 from nanobot.agent.tool_executor import ToolExecutor
+from nanobot.agent.tool_setup import register_default_tools
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool
 from nanobot.agent.tools.email import CheckEmailTool
-from nanobot.agent.tools.excel import (
-    DescribeDataTool,
-    ExcelFindTool,
-    ExcelGetRowsTool,
-    QueryDataTool,
-    ReadSpreadsheetTool,
-)
 from nanobot.agent.tools.feedback import FeedbackTool
-from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
-from nanobot.agent.tools.mission import (
-    MissionCancelTool,
-    MissionListTool,
-    MissionStartTool,
-    MissionStatusTool,
-)
-from nanobot.agent.tools.powerpoint import AnalyzePptxTool, PptxGetSlideTool, ReadPptxTool
+from nanobot.agent.tools.mission import MissionStartTool
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.result_cache import CacheGetSliceTool, ToolResultCache
+from nanobot.agent.tools.result_cache import ToolResultCache
 from nanobot.agent.tools.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
-from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.agent.tracing import TraceContext, bind_trace
 from nanobot.agent.verifier import AnswerVerifier
 from nanobot.bus.canonical import CanonicalEventBuilder
@@ -180,22 +165,6 @@ class ProgressCallback(Protocol):
         status_label: str = ...,
     ) -> None:
         pass
-
-
-@dataclass(slots=True)
-class TurnContext:
-    """Snapshot of agent settings overridden for a single routed turn.
-
-    Created by ``_apply_role_for_turn`` and consumed by ``_reset_role_after_turn``
-    to cleanly restore the original configuration without touching shared state
-    between turns.
-    """
-
-    model: str
-    temperature: float
-    max_iterations: int
-    role_prompt: str
-    tools: dict[str, Any] | None  # None → no tool filtering was applied
 
 
 @dataclass(slots=True)
@@ -399,6 +368,9 @@ class AgentLoop:
         )
         self._dispatcher.tools = self.tools
 
+        # Per-turn role switching (LAN-214)
+        self._role_manager = TurnRoleManager(self)
+
         # Legacy aliases — kept for backward compat with tests
         self._delegation_stack: list[str] = []
         self._scratchpad: Scratchpad | None = None
@@ -502,134 +474,23 @@ class AgentLoop:
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools, filtered by role config."""
-        role = self.role_config
-        allowed = set(role.allowed_tools) if role and role.allowed_tools is not None else None
-        denied = set(role.denied_tools) if role and role.denied_tools else set()
-        allowed_dir = self.workspace if self.config.restrict_to_workspace else None
-
-        def _should_register(name: str) -> bool:
-            if allowed is not None and name not in allowed:
-                return False
-            return name not in denied
-
-        for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
-            tool = cls(workspace=self.workspace, allowed_dir=allowed_dir)
-            if _should_register(tool.name):
-                self.tools.register(tool)
-
-        spreadsheet_tool = ReadSpreadsheetTool(
+        register_default_tools(
+            tools=self.tools,
+            role_config=self.role_config,
             workspace=self.workspace,
-            allowed_dir=allowed_dir,
-            cache=self.result_cache,
-        )
-        if _should_register(spreadsheet_tool.name):
-            self.tools.register(spreadsheet_tool)
-
-        # PowerPoint tools
-        pptx_read = ReadPptxTool(
-            workspace=self.workspace,
-            allowed_dir=allowed_dir,
-            cache=self.result_cache,
-        )
-        if _should_register(pptx_read.name):
-            self.tools.register(pptx_read)
-
-        pptx_analyze = AnalyzePptxTool(
-            workspace=self.workspace,
-            allowed_dir=allowed_dir,
-            cache=self.result_cache,
-            vision_model=self.config.vision_model,
-        )
-        if _should_register(pptx_analyze.name):
-            self.tools.register(pptx_analyze)
-
-        exec_tool = ExecTool(
-            working_dir=str(self.workspace),
-            timeout=self.exec_config.timeout,
             restrict_to_workspace=self.config.restrict_to_workspace,
             shell_mode=self.config.shell_mode,
+            vision_model=self.config.vision_model,
+            exec_config=self.exec_config,
+            brave_api_key=self.brave_api_key,
+            publish_outbound=self.bus.publish_outbound,
+            cron_service=self.cron_service,
+            delegation_enabled=self.config.delegation_enabled,
+            missions=self.missions,
+            result_cache=self.result_cache,
+            skills_enabled=self.config.skills_enabled,
+            skills_loader=self.context.skills,
         )
-        if _should_register(exec_tool.name):
-            self.tools.register(exec_tool)
-
-        for extra_tool in (
-            WebSearchTool(api_key=self.brave_api_key),
-            WebFetchTool(),
-            MessageTool(send_callback=self.bus.publish_outbound),
-            FeedbackTool(events_file=self.workspace / "memory" / "events.jsonl"),
-        ):
-            if _should_register(extra_tool.name):
-                self.tools.register(extra_tool)
-
-        # Email checking tool (callback set later by gateway via set_email_fetch)
-        email_tool = CheckEmailTool()
-        if _should_register(email_tool.name):
-            self.tools.register(email_tool)
-
-        if self.cron_service:
-            cron_tool = CronTool(self.cron_service)
-            if _should_register(cron_tool.name):
-                self.tools.register(cron_tool)
-
-        # Delegation tools
-        if self.config.delegation_enabled:
-            delegate_tool = DelegateTool()
-            if _should_register(delegate_tool.name):
-                self.tools.register(delegate_tool)
-            delegate_parallel_tool = DelegateParallelTool()
-            if _should_register(delegate_parallel_tool.name):
-                self.tools.register(delegate_parallel_tool)
-            mission_tool = MissionStartTool(manager=self.missions)
-            if _should_register(mission_tool.name):
-                self.tools.register(mission_tool)
-            mission_status = MissionStatusTool(manager=self.missions)
-            if _should_register(mission_status.name):
-                self.tools.register(mission_status)
-            mission_list = MissionListTool(manager=self.missions)
-            if _should_register(mission_list.name):
-                self.tools.register(mission_list)
-            mission_cancel = MissionCancelTool(manager=self.missions)
-            if _should_register(mission_cancel.name):
-                self.tools.register(mission_cancel)
-
-        # Scratchpad tools (scratchpad instance swapped per session in _ensure_scratchpad)
-        placeholder_pad = Scratchpad(self.workspace / "sessions" / "_placeholder")
-        for st in (
-            ScratchpadWriteTool(placeholder_pad),
-            ScratchpadReadTool(placeholder_pad),
-        ):
-            if _should_register(st.name):
-                self.tools.register(st)
-
-        # Skill-provided custom tools (Step 14)
-        if self.config.skills_enabled:
-            for skill_tool in self.context.skills.discover_tools():
-                self.tools.register(skill_tool)
-
-        # Cache retrieval tools
-        cache_slice = CacheGetSliceTool(cache=self.result_cache)
-        if _should_register(cache_slice.name):
-            self.tools.register(cache_slice)
-
-        excel_rows = ExcelGetRowsTool(cache=self.result_cache)
-        if _should_register(excel_rows.name):
-            self.tools.register(excel_rows)
-
-        excel_find = ExcelFindTool(cache=self.result_cache)
-        if _should_register(excel_find.name):
-            self.tools.register(excel_find)
-
-        pptx_get_slide = PptxGetSlideTool(cache=self.result_cache)
-        if _should_register(pptx_get_slide.name):
-            self.tools.register(pptx_get_slide)
-
-        query_tool = QueryDataTool(cache=self.result_cache)
-        if _should_register(query_tool.name):
-            self.tools.register(query_tool)
-
-        describe_tool = DescribeDataTool(cache=self.result_cache)
-        if _should_register(describe_tool.name):
-            self.tools.register(describe_tool)
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -1459,7 +1320,7 @@ class AgentLoop:
         each inbound message is first classified by the coordinator.  The
         coordinator returns an ``AgentRoleConfig`` whose overrides
         (model, system prompt, tool filters) are applied for that turn
-        via ``_apply_role_for_turn``.  When routing is disabled the loop
+        via ``TurnRoleManager.apply``.  When routing is disabled the loop
         behaves exactly as before.
         """
         self._running = True
@@ -1553,7 +1414,7 @@ class AgentLoop:
                                 latency_ms=classify_latency_ms,
                                 message_excerpt=msg.content,
                             )
-                            turn_ctx = self._apply_role_for_turn(role)
+                            turn_ctx = self._role_manager.apply(role)
 
                         # Wrap with timeout to prevent infinite processing
                         timeout = (
@@ -1587,7 +1448,7 @@ class AgentLoop:
                                 ),
                             )
 
-                    self._reset_role_after_turn(turn_ctx)
+                    self._role_manager.reset(turn_ctx)
 
                     if response is not None:
                         await self.bus.publish_outbound(response)
@@ -1609,7 +1470,7 @@ class AgentLoop:
 
                 except Exception as e:  # crash-barrier: message processing
                     logger.exception("Error processing message")
-                    self._reset_role_after_turn(turn_ctx)
+                    self._role_manager.reset(turn_ctx)
                     await self.bus.publish_outbound(
                         OutboundMessage(
                             channel=msg.channel,
@@ -1660,73 +1521,6 @@ class AgentLoop:
         self._dispatcher.wire_delegate_tools(
             available_roles_fn=self._capabilities.role_names,
         )
-
-    # ------------------------------------------------------------------
-    # Per-turn role switching (multi-agent routing)
-    # ------------------------------------------------------------------
-
-    def _apply_role_for_turn(self, role: AgentRoleConfig) -> TurnContext:
-        """Temporarily override agent settings for the current turn.
-
-        Returns a ``TurnContext`` snapshot that must be passed to
-        ``_reset_role_after_turn`` to restore the original configuration.
-        """
-        # Only copy the tool registry when filtering will actually be applied.
-        # Roles with no allowed/denied lists leave the registry unchanged, so
-        # copying is wasted allocation.
-        _will_filter = role.allowed_tools is not None or bool(role.denied_tools)
-        ctx = TurnContext(
-            model=self.model,
-            temperature=self.temperature,
-            max_iterations=self.max_iterations,
-            role_prompt=self.context.role_system_prompt,
-            tools=self.tools.snapshot() if _will_filter else None,
-        )
-
-        if role.model:
-            self.model = role.model
-        if role.temperature is not None:
-            self.temperature = role.temperature
-        if role.max_iterations is not None:
-            self.max_iterations = role.max_iterations
-        self.context.role_system_prompt = role.system_prompt or ""
-        self.role_name = role.name
-        self._dispatcher.role_name = role.name  # Keep dispatcher in sync (LAN-194)
-
-        # Apply role-specific tool filtering
-        self._filter_tools_for_role(role)
-        logger.debug("Applied role '{}' for turn (model={})", role.name, self.model)
-        return ctx
-
-    def _filter_tools_for_role(self, role: AgentRoleConfig) -> None:
-        """Remove tools that the role's allowed/denied lists exclude."""
-        allowed = set(role.allowed_tools) if role.allowed_tools is not None else None
-        denied = set(role.denied_tools) if role.denied_tools else set()
-        if allowed is None and not denied:
-            return
-        for name in list(self.tools.tool_names):
-            if allowed is not None and name not in allowed:
-                self.tools.unregister(name)
-            elif name in denied:
-                self.tools.unregister(name)
-
-    def _reset_role_after_turn(self, ctx: TurnContext | None) -> None:
-        """Restore original agent settings after a routed turn.
-
-        ``ctx`` is the ``TurnContext`` returned by ``_apply_role_for_turn``.
-        Passing ``None`` is a no-op (safe to call when no role was applied).
-        """
-        if ctx is None:
-            return
-        self.model = ctx.model
-        self.temperature = ctx.temperature
-        self.max_iterations = ctx.max_iterations
-        self.context.role_system_prompt = ctx.role_prompt
-        self.role_name = self.role_config.name if self.role_config else ""
-        self._dispatcher.role_name = self.role_name  # Keep dispatcher in sync (LAN-194)
-        # Restore full tool set (only non-None — None means no filtering was applied)
-        if ctx.tools is not None:
-            self.tools.restore(ctx.tools)
 
     async def close_mcp(self) -> None:
         """Close MCP connections and other async resources."""
@@ -2307,7 +2101,7 @@ class AgentLoop:
                     "Unknown forced role '{}' — available roles not matched", forced_role
                 )
                 return f"Unknown role: {forced_role}"
-            turn_ctx = self._apply_role_for_turn(role)
+            turn_ctx = self._role_manager.apply(role)
 
         try:
             async with trace_request(
@@ -2328,5 +2122,5 @@ class AgentLoop:
                     msg, session_key=session_key, on_progress=on_progress
                 )
         finally:
-            self._reset_role_after_turn(turn_ctx)
+            self._role_manager.reset(turn_ctx)
         return response.content if response else ""
