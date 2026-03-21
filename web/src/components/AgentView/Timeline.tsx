@@ -29,10 +29,11 @@ export default function Timeline({ events, agentFilter }: Props) {
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
 
   const filtered = agentFilter
-    ? events.filter(
-        (e) =>
-          !e.agent || e.agent === agentFilter || e.type === 'message_in' || e.type === 'message_out'
-      )
+    ? events.filter((e) => {
+        // Strict filter: only show events belonging to this agent
+        const eventAgent = typeof e.agent === 'string' ? e.agent : 'main'
+        return eventAgent === agentFilter
+      })
     : events
 
   useEffect(() => {

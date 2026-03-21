@@ -2,10 +2,10 @@ import { useState, useRef } from 'react'
 import { useApi } from '../../hooks/useApi'
 
 interface Props {
-  sessionKey?: string
+  agentName: string
 }
 
-export default function MessageInput({ sessionKey }: Props) {
+export default function MessageInput({ agentName }: Props) {
   const { sendMessage, loading } = useApi()
   const [text, setText] = useState('')
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -15,7 +15,7 @@ export default function MessageInput({ sessionKey }: Props) {
     if (!msg || loading) return
     setText('')
     try {
-      await sendMessage(msg, sessionKey)
+      await sendMessage(msg, agentName)
     } catch (e) {
       console.error('Failed to send:', e)
     }
@@ -29,6 +29,10 @@ export default function MessageInput({ sessionKey }: Props) {
     }
   }
 
+  const placeholder = agentName === 'main'
+    ? 'Send a message... (Enter to send)'
+    : `Send to @${agentName}... (Enter to send)`
+
   return (
     <div className="border-t border-slate-700/50 px-4 py-3 bg-slate-800/30">
       <div className="flex gap-2 items-end">
@@ -37,7 +41,7 @@ export default function MessageInput({ sessionKey }: Props) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Send a message... (Enter to send, Shift+Enter for newline)"
+          placeholder={placeholder}
           rows={1}
           className="flex-1 bg-slate-800 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-200
             placeholder:text-slate-500 focus:outline-none focus:border-blue-500/50 resize-none"

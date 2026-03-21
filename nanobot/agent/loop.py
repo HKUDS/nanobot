@@ -715,9 +715,11 @@ class AgentLoop:
             agent_name, content, msg.channel, msg.chat_id,
             media=msg.media if msg.media else None,
         )
+        meta = dict(msg.metadata or {})
+        meta["_agent"] = agent_name
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id,
-            content=result, metadata=msg.metadata or {},
+            content=result, metadata=meta,
         )
 
     async def _run_named_agent(

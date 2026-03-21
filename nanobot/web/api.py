@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 class SendMessageRequest(BaseModel):
     content: str
     agent: str = "main"  # "main" or named agent name
-    session_key: str = "web:dashboard"
 
 
 class _ApiState:
@@ -127,6 +126,25 @@ async def get_agent(name: str) -> dict[str, Any]:
     }
 
 
+@router.get("/agents/{name}/session")
+async def get_agent_session(name: str) -> dict[str, Any]:
+    """Get the dashboard session for a specific agent."""
+    if not state.agent_loop:
+        raise HTTPException(404, "Not initialized")
+
+    key = _agent_session_key(name)
+    session = state.agent_loop.sessions.get_or_create(key)
+    messages = _format_session_messages(session.messages[-200:])
+
+    return {
+        "key": session.key,
+        "created_at": session.created_at.isoformat(),
+        "updated_at": session.updated_at.isoformat(),
+        "message_count": len(session.messages),
+        "messages": messages,
+    }
+
+
 # ------------------------------------------------------------------
 # Sessions
 # ------------------------------------------------------------------
@@ -145,21 +163,7 @@ async def get_session(key: str) -> dict[str, Any]:
         raise HTTPException(404, "Not initialized")
 
     session = state.agent_loop.sessions.get_or_create(key)
-    messages = []
-    for msg in session.messages[-200:]:  # Last 200 messages
-        entry = {
-            "role": msg.get("role", ""),
-            "content": _truncate_content(msg.get("content", "")),
-            "timestamp": msg.get("timestamp", ""),
-        }
-        if msg.get("tool_calls"):
-            entry["tool_calls"] = [
-                {"name": tc.get("function", {}).get("name", ""), "id": tc.get("id", "")}
-                for tc in msg["tool_calls"]
-            ]
-        if msg.get("name"):
-            entry["tool_name"] = msg["name"]
-        messages.append(entry)
+    messages = _format_session_messages(session.messages[-200:])
 
     return {
         "key": session.key,
@@ -205,20 +209,56 @@ async def send_message(req: SendMessageRequest) -> dict[str, str]:
 
     from nanobot.bus.events import InboundMessage
 
+    content = req.content
+    # Prepend @mention for named agents so AgentLoop routes correctly
+    if req.agent and req.agent != "main":
+        content = f"@{req.agent} {content}"
+
     msg = InboundMessage(
         channel="web",
         sender_id="dashboard",
         chat_id="dashboard",
-        content=req.content,
-        session_key_override=req.session_key,
+        content=content,
+        metadata={"_target_agent": req.agent},
     )
     await state.bus.publish_inbound(msg)
-    return {"status": "sent", "session_key": req.session_key}
+
+    session_key = _agent_session_key(req.agent)
+    return {"status": "sent", "session_key": session_key}
 
 
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+
+def _agent_session_key(agent_name: str) -> str:
+    """Return the session key used by the dashboard for a given agent."""
+    if agent_name == "main":
+        return "web:dashboard"
+    # Matches the pattern in AgentLoop._run_named_agent:
+    # session_key = f"{channel}:{chat_id}:agent:{agent_name}"
+    return f"web:dashboard:agent:{agent_name}"
+
+
+def _format_session_messages(raw_messages: list[dict]) -> list[dict[str, Any]]:
+    """Convert raw session messages to API-friendly format."""
+    messages = []
+    for msg in raw_messages:
+        entry: dict[str, Any] = {
+            "role": msg.get("role", ""),
+            "content": _truncate_content(msg.get("content", "")),
+            "timestamp": msg.get("timestamp", ""),
+        }
+        if msg.get("tool_calls"):
+            entry["tool_calls"] = [
+                {"name": tc.get("function", {}).get("name", ""), "id": tc.get("id", "")}
+                for tc in msg["tool_calls"]
+            ]
+        if msg.get("name"):
+            entry["tool_name"] = msg["name"]
+        messages.append(entry)
+    return messages
 
 
 def _truncate_content(content: Any, max_len: int = 1000) -> Any:

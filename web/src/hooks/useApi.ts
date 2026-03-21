@@ -18,6 +18,9 @@ export function useApi() {
 
   const getAgent = useCallback((name: string) => fetchJson<Agent>(`/agents/${name}`), [])
 
+  const getAgentSession = useCallback((name: string) =>
+    fetchJson<SessionDetail>(`/agents/${encodeURIComponent(name)}/session`), [])
+
   const getSessions = useCallback(() => fetchJson<SessionInfo[]>('/sessions'), [])
 
   const getSession = useCallback((key: string) =>
@@ -28,21 +31,22 @@ export function useApi() {
 
   const getChannels = useCallback(() => fetchJson<ChannelStatus>('/channels'), [])
 
-  const sendMessage = useCallback(async (content: string, sessionKey?: string) => {
+  const sendMessage = useCallback(async (content: string, agent: string = 'main') => {
     setLoading(true)
     try {
-      return await fetchJson<{ status: string }>('/send', {
+      return await fetchJson<{ status: string; session_key: string }>('/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content,
-          session_key: sessionKey || 'web:dashboard',
-        }),
+        body: JSON.stringify({ content, agent }),
       })
     } finally {
       setLoading(false)
     }
   }, [])
 
-  return { getStatus, getAgents, getAgent, getSessions, getSession, clearSession, getChannels, sendMessage, loading }
+  return {
+    getStatus, getAgents, getAgent, getAgentSession,
+    getSessions, getSession, clearSession, getChannels,
+    sendMessage, loading,
+  }
 }

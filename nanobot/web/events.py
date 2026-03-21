@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import json
+import re
 from typing import Any
 
 from loguru import logger
 
 from nanobot.bus.events import DashboardEvent, InboundMessage, OutboundMessage
+
+_MENTION_RE = re.compile(r"^@(\S+)\s+")
 
 
 class DashboardEventBus:
@@ -50,12 +52,29 @@ class DashboardEventBus:
 
     async def on_inbound(self, msg: InboundMessage) -> None:
         """Observer callback for inbound messages."""
+        # Detect target agent from @mention or metadata
+        agent = "main"
+        content = msg.content
+        target = (msg.metadata or {}).get("_target_agent")
+        if target and target != "main":
+            agent = target
+            # Strip @mention prefix for display
+            m = _MENTION_RE.match(content)
+            if m:
+                content = content[m.end():]
+        elif msg.content.startswith("@"):
+            m = _MENTION_RE.match(msg.content)
+            if m:
+                agent = m.group(1)
+                content = msg.content[m.end():]
+
         self.broadcast({
             "type": "message_in",
+            "agent": agent,
             "channel": msg.channel,
             "chat_id": msg.chat_id,
             "sender": msg.sender_id,
-            "content": msg.content[:500],
+            "content": content[:500],
             "timestamp": msg.timestamp.isoformat(),
             "session_key": msg.session_key,
         })
@@ -65,12 +84,17 @@ class DashboardEventBus:
         is_progress = msg.metadata.get("_progress", False)
         is_tool_hint = msg.metadata.get("_tool_hint", False)
 
+        # Extract agent name from metadata if available
+        agent = msg.metadata.get("_agent", "main")
+
         self.broadcast({
             "type": "progress" if is_progress else "message_out",
+            "agent": agent,
             "channel": msg.channel,
             "chat_id": msg.chat_id,
             "content": msg.content[:500] if msg.content else "",
             "is_tool_hint": is_tool_hint,
+            "session_key": f"{msg.channel}:{msg.chat_id}",
         })
 
     async def on_dashboard_event(self, event: DashboardEvent) -> None:

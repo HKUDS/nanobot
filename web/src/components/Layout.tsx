@@ -5,6 +5,7 @@ import SessionList from './Sidebar/SessionList'
 import ChannelList from './Sidebar/ChannelList'
 import AgentDetail from './AgentView/AgentDetail'
 import Timeline from './AgentView/Timeline'
+import AgentSessionHistory from './AgentView/AgentSessionHistory'
 import SessionHistory from './SessionView/SessionHistory'
 import MessageInput from './SessionView/MessageInput'
 import SystemDashboard from './SystemView/Dashboard'
@@ -15,14 +16,18 @@ interface Props {
   onClearEvents: () => void
 }
 
+type AgentViewTab = 'timeline' | 'history'
+
 export default function Layout({ events, connected, onClearEvents }: Props) {
   const [view, setView] = useState<ViewMode>('agents')
   const [selectedAgent, setSelectedAgent] = useState<string>('main')
   const [selectedSession, setSelectedSession] = useState<string | null>(null)
+  const [agentTab, setAgentTab] = useState<AgentViewTab>('timeline')
 
   const handleSelectAgent = (name: string) => {
     setSelectedAgent(name)
     setView('agents')
+    setAgentTab('timeline')
   }
 
   const handleSelectSession = (key: string) => {
@@ -87,8 +92,38 @@ export default function Layout({ events, connected, onClearEvents }: Props) {
         {view === 'agents' && (
           <>
             <AgentDetail agentName={selectedAgent} />
-            <Timeline events={events} agentFilter={selectedAgent} />
-            <MessageInput sessionKey="web:dashboard" />
+
+            {/* Tab bar */}
+            <div className="flex border-b border-slate-700/50 px-4 bg-slate-800/30">
+              <button
+                onClick={() => setAgentTab('timeline')}
+                className={`px-3 py-2 text-sm border-b-2 transition-colors ${
+                  agentTab === 'timeline'
+                    ? 'border-blue-500 text-blue-400'
+                    : 'border-transparent text-slate-400 hover:text-slate-300'
+                }`}
+              >
+                Live Timeline
+              </button>
+              <button
+                onClick={() => setAgentTab('history')}
+                className={`px-3 py-2 text-sm border-b-2 transition-colors ${
+                  agentTab === 'history'
+                    ? 'border-blue-500 text-blue-400'
+                    : 'border-transparent text-slate-400 hover:text-slate-300'
+                }`}
+              >
+                Session History
+              </button>
+            </div>
+
+            {agentTab === 'timeline' ? (
+              <Timeline events={events} agentFilter={selectedAgent} />
+            ) : (
+              <AgentSessionHistory agentName={selectedAgent} />
+            )}
+
+            <MessageInput agentName={selectedAgent} />
           </>
         )}
 
