@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from .helpers import _norm_text, _safe_float, _tokenize, _utc_now_iso
 from .profile import ProfileManager
 
 if TYPE_CHECKING:
@@ -59,32 +60,11 @@ class ConflictManager:
         # MemoryStore at wiring time.
         self.conflict_auto_resolve_gap: float = 0.25
 
-    # -- helpers (delegated) ------------------------------------------------
-
-    @staticmethod
-    def _norm_text(value: str) -> str:
-        import re
-
-        return re.sub(r"\s+", " ", value.strip().lower())
-
-    @staticmethod
-    def _safe_float(value: Any, default: float) -> float:
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return default
-
-    @staticmethod
-    def _tokenize(value: str) -> set[str]:
-        import re
-
-        return {t for t in re.findall(r"[a-zA-Z0-9_\-]+", value.lower()) if len(t) > 1}
-
-    @staticmethod
-    def _utc_now_iso() -> str:
-        from datetime import datetime, timezone
-
-        return datetime.now(timezone.utc).isoformat()
+    # -- Shared helpers imported from .helpers --------------------------------
+    _norm_text = staticmethod(_norm_text)
+    _safe_float = staticmethod(_safe_float)
+    _tokenize = staticmethod(_tokenize)
+    _utc_now_iso = staticmethod(_utc_now_iso)
 
     # -- public API ---------------------------------------------------------
 
@@ -403,7 +383,7 @@ class ConflictManager:
                 old_entry.setdefault("supersedes_id", new_belief_id)
         elif selected == "keep_new":
             clean_new_value = (
-                store._sanitize_mem0_text(new_value, allow_archival=False) or new_value
+                store.ingester._sanitize_mem0_text(new_value, allow_archival=False) or new_value
             )
             if old_memory_id:
                 mem0_ok = self.mem0.update(old_memory_id, clean_new_value)
@@ -413,7 +393,7 @@ class ConflictManager:
                     conflict["new_memory_id"] = old_memory_id
                     result["new_memory_id"] = old_memory_id
             else:
-                conflict_metadata, _ = store._normalize_memory_metadata(
+                conflict_metadata, _ = store.ingester._normalize_memory_metadata(
                     {
                         "topic": "conflict_resolution",
                         "memory_type": "semantic",
@@ -424,7 +404,7 @@ class ConflictManager:
                     source="chat",
                 )
                 conflict_metadata.update({"event_type": "conflict_resolution", "field": key})
-                conflict_metadata = store._sanitize_mem0_metadata(conflict_metadata)
+                conflict_metadata = store.ingester._sanitize_mem0_metadata(conflict_metadata)
                 mem0_ok = (
                     self.mem0.add_text(
                         clean_new_value,

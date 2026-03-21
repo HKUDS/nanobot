@@ -100,7 +100,7 @@ class ConsolidationOrchestrator:
                 f"Fallback archive from /new ({len(lines)} messages)"
             )
             entry = header + "\n" + "\n".join(lines)
-            self._memory.append_history(entry)
+            self._memory.persistence.append_text(self._memory.history_file, entry.rstrip() + "\n\n")
             logger.warning("/new used fallback archival: {} messages", len(lines))
             return True
         except Exception:  # crash-barrier: memory subsystem archival

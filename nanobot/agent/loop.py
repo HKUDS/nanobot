@@ -1288,7 +1288,7 @@ class AgentLoop:
         self._stop_event = asyncio.Event()
         await self._connect_mcp()
         self._ensure_coordinator()
-        await self.context.memory.ensure_health()  # LAN-101: non-blocking vector health check
+        await self.context.memory.maintenance.ensure_health()  # LAN-101: non-blocking vector health
 
         logger.info("Agent loop started")
 
@@ -1693,11 +1693,11 @@ class AgentLoop:
         _enable_cc = self.config.memory_enable_contradiction_check
 
         def _pre_turn_memory() -> tuple[dict[str, Any], dict[str, Any] | None]:
-            cr = memory_store.handle_user_conflict_reply(_content)
+            cr = memory_store.conflict_mgr.handle_user_conflict_reply(_content)
             if cr.get("handled"):
                 return cr, None
             try:
-                corr = memory_store.apply_live_user_correction(
+                corr = memory_store.profile_mgr.apply_live_user_correction(
                     _content,
                     channel=_channel,
                     chat_id=_chat_id,
@@ -1725,7 +1725,7 @@ class AgentLoop:
 
         # Defer conflict questions until after the agent answers the user's message.
         # We check here and append to the response later instead of blocking.
-        pending_conflict_question = memory_store.ask_user_for_conflict(
+        pending_conflict_question = memory_store.conflict_mgr.ask_user_for_conflict(
             user_message=msg.content,
         )
 

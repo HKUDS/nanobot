@@ -1,52 +1,40 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 from nanobot.agent.tools.result_cache import _heuristic_summary
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def make_store():
-    """Minimal MemoryStore with mocked I/O for unit tests."""
+def make_store(tmp_path: Path):
+    """Minimal MemoryStore with proper construction."""
     from nanobot.agent.memory.store import MemoryStore
 
-    store = MemoryStore.__new__(MemoryStore)
-    store.workspace = MagicMock()
-    store.config = MagicMock()
-    store._mem0 = None
-    store._graph = None
-    store._reranker = None
+    store = MemoryStore(tmp_path, embedding_provider="hash")
     return store
 
 
 # ── Task 1: Remove redundant _cap_long_term_text call ───────────────────────
 
 
-def test_cap_long_term_text_called_once(monkeypatch):
+def test_cap_long_term_text_called_once(tmp_path):
     """_cap_long_term_text must be called at most once per get_memory_context call."""
-    store = make_store()
+    store = make_store(tmp_path)
     call_count = 0
-    original = store._cap_long_term_text
+    original = store._assembler._cap_long_term_text
 
     def counting_cap(text: str, cap: int, query: str) -> str:
         nonlocal call_count
         call_count += 1
         return original(text, cap, query)
 
-    monkeypatch.setattr(store, "_cap_long_term_text", counting_cap)
+    store._assembler._cap_long_term_text = counting_cap  # type: ignore[method-assign]
 
     long_term_text = "fact. " * 300  # ~300 tokens, well within the 1500 cap
+    store.persistence.write_text(store.memory_file, long_term_text)
 
-    with (
-        patch.object(store, "read_long_term", return_value=long_term_text),
-        patch.object(store, "read_profile", return_value={}),
-        patch.object(store, "retrieve", return_value=[]),
-        patch.object(store, "read_events", return_value=[]),
-        patch.object(store, "_build_graph_context_lines", return_value=[]),
-    ):
-        store.get_memory_context(query="test query", token_budget=900, memory_md_token_cap=1500)
+    store.get_memory_context(query="test query", token_budget=900, memory_md_token_cap=1500)
 
     assert call_count == 1, f"_cap_long_term_text called {call_count} times; expected exactly 1"
 
@@ -99,46 +87,36 @@ def test_scratchpad_injection_unchanged_when_small():
 # ── Task 4: Gate unresolved events scan on intent ────────────────────────────
 
 
-def test_read_events_not_called_for_fact_lookup(monkeypatch):
+def test_read_events_not_called_for_fact_lookup(tmp_path):
     """read_events must not be called when the inferred intent is 'fact_lookup'."""
-    store = make_store()
+    store = make_store(tmp_path)
     read_events_called = False
 
-    def mock_read_events(limit: int = 60) -> list:
+    def mock_read_events(**kwargs):
         nonlocal read_events_called
         read_events_called = True
         return []
 
-    with (
-        patch.object(store, "read_long_term", return_value=""),
-        patch.object(store, "read_profile", return_value={}),
-        patch.object(store, "retrieve", return_value=[]),
-        patch.object(store, "read_events", side_effect=mock_read_events),
-        patch.object(store, "_build_graph_context_lines", return_value=[]),
-    ):
-        store.get_memory_context(query="what is the capital of France", token_budget=900)
+    store.ingester.read_events = mock_read_events  # type: ignore[method-assign]
+
+    store.get_memory_context(query="what is the capital of France", token_budget=900)
 
     assert not read_events_called, "read_events was called for a fact_lookup query"
 
 
-def test_read_events_called_for_planning(monkeypatch):
+def test_read_events_called_for_planning(tmp_path):
     """read_events must be called when the query infers a planning intent."""
-    store = make_store()
+    store = make_store(tmp_path)
     read_events_called = False
 
-    def mock_read_events(limit: int = 60) -> list:
+    def mock_read_events(**kwargs):
         nonlocal read_events_called
         read_events_called = True
         return []
 
-    with (
-        patch.object(store, "read_long_term", return_value=""),
-        patch.object(store, "read_profile", return_value={}),
-        patch.object(store, "retrieve", return_value=[]),
-        patch.object(store, "read_events", side_effect=mock_read_events),
-        patch.object(store, "_build_graph_context_lines", return_value=[]),
-    ):
-        store.get_memory_context(query="plan the sprint tasks for next week", token_budget=900)
+    store.ingester.read_events = mock_read_events  # type: ignore[method-assign]
+
+    store.get_memory_context(query="plan the sprint tasks for next week", token_budget=900)
 
     assert read_events_called, "read_events was NOT called for a planning query"
 

@@ -1736,11 +1736,11 @@ def memory_inspect(
         rollout_overrides=_memory_rollout_overrides(config),
     )
 
-    observability = store.get_observability_report()
+    observability = store.eval_runner.get_observability_report()
     backend = observability.get("backend", {}) if isinstance(observability, dict) else {}
-    profile = store.read_profile()
-    report = store.verify_memory()
-    events = store.read_events()
+    profile = store.profile_mgr.read_profile()
+    report = store.snapshot.verify_memory()
+    events = store.ingester.read_events()
 
     console.print(f"{__logo__} Memory Inspect\n")
     console.print("Mode: [cyan]mem0[/cyan]")
@@ -1760,7 +1760,7 @@ def memory_inspect(
     )
 
     if query.strip():
-        retrieved = store.retrieve(
+        retrieved = store.retriever.retrieve(
             query,
             top_k=top_k,
         )
@@ -1808,7 +1808,7 @@ def memory_metrics(
         config.workspace_path,
         rollout_overrides=_memory_rollout_overrides(config),
     )
-    observability = store.get_observability_report()
+    observability = store.eval_runner.get_observability_report()
     backend = observability.get("backend", {}) if isinstance(observability, dict) else {}
 
     table = Table(title="Memory Backend Health")
@@ -1845,7 +1845,7 @@ def memory_rebuild(
         config.workspace_path,
         rollout_overrides=_memory_rollout_overrides(config),
     )
-    snapshot = store.rebuild_memory_snapshot(max_events=max_events, write=True)
+    snapshot = store.snapshot.rebuild_memory_snapshot(max_events=max_events, write=True)
     line_count = len(snapshot.splitlines())
     console.print(f"[green]✓[/green] Rebuilt MEMORY.md with {line_count} lines")
 
@@ -1870,10 +1870,16 @@ def memory_reindex(
         config.workspace_path,
         rollout_overrides=_memory_rollout_overrides(config),
     )
-    result = store.reindex_from_structured_memory(
+    result = store.maintenance.reindex_from_structured_memory(
         max_events=max_events if max_events > 0 else None,
         reset_existing=reset,
         compact=False,
+        read_profile_fn=store.profile_mgr.read_profile,
+        read_events_fn=store.ingester.read_events,
+        ingester=store.ingester,
+        profile_keys=store.PROFILE_KEYS,
+        vector_points_count_fn=store.maintenance._vector_points_count,
+        mem0_get_all_rows_fn=store.maintenance._mem0_get_all_rows,
     )
     table = Table(title="Memory Reindex")
     table.add_column("Field", style="cyan")
@@ -1911,10 +1917,16 @@ def memory_compact(
         config.workspace_path,
         rollout_overrides=_memory_rollout_overrides(config),
     )
-    result = store.reindex_from_structured_memory(
+    result = store.maintenance.reindex_from_structured_memory(
         max_events=max_events if max_events > 0 else None,
         reset_existing=reset,
         compact=True,
+        read_profile_fn=store.profile_mgr.read_profile,
+        read_events_fn=store.ingester.read_events,
+        ingester=store.ingester,
+        profile_keys=store.PROFILE_KEYS,
+        vector_points_count_fn=store.maintenance._vector_points_count,
+        mem0_get_all_rows_fn=store.maintenance._mem0_get_all_rows,
     )
     table = Table(title="Memory Compaction")
     table.add_column("Field", style="cyan")
@@ -1951,7 +1963,7 @@ def memory_verify(
         config.workspace_path,
         rollout_overrides=_memory_rollout_overrides(config),
     )
-    report = store.verify_memory(stale_days=stale_days, update_profile=True)
+    report = store.snapshot.verify_memory(stale_days=stale_days, update_profile=True)
 
     table = Table(title="Memory Verification")
     table.add_column("Check", style="cyan")
@@ -2009,9 +2021,16 @@ def memory_eval(
                 "[red]Both --seeded-profile and --seeded-events are required together.[/red]"
             )
             raise typer.Exit(1)
-        seed_result = store.seed_structured_corpus(
+        seed_result = store.maintenance.seed_structured_corpus(
             profile_path=Path(seeded_profile).expanduser(),
             events_path=Path(seeded_events).expanduser(),
+            read_profile_fn=store.profile_mgr.read_profile,
+            write_profile_fn=store.profile_mgr.write_profile,
+            read_events_fn=store.ingester.read_events,
+            ingester=store.ingester,
+            profile_keys=store.PROFILE_KEYS,
+            vector_points_count_fn=store.maintenance._vector_points_count,
+            mem0_get_all_rows_fn=store.maintenance._mem0_get_all_rows,
         )
         seed_table = Table(title="Seeded Corpus")
         seed_table.add_column("Field", style="cyan")
@@ -2065,12 +2084,12 @@ def memory_eval(
         console.print("[red]Benchmark file must contain a JSON array or {'cases': [...]}[/red]")
         raise typer.Exit(1)
 
-    evaluation = store.evaluate_retrieval_cases(
+    evaluation = store.eval_runner.evaluate_retrieval_cases(
         raw_cases,
         default_top_k=top_k,
     )
-    obs = store.get_observability_report()
-    rollout_gate = store.evaluate_rollout_gates(evaluation, obs)
+    obs = store.eval_runner.get_observability_report()
+    rollout_gate = store.eval_runner.evaluate_rollout_gates(evaluation, obs)
     eval_summary = evaluation.get("summary", {})
 
     table = Table(title="Memory Evaluation")
@@ -2122,11 +2141,11 @@ def memory_eval(
         console.print(detail_table)
 
     if export or output_file:
-        saved = store.save_evaluation_report(
+        saved = store.eval_runner.save_evaluation_report(
             evaluation,
             obs,
             rollout={
-                "status": store.get_rollout_status(),
+                "status": store._rollout_config.get_status(),
                 "gates": rollout_gate,
             },
             output_file=output_file or None,
@@ -2147,7 +2166,7 @@ def memory_conflicts(
         config.workspace_path,
         rollout_overrides=_memory_rollout_overrides(config),
     )
-    rows = store.list_conflicts(include_closed=all)
+    rows = store.conflict_mgr.list_conflicts(include_closed=all)
     if not rows:
         console.print("No conflicts found.")
         return
@@ -2189,7 +2208,7 @@ def memory_resolve(
         config.workspace_path,
         rollout_overrides=_memory_rollout_overrides(config),
     )
-    details = store.resolve_conflict_details(index=index, action=action)
+    details = store.conflict_mgr.resolve_conflict_details(index=index, action=action)
     if not details.get("ok"):
         console.print("[red]Failed to resolve conflict. Check index/action.[/red]")
         raise typer.Exit(1)
@@ -2226,7 +2245,7 @@ def memory_pin(
         rollout_overrides=_memory_rollout_overrides(config),
     )
     try:
-        ok = store.set_item_pin(field, text, pinned=True)
+        ok = store.profile_mgr.set_item_pin(field, text, pinned=True)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from None
@@ -2250,7 +2269,7 @@ def memory_unpin(
         rollout_overrides=_memory_rollout_overrides(config),
     )
     try:
-        ok = store.set_item_pin(field, text, pinned=False)
+        ok = store.profile_mgr.set_item_pin(field, text, pinned=False)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from None
@@ -2274,7 +2293,7 @@ def memory_outdated(
         rollout_overrides=_memory_rollout_overrides(config),
     )
     try:
-        ok = store.mark_item_outdated(field, text)
+        ok = store.profile_mgr.mark_item_outdated(field, text)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from None

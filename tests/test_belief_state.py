@@ -14,8 +14,8 @@ from nanobot.agent.memory import MemoryStore
 class TestStableBeliefIds:
     def test_new_meta_entry_has_id_and_created_at(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path)
-        profile = store.read_profile()
-        entry = store._meta_entry(profile, "stable_facts", "User uses Python")
+        profile = store.profile_mgr.read_profile()
+        entry = store.profile_mgr._meta_entry(profile, "stable_facts", "User uses Python")
 
         assert "id" in entry
         assert entry["id"].startswith("bf-")
@@ -25,19 +25,19 @@ class TestStableBeliefIds:
 
     def test_stable_id_is_deterministic(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path)
-        profile = store.read_profile()
-        entry = store._meta_entry(profile, "stable_facts", "User uses Python")
+        profile = store.profile_mgr.read_profile()
+        entry = store.profile_mgr._meta_entry(profile, "stable_facts", "User uses Python")
         first_id = entry["id"]
 
         # Re-reading the same entry returns the same ID.
-        entry2 = store._meta_entry(profile, "stable_facts", "User uses Python")
+        entry2 = store.profile_mgr._meta_entry(profile, "stable_facts", "User uses Python")
         assert entry2["id"] == first_id
 
     def test_different_items_get_different_ids(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path)
-        profile = store.read_profile()
-        e1 = store._meta_entry(profile, "stable_facts", "User uses Python")
-        e2 = store._meta_entry(profile, "stable_facts", "User uses Rust")
+        profile = store.profile_mgr.read_profile()
+        e1 = store.profile_mgr._meta_entry(profile, "stable_facts", "User uses Python")
+        e2 = store.profile_mgr._meta_entry(profile, "stable_facts", "User uses Rust")
         assert e1["id"] != e2["id"]
 
     def test_legacy_entry_backfilled_on_read(self, tmp_path: Path) -> None:
@@ -66,7 +66,7 @@ class TestStableBeliefIds:
         }
         store.persistence.write_json(store.profile_file, legacy)
 
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         entry = profile["meta"]["stable_facts"]["user uses python"]
         assert "id" in entry
         assert entry["id"].startswith("bf-")
@@ -74,11 +74,11 @@ class TestStableBeliefIds:
 
     def test_touch_preserves_id(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path)
-        profile = store.read_profile()
-        entry = store._meta_entry(profile, "preferences", "prefers dark mode")
+        profile = store.profile_mgr.read_profile()
+        entry = store.profile_mgr._meta_entry(profile, "preferences", "prefers dark mode")
         original_id = entry["id"]
 
-        store._touch_meta_entry(entry, confidence_delta=0.1)
+        store.profile_mgr._touch_meta_entry(entry, confidence_delta=0.1)
         assert entry["id"] == original_id
 
 
@@ -136,7 +136,7 @@ class TestPinnedSectionProtection:
             current_memory=current,
         )
         # memory_update should be ignored — MEMORY.md is not written
-        written = store.read_long_term()
+        written = store.persistence.read_text(store.memory_file)
         assert written == ""
 
     def test_rebuild_memory_snapshot_preserves_pinned(self, tmp_path: Path) -> None:
@@ -147,10 +147,10 @@ class TestPinnedSectionProtection:
             "<!-- user-pinned -->\nDO NOT DELETE\n<!-- end-user-pinned -->\n"
             "Old summary.\n"
         )
-        store.write_long_term(pinned_content)
-        snapshot = store.rebuild_memory_snapshot(write=True)
+        store.persistence.write_text(store.memory_file, pinned_content)
+        snapshot = store.snapshot.rebuild_memory_snapshot(write=True)
         assert "DO NOT DELETE" in snapshot
-        written = store.read_long_term()
+        written = store.persistence.read_text(store.memory_file)
         assert "DO NOT DELETE" in written
 
 
@@ -162,29 +162,37 @@ class TestPinnedSectionProtection:
 class TestEvidenceLinking:
     def test_touch_appends_evidence_event_id(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path)
-        profile = store.read_profile()
-        entry = store._meta_entry(profile, "stable_facts", "User uses Python")
+        profile = store.profile_mgr.read_profile()
+        entry = store.profile_mgr._meta_entry(profile, "stable_facts", "User uses Python")
         assert entry.get("evidence_event_ids", []) == []
 
-        store._touch_meta_entry(entry, confidence_delta=0.05, evidence_event_id="evt-001")
+        store.profile_mgr._touch_meta_entry(
+            entry, confidence_delta=0.05, evidence_event_id="evt-001"
+        )
         assert entry["evidence_event_ids"] == ["evt-001"]
 
     def test_touch_does_not_duplicate_evidence(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path)
-        profile = store.read_profile()
-        entry = store._meta_entry(profile, "stable_facts", "User uses Python")
+        profile = store.profile_mgr.read_profile()
+        entry = store.profile_mgr._meta_entry(profile, "stable_facts", "User uses Python")
 
-        store._touch_meta_entry(entry, confidence_delta=0.05, evidence_event_id="evt-001")
-        store._touch_meta_entry(entry, confidence_delta=0.03, evidence_event_id="evt-001")
+        store.profile_mgr._touch_meta_entry(
+            entry, confidence_delta=0.05, evidence_event_id="evt-001"
+        )
+        store.profile_mgr._touch_meta_entry(
+            entry, confidence_delta=0.03, evidence_event_id="evt-001"
+        )
         assert entry["evidence_event_ids"] == ["evt-001"]
 
     def test_evidence_list_capped(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path)
-        profile = store.read_profile()
-        entry = store._meta_entry(profile, "stable_facts", "User uses Python")
+        profile = store.profile_mgr.read_profile()
+        entry = store.profile_mgr._meta_entry(profile, "stable_facts", "User uses Python")
 
         for i in range(15):
-            store._touch_meta_entry(entry, confidence_delta=0.01, evidence_event_id=f"evt-{i:03d}")
+            store.profile_mgr._touch_meta_entry(
+                entry, confidence_delta=0.01, evidence_event_id=f"evt-{i:03d}"
+            )
         refs = entry["evidence_event_ids"]
         assert len(refs) == store._MAX_EVIDENCE_REFS
         # Most recent should be present.
@@ -192,8 +200,8 @@ class TestEvidenceLinking:
 
     def test_apply_profile_updates_threads_event_ids(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path)
-        profile = store.read_profile()
-        store._apply_profile_updates(
+        profile = store.profile_mgr.read_profile()
+        store.profile_mgr._apply_profile_updates(
             profile,
             {"stable_facts": ["User prefers vim"]},
             enable_contradiction_check=False,
@@ -211,12 +219,14 @@ class TestEvidenceLinking:
 class TestSupersessionChains:
     def test_conflict_record_includes_belief_ids(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path)
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         # Seed an existing fact.
         profile["stable_facts"] = ["User does not use dark mode for coding"]
-        store._meta_entry(profile, "stable_facts", "User does not use dark mode for coding")
+        store.profile_mgr._meta_entry(
+            profile, "stable_facts", "User does not use dark mode for coding"
+        )
 
-        store._apply_profile_updates(
+        store.profile_mgr._apply_profile_updates(
             profile,
             {"stable_facts": ["User does use dark mode for coding"]},
             enable_contradiction_check=True,
@@ -231,22 +241,24 @@ class TestSupersessionChains:
 
     def test_keep_new_sets_supersession(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path)
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         profile["stable_facts"] = ["User does not use dark mode for coding"]
-        store._meta_entry(profile, "stable_facts", "User does not use dark mode for coding")
+        store.profile_mgr._meta_entry(
+            profile, "stable_facts", "User does not use dark mode for coding"
+        )
 
-        store._apply_profile_updates(
+        store.profile_mgr._apply_profile_updates(
             profile,
             {"stable_facts": ["User does use dark mode for coding"]},
             enable_contradiction_check=True,
         )
-        store.write_profile(profile)
+        store.profile_mgr.write_profile(profile)
 
         # Resolve with keep_new.
-        result = store.resolve_conflict_details(0, "keep_new")
+        result = store.conflict_mgr.resolve_conflict_details(0, "keep_new")
         assert result["ok"]
 
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         old_meta = profile["meta"]["stable_facts"].get("user does not use dark mode for coding", {})
         new_meta = profile["meta"]["stable_facts"].get("user does use dark mode for coding", {})
 
@@ -263,7 +275,7 @@ class TestSupersessionChains:
 class TestVerifyBeliefs:
     def test_empty_profile_returns_zero_summary(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path)
-        report = store.verify_beliefs()
+        report = store.profile_mgr.verify_beliefs()
         assert report["summary"]["total"] == 0
         assert report["summary"]["healthy"] == 0
         assert report["summary"]["weak"] == 0
@@ -273,12 +285,12 @@ class TestVerifyBeliefs:
     def test_single_new_belief_classified_weak(self, tmp_path: Path) -> None:
         """A brand-new belief with default confidence and evidence_count=1 is weak."""
         store = MemoryStore(tmp_path)
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         profile["stable_facts"] = ["User uses Python"]
-        store._meta_entry(profile, "stable_facts", "User uses Python")
-        store.write_profile(profile)
+        store.profile_mgr._meta_entry(profile, "stable_facts", "User uses Python")
+        store.profile_mgr.write_profile(profile)
 
-        report = store.verify_beliefs()
+        report = store.profile_mgr.verify_beliefs()
         assert report["summary"]["weak"] == 1
         assert report["summary"]["healthy"] == 0
         assert report["weak"][0]["field"] == "stable_facts"
@@ -286,118 +298,118 @@ class TestVerifyBeliefs:
     def test_well_evidenced_belief_classified_healthy(self, tmp_path: Path) -> None:
         """A belief with high confidence and multiple evidence counts is healthy."""
         store = MemoryStore(tmp_path)
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         profile["preferences"] = ["prefers dark mode"]
-        entry = store._meta_entry(profile, "preferences", "prefers dark mode")
+        entry = store.profile_mgr._meta_entry(profile, "preferences", "prefers dark mode")
         entry["confidence"] = 0.85
         entry["evidence_count"] = 5
         entry["evidence_event_ids"] = ["evt-1", "evt-2", "evt-3", "evt-4", "evt-5"]
         entry["status"] = "active"
-        store.write_profile(profile)
+        store.profile_mgr.write_profile(profile)
 
-        report = store.verify_beliefs()
+        report = store.profile_mgr.verify_beliefs()
         assert report["summary"]["healthy"] == 1
         assert report["healthy"][0]["confidence"] == 0.85
 
     def test_conflicted_belief_classified_contradicted(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path)
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         profile["stable_facts"] = ["User likes cats"]
-        entry = store._meta_entry(profile, "stable_facts", "User likes cats")
+        entry = store.profile_mgr._meta_entry(profile, "stable_facts", "User likes cats")
         entry["status"] = "conflicted"
         entry["confidence"] = 0.5
         entry["evidence_count"] = 3
-        store.write_profile(profile)
+        store.profile_mgr.write_profile(profile)
 
-        report = store.verify_beliefs()
+        report = store.profile_mgr.verify_beliefs()
         assert report["summary"]["contradicted"] == 1
         assert report["contradicted"][0]["reason"] == "has open conflict"
 
     def test_superseded_belief_classified_stale(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path)
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         profile["stable_facts"] = ["User uses vim"]
-        entry = store._meta_entry(profile, "stable_facts", "User uses vim")
+        entry = store.profile_mgr._meta_entry(profile, "stable_facts", "User uses vim")
         entry["superseded_by_id"] = "bf-aaaaaaaa"
         entry["status"] = "active"
         entry["confidence"] = 0.9
         entry["evidence_count"] = 10
-        store.write_profile(profile)
+        store.profile_mgr.write_profile(profile)
 
-        report = store.verify_beliefs()
+        report = store.profile_mgr.verify_beliefs()
         assert report["summary"]["stale"] == 1
         assert report["stale"][0]["reason"] == "superseded or retracted"
 
     def test_retracted_status_classified_stale(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path)
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         profile["constraints"] = ["no shellfish"]
-        entry = store._meta_entry(profile, "constraints", "no shellfish")
+        entry = store.profile_mgr._meta_entry(profile, "constraints", "no shellfish")
         entry["status"] = "retracted"
-        store.write_profile(profile)
+        store.profile_mgr.write_profile(profile)
 
-        report = store.verify_beliefs()
+        report = store.profile_mgr.verify_beliefs()
         assert report["summary"]["stale"] == 1
 
     def test_low_confidence_classified_weak(self, tmp_path: Path) -> None:
         """Even with multiple evidence, low confidence => weak."""
         store = MemoryStore(tmp_path)
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         profile["stable_facts"] = ["User likes tea"]
-        entry = store._meta_entry(profile, "stable_facts", "User likes tea")
+        entry = store.profile_mgr._meta_entry(profile, "stable_facts", "User likes tea")
         entry["confidence"] = 0.3
         entry["evidence_count"] = 5
-        store.write_profile(profile)
+        store.profile_mgr.write_profile(profile)
 
-        report = store.verify_beliefs()
+        report = store.profile_mgr.verify_beliefs()
         assert report["summary"]["weak"] == 1
 
     def test_verify_memory_includes_belief_quality(self, tmp_path: Path) -> None:
         """verify_memory report should include a belief_quality summary."""
         store = MemoryStore(tmp_path)
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         profile["stable_facts"] = ["User uses Rust"]
-        entry = store._meta_entry(profile, "stable_facts", "User uses Rust")
+        entry = store.profile_mgr._meta_entry(profile, "stable_facts", "User uses Rust")
         entry["confidence"] = 0.9
         entry["evidence_count"] = 4
-        store.write_profile(profile)
+        store.profile_mgr.write_profile(profile)
 
-        report = store.verify_memory()
+        report = store.snapshot.verify_memory()
         assert "belief_quality" in report
         assert report["belief_quality"]["healthy"] == 1
 
     def test_mixed_beliefs_all_buckets(self, tmp_path: Path) -> None:
         """Profile with beliefs in every bucket produces correct summary."""
         store = MemoryStore(tmp_path)
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
 
         # healthy: high confidence + evidence
         profile["preferences"] = ["dark mode"]
-        e = store._meta_entry(profile, "preferences", "dark mode")
+        e = store.profile_mgr._meta_entry(profile, "preferences", "dark mode")
         e["confidence"] = 0.88
         e["evidence_count"] = 3
 
         # weak: low evidence
         profile["stable_facts"] = ["uses Python"]
-        e2 = store._meta_entry(profile, "stable_facts", "uses Python")
+        e2 = store.profile_mgr._meta_entry(profile, "stable_facts", "uses Python")
         e2["confidence"] = 0.65
         e2["evidence_count"] = 1
 
         # contradicted
         profile["constraints"] = ["no dairy"]
-        e3 = store._meta_entry(profile, "constraints", "no dairy")
+        e3 = store.profile_mgr._meta_entry(profile, "constraints", "no dairy")
         e3["status"] = "conflicted"
         e3["confidence"] = 0.5
         e3["evidence_count"] = 3
 
         # stale
         profile["relationships"] = ["knows Alice"]
-        e4 = store._meta_entry(profile, "relationships", "knows Alice")
+        e4 = store.profile_mgr._meta_entry(profile, "relationships", "knows Alice")
         e4["status"] = "retracted"
 
-        store.write_profile(profile)
+        store.profile_mgr.write_profile(profile)
 
-        report = store.verify_beliefs()
+        report = store.profile_mgr.verify_beliefs()
         s = report["summary"]
         assert s["healthy"] == 1
         assert s["weak"] == 1

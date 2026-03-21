@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from loguru import logger
 
+from .helpers import _estimate_tokens, _norm_text, _safe_float, _to_str_list
 from .persistence import MemoryPersistence
 from .profile import ProfileManager
 from .retrieval_planner import RetrievalPlanner
@@ -641,30 +642,8 @@ class ContextAssembler:
         )
         return any(marker in text for marker in resolved_markers)
 
-    @staticmethod
-    def _estimate_tokens(text: str) -> int:
-        value = str(text or "")
-        if not value:
-            return 0
-        return max(1, len(value) // 4)
-
-    @staticmethod
-    def _to_str_list(value: Any) -> list[str]:
-        if not isinstance(value, list):
-            return []
-        out: list[str] = []
-        for item in value:
-            if isinstance(item, str) and item.strip():
-                out.append(item.strip())
-        return out
-
-    @staticmethod
-    def _safe_float(value: Any, default: float) -> float:
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return default
-
-    @staticmethod
-    def _norm_text(value: str) -> str:
-        return re.sub(r"\s+", " ", value.strip().lower())
+    # -- Shared helpers imported from .helpers --------------------------------
+    _estimate_tokens = staticmethod(_estimate_tokens)
+    _to_str_list = staticmethod(_to_str_list)
+    _safe_float = staticmethod(_safe_float)
+    _norm_text = staticmethod(_norm_text)

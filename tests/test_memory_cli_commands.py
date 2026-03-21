@@ -12,34 +12,58 @@ from nanobot.config.schema import Config
 runner = CliRunner()
 
 
-class _FakeStore:
-    conflicts_open = 0
-    conflict_rows: list[dict[str, object]] = []
-    resolve_ok = True
-    pin_ok = True
-    outdated_ok = True
-    seeded_ok = True
-
-    def __init__(self, workspace: Path, rollout_overrides: dict[str, object] | None = None):
-        self.workspace = workspace
-
-    def get_observability_report(self) -> dict[str, object]:
-        return {
-            "backend": {
-                "mem0_enabled": True,
-                "mem0_mode": "history",
-                "vector_points_count": 3,
-                "mem0_get_all_count": 2,
-                "history_rows_count": 6,
-                "vector_health_state": "healthy",
-                "mem0_add_mode": "history",
-            },
-            "metrics": {},
-            "kpis": {},
-        }
-
+class _FakeProfileMgr:
     def read_profile(self) -> dict[str, object]:
         return {"preferences": ["a"], "stable_facts": ["b"]}
+
+    def write_profile(self, profile: dict[str, object]) -> None:
+        pass
+
+    def set_item_pin(self, field: str, text: str, pinned: bool) -> bool:
+        if field == "bad":
+            raise ValueError("bad field")
+        return self._parent.pin_ok
+
+    def mark_item_outdated(self, field: str, text: str) -> bool:
+        if field == "bad":
+            raise ValueError("bad field")
+        return self._parent.outdated_ok
+
+
+class _FakeConflictMgr:
+    def list_conflicts(self, include_closed: bool = False) -> list[dict[str, object]]:
+        return list(self._parent.conflict_rows)
+
+    def resolve_conflict_details(self, index: int, action: str) -> dict[str, object]:
+        if not self._parent.resolve_ok:
+            return {"ok": False}
+        return {
+            "ok": True,
+            "mem0_operation": "none",
+            "mem0_ok": True,
+            "old_memory_id": "",
+            "new_memory_id": "",
+        }
+
+
+class _FakeIngester:
+    def read_events(self, **kw: object) -> list[dict[str, object]]:
+        return [{"id": "e1"}, {"id": "e2"}]
+
+    def append_events(self, events: list[dict[str, object]]) -> int:
+        return len(events)
+
+
+class _FakeRetriever:
+    def retrieve(self, query: str, top_k: int = 6, **kw: object) -> list[dict[str, object]]:
+        if query == "none":
+            return []
+        return [{"timestamp": "2026-03-10", "type": "fact", "score": 0.9, "summary": "x"}]
+
+
+class _FakeSnapshot:
+    def rebuild_memory_snapshot(self, max_events: int = 30, write: bool = True) -> str:
+        return "line1\nline2\n"
 
     def verify_memory(
         self, stale_days: int = 90, update_profile: bool = False
@@ -47,30 +71,16 @@ class _FakeStore:
         return {
             "events": 2,
             "profile_items": 3,
-            "open_conflicts": self.conflicts_open,
+            "open_conflicts": self._parent.conflicts_open,
             "stale_events": 0,
             "stale_profile_items": 0,
             "ttl_tracked_events": 1,
             "last_verified_at": "2026-03-11T00:00:00+00:00",
         }
 
-    def read_events(self) -> list[dict[str, object]]:
-        return [{"id": "e1"}, {"id": "e2"}]
 
-    def retrieve(self, query: str, top_k: int = 6) -> list[dict[str, object]]:
-        if query == "none":
-            return []
-        return [{"timestamp": "2026-03-10", "type": "fact", "score": 0.9, "summary": "x"}]
-
-    def rebuild_memory_snapshot(self, max_events: int = 30, write: bool = True) -> str:
-        return "line1\nline2\n"
-
-    def reindex_from_structured_memory(
-        self,
-        max_events: int | None = None,
-        reset_existing: bool = True,
-        compact: bool = False,
-    ) -> dict[str, object]:
+class _FakeMaintenance:
+    def reindex_from_structured_memory(self, **kw: object) -> dict[str, object]:
         return {
             "ok": True,
             "reason": "",
@@ -90,17 +100,40 @@ class _FakeStore:
             },
         }
 
-    def seed_structured_corpus(self, profile_path: Path, events_path: Path) -> dict[str, object]:
+    def seed_structured_corpus(self, **kw: object) -> dict[str, object]:
         return {
-            "ok": self.seeded_ok,
-            "reason": "" if self.seeded_ok else "seed_failed",
+            "ok": self._parent.seeded_ok,
+            "reason": "" if self._parent.seeded_ok else "seed_failed",
             "seeded_profile_items": 1,
             "seeded_events": 1,
             "reindex": {"written": 1, "failed": 0, "vector_points_after": 1},
         }
 
+    def _vector_points_count(self) -> int:
+        return 0
+
+    def _mem0_get_all_rows(self, limit: int = 200) -> list[dict[str, object]]:
+        return []
+
+
+class _FakeEvalRunner:
+    def get_observability_report(self) -> dict[str, object]:
+        return {
+            "backend": {
+                "mem0_enabled": True,
+                "mem0_mode": "history",
+                "vector_points_count": 3,
+                "mem0_get_all_count": 2,
+                "history_rows_count": 6,
+                "vector_health_state": "healthy",
+                "mem0_add_mode": "history",
+            },
+            "metrics": {},
+            "kpis": {},
+        }
+
     def evaluate_retrieval_cases(
-        self, raw_cases: list[dict[str, object]], default_top_k: int = 6
+        self, raw_cases: list[dict[str, object]], default_top_k: int = 6, **kw: object
     ) -> dict[str, object]:
         return {
             "cases": len(raw_cases),
@@ -132,44 +165,56 @@ class _FakeStore:
         self,
         evaluation: dict[str, object],
         obs: dict[str, object],
-        rollout: dict[str, object],
+        rollout: dict[str, object] | None = None,
         output_file: str | None = None,
     ) -> Path:
         out = (
             Path(output_file)
             if output_file
-            else self.workspace / "memory" / "reports" / "eval.json"
+            else self._parent.workspace / "memory" / "reports" / "eval.json"
         )
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text("{}", encoding="utf-8")
         return out
 
-    def list_conflicts(self, include_closed: bool = False) -> list[dict[str, object]]:
-        return list(self.conflict_rows)
 
-    def resolve_conflict_details(self, index: int, action: str) -> dict[str, object]:
-        if not self.resolve_ok:
-            return {"ok": False}
-        return {
-            "ok": True,
-            "mem0_operation": "none",
-            "mem0_ok": True,
-            "old_memory_id": "",
-            "new_memory_id": "",
-        }
-
-    def set_item_pin(self, field: str, text: str, pinned: bool) -> bool:
-        if field == "bad":
-            raise ValueError("bad field")
-        return self.pin_ok
-
-    def mark_item_outdated(self, field: str, text: str) -> bool:
-        if field == "bad":
-            raise ValueError("bad field")
-        return self.outdated_ok
-
-    def get_rollout_status(self) -> dict[str, object]:
+class _FakeRolloutConfig:
+    def get_status(self) -> dict[str, object]:
         return {"memory_rollout_mode": "enabled"}
+
+
+class _FakeStore:
+    conflicts_open = 0
+    conflict_rows: list[dict[str, object]] = []
+    resolve_ok = True
+    pin_ok = True
+    outdated_ok = True
+    seeded_ok = True
+    PROFILE_KEYS = (
+        "preferences",
+        "stable_facts",
+        "active_projects",
+        "relationships",
+        "constraints",
+    )
+
+    def __init__(
+        self, workspace: Path, rollout_overrides: dict[str, object] | None = None, **kw: object
+    ):
+        self.workspace = workspace
+        self.profile_mgr = _FakeProfileMgr()
+        self.profile_mgr._parent = self
+        self.conflict_mgr = _FakeConflictMgr()
+        self.conflict_mgr._parent = self
+        self.ingester = _FakeIngester()
+        self.retriever = _FakeRetriever()
+        self.snapshot = _FakeSnapshot()
+        self.snapshot._parent = self
+        self.maintenance = _FakeMaintenance()
+        self.maintenance._parent = self
+        self.eval_runner = _FakeEvalRunner()
+        self.eval_runner._parent = self
+        self._rollout_config = _FakeRolloutConfig()
 
 
 @pytest.fixture
