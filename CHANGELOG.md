@@ -12,6 +12,13 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Trivy scans on PRs**: Container image vulnerability scanning now runs on all pull requests, not only on push/schedule events (`.github/workflows/security.yml`)
 
 ### Added
+- **Neo4j migration CLI** (`nanobot memory migrate-graph`): one-time migration of knowledge graph data from Neo4j to local networkx JSON file (LAN-224)
+
+### Changed
+- **Reranker**: default cross-encoder backend switched from sentence-transformers (PyTorch) to ONNX Runtime (~10x smaller footprint) (ADR-010)
+- **Knowledge graph**: storage backend switched from neo4j to networkx with JSON persistence — no external server required (ADR-010)
+
+### Added
 - **`classify_reaction()` in agent layer**: Emoji → rating classification moved from `bus/events.py` to `nanobot/agent/reaction.py`, preserving the module boundary rule that `bus/` must not import from `agent/` (`reaction.py`, `loop.py`)
 - **`FakeProvider` shared fixture**: Common scripted LLM provider consolidated into `tests/conftest.py` and re-used by `test_delegate.py`, `test_parallel_delegation.py`, and `test_routing_metrics.py`
 - **Concurrent session isolation test**: `TestConcurrentProcessMessage.test_concurrent_sessions_independent` verifies that simultaneous `_process_message()` calls for different sessions do not corrupt each other's history (`test_agent_loop.py`)

@@ -9,7 +9,7 @@ import pytest
 from nanobot.agent.memory import extractor as extractor_mod
 from nanobot.agent.memory.entity_linker import register_alias, resolve_alias
 from nanobot.agent.memory.mem0_adapter import _Mem0Adapter
-from nanobot.agent.memory.reranker import CrossEncoderReranker
+from nanobot.agent.memory.onnx_reranker import OnnxCrossEncoderReranker
 from nanobot.agent.memory.retrieval import (
     _bm25_score,
     _build_bm25_index,
@@ -94,27 +94,17 @@ def test_retrieval_helper_branches() -> None:
     assert len(fb) == 1
 
 
-def test_reranker_model_load_failure_and_non_dict_reason(monkeypatch: pytest.MonkeyPatch) -> None:
-    import nanobot.agent.memory.reranker as mod
+def test_onnx_reranker_model_load_failure_and_graceful_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reranker = OnnxCrossEncoderReranker()
+    # Force _ensure_model to fail by patching it
+    monkeypatch.setattr(reranker, "_ensure_model", lambda: False)
 
-    class _BrokenCrossEncoder:
-        def __init__(self, *_args, **_kwargs):
-            raise RuntimeError("load failed")
-
-    monkeypatch.setattr(mod, "_import_attempted", True)
-    monkeypatch.setattr(mod, "_cross_encoder_cls", _BrokenCrossEncoder)
-
-    reranker = CrossEncoderReranker()
-    assert reranker._load_model() is None
-
-    class _FakeModel:
-        def predict(self, pairs):
-            return [1.0 for _ in pairs]
-
-    reranker._model = _FakeModel()
     items = [{"summary": "x", "score": 0.2, "retrieval_reason": "invalid"}]
     ranked = reranker.rerank("q", items)
-    assert isinstance(ranked[0]["retrieval_reason"], dict)
+    # Graceful degradation: items returned unchanged
+    assert ranked[0]["score"] == 0.2
 
 
 async def test_extractor_parse_and_fallback_paths() -> None:

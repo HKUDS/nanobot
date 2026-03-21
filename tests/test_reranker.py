@@ -1,11 +1,12 @@
-"""Tests for the cross-encoder re-ranker (Step 7)."""
+"""Tests for re-ranker implementations (CompositeReranker + OnnxCrossEncoderReranker alias)."""
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import MagicMock, patch
 
-from nanobot.agent.memory.reranker import CrossEncoderReranker
+from nanobot.agent.memory.onnx_reranker import OnnxCrossEncoderReranker
+from nanobot.agent.memory.reranker import CompositeReranker, Reranker
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -27,125 +28,42 @@ def _make_items(n: int = 5) -> list[dict[str, Any]]:
     return items
 
 
-class FakeCrossEncoder:
-    """Stub that returns scores proportional to reverse list index."""
-
-    def __init__(self, model_name: str = "") -> None:
-        self.model_name = model_name
-
-    def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
-        n = len(pairs)
-        # Give higher scores to later items to force a rank flip.
-        return [float(i) / max(n - 1, 1) for i in range(n)]
-
-
 # ---------------------------------------------------------------------------
-# Unit tests — CrossEncoderReranker
+# Backward-compat alias
 # ---------------------------------------------------------------------------
 
 
-class TestCrossEncoderRerankerUnit:
-    """Tests that exercise the reranker without loading a real model."""
+class TestBackwardCompatAlias:
+    """CrossEncoderReranker is aliased to OnnxCrossEncoderReranker in __init__.py."""
 
-    def test_rerank_empty_returns_empty(self) -> None:
-        reranker = CrossEncoderReranker()
-        result = reranker.rerank("query", [])
-        assert result == []
+    def test_alias_importable(self) -> None:
+        from nanobot.agent.memory import CrossEncoderReranker
 
-    def test_rerank_no_model_returns_unchanged(self) -> None:
-        reranker = CrossEncoderReranker()
-        items = _make_items(3)
-        original_scores = [it["score"] for it in items]
-        # Model is None by default (sentence-transformers not installed in test env)
-        with patch.object(reranker, "_load_model", return_value=None):
-            result = reranker.rerank("query", items)
-        assert [it["score"] for it in result] == original_scores
-
-    def test_rerank_with_fake_model_reorders(self) -> None:
-        reranker = CrossEncoderReranker(alpha=1.0)  # pure CE score
-        reranker._model = FakeCrossEncoder()
-        items = _make_items(4)
-        original_ids = [it["id"] for it in items]
-        result = reranker.rerank("query", items)
-        # CE gives increasing scores → last item should now be first
-        assert result[0]["id"] == original_ids[-1]
-
-    def test_rerank_alpha_zero_preserves_heuristic_order(self) -> None:
-        reranker = CrossEncoderReranker(alpha=0.0)
-        reranker._model = FakeCrossEncoder()
-        items = _make_items(4)
-        original_order = [it["id"] for it in items]
-        result = reranker.rerank("query", items)
-        assert [it["id"] for it in result] == original_order
-
-    def test_rerank_blends_scores(self) -> None:
-        reranker = CrossEncoderReranker(alpha=0.5)
-        reranker._model = FakeCrossEncoder()
-        items = _make_items(3)
-        result = reranker.rerank("query", items)
-        for item in result:
-            reason = item["retrieval_reason"]
-            assert "ce_score" in reason
-            assert "ce_norm" in reason
-            assert "blended_score" in reason
-            assert "reranker_alpha" in reason
-            assert reason["reranker_alpha"] == 0.5
-
-    def test_rerank_alpha_override(self) -> None:
-        reranker = CrossEncoderReranker(alpha=0.5)
-        reranker._model = FakeCrossEncoder()
-        items = _make_items(2)
-        result = reranker.rerank("query", items, alpha=0.9)
-        assert result[0]["retrieval_reason"]["reranker_alpha"] == 0.9
-
-    def test_rerank_handles_predict_exception(self) -> None:
-        reranker = CrossEncoderReranker()
-        model = MagicMock()
-        model.predict.side_effect = RuntimeError("GPU OOM")
-        reranker._model = model
-        items = _make_items(3)
-        original_scores = [it["score"] for it in items]
-        result = reranker.rerank("query", items)
-        assert [it["score"] for it in result] == original_scores
-
-    def test_rerank_single_item(self) -> None:
-        reranker = CrossEncoderReranker(alpha=0.5)
-        reranker._model = FakeCrossEncoder()
-        items = _make_items(1)
-        result = reranker.rerank("query", items)
-        assert len(result) == 1
-        # Single item → normalised CE score is 0.5 (all-same normalization)
-        assert "ce_score" in result[0]["retrieval_reason"]
-
-    def test_alpha_clamped(self) -> None:
-        reranker = CrossEncoderReranker(alpha=5.0)
-        assert reranker._alpha == 1.0
-        reranker2 = CrossEncoderReranker(alpha=-1.0)
-        assert reranker2._alpha == 0.0
+        assert CrossEncoderReranker is OnnxCrossEncoderReranker
 
 
 # ---------------------------------------------------------------------------
-# compute_rank_delta tests
+# CompositeReranker compute_rank_delta tests
 # ---------------------------------------------------------------------------
 
 
 class TestComputeRankDelta:
     def test_identical_order_zero_delta(self) -> None:
-        reranker = CrossEncoderReranker()
+        reranker = CompositeReranker()
         ids = ["a", "b", "c"]
         assert reranker.compute_rank_delta(ids, ids) == 0.0
 
     def test_reversed_order_positive_delta(self) -> None:
-        reranker = CrossEncoderReranker()
+        reranker = CompositeReranker()
         delta = reranker.compute_rank_delta(["a", "b", "c"], ["c", "b", "a"])
         assert delta > 0.0
 
     def test_disjoint_sets_zero_delta(self) -> None:
-        reranker = CrossEncoderReranker()
+        reranker = CompositeReranker()
         assert reranker.compute_rank_delta(["a"], ["b"]) == 0.0
 
     def test_empty_lists(self) -> None:
-        reranker = CrossEncoderReranker()
+        reranker = CompositeReranker()
         assert reranker.compute_rank_delta([], []) == 0.0
 
 
@@ -183,7 +101,7 @@ class TestRerankerRolloutGating:
 
     def test_reranker_instance_created(self, tmp_path) -> None:
         store = self._make_store(tmp_path, "enabled")
-        assert isinstance(store._reranker, CrossEncoderReranker)
+        assert isinstance(store._reranker, OnnxCrossEncoderReranker)
 
     def test_env_override_reranker_mode(self, tmp_path, monkeypatch) -> None:
         from nanobot.agent.memory.store import MemoryStore
@@ -203,30 +121,161 @@ class TestRerankerRolloutGating:
         store = MemoryStore(tmp_path, rollout_overrides={"reranker_model": "custom/model"})
         assert store.rollout["reranker_model"] == "custom/model"
 
+    def test_composite_reranker_for_non_onnx_model(self, tmp_path) -> None:
+        from nanobot.agent.memory.store import MemoryStore
+
+        store = MemoryStore(
+            tmp_path,
+            rollout_overrides={"reranker_model": "custom/model"},
+        )
+        assert isinstance(store._reranker, CompositeReranker)
+
 
 # ---------------------------------------------------------------------------
-# available property
+# CompositeReranker tests
 # ---------------------------------------------------------------------------
 
 
-class TestAvailableProperty:
-    def test_available_false_without_package(self) -> None:
-        with (
-            patch("nanobot.agent.memory.reranker._import_attempted", False),
-            patch("nanobot.agent.memory.reranker._cross_encoder_cls", None),
-        ):
-            # Force re-import attempt that fails
-            import nanobot.agent.memory.reranker as mod
+def _make_composite_items() -> list[dict[str, Any]]:
+    """Build items with varying summaries, entities, types, and timestamps."""
+    now = datetime.now(timezone.utc)
+    return [
+        {
+            "id": "item_a",
+            "summary": "User prefers dark mode in the editor",
+            "score": 0.9,
+            "type": "preference",
+            "entities": ["dark mode", "editor"],
+            "timestamp": now.isoformat(),
+            "retrieval_reason": {"provider": "bm25", "score": 0.8},
+        },
+        {
+            "id": "item_b",
+            "summary": "Task progress on the API refactor",
+            "score": 0.7,
+            "type": "task",
+            "entities": ["API", "refactor"],
+            "timestamp": "2024-01-01T00:00:00+00:00",
+            "retrieval_reason": {"provider": "bm25", "score": 0.3},
+        },
+        {
+            "id": "item_c",
+            "summary": "Decided to use PostgreSQL over MySQL",
+            "score": 0.5,
+            "type": "decision",
+            "entities": ["PostgreSQL", "MySQL"],
+            "timestamp": now.isoformat(),
+            "retrieval_reason": {"provider": "bm25", "score": 0.6},
+        },
+    ]
 
-            old_attempted = mod._import_attempted
-            old_cls = mod._cross_encoder_cls
-            mod._import_attempted = False
-            mod._cross_encoder_cls = None
-            try:
-                reranker = CrossEncoderReranker()
-                # Will try to import and likely fail in test env
-                _ = reranker.available
-                # Either True (if installed) or False — just check we don't crash
-            finally:
-                mod._import_attempted = old_attempted
-                mod._cross_encoder_cls = old_cls
+
+class TestCompositeRerankerAvailable:
+    """CompositeReranker.available is always True."""
+
+    def test_available_always_true(self) -> None:
+        reranker = CompositeReranker()
+        assert reranker.available is True
+
+    def test_available_true_regardless_of_alpha(self) -> None:
+        assert CompositeReranker(alpha=0.0).available is True
+        assert CompositeReranker(alpha=1.0).available is True
+
+    def test_satisfies_reranker_protocol(self) -> None:
+        reranker = CompositeReranker()
+        assert isinstance(reranker, Reranker)
+
+
+class TestCompositeRerankerScoring:
+    """Verify items are re-ordered by composite score."""
+
+    def test_reranks_by_composite(self) -> None:
+        reranker = CompositeReranker(alpha=1.0)
+        items = _make_composite_items()
+        # Query about preferences should boost the preference item
+        result = reranker.rerank("What are the user preferences for dark mode?", items)
+        # item_a has the strongest lexical + entity + type match for this query
+        assert result[0]["id"] == "item_a"
+
+    def test_retrieval_reason_keys_present(self) -> None:
+        reranker = CompositeReranker(alpha=0.5)
+        items = _make_composite_items()
+        result = reranker.rerank("dark mode preference", items)
+        for item in result:
+            reason = item["retrieval_reason"]
+            assert "ce_score" in reason
+            assert "blended_score" in reason
+            assert "reranker_alpha" in reason
+
+    def test_scores_are_sorted_descending(self) -> None:
+        reranker = CompositeReranker(alpha=0.6)
+        items = _make_composite_items()
+        result = reranker.rerank("dark mode editor preference", items)
+        scores = [it["score"] for it in result]
+        assert scores == sorted(scores, reverse=True)
+
+    def test_old_items_penalized_by_recency(self) -> None:
+        """An item from 2024 should score lower on recency than a fresh item."""
+        reranker = CompositeReranker(alpha=1.0)
+        items = _make_composite_items()
+        # Both item_a and item_c are recent; item_b is old.
+        # With a generic query, recency should penalize item_b.
+        result = reranker.rerank("some generic query", items)
+        item_b = next(it for it in result if it["id"] == "item_b")
+        item_a = next(it for it in result if it["id"] == "item_a")
+        # item_a should score >= item_b due to recency advantage (both have low lexical)
+        assert item_a["score"] >= item_b["score"]
+
+
+class TestCompositeRerankerAlphaBlending:
+    """Verify alpha blending works correctly."""
+
+    def test_alpha_zero_preserves_heuristic_order(self) -> None:
+        reranker = CompositeReranker(alpha=0.0)
+        items = _make_composite_items()
+        original_order = [it["id"] for it in items]
+        result = reranker.rerank("dark mode", items)
+        # alpha=0 means 100% heuristic → original descending score order preserved
+        assert [it["id"] for it in result] == original_order
+
+    def test_alpha_override(self) -> None:
+        reranker = CompositeReranker(alpha=0.5)
+        items = _make_composite_items()
+        result = reranker.rerank("query", items, alpha=0.9)
+        assert result[0]["retrieval_reason"]["reranker_alpha"] == 0.9
+
+    def test_alpha_clamped(self) -> None:
+        reranker = CompositeReranker(alpha=5.0)
+        assert reranker._alpha == 1.0
+        reranker2 = CompositeReranker(alpha=-1.0)
+        assert reranker2._alpha == 0.0
+
+    def test_blended_score_between_zero_and_one(self) -> None:
+        reranker = CompositeReranker(alpha=0.5)
+        items = _make_composite_items()
+        result = reranker.rerank("preference dark mode", items)
+        for item in result:
+            assert 0.0 <= item["retrieval_reason"]["blended_score"] <= 1.0
+
+
+class TestCompositeRerankerEmptyInput:
+    """Empty items list returns empty."""
+
+    def test_empty_returns_empty(self) -> None:
+        reranker = CompositeReranker()
+        result = reranker.rerank("any query", [])
+        assert result == []
+
+    def test_compute_rank_delta_empty(self) -> None:
+        reranker = CompositeReranker()
+        assert reranker.compute_rank_delta([], []) == 0.0
+
+    def test_compute_rank_delta_identical(self) -> None:
+        reranker = CompositeReranker()
+        ids = ["a", "b", "c"]
+        assert reranker.compute_rank_delta(ids, ids) == 0.0
+
+    def test_compute_rank_delta_reversed(self) -> None:
+        reranker = CompositeReranker()
+        delta = reranker.compute_rank_delta(["a", "b", "c"], ["c", "b", "a"])
+        assert delta > 0.0

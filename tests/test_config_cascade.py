@@ -36,9 +36,9 @@ class TestSchemaDefaults:
 
     def test_reranker_defaults(self):
         rc = RerankerConfig()
-        assert rc.mode == "disabled"
+        assert rc.mode == "enabled"
         assert rc.alpha == 0.5
-        assert rc.model == ""
+        assert rc.model == "onnx:ms-marco-MiniLM-L-6-v2"
 
     def test_mem0_defaults(self):
         mc = Mem0Config()
@@ -51,7 +51,7 @@ class TestSchemaDefaults:
         ad = AgentDefaults()
         assert isinstance(ad.reranker, RerankerConfig)
         assert isinstance(ad.mem0, Mem0Config)
-        assert ad.reranker.mode == "disabled"
+        assert ad.reranker.mode == "enabled"
         assert ad.mem0.user_id == "nanobot"
 
 
@@ -128,7 +128,7 @@ class TestSubModelWiring:
         ac = AgentConfig.from_defaults(defaults)
         assert ac.model == "test-model"
         assert ac.graph_enabled is True
-        assert ac.reranker_mode == "disabled"
+        assert ac.reranker_mode == "enabled"
         assert ac.mem0_user_id == "nanobot"
 
     def test_overrides_applied_after_defaults(self):

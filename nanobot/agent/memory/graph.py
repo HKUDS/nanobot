@@ -1,26 +1,25 @@
-"""Neo4j-backed knowledge graph adapter for the memory subsystem.
-
-Follows the same graceful-degradation pattern as ``_Mem0Adapter``:
-if the ``neo4j`` package is not installed or the database is unreachable,
-all public methods return empty results and ``enabled`` remains ``False``.
+"""In-process knowledge graph backed by networkx DiGraph + JSON persistence.
 
 Architecture
 ------------
-- **KnowledgeGraph** — Primary public API.  Wraps a Neo4j async Bolt
-  driver with connection-pooling and health-check on init.
+- **KnowledgeGraph** — Primary public API.  Uses a ``networkx.DiGraph``
+  for in-memory graph operations and persists to a JSON file alongside
+  other memory artefacts.
 - Write path: ``upsert_entity``, ``add_relationship``,
   ``ingest_event_triples`` (batch).
 - Read path: ``get_neighbors``, ``find_paths``, ``query_subgraph``,
   ``get_entity``, ``search_entities``, ``resolve_entity``.
-- Schema: ``ensure_indexes`` creates uniqueness constraints and a
-  full-text index on entity names/aliases.
+- Schema: ``ensure_indexes`` is a no-op (kept for interface compat).
 """
 
 from __future__ import annotations
 
-import asyncio
+import json
+from collections import deque
+from pathlib import Path
 from typing import Any
 
+import networkx as nx
 from loguru import logger
 
 from .ontology import (
@@ -33,124 +32,42 @@ from .ontology import (
     validate_triple_types,
 )
 
-try:
-    from neo4j import (  # type: ignore[import-untyped]
-        AsyncDriver,
-        AsyncGraphDatabase,
-        GraphDatabase,
-    )
-
-    _HAS_NEO4J = True
-except Exception:  # pragma: no cover – optional dependency
-    AsyncGraphDatabase = None  # type: ignore[assignment,misc]
-    AsyncDriver = None  # type: ignore[assignment,misc]
-    GraphDatabase = None  # type: ignore[assignment,misc]
-    _HAS_NEO4J = False
-
 
 class KnowledgeGraph:
-    """Neo4j-backed knowledge graph with graceful degradation.
+    """In-process knowledge graph backed by networkx DiGraph + JSON persistence."""
 
-    Parameters
-    ----------
-    uri:
-        Bolt URI (e.g. ``bolt://localhost:7687``).
-    auth:
-        ``"user/password"`` string split on ``/``.
-    database:
-        Neo4j database name (default ``"neo4j"``).
-    """
-
-    def __init__(
-        self,
-        uri: str = "bolt://localhost:7687",
-        auth: str = "neo4j/nanobot_graph",
-        database: str = "neo4j",
-    ) -> None:
-        self._uri = uri
-        self._database = database
-        self._driver: Any | None = None
-        self._sync_driver: Any | None = None
-        self.enabled: bool = False
+    def __init__(self, workspace: Path | None = None) -> None:
+        self._graph = nx.DiGraph()
+        self._workspace = workspace
+        self._json_path = (workspace / "memory" / "knowledge_graph.json") if workspace else None
+        self.enabled: bool = workspace is not None
         self.error: str | None = None
-
-        if not _HAS_NEO4J:
-            self.error = "neo4j package not installed"
-            return
-
-        parts = auth.split("/", 1)
-        user = parts[0]
-        password = parts[1] if len(parts) > 1 else ""
-
-        try:
-            self._driver = AsyncGraphDatabase.driver(uri, auth=(user, password))
-            self._sync_driver = GraphDatabase.driver(uri, auth=(user, password))
-            self.enabled = True
-        except Exception as exc:  # noqa: BLE001
-            self.error = f"Neo4j driver init failed: {exc}"
-            logger.warning("KnowledgeGraph disabled: {}", self.error)
+        if self.enabled and self._json_path and self._json_path.exists():
+            self._load()
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def verify_connectivity(self) -> bool:
-        """Attempt a lightweight connectivity check.  Returns ``True`` on
-        success, sets ``enabled = False`` on failure."""
-        if not self._driver:
-            return False
-        try:
-            await self._driver.verify_connectivity()
-            self.enabled = True
-            return True
-        except Exception as exc:  # noqa: BLE001
-            self.enabled = False
-            self.error = f"connectivity check failed: {exc}"
-            logger.warning("KnowledgeGraph disabled: {}", self.error)
-            return False
+        """Return whether the graph is enabled."""
+        return self.enabled
 
     async def close(self) -> None:
-        """Close the underlying drivers."""
-        if self._driver:
-            await self._driver.close()
-            self._driver = None
-        if self._sync_driver:
-            self._sync_driver.close()
-            self._sync_driver = None
-            self.enabled = False
-
-    # ------------------------------------------------------------------
-    # Schema setup
-    # ------------------------------------------------------------------
+        """Persist graph to disk and release resources."""
+        if self.enabled:
+            self._save()
 
     async def ensure_indexes(self) -> None:
-        """Create uniqueness constraints and full-text indexes (idempotent)."""
-        if not self.enabled or self._driver is None:
-            return
-        queries = [
-            (
-                "CREATE CONSTRAINT entity_name_unique IF NOT EXISTS "
-                "FOR (e:Entity) REQUIRE e.canonical_name IS UNIQUE"
-            ),
-            (
-                "CREATE FULLTEXT INDEX entity_search IF NOT EXISTS "
-                "FOR (e:Entity) ON EACH [e.name, e.aliases_text]"
-            ),
-        ]
-        try:
-            async with self._driver.session(database=self._database) as session:
-                for q in queries:
-                    await session.run(q)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("ensure_indexes failed: {}", exc)
+        """No-op — networkx does not require index setup."""
 
     # ------------------------------------------------------------------
     # Write methods
     # ------------------------------------------------------------------
 
     async def upsert_entity(self, entity: Entity) -> None:
-        """MERGE an entity node, updating properties and timestamps."""
-        if not self.enabled or self._driver is None:
+        """Merge an entity node, updating properties and timestamps."""
+        if not self.enabled:
             return
         canonical = entity.canonical_name
         props: dict[str, Any] = {
@@ -163,52 +80,40 @@ class KnowledgeGraph:
         }
         props.update({f"prop_{k}": v for k, v in entity.properties.items()})
 
-        cypher = (
-            "MERGE (e:Entity {canonical_name: $canonical_name}) "
-            "ON CREATE SET e = $props "
-            "ON MATCH SET e += $props"
-        )
-        try:
-            async with self._driver.session(database=self._database) as session:
-                await session.run(cypher, canonical_name=canonical, props=props)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("upsert_entity failed for {}: {}", entity.name, exc)
+        if canonical in self._graph:
+            existing = dict(self._graph.nodes[canonical])
+            # Merge aliases
+            old_aliases = str(existing.get("aliases_text", ""))
+            old_set = {a.strip() for a in old_aliases.split(",") if a.strip()}
+            new_set = {a.strip() for a in props["aliases_text"].split(",") if a.strip()}
+            merged_aliases = sorted(old_set | new_set)
+            props["aliases_text"] = ", ".join(merged_aliases)
+            # Preserve first_seen from existing
+            if existing.get("first_seen"):
+                props["first_seen"] = existing["first_seen"]
+            existing.update(props)
+            self._graph.nodes[canonical].update(existing)
+        else:
+            self._graph.add_node(canonical, **props)
+
+        self._save()
 
     async def add_relationship(self, rel: Relationship) -> None:
-        """MERGE a directed relationship edge between two entities."""
-        if not self.enabled or self._driver is None:
+        """Merge a directed relationship edge between two entities."""
+        if not self.enabled:
             return
         src = rel.source_id.strip().lower().replace(" ", "_")
         tgt = rel.target_id.strip().lower().replace(" ", "_")
-        rel_type = rel.relation_type.value  # e.g. "WORKS_ON"
+        rel_type = rel.relation_type.value
 
-        # Dynamic relationship type via APOC-free pattern: use generic REL
-        # edge with a `type` property, since parameterised rel types are not
-        # supported in Cypher MERGE.  Trade-off: simpler setup, filterable
-        # via property.
-        cypher = (
-            "MERGE (s:Entity {canonical_name: $src}) "
-            "MERGE (t:Entity {canonical_name: $tgt}) "
-            "MERGE (s)-[r:REL {type: $rel_type}]->(t) "
-            "ON CREATE SET r.confidence = $confidence, "
-            "  r.source_event_id = $event_id, r.timestamp = $ts "
-            "ON MATCH SET r.confidence = CASE WHEN $confidence > r.confidence "
-            "  THEN $confidence ELSE r.confidence END, "
-            "  r.timestamp = $ts"
-        )
-        params = {
-            "src": src,
-            "tgt": tgt,
-            "rel_type": rel_type,
-            "confidence": rel.confidence,
-            "event_id": rel.source_event_id,
-            "ts": rel.timestamp,
-        }
-        try:
-            async with self._driver.session(database=self._database) as session:
-                await session.run(cypher, **params)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("add_relationship failed {}->{}: {}", src, tgt, exc)
+        # Ensure source and target nodes exist (minimal stubs with display name)
+        if src not in self._graph:
+            self._graph.add_node(src, canonical_name=src, name=rel.source_id.strip())
+        if tgt not in self._graph:
+            self._graph.add_node(tgt, canonical_name=tgt, name=rel.target_id.strip())
+
+        self._merge_edge(src, tgt, rel_type, rel.confidence, rel.source_event_id, rel.timestamp)
+        self._save()
 
     async def ingest_event_triples(
         self,
@@ -277,25 +182,22 @@ class KnowledgeGraph:
 
     async def get_entity(self, name: str) -> Entity | None:
         """Look up an entity by canonical name or alias."""
-        if not self.enabled or self._driver is None:
+        if not self.enabled:
             return None
         canonical = name.strip().lower().replace(" ", "_")
-        cypher = (
-            "MATCH (e:Entity) "
-            "WHERE e.canonical_name = $name OR e.aliases_text CONTAINS $raw "
-            "RETURN e LIMIT 1"
-        )
-        try:
-            async with self._driver.session(database=self._database) as session:
-                result = await session.run(cypher, name=canonical, raw=name.strip().lower())
-                record = await result.single()
-                if not record:
-                    return None
-                node = record["e"]
-                return self._node_to_entity(dict(node))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("get_entity failed for {}: {}", name, exc)
-            return None
+        raw = name.strip().lower()
+
+        # Check by canonical_name first
+        if canonical in self._graph:
+            return self._node_to_entity(dict(self._graph.nodes[canonical]))
+
+        # Check aliases across all nodes
+        for _node_id, data in self._graph.nodes(data=True):
+            aliases_text = str(data.get("aliases_text", ""))
+            if raw in aliases_text.lower():
+                return self._node_to_entity(dict(data))
+
+        return None
 
     async def search_entities(
         self,
@@ -303,27 +205,37 @@ class KnowledgeGraph:
         entity_type: EntityType | None = None,
         limit: int = 10,
     ) -> list[Entity]:
-        """Fuzzy text search across entity names and aliases."""
-        if not self.enabled or self._driver is None:
+        """Substring search across entity names and aliases."""
+        if not self.enabled:
             return []
-        # Use full-text index for fuzzy matching
-        cypher = "CALL db.index.fulltext.queryNodes('entity_search', $query) YIELD node, score "
-        if entity_type:
-            cypher += "WHERE node.entity_type = $etype "
-        cypher += "RETURN node ORDER BY score DESC LIMIT $limit"
+        query_lower = query.strip().lower()
+        scored: list[tuple[float, Entity]] = []
 
-        params: dict[str, Any] = {"query": query, "limit": limit}
-        if entity_type:
-            params["etype"] = entity_type.value
+        for _node_id, data in self._graph.nodes(data=True):
+            if entity_type:
+                etype_raw = str(data.get("entity_type", "unknown"))
+                if etype_raw != entity_type.value:
+                    continue
 
-        try:
-            async with self._driver.session(database=self._database) as session:
-                result = await session.run(cypher, **params)
-                records = await result.data()
-                return [self._node_to_entity(dict(r["node"])) for r in records]
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("search_entities failed: {}", exc)
-            return []
+            name = str(data.get("name", "")).lower()
+            canonical = str(data.get("canonical_name", "")).lower()
+            aliases_text = str(data.get("aliases_text", "")).lower()
+
+            score = 0.0
+            if query_lower == canonical or query_lower == name:
+                score = 1.0
+            elif query_lower in name:
+                score = 0.8
+            elif query_lower in canonical:
+                score = 0.7
+            elif query_lower in aliases_text:
+                score = 0.6
+
+            if score > 0:
+                scored.append((score, self._node_to_entity(dict(data))))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [entity for _, entity in scored[:limit]]
 
     async def get_neighbors(
         self,
@@ -331,34 +243,71 @@ class KnowledgeGraph:
         depth: int = 1,
         relation_types: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """BFS traversal returning nodes + edges up to *depth* hops."""
-        if not self.enabled or self._driver is None:
+        """BFS traversal returning edges up to *depth* hops."""
+        if not self.enabled:
             return []
         canonical = entity_name.strip().lower().replace(" ", "_")
-        depth = max(1, min(depth, 5))  # clamp to [1, 5]
+        depth = max(1, min(depth, 5))
 
-        cypher = (
-            f"MATCH path = (start:Entity {{canonical_name: $name}})"
-            f"-[r:REL*1..{depth}]-(neighbor:Entity) "
-        )
-        if relation_types:
-            type_list = ", ".join(f"'{t}'" for t in relation_types)
-            cypher += f"WHERE ALL(rel IN r WHERE rel.type IN [{type_list}]) "
-        cypher += (
-            "UNWIND relationships(path) AS edge "
-            "WITH DISTINCT startNode(edge) AS src, edge, endNode(edge) AS tgt "
-            "RETURN src.name AS source, edge.type AS relation, "
-            "tgt.name AS target, edge.confidence AS confidence "
-            "LIMIT 100"
-        )
-        try:
-            async with self._driver.session(database=self._database) as session:
-                result = await session.run(cypher, name=canonical)
-                data: list[dict[str, Any]] = await result.data()
-                return data
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("get_neighbors failed for {}: {}", entity_name, exc)
+        if canonical not in self._graph:
             return []
+
+        # BFS collecting edges (undirected traversal)
+        visited: set[str] = {canonical}
+        queue: deque[tuple[str, int]] = deque([(canonical, 0)])
+        edges: list[dict[str, Any]] = []
+        seen_edges: set[tuple[str, str, str]] = set()
+
+        while queue:
+            current, d = queue.popleft()
+            if d >= depth:
+                continue
+
+            # Outgoing edges
+            for _, tgt, edata in self._graph.out_edges(current, data=True):
+                rel_type = edata.get("type", "")
+                if relation_types and rel_type not in relation_types:
+                    continue
+                edge_key = (current, tgt, rel_type)
+                if edge_key not in seen_edges:
+                    seen_edges.add(edge_key)
+                    src_name = self._get_node_name(current)
+                    tgt_name = self._get_node_name(tgt)
+                    edges.append(
+                        {
+                            "source": src_name,
+                            "relation": rel_type,
+                            "target": tgt_name,
+                            "confidence": edata.get("confidence", 0.0),
+                        }
+                    )
+                if tgt not in visited:
+                    visited.add(tgt)
+                    queue.append((tgt, d + 1))
+
+            # Incoming edges (undirected traversal like Neo4j's -[]-)
+            for src, _, edata in self._graph.in_edges(current, data=True):
+                rel_type = edata.get("type", "")
+                if relation_types and rel_type not in relation_types:
+                    continue
+                edge_key = (src, current, rel_type)
+                if edge_key not in seen_edges:
+                    seen_edges.add(edge_key)
+                    src_name = self._get_node_name(src)
+                    tgt_name = self._get_node_name(current)
+                    edges.append(
+                        {
+                            "source": src_name,
+                            "relation": rel_type,
+                            "target": tgt_name,
+                            "confidence": edata.get("confidence", 0.0),
+                        }
+                    )
+                if src not in visited:
+                    visited.add(src)
+                    queue.append((src, d + 1))
+
+        return edges[:100]
 
     async def find_paths(
         self,
@@ -366,43 +315,43 @@ class KnowledgeGraph:
         target: str,
         max_depth: int = 3,
     ) -> list[list[dict[str, Any]]]:
-        """Find shortest paths between two entities."""
-        if not self.enabled or self._driver is None:
+        """Find paths between two entities."""
+        if not self.enabled:
             return []
         src = source.strip().lower().replace(" ", "_")
         tgt = target.strip().lower().replace(" ", "_")
         max_depth = max(1, min(max_depth, 5))
 
-        cypher = (
-            "MATCH path = shortestPath("
-            "(s:Entity {canonical_name: $src})-[r:REL*1.." + str(max_depth) + "]-"
-            "(t:Entity {canonical_name: $tgt})) "
-            "RETURN [n IN nodes(path) | n.name] AS nodes, "
-            "[r IN relationships(path) | r.type] AS relations "
-            "LIMIT 5"
-        )
-        try:
-            async with self._driver.session(database=self._database) as session:
-                result = await session.run(cypher, src=src, tgt=tgt)
-                records = await result.data()
-                paths: list[list[dict[str, Any]]] = []
-                for rec in records:
-                    path_steps: list[dict[str, Any]] = []
-                    nodes = rec["nodes"]
-                    relations = rec["relations"]
-                    for i, rel in enumerate(relations):
-                        path_steps.append(
-                            {
-                                "source": nodes[i],
-                                "relation": rel,
-                                "target": nodes[i + 1],
-                            }
-                        )
-                    paths.append(path_steps)
-                return paths
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("find_paths failed {}->{}: {}", source, target, exc)
+        if src not in self._graph or tgt not in self._graph:
             return []
+
+        # Use undirected view for path finding (matches Neo4j's undirected pattern)
+        undirected = self._graph.to_undirected()
+        paths: list[list[dict[str, Any]]] = []
+        try:
+            for path_nodes in nx.all_simple_paths(undirected, src, tgt, cutoff=max_depth):
+                path_steps: list[dict[str, Any]] = []
+                for i in range(len(path_nodes) - 1):
+                    n1, n2 = path_nodes[i], path_nodes[i + 1]
+                    # Check both directions for the edge
+                    edata = self._graph.get_edge_data(n1, n2)
+                    if edata is None:
+                        edata = self._graph.get_edge_data(n2, n1)
+                    rel_type = edata.get("type", "") if edata else ""
+                    path_steps.append(
+                        {
+                            "source": self._get_node_name(n1),
+                            "relation": rel_type,
+                            "target": self._get_node_name(n2),
+                        }
+                    )
+                paths.append(path_steps)
+                if len(paths) >= 5:
+                    break
+        except nx.NetworkXError:  # crash-barrier: no path exists between entities
+            pass
+
+        return paths
 
     async def query_subgraph(
         self,
@@ -413,15 +362,13 @@ class KnowledgeGraph:
         if not self.enabled or not entity_names:
             return {"nodes": [], "edges": []}
 
-        tasks = [self.get_neighbors(name, depth=depth) for name in entity_names]
-        all_edges = await asyncio.gather(*tasks)
-
         seen_edges: set[tuple[str, str, str]] = set()
         seen_nodes: set[str] = set()
         nodes: list[str] = []
         edges: list[dict[str, Any]] = []
 
-        for edge_list in all_edges:
+        for name in entity_names:
+            edge_list = await self.get_neighbors(name, depth=depth)
             for edge in edge_list:
                 src = edge.get("source", "")
                 tgt = edge.get("target", "")
@@ -437,6 +384,10 @@ class KnowledgeGraph:
 
         return {"nodes": nodes, "edges": edges}
 
+    # ------------------------------------------------------------------
+    # Sync methods (used by retrieval)
+    # ------------------------------------------------------------------
+
     def get_related_entity_names_sync(
         self,
         entity_names: set[str],
@@ -445,36 +396,44 @@ class KnowledgeGraph:
         """Synchronous neighbor lookup returning related entity names.
 
         Used by the sync ``retrieve()`` path in ``MemoryStore`` to collect
-        graph-expanded entity names for scoring boosts.  Returns an empty
-        set when the graph is disabled or the sync driver is unavailable.
+        graph-expanded entity names for scoring boosts.
         """
-        if not self.enabled or not self._sync_driver or not entity_names:
+        if not self.enabled or not entity_names:
             return set()
         depth = max(1, min(depth, 3))
         related: set[str] = set()
-        try:
-            with self._sync_driver.session(database=self._database) as session:
-                for name in entity_names:
-                    canonical = name.strip().lower().replace(" ", "_")
-                    # Try exact match first, then fall back to CONTAINS.
-                    cypher = (
-                        f"MATCH (start:Entity)"
-                        f"-[r:REL*1..{depth}]-(neighbor:Entity) "
-                        "WHERE start.canonical_name = $name "
-                        "   OR start.canonical_name CONTAINS $name "
-                        "RETURN DISTINCT neighbor.canonical_name AS cn, "
-                        "neighbor.name AS n LIMIT 50"
-                    )
-                    result = session.run(cypher, name=canonical)
-                    for record in result:
-                        cn = record.get("cn", "")
-                        n = record.get("n", "")
-                        if cn:
-                            related.add(cn)
-                        if n:
-                            related.add(n.lower())
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("get_related_entity_names_sync failed: {}", exc)
+
+        for name in entity_names:
+            canonical = name.strip().lower().replace(" ", "_")
+            # Collect nodes matching by canonical_name or containing the name
+            start_nodes: list[str] = []
+            for node_id, data in self._graph.nodes(data=True):
+                cn = str(data.get("canonical_name", node_id))
+                if cn == canonical or canonical in cn:
+                    start_nodes.append(node_id)
+
+            for start in start_nodes:
+                # BFS up to depth
+                visited: set[str] = {start}
+                queue: deque[tuple[str, int]] = deque([(start, 0)])
+                while queue:
+                    current, d = queue.popleft()
+                    if d >= depth:
+                        continue
+                    for neighbor in set(self._graph.successors(current)) | set(
+                        self._graph.predecessors(current)
+                    ):
+                        if neighbor not in visited:
+                            visited.add(neighbor)
+                            ndata = self._graph.nodes[neighbor]
+                            cn = str(ndata.get("canonical_name", neighbor))
+                            n = str(ndata.get("name", ""))
+                            if cn:
+                                related.add(cn)
+                            if n:
+                                related.add(n.lower())
+                            queue.append((neighbor, d + 1))
+
         return related
 
     def get_triples_for_entities_sync(
@@ -486,29 +445,43 @@ class KnowledgeGraph:
         Returns ``(subject, predicate, object)`` tuples for relationships
         touching any of the given entity names.
         """
-        if not self.enabled or not self._sync_driver or not entity_names:
+        if not self.enabled or not entity_names:
             return []
         triples: list[tuple[str, str, str]] = []
-        try:
-            with self._sync_driver.session(database=self._database) as session:
-                for name in entity_names:
-                    canonical = name.strip().lower().replace(" ", "_")
-                    cypher = (
-                        "MATCH (s:Entity)-[r:REL]-(t:Entity) "
-                        "WHERE s.canonical_name = $name "
-                        "   OR s.canonical_name CONTAINS $name "
-                        "RETURN s.name AS source, r.type AS relation, "
-                        "t.name AS target LIMIT 30"
-                    )
-                    result = session.run(cypher, name=canonical)
-                    for record in result:
-                        src = record.get("source", "")
-                        rel = record.get("relation", "")
-                        tgt = record.get("target", "")
-                        if src and rel and tgt:
-                            triples.append((src, rel, tgt))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("get_triples_for_entities_sync failed: {}", exc)
+        seen: set[tuple[str, str, str]] = set()
+
+        for name in entity_names:
+            canonical = name.strip().lower().replace(" ", "_")
+            # Find matching nodes
+            matching_nodes: list[str] = []
+            for node_id, data in self._graph.nodes(data=True):
+                cn = str(data.get("canonical_name", node_id))
+                if cn == canonical or canonical in cn:
+                    matching_nodes.append(node_id)
+
+            for node in matching_nodes:
+                # Outgoing
+                for _, tgt, edata in self._graph.out_edges(node, data=True):
+                    src_name = self._get_node_name(node)
+                    rel = str(edata.get("type", ""))
+                    tgt_name = self._get_node_name(tgt)
+                    if src_name and rel and tgt_name:
+                        triple = (src_name, rel, tgt_name)
+                        if triple not in seen:
+                            seen.add(triple)
+                            triples.append(triple)
+
+                # Incoming
+                for src, _, edata in self._graph.in_edges(node, data=True):
+                    src_name = self._get_node_name(src)
+                    rel = str(edata.get("type", ""))
+                    tgt_name = self._get_node_name(node)
+                    if src_name and rel and tgt_name:
+                        triple = (src_name, rel, tgt_name)
+                        if triple not in seen:
+                            seen.add(triple)
+                            triples.append(triple)
+
         return triples
 
     async def resolve_entity(self, name: str) -> str:
@@ -529,8 +502,7 @@ class KnowledgeGraph:
 
     @staticmethod
     def _node_to_entity(props: dict[str, Any]) -> Entity:
-        """Convert a Neo4j node-property dict to an ``Entity`` instance."""
-        # Extract custom properties (stored as prop_*)
+        """Convert a node-property dict to an ``Entity`` instance."""
         extra: dict[str, Any] = {}
         for k, v in props.items():
             if k.startswith("prop_"):
@@ -553,3 +525,84 @@ class KnowledgeGraph:
             first_seen=str(props.get("first_seen", "")),
             last_seen=str(props.get("last_seen", "")),
         )
+
+    def _get_node_name(self, node_id: str) -> str:
+        """Return the display name for a node, falling back to node_id."""
+        if node_id in self._graph:
+            return str(self._graph.nodes[node_id].get("name", node_id))
+        return node_id
+
+    def _merge_edge(
+        self,
+        src: str,
+        tgt: str,
+        rel_type: str,
+        confidence: float,
+        source_event_id: str,
+        timestamp: str,
+    ) -> None:
+        """Merge an edge into the graph, updating confidence if higher."""
+        existing_edge = self._graph.get_edge_data(src, tgt)
+        if existing_edge and existing_edge.get("type") == rel_type:
+            old_conf = existing_edge.get("confidence", 0.0)
+            self._graph[src][tgt]["confidence"] = max(old_conf, confidence)
+            self._graph[src][tgt]["timestamp"] = timestamp
+        else:
+            self._graph.add_edge(
+                src,
+                tgt,
+                type=rel_type,
+                confidence=confidence,
+                source_event_id=source_event_id,
+                timestamp=timestamp,
+            )
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def _load(self) -> None:
+        """Read JSON file and rebuild the DiGraph."""
+        if not self._json_path:
+            return
+        try:
+            raw = self._json_path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            self._graph.clear()
+            for node in data.get("nodes", []):
+                node_id = node.pop("id", node.get("canonical_name", ""))
+                self._graph.add_node(node_id, **node)
+            for edge in data.get("edges", []):
+                src = edge.pop("source", "")
+                tgt = edge.pop("target", "")
+                if src and tgt:
+                    self._graph.add_edge(src, tgt, **edge)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("KnowledgeGraph._load failed: {}", exc)
+
+    def _save(self) -> None:
+        """Serialize DiGraph to JSON."""
+        if not self._json_path:
+            return
+        try:
+            nodes: list[dict[str, Any]] = []
+            for node_id, data in self._graph.nodes(data=True):
+                entry = {"id": node_id}
+                entry.update(data)
+                nodes.append(entry)
+
+            edges: list[dict[str, Any]] = []
+            for src, tgt, data in self._graph.edges(data=True):
+                entry = {"source": src, "target": tgt}
+                entry.update(data)
+                edges.append(entry)
+
+            payload = {"nodes": nodes, "edges": edges}
+
+            # Atomic write: write to temp file then rename
+            self._json_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = self._json_path.with_suffix(".json.tmp")
+            tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            tmp_path.replace(self._json_path)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("KnowledgeGraph._save failed: {}", exc)

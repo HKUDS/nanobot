@@ -98,7 +98,7 @@ class TestFromDefaults:
     def test_from_defaults_reranker(self):
         defaults = AgentDefaults()
         ac = AgentConfig.from_defaults(defaults)
-        assert ac.reranker_mode == "disabled"
+        assert ac.reranker_mode == "enabled"
         assert ac.reranker_alpha == 0.5
 
     def test_from_defaults_mem0(self):
@@ -124,7 +124,6 @@ class TestFromDefaults:
         defaults = AgentDefaults(graph_enabled=True)
         ac = AgentConfig.from_defaults(defaults)
         assert ac.graph_enabled is True
-        assert ac.graph_neo4j_uri == "bolt://localhost:7687"
 
 
 # ---------------------------------------------------------------------------

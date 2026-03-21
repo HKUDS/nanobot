@@ -144,9 +144,9 @@ class Mem0Config(Base):
 class RerankerConfig(Base):
     """Cross-encoder re-ranker tuning."""
 
-    mode: str = "disabled"  # enabled | shadow | disabled (was NANOBOT_RERANKER_MODE)
+    mode: str = "enabled"  # enabled | shadow | disabled (was NANOBOT_RERANKER_MODE)
     alpha: float = 0.5  # Blend weight 0.0–1.0 (was NANOBOT_RERANKER_ALPHA)
-    model: str = ""  # Model name; blank = default (was NANOBOT_RERANKER_MODEL)
+    model: str = "onnx:ms-marco-MiniLM-L-6-v2"  # Model name (was NANOBOT_RERANKER_MODEL)
 
 
 class MissionConfig(Base):
@@ -196,17 +196,8 @@ class AgentDefaults(Base):
     # Vision / multimodal
     vision_model: str = "gpt-4o-mini"
 
-    # Knowledge graph
+    # Knowledge graph (networkx + JSON persistence)
     graph_enabled: bool = False
-    graph_neo4j_uri: str = "bolt://localhost:7687"
-    graph_neo4j_auth: str = Field(
-        default="",
-        description=(
-            "Neo4j credentials in 'user/password' format. "
-            "No default — must be configured explicitly before enabling the knowledge graph."
-        ),
-    )
-    graph_neo4j_database: str = "neo4j"
 
     # Reranker
     reranker: RerankerConfig = Field(default_factory=RerankerConfig)
@@ -295,22 +286,13 @@ class AgentConfig(Base):
     # Per-message timeout (seconds); 0 = no timeout
     message_timeout: int = 300
 
-    # Knowledge graph
+    # Knowledge graph (networkx + JSON persistence)
     graph_enabled: bool = False
-    graph_neo4j_uri: str = "bolt://localhost:7687"
-    graph_neo4j_auth: str = Field(
-        default="",
-        description=(
-            "Neo4j credentials in 'user/password' format. "
-            "No default — must be configured explicitly before enabling the knowledge graph."
-        ),
-    )
-    graph_neo4j_database: str = "neo4j"
 
     # Reranker / mem0
-    reranker_mode: str = "disabled"
+    reranker_mode: str = "enabled"
     reranker_alpha: float = 0.5
-    reranker_model: str = ""
+    reranker_model: str = "onnx:ms-marco-MiniLM-L-6-v2"
     mem0_user_id: str = "nanobot"
     mem0_add_debug: bool = False
     mem0_verify_write: bool = True
@@ -379,9 +361,6 @@ class AgentConfig(Base):
             "tool_result_max_chars": defaults.tool_result_max_chars,
             "tool_result_context_tokens": defaults.tool_result_context_tokens,
             "graph_enabled": defaults.graph_enabled,
-            "graph_neo4j_uri": defaults.graph_neo4j_uri,
-            "graph_neo4j_auth": defaults.graph_neo4j_auth,
-            "graph_neo4j_database": defaults.graph_neo4j_database,
             "reranker_mode": defaults.reranker.mode,
             "reranker_alpha": defaults.reranker.alpha,
             "reranker_model": defaults.reranker.model,

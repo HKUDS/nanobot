@@ -45,8 +45,7 @@ from .graph import KnowledgeGraph
 from .mem0_adapter import _Mem0Adapter, _Mem0RuntimeInfo
 from .persistence import MemoryPersistence
 from .profile import ProfileManager
-from .reranker import DEFAULT_MODEL as _DEFAULT_RERANKER_MODEL
-from .reranker import CrossEncoderReranker
+from .reranker import CompositeReranker, Reranker
 from .retrieval import _local_retrieve, _topic_fallback_retrieve
 from .retrieval_planner import RetrievalPlanner
 
@@ -143,24 +142,26 @@ class MemoryStore:
         self._history_count_cache: tuple[float, int] | None = None
 
         # Cross-encoder re-ranker (Step 7)
+        reranker_model = str(
+            self.rollout.get("reranker_model", "onnx:ms-marco-MiniLM-L-6-v2")
+        ).strip()
         reranker_alpha = float(self.rollout.get("reranker_alpha", 0.5))
-        reranker_model = str(self.rollout.get("reranker_model", "")).strip() or None
-        self._reranker = CrossEncoderReranker(
-            model_name=reranker_model or _DEFAULT_RERANKER_MODEL,
-            alpha=reranker_alpha,
-        )
+        self._reranker: Reranker
+        if reranker_model.startswith("onnx:"):
+            from .onnx_reranker import OnnxCrossEncoderReranker
 
-        # Knowledge graph (Neo4j) — graceful degradation when disabled or
-        # neo4j package is not installed.
+            self._reranker = OnnxCrossEncoderReranker(
+                model_name=reranker_model.split(":", 1)[1], alpha=reranker_alpha
+            )
+        else:
+            self._reranker = CompositeReranker(alpha=reranker_alpha)
+
+        # Knowledge graph (networkx + JSON persistence).
         graph_enabled = self.rollout.get("graph_enabled", False)
         if graph_enabled:
-            graph_uri = str(self.rollout.get("graph_neo4j_uri", "bolt://localhost:7687"))
-            graph_auth = str(self.rollout.get("graph_neo4j_auth", "neo4j/nanobot_graph"))
-            graph_db = str(self.rollout.get("graph_neo4j_database", "neo4j"))
-            self.graph = KnowledgeGraph(uri=graph_uri, auth=graph_auth, database=graph_db)
+            self.graph = KnowledgeGraph(workspace=workspace)
         else:
             self.graph = KnowledgeGraph()  # disabled — all methods return empty
-            self.graph.enabled = False
 
         # LAN-208: gate raw conversation turn ingestion into mem0.
         # When disabled, only structured events (from extractor) are synced to mem0,
@@ -360,9 +361,9 @@ class MemoryStore:
                 "max_avg_memory_context_tokens": 1400.0,
                 "max_history_fallback_ratio": 0.05,
             },
-            "reranker_mode": "disabled",
+            "reranker_mode": "enabled",
             "reranker_alpha": 0.5,
-            "reranker_model": "",
+            "reranker_model": "onnx:ms-marco-MiniLM-L-6-v2",
             "mem0_user_id": "nanobot",
             "mem0_add_debug": False,
             "mem0_verify_write": True,
@@ -1809,12 +1810,12 @@ class MemoryStore:
             if self.graph.enabled:
                 query_keywords = self._extract_query_keywords(query)
                 if query_keywords:
-                    neo4j_related = self.graph.get_related_entity_names_sync(
+                    graph_related = self.graph.get_related_entity_names_sync(
                         query_keywords,
                         depth=2,
                     )
                     # Append related entity names to the query for BM25 matching.
-                    extra_terms = neo4j_related - query_keywords
+                    extra_terms = graph_related - query_keywords
                     if extra_terms:
                         augmented_query = (
                             query
@@ -1861,12 +1862,12 @@ class MemoryStore:
                             graph_entity_names.add(obj)
                         elif obj in query_entities:
                             graph_entity_names.add(subj)
-                # Augment with Neo4j graph neighbors when available.
-                neo4j_related = self.graph.get_related_entity_names_sync(
+                # Augment with graph neighbors when available.
+                graph_related = self.graph.get_related_entity_names_sync(
                     query_entities,
                     depth=2,
                 )
-                graph_entity_names |= neo4j_related
+                graph_entity_names |= graph_related
 
             for item in candidates:
                 memory_type = self._memory_type_for_item(item)
@@ -1992,11 +1993,11 @@ class MemoryStore:
         if self.graph.enabled:
             query_keywords = self._extract_query_keywords(query)
             if query_keywords:
-                neo4j_related = self.graph.get_related_entity_names_sync(
+                graph_related = self.graph.get_related_entity_names_sync(
                     query_keywords,
                     depth=2,
                 )
-                graph_extra_terms = neo4j_related - query_keywords
+                graph_extra_terms = graph_related - query_keywords
 
         search_result = self.mem0.search(
             query,
@@ -2305,7 +2306,7 @@ class MemoryStore:
         # Cross-encoder re-ranking (Step 7)
         # ------------------------------------------------------------------
         reranker_mode = str(self.rollout.get("reranker_mode", "disabled")).strip().lower()
-        if reranker_mode in ("enabled", "shadow") and adjusted and self._reranker.available:
+        if reranker_mode in ("enabled", "shadow") and adjusted:
             if reranker_mode == "enabled":
                 adjusted = self._reranker.rerank(query, adjusted)
             else:
@@ -2388,7 +2389,7 @@ class MemoryStore:
         retrieved: list[dict[str, Any]],
         max_tokens: int = 100,
     ) -> list[str]:
-        """Build entity relationship summary lines from Neo4j and local event triples.
+        """Build entity relationship summary lines from graph and local event triples.
 
         Queries the knowledge graph first (when available), then falls back to
         scanning triples stored in local events.
@@ -2408,13 +2409,13 @@ class MemoryStore:
         if not query_entities:
             return []
 
-        # Collect relevant triples — Neo4j first, then local event fallback.
+        # Collect relevant triples — graph first, then local event fallback.
         rel_triples: list[tuple[str, str, str]] = []
 
         if self.graph.enabled:
             rel_triples.extend(self.graph.get_triples_for_entities_sync(query_entities))
 
-        # Supplement with local event triples (may add context Neo4j lacks).
+        # Supplement with local event triples (may add context the graph lacks).
         for evt in events:
             for triple in evt.get("triples") or []:
                 subj = str(triple.get("subject", "")).strip()

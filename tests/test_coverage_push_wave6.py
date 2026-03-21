@@ -272,11 +272,7 @@ def test_graph_entity_helpers_and_disabled_paths() -> None:
     assert ent.entity_type.value == "unknown"
     assert ent.properties["owner"] == "carlos"
 
-    graph = KnowledgeGraph.__new__(KnowledgeGraph)
-    graph.enabled = False
-    graph._driver = None
-    graph._sync_driver = None
-    graph._database = "neo4j"
+    graph = KnowledgeGraph()  # no workspace → disabled
 
     # Disabled-path guards
     assert graph.get_related_entity_names_sync(set()) == set()
@@ -418,14 +414,13 @@ def test_store_retrieve_core_router_off_and_rollout_status(tmp_path: Path) -> No
     assert meta2["intent"] == "rollout_status"
 
 
-async def test_graph_query_subgraph_dedupe_and_get_entity_none() -> None:
-    g = KnowledgeGraph.__new__(KnowledgeGraph)
-    g.enabled = True
-    g._database = "neo4j"
-    g._driver = object()
-    g._sync_driver = None
+async def test_graph_query_subgraph_dedupe_and_get_entity_none(tmp_path: object) -> None:
+    from pathlib import Path
 
-    async def _neighbors(name: str, depth: int = 1):
+    workspace = Path(str(tmp_path))
+    g = KnowledgeGraph(workspace=workspace)
+
+    async def _neighbors(name: str, depth: int = 1, relation_types: list[str] | None = None):
         if name == "a":
             return [{"source": "A", "relation": "REL", "target": "B"}]
         return [
@@ -438,29 +433,8 @@ async def test_graph_query_subgraph_dedupe_and_get_entity_none() -> None:
     assert set(sub["nodes"]) == {"A", "B", "C"}
     assert len(sub["edges"]) == 2
 
-    class _NoRecordResult:
-        async def single(self):
-            return None
-
-    class _Sess:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return None
-
-        async def run(self, *_args, **_kwargs):
-            return _NoRecordResult()
-
-    class _Drv:
-        def session(self, database: str = "neo4j"):
-            return _Sess()
-
-    g2 = KnowledgeGraph.__new__(KnowledgeGraph)
-    g2.enabled = True
-    g2._database = "neo4j"
-    g2._driver = _Drv()
-    g2._sync_driver = None
+    # get_entity returns None for non-existent entity
+    g2 = KnowledgeGraph(workspace=workspace)
     assert await g2.get_entity("Missing") is None
 
 
@@ -1126,28 +1100,14 @@ def test_extractor_entity_and_graph_exception_paths(tmp_path: Path) -> None:
     entities = MemoryExtractor._extract_entities('met "Project Alpha" with Google Chrome in Paris')
     assert entities
 
-    graph = object.__new__(KnowledgeGraph)
-    graph.enabled = True
-    graph._database = None
-
-    class _Driver:
-        def session(self, **_kwargs):
-            class _SessionCtx:
-                async def __aenter__(self):
-                    raise RuntimeError("neo4j down")
-
-                async def __aexit__(self, exc_type, exc, tb):
-                    return False
-
-            return _SessionCtx()
-
-    graph._driver = _Driver()
-
-    async def _run_checks():
-        assert await graph.get_entity("oauth2") is None
-        assert await graph.search_entities("oauth2") == []
+    graph = KnowledgeGraph(workspace=tmp_path)
 
     import asyncio
+
+    async def _run_checks() -> None:
+        # Empty graph — entity lookup returns None / empty
+        assert await graph.get_entity("oauth2") is None
+        assert await graph.search_entities("oauth2") == []
 
     asyncio.run(_run_checks())
 
