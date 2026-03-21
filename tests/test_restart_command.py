@@ -175,14 +175,14 @@ class TestRestartCommand:
         assert "Context: 1k/64k (1%)" in response.content
 
     @pytest.mark.asyncio
-    async def test_process_direct_outbound_preserves_render_metadata(self):
+    async def test_process_direct_preserves_render_metadata(self):
         loop, _bus = _make_loop()
         session = MagicMock()
         session.get_history.return_value = []
         loop.sessions.get_or_create.return_value = session
         loop.subagents.get_running_count.return_value = 0
 
-        response = await loop.process_direct_outbound("/status", session_key="cli:test")
+        response = await loop.process_direct("/status", session_key="cli:test")
 
         assert response is not None
         assert response.metadata == {"render_as": "text"}

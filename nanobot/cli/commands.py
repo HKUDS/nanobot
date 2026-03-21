@@ -2,7 +2,7 @@
 
 import asyncio
 from contextlib import contextmanager, nullcontext
-import inspect
+
 import os
 import select
 import signal
@@ -579,7 +579,7 @@ def gateway(
         if isinstance(cron_tool, CronTool):
             cron_token = cron_tool.set_cron_context(True)
         try:
-            response = await agent.process_direct(
+            resp = await agent.process_direct(
                 reminder_note,
                 session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
@@ -588,6 +588,8 @@ def gateway(
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
                 cron_tool.reset_cron_context(cron_token)
+
+        response = resp.content if resp else ""
 
         message_tool = agent.tools.get("message")
         if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
@@ -634,13 +636,14 @@ def gateway(
         async def _silent(*_args, **_kwargs):
             pass
 
-        return await agent.process_direct(
+        resp = await agent.process_direct(
             tasks,
             session_key="heartbeat",
             channel=channel,
             chat_id=chat_id,
             on_progress=_silent,
         )
+        return resp.content if resp else ""
 
     async def on_heartbeat_notify(response: str) -> None:
         """Deliver a heartbeat response to the user's channel."""
@@ -768,27 +771,15 @@ def agent(
             nonlocal _thinking
             _thinking = _ThinkingSpinner(enabled=not logs)
             with _thinking:
-                direct_outbound = getattr(agent_loop, "process_direct_outbound", None)
-                if inspect.iscoroutinefunction(direct_outbound):
-                    response = await agent_loop.process_direct_outbound(
-                        message,
-                        session_id,
-                        on_progress=_cli_progress,
-                    )
-                    response_content = response.content if response else ""
-                    response_meta = response.metadata if response else None
-                else:
-                    response_content = await agent_loop.process_direct(
-                        message,
-                        session_id,
-                        on_progress=_cli_progress,
-                    )
-                    response_meta = None
+                response = await agent_loop.process_direct(
+                    message, session_id, on_progress=_cli_progress,
+                )
             _thinking = None
-            kwargs = {"render_markdown": markdown}
-            if response_meta is not None:
-                kwargs["metadata"] = response_meta
-            _print_agent_response(response_content, **kwargs)
+            _print_agent_response(
+                response.content if response else "",
+                render_markdown=markdown,
+                metadata=response.metadata if response else None,
+            )
             await agent_loop.close_mcp()
 
         asyncio.run(run_once())
