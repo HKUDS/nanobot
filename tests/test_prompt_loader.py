@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import nanobot.agent.prompt_loader as _prompt_loader_mod
 from nanobot.agent.prompt_loader import PromptLoader
 
 # ---------------------------------------------------------------------------
@@ -32,7 +33,7 @@ class TestPromptLoaderGet:
         (builtin_dir / "plan.md").write_text("Plan prompt text")
 
         # Monkey-patch the built-in dir
-        import nanobot.agent.prompt_loader as mod
+        mod = _prompt_loader_mod
 
         orig = mod._BUILTIN_DIR
         mod._BUILTIN_DIR = builtin_dir
@@ -46,7 +47,7 @@ class TestPromptLoaderGet:
         loader = PromptLoader()
         # With an invalid workspace, falls through to builtin; if not found → ""
         loader._workspace = Path("/nonexistent")
-        import nanobot.agent.prompt_loader as mod
+        mod = _prompt_loader_mod
 
         orig = mod._BUILTIN_DIR
         mod._BUILTIN_DIR = Path("/also_nonexistent")
@@ -62,7 +63,7 @@ class TestPromptLoaderGet:
         builtin_dir.mkdir(parents=True)
         (builtin_dir / "greet.md").write_text("Hello")
 
-        import nanobot.agent.prompt_loader as mod
+        mod = _prompt_loader_mod
 
         orig = mod._BUILTIN_DIR
         mod._BUILTIN_DIR = builtin_dir
@@ -92,7 +93,7 @@ class TestWorkspaceOverride:
         workspace = tmp_path / "workspace"
         _write_prompt(workspace, "plan", "overridden plan")
 
-        import nanobot.agent.prompt_loader as mod
+        mod = _prompt_loader_mod
 
         orig = mod._BUILTIN_DIR
         mod._BUILTIN_DIR = builtin_dir
@@ -111,7 +112,7 @@ class TestWorkspaceOverride:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
 
-        import nanobot.agent.prompt_loader as mod
+        mod = _prompt_loader_mod
 
         orig = mod._BUILTIN_DIR
         mod._BUILTIN_DIR = builtin_dir
@@ -134,7 +135,7 @@ class TestPreloadAndClear:
         (builtin_dir / "a.md").write_text("aaa")
         (builtin_dir / "b.md").write_text("bbb")
 
-        import nanobot.agent.prompt_loader as mod
+        mod = _prompt_loader_mod
 
         orig = mod._BUILTIN_DIR
         mod._BUILTIN_DIR = builtin_dir
@@ -154,7 +155,7 @@ class TestPreloadAndClear:
 
     def test_preload_no_dir_is_noop(self, tmp_path: Path):
         """Preload with a non-existent builtin dir should not crash."""
-        import nanobot.agent.prompt_loader as mod
+        mod = _prompt_loader_mod
 
         orig = mod._BUILTIN_DIR
         mod._BUILTIN_DIR = tmp_path / "nonexistent"
@@ -179,7 +180,7 @@ class TestPreloadAndClear:
 class TestRender:
     @staticmethod
     def _make_loader(tmp_path: Path, files: dict[str, str]) -> PromptLoader:
-        import nanobot.agent.prompt_loader as mod
+        mod = _prompt_loader_mod
 
         prompts_dir = tmp_path / "templates" / "prompts"
         prompts_dir.mkdir(parents=True, exist_ok=True)
@@ -193,7 +194,7 @@ class TestRender:
 
     @staticmethod
     def _restore(loader: PromptLoader) -> None:
-        import nanobot.agent.prompt_loader as mod
+        mod = _prompt_loader_mod
 
         mod._BUILTIN_DIR = loader._orig_dir  # type: ignore[attr-defined]
 
