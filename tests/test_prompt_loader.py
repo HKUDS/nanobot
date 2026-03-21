@@ -171,6 +171,78 @@ class TestPreloadAndClear:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Template rendering
+# ---------------------------------------------------------------------------
+
+
+class TestRender:
+    @staticmethod
+    def _make_loader(tmp_path: Path, files: dict[str, str]) -> PromptLoader:
+        import nanobot.agent.prompt_loader as mod
+
+        prompts_dir = tmp_path / "templates" / "prompts"
+        prompts_dir.mkdir(parents=True, exist_ok=True)
+        for name, content in files.items():
+            (prompts_dir / f"{name}.md").write_text(content)
+        loader = PromptLoader()
+        # Store original so fixture can restore it; tests use finally blocks
+        loader._orig_dir = mod._BUILTIN_DIR  # type: ignore[attr-defined]
+        mod._BUILTIN_DIR = prompts_dir
+        return loader
+
+    @staticmethod
+    def _restore(loader: PromptLoader) -> None:
+        import nanobot.agent.prompt_loader as mod
+
+        mod._BUILTIN_DIR = loader._orig_dir  # type: ignore[attr-defined]
+
+    def test_substitutes_known_variables(self, tmp_path: Path) -> None:
+        loader = self._make_loader(tmp_path, {"greeting": "Hello, {name}! Welcome to {place}."})
+        try:
+            result = loader.render("greeting", name="Alice", place="Wonderland")
+            assert result == "Hello, Alice! Welcome to Wonderland."
+        finally:
+            self._restore(loader)
+
+    def test_leaves_unknown_variables_untouched(self, tmp_path: Path) -> None:
+        loader = self._make_loader(tmp_path, {"greeting": "Hello, {name}! Welcome to {place}."})
+        try:
+            result = loader.render("greeting", name="Alice")
+            assert result == "Hello, Alice! Welcome to {place}."
+        finally:
+            self._restore(loader)
+
+    def test_no_variables_same_as_get(self, tmp_path: Path) -> None:
+        loader = self._make_loader(tmp_path, {"static": "No variables here."})
+        try:
+            result = loader.render("static")
+            assert result == "No variables here."
+        finally:
+            self._restore(loader)
+
+    def test_escaped_braces_survive(self, tmp_path: Path) -> None:
+        loader = self._make_loader(tmp_path, {"escaped": "Use {{key}} for cache lookup."})
+        try:
+            result = loader.render("escaped")
+            assert result == "Use {key} for cache lookup."
+        finally:
+            self._restore(loader)
+
+    def test_render_missing_prompt_returns_empty(self, tmp_path: Path) -> None:
+        loader = self._make_loader(tmp_path, {})
+        try:
+            result = loader.render("nonexistent", foo="bar")
+            assert result == ""
+        finally:
+            self._restore(loader)
+
+
+# ---------------------------------------------------------------------------
+# Module singleton
+# ---------------------------------------------------------------------------
+
+
 class TestModuleSingleton:
     def test_singleton_exists(self):
         from nanobot.agent.prompt_loader import prompts

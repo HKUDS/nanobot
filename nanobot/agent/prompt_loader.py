@@ -25,6 +25,17 @@ from loguru import logger
 _BUILTIN_DIR = Path(__file__).resolve().parent.parent / "templates" / "prompts"
 
 
+class _PassthroughDict(dict):
+    """Dict subclass that returns '{key}' for missing keys.
+
+    Used by ``str.format_map()`` so that unknown placeholders in prompt
+    templates survive rendering without raising ``KeyError``.
+    """
+
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
+
+
 class PromptLoader:
     """Read-through cache for prompt template files."""
 
@@ -45,6 +56,17 @@ class PromptLoader:
         text = self._load(name)
         self._cache[name] = text
         return text
+
+    def render(self, name: str, /, **kwargs: str) -> str:
+        """Load a prompt template and substitute ``{variable}`` placeholders.
+
+        Unknown placeholders are left untouched (safe partial rendering).
+        Escaped braces ``{{`` / ``}}`` are handled by Python's ``str.format_map``.
+        """
+        template = self.get(name)
+        if not template:
+            return template
+        return template.format_map(_PassthroughDict(kwargs))
 
     def _load(self, name: str) -> str:
         # User override
