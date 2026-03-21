@@ -110,3 +110,75 @@ class DelegationAdvisor:
             )
 
         return _NONE_ADVICE
+
+    def advise_reflect_phase(
+        self,
+        *,
+        role_name: str,
+        turn_tool_calls: int,
+        delegation_count: int,
+        max_delegations: int,
+        had_delegations_this_batch: bool,
+        used_sequential_delegate: bool,
+        has_parallel_structure: bool,
+        any_ungrounded: bool,
+        any_failed: bool,
+        iteration: int,
+        previous_advice: DelegationAction | None = None,
+    ) -> DelegationAdvice:
+        """Called after each tool batch in the reflect phase."""
+        if get_delegation_depth() > 0:
+            return _NONE_ADVICE
+
+        if any_failed:
+            return _NONE_ADVICE
+
+        if had_delegations_this_batch:
+            advice: DelegationAdvice
+            if any_ungrounded:
+                advice = DelegationAdvice(
+                    action=DelegationAction.SYNTHESIZE,
+                    warn_ungrounded=True,
+                    reason="delegation complete, ungrounded results detected",
+                )
+            elif delegation_count >= max_delegations:
+                advice = DelegationAdvice(
+                    action=DelegationAction.SYNTHESIZE,
+                    remove_delegate_tools=True,
+                    reason="budget exhausted after delegation batch",
+                )
+            else:
+                advice = _NONE_ADVICE
+
+            if used_sequential_delegate and has_parallel_structure:
+                advice = DelegationAdvice(
+                    action=DelegationAction.SOFT_NUDGE,
+                    suggested_mode="delegate_parallel",
+                    reason="parallel structure detected, switch to delegate_parallel",
+                )
+
+            return advice
+
+        if delegation_count >= max_delegations:
+            return DelegationAdvice(
+                action=DelegationAction.HARD_GATE,
+                remove_delegate_tools=True,
+                reason="delegation budget exhausted",
+            )
+
+        policy = self._get_policy(role_name)
+        if policy.exempt_from_nudge:
+            return _NONE_ADVICE
+
+        if turn_tool_calls >= policy.solo_tool_threshold:
+            if previous_advice == DelegationAction.SOFT_NUDGE:
+                return DelegationAdvice(
+                    action=DelegationAction.HARD_NUDGE,
+                    reason=f"escalation: {turn_tool_calls} solo calls, soft nudge was ignored",
+                )
+            return DelegationAdvice(
+                action=DelegationAction.SOFT_NUDGE,
+                reason=f"{turn_tool_calls} solo calls without delegation",
+            )
+
+        return _NONE_ADVICE
