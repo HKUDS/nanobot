@@ -1315,7 +1315,8 @@ class AgentLoop:
                     ):
                         if self._coordinator and msg.channel != "system":
                             t0_classify = time.monotonic()
-                            role_name, confidence = await self._coordinator.classify(msg.content)
+                            cls_result = await self._coordinator.classify(msg.content)
+                            role_name, confidence = cls_result.role_name, cls_result.confidence
                             classify_latency_ms = (time.monotonic() - t0_classify) * 1000
                             # Confidence-aware: fall back to default on low confidence
                             threshold = (

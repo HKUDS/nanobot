@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from nanobot.agent.consolidation import ConsolidationOrchestrator
 from nanobot.agent.context import ContextBuilder
-from nanobot.agent.coordinator import Coordinator
+from nanobot.agent.coordinator import ClassificationResult, Coordinator
 from nanobot.agent.delegation import DelegationDispatcher
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.memory import MemoryStore
@@ -23,6 +23,7 @@ __all__ = [
     "AgentLoop",
     "AgentRegistry",
     "AnswerVerifier",
+    "ClassificationResult",
     "ConsolidationOrchestrator",
     "ContextBuilder",
     "Coordinator",
