@@ -7,11 +7,21 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
+from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import iMessageConfig
+from nanobot.config.schema import Base
+
+
+class iMessageConfig(Base):
+    """iMessage channel configuration."""
+
+    enabled: bool = False
+    imsg_path: str = ""
+    self_chat: bool = False
+    allow_from: list[str] = Field(default_factory=list)
 
 
 class iMessageChannel(BaseChannel):
@@ -23,8 +33,15 @@ class iMessageChannel(BaseChannel):
     """
 
     name = "imessage"
+    display_name = "iMessage"
 
-    def __init__(self, config: iMessageConfig, bus: MessageBus):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return iMessageConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = iMessageConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: iMessageConfig = config
         self._process: asyncio.subprocess.Process | None = None
