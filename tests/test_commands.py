@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
+from nanobot.bus.events import OutboundMessage
 from nanobot.cli.commands import _make_provider, app
 from nanobot.config.schema import Config
 from nanobot.providers.litellm_provider import LiteLLMProvider
@@ -213,6 +214,15 @@ def test_config_matches_openai_codex_with_hyphen_prefix():
     assert config.get_provider_name() == "openai_codex"
 
 
+def test_config_dump_excludes_oauth_provider_blocks():
+    config = Config()
+
+    providers = config.model_dump(by_alias=True)["providers"]
+
+    assert "openaiCodex" not in providers
+    assert "githubCopilot" not in providers
+
+
 def test_config_matches_explicit_ollama_prefix_without_api_key():
     config = Config()
     config.agents.defaults.model = "ollama/llama3.2"
@@ -336,7 +346,9 @@ def mock_agent_runtime(tmp_path):
 
         agent_loop = MagicMock()
         agent_loop.channels_config = None
-        agent_loop.process_direct = AsyncMock(return_value="mock-response")
+        agent_loop.process_direct = AsyncMock(
+            return_value=OutboundMessage(channel="cli", chat_id="direct", content="mock-response"),
+        )
         agent_loop.close_mcp = AsyncMock(return_value=None)
         mock_agent_loop_cls.return_value = agent_loop
 
@@ -373,7 +385,9 @@ def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_
         mock_agent_runtime["config"].workspace_path
     )
     mock_agent_runtime["agent_loop"].process_direct.assert_awaited_once()
-    mock_agent_runtime["print_response"].assert_called_once_with("mock-response", render_markdown=True)
+    mock_agent_runtime["print_response"].assert_called_once_with(
+        "mock-response", render_markdown=True, metadata={},
+    )
 
 
 def test_agent_uses_explicit_config_path(mock_agent_runtime, tmp_path: Path):
@@ -409,8 +423,8 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
         def __init__(self, *args, **kwargs) -> None:
             pass
 
-        async def process_direct(self, *_args, **_kwargs) -> str:
-            return "ok"
+        async def process_direct(self, *_args, **_kwargs):
+            return OutboundMessage(channel="cli", chat_id="direct", content="ok")
 
         async def close_mcp(self) -> None:
             return None

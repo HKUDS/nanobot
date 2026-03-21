@@ -359,6 +359,8 @@ class TestProviderChannelInfo:
         assert len(names) > 0
         # Should include common providers
         assert "openai" in names or "anthropic" in names
+        assert "openai_codex" not in names
+        assert "github_copilot" not in names
 
     def test_get_channel_names_returns_dict(self):
         from nanobot.cli.onboard_wizard import _get_channel_names

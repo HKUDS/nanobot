@@ -111,3 +111,33 @@ async def test_print_interactive_progress_line_pauses_spinner_before_printing():
             await commands._print_interactive_progress_line("tool running", thinking)
 
     assert order == ["start", "stop", "print", "start", "stop"]
+
+
+def test_response_renderable_uses_text_for_explicit_plain_rendering():
+    status = (
+        "🐈 nanobot v0.1.4.post5\n"
+        "🧠 Model: MiniMax-M2.7\n"
+        "📊 Tokens: 20639 in / 29 out"
+    )
+
+    renderable = commands._response_renderable(
+        status,
+        render_markdown=True,
+        metadata={"render_as": "text"},
+    )
+
+    assert renderable.__class__.__name__ == "Text"
+
+
+def test_response_renderable_preserves_normal_markdown_rendering():
+    renderable = commands._response_renderable("**bold**", render_markdown=True)
+
+    assert renderable.__class__.__name__ == "Markdown"
+
+
+def test_response_renderable_without_metadata_keeps_markdown_path():
+    help_text = "🐈 nanobot commands:\n/status — Show bot status\n/help — Show available commands"
+
+    renderable = commands._response_renderable(help_text, render_markdown=True)
+
+    assert renderable.__class__.__name__ == "Markdown"

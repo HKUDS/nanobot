@@ -7,12 +7,14 @@ import json
 import os
 import re
 import sys
+import time
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+from nanobot import __version__
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.subagent import SubagentManager
@@ -25,6 +27,7 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.utils.helpers import build_status_content
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
@@ -79,6 +82,8 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self._start_time = time.time()
+        self._last_usage: dict[str, int] = {}
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -120,12 +125,13 @@ class AgentLoop:
         self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
         for cls in (WriteFileTool, EditFileTool, ListDirTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
-        self.tools.register(ExecTool(
-            working_dir=str(self.workspace),
-            timeout=self.exec_config.timeout,
-            restrict_to_workspace=self.restrict_to_workspace,
-            path_append=self.exec_config.path_append,
-        ))
+        if self.exec_config.enable:
+            self.tools.register(ExecTool(
+                working_dir=str(self.workspace),
+                timeout=self.exec_config.timeout,
+                restrict_to_workspace=self.restrict_to_workspace,
+                path_append=self.exec_config.path_append,
+            ))
         self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
@@ -180,6 +186,28 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    def _status_response(self, msg: InboundMessage, session: Session) -> OutboundMessage:
+        """Build an outbound status message for a session."""
+        ctx_est = 0
+        try:
+            ctx_est, _ = self.memory_consolidator.estimate_session_prompt_tokens(session)
+        except Exception:
+            pass
+        if ctx_est <= 0:
+            ctx_est = self._last_usage.get("prompt_tokens", 0)
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=build_status_content(
+                version=__version__, model=self.model,
+                start_time=self._start_time, last_usage=self._last_usage,
+                context_window_tokens=self.context_window_tokens,
+                session_msg_count=len(session.get_history(max_messages=0)),
+                context_tokens_estimate=ctx_est,
+            ),
+            metadata={"render_as": "text"},
+        )
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -201,6 +229,11 @@ class AgentLoop:
                 tools=tool_defs,
                 model=self.model,
             )
+            usage = response.usage or {}
+            self._last_usage = {
+                "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
+                "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
+            }
 
             if response.has_tool_calls:
                 if on_progress:
@@ -279,6 +312,9 @@ class AgentLoop:
                 await self._handle_stop(msg)
             elif cmd == "/restart":
                 await self._handle_restart(msg)
+            elif cmd == "/status":
+                session = self.sessions.get_or_create(msg.session_key)
+                await self.bus.publish_outbound(self._status_response(msg, session))
             else:
                 task = asyncio.create_task(self._dispatch(msg))
                 self._active_tasks.setdefault(msg.session_key, []).append(task)
@@ -409,16 +445,22 @@ class AgentLoop:
 
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
+        if cmd == "/status":
+            return self._status_response(msg, session)
         if cmd == "/help":
             lines = [
                 "🐈 nanobot commands:",
                 "/new — Start a new conversation",
                 "/stop — Stop the current task",
                 "/restart — Restart the bot",
+                "/status — Show bot status",
                 "/help — Show available commands",
             ]
             return OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="\n".join(lines),
+                metadata={"render_as": "text"},
             )
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
@@ -464,6 +506,52 @@ class AgentLoop:
             metadata=msg.metadata or {},
         )
 
+    @staticmethod
+    def _image_placeholder(block: dict[str, Any]) -> dict[str, str]:
+        """Convert an inline image block into a compact text placeholder."""
+        path = (block.get("_meta") or {}).get("path", "")
+        return {"type": "text", "text": f"[image: {path}]" if path else "[image]"}
+
+    def _sanitize_persisted_blocks(
+        self,
+        content: list[dict[str, Any]],
+        *,
+        truncate_text: bool = False,
+        drop_runtime: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Strip volatile multimodal payloads before writing session history."""
+        filtered: list[dict[str, Any]] = []
+        for block in content:
+            if not isinstance(block, dict):
+                filtered.append(block)
+                continue
+
+            if (
+                drop_runtime
+                and block.get("type") == "text"
+                and isinstance(block.get("text"), str)
+                and block["text"].startswith(ContextBuilder._RUNTIME_CONTEXT_TAG)
+            ):
+                continue
+
+            if (
+                block.get("type") == "image_url"
+                and block.get("image_url", {}).get("url", "").startswith("data:image/")
+            ):
+                filtered.append(self._image_placeholder(block))
+                continue
+
+            if block.get("type") == "text" and isinstance(block.get("text"), str):
+                text = block["text"]
+                if truncate_text and len(text) > self._TOOL_RESULT_MAX_CHARS:
+                    text = text[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+                filtered.append({**block, "text": text})
+                continue
+
+            filtered.append(block)
+
+        return filtered
+
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
@@ -472,8 +560,14 @@ class AgentLoop:
             role, content = entry.get("role"), entry.get("content")
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
-            if role == "tool" and isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
-                entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+            if role == "tool":
+                if isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
+                    entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+                elif isinstance(content, list):
+                    filtered = self._sanitize_persisted_blocks(content, truncate_text=True)
+                    if not filtered:
+                        continue
+                    entry["content"] = filtered
             elif role == "user":
                 if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
                     # Strip the runtime-context prefix, keep only the user text.
@@ -483,17 +577,7 @@ class AgentLoop:
                     else:
                         continue
                 if isinstance(content, list):
-                    filtered = []
-                    for c in content:
-                        if c.get("type") == "text" and isinstance(c.get("text"), str) and c["text"].startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
-                            continue  # Strip runtime context from multimodal messages
-                        if (c.get("type") == "image_url"
-                                and c.get("image_url", {}).get("url", "").startswith("data:image/")):
-                            path = (c.get("_meta") or {}).get("path", "")
-                            placeholder = f"[image: {path}]" if path else "[image]"
-                            filtered.append({"type": "text", "text": placeholder})
-                        else:
-                            filtered.append(c)
+                    filtered = self._sanitize_persisted_blocks(content, drop_runtime=True)
                     if not filtered:
                         continue
                     entry["content"] = filtered
@@ -508,9 +592,8 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
-    ) -> str:
-        """Process a message directly (for CLI or cron usage)."""
+    ) -> OutboundMessage | None:
+        """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
-        return response.content if response else ""
+        return await self._process_message(msg, session_key=session_key, on_progress=on_progress)
