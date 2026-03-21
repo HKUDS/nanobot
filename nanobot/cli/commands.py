@@ -829,7 +829,13 @@ def agent(
         return console.status("[dim]nanobot is thinking...[/dim]", spinner="dots")
 
     async def _cli_progress(
-        content: str, *, tool_hint: bool = False, streaming: bool = False
+        content: str,
+        *,
+        tool_hint: bool = False,
+        streaming: bool = False,
+        status_code: str = "",
+        status_label: str = "",
+        **_kwargs: object,
     ) -> None:
         ch = agent_loop.channels_config
         if ch and tool_hint and not ch.send_tool_hints:
