@@ -900,7 +900,9 @@ class TestProgressEvents:
             [
                 LLMResponse(
                     content=None,
-                    tool_calls=[ToolCallRequest(id="tc1", name="read_file", arguments={"path": "/tmp/x"})]
+                    tool_calls=[
+                        ToolCallRequest(id="tc1", name="read_file", arguments={"path": "/tmp/x"})
+                    ],
                 ),
                 LLMResponse(content="Done."),
             ]

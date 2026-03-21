@@ -39,9 +39,7 @@ def _handler(
     send_progress: bool = True, send_tool_hints: bool = True
 ) -> tuple[CliProgressHandler, StringIO]:
     buf = StringIO()
-    fake_config = _FakeChannelsConfig(
-        send_progress=send_progress, send_tool_hints=send_tool_hints
-    )
+    fake_config = _FakeChannelsConfig(send_progress=send_progress, send_tool_hints=send_tool_hints)
     # Cast to ChannelsConfig since we only use send_progress and send_tool_hints
     ch = cast(ChannelsConfig, fake_config)
     return CliProgressHandler(Console(file=buf, highlight=False), channels_config=ch), buf
