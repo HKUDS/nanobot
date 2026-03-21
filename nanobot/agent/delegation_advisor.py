@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from nanobot.agent.delegation import get_delegation_depth  # noqa: F401 — used in later phases
+from nanobot.agent.delegation import DelegationDispatcher, get_delegation_depth
 
 
 class DelegationAction(str, Enum):
@@ -77,3 +77,36 @@ class DelegationAdvisor:
 
     def _get_policy(self, role_name: str) -> RolePolicy:
         return self._policies.get(role_name, self._default_policy)
+
+    def advise_plan_phase(
+        self,
+        *,
+        role_name: str,
+        needs_orchestration: bool,
+        relevant_roles: list[str],
+        user_text: str,
+        delegate_tools_available: bool,
+    ) -> DelegationAdvice:
+        """Called once before the agent loop starts."""
+        if not delegate_tools_available:
+            return _NONE_ADVICE
+
+        if get_delegation_depth() > 0:
+            return _NONE_ADVICE
+
+        if needs_orchestration or len(relevant_roles) >= 2:
+            if DelegationDispatcher.has_parallel_structure(user_text):
+                return DelegationAdvice(
+                    action=DelegationAction.SOFT_NUDGE,
+                    reason="orchestration needed with parallel structure",
+                    suggested_mode="delegate_parallel",
+                    suggested_roles=relevant_roles or None,
+                )
+            return DelegationAdvice(
+                action=DelegationAction.SOFT_NUDGE,
+                reason="orchestration needed",
+                suggested_mode="delegate",
+                suggested_roles=relevant_roles or None,
+            )
+
+        return _NONE_ADVICE
