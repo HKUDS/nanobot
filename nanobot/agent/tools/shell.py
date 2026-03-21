@@ -96,6 +96,7 @@ class ExecTool(Tool):
                 stdin=asyncio.subprocess.DEVNULL,  # Prevent interactive prompts from hanging
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,  # Disconnect from /dev/tty (ssh and similar programs bypass stdin)
                 cwd=cwd,
                 env=env,
             )
