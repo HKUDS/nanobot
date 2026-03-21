@@ -53,12 +53,19 @@ class SubagentManager:
         label: str | None = None,
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
+        origin_message_id: str | None = None,
+        origin_message_thread_id: str | None = None,
         session_key: str | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
-        origin = {"channel": origin_channel, "chat_id": origin_chat_id}
+        origin = {
+            "channel": origin_channel, 
+            "chat_id": origin_chat_id,
+            "message_id": origin_message_id,
+            "message_thread_id": origin_message_thread_id,
+        }
 
         bg_task = asyncio.create_task(
             self._run_subagent(task_id, task, display_label, origin)
@@ -171,7 +178,7 @@ class SubagentManager:
         label: str,
         task: str,
         result: str,
-        origin: dict[str, str],
+        origin: dict[str, str | None],
         status: str,
     ) -> None:
         """Announce the subagent result to the main agent via the message bus."""
@@ -192,6 +199,10 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
             sender_id="subagent",
             chat_id=f"{origin['channel']}:{origin['chat_id']}",
             content=announce_content,
+            metadata={
+                "reply_to_message_id": origin.get("message_id"),
+                "message_thread_id": origin.get("message_thread_id"),
+            }
         )
 
         await self.bus.publish_inbound(msg)
