@@ -51,6 +51,12 @@ class CustomProvider(LLMProvider):
         try:
             return self._parse(await self._client.chat.completions.create(**kwargs))
         except Exception as e:
+            # JSONDecodeError.doc / APIError.response.text may carry the raw body
+            # (e.g. "unsupported model: xxx") which is far more useful than the
+            # generic "Expecting value …" message.  Truncate to avoid huge HTML pages.
+            body = getattr(e, "doc", None) or getattr(getattr(e, "response", None), "text", None)
+            if body and body.strip():
+                return LLMResponse(content=f"Error: {body.strip()[:500]}", finish_reason="error")
             return LLMResponse(content=f"Error: {e}", finish_reason="error")
 
     def _parse(self, response: Any) -> LLMResponse:

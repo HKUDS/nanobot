@@ -182,7 +182,7 @@ class TestConsolidationTriggerConditions:
     """Test consolidation trigger conditions and logic."""
 
     def test_consolidation_needed_when_messages_exceed_window(self):
-        """Test consolidation logic: should trigger when messages > memory_window."""
+        """Test consolidation logic: should trigger when messages exceed the window."""
         session = create_session_with_messages("test:trigger", 60)
 
         total_messages = len(session.messages)
