@@ -73,17 +73,17 @@ Be thorough. Always cite slide numbers. Deduplicate across slides.\
 # ---------------------------------------------------------------------------
 
 
-def _import_pptx():  # type: ignore[return]
+def _import_pptx() -> Any:
     """Import python-pptx Presentation class with helpful error."""
     try:
         from pptx import Presentation  # type: ignore[import-untyped]
 
         return Presentation
-    except ImportError:
+    except ImportError as err:
         raise ImportError(
             "python-pptx is required for PowerPoint reading. "
             "Install it with: pip install 'nanobot-ai[pptx]'"
-        )
+        ) from err
 
 
 def _extract_slides_data(file_path: Path) -> list[dict[str, Any]]:
@@ -404,9 +404,7 @@ class ReadPptxTool(Tool):
             "required": ["path"],
         }
 
-    def _cache_slide(
-        self, file_path: str, slide_number: int, slide_data: dict[str, Any]
-    ) -> str:
+    def _cache_slide(self, file_path: str, slide_number: int, slide_data: dict[str, Any]) -> str:
         """Cache a single slide's data and return the cache key."""
         if not self._cache:
             return ""
@@ -430,9 +428,7 @@ class ReadPptxTool(Tool):
         if not file_path.is_file():
             return ToolResult.fail(f"Not a file: {path}", error_type="invalid_path")
         if file_path.suffix.lower() != ".pptx":
-            return ToolResult.fail(
-                f"Not a .pptx file: {path}", error_type="invalid_format"
-            )
+            return ToolResult.fail(f"Not a .pptx file: {path}", error_type="invalid_format")
 
         try:
             slides = _extract_slides_data(file_path)
@@ -564,9 +560,7 @@ class AnalyzePptxTool(Tool):
         if not file_path.is_file():
             return ToolResult.fail(f"Not a file: {path}", error_type="invalid_path")
         if file_path.suffix.lower() != ".pptx":
-            return ToolResult.fail(
-                f"Not a .pptx file: {path}", error_type="invalid_format"
-            )
+            return ToolResult.fail(f"Not a .pptx file: {path}", error_type="invalid_format")
 
         # Level 1: Extract text
         try:
@@ -606,27 +600,19 @@ class AnalyzePptxTool(Tool):
                 return await _analyze_slide(sd, img, resolved_model)
 
         try:
-            slide_analyses = list(
-                await asyncio.gather(*[_bounded(sd) for sd in slides_data])
-            )
+            slide_analyses = list(await asyncio.gather(*[_bounded(sd) for sd in slides_data]))
         except Exception as e:
-            return ToolResult.fail(
-                f"Error during slide analysis: {e}", error_type="analysis_error"
-            )
+            return ToolResult.fail(f"Error during slide analysis: {e}", error_type="analysis_error")
 
         # Cache each slide analysis
         for sa in slide_analyses:
-            self._cache_slide_analysis(
-                str(file_path), sa.get("slide_number", 0), sa
-            )
+            self._cache_slide_analysis(str(file_path), sa.get("slide_number", 0), sa)
 
         # Level 3: Deck synthesis
         try:
             synthesis = await _synthesize_deck(slide_analyses, resolved_model)
         except Exception as e:
-            return ToolResult.fail(
-                f"Error during deck synthesis: {e}", error_type="analysis_error"
-            )
+            return ToolResult.fail(f"Error during deck synthesis: {e}", error_type="analysis_error")
 
         # Save full analysis JSON
         if output_path:
@@ -652,9 +638,7 @@ class AnalyzePptxTool(Tool):
         )
 
         # Format readable summary
-        summary = _format_analysis_output(
-            file_path.name, len(slides_data), mode, synthesis, out
-        )
+        summary = _format_analysis_output(file_path.name, len(slides_data), mode, synthesis, out)
         return ToolResult.ok(summary)
 
 

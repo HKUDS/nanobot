@@ -114,7 +114,6 @@ class DelegateTool(Tool):
             return False, "Delegation not configured"
         return True, None
 
-
     async def execute(  # type: ignore[override]
         self,
         *,
@@ -220,7 +219,6 @@ class DelegateParallelTool(Tool):
         if not self._dispatch:
             return False, "Delegation not configured"
         return True, None
-
 
     async def execute(self, *, subtasks: list[dict[str, str]], **_: Any) -> ToolResult:  # type: ignore[override]
         if not self._dispatch:

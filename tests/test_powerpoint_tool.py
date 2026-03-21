@@ -363,9 +363,7 @@ async def test_analyze_pptx_custom_output_path(
             return_value=_DECK_SYNTHESIS,
         ),
     ):
-        result = await analyze_tool.execute(
-            path=str(sample_pptx), output_path=str(custom_out)
-        )
+        result = await analyze_tool.execute(path=str(sample_pptx), output_path=str(custom_out))
         assert result.success
         assert custom_out.exists()
 
