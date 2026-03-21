@@ -185,6 +185,7 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        on_iteration_complete: Callable[[list[dict]], Awaitable[None]] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop."""
         messages = initial_messages
@@ -230,6 +231,8 @@ class AgentLoop:
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
+                if on_iteration_complete:
+                    await on_iteration_complete(messages)
             else:
                 clean = self._strip_think(response.content)
                 # Don't persist error responses to session history — they can
@@ -242,6 +245,8 @@ class AgentLoop:
                     messages, clean, reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
                 )
+                if on_iteration_complete:
+                    await on_iteration_complete(messages)
                 final_content = clean
                 break
 
@@ -253,6 +258,14 @@ class AgentLoop:
             )
 
         return final_content, tools_used, messages
+
+    def _flush_new_messages(self, session: Session, messages: list[dict], skip: int) -> int:
+        """Persist any new source messages since the previous flush cursor."""
+        if skip >= len(messages):
+            return len(messages)
+        self._save_turn(session, messages, skip)
+        self.sessions.save(session)
+        return len(messages)
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
@@ -384,9 +397,16 @@ class AgentLoop:
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
-            self._save_turn(session, all_msgs, 1 + len(history))
-            self.sessions.save(session)
+            persisted_count = self._flush_new_messages(session, messages, 1 + len(history))
+
+            async def _persist_progress(all_msgs: list[dict]) -> None:
+                nonlocal persisted_count
+                persisted_count = self._flush_new_messages(session, all_msgs, persisted_count)
+
+            final_content, _, _ = await self._run_agent_loop(
+                messages,
+                on_iteration_complete=_persist_progress,
+            )
             self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
@@ -435,6 +455,7 @@ class AgentLoop:
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
         )
+        persisted_count = self._flush_new_messages(session, initial_messages, 1 + len(history))
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
@@ -444,15 +465,18 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+        async def _persist_progress(all_msgs: list[dict]) -> None:
+            nonlocal persisted_count
+            persisted_count = self._flush_new_messages(session, all_msgs, persisted_count)
+
+        final_content, _, _ = await self._run_agent_loop(
+            initial_messages,
+            on_progress=on_progress or _bus_progress,
+            on_iteration_complete=_persist_progress,
         )
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
-
-        self._save_turn(session, all_msgs, 1 + len(history))
-        self.sessions.save(session)
         self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
