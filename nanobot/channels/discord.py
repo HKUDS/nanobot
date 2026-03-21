@@ -2,13 +2,14 @@
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Any, Literal
 
 import httpx
-from pydantic import Field
 import websockets
 from loguru import logger
+from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -303,9 +304,12 @@ class DiscordChannel(BaseChannel):
             return
 
         # Check group channel policy (DMs always respond if is_allowed passes)
-        if guild_id is not None:
-            if not self._should_respond_in_group(payload, content):
-                return
+        if guild_id is not None and not self._should_respond_in_group(payload, content):
+            return
+
+        # Strip bot mentions
+        if content and self._bot_user_id:
+            content = re.sub(rf"<@!?{re.escape(self._bot_user_id)}>\s*", "", content).strip()
 
         content_parts = [content] if content else []
         media_paths: list[str] = []
