@@ -130,9 +130,15 @@ def test_inbound_group_message_mention_policy_accepts_at_self() -> None:
     asyncio.run(run())
 
 
-def test_image_receive_populates_media_and_preserves_text() -> None:
+def test_image_receive_populates_local_media_and_preserves_text(monkeypatch) -> None:
     async def run() -> None:
         channel = _make_channel()
+        async def fake_download(url: str, message_id: str, index: int) -> str:
+            assert url == "https://example.com/a.png"
+            assert message_id == "123"
+            assert index == 1
+            return "/tmp/napcat_123_1.png"
+        monkeypatch.setattr(channel, "_download_image", fake_download)
         await channel._handle_ws_message(json.dumps({
             "post_type": "message",
             "self_id": 10001,
@@ -146,7 +152,7 @@ def test_image_receive_populates_media_and_preserves_text() -> None:
         }))
         msg = await channel.bus.consume_inbound()
         assert msg.content == "look"
-        assert msg.media == ["https://example.com/a.png"]
+        assert msg.media == ["/tmp/napcat_123_1.png"]
 
     asyncio.run(run())
 

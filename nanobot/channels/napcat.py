@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import mimetypes
 from collections import OrderedDict
 from itertools import count
+from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlparse
 
+import httpx
 from loguru import logger
 from pydantic import Field
 import websockets
@@ -15,6 +19,7 @@ import websockets
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 
 
@@ -171,13 +176,19 @@ class NapCatChannel(BaseChannel):
 
         segments = event.get("message")
         text = self._segments_to_text(segments)
-        media = self._segments_to_media(segments)
+        media = await self._download_image_segments(segments, message_id)
+        logger.info(
+            "NapCat inbound {} message {} from {} to {}: text_len={}, images={}",
+            message_type, message_id or "<no-id>", user_id, chat_id, len(text), len(media),
+        )
 
         if message_type == "group" and self.config.group_policy == "mention":
             if not self._contains_self_mention(segments):
+                logger.info("NapCat skipped group message {}: no @mention", message_id or "<no-id>")
                 return
 
         if not text and not media:
+            logger.info("NapCat skipped message {}: no text or usable media", message_id or "<no-id>")
             return
 
         await self._handle_message(
@@ -232,3 +243,35 @@ class NapCatChannel(BaseChannel):
             if url:
                 media.append(url)
         return media
+
+    async def _download_image_segments(self, segments: Any, message_id: str) -> list[str]:
+        """Download inbound image segments to local files so multimodal models can read them."""
+        urls = self._segments_to_media(segments)
+        if not urls:
+            return []
+
+        local_paths: list[str] = []
+        for index, url in enumerate(urls, start=1):
+            try:
+                path = await self._download_image(url, message_id or "msg", index)
+            except Exception as e:
+                logger.warning("NapCat failed to download image {} for {}: {}", index, message_id or "<no-id>", e)
+                continue
+            logger.info("NapCat downloaded image {} for {} -> {}", index, message_id or "<no-id>", path)
+            local_paths.append(path)
+        return local_paths
+
+    async def _download_image(self, url: str, message_id: str, index: int) -> str:
+        """Download one image URL to the NapCat media directory."""
+        media_dir = get_media_dir("napcat")
+        parsed = urlparse(url)
+        suffix = Path(parsed.path).suffix
+        if not suffix:
+            suffix = mimetypes.guess_extension("image/jpeg") or ".jpg"
+        file_path = media_dir / f"{message_id}_{index}{suffix}"
+
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            file_path.write_bytes(response.content)
+        return str(file_path)
