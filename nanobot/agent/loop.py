@@ -7,7 +7,7 @@ import json
 import os
 import re
 import sys
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -103,7 +103,12 @@ class AgentLoop:
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
-        self._processing_lock = asyncio.Lock()
+        self._session_locks: dict[str, asyncio.Lock] = {}
+        # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
+        _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3"))
+        self._concurrency_gate: asyncio.Semaphore | None = (
+            asyncio.Semaphore(_max) if _max > 0 else None
+        )
         self.memory_consolidator = MemoryConsolidator(
             workspace=workspace,
             provider=provider,
@@ -206,6 +211,10 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        *,
+        channel: str = "cli",
+        chat_id: str = "direct",
+        message_id: str | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop."""
         messages = initial_messages
@@ -247,6 +256,10 @@ class AgentLoop:
                     tools_used.append(tc.name)
                     args_str = json.dumps(tc.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tc.name, args_str[:200])
+
+                # Re-bind tool context right before execution so that
+                # concurrent sessions don't clobber each other's routing.
+                self._set_tool_context(channel, chat_id, message_id)
 
                 # Execute all tool calls concurrently — the LLM batches
                 # independent calls in a single response on purpose.
@@ -343,8 +356,10 @@ class AgentLoop:
         asyncio.create_task(_do_restart())
 
     async def _dispatch(self, msg: InboundMessage) -> None:
-        """Process a message under the global lock."""
-        async with self._processing_lock:
+        """Process a message: per-session serial, cross-session concurrent."""
+        lock = self._session_locks.setdefault(msg.session_key, asyncio.Lock())
+        gate = self._concurrency_gate or nullcontext()
+        async with lock, gate:
             try:
                 response = await self._process_message(msg)
                 if response is not None:
@@ -411,7 +426,10 @@ class AgentLoop:
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, _, all_msgs = await self._run_agent_loop(
+                messages, channel=channel, chat_id=chat_id,
+                message_id=msg.metadata.get("message_id"),
+            )
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
@@ -473,6 +491,8 @@ class AgentLoop:
 
         final_content, _, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
+            channel=msg.channel, chat_id=msg.chat_id,
+            message_id=msg.metadata.get("message_id"),
         )
 
         if final_content is None:
