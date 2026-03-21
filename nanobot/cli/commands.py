@@ -23,6 +23,8 @@ from rich.table import Table
 from rich.text import Text
 
 from nanobot import __logo__, __version__
+from nanobot.agent.callbacks import ProgressEvent
+from nanobot.cli.progress import CliProgressHandler
 from nanobot.config.schema import AgentConfig, Config
 
 app = typer.Typer(
@@ -505,7 +507,7 @@ def gateway(
         """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
 
-        async def _silent(*_args: Any, **_kwargs: Any) -> None:
+        async def _silent(event: ProgressEvent) -> None:  # noqa: ARG001
             pass
 
         return await agent.process_direct(
@@ -828,22 +830,14 @@ def agent(
         # Animated spinner is safe to use with prompt_toolkit input handling
         return console.status("[dim]nanobot is thinking...[/dim]", spinner="dots")
 
-    async def _cli_progress(
-        content: str, *, tool_hint: bool = False, streaming: bool = False
-    ) -> None:
-        ch = agent_loop.channels_config
-        if ch and tool_hint and not ch.send_tool_hints:
-            return
-        if ch and not tool_hint and not ch.send_progress:
-            return
-        console.print(f"  [dim]↳ {content}[/dim]")
+    handler = CliProgressHandler(console=console, channels_config=agent_loop.channels_config)
 
     if message:
         # Single message mode — direct call, no bus needed
         async def run_once() -> None:
             try:
                 with _thinking_ctx():
-                    coro = agent_loop.process_direct(message, session_id, on_progress=_cli_progress)
+                    coro = agent_loop.process_direct(message, session_id, on_progress=handler)
                     if timeout_s > 0:
                         response = await asyncio.wait_for(coro, timeout=float(timeout_s))
                     else:

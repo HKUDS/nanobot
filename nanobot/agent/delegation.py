@@ -22,10 +22,15 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
+from nanobot.agent.callbacks import (
+    DelegateEndEvent,
+    DelegateStartEvent,
+    ProgressCallback,
+)
 from nanobot.agent.observability import span as langfuse_span
 from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.tool_loop import run_tool_loop
@@ -209,7 +214,7 @@ class DelegationDispatcher:
         active_messages: list[dict[str, Any]] | None = None,
         tools: ToolExecutor | None = None,
         mcp_tools: list[Tool] | None = None,
-        on_progress: Callable[..., Awaitable[None]] | None = None,
+        on_progress: ProgressCallback | None = None,
         max_delegation_depth: int = 8,
     ) -> None:
         """Initialise the delegation dispatcher.
@@ -271,7 +276,7 @@ class DelegationDispatcher:
         self.active_messages: list[dict[str, Any]] | None = active_messages
         self.tools: ToolExecutor | None = tools
         self.mcp_tools: list[Tool] = mcp_tools if mcp_tools is not None else []
-        self.on_progress: Callable[..., Awaitable[None]] | None = on_progress
+        self.on_progress: ProgressCallback | None = on_progress
         # JSONL persistence for routing trace (LAN-130). Set by loop._ensure_scratchpad.
         self._trace_path: Path | None = None
 
@@ -763,12 +768,11 @@ class DelegationDispatcher:
         if self.on_progress:
             try:
                 await self.on_progress(
-                    "",
-                    delegate_start={
-                        "delegation_id": delegation_id,
-                        "child_role": role.name,
-                        "task_title": task[:120],
-                    },
+                    DelegateStartEvent(
+                        delegation_id=delegation_id,
+                        child_role=role.name,
+                        task_title=task[:120],
+                    )
                 )
             except Exception as exc:  # crash-barrier: never let event emission block delegation
                 logger.debug("delegate_start event emission failed: {}", exc)
@@ -802,11 +806,7 @@ class DelegationDispatcher:
             if self.on_progress:
                 try:
                     await self.on_progress(
-                        "",
-                        delegate_end={
-                            "delegation_id": delegation_id,
-                            "success": True,
-                        },
+                        DelegateEndEvent(delegation_id=delegation_id, success=True)
                     )
                 except Exception as exc:  # crash-barrier: never let event emission block delegation
                     logger.debug("delegate_end event emission failed: {}", exc)
@@ -826,11 +826,7 @@ class DelegationDispatcher:
             if self.on_progress:
                 try:
                     await self.on_progress(
-                        "",
-                        delegate_end={
-                            "delegation_id": delegation_id,
-                            "success": False,
-                        },
+                        DelegateEndEvent(delegation_id=delegation_id, success=False)
                     )
                 except Exception as exc:  # crash-barrier: never let event emission block delegation
                     logger.debug("delegate_end (failure) event emission failed: {}", exc)

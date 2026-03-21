@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import re
 import time
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from nanobot.agent.callbacks import ProgressCallback, StatusEvent, TextChunk
 from nanobot.agent.tracing import bind_trace
 
 if TYPE_CHECKING:
@@ -72,7 +73,7 @@ class StreamingLLMCaller:
         self,
         messages: list[dict],
         tools: list[dict[str, Any]] | None,
-        on_progress: Callable[..., Awaitable[None]] | None,
+        on_progress: ProgressCallback | None,
     ) -> LLMResponse:
         """Call the LLM, streaming when *on_progress* is available.
 
@@ -149,11 +150,11 @@ class StreamingLLMCaller:
             # indicator rather than polluting the message body.
             if full_clean:
                 label = full_clean.split("\n")[0][:80].strip()
-                await on_progress("", status_code="thinking", status_label=label or "Thinking…")
+                await on_progress(StatusEvent(status_code="thinking", label=label or "Thinking…"))
         else:
             # Final response — emit full text so the channel can display it.
             if full_clean:
-                await on_progress(full_clean, streaming=True)
+                await on_progress(TextChunk(content=full_clean, streaming=True))
 
         from nanobot.providers.base import LLMResponse
 
