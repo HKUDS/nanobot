@@ -55,6 +55,7 @@ jobs:
             set -euo pipefail
             NANOBOT_FORK="git+https://github.com/anjorinjnr/nanobot.git@homer-patches"
             echo "[deploy] Reinstalling nanobot fork (commit: ${{ github.sha }})"
+            [[ -d /opt/homer/.venv ]] || python3 -m venv /opt/homer/.venv
             /opt/homer/.venv/bin/pip install --force-reinstall "$NANOBOT_FORK" -q
             echo "${{ github.sha }}" | cut -c1-8 > /opt/homer/context/.nanobot_workspace/NANOBOT_FORK_COMMIT
             if [[ "${{ steps.bridge.outputs.changed }}" == "true" ]]; then
