@@ -19,7 +19,6 @@ go through ``_Mem0Adapter``.  This module owns the coordination logic only.
 from __future__ import annotations
 
 import json
-import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -54,6 +53,7 @@ from .helpers import (
     _utc_now_iso,
 )
 from .ingester import EventIngester
+from .maintenance import MemoryMaintenance
 from .mem0_adapter import _Mem0Adapter
 from .persistence import MemoryPersistence
 from .profile import ProfileManager
@@ -65,8 +65,6 @@ from .rollout import RolloutConfig
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session
-
-_COUNT_CACHE_TTL: float = 60.0  # seconds — SQLite counts change infrequently (LAN-102)
 
 
 class MemoryStore:
@@ -152,12 +150,14 @@ class MemoryStore:
             ),
         )
 
-        # _ensure_vector_health() moved to async ensure_health() — called from
-        # AgentLoop.run() to avoid blocking the event loop at instantiation (LAN-101).
-
-        # TTL caches for SQLite count queries — avoids re-opening connections on every call (LAN-102)
-        self._vector_count_cache: tuple[float, int] | None = None
-        self._history_count_cache: tuple[float, int] | None = None
+        # MemoryMaintenance: reindex, seed, health checks, backend stats.
+        self.maintenance = MemoryMaintenance(
+            mem0=self.mem0,
+            persistence=self.persistence,
+            rollout=self.rollout,
+        )
+        # Wire reindex callback so health check can trigger reindex.
+        self.maintenance._reindex_fn = lambda: self.reindex_from_structured_memory()
 
         # Cross-encoder re-ranker (Step 7)
         reranker_model = str(
@@ -326,133 +326,24 @@ class MemoryStore:
         return self.ingester._sanitize_mem0_text(text, allow_archival=allow_archival)
 
     def _mem0_get_all_rows(self, *, limit: int = 200) -> list[dict[str, Any]]:
-        if not self.mem0.enabled or not self.mem0.client:
-            return []
-        try:
-            raw = self.mem0.client.get_all(user_id=self.mem0.user_id, limit=max(1, limit))
-        except TypeError:
-            try:
-                raw = self.mem0.client.get_all(self.mem0.user_id, max(1, limit))
-            except Exception:  # crash-barrier: mem0 SDK produces varied errors
-                return []
-        except Exception:  # crash-barrier: mem0 SDK produces varied errors
-            return []
-        return self.mem0._rows(raw)
+        return self.maintenance._mem0_get_all_rows(limit=limit)
 
     def _vector_points_count(self) -> int:
-        now = time.monotonic()
-        if self._vector_count_cache is not None:
-            ts, cached = self._vector_count_cache
-            if now - ts < _COUNT_CACHE_TTL:
-                return cached
-        local_mem0_dir = self.mem0._local_mem0_dir or (self.workspace / "memory" / "mem0")
-        base = local_mem0_dir / "qdrant" / "collection"
-        if not base.exists() or not base.is_dir():
-            result = 0
-            self._vector_count_cache = (now, result)
-            return result
-        total = 0
-        for child in base.iterdir():
-            if not child.is_dir():
-                continue
-            storage = child / "storage.sqlite"
-            if not storage.exists():
-                continue
-            try:
-                conn = sqlite3.connect(storage)
-                cur = conn.cursor()
-                cur.execute("SELECT COUNT(*) FROM points")
-                total += int(cur.fetchone()[0])
-                conn.close()
-            except (sqlite3.Error, OSError):
-                continue
-        result = max(total, 0)
-        self._vector_count_cache = (now, result)
-        return result
+        return self.maintenance._vector_points_count()
 
     def _history_row_count(self) -> int:
-        now = time.monotonic()
-        if self._history_count_cache is not None:
-            ts, cached = self._history_count_cache
-            if now - ts < _COUNT_CACHE_TTL:
-                return cached
-        local_mem0_dir = self.mem0._local_mem0_dir or (self.workspace / "memory" / "mem0")
-        history_db = local_mem0_dir / "history.db"
-        if not history_db.exists():
-            self._history_count_cache = (now, 0)
-            return 0
-        try:
-            conn = sqlite3.connect(history_db)
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT COUNT(*)
-                FROM history
-                WHERE COALESCE(is_deleted, 0) = 0
-                  AND COALESCE(new_memory, '') != ''
-                """
-            )
-            count = int(cur.fetchone()[0])
-            conn.close()
-            result = max(count, 0)
-            self._history_count_cache = (now, result)
-            return result
-        except (sqlite3.Error, OSError):
-            return 0
+        return self.maintenance._history_row_count()
 
     def _backend_stats_for_eval(self) -> dict[str, Any]:
-        """Collect backend stats needed by EvalRunner.get_observability_report."""
-        return {
-            "vector_points_count": self._vector_points_count(),
-            "mem0_get_all_count": len(self._mem0_get_all_rows(limit=500)),
-            "history_rows_count": self._history_row_count(),
-            "mem0_enabled": self.mem0.enabled,
-            "mem0_mode": self.mem0.mode,
-        }
+        return self.maintenance._backend_stats_for_eval()
 
     def _event_compaction_key(self, event: dict[str, Any]) -> tuple[str, str, str, str]:
-        summary = self._norm_text(str(event.get("summary", "")))
-        event_type = str(event.get("type", "fact")).strip().lower() or "fact"
-        memory_type = str(event.get("memory_type", "episodic")).strip().lower() or "episodic"
-        topic = str(event.get("topic", "general")).strip().lower() or "general"
-        return (summary, event_type, memory_type, topic)
+        return MemoryMaintenance._event_compaction_key(event)
 
     def _compact_events_for_reindex(
         self, events: list[dict[str, Any]]
     ) -> tuple[list[dict[str, Any]], dict[str, int]]:
-        if not events:
-            return [], {"before": 0, "after": 0, "superseded_dropped": 0, "duplicates_dropped": 0}
-
-        compacted: dict[tuple[str, str, str, str], dict[str, Any]] = {}
-        superseded_dropped = 0
-        duplicates_dropped = 0
-        for event in events:
-            if not isinstance(event, dict):
-                continue
-            status = str(event.get("status", "")).strip().lower()
-            if status == "superseded":
-                superseded_dropped += 1
-                continue
-            key = self._event_compaction_key(event)
-            if not key[0]:
-                continue
-            existing = compacted.get(key)
-            if existing is None:
-                compacted[key] = event
-                continue
-            old_ts = str(existing.get("timestamp", ""))
-            new_ts = str(event.get("timestamp", ""))
-            if new_ts >= old_ts:
-                compacted[key] = event
-            duplicates_dropped += 1
-
-        out = sorted(compacted.values(), key=lambda e: str(e.get("timestamp", "")))
-        return out, {
-            "before": len(events),
-            "after": len(out),
-            "superseded_dropped": superseded_dropped,
-            "duplicates_dropped": duplicates_dropped,
-        }
+        return MemoryMaintenance._compact_events_for_reindex(events)
 
     def reindex_from_structured_memory(
         self,
@@ -461,208 +352,44 @@ class MemoryStore:
         reset_existing: bool = False,
         compact: bool = False,
     ) -> dict[str, Any]:
-        if not self.mem0.enabled:
-            result = {"ok": False, "reason": "mem0_disabled", "written": 0, "failed": 0}
-            return result
-
-        reset_result: dict[str, Any] = {
-            "requested": bool(reset_existing),
-            "ok": True,
-            "reason": "",
-            "deleted_estimate": 0,
-        }
-        if reset_existing:
-            ok, reason, deleted_estimate = self.mem0.delete_all_user_memories()
-            reset_result = {
-                "requested": True,
-                "ok": bool(ok),
-                "reason": str(reason),
-                "deleted_estimate": int(deleted_estimate),
-            }
-            if not ok:
-                result = {
-                    "ok": False,
-                    "reason": "structured_reindex_reset_failed",
-                    "written": 0,
-                    "failed": 0,
-                    "events_indexed": 0,
-                    "reset": reset_result,
-                }
-                return result
-
-        profile = self.read_profile()
-        events = self.ingester.read_events(
-            limit=max_events if isinstance(max_events, int) and max_events > 0 else None
+        return self.maintenance.reindex_from_structured_memory(
+            max_events=max_events,
+            reset_existing=reset_existing,
+            compact=compact,
+            read_profile_fn=self.read_profile,
+            read_events_fn=self.ingester.read_events,
+            ingester=self.ingester,
+            profile_keys=self.PROFILE_KEYS,
+            vector_points_count_fn=self._vector_points_count,
+            mem0_get_all_rows_fn=self._mem0_get_all_rows,
         )
-        compaction_stats = {
-            "before": len(events),
-            "after": len(events),
-            "superseded_dropped": 0,
-            "duplicates_dropped": 0,
-        }
-        if compact:
-            events, compaction_stats = self._compact_events_for_reindex(events)
-        written = 0
-        failed = 0
-        seen: set[tuple[str, str, str]] = set()
-
-        section_topic = {
-            "preferences": "user_preference",
-            "stable_facts": "knowledge",
-            "active_projects": "project",
-            "relationships": "relationship",
-            "constraints": "constraint",
-        }
-        section_event_type = {
-            "preferences": "preference",
-            "stable_facts": "fact",
-            "active_projects": "fact",
-            "relationships": "relationship",
-            "constraints": "constraint",
-        }
-
-        for section in self.PROFILE_KEYS:
-            values = profile.get(section, [])
-            if not isinstance(values, list):
-                continue
-            for value in values:
-                summary = self.ingester._sanitize_mem0_text(str(value), allow_archival=False)
-                if not summary:
-                    continue
-                metadata = self.ingester._sanitize_mem0_metadata(
-                    {
-                        "memory_type": "semantic",
-                        "topic": section_topic.get(section, "general"),
-                        "stability": "high",
-                        "source": "profile",
-                        "event_type": section_event_type.get(section, "fact"),
-                        "status": "active",
-                        "timestamp": profile.get("last_verified_at") or self._utc_now_iso(),
-                    }
-                )
-                key = (
-                    self._norm_text(summary),
-                    str(metadata.get("memory_type", "")),
-                    str(metadata.get("topic", "")),
-                )
-                if key in seen:
-                    continue
-                seen.add(key)
-                if self.mem0.add_text(summary, metadata=metadata):
-                    written += 1
-                else:
-                    failed += 1
-
-        for event in events:
-            for text, raw_metadata in self._event_mem0_write_plan(event):
-                summary = self._sanitize_mem0_text(
-                    text,
-                    allow_archival=bool(raw_metadata.get("archival")),
-                )
-                if not summary:
-                    continue
-                metadata = self._sanitize_mem0_metadata(dict(raw_metadata))
-                metadata["source"] = "events"
-                key = (
-                    self._norm_text(summary),
-                    str(metadata.get("memory_type", "")),
-                    str(metadata.get("topic", "")),
-                )
-                if key in seen:
-                    continue
-                seen.add(key)
-                if self.mem0.add_text(summary, metadata=metadata):
-                    written += 1
-                else:
-                    failed += 1
-
-        flushed = self.mem0.flush_vector_store()
-        if flushed:
-            self.mem0.reopen_client()
-
-        vector_points_after = self._vector_points_count()
-        mem0_rows_after = len(self._mem0_get_all_rows(limit=500))
-        ok = failed == 0 and (vector_points_after > 0 or mem0_rows_after > 0)
-        result = {
-            "ok": ok,
-            "reason": "structured_reindex",
-            "written": written,
-            "failed": failed,
-            "events_indexed": len(events),
-            "compacted": bool(compact),
-            "events_before_compaction": int(compaction_stats.get("before", len(events))),
-            "events_after_compaction": int(compaction_stats.get("after", len(events))),
-            "events_superseded_dropped": int(compaction_stats.get("superseded_dropped", 0)),
-            "events_duplicates_dropped": int(compaction_stats.get("duplicates_dropped", 0)),
-            "reset": reset_result,
-            "vector_points_after": vector_points_after,
-            "mem0_get_all_after": mem0_rows_after,
-            "mem0_add_mode": str(self.mem0.last_add_mode),
-            "flush_applied": flushed,
-        }
-        return result
 
     def seed_structured_corpus(self, *, profile_path: Path, events_path: Path) -> dict[str, Any]:
-        try:
-            profile_payload = json.loads(profile_path.read_text(encoding="utf-8"))
-            if not isinstance(profile_payload, dict):
-                raise ValueError("seed profile must be a JSON object")
-        except (json.JSONDecodeError, OSError, ValueError) as exc:
-            return {"ok": False, "reason": f"invalid_profile_seed:{exc}"}
-
-        seeded_profile = self.read_profile()
-        for key in self.PROFILE_KEYS:
-            incoming = profile_payload.get(key, [])
-            if isinstance(incoming, list):
-                seeded_profile[key] = [str(x).strip() for x in incoming if str(x).strip()]
-            else:
-                seeded_profile[key] = []
-        conflicts = profile_payload.get("conflicts", [])
-        seeded_profile["conflicts"] = conflicts if isinstance(conflicts, list) else []
-        seeded_profile["last_verified_at"] = self._utc_now_iso()
-        seeded_profile["updated_at"] = self._utc_now_iso()
-        seeded_profile.setdefault("meta", {key: {} for key in self.PROFILE_KEYS})
-        self.write_profile(seeded_profile)
-
-        seeded_events: list[dict[str, Any]] = []
-        try:
-            for line in events_path.read_text(encoding="utf-8").splitlines():
-                text = str(line).strip()
-                if not text:
-                    continue
-                payload = json.loads(text)
-                if not isinstance(payload, dict):
-                    continue
-                coerced = self.ingester._coerce_event(payload, source_span=[0, 0])
-                if coerced:
-                    seeded_events.append(coerced)
-        except (json.JSONDecodeError, OSError) as exc:
-            return {"ok": False, "reason": f"invalid_events_seed:{exc}"}
-
-        self.persistence.write_jsonl(self.events_file, seeded_events)
-        result = self.reindex_from_structured_memory(reset_existing=True, compact=True)
-        return {
-            "ok": bool(result.get("ok")),
-            "reason": "seeded_structured_corpus",
-            "seeded_profile_items": sum(
-                len(self._to_str_list(seeded_profile.get(k))) for k in self.PROFILE_KEYS
-            ),
-            "seeded_events": len(seeded_events),
-            "reindex": result,
-        }
+        return self.maintenance.seed_structured_corpus(
+            profile_path=profile_path,
+            events_path=events_path,
+            read_profile_fn=self.read_profile,
+            write_profile_fn=self.write_profile,
+            read_events_fn=self.ingester.read_events,
+            ingester=self.ingester,
+            profile_keys=self.PROFILE_KEYS,
+            vector_points_count_fn=self._vector_points_count,
+            mem0_get_all_rows_fn=self._mem0_get_all_rows,
+        )
 
     async def ensure_health(self) -> None:
-        """Run vector health check asynchronously (non-blocking).
-
-        Must be awaited from an async context after instantiation.
-        Called by ``AgentLoop.run()`` at startup instead of running
-        synchronously in ``__init__`` (LAN-101).
-        """
+        """Run vector health check asynchronously (non-blocking)."""
         import asyncio
 
         await asyncio.to_thread(self._ensure_vector_health)
 
     def _ensure_vector_health(self) -> None:
+        """Backward-compat wrapper that calls store-level aliases.
+
+        Cannot simply delegate to ``maintenance._ensure_vector_health``
+        because existing callers/tests patch ``_history_row_count``,
+        ``_vector_points_count``, etc. on the store instance.
+        """
         if not bool(self.rollout.get("memory_vector_health_enabled", True)):
             return
         if not self.mem0.enabled:
@@ -670,7 +397,6 @@ class MemoryStore:
         vector_rows = len(self._mem0_get_all_rows(limit=25))
         vector_points = self._vector_points_count()
         history_rows = self._history_row_count()
-        # Explicit probe requested in rollout plan.
         _probe_result = self.mem0.search("__health__", top_k=1, allow_history_fallback=False)
         degraded = history_rows > 0 and vector_rows == 0 and vector_points == 0
         if not degraded:
