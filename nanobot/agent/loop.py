@@ -796,6 +796,8 @@ class AgentLoop:
         max_iterations = agent.config.max_iterations
         final_content = None
 
+        await self._emit("agent_status", agent_name, status="processing")
+
         while iteration < max_iterations:
             iteration += 1
             tool_defs = agent.tools.get_definitions()
@@ -804,6 +806,11 @@ class AgentLoop:
             )
 
             if response.has_tool_calls:
+                # Emit thinking/progress
+                thought = self._strip_think(response.content)
+                if thought:
+                    await self._emit("progress", agent_name, content=thought)
+
                 tool_call_dicts = [tc.to_openai_tool_call() for tc in response.tool_calls]
                 messages = agent.context.add_assistant_message(
                     messages, response.content, tool_call_dicts,
@@ -813,7 +820,19 @@ class AgentLoop:
                 for tool_call in response.tool_calls:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.debug("[{}] Tool: {}({})", agent_name, tool_call.name, args_str[:200])
+
+                    await self._emit(
+                        "tool_call", agent_name,
+                        tool=tool_call.name, args=args_str,
+                    )
+
                     result = await agent.tools.execute(tool_call.name, tool_call.arguments)
+
+                    await self._emit(
+                        "tool_result", agent_name,
+                        tool=tool_call.name, preview=result or "",
+                    )
+
                     messages = agent.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result,
                     )
@@ -831,6 +850,8 @@ class AgentLoop:
 
         if final_content is None:
             final_content = f"Agent '{agent_name}' reached max iterations ({max_iterations})."
+
+        await self._emit("agent_status", agent_name, status="idle")
 
         # Save turn to the agent's session
         self._save_turn(session, messages, 1 + len(history))
