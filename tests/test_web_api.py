@@ -389,3 +389,111 @@ class TestStripAttachments:
         saved = list(tmp_path.iterdir())
         assert len(saved) == 1
         assert saved[0].name == "passwd"
+
+
+class TestRateLimitMiddleware:
+    """Tests for the per-IP sliding-window rate limiter."""
+
+    def test_requests_under_limit_succeed(self) -> None:
+        """Requests within the per-minute limit are allowed through."""
+        from starlette.applications import Starlette
+        from starlette.responses import PlainTextResponse
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+
+        from nanobot.web.ratelimit import RateLimitMiddleware
+
+        async def homepage(request):
+            return PlainTextResponse("ok")
+
+        app = Starlette(routes=[Route("/api/chat", homepage, methods=["POST"])])
+        app.add_middleware(RateLimitMiddleware, requests_per_minute=5)
+
+        client = TestClient(app, raise_server_exceptions=False)
+        for _ in range(5):
+            resp = client.post("/api/chat")
+            assert resp.status_code == 200
+
+    def test_requests_over_limit_get_429(self) -> None:
+        """Requests exceeding the per-minute limit receive 429."""
+        from starlette.applications import Starlette
+        from starlette.responses import PlainTextResponse
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+
+        from nanobot.web.ratelimit import RateLimitMiddleware
+
+        async def homepage(request):
+            return PlainTextResponse("ok")
+
+        app = Starlette(routes=[Route("/api/chat", homepage, methods=["POST"])])
+        app.add_middleware(RateLimitMiddleware, requests_per_minute=3)
+
+        client = TestClient(app, raise_server_exceptions=False)
+        responses = [client.post("/api/chat") for _ in range(5)]
+        statuses = [r.status_code for r in responses]
+        assert statuses[:3] == [200, 200, 200], "First 3 should succeed"
+        assert 429 in statuses[3:], "4th and 5th should be rate-limited"
+
+    def test_health_probe_exempt_from_rate_limit(self) -> None:
+        """Health probe paths are not subject to rate limiting."""
+        from starlette.applications import Starlette
+        from starlette.responses import PlainTextResponse
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+
+        from nanobot.web.ratelimit import RateLimitMiddleware
+
+        async def health(request):
+            return PlainTextResponse("ok")
+
+        app = Starlette(routes=[Route("/health", health)])
+        app.add_middleware(RateLimitMiddleware, requests_per_minute=1)
+
+        client = TestClient(app, raise_server_exceptions=False)
+        # /health is not under /api so should never be rate-limited
+        for _ in range(5):
+            resp = client.get("/health")
+            assert resp.status_code == 200
+
+    def test_rate_limit_disabled_when_zero(self) -> None:
+        """Setting requests_per_minute=0 disables rate limiting entirely."""
+        from starlette.applications import Starlette
+        from starlette.responses import PlainTextResponse
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+
+        from nanobot.web.ratelimit import RateLimitMiddleware
+
+        async def homepage(request):
+            return PlainTextResponse("ok")
+
+        app = Starlette(routes=[Route("/api/chat", homepage, methods=["POST"])])
+        app.add_middleware(RateLimitMiddleware, requests_per_minute=0)
+
+        client = TestClient(app, raise_server_exceptions=False)
+        for _ in range(10):
+            resp = client.post("/api/chat")
+            assert resp.status_code == 200
+
+    def test_rate_limit_retry_after_header(self) -> None:
+        """429 response includes a Retry-After header."""
+        from starlette.applications import Starlette
+        from starlette.responses import PlainTextResponse
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+
+        from nanobot.web.ratelimit import RateLimitMiddleware
+
+        async def homepage(request):
+            return PlainTextResponse("ok")
+
+        app = Starlette(routes=[Route("/api/chat", homepage, methods=["POST"])])
+        app.add_middleware(RateLimitMiddleware, requests_per_minute=1)
+
+        client = TestClient(app, raise_server_exceptions=False)
+        client.post("/api/chat")  # consume the quota
+        resp = client.post("/api/chat")  # should be rate-limited
+        assert resp.status_code == 429
+        assert "Retry-After" in resp.headers
+        assert int(resp.headers["Retry-After"]) > 0

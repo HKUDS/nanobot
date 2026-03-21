@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.errors import ToolExecutionError
@@ -32,51 +32,43 @@ class MissionStartTool(Tool):
         self._origin_channel = channel
         self._origin_chat_id = chat_id
 
-    @property
-    def name(self) -> str:
-        return "mission_start"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Launch a background mission for independent tasks that can run asynchronously. "
-            "Use when: (1) the user explicitly asks you to 'do this in the background' or "
-            "'work on this while I do X'; (2) you identify a large investigation, code audit, "
-            "or report that would benefit from focused specialist execution without blocking the "
-            "conversation. The user will receive the result directly when the mission completes. "
-            "Do NOT use for quick questions or tasks that need immediate answers."
-        )
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "task": {
-                    "type": "string",
-                    "description": (
-                        "A clear and specific description of the task. Include enough "
-                        "context for an independent agent to complete it without follow-up. "
-                        "Be precise about deliverables and scope."
-                    ),
-                },
-                "label": {
-                    "type": "string",
-                    "description": (
-                        "Short display label for the mission (e.g. 'security audit', "
-                        "'dependency report'). Defaults to a truncation of the task."
-                    ),
-                },
-                "context": {
-                    "type": "string",
-                    "description": (
-                        "Optional additional context the mission agent should know — "
-                        "conversation highlights, user preferences, or constraints."
-                    ),
-                },
+    name = "mission_start"
+    description = (
+        "Launch a background mission for independent tasks that can run asynchronously. "
+        "Use when: (1) the user explicitly asks you to 'do this in the background' or "
+        "'work on this while I do X'; (2) you identify a large investigation, code audit, "
+        "or report that would benefit from focused specialist execution without blocking the "
+        "conversation. The user will receive the result directly when the mission completes. "
+        "Do NOT use for quick questions or tasks that need immediate answers."
+    )
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "task": {
+                "type": "string",
+                "description": (
+                    "A clear and specific description of the task. Include enough "
+                    "context for an independent agent to complete it without follow-up. "
+                    "Be precise about deliverables and scope."
+                ),
             },
-            "required": ["task"],
-        }
+            "label": {
+                "type": "string",
+                "description": (
+                    "Short display label for the mission (e.g. 'security audit', "
+                    "'dependency report'). Defaults to a truncation of the task."
+                ),
+            },
+            "context": {
+                "type": "string",
+                "description": (
+                    "Optional additional context the mission agent should know — "
+                    "conversation highlights, user preferences, or constraints."
+                ),
+            },
+        },
+        "required": ["task"],
+    }
 
     async def execute(  # type: ignore[override]
         self,
@@ -109,30 +101,22 @@ class MissionStatusTool(Tool):
         self._manager = manager
         self.readonly = True
 
-    @property
-    def name(self) -> str:
-        return "mission_status"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Check the current status of a background mission. "
-            "Returns the mission's status, role, grounding info, tools used, "
-            "and result (if complete)."
-        )
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "mission_id": {
-                    "type": "string",
-                    "description": "The 8-character hex mission ID returned by mission_start.",
-                },
+    name = "mission_status"
+    description = (
+        "Check the current status of a background mission. "
+        "Returns the mission's status, role, grounding info, tools used, "
+        "and result (if complete)."
+    )
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "mission_id": {
+                "type": "string",
+                "description": "The 8-character hex mission ID returned by mission_start.",
             },
-            "required": ["mission_id"],
-        }
+        },
+        "required": ["mission_id"],
+    }
 
     async def execute(self, mission_id: str, **kwargs: Any) -> ToolResult:  # type: ignore[override]
         """Return mission details as JSON."""
@@ -168,29 +152,21 @@ class MissionListTool(Tool):
         self._manager = manager
         self.readonly = True
 
-    @property
-    def name(self) -> str:
-        return "mission_list"
-
-    @property
-    def description(self) -> str:
-        return (
-            "List background missions. Returns all missions by default, "
-            "or filter by status (active, completed, failed, cancelled)."
-        )
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "status_filter": {
-                    "type": "string",
-                    "enum": ["all", "active", "completed", "failed", "cancelled"],
-                    "description": "Filter missions by status. Default: all.",
-                },
+    name = "mission_list"
+    description = (
+        "List background missions. Returns all missions by default, "
+        "or filter by status (active, completed, failed, cancelled)."
+    )
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "status_filter": {
+                "type": "string",
+                "enum": ["all", "active", "completed", "failed", "cancelled"],
+                "description": "Filter missions by status. Default: all.",
             },
-        }
+        },
+    }
 
     async def execute(self, status_filter: str = "all", **kwargs: Any) -> ToolResult:  # type: ignore[override]
         """Return a formatted list of missions."""
@@ -229,29 +205,21 @@ class MissionCancelTool(Tool):
         self._manager = manager
         self.readonly = False
 
-    @property
-    def name(self) -> str:
-        return "mission_cancel"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Cancel a running background mission. The mission will stop and "
-            "the user will be notified. Cannot cancel already-completed missions."
-        )
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "mission_id": {
-                    "type": "string",
-                    "description": "The 8-character hex mission ID to cancel.",
-                },
+    name = "mission_cancel"
+    description = (
+        "Cancel a running background mission. The mission will stop and "
+        "the user will be notified. Cannot cancel already-completed missions."
+    )
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "mission_id": {
+                "type": "string",
+                "description": "The 8-character hex mission ID to cancel.",
             },
-            "required": ["mission_id"],
-        }
+        },
+        "required": ["mission_id"],
+    }
 
     async def execute(self, mission_id: str, **kwargs: Any) -> ToolResult:  # type: ignore[override]
         """Send cancellation signal to the mission."""

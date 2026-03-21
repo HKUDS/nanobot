@@ -296,7 +296,14 @@ async def test_extractor_correction_helpers_and_provider_failure() -> None:
     facts = extractor.extract_explicit_fact_corrections(
         "Actually project status is green, not red."
     )
-    assert prefs and facts
+    assert len(prefs) >= 1, "Should extract at least one preference correction"
+    assert any("python" in str(p).lower() or "javascript" in str(p).lower() for p in prefs), (
+        "Preference correction should reference Python or JavaScript"
+    )
+    assert len(facts) >= 1, "Should extract at least one fact correction"
+    assert any("green" in str(f).lower() or "status" in str(f).lower() for f in facts), (
+        "Fact correction should reference project status change"
+    )
 
     class _FailProvider:
         async def chat(self, **_kwargs):

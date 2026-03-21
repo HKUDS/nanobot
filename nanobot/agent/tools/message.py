@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, ClassVar
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.bus.events import DeliveryResult, OutboundMessage
@@ -53,39 +53,31 @@ class MessageTool(Tool):
         """Reset per-turn send tracking."""
         self._sent_in_turn = False
 
-    @property
-    def name(self) -> str:
-        return "message"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Send a message to a destination channel/chat. "
-            "For email delivery, set channel='email' and chat_id to the recipient email address."
-        )
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "content": {"type": "string", "description": "The message content to send"},
-                "channel": {
-                    "type": "string",
-                    "description": "Optional: target channel (telegram, discord, email, etc.)",
-                },
-                "chat_id": {
-                    "type": "string",
-                    "description": "Optional: target chat/user ID. For email, this would be the recipient's email address.",
-                },
-                "media": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional: list of file paths to attach (images, audio, documents)",
-                },
+    name = "message"
+    description = (
+        "Send a message to a destination channel/chat. "
+        "For email delivery, set channel='email' and chat_id to the recipient email address."
+    )
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "content": {"type": "string", "description": "The message content to send"},
+            "channel": {
+                "type": "string",
+                "description": "Optional: target channel (telegram, discord, email, etc.)",
             },
-            "required": ["content"],
-        }
+            "chat_id": {
+                "type": "string",
+                "description": "Optional: target chat/user ID. For email, this would be the recipient's email address.",
+            },
+            "media": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional: list of file paths to attach (images, audio, documents)",
+            },
+        },
+        "required": ["content"],
+    }
 
     async def execute(  # type: ignore[override]
         self,

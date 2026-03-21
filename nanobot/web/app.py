@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 
+from nanobot.web.ratelimit import RateLimitMiddleware
 from nanobot.web.routes import router
 
 if TYPE_CHECKING:
@@ -48,6 +49,7 @@ def create_app(
     uploads_dir: Path | None = None,
     owns_lifecycle: bool = False,
     api_key: str = "",
+    rate_limit_per_minute: int = 60,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -86,6 +88,13 @@ def create_app(
     _uploads = uploads_dir or Path.home() / ".nanobot" / "workspace" / "uploads"
     _uploads.mkdir(parents=True, exist_ok=True)
     app.state.uploads_dir = _uploads
+
+    # Rate limiting — applied to /api/* routes only; health probes are exempt
+    if rate_limit_per_minute > 0:
+        app.add_middleware(
+            RateLimitMiddleware,
+            requests_per_minute=rate_limit_per_minute,
+        )
 
     # CORS for local development (React dev server on :5173)
     app.add_middleware(

@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import re
+import unicodedata
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, ClassVar
 
 from nanobot.agent.failure import _CycleError
 from nanobot.agent.tools.base import Tool, ToolResult
@@ -35,6 +36,24 @@ class DelegationResult:
 # Type alias for the dispatch callback wired by AgentLoop
 DispatchFn = Callable[[str, str, str | None], Awaitable[DelegationResult]]
 
+_MAX_TASK_LENGTH = 4000
+
+
+def _sanitize_task(task: str) -> tuple[bool, str]:
+    """Validate and sanitize delegation task content.
+
+    Returns ``(ok, result)`` where *result* is the sanitized task on success,
+    or an error message when ``ok`` is ``False``.
+    """
+    if not task or not task.strip():
+        return False, "task must not be empty"
+    # Strip C0/C1 control characters but preserve newlines, carriage returns, tabs
+    cleaned = "".join(ch for ch in task if unicodedata.category(ch)[0] != "C" or ch in "\n\r\t")
+    if len(cleaned) > _MAX_TASK_LENGTH:
+        cleaned = cleaned[:_MAX_TASK_LENGTH]
+    return True, cleaned
+
+
 # Keywords that signal an investigation-type task where tool use is expected
 _INVESTIGATION_RE = re.compile(
     r"\b(search|find|look\s*up|check|verify|investigate|retrieve|fetch|query|inspect)\b",
@@ -55,6 +74,33 @@ class DelegateTool(Tool):
         self._dispatch: DispatchFn | None = None
         self._available_roles_fn: AvailableRolesFn | None = None
 
+    name = "delegate"
+    description = (
+        "Delegate a sub-task to a specialist agent. The coordinator routes "
+        "the task to the best role and the result is written to the scratchpad."
+    )
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "target_role": {
+                "type": "string",
+                "description": (
+                    "The specialist role to delegate to (e.g. 'research', 'code'). "
+                    "If unsure, leave empty and the coordinator will classify."
+                ),
+            },
+            "task": {
+                "type": "string",
+                "description": "Clear description of the sub-task to perform.",
+            },
+            "context": {
+                "type": "string",
+                "description": "Optional extra context or constraints for the sub-task.",
+            },
+        },
+        "required": ["task"],
+    }
+
     def set_dispatch(self, fn: DispatchFn) -> None:
         """Wire the dispatch callback (called by AgentLoop during setup)."""
         self._dispatch = fn
@@ -68,41 +114,6 @@ class DelegateTool(Tool):
             return False, "Delegation not configured"
         return True, None
 
-    @property
-    def name(self) -> str:
-        return "delegate"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Delegate a sub-task to a specialist agent. The coordinator routes "
-            "the task to the best role and the result is written to the scratchpad."
-        )
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "target_role": {
-                    "type": "string",
-                    "description": (
-                        "The specialist role to delegate to (e.g. 'research', 'code'). "
-                        "If unsure, leave empty and the coordinator will classify."
-                    ),
-                },
-                "task": {
-                    "type": "string",
-                    "description": "Clear description of the sub-task to perform.",
-                },
-                "context": {
-                    "type": "string",
-                    "description": "Optional extra context or constraints for the sub-task.",
-                },
-            },
-            "required": ["task"],
-        }
-
     async def execute(  # type: ignore[override]
         self,
         *,
@@ -113,6 +124,10 @@ class DelegateTool(Tool):
     ) -> ToolResult:
         if not self._dispatch:
             return ToolResult.fail("Delegation not available", error_type="config")
+
+        ok, sanitized = _sanitize_task(task)
+        if not ok:
+            return ToolResult.fail(sanitized, error_type="validation")
 
         # Validate target_role against known roles
         target_role = target_role.strip()
@@ -126,8 +141,8 @@ class DelegateTool(Tool):
                 )
 
         try:
-            dr = await self._dispatch(target_role, task, context or None)
-            return self._format_result(dr, task)
+            dr = await self._dispatch(target_role, sanitized, context or None)
+            return self._format_result(dr, sanitized)
         except _CycleError as exc:
             return ToolResult.fail(str(exc), error_type="cycle")
         except Exception as exc:  # crash-barrier: delegation dispatch callback
@@ -158,6 +173,41 @@ class DelegateParallelTool(Tool):
         self._dispatch: DispatchFn | None = None
         self._available_roles_fn: AvailableRolesFn | None = None
 
+    name = "delegate_parallel"
+    description = (
+        "Delegate multiple sub-tasks concurrently to specialist agents. "
+        "Each sub-task is routed independently and results are written to the scratchpad."
+    )
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "subtasks": {
+                "type": "array",
+                "description": "List of sub-tasks (max 5).",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "target_role": {
+                            "type": "string",
+                            "description": "Specialist role (optional).",
+                        },
+                        "task": {
+                            "type": "string",
+                            "description": "Sub-task description.",
+                        },
+                        "context": {
+                            "type": "string",
+                            "description": "Optional extra context or constraints.",
+                        },
+                    },
+                    "required": ["task"],
+                },
+                "maxItems": 5,
+            },
+        },
+        "required": ["subtasks"],
+    }
+
     def set_dispatch(self, fn: DispatchFn) -> None:
         self._dispatch = fn
 
@@ -169,49 +219,6 @@ class DelegateParallelTool(Tool):
         if not self._dispatch:
             return False, "Delegation not configured"
         return True, None
-
-    @property
-    def name(self) -> str:
-        return "delegate_parallel"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Delegate multiple sub-tasks concurrently to specialist agents. "
-            "Each sub-task is routed independently and results are written to the scratchpad."
-        )
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "subtasks": {
-                    "type": "array",
-                    "description": "List of sub-tasks (max 5).",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "target_role": {
-                                "type": "string",
-                                "description": "Specialist role (optional).",
-                            },
-                            "task": {
-                                "type": "string",
-                                "description": "Sub-task description.",
-                            },
-                            "context": {
-                                "type": "string",
-                                "description": "Optional extra context or constraints.",
-                            },
-                        },
-                        "required": ["task"],
-                    },
-                    "maxItems": 5,
-                },
-            },
-            "required": ["subtasks"],
-        }
 
     async def execute(self, *, subtasks: list[dict[str, str]], **_: Any) -> ToolResult:  # type: ignore[override]
         if not self._dispatch:
@@ -239,8 +246,11 @@ class DelegateParallelTool(Tool):
         async def _run_one(st: dict[str, str]) -> DelegationResult:
             role = st.get("target_role", "").strip()
             task = st.get("task", "")
+            ok, sanitized = _sanitize_task(task)
+            if not ok:
+                raise ValueError(f"Invalid task: {sanitized}")
             ctx = st.get("context") or None
-            return await self._dispatch(role, task, ctx)  # type: ignore[misc]
+            return await self._dispatch(role, sanitized, ctx)  # type: ignore[misc]
 
         results = await asyncio.gather(
             *[_run_one(st) for st in subtasks],

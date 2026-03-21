@@ -73,17 +73,24 @@ class Scratchpad:
                 self._flush(full_rewrite=False)
         return entry_id
 
-    def read(self, entry_id: str | None = None) -> str:
-        """Read a specific entry by ID, or all entries if *entry_id* is ``None``."""
+    # Intentionally lock-free: reads operate on the in-memory _entries list which is only
+    # mutated under _lock. List iteration is safe for concurrent reads; callers that need
+    # a consistent snapshot should call list_entries() instead.
+    def read(self, entry_id: str | None = None) -> str | None:
+        """Read a specific entry by ID, or all entries if *entry_id* is ``None``.
+
+        Returns ``None`` if the entry is not found (when *entry_id* is given) or if the
+        scratchpad is empty (when *entry_id* is ``None``).
+        """
         self._ensure_loaded()
         if entry_id:
             for e in self._entries:
                 if e["id"] == entry_id:
                     tag = self._grounded_tag(e)
                     return f"[{e['id']}]{tag} ({e['role']}) {e['label']}\n{e['content']}"
-            return f"Entry {entry_id} not found."
+            return None
         if not self._entries:
-            return "Scratchpad is empty."
+            return None
         parts = []
         for e in self._entries:
             tag = self._grounded_tag(e)

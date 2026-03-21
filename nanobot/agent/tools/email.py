@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, timedelta
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar
 
 from nanobot.agent.tools.base import Tool, ToolResult
 
@@ -28,53 +28,45 @@ class CheckEmailTool(Tool):
         self._fetch = fetch_callback
         self._fetch_unread = fetch_unread_callback
 
+    name = "check_email"
+    description = (
+        "Check and retrieve emails from the configured mailbox. "
+        "Use period='unread' for new/unread messages, or specify a date "
+        "range like 'today', 'yesterday', 'last_3_days', or explicit "
+        "'start_date'/'end_date' (YYYY-MM-DD)."
+    )
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "period": {
+                "type": "string",
+                "description": (
+                    "Shortcut period: 'unread', 'today', 'yesterday', "
+                    "'last_3_days', 'last_7_days'. Default: 'unread'."
+                ),
+            },
+            "start_date": {
+                "type": "string",
+                "description": "Start date (YYYY-MM-DD). Overrides period.",
+            },
+            "end_date": {
+                "type": "string",
+                "description": "End date (YYYY-MM-DD). Defaults to today+1.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of emails to return. Default: 20.",
+            },
+        },
+        "required": [],
+    }
+
+    # ------------------------------------------------------------------
+
     def check_available(self) -> tuple[bool, str | None]:
         if not self._fetch and not self._fetch_unread:
             return False, "Email channel not configured"
         return True, None
-
-    @property
-    def name(self) -> str:
-        return "check_email"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Check and retrieve emails from the configured mailbox. "
-            "Use period='unread' for new/unread messages, or specify a date "
-            "range like 'today', 'yesterday', 'last_3_days', or explicit "
-            "'start_date'/'end_date' (YYYY-MM-DD)."
-        )
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "period": {
-                    "type": "string",
-                    "description": (
-                        "Shortcut period: 'unread', 'today', 'yesterday', "
-                        "'last_3_days', 'last_7_days'. Default: 'unread'."
-                    ),
-                },
-                "start_date": {
-                    "type": "string",
-                    "description": "Start date (YYYY-MM-DD). Overrides period.",
-                },
-                "end_date": {
-                    "type": "string",
-                    "description": "End date (YYYY-MM-DD). Defaults to today+1.",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of emails to return. Default: 20.",
-                },
-            },
-            "required": [],
-        }
-
-    # ------------------------------------------------------------------
 
     async def execute(  # type: ignore[override]
         self,

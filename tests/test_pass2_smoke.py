@@ -379,14 +379,17 @@ class TestPhaseDSmoke:
 
         # Read individual entries
         r1 = pad.read(id1)
+        assert r1 is not None, f"Expected entry {id1} to exist in scratchpad"
         assert "✓" in r1
         assert "Retrieved from live API" in r1
 
         r2 = pad.read(id2)
+        assert r2 is not None, f"Expected entry {id2} to exist in scratchpad"
         assert "⚠ungrounded" in r2
 
         # Read all — both tags visible
         all_output = pad.read()
+        assert all_output is not None, "Scratchpad should not be empty after two writes"
         assert "✓" in all_output
         assert "⚠ungrounded" in all_output
 

@@ -7,7 +7,7 @@ import io
 import json
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.filesystem import _resolve_path
@@ -59,48 +59,38 @@ class ReadSpreadsheetTool(Tool):
         self._max_rows = max_rows
         self._cache: ToolResultCache | None = cache
 
-    @property
-    def name(self) -> str:
-        return "read_spreadsheet"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Read an Excel (.xlsx/.xls/.xlsm/.xlsb) workbook or CSV file and return "
-            "sheet names, headers, and row data as JSON. Use this instead of exec for "
-            "spreadsheet analysis. For large datasets, use describe_data or query_data "
-            "with the returned cache_key for efficient analysis."
-        )
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Path to the file (.xlsx, .xls, .xlsm, .xlsb, or .csv)",
-                },
-                "sheet": {
-                    "type": "string",
-                    "description": ("Sheet name to read. If omitted, reads all sheets."),
-                },
-                "max_rows": {
-                    "type": "integer",
-                    "description": "Maximum rows to return per sheet (default 200)",
-                    "minimum": 1,
-                    "maximum": 5000,
-                },
-                "columns": {
-                    "type": "array",
-                    "description": (
-                        "Column names to include. If omitted, all columns are returned."
-                    ),
-                    "items": {"type": "string"},
-                },
+    name = "read_spreadsheet"
+    description = (
+        "Read an Excel (.xlsx/.xls/.xlsm/.xlsb) workbook or CSV file and return "
+        "sheet names, headers, and row data as JSON. Use this instead of exec for "
+        "spreadsheet analysis. For large datasets, use describe_data or query_data "
+        "with the returned cache_key for efficient analysis."
+    )
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Path to the file (.xlsx, .xls, .xlsm, .xlsb, or .csv)",
             },
-            "required": ["path"],
-        }
+            "sheet": {
+                "type": "string",
+                "description": ("Sheet name to read. If omitted, reads all sheets."),
+            },
+            "max_rows": {
+                "type": "integer",
+                "description": "Maximum rows to return per sheet (default 200)",
+                "minimum": 1,
+                "maximum": 5000,
+            },
+            "columns": {
+                "type": "array",
+                "description": ("Column names to include. If omitted, all columns are returned."),
+                "items": {"type": "string"},
+            },
+        },
+        "required": ["path"],
+    }
 
     async def execute(  # type: ignore[override]
         self,
@@ -708,39 +698,31 @@ class QueryDataTool(Tool):
     def __init__(self, cache: ToolResultCache) -> None:
         self._cache = cache
 
-    @property
-    def name(self) -> str:
-        return "query_data"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Run a SQL SELECT query over previously loaded spreadsheet data. "
-            "The data is available as a table named 'data'. "
-            "Use the cache_key from a prior read_spreadsheet call. "
-            "Example: SELECT department, SUM(amount) FROM data GROUP BY department"
-        )
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "cache_key": {
-                    "type": "string",
-                    "description": "The cache key from a prior read_spreadsheet call.",
-                },
-                "query": {
-                    "type": "string",
-                    "description": "SQL SELECT query. The table is named 'data'.",
-                },
-                "sheet": {
-                    "type": "string",
-                    "description": "Sheet name to query. If omitted, queries the first sheet.",
-                },
+    name = "query_data"
+    description = (
+        "Run a SQL SELECT query over previously loaded spreadsheet data. "
+        "The data is available as a table named 'data'. "
+        "Use the cache_key from a prior read_spreadsheet call. "
+        "Example: SELECT department, SUM(amount) FROM data GROUP BY department"
+    )
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "cache_key": {
+                "type": "string",
+                "description": "The cache key from a prior read_spreadsheet call.",
             },
-            "required": ["cache_key", "query"],
-        }
+            "query": {
+                "type": "string",
+                "description": "SQL SELECT query. The table is named 'data'.",
+            },
+            "sheet": {
+                "type": "string",
+                "description": "Sheet name to query. If omitted, queries the first sheet.",
+            },
+        },
+        "required": ["cache_key", "query"],
+    }
 
     async def execute(  # type: ignore[override]
         self,
@@ -825,35 +807,27 @@ class DescribeDataTool(Tool):
     def __init__(self, cache: ToolResultCache) -> None:
         self._cache = cache
 
-    @property
-    def name(self) -> str:
-        return "describe_data"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Get schema, statistics, and sample rows from previously loaded "
-            "spreadsheet data. Returns column names, types, row count, null counts, "
-            "unique counts, min/max for numerics, and sample rows. "
-            "Use this before writing SQL queries with query_data."
-        )
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "cache_key": {
-                    "type": "string",
-                    "description": "The cache key from a prior read_spreadsheet call.",
-                },
-                "sheet": {
-                    "type": "string",
-                    "description": "Sheet name. If omitted, describes the first sheet.",
-                },
+    name = "describe_data"
+    description = (
+        "Get schema, statistics, and sample rows from previously loaded "
+        "spreadsheet data. Returns column names, types, row count, null counts, "
+        "unique counts, min/max for numerics, and sample rows. "
+        "Use this before writing SQL queries with query_data."
+    )
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "cache_key": {
+                "type": "string",
+                "description": "The cache key from a prior read_spreadsheet call.",
             },
-            "required": ["cache_key"],
-        }
+            "sheet": {
+                "type": "string",
+                "description": "Sheet name. If omitted, describes the first sheet.",
+            },
+        },
+        "required": ["cache_key"],
+    }
 
     async def execute(  # type: ignore[override]
         self,
@@ -936,44 +910,36 @@ class ExcelGetRowsTool(Tool):
     def __init__(self, cache: ToolResultCache) -> None:
         self._cache = cache
 
-    @property
-    def name(self) -> str:
-        return "excel_get_rows"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Retrieve a range of rows from a previously cached read_spreadsheet result. "
-            "Use the cache_key from the read_spreadsheet summary. "
-            "Output is size-limited per call — use start_row/end_row to page through large data."
-        )
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "cache_key": {
-                    "type": "string",
-                    "description": "The cache key from a prior read_spreadsheet call.",
-                },
-                "sheet": {
-                    "type": "string",
-                    "description": "Sheet name. If omitted, returns rows from the first sheet.",
-                },
-                "start_row": {
-                    "type": "integer",
-                    "description": "Start row index (0-based). Default 0.",
-                    "minimum": 0,
-                },
-                "end_row": {
-                    "type": "integer",
-                    "description": "End row index (exclusive). Default 25.",
-                    "minimum": 1,
-                },
+    name = "excel_get_rows"
+    description = (
+        "Retrieve a range of rows from a previously cached read_spreadsheet result. "
+        "Use the cache_key from the read_spreadsheet summary. "
+        "Output is size-limited per call — use start_row/end_row to page through large data."
+    )
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "cache_key": {
+                "type": "string",
+                "description": "The cache key from a prior read_spreadsheet call.",
             },
-            "required": ["cache_key"],
-        }
+            "sheet": {
+                "type": "string",
+                "description": "Sheet name. If omitted, returns rows from the first sheet.",
+            },
+            "start_row": {
+                "type": "integer",
+                "description": "Start row index (0-based). Default 0.",
+                "minimum": 0,
+            },
+            "end_row": {
+                "type": "integer",
+                "description": "End row index (exclusive). Default 25.",
+                "minimum": 1,
+            },
+        },
+        "required": ["cache_key"],
+    }
 
     async def execute(  # type: ignore[override]
         self,
@@ -1038,41 +1004,33 @@ class ExcelFindTool(Tool):
     def __init__(self, cache: ToolResultCache) -> None:
         self._cache = cache
 
-    @property
-    def name(self) -> str:
-        return "excel_find"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Search a cached read_spreadsheet result for rows matching a text query. "
-            "Searches all columns or a specific column."
-        )
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "cache_key": {
-                    "type": "string",
-                    "description": "The cache key from a prior read_spreadsheet call.",
-                },
-                "query": {
-                    "type": "string",
-                    "description": "Text to search for (case-insensitive substring match).",
-                },
-                "column": {
-                    "type": "string",
-                    "description": "Column name to limit search to. If omitted, searches all.",
-                },
-                "sheet": {
-                    "type": "string",
-                    "description": "Sheet name. If omitted, searches the first sheet.",
-                },
+    name = "excel_find"
+    description = (
+        "Search a cached read_spreadsheet result for rows matching a text query. "
+        "Searches all columns or a specific column."
+    )
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "cache_key": {
+                "type": "string",
+                "description": "The cache key from a prior read_spreadsheet call.",
             },
-            "required": ["cache_key", "query"],
-        }
+            "query": {
+                "type": "string",
+                "description": "Text to search for (case-insensitive substring match).",
+            },
+            "column": {
+                "type": "string",
+                "description": "Column name to limit search to. If omitted, searches all.",
+            },
+            "sheet": {
+                "type": "string",
+                "description": "Sheet name. If omitted, searches the first sheet.",
+            },
+        },
+        "required": ["cache_key", "query"],
+    }
 
     async def execute(  # type: ignore[override]
         self,

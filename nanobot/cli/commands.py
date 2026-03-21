@@ -568,6 +568,7 @@ def gateway(
             web_channel,
             static_dir=frontend_dist if frontend_dist.is_dir() else None,
             api_key=web_cfg.api_key,
+            rate_limit_per_minute=web_cfg.rate_limit_per_minute,
         )
         if frontend_dist.is_dir():
             console.print(f"[green]✓[/green] Web UI: http://{web_cfg.host}:{web_cfg.port}")

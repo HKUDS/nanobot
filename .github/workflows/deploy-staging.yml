@@ -64,3 +64,13 @@ jobs:
         run: |
           echo "::error::Staging deployment failed. Check container logs:"
           echo "  docker compose -p nanobot-staging -f deploy/staging/docker-compose.yml logs --tail 50"
+
+  notify-skipped:
+    name: Notify skipped deploy
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_dispatch' && github.event.workflow_run.conclusion != 'success' }}
+    steps:
+      - name: Annotate skipped deploy
+        run: |
+          conclusion="${{ github.event.workflow_run.conclusion }}"
+          echo "::notice title=Staging Deploy Skipped::Staging deploy was not triggered because the upstream build concluded with: ${conclusion:-unknown}. Staging may be out of date."

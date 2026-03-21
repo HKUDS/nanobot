@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.cron.service import CronService
@@ -11,6 +11,38 @@ from nanobot.cron.types import CronSchedule
 
 class CronTool(Tool):
     """Tool to schedule reminders and recurring tasks."""
+
+    name = "cron"
+    description = "Schedule reminders and recurring tasks. Actions: add, list, remove."
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["add", "list", "remove"],
+                "description": "Action to perform",
+            },
+            "message": {"type": "string", "description": "Reminder message (for add)"},
+            "every_seconds": {
+                "type": "integer",
+                "description": "Interval in seconds (for recurring tasks)",
+            },
+            "cron_expr": {
+                "type": "string",
+                "description": "Cron expression like '0 9 * * *' (for scheduled tasks)",
+            },
+            "tz": {
+                "type": "string",
+                "description": "IANA timezone for cron expressions (e.g. 'America/Vancouver')",
+            },
+            "at": {
+                "type": "string",
+                "description": "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00')",
+            },
+            "job_id": {"type": "string", "description": "Job ID (for remove)"},
+        },
+        "required": ["action"],
+    }
 
     def __init__(self, cron_service: CronService):
         self._cron = cron_service
@@ -21,46 +53,6 @@ class CronTool(Tool):
         """Set the current session context for delivery."""
         self._channel = channel
         self._chat_id = chat_id
-
-    @property
-    def name(self) -> str:
-        return "cron"
-
-    @property
-    def description(self) -> str:
-        return "Schedule reminders and recurring tasks. Actions: add, list, remove."
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "action": {
-                    "type": "string",
-                    "enum": ["add", "list", "remove"],
-                    "description": "Action to perform",
-                },
-                "message": {"type": "string", "description": "Reminder message (for add)"},
-                "every_seconds": {
-                    "type": "integer",
-                    "description": "Interval in seconds (for recurring tasks)",
-                },
-                "cron_expr": {
-                    "type": "string",
-                    "description": "Cron expression like '0 9 * * *' (for scheduled tasks)",
-                },
-                "tz": {
-                    "type": "string",
-                    "description": "IANA timezone for cron expressions (e.g. 'America/Vancouver')",
-                },
-                "at": {
-                    "type": "string",
-                    "description": "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00')",
-                },
-                "job_id": {"type": "string", "description": "Job ID (for remove)"},
-            },
-            "required": ["action"],
-        }
 
     async def execute(  # type: ignore[override]
         self,

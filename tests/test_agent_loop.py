@@ -10,11 +10,14 @@ Uses a mock LLM provider with scripted responses to test:
 - Nudge for final answer (tool results but no text)
 - Planning prompt injection
 - Verification pass
+- Concurrent _process_message() session isolation
 """
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -859,3 +862,56 @@ class TestRoleSwitching:
         role = AgentRoleConfig(name="passthrough")
         ctx = loop._apply_role_for_turn(role)
         assert ctx.tools is None
+
+
+class TestConcurrentProcessMessage:
+    """Verify that concurrent _process_message calls for different sessions don't corrupt each other."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_sessions_independent(self, tmp_path: Path):
+        """Two simultaneous messages from different sessions must produce independent replies."""
+
+        class IndexedProvider(LLMProvider):
+            """Returns a response tagged with the user ID embedded in the message."""
+
+            def get_default_model(self) -> str:
+                return "test-model"
+
+            async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> LLMResponse:
+                # Reflect back the last user message content so we can verify routing
+                last_user = next(
+                    (m["content"] for m in reversed(messages) if m.get("role") == "user"),
+                    "unknown",
+                )
+                return LLMResponse(content=f"reply:{last_user}")
+
+        loop = _make_loop(tmp_path, IndexedProvider())
+
+        msg_a = _make_inbound("hello-from-A", chat_id="user-A")
+        msg_b = _make_inbound("hello-from-B", chat_id="user-B")
+
+        # Run both concurrently
+        await asyncio.gather(
+            loop._process_message(msg_a),
+            loop._process_message(msg_b),
+        )
+
+        session_a = loop.sessions.get_or_create("cli:user-A")
+        session_b = loop.sessions.get_or_create("cli:user-B")
+
+        # Each session must contain only its own messages
+        contents_a = [m["content"] for m in session_a.messages if m.get("role") == "user"]
+        contents_b = [m["content"] for m in session_b.messages if m.get("role") == "user"]
+
+        assert all("hello-from-A" in c for c in contents_a), (
+            "Session A must not contain B's messages"
+        )
+        assert all("hello-from-B" in c for c in contents_b), (
+            "Session B must not contain A's messages"
+        )
+        assert not any("hello-from-B" in c for c in contents_a), (
+            "A's session must not leak B's content"
+        )
+        assert not any("hello-from-A" in c for c in contents_b), (
+            "B's session must not leak A's content"
+        )

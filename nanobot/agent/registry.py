@@ -25,12 +25,20 @@ class AgentRegistry:
     def __init__(self, default_role: str = "general") -> None:
         self._roles: dict[str, AgentRoleConfig] = {}
         self._default_role = default_role
+        self._cached_roles: list[AgentRoleConfig] | None = None
+        self._cached_role_names: list[str] | None = None
+
+    def _invalidate_cache(self) -> None:
+        """Invalidate cached role lists after any write operation."""
+        self._cached_roles = None
+        self._cached_role_names = None
 
     def register(self, role: AgentRoleConfig) -> None:
         """Register an agent role config by its name."""
         if role.name in self._roles:
             logger.debug("Overriding existing agent role: {}", role.name)
         self._roles[role.name] = role
+        self._invalidate_cache()
 
     def merge_register(self, role: AgentRoleConfig) -> None:
         """Register a role, merging explicitly-set fields into any existing entry.
@@ -50,6 +58,7 @@ class AgentRegistry:
             merged = existing.model_copy(update=overrides)
             self._roles[role.name] = merged
             logger.debug("Merged config into role '{}': {}", role.name, list(overrides))
+        self._invalidate_cache()
 
     def get(self, name: str) -> AgentRoleConfig | None:
         """Look up a role by name. Returns None if not found."""
@@ -61,11 +70,15 @@ class AgentRegistry:
 
     def list_roles(self) -> list[AgentRoleConfig]:
         """Return all registered roles (enabled only)."""
-        return [r for r in self._roles.values() if r.enabled]
+        if self._cached_roles is None:
+            self._cached_roles = [r for r in self._roles.values() if r.enabled]
+        return self._cached_roles
 
     def role_names(self) -> list[str]:
         """Return names of all enabled roles."""
-        return [r.name for r in self._roles.values() if r.enabled]
+        if self._cached_role_names is None:
+            self._cached_role_names = [r.name for r in self._roles.values() if r.enabled]
+        return self._cached_role_names
 
     def __len__(self) -> int:
         return len(self._roles)

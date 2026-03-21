@@ -42,12 +42,12 @@ class TestScratchpad:
     async def test_read_nonexistent(self, tmp_path: Path) -> None:
         pad = Scratchpad(tmp_path)
         result = pad.read("nonexistent")
-        assert "not found" in result.lower()
+        assert result is None
 
     async def test_read_empty(self, tmp_path: Path) -> None:
         pad = Scratchpad(tmp_path)
         result = pad.read()
-        assert "empty" in result.lower()
+        assert result is None
 
     async def test_list_entries(self, tmp_path: Path) -> None:
         pad = Scratchpad(tmp_path)
@@ -75,7 +75,7 @@ class TestScratchpad:
         await pad.write(role="r", label="x", content="y")
         await pad.clear()
         assert pad.list_entries() == []
-        assert pad.read() == "Scratchpad is empty."
+        assert pad.read() is None
 
     async def test_concurrent_writes(self, tmp_path: Path) -> None:
         pad = Scratchpad(tmp_path)

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from nanobot.agent.reaction import classify_reaction
 from nanobot.agent.tools.feedback import FeedbackTool, feedback_summary, load_feedback_events
 from nanobot.bus.events import ReactionEvent
 
@@ -121,7 +122,7 @@ class TestReactionEvent:
             chat_id="chat1",
             emoji=emoji,
         )
-        assert event.rating == expected
+        assert classify_reaction(event.emoji) == expected
 
 
 # ---------------------------------------------------------------------------

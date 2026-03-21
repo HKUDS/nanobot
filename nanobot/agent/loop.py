@@ -63,6 +63,7 @@ from nanobot.agent.observability import (
     update_current_span,
 )
 from nanobot.agent.prompt_loader import prompts
+from nanobot.agent.reaction import classify_reaction
 from nanobot.agent.scratchpad import Scratchpad
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
 from nanobot.agent.tool_executor import ToolExecutor
@@ -85,6 +86,7 @@ from nanobot.agent.tools.mission import (
     MissionStartTool,
     MissionStatusTool,
 )
+from nanobot.agent.tools.powerpoint import AnalyzePptxTool, PptxGetSlideTool, ReadPptxTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.result_cache import CacheGetSliceTool, ToolResultCache
 from nanobot.agent.tools.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
@@ -395,6 +397,7 @@ class AgentLoop:
                 role_name=self.role_name,
             ),
             provider=provider,
+            max_delegation_depth=config.max_delegation_depth,
         )
         self._dispatcher.tools = self.tools
 
@@ -562,6 +565,24 @@ class AgentLoop:
         if _should_register(spreadsheet_tool.name):
             self.tools.register(spreadsheet_tool)
 
+        # PowerPoint tools
+        pptx_read = ReadPptxTool(
+            workspace=self.workspace,
+            allowed_dir=allowed_dir,
+            cache=self.result_cache,
+        )
+        if _should_register(pptx_read.name):
+            self.tools.register(pptx_read)
+
+        pptx_analyze = AnalyzePptxTool(
+            workspace=self.workspace,
+            allowed_dir=allowed_dir,
+            cache=self.result_cache,
+            vision_model=self.config.vision_model,
+        )
+        if _should_register(pptx_analyze.name):
+            self.tools.register(pptx_analyze)
+
         exec_tool = ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
@@ -637,6 +658,10 @@ class AgentLoop:
         excel_find = ExcelFindTool(cache=self.result_cache)
         if _should_register(excel_find.name):
             self.tools.register(excel_find)
+
+        pptx_get_slide = PptxGetSlideTool(cache=self.result_cache)
+        if _should_register(pptx_get_slide.name):
+            self.tools.register(pptx_get_slide)
 
         query_tool = QueryDataTool(cache=self.result_cache)
         if _should_register(query_tool.name):
@@ -1441,7 +1466,7 @@ class AgentLoop:
         The reaction is mapped to positive/negative and persisted via the
         feedback tool.
         """
-        rating = reaction.rating
+        rating = classify_reaction(reaction.emoji)
         if rating is None:
             logger.debug("Ignoring unmapped reaction emoji: {}", reaction.emoji)
             return
