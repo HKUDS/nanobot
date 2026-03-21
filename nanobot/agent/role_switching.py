@@ -10,13 +10,31 @@ See also ``nanobot.agent.coordinator`` for intent classification and
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from loguru import logger
 
 if TYPE_CHECKING:
-    from nanobot.agent.loop import AgentLoop
     from nanobot.config.schema import AgentRoleConfig
+
+
+class _LoopLike(Protocol):
+    """Minimal interface that TurnRoleManager needs from AgentLoop.
+
+    Using a Protocol instead of importing AgentLoop avoids a circular
+    import between loop.py ↔ role_switching.py.
+    """
+
+    model: str
+    temperature: float
+    max_iterations: int
+    role_name: str
+    role_config: Any
+    context: Any
+    tools: Any
+    _dispatcher: Any
+    _capabilities: Any
+    exec_config: Any
 
 
 @dataclass(slots=True)
@@ -43,7 +61,7 @@ class TurnRoleManager:
     temperature, max_iterations, system prompt, tools) for a single turn.
     """
 
-    def __init__(self, loop: AgentLoop) -> None:
+    def __init__(self, loop: _LoopLike) -> None:
         self._loop = loop
 
     def apply(self, role: AgentRoleConfig) -> TurnContext:
