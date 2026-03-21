@@ -45,11 +45,11 @@ class CliProgressHandler:
     async def __call__(self, event: ProgressEvent) -> None:
         ch = self._channels_config
         match event:
-            case TextChunk(content=content):
+            case TextChunk():
                 if ch and not ch.send_progress:
                     return
-                if content:
-                    self._console.print(f"  [dim]↳ {content}[/dim]")
+                if event.content:
+                    self._console.print(f"  [dim]↳ {event.content}[/dim]")
             case ToolCallEvent(tool_name=name):
                 if ch and not ch.send_tool_hints:
                     return
