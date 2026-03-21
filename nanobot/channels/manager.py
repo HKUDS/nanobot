@@ -65,6 +65,54 @@ class ChannelManager:
                     f'Set ["*"] to allow everyone, or add specific user IDs.'
                 )
 
+<<<<<<< HEAD
+=======
+        # Email channel
+        if self.config.channels.email.enabled:
+            try:
+                from nanobot.channels.email import EmailChannel
+                self.channels["email"] = EmailChannel(
+                    self.config.channels.email, self.bus
+                )
+                logger.info("Email channel enabled")
+            except ImportError as e:
+                logger.warning(f"Email channel not available: {e}")
+
+        # Slack channel
+        if self.config.channels.slack.enabled:
+            try:
+                from nanobot.channels.slack import SlackChannel
+                self.channels["slack"] = SlackChannel(
+                    self.config.channels.slack, self.bus
+                )
+                logger.info("Slack channel enabled")
+            except ImportError as e:
+                logger.warning(f"Slack channel not available: {e}")
+
+        # QQ channel
+        if self.config.channels.qq.enabled:
+            try:
+                from nanobot.channels.qq import QQChannel
+                self.channels["qq"] = QQChannel(
+                    self.config.channels.qq,
+                    self.bus,
+                )
+                logger.info("QQ channel enabled")
+            except ImportError as e:
+                logger.warning(f"QQ channel not available: {e}")
+
+        # iMessage channel
+        if self.config.channels.i_message.enabled:
+            try:
+                from nanobot.channels.imessage import iMessageChannel
+                self.channels["imessage"] = iMessageChannel(
+                    self.config.channels.i_message, self.bus
+                )
+                logger.info("iMessage channel enabled")
+            except (ImportError, FileNotFoundError) as e:
+                logger.warning(f"iMessage channel not available: {e}")
+    
+>>>>>>> melo_branch
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
         try:

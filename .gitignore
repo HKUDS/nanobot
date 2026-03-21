@@ -23,3 +23,10 @@ botpy.log
 nano.*.save
 .DS_Store
 uv.lock
+tests/
+bridge/dist*
+bridge/node_modules*
+**/package-lock.json
+package.json
+node_modules/**
+

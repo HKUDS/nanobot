@@ -900,6 +900,15 @@ def channels_status():
             "[green]\u2713[/green]" if enabled else "[dim]\u2717[/dim]",
         )
 
+    # iMessage
+    im = config.channels.i_message
+    im_config = im.imsg_path if im.imsg_path else "[dim]auto-detect[/dim]"
+    table.add_row(
+        "iMessage",
+        "✓" if im.enabled else "✗",
+        im_config
+    )
+
     console.print(table)
 
 
