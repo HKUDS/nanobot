@@ -29,7 +29,10 @@ Architecture
 
 from __future__ import annotations
 
-from .event import KnowledgeTriple, MemoryEvent
+from .conflicts import ConflictManager
+from .context_assembler import ContextAssembler
+from .eval import EvalRunner
+from .event import BeliefRecord, KnowledgeTriple, MemoryEvent
 from .extractor import MemoryExtractor
 from .graph import KnowledgeGraph
 from .mem0_adapter import _Mem0Adapter, _Mem0RuntimeInfo
@@ -47,13 +50,22 @@ from .ontology import (
     validate_triple_types,
 )
 from .persistence import MemoryPersistence
+from .profile import ProfileManager
 from .reranker import CrossEncoderReranker
+from .retrieval_planner import RetrievalPlan, RetrievalPlanner
 from .store import MemoryStore
 
 __all__ = [
+    "BeliefRecord",
+    "ConflictManager",
+    "ContextAssembler",
+    "EvalRunner",
     "KnowledgeTriple",
     "MemoryEvent",
     "MemoryStore",
+    "RetrievalPlan",
+    "RetrievalPlanner",
+    "ProfileManager",
     "MemoryExtractor",
     "MemoryPersistence",
     "CrossEncoderReranker",

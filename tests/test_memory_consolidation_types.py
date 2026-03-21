@@ -61,7 +61,9 @@ class TestMemoryConsolidationTypeHandling:
         assert result is True
         assert store.history_file.exists()
         assert "[2026-01-01] User discussed testing." in store.history_file.read_text()
-        assert "User likes testing." in store.memory_file.read_text()
+        # LAN-206: MEMORY.md is now a deterministic rebuild, not the LLM's memory_update
+        assert store.memory_file.exists()
+        assert "# Memory" in store.memory_file.read_text()
 
     async def test_dict_arguments_serialized_to_json(self, tmp_path: Path) -> None:
         """Issue #1042: LLM returns dict instead of string — must not raise TypeError."""
@@ -82,10 +84,8 @@ class TestMemoryConsolidationTypeHandling:
         history_content = store.history_file.read_text()
         parsed = json.loads(history_content.strip())
         assert parsed["summary"] == "User discussed testing."
-
-        memory_content = store.memory_file.read_text()
-        parsed_mem = json.loads(memory_content)
-        assert "User likes testing" in parsed_mem["facts"]
+        # LAN-206: MEMORY.md is a deterministic rebuild, not the LLM's memory_update
+        assert store.memory_file.exists()
 
     async def test_string_arguments_as_raw_json(self, tmp_path: Path) -> None:
         """Some providers return arguments as a JSON string instead of parsed dict."""

@@ -18,11 +18,11 @@ _SAVE_MEMORY_TOOL = [
                     },
                     "memory_update": {
                         "type": "string",
-                        "description": "Full updated long-term memory as markdown. Include all existing "
-                        "facts plus new ones. Return unchanged if nothing new.",
+                        "description": "(Deprecated — ignored.) Kept for backward compatibility "
+                        "with cached tool calls.",
                     },
                 },
-                "required": ["history_entry", "memory_update"],
+                "required": ["history_entry"],
             },
         },
     }

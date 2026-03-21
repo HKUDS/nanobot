@@ -20,37 +20,40 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
 import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from nanobot.agent.tracing import bind_trace
-from nanobot.utils.helpers import ensure_dir
 
+from .conflicts import (
+    CONFLICT_STATUS_NEEDS_USER,
+    CONFLICT_STATUS_OPEN,
+    CONFLICT_STATUS_RESOLVED,
+    ConflictManager,
+)
 from .constants import _SAVE_MEMORY_TOOL
+from .context_assembler import ContextAssembler
+from .eval import EvalRunner
 from .extractor import MemoryExtractor
 from .graph import KnowledgeGraph
 from .mem0_adapter import _Mem0Adapter, _Mem0RuntimeInfo
 from .persistence import MemoryPersistence
+from .profile import ProfileManager
 from .reranker import DEFAULT_MODEL as _DEFAULT_RERANKER_MODEL
 from .reranker import CrossEncoderReranker
 from .retrieval import _local_retrieve, _topic_fallback_retrieve
+from .retrieval_planner import RetrievalPlanner
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session
 
-# Intents that benefit from scanning recent unresolved events.
-# For all other intents (fact_lookup, chitchat, …) the scan is skipped.
-_UNRESOLVED_INTENTS: frozenset[str] = frozenset(
-    {"planning", "debug", "conflict", "reflection", "task"}
-)
 _COUNT_CACHE_TTL: float = 60.0  # seconds — SQLite counts change infrequently (LAN-102)
 
 
@@ -70,9 +73,9 @@ class MemoryStore:
     PROFILE_STATUS_ACTIVE = "active"
     PROFILE_STATUS_CONFLICTED = "conflicted"
     PROFILE_STATUS_STALE = "stale"
-    CONFLICT_STATUS_OPEN = "open"
-    CONFLICT_STATUS_NEEDS_USER = "needs_user"
-    CONFLICT_STATUS_RESOLVED = "resolved"
+    CONFLICT_STATUS_OPEN = CONFLICT_STATUS_OPEN
+    CONFLICT_STATUS_NEEDS_USER = CONFLICT_STATUS_NEEDS_USER
+    CONFLICT_STATUS_RESOLVED = CONFLICT_STATUS_RESOLVED
     EPISODIC_STATUS_OPEN = "open"
     EPISODIC_STATUS_RESOLVED = "resolved"
     ROLLOUT_MODES = {"enabled", "shadow", "disabled"}
@@ -110,6 +113,28 @@ class MemoryStore:
             force_infer_true=bool(self.rollout.get("mem0_force_infer_true", False)),
         )
 
+        # Profile manager (LAN-202) — delegates profile CRUD to ProfileManager.
+        self.profile_mgr = ProfileManager(self.persistence, self.profile_file, self.mem0)
+        self.profile_mgr._store = self
+
+        # Conflict manager (LAN-203) — delegates conflict resolution to ConflictManager.
+        self.conflict_mgr = ConflictManager(self.profile_mgr, self.mem0)
+        self.conflict_mgr._store = self
+
+        # Retrieval planner (LAN-207) — intent classification + policy + routing.
+        self._planner = RetrievalPlanner()
+
+        # Context assembler (LAN-210) — prompt rendering extracted from MemoryStore.
+        self._assembler = ContextAssembler(
+            profile_mgr=self.profile_mgr,
+            retrieve_fn=lambda *a, **kw: self.retrieve(*a, **kw),
+            persistence=self.persistence,
+            planner=self._planner,
+            read_events_fn=lambda **kw: self.read_events(**kw),
+            read_long_term_fn=lambda: self.read_long_term(),
+            build_graph_context_lines_fn=self._build_graph_context_lines,
+        )
+
         # _ensure_vector_health() moved to async ensure_health() — called from
         # AgentLoop.run() to avoid blocking the event loop at instantiation (LAN-101).
 
@@ -137,15 +162,34 @@ class MemoryStore:
             self.graph = KnowledgeGraph()  # disabled — all methods return empty
             self.graph.enabled = False
 
+        # LAN-208: gate raw conversation turn ingestion into mem0.
+        # When disabled, only structured events (from extractor) are synced to mem0,
+        # clarifying mem0's role as a semantic index rather than a raw transcript store.
+        self._mem0_raw_turn_ingestion: bool = bool(
+            self.rollout.get("mem0_raw_turn_ingestion", True)
+        )
+
         # Configurable auto-resolve confidence gap threshold.
         self.conflict_auto_resolve_gap: float = float(
             self.rollout.get("conflict_auto_resolve_gap", 0.25)
         )
+        self.conflict_mgr.conflict_auto_resolve_gap = self.conflict_auto_resolve_gap
 
         # P-01/P-02: mtime-based cache for events.jsonl — avoids re-reading the
         # file on every BM25 retrieval call within the same turn.
         self._events_cache: list[dict[str, Any]] | None = None
         self._events_cache_mtime: float = -1.0
+
+        # Evaluation / observability helper (LAN-204)
+        # Use lambdas so that test-time MagicMock patches on the instance are honoured.
+        self._eval = EvalRunner(
+            retrieve_fn=lambda *a, **kw: self.retrieve(*a, **kw),
+            persistence=self.persistence,
+            workspace=self.workspace,
+            get_rollout_status_fn=lambda: self.get_rollout_status(),
+            get_rollout_fn=lambda: self.rollout,
+            get_backend_stats_fn=lambda: self._backend_stats_for_eval(),
+        )
 
     @staticmethod
     def _utc_now_iso() -> str:
@@ -454,7 +498,12 @@ class MemoryStore:
         # mem0 overrides
         if "mem0_user_id" in overrides:
             self.rollout["mem0_user_id"] = str(overrides["mem0_user_id"]).strip() or "nanobot"
-        for bk in ("mem0_add_debug", "mem0_verify_write", "mem0_force_infer_true"):
+        for bk in (
+            "mem0_add_debug",
+            "mem0_verify_write",
+            "mem0_force_infer_true",
+            "mem0_raw_turn_ingestion",
+        ):
             if bk in overrides:
                 self.rollout[bk] = bool(overrides[bk])
 
@@ -463,189 +512,19 @@ class MemoryStore:
         lowered = str(text or "").lower()
         return any(needle in lowered for needle in needles)
 
+    # ── Thin wrappers delegating to RetrievalPlanner (LAN-207) ──────────
+
     @staticmethod
     def _infer_retrieval_intent(query: str) -> str:
-        text = str(query or "").strip().lower()
-        if not text:
-            return "fact_lookup"
-
-        debug_markers = (
-            "what happened",
-            "last time",
-            "failed",
-            "failure",
-            "error",
-            "incident",
-            "debug",
-            "timeline",
-            "yesterday",
-            "what did we try",
-            "correction",
-            "corrected",
-            "post-mortem",
-            "postmortem",
-            "root cause",
-            "outage",
-        )
-        reflection_markers = (
-            "reflect",
-            "reflection",
-            "lesson",
-            "learned",
-            "retrospective",
-            "insight",
-            "insights",
-        )
-        planning_markers = (
-            "plan",
-            "next step",
-            "roadmap",
-            "todo",
-            "should we",
-            "what should",
-            "task",
-            "tasks",
-            "decision",
-            "decisions",
-            "in progress",
-            "still open",
-            "resolved",
-            "completed",
-            "closed",
-            "project",
-            "projects",
-            "active",
-        )
-        architecture_markers = (
-            "architecture",
-            "architectural",
-            "design decision",
-            "memory architecture",
-        )
-        constraints_markers = ("constraint", "must", "cannot", "before running commands")
-        conflict_markers = ("conflict", "needs_user", "unresolved decision")
-        rollout_markers = ("rollout", "router", "shadow mode", "memory behavior enabled")
-
-        if any(marker in text for marker in reflection_markers):
-            return "reflection"
-        if any(marker in text for marker in rollout_markers):
-            return "rollout_status"
-        if any(marker in text for marker in conflict_markers):
-            return "conflict_review"
-        if any(marker in text for marker in constraints_markers):
-            return "constraints_lookup"
-        if any(marker in text for marker in debug_markers):
-            return "debug_history"
-        if any(marker in text for marker in architecture_markers):
-            return "planning"
-        if any(marker in text for marker in planning_markers):
-            return "planning"
-        return "fact_lookup"
+        return RetrievalPlanner.infer_retrieval_intent(query)
 
     @staticmethod
     def _retrieval_policy(intent: str) -> dict[str, Any]:
-        policy = {
-            "fact_lookup": {
-                "candidate_multiplier": 3,
-                "half_life_days": 120.0,
-                "type_boost": {"semantic": 0.18, "episodic": -0.05, "reflection": -0.12},
-                "fallback_topics": [
-                    "knowledge",
-                    "user_preference",
-                    "relationship",
-                    "profile_update",
-                ],
-                "fallback_types": ["semantic"],
-            },
-            "debug_history": {
-                "candidate_multiplier": 4,
-                "half_life_days": 21.0,
-                "type_boost": {"semantic": -0.04, "episodic": 0.22, "reflection": -0.1},
-                "fallback_topics": ["infra", "user_correction"],
-                "fallback_types": ["episodic"],
-            },
-            "planning": {
-                "candidate_multiplier": 3,
-                "half_life_days": 45.0,
-                "type_boost": {"semantic": 0.1, "episodic": 0.08, "reflection": -0.06},
-                "fallback_topics": ["task_progress", "decision_log", "project"],
-                "fallback_types": ["episodic"],
-            },
-            "reflection": {
-                "candidate_multiplier": 3,
-                "half_life_days": 60.0,
-                "type_boost": {"semantic": 0.03, "episodic": -0.03, "reflection": 0.2},
-                "fallback_topics": ["reflection"],
-                "fallback_types": ["reflection"],
-            },
-            "constraints_lookup": {
-                "candidate_multiplier": 4,
-                "half_life_days": 180.0,
-                "type_boost": {"semantic": 0.24, "episodic": -0.1, "reflection": -0.14},
-                "fallback_topics": ["constraint"],
-                "fallback_types": ["semantic"],
-            },
-            "conflict_review": {
-                "candidate_multiplier": 4,
-                "half_life_days": 90.0,
-                "type_boost": {"semantic": 0.05, "episodic": 0.15, "reflection": -0.08},
-                "fallback_topics": ["decision_log"],
-                "fallback_types": ["episodic"],
-            },
-            "rollout_status": {
-                "candidate_multiplier": 2,
-                "half_life_days": 365.0,
-                "type_boost": {"semantic": 0.3, "episodic": -0.16, "reflection": -0.2},
-                "fallback_topics": ["rollout"],
-                "fallback_types": ["semantic"],
-            },
-        }
-        return policy.get(intent, policy["fact_lookup"])
+        return RetrievalPlanner.retrieval_policy(intent)
 
     @staticmethod
     def _query_routing_hints(query: str) -> dict[str, Any]:
-        text = str(query or "").strip().lower()
-        open_markers = (
-            "still open",
-            "open task",
-            "open tasks",
-            "pending",
-            "in progress",
-            "unresolved",
-            "needs user",
-        )
-        resolved_markers = ("resolved", "completed", "closed", "finished", "done")
-        planning_markers = ("plan", "next step", "roadmap", "todo", "planning")
-        architecture_markers = (
-            "architecture",
-            "architectural",
-            "design decision",
-            "memory architecture",
-        )
-        task_decision_markers = ("task", "tasks", "decision", "decisions")
-
-        requires_open = any(marker in text for marker in open_markers)
-        requires_resolved = any(marker in text for marker in resolved_markers)
-        if requires_open and requires_resolved:
-            # If query mixes both terms, prefer broader task/decision focus without status hard-filter.
-            requires_open = False
-            requires_resolved = False
-
-        focus_architecture = any(marker in text for marker in architecture_markers)
-        focus_planning = focus_architecture or any(marker in text for marker in planning_markers)
-        focus_task_decision = (
-            requires_open
-            or requires_resolved
-            or any(marker in text for marker in task_decision_markers)
-        )
-
-        return {
-            "requires_open": requires_open,
-            "requires_resolved": requires_resolved,
-            "focus_planning": focus_planning,
-            "focus_architecture": focus_architecture,
-            "focus_task_decision": focus_task_decision,
-        }
+        return RetrievalPlanner.query_routing_hints(query)
 
     def _status_matches_query_hint(
         self,
@@ -655,55 +534,18 @@ class MemoryStore:
         requires_open: bool,
         requires_resolved: bool,
     ) -> bool:
-        status_norm = str(status or "").strip().lower()
-        summary_text = str(summary or "")
-        open_statuses = {"open", "in_progress", "pending", "active", "needs_user"}
-        resolved_statuses = {"resolved", "completed", "closed", "done", "superseded"}
-        summary_is_resolved = self._is_resolved_task_or_decision(summary_text)
-
-        if requires_open:
-            if status_norm in resolved_statuses:
-                return False
-            if status_norm in open_statuses:
-                return True
-            return not summary_is_resolved
-        if requires_resolved:
-            if status_norm in resolved_statuses:
-                return True
-            if status_norm in open_statuses:
-                return False
-            return summary_is_resolved
-        return True
+        return RetrievalPlanner.status_matches_query_hint(
+            status=status,
+            summary=summary,
+            requires_open=requires_open,
+            requires_resolved=requires_resolved,
+        )
 
     def _memory_type_for_item(self, item: dict[str, Any]) -> str:
-        memory_type = str(item.get("memory_type", "")).strip().lower()
-        if memory_type in self.MEMORY_TYPES:
-            return memory_type
-        # Check metadata as fallback for raw JSONL events.
-        meta = item.get("metadata")
-        if isinstance(meta, dict):
-            meta_type = str(meta.get("memory_type", "")).strip().lower()
-            if meta_type in self.MEMORY_TYPES:
-                return meta_type
-        event_type = str(item.get("type", "")).strip().lower()
-        if event_type in {"task", "decision"}:
-            return "episodic"
-        if event_type in {"preference", "fact", "constraint", "relationship"}:
-            return "semantic"
-        return "episodic"
+        return RetrievalPlanner.memory_type_for_item(item)
 
     def _recency_signal(self, timestamp: str, *, half_life_days: float) -> float:
-        ts = self._to_datetime(timestamp)
-        if ts is None:
-            return 0.0
-        now = datetime.now(timezone.utc)
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-        age_days = max((now - ts).total_seconds() / 86400.0, 0.0)
-        if half_life_days <= 0:
-            return 0.0
-        decay = math.exp(-math.log(2) * age_days / half_life_days)
-        return max(min(decay, 1.0), 0.0)
+        return RetrievalPlanner.recency_signal(timestamp, half_life_days=half_life_days)
 
     def _default_topic_for_event_type(self, event_type: str) -> str:
         topic_by_event_type = {
@@ -1017,6 +859,16 @@ class MemoryStore:
         except (sqlite3.Error, OSError):
             return 0
 
+    def _backend_stats_for_eval(self) -> dict[str, Any]:
+        """Collect backend stats needed by EvalRunner.get_observability_report."""
+        return {
+            "vector_points_count": self._vector_points_count(),
+            "mem0_get_all_count": len(self._mem0_get_all_rows(limit=500)),
+            "history_rows_count": self._history_row_count(),
+            "mem0_enabled": self.mem0.enabled,
+            "mem0_mode": self.mem0.mode,
+        }
+
     def _event_compaction_key(self, event: dict[str, Any]) -> tuple[str, str, str, str]:
         summary = self._norm_text(str(event.get("summary", "")))
         event_type = str(event.get("type", "fact")).strip().lower() or "fact"
@@ -1293,28 +1145,7 @@ class MemoryStore:
         The ``metrics`` and ``kpis`` keys are kept empty for backward
         compatibility with callers that destructure the return value.
         """
-        vector_points_count = self._vector_points_count()
-        mem0_get_all_count = len(self._mem0_get_all_rows(limit=500))
-        history_rows_count = self._history_row_count()
-        vector_health_state = (
-            "degraded"
-            if (history_rows_count > 0 and vector_points_count == 0 and mem0_get_all_count == 0)
-            else "healthy"
-        )
-
-        return {
-            "metrics": {},
-            "kpis": {},
-            "backend": {
-                "mem0_enabled": self.mem0.enabled,
-                "mem0_mode": self.mem0.mode,
-                "vector_points_count": vector_points_count,
-                "mem0_get_all_count": mem0_get_all_count,
-                "history_rows_count": history_rows_count,
-                "vector_health_state": vector_health_state,
-            },
-            "rollout": self.get_rollout_status(),
-        }
+        return self._eval.get_observability_report()
 
     def evaluate_retrieval_cases(
         self,
@@ -1324,234 +1155,13 @@ class MemoryStore:
         recency_half_life_days: float | None = None,
         embedding_provider: str | None = None,
     ) -> dict[str, Any]:
-        """Evaluate retrieval quality using labeled cases.
-
-        Case format (each dict):
-        - query: str (required)
-        - expected_ids: list[str] (optional)
-        - expected_any: list[str] substrings expected in retrieved summaries (optional)
-        - expected_topics: list[str] expected topic substrings (optional)
-        - expected_memory_types: list[str] expected memory_type values (optional)
-        - expected_status_any: list[str] expected status substrings (optional)
-        - expected_any_mode: "substring" | "normalized" (optional)
-        - required_min_hits: int minimum matched expectations for full recall (optional)
-        - top_k: int (optional)
-        """
-        valid_cases = [
-            c
-            for c in cases
-            if isinstance(c, dict)
-            and isinstance(c.get("query"), str)
-            and c.get("query", "").strip()
-        ]
-        if not valid_cases:
-            return {
-                "cases": 0,
-                "evaluated": [],
-                "summary": {
-                    "recall_at_k": 0.0,
-                    "precision_at_k": 0.0,
-                },
-            }
-
-        total_expected = 0
-        total_found = 0
-        total_relevant_retrieved = 0
-        total_retrieved_slots = 0
-        evaluated: list[dict[str, Any]] = []
-
-        synonym_map = {
-            "failed": "fail",
-            "failure": "fail",
-            "failing": "fail",
-            "constraints": "constraint",
-            "resolved": "resolve",
-            "completed": "resolve",
-            "closed": "resolve",
-            "learned": "lesson",
-            "lessons": "lesson",
-            "updates": "update",
-            "corrected": "correct",
-            "corrections": "correct",
-            "correction": "correct",
-            "preferences": "prefer",
-            "preference": "prefer",
-            "preferred": "prefer",
-            "prefers": "prefer",
-            "relationships": "relationship",
-            "reflections": "reflection",
-            "decisions": "decision",
-            "tasks": "task",
-            "incidents": "incident",
-            "superseded": "supersede",
-        }
-
-        def _normalize_phrase(value: str) -> str:
-            tokens = [t for t in re.findall(r"[a-z0-9_]+", str(value or "").lower()) if t]
-            normalized = [synonym_map.get(tok, tok) for tok in tokens]
-            return " ".join(normalized)
-
-        for case in valid_cases:
-            query = str(case.get("query", "")).strip()
-            top_k = int(case.get("top_k", default_top_k) or default_top_k)
-            top_k = max(1, min(top_k, 30))
-
-            expected_ids = [
-                str(x) for x in case.get("expected_ids", []) if isinstance(x, str) and x.strip()
-            ]
-            expected_any = [
-                str(x).lower()
-                for x in case.get("expected_any", [])
-                if isinstance(x, str) and x.strip()
-            ]
-            expected_topics = [
-                str(x).strip().lower()
-                for x in case.get("expected_topics", [])
-                if isinstance(x, str) and x.strip()
-            ]
-            expected_memory_types = [
-                str(x).strip().lower()
-                for x in case.get("expected_memory_types", [])
-                if isinstance(x, str) and x.strip()
-            ]
-            expected_status_any = [
-                str(x).strip().lower()
-                for x in case.get("expected_status_any", [])
-                if isinstance(x, str) and x.strip()
-            ]
-            expected_any_mode = str(case.get("expected_any_mode", "normalized")).strip().lower()
-            if expected_any_mode not in {"substring", "normalized"}:
-                expected_any_mode = "normalized"
-            required_min_hits_raw = case.get("required_min_hits")
-            try:
-                required_min_hits = (
-                    int(required_min_hits_raw) if required_min_hits_raw is not None else None
-                )
-            except (TypeError, ValueError):
-                required_min_hits = None
-
-            expected_any_norm = [_normalize_phrase(x) for x in expected_any if _normalize_phrase(x)]
-
-            retrieved = self.retrieve(
-                query,
-                top_k=top_k,
-                recency_half_life_days=recency_half_life_days,
-                embedding_provider=embedding_provider,
-            )
-
-            hits = 0
-            relevant_retrieved = 0
-            matched_expected_tokens: set[str] = set()
-            matched_topics: set[str] = set()
-            matched_types: set[str] = set()
-            matched_status: set[str] = set()
-
-            for item in retrieved:
-                summary = str(item.get("summary", "")).lower()
-                summary_norm = _normalize_phrase(summary)
-                event_id = str(item.get("id", ""))
-                item_topic = str(item.get("topic", "")).strip().lower()
-                item_type = str(item.get("memory_type", "")).strip().lower()
-                item_status = str(item.get("status", "")).strip().lower()
-                is_relevant = False
-
-                for expected_id in expected_ids:
-                    if expected_id == event_id:
-                        matched_expected_tokens.add(f"id:{expected_id}")
-                        is_relevant = True
-
-                for expected_text in expected_any:
-                    if expected_any_mode == "substring" and expected_text in summary:
-                        matched_expected_tokens.add(f"txt:{expected_text}")
-                        is_relevant = True
-                if expected_any_mode == "normalized":
-                    for expected_norm in expected_any_norm:
-                        if expected_norm and expected_norm in summary_norm:
-                            matched_expected_tokens.add(f"txtn:{expected_norm}")
-                            is_relevant = True
-
-                for expected_topic in expected_topics:
-                    if expected_topic and expected_topic in item_topic:
-                        matched_topics.add(expected_topic)
-                        is_relevant = True
-
-                for expected_type in expected_memory_types:
-                    if expected_type and expected_type == item_type:
-                        matched_types.add(expected_type)
-                        is_relevant = True
-
-                for expected_status in expected_status_any:
-                    if expected_status and expected_status in item_status:
-                        matched_status.add(expected_status)
-                        is_relevant = True
-
-                if is_relevant:
-                    relevant_retrieved += 1
-
-            expected_count = (
-                len(expected_ids)
-                + len(expected_any)
-                + len(expected_topics)
-                + len(expected_memory_types)
-                + len(expected_status_any)
-            )
-            if expected_count > 0:
-                hits = (
-                    len(matched_expected_tokens)
-                    + len(matched_topics)
-                    + len(matched_types)
-                    + len(matched_status)
-                )
-                total_expected += expected_count
-                total_found += hits
-
-            total_relevant_retrieved += relevant_retrieved
-            total_retrieved_slots += top_k
-
-            case_recall = (hits / expected_count) if expected_count else 0.0
-            case_precision = (relevant_retrieved / top_k) if top_k > 0 else 0.0
-            if required_min_hits is not None and expected_count > 0:
-                effective_required = max(min(required_min_hits, expected_count), 0)
-                case_recall = min(hits / max(effective_required, 1), 1.0)
-            why_missed: list[str] = []
-            if hits == 0:
-                if not retrieved:
-                    why_missed.append("no_candidate")
-                else:
-                    if expected_memory_types and not matched_types:
-                        why_missed.append("wrong_type")
-                    if expected_topics and not matched_topics:
-                        why_missed.append("wrong_topic")
-                    if expected_status_any and not matched_status:
-                        why_missed.append("wrong_status")
-                    if not why_missed:
-                        why_missed.append("token_mismatch")
-            evaluated.append(
-                {
-                    "query": query,
-                    "top_k": top_k,
-                    "expected": expected_count,
-                    "hits": hits,
-                    "retrieved": len(retrieved),
-                    "case_recall_at_k": round(case_recall, 4),
-                    "case_precision_at_k": round(case_precision, 4),
-                    "why_missed": why_missed,
-                }
-            )
-
-        overall_recall = (total_found / total_expected) if total_expected else 0.0
-        overall_precision = (
-            (total_relevant_retrieved / total_retrieved_slots) if total_retrieved_slots else 0.0
+        """Evaluate retrieval quality using labeled cases."""
+        return self._eval.evaluate_retrieval_cases(
+            cases,
+            default_top_k=default_top_k,
+            recency_half_life_days=recency_half_life_days,
+            embedding_provider=embedding_provider,
         )
-
-        return {
-            "cases": len(valid_cases),
-            "evaluated": evaluated,
-            "summary": {
-                "recall_at_k": round(overall_recall, 4),
-                "precision_at_k": round(overall_precision, 4),
-            },
-        }
 
     def save_evaluation_report(
         self,
@@ -1562,79 +1172,19 @@ class MemoryStore:
         output_file: str | None = None,
     ) -> Path:
         """Persist evaluation + observability report to disk and return the file path."""
-        reports_dir = ensure_dir(self.memory_dir / "reports")
-        if output_file:
-            path = Path(output_file).expanduser().resolve()
-            ensure_dir(path.parent)
-        else:
-            ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-            path = reports_dir / f"memory_eval_{ts}.json"
-
-        payload = {
-            "generated_at": self._utc_now_iso(),
-            "evaluation": evaluation,
-            "observability": observability,
-            "rollout": rollout or self.get_rollout_status(),
-        }
-        self.persistence.write_json(path, payload)
-        return path
+        return self._eval.save_evaluation_report(
+            evaluation,
+            observability,
+            rollout=rollout,
+            output_file=output_file,
+        )
 
     def evaluate_rollout_gates(
         self,
         evaluation: dict[str, Any],
         observability: dict[str, Any],
     ) -> dict[str, Any]:
-        gates = self.rollout.get("rollout_gates", {})
-        if not isinstance(gates, dict):
-            gates = {}
-
-        min_recall = self._safe_float(gates.get("min_recall_at_k"), 0.55)
-        min_precision = self._safe_float(gates.get("min_precision_at_k"), 0.25)
-        max_tokens = self._safe_float(gates.get("max_avg_memory_context_tokens"), 1400.0)
-        max_history_fallback_ratio = self._safe_float(gates.get("max_history_fallback_ratio"), 0.05)
-
-        summary = evaluation.get("summary", {}) if isinstance(evaluation, dict) else {}
-        recall = self._safe_float(summary.get("recall_at_k"), 0.0)
-        precision = self._safe_float(summary.get("precision_at_k"), 0.0)
-        kpis = observability.get("kpis", {}) if isinstance(observability, dict) else {}
-        avg_ctx_tokens = self._safe_float(kpis.get("avg_memory_context_tokens"), 0.0)
-        history_fallback_ratio = self._safe_float(kpis.get("history_fallback_ratio"), 0.0)
-
-        checks = [
-            {
-                "name": "recall_at_k",
-                "actual": round(recall, 4),
-                "threshold": round(min_recall, 4),
-                "op": ">=",
-                "passed": recall >= min_recall,
-            },
-            {
-                "name": "precision_at_k",
-                "actual": round(precision, 4),
-                "threshold": round(min_precision, 4),
-                "op": ">=",
-                "passed": precision >= min_precision,
-            },
-            {
-                "name": "avg_memory_context_tokens",
-                "actual": round(avg_ctx_tokens, 2),
-                "threshold": round(max_tokens, 2),
-                "op": "<=",
-                "passed": avg_ctx_tokens <= max_tokens,
-            },
-            {
-                "name": "history_fallback_ratio",
-                "actual": round(history_fallback_ratio, 4),
-                "threshold": round(max_history_fallback_ratio, 4),
-                "op": "<=",
-                "passed": history_fallback_ratio <= max_history_fallback_ratio,
-            },
-        ]
-        return {
-            "passed": all(bool(item["passed"]) for item in checks),
-            "checks": checks,
-            "rollout_mode": str(self.rollout.get("memory_rollout_mode", "enabled")),
-        }
+        return self._eval.evaluate_rollout_gates(evaluation, observability)
 
     def read_events(self, limit: int | None = None) -> list[dict[str, Any]]:
         # P-01/P-02: serve from cache when events_file has not been modified.
@@ -2048,70 +1598,20 @@ class MemoryStore:
         return total
 
     def read_profile(self) -> dict[str, Any]:
-        data = self.persistence.read_json(self.profile_file)
-        if isinstance(data, dict):
-            for key in self.PROFILE_KEYS:
-                data.setdefault(key, [])
-                if not isinstance(data[key], list):
-                    data[key] = []
-            data.setdefault("conflicts", [])
-            data.setdefault("last_verified_at", None)
-            data.setdefault("meta", {})
-            for key in self.PROFILE_KEYS:
-                section_meta = data["meta"].get(key)
-                if not isinstance(section_meta, dict):
-                    section_meta = {}
-                    data["meta"][key] = section_meta
-                for item in data[key]:
-                    if not isinstance(item, str) or not item.strip():
-                        continue
-                    norm = self._norm_text(item)
-                    entry = section_meta.get(norm)
-                    if not isinstance(entry, dict):
-                        section_meta[norm] = {
-                            "text": item,
-                            "confidence": 0.65,
-                            "evidence_count": 1,
-                            "status": self.PROFILE_STATUS_ACTIVE,
-                            "last_seen_at": data.get("updated_at") or self._utc_now_iso(),
-                        }
-            return data
-        if self.profile_file.exists():
-            logger.warning("Failed to parse memory profile, resetting")
-        return {
-            "preferences": [],
-            "stable_facts": [],
-            "active_projects": [],
-            "relationships": [],
-            "constraints": [],
-            "conflicts": [],
-            "last_verified_at": None,
-            "meta": {key: {} for key in self.PROFILE_KEYS},
-            "updated_at": self._utc_now_iso(),
-        }
+        return self.profile_mgr.read_profile()
 
     def _meta_section(self, profile: dict[str, Any], key: str) -> dict[str, Any]:
-        profile.setdefault("meta", {})
-        section = profile["meta"].get(key)
-        if not isinstance(section, dict):
-            section = {}
-            profile["meta"][key] = section
-        return section
+        return self.profile_mgr._meta_section(profile, key)
+
+    @staticmethod
+    def _generate_belief_id(section: str, norm_text: str, created_at: str) -> str:
+        """Generate a deterministic stable ID for a profile item."""
+        return ProfileManager._generate_belief_id(section, norm_text, created_at)
 
     def _meta_entry(self, profile: dict[str, Any], key: str, text: str) -> dict[str, Any]:
-        norm = self._norm_text(text)
-        section = self._meta_section(profile, key)
-        entry = section.get(norm)
-        if not isinstance(entry, dict):
-            entry = {
-                "text": text,
-                "confidence": 0.65,
-                "evidence_count": 1,
-                "status": self.PROFILE_STATUS_ACTIVE,
-                "last_seen_at": self._utc_now_iso(),
-            }
-            section[norm] = entry
-        return entry
+        return self.profile_mgr._meta_entry(profile, key, text)
+
+    _MAX_EVIDENCE_REFS = 10  # Cap evidence_event_ids to avoid unbounded growth.
 
     def _touch_meta_entry(
         self,
@@ -2121,221 +1621,47 @@ class MemoryStore:
         min_confidence: float = 0.05,
         max_confidence: float = 0.99,
         status: str | None = None,
+        evidence_event_id: str | None = None,
     ) -> None:
-        current_conf = self._safe_float(entry.get("confidence"), 0.65)
-        entry["confidence"] = min(
-            max(current_conf + confidence_delta, min_confidence), max_confidence
+        self.profile_mgr._touch_meta_entry(
+            entry,
+            confidence_delta=confidence_delta,
+            min_confidence=min_confidence,
+            max_confidence=max_confidence,
+            status=status,
+            evidence_event_id=evidence_event_id,
         )
-        evidence = int(entry.get("evidence_count", 0)) + 1
-        entry["evidence_count"] = max(evidence, 1)
-        entry["last_seen_at"] = self._utc_now_iso()
-        if status:
-            entry["status"] = status
 
     def _validate_profile_field(self, field: str) -> str:
-        key = str(field or "").strip()
-        if key not in self.PROFILE_KEYS:
-            raise ValueError(
-                f"Invalid profile field '{field}'. Expected one of: {', '.join(self.PROFILE_KEYS)}"
-            )
-        return key
+        return self.profile_mgr._validate_profile_field(field)
 
     def set_item_pin(self, field: str, text: str, *, pinned: bool) -> bool:
-        key = self._validate_profile_field(field)
-        value = str(text or "").strip()
-        if not value:
-            return False
-
-        profile = self.read_profile()
-        values = self._to_str_list(profile.get(key))
-        normalized = self._norm_text(value)
-        existing_map = {self._norm_text(v): v for v in values}
-        if normalized not in existing_map:
-            values.append(value)
-            profile[key] = values
-
-        canonical = existing_map.get(normalized, value)
-        entry = self._meta_entry(profile, key, canonical)
-        entry["pinned"] = bool(pinned)
-        entry["last_seen_at"] = self._utc_now_iso()
-        if entry.get("status") == self.PROFILE_STATUS_STALE and pinned:
-            entry["status"] = self.PROFILE_STATUS_ACTIVE
-        self.write_profile(profile)
-        return True
+        return self.profile_mgr.set_item_pin(field, text, pinned=pinned)
 
     def mark_item_outdated(self, field: str, text: str) -> bool:
-        key = self._validate_profile_field(field)
-        value = str(text or "").strip()
-        if not value:
-            return False
-
-        profile = self.read_profile()
-        values = self._to_str_list(profile.get(key))
-        normalized = self._norm_text(value)
-        existing = None
-        for item in values:
-            if self._norm_text(item) == normalized:
-                existing = item
-                break
-        if existing is None:
-            return False
-
-        entry = self._meta_entry(profile, key, existing)
-        entry["status"] = self.PROFILE_STATUS_STALE
-        entry["last_seen_at"] = self._utc_now_iso()
-        self.write_profile(profile)
-        return True
+        return self.profile_mgr.mark_item_outdated(field, text)
 
     def list_conflicts(self, *, include_closed: bool = False) -> list[dict[str, Any]]:
-        profile = self.read_profile()
-        conflicts = profile.get("conflicts", [])
-        if not isinstance(conflicts, list):
-            return []
-
-        out: list[dict[str, Any]] = []
-        for idx, item in enumerate(conflicts):
-            if not isinstance(item, dict):
-                continue
-            status = str(item.get("status", self.CONFLICT_STATUS_OPEN)).strip().lower()
-            if not include_closed and status not in {
-                self.CONFLICT_STATUS_OPEN,
-                self.CONFLICT_STATUS_NEEDS_USER,
-            }:
-                continue
-            row = dict(item)
-            row["index"] = idx
-            out.append(row)
-        return out
+        return self.conflict_mgr.list_conflicts(include_closed=include_closed)
 
     @staticmethod
     def _parse_conflict_user_action(text: str) -> str | None:
-        content = str(text or "").strip().lower()
-        if not content:
-            return None
-        keep_old_markers = {"keep 1", "1", "old", "keep old", "keep_old"}
-        keep_new_markers = {"keep 2", "2", "new", "keep new", "keep_new"}
-        dismiss_markers = {"neither", "dismiss", "none", "skip"}
-        merge_markers = {"merge", "combine"}
-        if content in keep_old_markers:
-            return "keep_old"
-        if content in keep_new_markers:
-            return "keep_new"
-        if content in dismiss_markers:
-            return "dismiss"
-        if content in merge_markers:
-            return "merge"
-        return None
+        return ConflictManager._parse_conflict_user_action(text)
 
     # Language patterns indicating a correction (new value supersedes old).
-    _CORRECTION_MARKERS: ClassVar[tuple[str, ...]] = (
-        "corrected",
-        "changed to",
-        "updated to",
-        "actually",
-        "replaced by",
-        "switched to",
-        "migrated to",
-    )
+    _CORRECTION_MARKERS = ConflictManager._CORRECTION_MARKERS
 
     def _auto_resolution_action(self, conflict: dict[str, Any]) -> str | None:
-        source = str(conflict.get("source", "")).strip().lower()
-        if source == "live_correction":
-            # Live corrections surface conflicts for user review rather than
-            # silently auto-resolving.  The user explicitly stated a change so
-            # the conflict should be presented via ask_user_for_conflict().
-            return None
-
-        old_conf = self._safe_float(conflict.get("old_confidence"), 0.0)
-        new_conf = self._safe_float(conflict.get("new_confidence"), 0.0)
-        gap = abs(old_conf - new_conf)
-        if gap >= self.conflict_auto_resolve_gap:
-            return "keep_new" if new_conf > old_conf else "keep_old"
-
-        # Temporal recency: when the confidence gap is too narrow, use
-        # timestamps as a tiebreaker — newer facts supersede older ones.
-        old_ts = str(conflict.get("old_last_seen_at", "")).strip()
-        new_ts = str(conflict.get("new_last_seen_at", "")).strip()
-        if old_ts and new_ts and old_ts != new_ts:
-            return "keep_new" if new_ts > old_ts else "keep_old"
-
-        # Correction language: if the *new* value contains correction markers,
-        # treat it as an explicit supersession of the old value.
-        new_text = self._norm_text(str(conflict.get("new", "")))
-        if any(marker in new_text for marker in self._CORRECTION_MARKERS):
-            return "keep_new"
-
-        return None
+        return self.conflict_mgr._auto_resolution_action(conflict)
 
     def auto_resolve_conflicts(self, *, max_items: int = 10) -> dict[str, int]:
-        profile = self.read_profile()
-        conflicts = profile.get("conflicts", [])
-        if not isinstance(conflicts, list):
-            return {"auto_resolved": 0, "needs_user": 0}
-
-        auto_resolved = 0
-        needs_user = 0
-        touched = False
-        for idx, conflict in enumerate(conflicts):
-            if max_items <= 0:
-                break
-            if not isinstance(conflict, dict):
-                continue
-            status = str(conflict.get("status", self.CONFLICT_STATUS_OPEN)).strip().lower()
-            if status not in {self.CONFLICT_STATUS_OPEN, self.CONFLICT_STATUS_NEEDS_USER}:
-                continue
-            max_items -= 1
-
-            action = self._auto_resolution_action(conflict)
-            if action is None:
-                if status != self.CONFLICT_STATUS_NEEDS_USER:
-                    conflict["status"] = self.CONFLICT_STATUS_NEEDS_USER
-                    touched = True
-                needs_user += 1
-                continue
-
-            details = self.resolve_conflict_details(idx, action)
-            if details.get("ok"):
-                auto_resolved += 1
-                continue
-
-            conflict["status"] = self.CONFLICT_STATUS_NEEDS_USER
-            touched = True
-            needs_user += 1
-
-        if touched:
-            self.write_profile(profile)
-        return {"auto_resolved": auto_resolved, "needs_user": needs_user}
+        return self.conflict_mgr.auto_resolve_conflicts(max_items=max_items)
 
     def get_next_user_conflict(self) -> dict[str, Any] | None:
-        """Return the most-recently-asked conflict, or None.
-
-        Only conflicts that have been explicitly presented to the user
-        (``asked_at`` set) are eligible — this prevents ambiguous short
-        replies like "1" from being silently hijacked as conflict resolutions
-        when no conflict question was shown in the current conversation.
-        """
-        conflicts = self.list_conflicts(include_closed=False)
-        if not conflicts:
-            return None
-
-        asked = [c for c in conflicts if isinstance(c.get("asked_at"), str) and c.get("asked_at")]
-        if not asked:
-            return None
-        asked.sort(key=lambda c: str(c.get("asked_at", "")))
-        return asked[0]
+        return self.conflict_mgr.get_next_user_conflict()
 
     def _conflict_relevant_to(self, conflict: dict[str, Any], user_message: str) -> bool:
-        """Return True if the conflict topic overlaps with the user's message."""
-        msg_tokens = self._tokenize(self._norm_text(user_message))
-        if not msg_tokens:
-            return True  # empty message → don't filter
-        old_tokens = self._tokenize(self._norm_text(str(conflict.get("old", ""))))
-        new_tokens = self._tokenize(self._norm_text(str(conflict.get("new", ""))))
-        conflict_tokens = old_tokens | new_tokens
-        if not conflict_tokens:
-            return True
-        overlap = len(msg_tokens & conflict_tokens) / max(len(conflict_tokens), 1)
-        return overlap >= 0.25
+        return self.conflict_mgr._conflict_relevant_to(conflict, user_message)
 
     def ask_user_for_conflict(
         self,
@@ -2343,224 +1669,22 @@ class MemoryStore:
         include_already_asked: bool = False,
         user_message: str = "",
     ) -> str | None:
-        profile = self.read_profile()
-        conflicts = profile.get("conflicts", [])
-        if not isinstance(conflicts, list):
-            return None
-
-        chosen_idx: int | None = None
-        chosen: dict[str, Any] | None = None
-        for idx, item in enumerate(conflicts):
-            if not isinstance(item, dict):
-                continue
-            status = str(item.get("status", self.CONFLICT_STATUS_OPEN)).strip().lower()
-            if status != self.CONFLICT_STATUS_NEEDS_USER:
-                continue
-            if not include_already_asked and item.get("asked_at"):
-                continue
-            # Relevance gate: if the user sent a message, only surface conflicts
-            # whose topic overlaps with the message.  When there is no message
-            # (e.g. interactive session start), skip the gate and show the first.
-            if user_message and not self._conflict_relevant_to(item, user_message):
-                continue
-            chosen_idx = idx
-            chosen = item
-            break
-
-        if chosen_idx is None or chosen is None:
-            return None
-
-        if not chosen.get("asked_at"):
-            chosen["asked_at"] = self._utc_now_iso()
-            self.write_profile(profile)
-
-        old_value = str(chosen.get("old", "")).strip()
-        new_value = str(chosen.get("new", "")).strip()
-
-        # Build richer provenance lines when timestamps are available.
-        old_ts = str(chosen.get("old_last_seen_at", "")).strip()
-        new_ts = str(chosen.get("new_last_seen_at", "")).strip()
-        old_hint = f" (last seen: {old_ts[:10]})" if old_ts else ""
-        new_hint = f" (last seen: {new_ts[:10]})" if new_ts else ""
-
-        return (
-            "I found a memory conflict and need your choice:\n"
-            f"1. {old_value}{old_hint}\n"
-            f"2. {new_value}{new_hint}\n"
-            "Reply with: `keep 1`, `keep 2`, `merge`, or `neither`."
+        return self.conflict_mgr.ask_user_for_conflict(
+            include_already_asked=include_already_asked,
+            user_message=user_message,
         )
 
     def handle_user_conflict_reply(self, text: str) -> dict[str, Any]:
-        action = self._parse_conflict_user_action(text)
-        if action is None:
-            return {"handled": False}
-
-        conflict = self.get_next_user_conflict()
-        if not conflict:
-            return {"handled": False}
-
-        idx = int(conflict.get("index", -1))
-        if idx < 0:
-            return {"handled": False}
-
-        selected = "keep_new" if action == "merge" else action
-        details = self.resolve_conflict_details(index=idx, action=selected)
-        if not details.get("ok"):
-            return {
-                "handled": True,
-                "ok": False,
-                "message": "I couldn't resolve that conflict automatically. Please try `keep 1` or `keep 2`.",
-            }
-
-        return {
-            "handled": True,
-            "ok": True,
-            "message": (
-                f"Resolved conflict #{idx} with action `{selected}` "
-                f"(mem0 op: {details.get('mem0_operation', 'none')})."
-            ),
-        }
+        return self.conflict_mgr.handle_user_conflict_reply(text)
 
     def resolve_conflict_details(self, index: int, action: str) -> dict[str, Any]:
-        result: dict[str, Any] = {
-            "ok": False,
-            "index": index,
-            "action": str(action or "").strip().lower(),
-            "field": "",
-            "old": "",
-            "new": "",
-            "old_memory_id": "",
-            "new_memory_id": "",
-            "mem0_operation": "none",
-            "mem0_ok": False,
-        }
-        profile = self.read_profile()
-        conflicts = profile.get("conflicts", [])
-        if not isinstance(conflicts, list) or index < 0 or index >= len(conflicts):
-            return result
-
-        conflict = conflicts[index]
-        if not isinstance(conflict, dict) or str(
-            conflict.get("status", "")
-        ).strip().lower() not in {
-            self.CONFLICT_STATUS_OPEN,
-            self.CONFLICT_STATUS_NEEDS_USER,
-        }:
-            return result
-
-        field = str(conflict.get("field", ""))
-        result["field"] = field
-        try:
-            key = self._validate_profile_field(field)
-        except ValueError:
-            return result
-
-        old_value = str(conflict.get("old", "")).strip()
-        new_value = str(conflict.get("new", "")).strip()
-        result["old"] = old_value
-        result["new"] = new_value
-        values = self._to_str_list(profile.get(key))
-        old_memory_id = str(
-            conflict.get("old_memory_id", "")
-        ).strip() or self._find_mem0_id_for_text(old_value)
-        new_memory_id = str(
-            conflict.get("new_memory_id", "")
-        ).strip() or self._find_mem0_id_for_text(new_value)
-        if old_memory_id:
-            conflict["old_memory_id"] = old_memory_id
-        if new_memory_id:
-            conflict["new_memory_id"] = new_memory_id
-
-        result["old_memory_id"] = old_memory_id
-        result["new_memory_id"] = new_memory_id
-
-        def _remove_value(values_in: list[str], target: str) -> list[str]:
-            target_norm = self._norm_text(target)
-            return [v for v in values_in if self._norm_text(v) != target_norm]
-
-        selected = str(action or "").strip().lower()
-        mem0_ok = False
-        if selected == "keep_old":
-            if new_memory_id:
-                mem0_ok = self.mem0.delete(new_memory_id)
-                result["mem0_operation"] = "delete_new"
-            else:
-                mem0_ok = True
-                result["mem0_operation"] = "none"
-            values = _remove_value(values, new_value)
-            old_entry = self._meta_entry(profile, key, old_value)
-            self._touch_meta_entry(
-                old_entry, confidence_delta=0.08, status=self.PROFILE_STATUS_ACTIVE
-            )
-            new_entry = self._meta_entry(profile, key, new_value)
-            new_entry["status"] = self.PROFILE_STATUS_STALE
-        elif selected == "keep_new":
-            clean_new_value = self._sanitize_mem0_text(new_value, allow_archival=False) or new_value
-            if old_memory_id:
-                mem0_ok = self.mem0.update(old_memory_id, clean_new_value)
-                result["mem0_operation"] = "update_old_to_new"
-                if mem0_ok and new_memory_id and new_memory_id != old_memory_id:
-                    self.mem0.delete(new_memory_id)
-                    conflict["new_memory_id"] = old_memory_id
-                    result["new_memory_id"] = old_memory_id
-            else:
-                conflict_metadata, _ = self._normalize_memory_metadata(
-                    {
-                        "topic": "conflict_resolution",
-                        "memory_type": "semantic",
-                        "stability": "high",
-                    },
-                    event_type="fact",
-                    summary=clean_new_value,
-                    source="chat",
-                )
-                conflict_metadata.update({"event_type": "conflict_resolution", "field": key})
-                conflict_metadata = self._sanitize_mem0_metadata(conflict_metadata)
-                mem0_ok = (
-                    self.mem0.add_text(
-                        clean_new_value,
-                        metadata=conflict_metadata,
-                    )
-                    if clean_new_value
-                    else False
-                )
-                if mem0_ok:
-                    result["mem0_operation"] = "add_new"
-            values = _remove_value(values, old_value)
-            new_entry = self._meta_entry(profile, key, new_value)
-            self._touch_meta_entry(
-                new_entry, confidence_delta=0.08, status=self.PROFILE_STATUS_ACTIVE
-            )
-            old_entry = self._meta_entry(profile, key, old_value)
-            old_entry["status"] = self.PROFILE_STATUS_STALE
-        elif selected == "dismiss":
-            mem0_ok = True
-            result["mem0_operation"] = "none"
-            old_entry = self._meta_entry(profile, key, old_value)
-            new_entry = self._meta_entry(profile, key, new_value)
-            old_entry["status"] = self.PROFILE_STATUS_ACTIVE
-            new_entry["status"] = self.PROFILE_STATUS_ACTIVE
-        else:
-            return result
-
-        result["mem0_ok"] = mem0_ok
-        if not mem0_ok and self.mem0.enabled:
-            return result
-
-        profile[key] = values
-        conflict["status"] = self.CONFLICT_STATUS_RESOLVED
-        conflict["resolution"] = selected
-        conflict["resolved_at"] = self._utc_now_iso()
-        self.write_profile(profile)
-        result["ok"] = True
-        return result
+        return self.conflict_mgr.resolve_conflict_details(index, action)
 
     def resolve_conflict(self, index: int, action: str) -> bool:
-        return bool(self.resolve_conflict_details(index, action).get("ok"))
+        return self.conflict_mgr.resolve_conflict(index, action)
 
     def write_profile(self, profile: dict[str, Any]) -> None:
-        profile["updated_at"] = self._utc_now_iso()
-        self.persistence.write_json(self.profile_file, profile)
+        self.profile_mgr.write_profile(profile)
 
     def _build_event_id(self, event_type: str, summary: str, timestamp: str) -> str:
         raw = f"{self._norm_text(event_type)}|{self._norm_text(summary)}|{timestamp[:16]}"
@@ -2673,16 +1797,12 @@ class MemoryStore:
         # Local BM25 retrieval with intent routing when mem0 is unavailable.
         if not self.mem0.enabled:
             events = self.read_events()
-            intent = self._infer_retrieval_intent(query)
-            policy = self._retrieval_policy(intent)
+            plan = self._planner.plan(query)
+            policy = plan.policy
             candidate_k = max(1, min(top_k * int(policy.get("candidate_multiplier", 3)), 60))
             half_life = recency_half_life_days or float(policy.get("half_life_days", 60.0))
 
-            # Detect queries about superseded/stale items.
-            q_lower = str(query or "").lower()
-            wants_superseded = any(
-                m in q_lower for m in ("supersede", "stale", "older fact", "replaced")
-            )
+            wants_superseded = plan.include_superseded
 
             # Graph query augmentation: expand search terms with related entities.
             augmented_query = query
@@ -2849,8 +1969,13 @@ class MemoryStore:
         type_separation_enabled: bool,
         reflection_enabled: bool,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        intent = self._infer_retrieval_intent(query) if router_enabled else "fact_lookup"
-        policy = self._retrieval_policy(intent)
+        planner = RetrievalPlanner(
+            router_enabled=router_enabled,
+            type_separation_enabled=type_separation_enabled,
+        )
+        plan = planner.plan(query)
+        intent = plan.intent
+        policy = plan.policy
         candidate_multiplier = (
             max(int(policy.get("candidate_multiplier", 3)), 1) if router_enabled else 1
         )
@@ -3010,7 +2135,7 @@ class MemoryStore:
         adjusted: list[dict[str, Any]] = []
         reflection_filtered_non_reflection_intent = 0
         reflection_filtered_no_evidence = 0
-        routing_hints = self._query_routing_hints(query)
+        routing_hints = plan.routing_hints
         for item in retrieved:
             event_type = str(item.get("type", "fact"))
             memory_type = self._memory_type_for_item(item)
@@ -3332,92 +2457,23 @@ class MemoryStore:
     def _profile_section_lines(
         self, profile: dict[str, Any], max_items_per_section: int = 6
     ) -> list[str]:
-        lines: list[str] = []
-        title_map = {
-            "preferences": "Preferences",
-            "stable_facts": "Stable Facts",
-            "active_projects": "Active Projects",
-            "relationships": "Relationships",
-            "constraints": "Constraints",
-        }
-        for key in self.PROFILE_KEYS:
-            values = self._to_str_list(profile.get(key))
-            if not values:
-                continue
-            section_meta = self._meta_section(profile, key)
-            scored_values: list[tuple[str, float, int]] = []
-            for value in values:
-                meta = (
-                    section_meta.get(self._norm_text(value), {})
-                    if isinstance(section_meta, dict)
-                    else {}
-                )
-                status = meta.get("status") if isinstance(meta, dict) else None
-                pinned = bool(meta.get("pinned")) if isinstance(meta, dict) else False
-                if status == self.PROFILE_STATUS_STALE and not pinned:
-                    continue
-                conf = self._safe_float(
-                    meta.get("confidence") if isinstance(meta, dict) else None, 0.65
-                )
-                pin_rank = 1 if pinned else 0
-                scored_values.append((value, conf, pin_rank))
-            scored_values.sort(key=lambda item: (item[2], item[1]), reverse=True)
-            if not scored_values:
-                continue
-            lines.append(f"### {title_map[key]}")
-            for item, confidence, pin_rank in scored_values[:max_items_per_section]:
-                pin_suffix = " 📌" if pin_rank else ""
-                lines.append(f"- {item} (conf={confidence:.2f}){pin_suffix}")
-            lines.append("")
-        return lines
+        return self._assembler._profile_section_lines(profile, max_items_per_section)
 
     @staticmethod
     def _is_resolved_task_or_decision(summary: str) -> bool:
-        text = summary.lower()
-        resolved_markers = (
-            "done",
-            "completed",
-            "resolved",
-            "closed",
-            "finished",
-            "cancelled",
-            "canceled",
-        )
-        return any(marker in text for marker in resolved_markers)
+        return ContextAssembler._is_resolved_task_or_decision(summary)
 
     def _recent_unresolved(
         self, events: list[dict[str, Any]], max_items: int = 8
     ) -> list[dict[str, Any]]:
-        unresolved: list[dict[str, Any]] = []
-        for event in reversed(events):
-            event_type = str(event.get("type", ""))
-            if event_type not in {"task", "decision"}:
-                continue
-            status = str(event.get("status", "")).strip().lower()
-            if status == self.EPISODIC_STATUS_RESOLVED:
-                continue
-            summary = str(event.get("summary", "")).strip()
-            if not summary or self._is_resolved_task_or_decision(summary):
-                continue
-            unresolved.append(event)
-            if len(unresolved) >= max_items:
-                break
-        unresolved.reverse()
-        return unresolved
+        return self._assembler._recent_unresolved(events, max_items)
 
     @staticmethod
     def _memory_item_line(item: dict[str, Any]) -> str:
-        timestamp = str(item.get("timestamp", ""))[:16]
-        event_type = item.get("type", "fact")
-        summary = item.get("summary", "")
-        reason = item.get("retrieval_reason", {})
-        return (
-            f"- [{timestamp}] ({event_type}) {summary} "
-            f"[sem={reason.get('semantic', 0):.2f}, rec={reason.get('recency', 0):.2f}, src={reason.get('provider', 'mem0')}]"
-        )
+        return ContextAssembler._memory_item_line(item)
 
     # ------------------------------------------------------------------
-    # MEMORY.md capping (Step 5)
+    # MEMORY.md capping (Step 5) — delegates to ContextAssembler (LAN-210)
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -3427,19 +2483,7 @@ class MemoryStore:
         Sections are delimited by ``## `` headings.  Text before the first
         heading is returned with heading ``""``.
         """
-        import re
-
-        parts = re.split(r"(?m)^(## .+)$", text)
-        sections: list[tuple[str, str]] = []
-        if parts and not parts[0].startswith("## "):
-            preamble = parts.pop(0).strip()
-            if preamble:
-                sections.append(("", preamble))
-        while parts:
-            heading = parts.pop(0).strip()
-            body = parts.pop(0).strip() if parts else ""
-            sections.append((heading, body))
-        return sections
+        return ContextAssembler._split_md_sections(text)
 
     def _cap_long_term_text(
         self,
@@ -3447,157 +2491,20 @@ class MemoryStore:
         token_cap: int,
         query: str,
     ) -> str:
-        """Return *long_term_text* capped to *token_cap* tokens.
-
-        When the full text exceeds the cap, sections are ranked by a simple
-        keyword-overlap score against *query* and the top sections that fit
-        within the budget are selected (most relevant first).
-        """
-        if token_cap <= 0 or not long_term_text:
-            return long_term_text
-
-        if self._estimate_tokens(long_term_text) <= token_cap:
-            return long_term_text
-
-        sections = self._split_md_sections(long_term_text)
-        if not sections:
-            # No headings — hard-truncate
-            chars = token_cap * 4
-            return long_term_text[:chars].rsplit("\n", 1)[0] + "\n(long-term memory truncated)"
-
-        # Score each section by keyword overlap with the query
-        query_words = set(query.lower().split()) if query else set()
-
-        def _score(heading: str, body: str) -> float:
-            text_words = set((heading + " " + body).lower().split())
-            overlap = len(query_words & text_words)
-            # Boost: shorter sections cost less budget and are proportionally more valuable
-            brevity = 1.0 / max(1, self._estimate_tokens(body) / 100)
-            return overlap + brevity * 0.5
-
-        scored = sorted(
-            sections,
-            key=lambda s: _score(s[0], s[1]),
-            reverse=True,
-        )
-
-        selected: list[tuple[str, str]] = []
-        used = 0
-        for heading, body in scored:
-            section_text = f"{heading}\n{body}" if heading else body
-            section_tokens = self._estimate_tokens(section_text)
-            if used + section_tokens > token_cap and selected:
-                break
-            selected.append((heading, body))
-            used += section_tokens
-
-        # Preserve original ordering
-        original_order = {id(s): i for i, s in enumerate(sections)}
-        selected.sort(key=lambda s: original_order.get(id(s), 0))
-
-        out_parts = []
-        for heading, body in selected:
-            if heading:
-                out_parts.append(f"{heading}\n{body}")
-            else:
-                out_parts.append(body)
-
-        result = "\n\n".join(out_parts)
-        if len(selected) < len(sections):
-            result += "\n(some long-term memory sections omitted to fit context budget)"
-        return result
+        """Return *long_term_text* capped to *token_cap* tokens."""
+        return self._assembler._cap_long_term_text(long_term_text, token_cap, query)
 
     def _fit_lines_to_token_cap(self, lines: list[str], *, token_cap: int) -> list[str]:
-        if token_cap <= 0 or not lines:
-            return []
-        out: list[str] = []
-        used = 0
-        for line in lines:
-            line_tokens = self._estimate_tokens(line)
-            if out and used + line_tokens > token_cap:
-                out.append("- ... (section truncated to token budget)")
-                break
-            out.append(line)
-            used += line_tokens
-        return out
+        return self._assembler._fit_lines_to_token_cap(lines, token_cap=token_cap)
 
     # ------------------------------------------------------------------
-    # Budget-aware context section allocation
+    # Budget-aware context section allocation — delegates to ContextAssembler
     # ------------------------------------------------------------------
 
-    # Intent → per-section priority weights.  Higher weight means the
-    # section receives a larger share of the total token budget.  Weights
-    # are relative — they're normalised to sum to 1.0 during allocation.
-    _SECTION_PRIORITY_WEIGHTS: dict[str, dict[str, float]] = {
-        "fact_lookup": {
-            "long_term": 0.28,
-            "profile": 0.23,
-            "semantic": 0.20,
-            "episodic": 0.05,
-            "reflection": 0.00,
-            "graph": 0.19,
-            "unresolved": 0.05,
-        },
-        "debug_history": {
-            "long_term": 0.15,
-            "profile": 0.10,
-            "semantic": 0.10,
-            "episodic": 0.35,
-            "reflection": 0.05,
-            "graph": 0.15,
-            "unresolved": 0.10,
-        },
-        "planning": {
-            "long_term": 0.15,
-            "profile": 0.15,
-            "semantic": 0.20,
-            "episodic": 0.20,
-            "reflection": 0.05,
-            "graph": 0.15,
-            "unresolved": 0.10,
-        },
-        "reflection": {
-            "long_term": 0.15,
-            "profile": 0.10,
-            "semantic": 0.15,
-            "episodic": 0.10,
-            "reflection": 0.25,
-            "graph": 0.15,
-            "unresolved": 0.10,
-        },
-        "constraints_lookup": {
-            "long_term": 0.19,
-            "profile": 0.28,
-            "semantic": 0.24,
-            "episodic": 0.05,
-            "reflection": 0.00,
-            "graph": 0.19,
-            "unresolved": 0.05,
-        },
-        "rollout_status": {
-            "long_term": 0.25,
-            "profile": 0.15,
-            "semantic": 0.30,
-            "episodic": 0.00,
-            "reflection": 0.00,
-            "graph": 0.20,
-            "unresolved": 0.10,
-        },
-        "conflict_review": {
-            "long_term": 0.15,
-            "profile": 0.20,
-            "semantic": 0.20,
-            "episodic": 0.15,
-            "reflection": 0.00,
-            "graph": 0.20,
-            "unresolved": 0.10,
-        },
-    }
-
-    # Minimum token allocation per section — ensures every section gets at
-    # least this much budget regardless of priority weight, as long as the
-    # section has content.  A section with zero weight or no content gets 0.
-    _SECTION_MIN_TOKENS = 40
+    # Keep class-level constants as aliases so test code referencing
+    # MemoryStore._SECTION_PRIORITY_WEIGHTS / ._SECTION_MIN_TOKENS still works.
+    _SECTION_PRIORITY_WEIGHTS = ContextAssembler._SECTION_PRIORITY_WEIGHTS
+    _SECTION_MIN_TOKENS = ContextAssembler._SECTION_MIN_TOKENS
 
     @classmethod
     def _allocate_section_budgets(
@@ -3606,73 +2513,46 @@ class MemoryStore:
         intent: str,
         section_sizes: dict[str, int],
     ) -> dict[str, int]:
-        """Distribute *total_budget* tokens across named sections.
+        """Distribute *total_budget* tokens across named sections."""
+        return ContextAssembler._allocate_section_budgets(total_budget, intent, section_sizes)
 
-        Uses a two-pass proportional allocation:
+    def _ensure_assembler(self) -> ContextAssembler:
+        """Return a ``ContextAssembler``, creating it lazily if needed.
 
-        1. **Priority pass** — each section gets a share proportional to its
-           intent-specific weight, capped at its actual content size.
-        2. **Redistribution pass** — tokens freed by sections that are
-           smaller than their share are redistributed to sections that need
-           more space, again proportionally by weight.
+        Lazy creation supports test code that constructs ``MemoryStore`` via
+        ``__new__`` (bypassing ``__init__``) and then monkeypatches methods
+        before calling ``get_memory_context``.
 
-        Parameters
-        ----------
-        total_budget:
-            Total token budget for the combined memory context.
-        intent:
-            Query intent string (drives prioritisation weights).
-        section_sizes:
-            Mapping of section name → estimated token count of the **full**
-            (untruncated) content for that section.  Sections missing from
-            the map or with size 0 receive no allocation.
-
-        Returns
-        -------
-        dict mapping section name → allocated token budget.
+        All patchable helper methods are routed through lambdas that capture
+        ``self``, so monkeypatches applied to the store instance are always
+        honoured — even when applied after the assembler is first created.
         """
-        weights = cls._SECTION_PRIORITY_WEIGHTS.get(
-            intent,
-            cls._SECTION_PRIORITY_WEIGHTS["fact_lookup"],
+        # Fast path: already initialised (either by __init__ or a previous call).
+        assembler = getattr(self, "_assembler", None)
+        if isinstance(assembler, ContextAssembler):
+            return assembler
+
+        # Use getattr for attrs that may be missing when __init__ was bypassed
+        # (e.g. test code using MemoryStore.__new__).
+        profile_mgr = getattr(self, "profile_mgr", None)
+        persistence = getattr(self, "persistence", None)
+        planner = getattr(self, "_planner", None) or RetrievalPlanner()
+
+        self._assembler = ContextAssembler(
+            profile_mgr=profile_mgr,  # type: ignore[arg-type]
+            retrieve_fn=lambda *a, **kw: self.retrieve(*a, **kw),
+            persistence=persistence,  # type: ignore[arg-type]
+            planner=planner,
+            read_events_fn=lambda **kw: self.read_events(**kw),
+            read_long_term_fn=lambda: self.read_long_term(),
+            build_graph_context_lines_fn=lambda *a, **kw: self._build_graph_context_lines(*a, **kw),
+            cap_long_term_text_fn=lambda text, cap, query: self._cap_long_term_text(
+                text, cap, query
+            ),
+            profile_section_lines_fn=lambda profile, *a: self._profile_section_lines(profile, *a),
+            read_profile_fn=lambda: self.read_profile(),
         )
-
-        # Filter to sections that actually have content *and* non-zero weight.
-        active: dict[str, float] = {}
-        for name, weight in weights.items():
-            size = section_sizes.get(name, 0)
-            if size > 0 and weight > 0:
-                active[name] = weight
-
-        if not active:
-            return {name: 0 for name in weights}
-
-        total_weight = sum(active.values())
-        allocations: dict[str, int] = {name: 0 for name in weights}
-
-        # Pass 1: proportional allocation capped at actual size.
-        surplus = 0
-        uncapped: dict[str, float] = {}
-        for name, weight in active.items():
-            share = int(total_budget * (weight / total_weight))
-            actual_size = section_sizes.get(name, 0)
-            if share >= actual_size:
-                # Section fits entirely — cap and reclaim the surplus.
-                allocations[name] = actual_size
-                surplus += share - actual_size
-            else:
-                # Section needs more than its share.
-                allocations[name] = max(share, cls._SECTION_MIN_TOKENS)
-                uncapped[name] = weight
-
-        # Pass 2: redistribute surplus to sections that couldn't fit.
-        if surplus > 0 and uncapped:
-            uncapped_total = sum(uncapped.values())
-            for name, weight in uncapped.items():
-                extra = int(surplus * (weight / uncapped_total))
-                actual_size = section_sizes.get(name, 0)
-                allocations[name] = min(allocations[name] + extra, actual_size)
-
-        return allocations
+        return self._assembler
 
     def get_memory_context(
         self,
@@ -3685,190 +2565,18 @@ class MemoryStore:
         recency_half_life_days: float | None = None,
         embedding_provider: str | None = None,
     ) -> str:
-        intent = self._infer_retrieval_intent(query or "")
-        long_term = self.read_long_term()
-
-        profile = self.read_profile()
-        try:
-            retrieved = self.retrieve(
-                query or "",
-                top_k=retrieval_k,
-                recency_half_life_days=recency_half_life_days,
-                embedding_provider=embedding_provider,
-            )
-        except Exception:  # crash-barrier: multi-subsystem retrieval pipeline
-            logger.warning("Memory retrieval failed; continuing with local data only")
-            retrieved = []
-
-        budget = max(token_budget, 200)
-
-        # Determine which sections to include based on intent.
-        # Episodic is always included now (soft gating via budget weight),
-        # but gets higher weight for debug/planning/reflection/conflict intents.
-        include_episodic = True
-        include_reflection = intent == "reflection"
-
-        # ── Phase 1: build raw (untruncated) content for every section ──
-
-        long_term_text = long_term.strip() if long_term else ""
-
-        profile_lines = self._profile_section_lines(profile)
-        profile_text = "\n".join(profile_lines).strip() if profile_lines else ""
-
-        semantic_items = [
-            item for item in retrieved if self._memory_type_for_item(item) == "semantic"
-        ]
-        episodic_items = [
-            item for item in retrieved if self._memory_type_for_item(item) == "episodic"
-        ]
-        reflection_items = [
-            item for item in retrieved if self._memory_type_for_item(item) == "reflection"
-        ]
-
-        raw_semantic = [self._memory_item_line(item) for item in semantic_items]
-        raw_episodic = [self._memory_item_line(item) for item in episodic_items]
-        raw_reflection = [self._memory_item_line(item) for item in reflection_items]
-
-        raw_graph: list[str] = []
-        if query:
-            raw_graph = self._build_graph_context_lines(
-                query,
-                retrieved,
-                max_tokens=budget,
-            )
-
-        unresolved: list[dict[str, Any]] = (
-            self._recent_unresolved(self.read_events(limit=60), max_items=6)
-            if intent in _UNRESOLVED_INTENTS
-            else []
+        return self._ensure_assembler().build(
+            query=query,
+            retrieval_k=retrieval_k,
+            token_budget=token_budget,
+            memory_md_token_cap=memory_md_token_cap,
+            mode=mode,
+            recency_half_life_days=recency_half_life_days,
+            embedding_provider=embedding_provider,
         )
-        raw_unresolved: list[str] = []
-        if include_episodic and unresolved:
-            for item in unresolved:
-                ts = str(item.get("timestamp", ""))[:16]
-                raw_unresolved.append(
-                    f"- [{ts}] ({item.get('type', 'task')}) {item.get('summary', '')}"
-                )
-
-        # ── Phase 2: measure raw sizes and allocate budget ──
-
-        raw_long_term_tokens = self._estimate_tokens(long_term_text)
-        capped_long_term_tokens = (
-            min(raw_long_term_tokens, memory_md_token_cap)
-            if memory_md_token_cap > 0
-            else raw_long_term_tokens
-        )
-
-        section_sizes: dict[str, int] = {
-            "long_term": capped_long_term_tokens,
-            "profile": self._estimate_tokens(profile_text),
-            "semantic": self._estimate_tokens("\n".join(raw_semantic)),
-            "episodic": self._estimate_tokens("\n".join(raw_episodic)) if include_episodic else 0,
-            "reflection": (
-                self._estimate_tokens("\n".join(raw_reflection)) if include_reflection else 0
-            ),
-            "graph": self._estimate_tokens("\n".join(raw_graph)),
-            "unresolved": self._estimate_tokens("\n".join(raw_unresolved)),
-        }
-
-        alloc = self._allocate_section_budgets(budget, intent, section_sizes)
-
-        # ── Phase 3: fit each section to its allocated budget ──
-
-        if long_term_text and alloc["long_term"] > 0:
-            long_term_text = self._cap_long_term_text(
-                long_term_text, alloc["long_term"], query or ""
-            )
-
-        semantic_lines = self._fit_lines_to_token_cap(
-            raw_semantic,
-            token_cap=alloc["semantic"],
-        )
-        episodic_lines = self._fit_lines_to_token_cap(
-            raw_episodic,
-            token_cap=alloc["episodic"],
-        )
-        reflection_lines = self._fit_lines_to_token_cap(
-            raw_reflection,
-            token_cap=alloc["reflection"],
-        )
-        graph_lines = self._fit_lines_to_token_cap(
-            raw_graph,
-            token_cap=alloc["graph"],
-        )
-        unresolved_lines = self._fit_lines_to_token_cap(
-            raw_unresolved,
-            token_cap=alloc["unresolved"],
-        )
-        fitted_profile_lines = self._fit_lines_to_token_cap(
-            profile_lines,
-            token_cap=alloc["profile"],
-        )
-
-        # ── Phase 4: assemble in logical presentation order ──
-
-        lines: list[str] = []
-
-        if long_term_text:
-            lines.append("## Long-term Memory (project-specific — cite these verbatim)")
-            lines.append(long_term_text)
-
-        if fitted_profile_lines:
-            lines.append("## Profile Memory")
-            lines.append("User-specific facts, preferences, and constraints:")
-            lines.extend(fitted_profile_lines)
-
-        if semantic_lines:
-            lines.append("## Relevant Semantic Memories")
-            lines.append("Retrieved factual knowledge (use these exact terms when answering):")
-            lines.extend(semantic_lines)
-
-        if graph_lines:
-            lines.append("## Entity Graph")
-            lines.append("Verified entity relationships:")
-            lines.extend(graph_lines)
-
-        if episodic_lines:
-            lines.append("## Relevant Episodic Memories")
-            lines.append("Past events and interactions (cite specific details):")
-            lines.extend(episodic_lines)
-
-        if include_reflection and reflection_lines:
-            lines.append("## Relevant Reflection Memories")
-            lines.extend(reflection_lines)
-
-        if unresolved_lines:
-            lines.append("## Recent Unresolved Tasks/Decisions")
-            lines.extend(unresolved_lines)
-
-        text = "\n".join(lines).strip()
-
-        # Final safety net — should rarely trigger now that every section
-        # is individually budget-capped, but guards against heading overhead.
-        max_chars = budget * 4
-        if len(text) > max_chars:
-            text = (
-                text[:max_chars].rsplit("\n", 1)[0]
-                + "\n- ... (memory context truncated to token budget)"
-            )
-
-        return text
 
     def _conflict_pair(self, old_value: str, new_value: str) -> bool:
-        old_n = self._norm_text(old_value)
-        new_n = self._norm_text(new_value)
-        if not old_n or not new_n or old_n == new_n:
-            return False
-        old_has_not = " not " in f" {old_n} " or "n't" in old_n
-        new_has_not = " not " in f" {new_n} " or "n't" in new_n
-        if old_has_not == new_has_not:
-            return False
-        old_tokens = self._tokenize(old_n.replace("not", ""))
-        new_tokens = self._tokenize(new_n.replace("not", ""))
-        if not old_tokens or not new_tokens:
-            return False
-        overlap = len(old_tokens & new_tokens) / max(len(old_tokens | new_tokens), 1)
-        return overlap >= 0.55
+        return self.profile_mgr._conflict_pair(old_value, new_value)
 
     def _apply_profile_updates(
         self,
@@ -3876,119 +2584,24 @@ class MemoryStore:
         updates: dict[str, list[str]],
         *,
         enable_contradiction_check: bool,
+        source_event_ids: list[str] | None = None,
     ) -> tuple[int, int, int]:
-        added = 0
-        conflicts = 0
-        touched = 0
-        profile.setdefault("conflicts", [])
-
-        for key in self.PROFILE_KEYS:
-            values = self._to_str_list(profile.get(key))
-            seen = {self._norm_text(v) for v in values}
-            for candidate in self._to_str_list(updates.get(key)):
-                normalized = self._norm_text(candidate)
-                if not normalized:
-                    continue
-
-                if normalized in seen:
-                    entry = self._meta_entry(profile, key, candidate)
-                    self._touch_meta_entry(
-                        entry, confidence_delta=0.03, status=self.PROFILE_STATUS_ACTIVE
-                    )
-                    touched += 1
-                    continue
-
-                has_conflict = False
-                if enable_contradiction_check:
-                    for existing in values:
-                        if self._conflict_pair(existing, candidate):
-                            has_conflict = True
-                            old_entry = self._meta_entry(profile, key, existing)
-                            self._touch_meta_entry(
-                                old_entry,
-                                confidence_delta=-0.12,
-                                status=self.PROFILE_STATUS_CONFLICTED,
-                            )
-                            new_entry = self._meta_entry(profile, key, candidate)
-                            self._touch_meta_entry(
-                                new_entry,
-                                confidence_delta=-0.2,
-                                min_confidence=0.35,
-                                status=self.PROFILE_STATUS_CONFLICTED,
-                            )
-                            profile["conflicts"].append(
-                                {
-                                    "timestamp": self._utc_now_iso(),
-                                    "field": key,
-                                    "old": existing,
-                                    "new": candidate,
-                                    "old_memory_id": self._find_mem0_id_for_text(existing),
-                                    "new_memory_id": self._find_mem0_id_for_text(candidate),
-                                    "status": self.CONFLICT_STATUS_OPEN,
-                                    "old_confidence": old_entry.get("confidence"),
-                                    "new_confidence": new_entry.get("confidence"),
-                                    "old_last_seen_at": old_entry.get("last_seen_at", ""),
-                                    "new_last_seen_at": new_entry.get("last_seen_at", ""),
-                                }
-                            )
-                            conflicts += 1
-                            touched += 2
-                            break
-
-                values.append(candidate)
-                seen.add(normalized)
-                entry = self._meta_entry(profile, key, candidate)
-                if not has_conflict:
-                    self._touch_meta_entry(
-                        entry, confidence_delta=0.1, status=self.PROFILE_STATUS_ACTIVE
-                    )
-                    touched += 1
-                added += 1
-
-            profile[key] = values
-
-        return added, conflicts, touched
+        return self.profile_mgr._apply_profile_updates(
+            profile,
+            updates,
+            enable_contradiction_check=enable_contradiction_check,
+            source_event_ids=source_event_ids,
+        )
 
     def _has_open_conflict(
         self, profile: dict[str, Any], *, field: str, old_value: str, new_value: str
     ) -> bool:
-        old_norm = self._norm_text(old_value)
-        new_norm = self._norm_text(new_value)
-        for item in profile.get("conflicts", []):
-            if not isinstance(item, dict):
-                continue
-            status = str(item.get("status", self.CONFLICT_STATUS_OPEN)).strip().lower()
-            if status not in {self.CONFLICT_STATUS_OPEN, self.CONFLICT_STATUS_NEEDS_USER}:
-                continue
-            if item.get("field") != field:
-                continue
-            if self._norm_text(str(item.get("old", ""))) != old_norm:
-                continue
-            if self._norm_text(str(item.get("new", ""))) != new_norm:
-                continue
-            return True
-        return False
+        return self.profile_mgr._has_open_conflict(
+            profile, field=field, old_value=old_value, new_value=new_value
+        )
 
     def _find_mem0_id_for_text(self, text: str, *, top_k: int = 8) -> str | None:
-        target = self._norm_text(text)
-        if not target or not self.mem0.enabled:
-            return None
-        search_result = self.mem0.search(text, top_k=top_k)
-        if isinstance(search_result, tuple) and len(search_result) == 2:
-            rows = search_result[0]
-        else:
-            rows = search_result if isinstance(search_result, list) else []
-        if not rows:
-            return None
-
-        for row in rows:
-            summary = self._norm_text(str(row.get("summary", "")))
-            if summary and (summary == target or target in summary or summary in target):
-                value = str(row.get("id", "")).strip()
-                if value:
-                    return value
-        value = str(rows[0].get("id", "")).strip()
-        return value or None
+        return self.profile_mgr._find_mem0_id_for_text(text, top_k=top_k)
 
     def apply_live_user_correction(
         self,
@@ -3998,171 +2611,12 @@ class MemoryStore:
         chat_id: str = "",
         enable_contradiction_check: bool = True,
     ) -> dict[str, Any]:
-        text = str(content or "").strip()
-        if not text:
-            return {"applied": 0, "conflicts": 0, "events": 0, "needs_user": 0, "question": None}
-
-        preference_corrections = self.extractor.extract_explicit_preference_corrections(text)
-        fact_corrections = self.extractor.extract_explicit_fact_corrections(text)
-        if not preference_corrections and not fact_corrections:
-            return {"applied": 0, "conflicts": 0, "events": 0, "needs_user": 0, "question": None}
-
-        profile = self.read_profile()
-        profile.setdefault("conflicts", [])
-        applied = 0
-        conflicts = 0
-        events: list[dict[str, Any]] = []
-
-        def _apply_field_corrections(
-            *,
-            field: str,
-            event_type: str,
-            correction_label: str,
-            correction_pairs: list[tuple[str, str]],
-        ) -> tuple[int, int]:
-            local_applied = 0
-            local_conflicts = 0
-            values = self._to_str_list(profile.get(field))
-            by_norm = {self._norm_text(v): v for v in values}
-
-            for new_value, old_value in correction_pairs:
-                old_norm = self._norm_text(old_value)
-                new_norm = self._norm_text(new_value)
-                if not new_norm:
-                    continue
-
-                if new_norm not in by_norm:
-                    values.append(new_value)
-                    by_norm[new_norm] = new_value
-                    local_applied += 1
-
-                new_entry = self._meta_entry(profile, field, by_norm[new_norm])
-                self._touch_meta_entry(
-                    new_entry, confidence_delta=0.08, status=self.PROFILE_STATUS_ACTIVE
-                )
-
-                if (
-                    enable_contradiction_check
-                    and old_norm in by_norm
-                    and not self._has_open_conflict(
-                        profile,
-                        field=field,
-                        old_value=by_norm[old_norm],
-                        new_value=by_norm[new_norm],
-                    )
-                ):
-                    old_entry = self._meta_entry(profile, field, by_norm[old_norm])
-                    self._touch_meta_entry(
-                        old_entry,
-                        confidence_delta=-0.2,
-                        min_confidence=0.35,
-                        status=self.PROFILE_STATUS_CONFLICTED,
-                    )
-                    self._touch_meta_entry(
-                        new_entry,
-                        confidence_delta=-0.08,
-                        min_confidence=0.35,
-                        status=self.PROFILE_STATUS_CONFLICTED,
-                    )
-                    profile["conflicts"].append(
-                        {
-                            "timestamp": self._utc_now_iso(),
-                            "field": field,
-                            "old": by_norm[old_norm],
-                            "new": by_norm[new_norm],
-                            "old_memory_id": self._find_mem0_id_for_text(by_norm[old_norm]),
-                            "new_memory_id": self._find_mem0_id_for_text(by_norm[new_norm]),
-                            "status": self.CONFLICT_STATUS_OPEN,
-                            "old_confidence": old_entry.get("confidence"),
-                            "new_confidence": new_entry.get("confidence"),
-                            "source": "live_correction",
-                        }
-                    )
-                    local_conflicts += 1
-
-                event = self._coerce_event(
-                    {
-                        "timestamp": self._utc_now_iso(),
-                        "type": event_type,
-                        "summary": f"User corrected {correction_label}: {new_value} (not {old_value}).",
-                        "entities": [new_value, old_value],
-                        "salience": 0.85,
-                        "confidence": 0.9,
-                        "ttl_days": 365,
-                    },
-                    source_span=[0, 0],
-                    channel=channel,
-                    chat_id=chat_id,
-                )
-                if event:
-                    events.append(event)
-
-            profile[field] = values
-            return local_applied, local_conflicts
-
-        pref_applied, pref_conflicts = _apply_field_corrections(
-            field="preferences",
-            event_type="preference",
-            correction_label="preference",
-            correction_pairs=preference_corrections,
+        return self.profile_mgr.apply_live_user_correction(
+            content,
+            channel=channel,
+            chat_id=chat_id,
+            enable_contradiction_check=enable_contradiction_check,
         )
-        fact_applied, fact_conflicts = _apply_field_corrections(
-            field="stable_facts",
-            event_type="fact",
-            correction_label="fact",
-            correction_pairs=fact_corrections,
-        )
-        applied += pref_applied + fact_applied
-        conflicts += pref_conflicts + fact_conflicts
-
-        if not applied and not conflicts:
-            return {"applied": 0, "conflicts": 0, "events": 0, "needs_user": 0, "question": None}
-
-        profile["last_verified_at"] = self._utc_now_iso()
-        self.write_profile(profile)
-
-        events_written = self.append_events(events)
-
-        needs_user = 0
-        question: str | None = None
-        if conflicts > 0:
-            resolution = self.auto_resolve_conflicts(max_items=10)
-            needs_user = int(resolution.get("needs_user", 0))
-            if needs_user > 0:
-                question = self.ask_user_for_conflict()
-
-        if self.mem0.enabled:
-            correction_meta, _ = self._normalize_memory_metadata(
-                {"topic": "user_correction", "memory_type": "episodic", "stability": "medium"},
-                event_type="fact",
-                summary=text,
-                source="chat",
-            )
-            correction_meta.update(
-                {
-                    "event_type": "user_correction",
-                    "timestamp": self._utc_now_iso(),
-                    "channel": channel,
-                    "chat_id": chat_id,
-                }
-            )
-            correction_text = self._sanitize_mem0_text(text, allow_archival=False)
-            correction_meta = self._sanitize_mem0_metadata(correction_meta)
-            if correction_text:
-                self.mem0.add_text(
-                    correction_text,
-                    metadata=correction_meta,
-                )
-
-        # Keep LLM-managed MEMORY.md content stable; snapshot can be generated on-demand.
-        self.rebuild_memory_snapshot(write=False)
-        return {
-            "applied": applied,
-            "conflicts": conflicts,
-            "events": events_written,
-            "needs_user": needs_user,
-            "question": question,
-        }
 
     def read_long_term(self) -> str:
         return self.persistence.read_text(self.memory_file)
@@ -4176,6 +2630,10 @@ class MemoryStore:
     def rebuild_memory_snapshot(self, *, max_events: int = 30, write: bool = True) -> str:
         profile = self.read_profile()
         events = self.read_events(limit=max_events)
+
+        # Preserve user-pinned sections across rebuilds (LAN-199 / LAN-206).
+        existing_memory = self.read_long_term()
+        pinned = self._extract_pinned_section(existing_memory) if existing_memory else None
 
         parts = ["# Memory", ""]
         section_lines = self._profile_section_lines(profile, max_items_per_section=8)
@@ -4196,6 +2654,10 @@ class MemoryStore:
                 ts = str(event.get("timestamp", ""))[:16]
                 parts.append(f"- [{ts}] ({event.get('type', 'fact')}) {event.get('summary', '')}")
         snapshot = "\n".join(parts).strip() + "\n"
+
+        if pinned:
+            snapshot = self._restore_pinned_section(snapshot, pinned)
+
         if write:
             self.write_long_term(snapshot)
         return snapshot
@@ -4255,6 +2717,8 @@ class MemoryStore:
             and str(c.get("status", self.CONFLICT_STATUS_OPEN)).strip().lower()
             in {self.CONFLICT_STATUS_OPEN, self.CONFLICT_STATUS_NEEDS_USER}
         ]
+        belief_quality = self.verify_beliefs()
+
         report = {
             "events": len(events),
             "profile_items": sum(len(self._to_str_list(profile.get(k))) for k in self.PROFILE_KEYS),
@@ -4263,8 +2727,16 @@ class MemoryStore:
             "stale_profile_items": stale_profile_items,
             "ttl_tracked_events": total_ttl,
             "last_verified_at": profile.get("last_verified_at"),
+            "belief_quality": belief_quality["summary"],
         }
         return report
+
+    def verify_beliefs(self) -> dict[str, Any]:
+        """Assess belief health based on evidence quality, not just timestamps.
+
+        Delegates to ``ProfileManager.verify_beliefs`` — see LAN-209.
+        """
+        return self.profile_mgr.verify_beliefs()
 
     def _select_messages_for_consolidation(
         self,
@@ -4308,7 +2780,7 @@ class MemoryStore:
 
     @staticmethod
     def _build_consolidation_prompt(current_memory: str, lines: list[str]) -> str:
-        return f"""Process this conversation and call the save_memory tool with your consolidation.
+        return f"""Process this conversation and call the save_memory tool with a history_entry summarizing key events, decisions, and topics.
 
 ## Current Long-term Memory
 {current_memory or "(empty)"}
@@ -4316,16 +2788,45 @@ class MemoryStore:
 ## Conversation to Process
 {chr(10).join(lines)}"""
 
+    _PINNED_START = "<!-- user-pinned -->"
+    _PINNED_END = "<!-- end-user-pinned -->"
+
+    @classmethod
+    def _extract_pinned_section(cls, text: str) -> str | None:
+        """Extract user-pinned content from MEMORY.md, if present."""
+        start = text.find(cls._PINNED_START)
+        end = text.find(cls._PINNED_END)
+        if start == -1 or end == -1 or end <= start:
+            return None
+        return text[start : end + len(cls._PINNED_END)]
+
+    @classmethod
+    def _restore_pinned_section(cls, new_text: str, pinned: str) -> str:
+        """Re-insert a pinned section into new MEMORY.md content.
+
+        If the new text already contains a pinned fence, replace it.
+        Otherwise insert the pinned block after the first heading.
+        """
+        existing = cls._extract_pinned_section(new_text)
+        if existing:
+            return new_text.replace(existing, pinned)
+        # Insert after the first heading line (or at the top).
+        lines = new_text.split("\n")
+        insert_at = 0
+        for i, line in enumerate(lines):
+            if line.startswith("#"):
+                insert_at = i + 1
+                break
+        lines.insert(insert_at, pinned)
+        return "\n".join(lines)
+
     def _apply_save_memory_tool_result(self, *, args: dict[str, Any], current_memory: str) -> None:
         if entry := args.get("history_entry"):
             if not isinstance(entry, str):
                 entry = json.dumps(entry, ensure_ascii=False)
             self.append_history(entry)
-        if update := args.get("memory_update"):
-            if not isinstance(update, str):
-                update = json.dumps(update, ensure_ascii=False)
-            if update != current_memory:
-                self.write_long_term(update)
+        # memory_update is intentionally ignored (LAN-206): MEMORY.md is now a
+        # pure projection rebuilt deterministically via rebuild_memory_snapshot().
 
     def _finalize_consolidation(
         self, session: Session, *, archive_all: bool, keep_count: int
@@ -4336,6 +2837,33 @@ class MemoryStore:
             len(session.messages),
             session.last_consolidated,
         )
+
+    def _sync_events_to_mem0(self, events: list[dict[str, Any]]) -> int:
+        """Write structured events to mem0 as semantic index entries.
+
+        This is the preferred path for populating mem0 — it indexes the same
+        structured events that are persisted to ``events.jsonl``, ensuring
+        mem0 acts as a **semantic index** rather than a raw transcript store.
+
+        Uses ``_event_mem0_write_plan`` to derive (text, metadata) pairs for
+        each event, matching the logic used by the full reindex path.
+
+        Returns the number of entries successfully written.
+        """
+        written = 0
+        for event in events:
+            for text, raw_metadata in self._event_mem0_write_plan(event):
+                summary = self._sanitize_mem0_text(
+                    text,
+                    allow_archival=bool(raw_metadata.get("archival")),
+                )
+                if not summary:
+                    continue
+                metadata = self._sanitize_mem0_metadata(dict(raw_metadata))
+                metadata["source"] = "events"
+                if self.mem0.add_text(summary, metadata=metadata):
+                    written += 1
+        return written
 
     async def consolidate(
         self,
@@ -4404,10 +2932,13 @@ class MemoryStore:
             )
             events_written = self.append_events(events)
             await self._ingest_graph_triples(events)
+            # Thread event IDs into profile updates for evidence linking (LAN-197).
+            event_ids = [e.get("id", "") for e in events if e.get("id")]
             profile_added, _, profile_touched = self._apply_profile_updates(
                 profile,
                 profile_updates,
                 enable_contradiction_check=enable_contradiction_check,
+                source_event_ids=event_ids,
             )
             if events_written > 0 or profile_added > 0 or profile_touched > 0:
                 profile["last_verified_at"] = self._utc_now_iso()
@@ -4418,10 +2949,17 @@ class MemoryStore:
             if profile_added > 0:
                 self.auto_resolve_conflicts(max_items=10)
 
-            # Keep LLM-managed MEMORY.md content stable; snapshot can be generated on-demand.
-            self.rebuild_memory_snapshot(write=False)
+            # MEMORY.md is a pure projection from profile + events (LAN-206).
+            self.rebuild_memory_snapshot(write=True)
 
-            if self.mem0.enabled:
+            # LAN-208: sync structured events to mem0 as the primary indexing
+            # path — mem0 is a semantic index, not a raw transcript store.
+            if self.mem0.enabled and events:
+                self._sync_events_to_mem0(events)
+
+            # LAN-208: raw conversation turn ingestion — legacy behaviour, gated
+            # behind _mem0_raw_turn_ingestion (default True for backward compat).
+            if self.mem0.enabled and self._mem0_raw_turn_ingestion:
                 for m in old_messages:
                     role = str(m.get("role", "user")).strip().lower() or "user"
                     content = str(m.get("content", "")).strip()
