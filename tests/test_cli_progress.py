@@ -6,8 +6,9 @@ Tests the handler in complete isolation — no CLI stack, no agent loop.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from io import StringIO
-from types import SimpleNamespace
+from typing import cast
 
 from rich.console import Console
 
@@ -20,13 +21,29 @@ from nanobot.agent.callbacks import (
     ToolResultEvent,
 )
 from nanobot.cli.progress import CliProgressHandler
+from nanobot.config.schema import ChannelsConfig
+
+
+@dataclass
+class _FakeChannelsConfig:
+    """Minimal stub for ChannelsConfig in tests.
+
+    Only includes the fields that CliProgressHandler actually uses.
+    """
+
+    send_progress: bool = True
+    send_tool_hints: bool = True
 
 
 def _handler(
     send_progress: bool = True, send_tool_hints: bool = True
 ) -> tuple[CliProgressHandler, StringIO]:
     buf = StringIO()
-    ch = SimpleNamespace(send_progress=send_progress, send_tool_hints=send_tool_hints)
+    fake_config = _FakeChannelsConfig(
+        send_progress=send_progress, send_tool_hints=send_tool_hints
+    )
+    # Cast to ChannelsConfig since we only use send_progress and send_tool_hints
+    ch = cast(ChannelsConfig, fake_config)
     return CliProgressHandler(Console(file=buf, highlight=False), channels_config=ch), buf
 
 
