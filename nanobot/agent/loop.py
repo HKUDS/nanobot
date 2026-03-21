@@ -613,7 +613,7 @@ class AgentLoop:
                     self._sticky_agents.pop(key, None)
                     msg = InboundMessage(
                         channel=msg.channel, chat_id=msg.chat_id,
-                        content=stripped_msg, sender=msg.sender,
+                        content=stripped_msg, sender_id=msg.sender_id,
                         media=msg.media, metadata=msg.metadata,
                     )
                 else:
