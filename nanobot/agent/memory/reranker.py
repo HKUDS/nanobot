@@ -36,11 +36,10 @@ class Reranker(Protocol):
     """Structural interface shared by all re-ranker implementations."""
 
     @property
-    def available(self) -> bool:
+    def available(self) -> bool:  # pragma: no cover
         """Whether the reranker backend is ready to use."""
-        ...  # pragma: no cover
 
-    def rerank(
+    def rerank(  # pragma: no cover
         self,
         query: str,
         items: list[dict[str, Any]],
@@ -48,15 +47,13 @@ class Reranker(Protocol):
         alpha: float | None = None,
     ) -> list[dict[str, Any]]:
         """Re-rank items by relevance to query, blending with heuristic scores."""
-        ...  # pragma: no cover
 
-    def compute_rank_delta(
+    def compute_rank_delta(  # pragma: no cover
         self,
         heuristic_order: list[str],
         reranked_order: list[str],
     ) -> float:
         """Compute displacement between heuristic and reranked orderings."""
-        ...  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
