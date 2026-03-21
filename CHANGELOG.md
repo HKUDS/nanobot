@@ -6,6 +6,10 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Typed progress events**: Replaced the 8-kwarg `ProgressCallback` Protocol with a discriminated union of frozen dataclasses (`TextChunk`, `ToolCallEvent`, `ToolResultEvent`, `DelegateStartEvent`, `DelegateEndEvent`, `StatusEvent`) in `nanobot/agent/callbacks.py`; all emitters (`loop.py`, `streaming.py`, `delegation.py`) and consumers (`cli/progress.py`) migrated to pattern-matching on typed events
+- **`CliProgressHandler` extracted**: CLI progress rendering moved from inline closure in `commands.py` to standalone `nanobot/cli/progress.py` class, independently testable
+
 ### Security
 - **Path disclosure hardening**: `DelegationDispatcher` now exposes only the workspace directory name (not the full absolute path) in delegation contracts (`delegation.py`)
 - **Task input sanitisation**: `DelegateTool` and `DelegateParallelTool` now strip C0/C1 control characters and enforce a 4,000-character maximum before forwarding tasks to specialist agents (`delegate.py`)
