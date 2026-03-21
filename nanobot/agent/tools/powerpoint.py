@@ -18,6 +18,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.filesystem import _resolve_path
 
@@ -31,41 +32,13 @@ if TYPE_CHECKING:
 _DEFAULT_VISION_MODEL = "gpt-4o-mini"
 MAX_CONCURRENT = 5
 
-SLIDE_ANALYSIS_PROMPT = """\
-You are analyzing one PowerPoint slide.
-You are given the extracted text content (JSON) and optionally a rendered slide image.
-Use BOTH the text and image (if provided) for your analysis.
 
-Return a JSON object with these keys:
-- title: string
-- summary: string (1-3 sentences)
-- key_points: string[] (main points on this slide)
-- decisions: string[] (decisions mentioned or implied)
-- risks: string[] (risks, concerns, blockers)
-- action_items: string[] (tasks, follow-ups, to-dos)
-- deadlines: string[] (dates, timelines, milestones)
-- owners: string[] (people, teams, roles responsible)
-- chart_insights: string[] (what charts/graphs show)
-- visual_observations: string[] (layout, emphasis, diagrams, screenshots)
+def _get_slide_analysis_prompt() -> str:
+    return prompts.get("slide_analysis")
 
-Omit keys with empty arrays. Be specific and cite actual content from the slide.\
-"""
 
-DECK_SYNTHESIS_PROMPT = """\
-You are synthesizing a complete PowerPoint deck analysis.
-You are given per-slide analyses as a JSON array.
-
-Return a JSON object with these keys:
-- executive_summary: string (concise 2-4 paragraph overview of the entire deck)
-- risks: string[] (all risks across the deck, with slide numbers, deduplicated)
-- decisions: string[] (all decisions, with slide numbers)
-- action_items: string[] (all action items, include owners and deadlines where known)
-- deadlines: string[] (all deadlines and timelines mentioned)
-- unanswered_questions: string[] (gaps, unclear points, missing information)
-- themes: string[] (recurring themes across the deck)
-
-Be thorough. Always cite slide numbers. Deduplicate across slides.\
-"""
+def _get_deck_synthesis_prompt() -> str:
+    return prompts.get("deck_synthesis")
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +260,7 @@ async def _analyze_slide(
         )
 
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": SLIDE_ANALYSIS_PROMPT},
+        {"role": "system", "content": _get_slide_analysis_prompt()},
         {"role": "user", "content": content},
     ]
     text = await _call_llm(messages, model)
@@ -307,7 +280,7 @@ async def _synthesize_deck(
 ) -> dict[str, Any]:
     """Produce deck-level synthesis from per-slide analyses."""
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": DECK_SYNTHESIS_PROMPT},
+        {"role": "system", "content": _get_deck_synthesis_prompt()},
         {"role": "user", "content": json.dumps(slide_analyses, ensure_ascii=False)},
     ]
     text = await _call_llm(messages, model)

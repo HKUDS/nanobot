@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nanobot.agent.prompt_loader import PromptLoader
+import nanobot.agent.prompt_loader as _prompt_loader_mod
+
+PromptLoader = _prompt_loader_mod.PromptLoader
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -32,7 +34,7 @@ class TestPromptLoaderGet:
         (builtin_dir / "plan.md").write_text("Plan prompt text")
 
         # Monkey-patch the built-in dir
-        import nanobot.agent.prompt_loader as mod
+        mod = _prompt_loader_mod
 
         orig = mod._BUILTIN_DIR
         mod._BUILTIN_DIR = builtin_dir
@@ -46,7 +48,7 @@ class TestPromptLoaderGet:
         loader = PromptLoader()
         # With an invalid workspace, falls through to builtin; if not found → ""
         loader._workspace = Path("/nonexistent")
-        import nanobot.agent.prompt_loader as mod
+        mod = _prompt_loader_mod
 
         orig = mod._BUILTIN_DIR
         mod._BUILTIN_DIR = Path("/also_nonexistent")
@@ -62,7 +64,7 @@ class TestPromptLoaderGet:
         builtin_dir.mkdir(parents=True)
         (builtin_dir / "greet.md").write_text("Hello")
 
-        import nanobot.agent.prompt_loader as mod
+        mod = _prompt_loader_mod
 
         orig = mod._BUILTIN_DIR
         mod._BUILTIN_DIR = builtin_dir
@@ -92,7 +94,7 @@ class TestWorkspaceOverride:
         workspace = tmp_path / "workspace"
         _write_prompt(workspace, "plan", "overridden plan")
 
-        import nanobot.agent.prompt_loader as mod
+        mod = _prompt_loader_mod
 
         orig = mod._BUILTIN_DIR
         mod._BUILTIN_DIR = builtin_dir
@@ -111,7 +113,7 @@ class TestWorkspaceOverride:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
 
-        import nanobot.agent.prompt_loader as mod
+        mod = _prompt_loader_mod
 
         orig = mod._BUILTIN_DIR
         mod._BUILTIN_DIR = builtin_dir
@@ -134,7 +136,7 @@ class TestPreloadAndClear:
         (builtin_dir / "a.md").write_text("aaa")
         (builtin_dir / "b.md").write_text("bbb")
 
-        import nanobot.agent.prompt_loader as mod
+        mod = _prompt_loader_mod
 
         orig = mod._BUILTIN_DIR
         mod._BUILTIN_DIR = builtin_dir
@@ -154,7 +156,7 @@ class TestPreloadAndClear:
 
     def test_preload_no_dir_is_noop(self, tmp_path: Path):
         """Preload with a non-existent builtin dir should not crash."""
-        import nanobot.agent.prompt_loader as mod
+        mod = _prompt_loader_mod
 
         orig = mod._BUILTIN_DIR
         mod._BUILTIN_DIR = tmp_path / "nonexistent"
@@ -171,14 +173,83 @@ class TestPreloadAndClear:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Template rendering
+# ---------------------------------------------------------------------------
+
+
+class TestRender:
+    @staticmethod
+    def _make_loader(tmp_path: Path, files: dict[str, str]) -> PromptLoader:
+        mod = _prompt_loader_mod
+
+        prompts_dir = tmp_path / "templates" / "prompts"
+        prompts_dir.mkdir(parents=True, exist_ok=True)
+        for name, content in files.items():
+            (prompts_dir / f"{name}.md").write_text(content)
+        loader = PromptLoader()
+        # Store original so fixture can restore it; tests use finally blocks
+        loader._orig_dir = mod._BUILTIN_DIR  # type: ignore[attr-defined]
+        mod._BUILTIN_DIR = prompts_dir
+        return loader
+
+    @staticmethod
+    def _restore(loader: PromptLoader) -> None:
+        mod = _prompt_loader_mod
+
+        mod._BUILTIN_DIR = loader._orig_dir  # type: ignore[attr-defined]
+
+    def test_substitutes_known_variables(self, tmp_path: Path) -> None:
+        loader = self._make_loader(tmp_path, {"greeting": "Hello, {name}! Welcome to {place}."})
+        try:
+            result = loader.render("greeting", name="Alice", place="Wonderland")
+            assert result == "Hello, Alice! Welcome to Wonderland."
+        finally:
+            self._restore(loader)
+
+    def test_leaves_unknown_variables_untouched(self, tmp_path: Path) -> None:
+        loader = self._make_loader(tmp_path, {"greeting": "Hello, {name}! Welcome to {place}."})
+        try:
+            result = loader.render("greeting", name="Alice")
+            assert result == "Hello, Alice! Welcome to {place}."
+        finally:
+            self._restore(loader)
+
+    def test_no_variables_same_as_get(self, tmp_path: Path) -> None:
+        loader = self._make_loader(tmp_path, {"static": "No variables here."})
+        try:
+            result = loader.render("static")
+            assert result == "No variables here."
+        finally:
+            self._restore(loader)
+
+    def test_escaped_braces_survive(self, tmp_path: Path) -> None:
+        loader = self._make_loader(tmp_path, {"escaped": "Use {{key}} for cache lookup."})
+        try:
+            result = loader.render("escaped")
+            assert result == "Use {key} for cache lookup."
+        finally:
+            self._restore(loader)
+
+    def test_render_missing_prompt_returns_empty(self, tmp_path: Path) -> None:
+        loader = self._make_loader(tmp_path, {})
+        try:
+            result = loader.render("nonexistent", foo="bar")
+            assert result == ""
+        finally:
+            self._restore(loader)
+
+
+# ---------------------------------------------------------------------------
+# Module singleton
+# ---------------------------------------------------------------------------
+
+
 class TestModuleSingleton:
     def test_singleton_exists(self):
-        from nanobot.agent.prompt_loader import prompts
-
-        assert isinstance(prompts, PromptLoader)
+        assert isinstance(_prompt_loader_mod.prompts, PromptLoader)
 
     def test_singleton_is_stable(self):
-        from nanobot.agent.prompt_loader import prompts as p1
-        from nanobot.agent.prompt_loader import prompts as p2
-
+        p1 = _prompt_loader_mod.prompts
+        p2 = _prompt_loader_mod.prompts
         assert p1 is p2

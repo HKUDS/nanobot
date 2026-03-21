@@ -37,9 +37,11 @@ multi-line prompt strings.
    (tool names, context snippets) are injected via Python string formatting
    at the call site in `loop.py`.
 
-4. **Prompt files are static assets** shipped with the package.  They are NOT
-   user-editable at runtime — user customization goes into `SOUL.md` and
-   skill files.
+4. **Prompt files are user-overridable.** Users can override any built-in prompt
+   by placing a file with the same name in `<workspace>/prompts/<name>.md`.
+   The `PromptLoader` resolves user files first, then falls back to built-in
+   templates. This replaces the original restriction that prompts were static
+   assets only (amended 2026-03-21 during prompt consolidation).
 
 ## Consequences
 

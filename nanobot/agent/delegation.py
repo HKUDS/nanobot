@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 from nanobot.agent.observability import span as langfuse_span
+from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.tool_loop import run_tool_loop
 from nanobot.agent.tools.base import ToolResult  # noqa: F401 — re-export for tests
 from nanobot.agent.tools.delegate import (
@@ -679,14 +680,7 @@ class DelegationDispatcher:
             sections.append(f"## Prior Results\n{parent_findings}")
 
         evidence_type = tt.get("evidence", "tool output excerpts")
-        output_schema = (
-            "\n\nYour response MUST use this structure:\n"
-            "## Findings\n<your key findings>\n\n"
-            "## Evidence\n<supporting evidence: " + evidence_type + ">\n\n"
-            "## Open Questions\n<anything unresolved or needing further investigation>\n\n"
-            "## Confidence\n<high/medium/low with brief justification>\n\n"
-            "## Files Inspected\n<list of files/sources you actually examined>"
-        )
+        output_schema = "\n\n" + prompts.render("delegation_schema", evidence_type=evidence_type)
 
         return "\n\n".join(sections), output_schema
 
@@ -923,15 +917,13 @@ class DelegationDispatcher:
 
         # Build system prompt
         avail_tools = ", ".join(tools.tool_names)
-        system_prompt = (
-            f"You are the **{role.name}** specialist agent.\n\n"
-            f"{role.system_prompt or ''}\n\n"
-            f"You MUST use your available tools to complete this task. "
-            f"Do NOT fabricate information — always verify with tools first."
+        system_prompt = prompts.render(
+            "delegation_agent",
+            role_name=role.name,
+            role_prompt=role.system_prompt or "",
+            avail_tools=avail_tools,
+            output_schema=output_schema,
         )
-        if avail_tools:
-            system_prompt += f"\nAvailable tools: {avail_tools}"
-        system_prompt += output_schema
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},

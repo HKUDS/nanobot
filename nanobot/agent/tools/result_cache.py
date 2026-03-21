@@ -17,6 +17,7 @@ from typing import Any, ClassVar, Protocol
 
 from loguru import logger
 
+from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.tools.base import Tool, ToolResult
 
 # ---------------------------------------------------------------------------
@@ -25,23 +26,9 @@ from nanobot.agent.tools.base import Tool, ToolResult
 
 _SUMMARY_THRESHOLD = 3000  # chars — results below this pass through as-is
 
-_SUMMARY_SYSTEM = (
-    "You are a tool-output summariser for an AI agent. Given the raw output of a tool call, "
-    "produce a concise structured summary that preserves the key information the agent needs "
-    "to reason about the data WITHOUT seeing the full output.\n\n"
-    "Requirements:\n"
-    "- Include data structure (row count, column names for tabular data, key names for JSON)\n"
-    "- Include a representative preview (first few rows or items)\n"
-    "- Include total size and the cache key so the agent knows how to retrieve more\n"
-    "- For spreadsheet/tabular data: list ALL task/item names with their key attributes "
-    "(status, dates, owner) so the agent can produce a complete summary without fetching raw rows. "
-    "Prefer a compact table or bullet list format.\n"
-    '- End with a note: \'Full data cached. Use excel_get_rows(cache_key="{key}", start_row=N, '
-    'end_row=M) for row ranges, or cache_get_slice(cache_key="{key}", start=N, end=M) '
-    "for raw lines.'\n"
-    "- Keep the summary under 4000 characters\n"
-    "- Do NOT reproduce raw JSON — restructure into human-readable format"
-)
+
+def _get_summary_system() -> str:
+    return prompts.get("summary_system")
 
 
 class _ChatProvider(Protocol):
@@ -96,7 +83,7 @@ async def generate_summary(
     try:
         resp = await provider.chat(
             messages=[
-                {"role": "system", "content": _SUMMARY_SYSTEM},
+                {"role": "system", "content": _get_summary_system()},
                 {"role": "user", "content": prompt},
             ],
             tools=None,
