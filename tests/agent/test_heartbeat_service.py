@@ -90,7 +90,9 @@ async def test_trigger_now_executes_when_decision_is_run(tmp_path) -> None:
 
     result = await service.trigger_now()
     assert result == "done"
-    assert called_with == ["check open tasks"]
+    assert len(called_with) == 1
+    assert called_with[0].startswith("check open tasks")
+    assert "Reference details from HEARTBEAT.md" in called_with[0]
 
 
 @pytest.mark.asyncio
