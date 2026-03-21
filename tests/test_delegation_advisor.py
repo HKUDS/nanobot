@@ -87,6 +87,11 @@ class TestAdvisePlanPhase:
         advice = self._advise(relevant_roles=["code", "research"])
         assert advice.action == DelegationAction.SOFT_NUDGE
 
+    @patch("nanobot.agent.delegation_advisor.get_delegation_depth", return_value=0)
+    def test_orchestration_true_empty_roles_still_nudges(self, _mock):
+        advice = self._advise(needs_orchestration=True, relevant_roles=[])
+        assert advice.action == DelegationAction.SOFT_NUDGE
+
 
 class TestAdviseReflectPhase:
     def _advise(self, advisor=None, **overrides):
@@ -171,4 +176,10 @@ class TestAdviseReflectPhase:
             role_policies={"specialist": RolePolicy(exempt_from_nudge=True)}
         )
         advice = self._advise(advisor=advisor, role_name="specialist", turn_tool_calls=20)
+        assert advice.action == DelegationAction.NONE
+
+    @patch("nanobot.agent.delegation_advisor.get_delegation_depth", return_value=0)
+    def test_had_delegations_no_special_conditions_none(self, _mock):
+        """Delegation in progress, no budget/ungrounded/parallel issues -> NONE."""
+        advice = self._advise(had_delegations_this_batch=True)
         assert advice.action == DelegationAction.NONE
