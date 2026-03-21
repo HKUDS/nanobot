@@ -146,7 +146,9 @@ class Tool(ABC):
 
     def _validate(self, val: Any, schema: dict[str, Any], path: str) -> list[str]:
         raw_type = schema.get("type")
-        nullable = isinstance(raw_type, list) and "null" in raw_type
+        nullable = (isinstance(raw_type, list) and "null" in raw_type) or schema.get(
+            "nullable", False
+        )
         t, label = self._resolve_type(raw_type), path or "parameter"
         if nullable and val is None:
             return []

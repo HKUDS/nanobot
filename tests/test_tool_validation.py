@@ -455,6 +455,18 @@ def test_validate_nullable_param_accepts_none() -> None:
     assert errors == []
 
 
+def test_validate_nullable_flag_accepts_none() -> None:
+    """OpenAI-normalized nullable params should still accept None locally."""
+    tool = CastTestTool(
+        {
+            "type": "object",
+            "properties": {"name": {"type": "string", "nullable": True}},
+        }
+    )
+    errors = tool.validate_params({"name": None})
+    assert errors == []
+
+
 def test_cast_nullable_param_no_crash() -> None:
     """cast_params should not crash on nullable type (the original bug)."""
     tool = CastTestTool(
