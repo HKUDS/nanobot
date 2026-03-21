@@ -1,24 +1,22 @@
 """Feishu/Lark channel implementation using lark-oapi SDK with WebSocket long connection."""
 
 import asyncio
+import importlib.util
 import json
 import os
 import re
 import threading
 from collections import OrderedDict
-from pathlib import Path
 from typing import Any, Literal
 
 from loguru import logger
+from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
-from pydantic import Field
-
-import importlib.util
 
 FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
 
@@ -248,6 +246,7 @@ class FeishuConfig(Base):
     react_emoji: str = "THUMBSUP"
     group_policy: Literal["open", "mention"] = "mention"
     reply_to_message: bool = False  # If True, bot replies quote the user's original message
+    respond_to_at_all: bool = True  # If True, bot responds to @_all messages in group chats
 
 
 class FeishuChannel(BaseChannel):
@@ -340,6 +339,7 @@ class FeishuChannel(BaseChannel):
         # "This event loop is already running" errors.
         def run_ws():
             import time
+
             import lark_oapi.ws.client as _lark_ws_client
             ws_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(ws_loop)
@@ -380,7 +380,7 @@ class FeishuChannel(BaseChannel):
     def _is_bot_mentioned(self, message: Any) -> bool:
         """Check if the bot is @mentioned in the message."""
         raw_content = message.content or ""
-        if "@_all" in raw_content:
+        if self.config.respond_to_at_all and "@_all" in raw_content:
             return True
 
         for mention in getattr(message, "mentions", None) or []:
@@ -400,7 +400,11 @@ class FeishuChannel(BaseChannel):
 
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
         """Sync helper for adding reaction (runs in thread pool)."""
-        from lark_oapi.api.im.v1 import CreateMessageReactionRequest, CreateMessageReactionRequestBody, Emoji
+        from lark_oapi.api.im.v1 import (
+            CreateMessageReactionRequest,
+            CreateMessageReactionRequestBody,
+            Emoji,
+        )
         try:
             request = CreateMessageReactionRequest.builder() \
                 .message_id(message_id) \
@@ -1043,7 +1047,7 @@ class FeishuChannel(BaseChannel):
             event = data.event
             message = event.message
             sender = event.sender
-            
+
             # Deduplication check
             message_id = message.message_id
             if message_id in self._processed_message_ids:
