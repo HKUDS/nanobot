@@ -56,7 +56,7 @@ class DashboardEventBus:
         agent = "main"
         content = msg.content
         target = (msg.metadata or {}).get("_target_agent")
-        if target and target != "main":
+        if target:
             agent = target
             # Strip @mention prefix for display
             m = _MENTION_RE.match(content)

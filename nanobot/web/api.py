@@ -210,9 +210,11 @@ async def send_message(req: SendMessageRequest) -> dict[str, str]:
     from nanobot.bus.events import InboundMessage
 
     content = req.content
-    # Prepend @mention for named agents so AgentLoop routes correctly
-    if req.agent and req.agent != "main":
-        content = f"@{req.agent} {content}"
+    # Always prepend @mention so AgentLoop routes correctly:
+    # - @main clears sticky routing, falls through to main agent
+    # - @agentname sets sticky routing to that agent
+    # Without this, sticky routing would send all messages to the last @mentioned agent.
+    content = f"@{req.agent} {content}"
 
     msg = InboundMessage(
         channel="web",
