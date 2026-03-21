@@ -113,7 +113,7 @@ class AgentLoop:
         self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._processing_lock = asyncio.Lock()
-        self._event_agent_cache: dict[Path, tuple[ContextBuilder, SessionManager]] = {}
+        self._guest_agent_cache: dict[Path, tuple[ContextBuilder, SessionManager]] = {}
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -134,14 +134,14 @@ class AgentLoop:
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
-    def _resolve_event_agent_workspace(self, sender_id: str) -> tuple[ContextBuilder, SessionManager, frozenset[str]] | None:
-        """Check if sender_id is an event agent (guest) and return event-specific context + sessions.
+    def _resolve_guest_agent_workspace(self, sender_id: str) -> tuple[ContextBuilder, SessionManager, frozenset[str]] | None:
+        """Check if sender_id is a guest and return guest-specific context + sessions.
 
-        Reads event_agent_acl.json from the main workspace. If the sender matches,
+        Reads guest_agent_acl.json from the main workspace. If the sender matches,
         returns a (ContextBuilder, SessionManager, blocked_tools) tuple pointing to the
-        event_agent/ subdirectory.
+        guest_agent/ subdirectory.
         """
-        acl_path = self.workspace / "event_agent_acl.json"
+        acl_path = self.workspace / "guest_agent_acl.json"
         if not acl_path.exists():
             return None
         try:
@@ -161,20 +161,20 @@ class AgentLoop:
         if not matched:
             return None
 
-        event_agent_workspace = self.workspace / "event_agent"
-        if not event_agent_workspace.exists():
-            logger.warning("Event agent ACL matched sender {} but event_agent workspace missing", sender_id)
+        guest_agent_workspace = self.workspace / "guest_agent"
+        if not guest_agent_workspace.exists():
+            logger.warning("Guest agent ACL matched sender {} but guest_agent workspace missing", sender_id)
             return None
 
-        # Cache event_agent context + sessions to avoid re-creating per message
-        if event_agent_workspace not in self._event_agent_cache:
-            blocked = self._load_blocked_tools(event_agent_workspace)
-            self._event_agent_cache[event_agent_workspace] = (
-                ContextBuilder(event_agent_workspace),
-                SessionManager(event_agent_workspace),
+        # Cache guest_agent context + sessions to avoid re-creating per message
+        if guest_agent_workspace not in self._guest_agent_cache:
+            blocked = self._load_blocked_tools(guest_agent_workspace)
+            self._guest_agent_cache[guest_agent_workspace] = (
+                ContextBuilder(guest_agent_workspace),
+                SessionManager(guest_agent_workspace),
                 blocked,
             )
-        return self._event_agent_cache[event_agent_workspace]
+        return self._guest_agent_cache[guest_agent_workspace]
 
     @staticmethod
     def _load_blocked_tools(workspace: Path) -> frozenset[str]:
@@ -459,8 +459,8 @@ class AgentLoop:
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
-        # Resolve event_agent workspace if sender is in event agent ACL
-        guest = self._resolve_event_agent_workspace(msg.sender_id) if msg.sender_id else None
+        # Resolve guest_agent workspace if sender is in guest agent ACL
+        guest = self._resolve_guest_agent_workspace(msg.sender_id) if msg.sender_id else None
         context = guest[0] if guest else self.context
         sessions = guest[1] if guest else self.sessions
         blocked_tools = guest[2] if guest else frozenset()
