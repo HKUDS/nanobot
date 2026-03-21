@@ -691,14 +691,33 @@ def gateway(
 
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
+    # Dashboard server setup
+    dashboard_server = None
+    if config.gateway.dashboard:
+        try:
+            import uvicorn
+            from nanobot.web.app import create_dashboard
+
+            dashboard_app = create_dashboard(agent, channels, bus, config)
+            uvi_config = uvicorn.Config(
+                dashboard_app,
+                host=config.gateway.host,
+                port=port,
+                log_level="warning",
+            )
+            dashboard_server = uvicorn.Server(uvi_config)
+            console.print(f"[green]✓[/green] Dashboard: http://{config.gateway.host}:{port}")
+        except ImportError:
+            console.print("[yellow]Dashboard disabled (install with: pip install nanobot-ai[dashboard])[/yellow]")
+
     async def run():
         try:
             await cron.start()
             await heartbeat.start()
-            await asyncio.gather(
-                agent.run(),
-                channels.start_all(),
-            )
+            tasks = [agent.run(), channels.start_all()]
+            if dashboard_server:
+                tasks.append(dashboard_server.serve())
+            await asyncio.gather(*tasks)
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         except Exception:
@@ -711,6 +730,8 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
+            if dashboard_server:
+                dashboard_server.should_exit = True
 
     asyncio.run(run())
 

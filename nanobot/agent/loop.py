@@ -28,7 +28,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import DashboardEvent, InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
@@ -321,16 +321,23 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    async def _emit(self, event_type: str, agent: str = "main", **data: Any) -> None:
+        """Emit a dashboard event via the message bus (fire-and-forget)."""
+        await self.bus.emit_dashboard_event(DashboardEvent(type=event_type, agent=agent, data=data))
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        agent_name: str = "main",
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+
+        await self._emit("agent_status", agent_name, status="processing")
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -348,6 +355,7 @@ class AgentLoop:
                     thought = self._strip_think(response.content)
                     if thought:
                         await on_progress(thought)
+                        await self._emit("progress", agent_name, content=thought)
                     tool_hint = self._tool_hint(response.tool_calls)
                     tool_hint = self._strip_think(tool_hint)
                     await on_progress(tool_hint, tool_hint=True)
@@ -366,7 +374,20 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+
+                    await self._emit(
+                        "tool_call", agent_name,
+                        tool=tool_call.name, args=args_str[:500],
+                    )
+
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+
+                    await self._emit(
+                        "tool_result", agent_name,
+                        tool=tool_call.name,
+                        preview=result[:300] if result else "",
+                    )
+
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -395,6 +416,7 @@ class AgentLoop:
                 "without completing the task. You can try breaking the task into smaller steps."
             )
 
+        await self._emit("agent_status", agent_name, status="idle")
         return final_content, tools_used, messages
 
     async def run(self) -> None:

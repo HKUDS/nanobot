@@ -119,6 +119,7 @@ class GatewayConfig(Base):
 
     host: str = "0.0.0.0"
     port: int = 18790
+    dashboard: bool = True  # Enable the web dashboard on host:port
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
