@@ -4,18 +4,34 @@ from __future__ import annotations
 
 import contextlib
 from typing import Any
-from unittest.mock import patch  # noqa: F401 – used by async tests (Task 4)
+from unittest.mock import patch
 
 import pytest
 
 from nanobot.agent.verifier import AnswerVerifier
-from nanobot.providers.base import LLMResponse  # noqa: F401 – used by async tests (Task 4)
+from nanobot.providers.base import LLMResponse
 from tests.helpers import ScriptedProvider
 
 
 @contextlib.asynccontextmanager
 async def _noop_span_cm(**kwargs: Any):
     yield None
+
+
+def _make_verifier_with_provider(
+    provider: ScriptedProvider,
+    mode: str = "always",
+    memory: Any = None,
+) -> AnswerVerifier:
+    return AnswerVerifier(
+        provider=provider,
+        model="test-model",
+        temperature=0.7,
+        max_tokens=4096,
+        verification_mode=mode,
+        memory_uncertainty_threshold=0.5,
+        memory_store=memory,
+    )
 
 
 class TestLooksLikeQuestion:
@@ -107,3 +123,121 @@ class TestEstimateGroundingConfidence:
         memory = type("FakeMemory", (), {"retrieve": lambda self, q, top_k=1: [{"score": 0.75}]})()
         v = self._make_verifier(memory=memory)
         assert v._estimate_grounding_confidence("anything") == 0.75
+
+
+@patch("nanobot.agent.verifier.score_current_trace", new=lambda **kw: None)
+@patch("nanobot.agent.verifier.langfuse_span", new=_noop_span_cm)
+class TestVerify:
+    async def test_off_passthrough(self) -> None:
+        provider = ScriptedProvider([])
+        v = _make_verifier_with_provider(provider, mode="off")
+        result, msgs = await v.verify("What?", "candidate", [])
+        assert result == "candidate"
+        assert len(provider.call_log) == 0
+
+    async def test_on_uncertainty_skips_non_question(self) -> None:
+        provider = ScriptedProvider([])
+        v = _make_verifier_with_provider(provider, mode="on_uncertainty")
+        result, _ = await v.verify("hello", "candidate", [])
+        assert result == "candidate"
+        assert len(provider.call_log) == 0
+
+    async def test_always_high_confidence_passes(self) -> None:
+        provider = ScriptedProvider(
+            [
+                LLMResponse(content='{"confidence": 5, "issues": []}'),
+            ]
+        )
+        v = _make_verifier_with_provider(provider)
+        result, _ = await v.verify("What?", "candidate", [])
+        assert result == "candidate"
+
+    async def test_always_low_confidence_revises(self) -> None:
+        provider = ScriptedProvider(
+            [
+                LLMResponse(content='{"confidence": 1, "issues": ["unsupported claim"]}'),
+                LLMResponse(content="revised answer"),
+            ]
+        )
+        v = _make_verifier_with_provider(provider)
+        msgs = [{"role": "assistant", "content": "candidate"}]
+        result, updated_msgs = await v.verify("What?", "candidate", msgs)
+        assert result == "revised answer"
+        # System message with issues was injected
+        system_msgs = [m for m in updated_msgs if m.get("role") == "system"]
+        assert any("unsupported claim" in m["content"] for m in system_msgs)
+
+    async def test_unparseable_json_passthrough(self) -> None:
+        provider = ScriptedProvider(
+            [
+                LLMResponse(content="not valid json"),
+            ]
+        )
+        v = _make_verifier_with_provider(provider)
+        result, _ = await v.verify("What?", "candidate", [])
+        assert result == "candidate"
+
+    async def test_llm_exception_passthrough(self) -> None:
+        provider = ScriptedProvider([])
+
+        async def _raise(**kwargs: Any) -> None:
+            raise RuntimeError("LLM down")
+
+        provider.chat = _raise  # type: ignore[assignment]
+        v = _make_verifier_with_provider(provider)
+        result, _ = await v.verify("What?", "candidate", [])
+        assert result == "candidate"
+
+
+@patch("nanobot.agent.verifier.langfuse_span", new=_noop_span_cm)
+class TestAttemptRecovery:
+    async def test_recovery_success(self) -> None:
+        provider = ScriptedProvider(
+            [
+                LLMResponse(content="recovered answer"),
+            ]
+        )
+        v = _make_verifier_with_provider(provider)
+        all_msgs = [
+            {"role": "system", "content": "You are helpful"},
+            {"role": "user", "content": "What is X?"},
+        ]
+        result = await v.attempt_recovery(channel="cli", chat_id="test", all_msgs=all_msgs)
+        assert result == "recovered answer"
+
+    async def test_recovery_missing_messages(self) -> None:
+        provider = ScriptedProvider([])
+        v = _make_verifier_with_provider(provider)
+        # Only tool messages — no system or user
+        all_msgs = [{"role": "tool", "name": "exec", "content": "output"}]
+        result = await v.attempt_recovery(channel="cli", chat_id="test", all_msgs=all_msgs)
+        assert result is None
+
+    async def test_recovery_llm_exception(self) -> None:
+        provider = ScriptedProvider([])
+
+        async def _raise(**kwargs: Any) -> None:
+            raise RuntimeError("boom")
+
+        provider.chat = _raise  # type: ignore[assignment]
+        v = _make_verifier_with_provider(provider)
+        all_msgs = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hello"},
+        ]
+        result = await v.attempt_recovery(channel="cli", chat_id="test", all_msgs=all_msgs)
+        assert result is None
+
+    async def test_recovery_error_finish_reason(self) -> None:
+        provider = ScriptedProvider(
+            [
+                LLMResponse(content="error detail", finish_reason="error"),
+            ]
+        )
+        v = _make_verifier_with_provider(provider)
+        all_msgs = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hello"},
+        ]
+        result = await v.attempt_recovery(channel="cli", chat_id="test", all_msgs=all_msgs)
+        assert result is None
