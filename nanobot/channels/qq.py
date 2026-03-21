@@ -12,7 +12,8 @@ Outbound:
 - msg.media supports local paths, file:// paths, and http(s) URLs
 
 Notes:
-- QQ restricts many audio/video formats. We conservatively classify as image vs file.
+- QQ rich media file_type: 1=image, 2=video, 3=voice, 4=file (groups: 4 not yet open).
+- Audio formats supported by QQ voice: silk/wav/mp3/flac. Others fall back to file.
 - Attachment structures differ across botpy versions; we try multiple field candidates.
 """
 
@@ -59,9 +60,11 @@ if TYPE_CHECKING:
     from botpy.types.message import Media
 
 
-# QQ rich media file_type: 1=image, 4=file
-# (2=voice, 3=video are restricted; we only use image vs file)
+# QQ rich media file_type per official API docs:
+#   1=image, 2=video, 3=voice, 4=file
+# Groups: file_type=4 (file) is not yet open; 1/2/3 are supported.
 QQ_FILE_TYPE_IMAGE = 1
+QQ_FILE_TYPE_VOICE = 3
 QQ_FILE_TYPE_FILE = 4
 
 _IMAGE_EXTS = {
@@ -76,6 +79,9 @@ _IMAGE_EXTS = {
     ".ico",
     ".svg",
 }
+
+# QQ voice supports: silk/wav/mp3/flac (per official docs)
+_VOICE_EXTS = {".silk", ".wav", ".mp3", ".flac", ".amr"}
 
 # Replace unsafe characters with "_", keep Chinese and common safe punctuation.
 _SAFE_NAME_RE = re.compile(r"[^\w.\-()\[\]（）【】\u4e00-\u9fff]+", re.UNICODE)
@@ -94,11 +100,13 @@ def _is_image_name(name: str) -> bool:
 
 
 def _guess_send_file_type(filename: str) -> int:
-    """Conservative send type: images -> 1, else -> 4."""
+    """Map filename to QQ rich media file_type: 1=image, 3=voice, 4=file."""
     ext = Path(filename).suffix.lower()
     mime, _ = mimetypes.guess_type(filename)
     if ext in _IMAGE_EXTS or (mime and mime.startswith("image/")):
         return QQ_FILE_TYPE_IMAGE
+    if ext in _VOICE_EXTS or (mime and mime.startswith("audio/")):
+        return QQ_FILE_TYPE_VOICE
     return QQ_FILE_TYPE_FILE
 
 
