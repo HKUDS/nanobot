@@ -108,7 +108,8 @@ class TestRegisterDefaultTools:
         # excel_get_rows(1) + excel_find(1) + pptx_get_slide(1) +
         # query_data(1) + describe_data(1) = 27
         # (no cron — cron_service=None)
-        assert len(tools._registry) == 27
+        count = len(tools._registry)
+        assert count == 27, f"Expected 27 tools, got {count}: {sorted(tools._registry.tool_names)}"
 
     def test_allowed_tools_whitelist(self, tmp_workspace: Path) -> None:
         role = AgentRoleConfig(
