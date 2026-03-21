@@ -37,6 +37,7 @@ from .eval import EvalRunner
 from .event import BeliefRecord, KnowledgeTriple, MemoryEvent
 from .extractor import MemoryExtractor
 from .graph import KnowledgeGraph
+from .ingester import EventIngester
 from .mem0_adapter import _Mem0Adapter, _Mem0RuntimeInfo
 from .onnx_reranker import OnnxCrossEncoderReranker
 from .onnx_reranker import OnnxCrossEncoderReranker as CrossEncoderReranker  # backward-compat
@@ -64,6 +65,7 @@ __all__ = [
     "BeliefRecord",
     "ConflictManager",
     "ContextAssembler",
+    "EventIngester",
     "EvalRunner",
     "KnowledgeTriple",
     "MemoryEvent",
