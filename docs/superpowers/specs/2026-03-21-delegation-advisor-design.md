@@ -219,14 +219,35 @@ These are defaults. Users can override via `AgentRoleConfig` in their config fil
 
 ### What gets removed from loop.py
 
-1. **Lines 899-917**: Runtime counter nudge (`turn_tool_calls >= 5` block) — replaced
-   by `advise_reflect_phase()`
-2. **Lines 835-849**: Budget exhaustion nudge — replaced by `advise_reflect_phase()`
-   returning `HARD_GATE`
-3. **Lines 991-1016**: Plan phase delegation injection (plan.md delegation text +
-   parallel structure nudge) — replaced by `advise_plan_phase()`
+Note: PR #30 moved nudge text from inline strings to `.md` template files loaded
+via `prompts.get()`. The DelegationAdvisor replaces the *decision logic* that
+selects which nudge to inject, not the nudge text itself. The loop.py call site
+renders `DelegationAdvice` into the appropriate `prompts.get()` call.
+
+1. **Budget exhaustion block** (~lines 835-844): Currently loads
+   `nudge_delegation_exhausted` — replaced by `advise_reflect_phase()` returning
+   `HARD_GATE`
+2. **Post-delegation block** (~lines 862-877): Currently loads
+   `nudge_post_delegation`, `nudge_ungrounded_warning`, `nudge_use_parallel` —
+   replaced by `advise_reflect_phase()` returning `SYNTHESIZE` with flags
+3. **Plan phase delegation injection** (~lines 975-989): Currently injects plan.md
+   delegation text + `nudge_parallel_structure` — replaced by
+   `advise_plan_phase()`
 4. **Two calls to `DelegationDispatcher.has_parallel_structure()`** — moved inside
    the advisor
+
+### Prompt template integration
+
+The advisor does NOT load prompt templates directly. It returns structured
+`DelegationAdvice` with action + flags. The caller in `_evaluate_progress()`
+maps actions to the appropriate `prompts.get()` calls:
+
+- `HARD_GATE` → `prompts.get("nudge_delegation_exhausted")`
+- `SYNTHESIZE` → `prompts.get("nudge_post_delegation")` + optional ungrounded warning
+- `SOFT_NUDGE` with parallel → `prompts.get("nudge_parallel_structure")`
+- `SOFT_NUDGE` / `HARD_NUDGE` → advisor-generated text (new template or inline)
+
+This keeps the advisor independent of the prompt loading system.
 
 ### What stays in loop.py
 
