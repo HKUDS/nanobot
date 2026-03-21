@@ -348,7 +348,7 @@ class KnowledgeGraph:
                 paths.append(path_steps)
                 if len(paths) >= 5:
                     break
-        except nx.NetworkXError:
+        except nx.NetworkXError:  # crash-barrier: no path exists between entities
             pass
 
         return paths

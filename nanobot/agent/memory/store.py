@@ -45,15 +45,13 @@ from .graph import KnowledgeGraph
 from .mem0_adapter import _Mem0Adapter, _Mem0RuntimeInfo
 from .persistence import MemoryPersistence
 from .profile import ProfileManager
-from .reranker import CompositeReranker
+from .reranker import CompositeReranker, Reranker
 from .retrieval import _local_retrieve, _topic_fallback_retrieve
 from .retrieval_planner import RetrievalPlanner
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session
-
-    from .onnx_reranker import OnnxCrossEncoderReranker
 
 _COUNT_CACHE_TTL: float = 60.0  # seconds — SQLite counts change infrequently (LAN-102)
 
@@ -148,7 +146,7 @@ class MemoryStore:
             self.rollout.get("reranker_model", "onnx:ms-marco-MiniLM-L-6-v2")
         ).strip()
         reranker_alpha = float(self.rollout.get("reranker_alpha", 0.5))
-        self._reranker: CompositeReranker | OnnxCrossEncoderReranker
+        self._reranker: Reranker
         if reranker_model.startswith("onnx:"):
             from .onnx_reranker import OnnxCrossEncoderReranker
 
