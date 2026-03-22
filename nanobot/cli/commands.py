@@ -701,7 +701,7 @@ def gateway(
         async def _silent(*_args, **_kwargs):
             pass
 
-    resp = await target_agent.process_direct(
+        resp = await target_agent.process_direct(
             tasks,
             session_key="heartbeat",
             channel=channel,
