@@ -26,6 +26,7 @@ class ContextBuilder:
         custom_identity: str | None = None,
         main_workspace: Path | None = None,
         extra_skill_paths: list[str] | None = None,
+        viking_provider: Any | None = None,
     ):
         self.workspace = workspace
         self.agent_name = agent_name
@@ -33,6 +34,7 @@ class ContextBuilder:
         # Named agents load bootstrap files from main workspace, memory from their own
         self._main_workspace = main_workspace or workspace
         self.memory = MemoryStore(workspace)
+        self._viking = viking_provider  # VikingContextProvider or None
         self.skills = SkillsLoader(self._main_workspace, extra_paths=extra_skill_paths)
         self.extra_system_sections: list[str | Callable[[], str]] = []  # strings or callables
 
@@ -50,7 +52,10 @@ class ContextBuilder:
         if bootstrap:
             parts.append(bootstrap)
 
-        memory = self.memory.get_memory_context()
+        if self._viking and self._viking.is_ready:
+            memory = self._viking.get_memory_context()
+        else:
+            memory = self.memory.get_memory_context()
         if memory:
             parts.append(f"# Memory\n\n{memory}")
 

@@ -174,6 +174,13 @@ class SkillsConfig(Base):
     extra_paths: list[str] = Field(default_factory=list)  # Additional skill directories to scan
 
 
+class VikingConfig(Base):
+    """OpenViking context database configuration (optional: pip install nanobot-ai[viking])."""
+
+    enabled: bool = False
+    config_path: str | None = None  # Path to ov.conf; None = default ~/.openviking/ov.conf
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
@@ -193,6 +200,7 @@ class Config(BaseSettings):
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
+    viking: VikingConfig = Field(default_factory=VikingConfig)
 
     @property
     def workspace_path(self) -> Path:

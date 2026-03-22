@@ -138,6 +138,20 @@ class AgentLoop:
                 extra_skill_paths=config.skills.extra_paths if config else None,
             )
 
+        # OpenViking integration (optional)
+        self._viking_provider = None
+        if config and config.viking.enabled:
+            from nanobot.agent.viking import HAS_VIKING, VikingContextProvider
+
+            if HAS_VIKING:
+                self._viking_provider = VikingContextProvider(config.viking)
+                self.context._viking = self._viking_provider
+            else:
+                logger.warning(
+                    "viking enabled in config but openviking not installed "
+                    "(pip install nanobot-ai[viking])"
+                )
+
         self._register_default_tools()
         self._update_agents_prompt()
 
@@ -179,6 +193,13 @@ class AgentLoop:
                 list_callback=agent_names,
             ))
             self.tools.register(ManageAgentsTool(registry=self.agent_registry))
+
+        # OpenViking tools (only when provider is configured)
+        if self._viking_provider:
+            from nanobot.agent.tools.viking import VikingAddResourceTool, VikingSearchTool
+
+            self.tools.register(VikingSearchTool(self._viking_provider))
+            self.tools.register(VikingAddResourceTool(self._viking_provider))
 
         # Discover and register external tool plugins
         if self._config:
@@ -429,6 +450,8 @@ class AgentLoop:
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
+        if self._viking_provider:
+            await self._viking_provider.initialize()
         await self._connect_mcp()
         logger.info("Agent loop started")
 
@@ -538,10 +561,12 @@ class AgentLoop:
                 ))
 
     async def close_mcp(self) -> None:
-        """Drain pending background archives, then close MCP connections."""
+        """Drain pending background archives, then close MCP and Viking connections."""
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
+        if self._viking_provider:
+            await self._viking_provider.close()
         if self._mcp_stack:
             try:
                 await self._mcp_stack.aclose()

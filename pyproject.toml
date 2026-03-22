@@ -63,6 +63,9 @@ dashboard = [
     "fastapi>=0.115.0,<1.0.0",
     "uvicorn[standard]>=0.34.0,<1.0.0",
 ]
+viking = [
+    "openviking>=0.1.0",
+]
 langsmith = [
     "langsmith>=0.1.0",
 ]
