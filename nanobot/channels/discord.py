@@ -63,6 +63,15 @@ class DiscordBotClient(discord.Client):
     async def on_message(self, message: discord.Message) -> None:
         await self._channel._handle_discord_message(message)
 
+    async def _reply_ephemeral(self, interaction: discord.Interaction, text: str) -> bool:
+        """Send an ephemeral interaction response and report success."""
+        try:
+            await interaction.response.send_message(text, ephemeral=True)
+            return True
+        except Exception as e:
+            logger.warning("Discord interaction response failed: {}", e)
+            return False
+
     def _register_app_commands(self) -> None:
         @self.tree.command(name="new", description="Start a new conversation")
         async def new_command(interaction: discord.Interaction) -> None:
@@ -71,19 +80,10 @@ class DiscordBotClient(discord.Client):
             sender_id = str(user.id)
 
             if not self._channel.is_allowed(sender_id):
-                ack_text = "You are not allowed to use this bot."
-                should_forward = False
-            else:
-                ack_text = "Starting a new session..."
-                should_forward = True
-
-            try:
-                await interaction.response.send_message(ack_text, ephemeral=True)
-            except Exception as e:
-                logger.warning("Discord /new ack failed: {}", e)
+                await self._reply_ephemeral(interaction, "You are not allowed to use this bot.")
                 return
 
-            if not should_forward:
+            if not await self._reply_ephemeral(interaction, "Starting a new session..."):
                 return
 
             await self._channel._handle_message(
@@ -99,10 +99,7 @@ class DiscordBotClient(discord.Client):
 
         @self.tree.command(name="help", description="Show available commands")
         async def help_command(interaction: discord.Interaction) -> None:
-            try:
-                await interaction.response.send_message(HELP_TEXT, ephemeral=True)
-            except Exception as e:
-                logger.warning("Discord /help response failed: {}", e)
+            await self._reply_ephemeral(interaction, HELP_TEXT)
 
         @self.tree.error
         async def on_app_command_error(
