@@ -328,6 +328,33 @@ def test_make_provider_passes_extra_headers_to_custom_provider():
     assert kwargs["default_headers"]["x-session-affinity"] == "sticky-session"
 
 
+def test_make_provider_passes_proxy_config_to_openai_codex_provider():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "openai_codex", "model": "openai-codex/gpt-5.4"}},
+            "providers": {
+                "openaiCodex": {
+                    "apiKey": "proxy-key",
+                    "apiBase": "https://proxy.example/v1/responses",
+                    "extraHeaders": {
+                        "X-Test": "demo",
+                    },
+                }
+            },
+        }
+    )
+
+    with patch("nanobot.providers.openai_codex_provider.OpenAICodexProvider") as mock_provider_cls:
+        _make_provider(config)
+
+    mock_provider_cls.assert_called_once_with(
+        default_model="openai-codex/gpt-5.4",
+        api_base="https://proxy.example/v1/responses",
+        api_key="proxy-key",
+        extra_headers={"X-Test": "demo"},
+    )
+
+
 @pytest.fixture
 def mock_agent_runtime(tmp_path):
     """Mock agent command dependencies for focused CLI tests."""
