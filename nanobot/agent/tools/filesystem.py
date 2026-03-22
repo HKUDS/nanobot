@@ -93,8 +93,10 @@ class ReadFileTool(_FsTool):
             "required": ["path"],
         }
 
-    async def execute(self, path: str, offset: int = 1, limit: int | None = None, **kwargs: Any) -> Any:
+    async def execute(self, path: str | None = None, offset: int = 1, limit: int | None = None, **kwargs: Any) -> Any:
         try:
+            if not path:
+                return f"Error: File not found: {path}"
             fp = self._resolve(path)
             if not fp.exists():
                 return f"Error: File not found: {path}"
@@ -174,8 +176,12 @@ class WriteFileTool(_FsTool):
             "required": ["path", "content"],
         }
 
-    async def execute(self, path: str, content: str, **kwargs: Any) -> str:
+    async def execute(self, path: str | None = None, content: str | None = None, **kwargs: Any) -> str:
         try:
+            if not path:
+                raise ValueError(f"Unknown path")
+            if content is None:
+                raise ValueError("Unknown content")
             fp = self._resolve(path)
             fp.parent.mkdir(parents=True, exist_ok=True)
             fp.write_text(content, encoding="utf-8")
@@ -248,10 +254,18 @@ class EditFileTool(_FsTool):
         }
 
     async def execute(
-        self, path: str, old_text: str, new_text: str,
+        self, path: str | None = None, old_text: str | None = None,
+        new_text: str | None = None,
         replace_all: bool = False, **kwargs: Any,
     ) -> str:
         try:
+            if not path:
+                raise ValueError(f"Unknown path")
+            if old_text is None:
+                raise ValueError(f"Unknown old_text")
+            if new_text is None:
+                raise ValueError(f"Unknown next_text")
+
             fp = self._resolve(path)
             if not fp.exists():
                 return f"Error: File not found: {path}"
@@ -350,10 +364,12 @@ class ListDirTool(_FsTool):
         }
 
     async def execute(
-        self, path: str, recursive: bool = False,
+        self, path: str | None = None, recursive: bool = False,
         max_entries: int | None = None, **kwargs: Any,
     ) -> str:
         try:
+            if path is None:
+                raise ValueError(f"Unknown path")
             dp = self._resolve(path)
             if not dp.exists():
                 return f"Error: Directory not found: {path}"
