@@ -83,8 +83,7 @@ class DiscordBotClient(discord.Client):
                 await self._reply_ephemeral(interaction, "You are not allowed to use this bot.")
                 return
 
-            if not await self._reply_ephemeral(interaction, "Starting a new session..."):
-                return
+            await self._reply_ephemeral(interaction, "Starting a new session...")
 
             await self._channel._handle_message(
                 sender_id=sender_id,
@@ -116,11 +115,7 @@ class DiscordBotClient(discord.Client):
 
     async def send_outbound(self, msg: OutboundMessage) -> None:
         """Send a nanobot outbound message using Discord transport rules."""
-        try:
-            channel_id = int(msg.chat_id)
-        except (TypeError, ValueError):
-            logger.warning("Invalid Discord channel id: {}", msg.chat_id)
-            return
+        channel_id = int(msg.chat_id)
 
         channel = self.get_channel(channel_id)
         if channel is None:
@@ -206,12 +201,7 @@ class DiscordBotClient(discord.Client):
             logger.warning("Invalid Discord reply target: {}", reply_to)
             return None, mention_settings
 
-        get_partial_message = getattr(channel, "get_partial_message", None)
-        if callable(get_partial_message):
-            return get_partial_message(message_id), mention_settings
-
-        logger.warning("Discord channel {} does not support replies", getattr(channel, "id", "?"))
-        return None, mention_settings
+        return channel.get_partial_message(message_id), mention_settings
 
 
 class DiscordChannel(BaseChannel):
