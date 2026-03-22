@@ -1,3 +1,5 @@
+import asyncio
+import base64
 from pathlib import Path
 
 import pytest
@@ -15,6 +17,49 @@ class _FakeWs:
         import json
 
         self.sent.append(json.loads(payload))
+
+
+class _FakeConnectWs:
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+        self._queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def send(self, payload: str) -> None:
+        import json
+
+        data = json.loads(payload)
+        self.sent.append(data)
+        if data.get("action") == "get_login_info":
+            await self._queue.put(
+                json.dumps(
+                    {
+                        "echo": data["echo"],
+                        "status": "ok",
+                        "data": {"user_id": 999},
+                    }
+                )
+            )
+            await self._queue.put(None)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> str:
+        item = await self._queue.get()
+        if item is None:
+            raise StopAsyncIteration
+        return item
+
+
+class _FakeConnectCtx:
+    def __init__(self, ws: _FakeConnectWs) -> None:
+        self.ws = ws
+
+    async def __aenter__(self) -> _FakeConnectWs:
+        return self.ws
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        return None
 
 
 @pytest.mark.asyncio
@@ -122,7 +167,7 @@ async def test_send_group_media_uses_image_segment(tmp_path: Path) -> None:
     assert calls[1][0] == "send_group_msg"
     assert calls[1][1]["group_id"] == 42
     assert calls[1][1]["message"][0]["type"] == "image"
-    assert calls[1][1]["message"][0]["data"]["file"].startswith("file://")
+    assert calls[1][1]["message"][0]["data"]["file"] == f"base64://{base64.b64encode(b'jpg').decode('ascii')}"
 
 
 @pytest.mark.asyncio
@@ -136,3 +181,19 @@ async def test_notice_and_request_handlers_log_without_bus_messages() -> None:
     await channel._handle_ws_message('{"post_type":"request","request_type":"friend","user_id":2,"comment":"hi"}')
 
     assert channel.bus.inbound_size == 0
+
+
+@pytest.mark.asyncio
+async def test_run_connection_reads_api_response_while_waiting(monkeypatch) -> None:
+    ws = _FakeConnectWs()
+    channel = NapCatChannel(
+        NapCatConfig(allow_from=["*"], ws_url="ws://127.0.0.1:3001/", message_debounce_enabled=False),
+        MessageBus(),
+    )
+
+    monkeypatch.setattr("nanobot.channels.napcat.websockets.connect", lambda *args, **kwargs: _FakeConnectCtx(ws))
+
+    await channel._run_connection()
+
+    assert channel._self_id == "999"
+    assert ws.sent[0]["action"] == "get_login_info"

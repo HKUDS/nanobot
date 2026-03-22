@@ -1,6 +1,7 @@
 """NapCat channel implementation using OneBot 11 over WebSocket."""
 
 import asyncio
+import base64
 import json
 import mimetypes
 from collections import OrderedDict
@@ -131,13 +132,24 @@ class NapCatChannel(BaseChannel):
         async with websockets.connect(self.config.ws_url, additional_headers=headers or None) as ws:
             self._ws = ws
             logger.info("NapCat websocket connected to {}", self.config.ws_url)
+            message_task = asyncio.create_task(self._recv_loop(ws))
+            try:
+                login = await self._call_api("get_login_info")
+                if isinstance(login, dict) and login.get("user_id") is not None:
+                    self._self_id = str(login["user_id"])
+                await message_task
+            finally:
+                if not message_task.done():
+                    message_task.cancel()
+                    try:
+                        await message_task
+                    except asyncio.CancelledError:
+                        pass
 
-            login = await self._call_api("get_login_info")
-            if isinstance(login, dict) and login.get("user_id") is not None:
-                self._self_id = str(login["user_id"])
-
-            async for raw in ws:
-                await self._handle_ws_message(raw)
+    async def _recv_loop(self, ws: Any) -> None:
+        """Consume websocket frames so API responses can resolve concurrently."""
+        async for raw in ws:
+            await self._handle_ws_message(raw)
 
     def _connect_headers(self) -> dict[str, str]:
         """Build websocket auth headers."""
@@ -158,7 +170,9 @@ class NapCatChannel(BaseChannel):
         if media_path.startswith(("http://", "https://")):
             file_param = media_path
         else:
-            file_param = f"file://{Path(media_path).resolve()}"
+            file_param = await self._encode_media_file(media_path)
+            if file_param is None:
+                return
 
         suffix = Path(media_path).suffix.lower()
         segment_type = "record" if suffix in {".mp3", ".wav", ".ogg", ".amr", ".silk", ".m4a"} else "image"
@@ -173,6 +187,15 @@ class NapCatChannel(BaseChannel):
         )
         if result is None:
             logger.warning("NapCat {} send failed to {}", segment_type, chat_id)
+
+    async def _encode_media_file(self, media_path: str) -> str | None:
+        """Encode a local file for websocket transport so NapCat does not need host path access."""
+        try:
+            raw = await asyncio.to_thread(Path(media_path).read_bytes)
+        except OSError as exc:
+            logger.warning("NapCat failed to read local media {}: {}", media_path, exc)
+            return None
+        return f"base64://{base64.b64encode(raw).decode('ascii')}"
 
     async def _call_api(self, action: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
         """Call OneBot API and wait for response."""
