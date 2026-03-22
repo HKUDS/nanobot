@@ -23,7 +23,6 @@ if TYPE_CHECKING:
 
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
-TYPING_INTERVAL_S = 8
 HELP_TEXT = (
     "nanobot commands:\n"
     "/new - Start a new conversation\n"
@@ -40,20 +39,21 @@ class DiscordConfig(Base):
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377
     group_policy: Literal["mention", "open"] = "mention"
+    typing_interval_s: int = 8
 
 
-class _DiscordClient(discord.Client):
-    """discord.py client that forwards events to the owning channel."""
+class DiscordBotClient(discord.Client):
+    """discord.py client that forwards events to the channel."""
 
-    def __init__(self, owner: "DiscordChannel", *, intents: discord.Intents) -> None:
+    def __init__(self, channel: "DiscordChannel", *, intents: discord.Intents) -> None:
         super().__init__(intents=intents)
-        self._owner = owner
+        self._channel = channel
         self.tree = app_commands.CommandTree(self)
         self._register_app_commands()
 
     async def on_ready(self) -> None:
-        self._owner._bot_user_id = str(self.user.id) if self.user else None
-        logger.info("Discord bot connected as user {}", self._owner._bot_user_id)
+        self._channel._bot_user_id = str(self.user.id) if self.user else None
+        logger.info("Discord bot connected as user {}", self._channel._bot_user_id)
         try:
             synced = await self.tree.sync()
             logger.info("Discord app commands synced: {}", len(synced))
@@ -61,16 +61,16 @@ class _DiscordClient(discord.Client):
             logger.warning("Discord app command sync failed: {}", e)
 
     async def on_message(self, message: discord.Message) -> None:
-        await self._owner._on_message(message)
+        await self._channel._handle_discord_message(message)
 
     def _register_app_commands(self) -> None:
         @self.tree.command(name="new", description="Start a new conversation")
         async def new_command(interaction: discord.Interaction) -> None:
-            await self._on_slash_new(interaction)
+            await self._handle_new_command(interaction)
 
         @self.tree.command(name="help", description="Show available commands")
         async def help_command(interaction: discord.Interaction) -> None:
-            await self._on_slash_help(interaction)
+            await self._handle_help_command(interaction)
 
         @self.tree.error
         async def on_app_command_error(
@@ -85,13 +85,13 @@ class _DiscordClient(discord.Client):
                 error,
             )
 
-    async def _on_slash_help(self, interaction: discord.Interaction) -> None:
+    async def _handle_help_command(self, interaction: discord.Interaction) -> None:
         try:
             await interaction.response.send_message(HELP_TEXT, ephemeral=True)
         except Exception as e:
             logger.warning("Discord /help response failed: {}", e)
 
-    async def _on_slash_new(self, interaction: discord.Interaction) -> None:
+    async def _handle_new_command(self, interaction: discord.Interaction) -> None:
         user = interaction.user
         channel_id = interaction.channel_id
         ack_text = "Starting a new session..."
@@ -102,7 +102,7 @@ class _DiscordClient(discord.Client):
             should_forward = False
 
         sender_id = str(user.id) if user is not None else ""
-        if should_forward and not self._owner.is_allowed(sender_id):
+        if should_forward and not self._channel.is_allowed(sender_id):
             ack_text = "You are not allowed to use this bot."
             should_forward = False
 
@@ -115,7 +115,7 @@ class _DiscordClient(discord.Client):
         if not should_forward:
             return
 
-        await self._owner._handle_message(
+        await self._channel._handle_message(
             sender_id=sender_id,
             chat_id=str(channel_id),
             content="/new",
@@ -133,8 +133,7 @@ class _DiscordClient(discord.Client):
             logger.warning("Discord channel {} not available in client cache", msg.chat_id)
             return
 
-        reference = self._build_reference(channel, msg.reply_to)
-        mention_settings = discord.AllowedMentions(replied_user=False)
+        reference, mention_settings = self._build_reply_context(channel, msg.reply_to)
         sent_media = False
         failed_media: list[str] = []
 
@@ -196,25 +195,26 @@ class _DiscordClient(discord.Client):
         return split_message(fallback, MAX_MESSAGE_LEN)
 
     @staticmethod
-    def _build_reference(
+    def _build_reply_context(
         channel: "Messageable",
         reply_to: str | None,
-    ) -> discord.PartialMessage | None:
-        """Build a lightweight reply reference when supported by the channel type."""
+    ) -> tuple[discord.PartialMessage | None, discord.AllowedMentions]:
+        """Build reply context for outbound messages."""
+        mention_settings = discord.AllowedMentions(replied_user=False)
         if not reply_to:
-            return None
+            return None, mention_settings
         try:
             message_id = int(reply_to)
         except (TypeError, ValueError):
             logger.warning("Invalid Discord reply target: {}", reply_to)
-            return None
+            return None, mention_settings
 
         get_partial_message = getattr(channel, "get_partial_message", None)
         if callable(get_partial_message):
-            return get_partial_message(message_id)
+            return get_partial_message(message_id), mention_settings
 
         logger.warning("Discord channel {} does not support replies", getattr(channel, "id", "?"))
-        return None
+        return None, mention_settings
 
 
 class DiscordChannel(BaseChannel):
@@ -232,7 +232,7 @@ class DiscordChannel(BaseChannel):
             config = DiscordConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: DiscordConfig = config
-        self._client: _DiscordClient | None = None
+        self._client: DiscordBotClient | None = None
         self._typing_tasks: dict[str, asyncio.Task[None]] = {}
         self._bot_user_id: str | None = None
 
@@ -244,7 +244,7 @@ class DiscordChannel(BaseChannel):
 
         try:
             intents = discord.Intents(self.config.intents)
-            self._client = _DiscordClient(self, intents=intents)
+            self._client = DiscordBotClient(self, intents=intents)
         except Exception as e:
             logger.error("Failed to initialize Discord client: {}", e)
             self._client = None
@@ -262,29 +262,12 @@ class DiscordChannel(BaseChannel):
             logger.error("Discord client startup failed: {}", e)
         finally:
             self._running = False
-            if self._client is not None and not self._client.is_closed():
-                try:
-                    await self._client.close()
-                except Exception as e:
-                    logger.warning("Discord client close failed: {}", e)
-            self._client = None
-            self._bot_user_id = None
-            await self._cancel_all_typing()
+            await self._reset_runtime_state(close_client=True)
 
     async def stop(self) -> None:
         """Stop the Discord channel."""
         self._running = False
-        await self._cancel_all_typing()
-        if self._client is None:
-            return
-        try:
-            if not self._client.is_closed():
-                await self._client.close()
-        except Exception as e:
-            logger.warning("Discord client close failed: {}", e)
-        finally:
-            self._client = None
-            self._bot_user_id = None
+        await self._reset_runtime_state(close_client=True)
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Discord using discord.py."""
@@ -300,30 +283,62 @@ class DiscordChannel(BaseChannel):
         finally:
             await self._stop_typing(msg.chat_id)
 
-    async def _on_message(self, message: discord.Message) -> None:
+    async def _handle_discord_message(self, message: discord.Message) -> None:
         """Handle incoming Discord messages from discord.py."""
         if message.author.bot:
             return
 
         sender_id = str(message.author.id)
         channel_id = str(message.channel.id)
-        guild_id = str(message.guild.id) if message.guild else None
         content = message.content or ""
 
+        if not self._should_accept_inbound(message, sender_id, content):
+            return
+
+        media_paths, attachment_markers = await self._download_attachments(message.attachments)
+        full_content = self._compose_inbound_content(content, attachment_markers)
+        metadata = self._build_inbound_metadata(message)
+
+        await self._start_typing(message.channel)
+
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=channel_id,
+            content=full_content,
+            media=media_paths,
+            metadata=metadata,
+        )
+
+    async def _on_message(self, message: discord.Message) -> None:
+        """Backward-compatible alias for legacy tests/callers."""
+        await self._handle_discord_message(message)
+
+    def _should_accept_inbound(
+        self,
+        message: discord.Message,
+        sender_id: str,
+        content: str,
+    ) -> bool:
+        """Check if inbound Discord message should be processed."""
         if not self.is_allowed(sender_id):
-            return
-
+            return False
         if message.guild is not None and not self._should_respond_in_group(message, content):
-            return
+            return False
+        return True
 
-        content_parts = [content] if content else []
+    async def _download_attachments(
+        self,
+        attachments: list[discord.Attachment],
+    ) -> tuple[list[str], list[str]]:
+        """Download supported attachments and return paths + display markers."""
         media_paths: list[str] = []
+        markers: list[str] = []
         media_dir = get_media_dir("discord")
 
-        for attachment in message.attachments:
+        for attachment in attachments:
             filename = attachment.filename or "attachment"
             if attachment.size and attachment.size > MAX_ATTACHMENT_BYTES:
-                content_parts.append(f"[attachment: {filename} - too large]")
+                markers.append(f"[attachment: {filename} - too large]")
                 continue
             try:
                 media_dir.mkdir(parents=True, exist_ok=True)
@@ -331,26 +346,29 @@ class DiscordChannel(BaseChannel):
                 file_path = media_dir / f"{attachment.id}_{safe_name}"
                 await attachment.save(file_path)
                 media_paths.append(str(file_path))
-                content_parts.append(f"[attachment: {file_path.name}]")
+                markers.append(f"[attachment: {file_path.name}]")
             except Exception as e:
                 logger.warning("Failed to download Discord attachment: {}", e)
-                content_parts.append(f"[attachment: {filename} - download failed]")
+                markers.append(f"[attachment: {filename} - download failed]")
 
+        return media_paths, markers
+
+    @staticmethod
+    def _compose_inbound_content(content: str, attachment_markers: list[str]) -> str:
+        """Combine message text with attachment markers."""
+        content_parts = [content] if content else []
+        content_parts.extend(attachment_markers)
+        return "\n".join(part for part in content_parts if part) or "[empty message]"
+
+    @staticmethod
+    def _build_inbound_metadata(message: discord.Message) -> dict[str, str | None]:
+        """Build metadata for inbound Discord messages."""
         reply_to = str(message.reference.message_id) if message.reference and message.reference.message_id else None
-
-        await self._start_typing(message.channel)
-
-        await self._handle_message(
-            sender_id=sender_id,
-            chat_id=channel_id,
-            content="\n".join(part for part in content_parts if part) or "[empty message]",
-            media=media_paths,
-            metadata={
-                "message_id": str(message.id),
-                "guild_id": guild_id,
-                "reply_to": reply_to,
-            },
-        )
+        return {
+            "message_id": str(message.id),
+            "guild_id": str(message.guild.id) if message.guild else None,
+            "reply_to": reply_to,
+        }
 
     def _should_respond_in_group(self, message: discord.Message, content: str) -> bool:
         """Check if the bot should respond in a guild channel based on policy."""
@@ -387,7 +405,7 @@ class DiscordChannel(BaseChannel):
                 except Exception as e:
                     logger.debug("Discord typing indicator failed for {}: {}", channel_id, e)
                     return
-                await asyncio.sleep(TYPING_INTERVAL_S)
+                await asyncio.sleep(self.config.typing_interval_s)
 
         self._typing_tasks[channel_id] = asyncio.create_task(typing_loop())
 
@@ -407,3 +425,14 @@ class DiscordChannel(BaseChannel):
         channel_ids = list(self._typing_tasks)
         for channel_id in channel_ids:
             await self._stop_typing(channel_id)
+
+    async def _reset_runtime_state(self, close_client: bool) -> None:
+        """Reset client and typing state."""
+        await self._cancel_all_typing()
+        if close_client and self._client is not None and not self._client.is_closed():
+            try:
+                await self._client.close()
+            except Exception as e:
+                logger.warning("Discord client close failed: {}", e)
+        self._client = None
+        self._bot_user_id = None

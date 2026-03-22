@@ -9,7 +9,7 @@ import pytest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.discord import DiscordChannel, DiscordConfig, _DiscordClient
+from nanobot.channels.discord import DiscordBotClient, DiscordChannel, DiscordConfig
 
 
 # Minimal Discord client test double used to control startup/readiness behavior.
@@ -170,7 +170,7 @@ async def test_start_handles_client_construction_failure(monkeypatch) -> None:
     def _boom(owner, *, intents):
         raise RuntimeError("bad client")
 
-    monkeypatch.setattr("nanobot.channels.discord._DiscordClient", _boom)
+    monkeypatch.setattr("nanobot.channels.discord.DiscordBotClient", _boom)
 
     await channel.start()
 
@@ -188,7 +188,7 @@ async def test_start_handles_client_start_failure(monkeypatch) -> None:
 
     _FakeDiscordClient.instances.clear()
     _FakeDiscordClient.start_error = RuntimeError("connect failed")
-    monkeypatch.setattr("nanobot.channels.discord._DiscordClient", _FakeDiscordClient)
+    monkeypatch.setattr("nanobot.channels.discord.DiscordBotClient", _FakeDiscordClient)
 
     await channel.start()
 
@@ -357,7 +357,7 @@ async def test_send_warns_when_client_not_ready() -> None:
 async def test_send_skips_when_channel_not_cached() -> None:
     # Outbound sends should be skipped when the destination channel is not resolvable.
     owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
-    client = _DiscordClient(owner, intents=discord.Intents.none())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
 
     await client.send_outbound(OutboundMessage(channel="discord", chat_id="123", content="hello"))
 
@@ -373,10 +373,10 @@ async def test_slash_new_forwards_when_user_is_allowlisted() -> None:
         handled.append(kwargs)
 
     channel._handle_message = capture_handle  # type: ignore[method-assign]
-    client = _DiscordClient(channel, intents=discord.Intents.none())
+    client = DiscordBotClient(channel, intents=discord.Intents.none())
     interaction = _make_interaction(user_id=123, channel_id=456, interaction_id=321)
 
-    await client._on_slash_new(interaction)
+    await client._handle_new_command(interaction)
 
     assert interaction.response.messages == [
         {"content": "Starting a new session...", "ephemeral": True}
@@ -398,10 +398,10 @@ async def test_slash_new_is_blocked_for_disallowed_user() -> None:
         handled.append(kwargs)
 
     channel._handle_message = capture_handle  # type: ignore[method-assign]
-    client = _DiscordClient(channel, intents=discord.Intents.none())
+    client = DiscordBotClient(channel, intents=discord.Intents.none())
     interaction = _make_interaction(user_id=123, channel_id=456)
 
-    await client._on_slash_new(interaction)
+    await client._handle_new_command(interaction)
 
     assert interaction.response.messages == [
         {"content": "You are not allowed to use this bot.", "ephemeral": True}
@@ -412,11 +412,11 @@ async def test_slash_new_is_blocked_for_disallowed_user() -> None:
 @pytest.mark.asyncio
 async def test_slash_help_returns_command_list() -> None:
     owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
-    client = _DiscordClient(owner, intents=discord.Intents.none())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
     interaction = _make_interaction()
     interaction.command.qualified_name = "help"
 
-    await client._on_slash_help(interaction)
+    await client._handle_help_command(interaction)
 
     assert len(interaction.response.messages) == 1
     help_text = interaction.response.messages[0]["content"]
@@ -429,7 +429,7 @@ async def test_slash_help_returns_command_list() -> None:
 async def test_client_send_outbound_chunks_text_replies_and_uploads_files(tmp_path) -> None:
     # Outbound payloads should upload files, attach reply references, and chunk long text.
     owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
-    client = _DiscordClient(owner, intents=discord.Intents.none())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
     target = _FakeChannel(channel_id=123)
     client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
 
@@ -457,7 +457,7 @@ async def test_client_send_outbound_chunks_text_replies_and_uploads_files(tmp_pa
 async def test_client_send_outbound_reports_failed_attachments_when_no_text(tmp_path) -> None:
     # If all attachment sends fail and no text exists, emit a failure placeholder message.
     owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
-    client = _DiscordClient(owner, intents=discord.Intents.none())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
     target = _FakeChannel(channel_id=123)
     client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
 
