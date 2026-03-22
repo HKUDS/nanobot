@@ -997,8 +997,40 @@ def _get_bridge_dir() -> Path:
 
 
 @channels_app.command("login")
-def channels_login():
+def channels_login(
+    channel: str = typer.Option("whatsapp", "--channel", "-c", help="Channel to login (whatsapp, weixin)"),
+):
     """Link device via QR code."""
+    if channel == "weixin":
+        _channels_login_weixin()
+        return
+
+    if channel != "whatsapp":
+        console.print(f"[red]Unknown channel: {channel}. Supported: whatsapp, weixin[/red]")
+        raise typer.Exit(1)
+
+    _channels_login_whatsapp()
+
+
+def _channels_login_weixin():
+    """Weixin QR code login flow."""
+    from nanobot.config.loader import load_config
+
+    console.print(f"{__logo__} [bold cyan]微信 iLink 登录[/bold cyan]\n")
+
+    config = load_config()
+    weixin_cfg = getattr(config.channels, "weixin", None) or {}
+    base_url = (
+        weixin_cfg.get("baseUrl", "") if isinstance(weixin_cfg, dict)
+        else getattr(weixin_cfg, "base_url", "")
+    ) or "https://ilinkai.weixin.qq.com"
+
+    from nanobot.channels.weixin import run_weixin_qr_login_sync
+    run_weixin_qr_login_sync(base_url=base_url)
+
+
+def _channels_login_whatsapp():
+    """WhatsApp bridge login flow (original implementation)."""
     import shutil
     import subprocess
 
