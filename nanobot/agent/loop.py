@@ -376,7 +376,23 @@ class AgentLoop:
         """Process a message under the global lock."""
         async with self._processing_lock:
             try:
-                response = await self._process_message(msg)
+                on_stream = on_stream_end = None
+                if msg.metadata.get("_wants_stream"):
+                    async def on_stream(delta: str) -> None:
+                        await self.bus.publish_outbound(OutboundMessage(
+                            channel=msg.channel, chat_id=msg.chat_id,
+                            content=delta, metadata={"_stream_delta": True},
+                        ))
+
+                    async def on_stream_end(*, resuming: bool = False) -> None:
+                        await self.bus.publish_outbound(OutboundMessage(
+                            channel=msg.channel, chat_id=msg.chat_id,
+                            content="", metadata={"_stream_end": True, "_resuming": resuming},
+                        ))
+
+                response = await self._process_message(
+                    msg, on_stream=on_stream, on_stream_end=on_stream_end,
+                )
                 if response is not None:
                     await self.bus.publish_outbound(response)
                 elif msg.channel == "cli":

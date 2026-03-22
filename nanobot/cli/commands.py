@@ -207,10 +207,6 @@ class _ThinkingSpinner:
         self._active = False
         if self._spinner:
             self._spinner.stop()
-            # Force-clear the spinner line: Rich Live's transient cleanup
-            # occasionally loses a race with its own render thread.
-            console.file.write("\033[2K\r")
-            console.file.flush()
         return False
 
     @contextmanager
@@ -218,8 +214,6 @@ class _ThinkingSpinner:
         """Temporarily stop spinner while printing progress."""
         if self._spinner and self._active:
             self._spinner.stop()
-            console.file.write("\033[2K\r")
-            console.file.flush()
         try:
             yield
         finally:
@@ -776,25 +770,16 @@ def agent(
         async def run_once():
             nonlocal _thinking
             _thinking = _ThinkingSpinner(enabled=not logs)
-
-            with _thinking or nullcontext():
+            with _thinking:
                 response = await agent_loop.process_direct(
-                    message, session_id,
-                    on_progress=_cli_progress,
+                    message, session_id, on_progress=_cli_progress,
                 )
-
-            if _thinking:
-                _thinking.__exit__(None, None, None)
-                _thinking = None
-
-            if response and response.content:
-                _print_agent_response(
-                    response.content,
-                    render_markdown=markdown,
-                    metadata=response.metadata,
-                )
-            else:
-                console.print()
+            _thinking = None
+            _print_agent_response(
+                response.content if response else "",
+                render_markdown=markdown,
+                metadata=response.metadata if response else None,
+            )
             await agent_loop.close_mcp()
 
         asyncio.run(run_once())
@@ -835,7 +820,6 @@ def agent(
                 while True:
                     try:
                         msg = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
-
                         if msg.metadata.get("_progress"):
                             is_tool_hint = msg.metadata.get("_tool_hint", False)
                             ch = agent_loop.channels_config
@@ -850,7 +834,6 @@ def agent(
                             if msg.content:
                                 turn_response.append((msg.content, dict(msg.metadata or {})))
                             turn_done.set()
-
                         elif msg.content:
                             await _print_interactive_response(
                                 msg.content,
@@ -889,7 +872,11 @@ def agent(
                             content=user_input,
                         ))
 
-                        await turn_done.wait()
+                        nonlocal _thinking
+                        _thinking = _ThinkingSpinner(enabled=not logs)
+                        with _thinking:
+                            await turn_done.wait()
+                        _thinking = None
 
                         if turn_response:
                             content, meta = turn_response[0]
