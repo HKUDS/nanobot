@@ -6,10 +6,8 @@ markdown rendering during streaming. Ellipsis mode handles overflow.
 
 from __future__ import annotations
 
-import re
 import sys
 import time
-from typing import Any
 
 from rich.console import Console
 from rich.live import Live
@@ -61,6 +59,8 @@ class ThinkingSpinner:
 class StreamRenderer:
     """Rich Live streaming with markdown. auto_refresh=False avoids render races.
 
+    Deltas arrive pre-filtered (no <think> tags) from the agent loop.
+
     Flow per round:
       spinner -> first visible delta -> header + Live renders ->
       on_end -> Live stops (content stays on screen)
@@ -76,15 +76,8 @@ class StreamRenderer:
         self._spinner: ThinkingSpinner | None = None
         self._start_spinner()
 
-    @staticmethod
-    def _clean(text: str) -> str:
-        text = re.sub(r"<think>[\s\S]*?</think>", "", text)
-        text = re.sub(r"<think>[\s\S]*$", "", text)
-        return text.strip()
-
     def _render(self):
-        clean = self._clean(self._buf)
-        return Markdown(clean) if self._md and clean else Text(clean or "")
+        return Markdown(self._buf) if self._md and self._buf else Text(self._buf or "")
 
     def _start_spinner(self) -> None:
         if self._show_spinner:
@@ -100,7 +93,7 @@ class StreamRenderer:
         self.streamed = True
         self._buf += delta
         if self._live is None:
-            if not self._clean(self._buf):
+            if not self._buf.strip():
                 return
             self._stop_spinner()
             c = _make_console()

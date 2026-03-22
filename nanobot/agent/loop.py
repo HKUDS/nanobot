@@ -173,7 +173,8 @@ class AgentLoop:
         """Remove <think>…</think> blocks that some models embed in content."""
         if not text:
             return None
-        return re.sub(r"<think>[\s\S]*?</think>", "", text).strip() or None
+        from nanobot.utils.helpers import strip_think
+        return strip_think(text) or None
 
     @staticmethod
     def _tool_hint(tool_calls: list) -> str:
@@ -227,6 +228,21 @@ class AgentLoop:
         final_content = None
         tools_used: list[str] = []
 
+        # Wrap on_stream with stateful think-tag filter so downstream
+        # consumers (CLI, channels) never see <think> blocks.
+        _raw_stream = on_stream
+        _stream_buf = ""
+
+        async def _filtered_stream(delta: str) -> None:
+            nonlocal _stream_buf
+            from nanobot.utils.helpers import strip_think
+            prev_clean = strip_think(_stream_buf)
+            _stream_buf += delta
+            new_clean = strip_think(_stream_buf)
+            incremental = new_clean[len(prev_clean):]
+            if incremental and _raw_stream:
+                await _raw_stream(incremental)
+
         while iteration < self.max_iterations:
             iteration += 1
 
@@ -237,7 +253,7 @@ class AgentLoop:
                     messages=messages,
                     tools=tool_defs,
                     model=self.model,
-                    on_content_delta=on_stream,
+                    on_content_delta=_filtered_stream,
                 )
             else:
                 response = await self.provider.chat_with_retry(
@@ -255,6 +271,7 @@ class AgentLoop:
             if response.has_tool_calls:
                 if on_stream and on_stream_end:
                     await on_stream_end(resuming=True)
+                    _stream_buf = ""
 
                 if on_progress:
                     if not on_stream:
@@ -286,6 +303,7 @@ class AgentLoop:
             else:
                 if on_stream and on_stream_end:
                     await on_stream_end(resuming=False)
+                    _stream_buf = ""
 
                 clean = self._strip_think(response.content)
                 if response.finish_reason == "error":
