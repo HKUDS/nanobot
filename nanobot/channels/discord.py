@@ -68,17 +68,15 @@ class DiscordBotClient(discord.Client):
         async def new_command(interaction: discord.Interaction) -> None:
             user = interaction.user
             channel_id = interaction.channel_id
-            ack_text = "Starting a new session..."
-            should_forward = True
-
             if user is None or channel_id is None:
                 ack_text = "Unable to resolve command context."
                 should_forward = False
-
-            sender_id = str(user.id) if user is not None else ""
-            if should_forward and not self._channel.is_allowed(sender_id):
+            elif not self._channel.is_allowed(str(user.id)):
                 ack_text = "You are not allowed to use this bot."
                 should_forward = False
+            else:
+                ack_text = "Starting a new session..."
+                should_forward = True
 
             try:
                 await interaction.response.send_message(ack_text, ephemeral=True)
