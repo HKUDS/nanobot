@@ -54,6 +54,7 @@ class SkillsLoader:
         # Filter by requirements
         if filter_unavailable:
             return [s for s in skills if self._check_requirements(self._get_skill_meta(s["name"]))]
+
         return skills
 
     def load_skill(self, name: str) -> str | None:
@@ -115,7 +116,8 @@ class SkillsLoader:
         def escape_xml(s: str) -> str:
             return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-        lines = ["<skills>"]
+        cnt = 1
+        lines = [f"skills[{len(all_skills)}]{{available,name,description,location,requires}}"]
         for s in all_skills:
             name = escape_xml(s["name"])
             path = s["path"]
@@ -123,20 +125,21 @@ class SkillsLoader:
             skill_meta = self._get_skill_meta(s["name"])
             available = self._check_requirements(skill_meta)
 
-            lines.append(f"  <skill available=\"{str(available).lower()}\">")
-            lines.append(f"    <name>{name}</name>")
-            lines.append(f"    <description>{desc}</description>")
-            lines.append(f"    <location>{path}</location>")
-
             # Show missing requirements for unavailable skills
             if not available:
-                missing = self._get_missing_requirements(skill_meta)
-                if missing:
-                    lines.append(f"    <requires>{escape_xml(missing)}</requires>")
+                if self._get_missing_requirements(skill_meta):
+                    missing = f"{escape_xml(self._get_missing_requirements(skill_meta))}"
+                else:
+                    missing = "Missing dependencies not listed"
+            else:
+                missing = "N/A"
 
-            lines.append("  </skill>")
-        lines.append("</skills>")
+            lines.append(f"{cnt},{str(available).lower()},{name},{desc},{path},{missing}")
+            cnt += 1
 
+
+        test = "\n".join(lines)
+        print(test)
         return "\n".join(lines)
 
     def _get_missing_requirements(self, skill_meta: dict) -> str:
