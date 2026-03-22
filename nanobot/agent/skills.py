@@ -138,8 +138,6 @@ class SkillsLoader:
             cnt += 1
 
 
-        test = "\n".join(lines)
-        print(test)
         return "\n".join(lines)
 
     def _get_missing_requirements(self, skill_meta: dict) -> str:
