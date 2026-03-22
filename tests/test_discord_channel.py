@@ -91,6 +91,45 @@ class _FakeChannel:
         self.trigger_typing_calls += 1
 
 
+class _FakeInteractionResponse:
+    def __init__(self) -> None:
+        self.messages: list[dict] = []
+        self._done = False
+
+    async def send_message(self, content: str, *, ephemeral: bool = False) -> None:
+        self.messages.append({"content": content, "ephemeral": ephemeral})
+        self._done = True
+
+    def is_done(self) -> bool:
+        return self._done
+
+
+class _FakeInteractionFollowup:
+    def __init__(self) -> None:
+        self.messages: list[dict] = []
+
+    async def send(self, content: str, *, ephemeral: bool = False) -> None:
+        self.messages.append({"content": content, "ephemeral": ephemeral})
+
+
+def _make_interaction(
+    *,
+    user_id: int = 123,
+    channel_id: int | None = 456,
+    guild_id: int | None = None,
+    interaction_id: int = 999,
+):
+    return SimpleNamespace(
+        user=SimpleNamespace(id=user_id),
+        channel_id=channel_id,
+        guild_id=guild_id,
+        id=interaction_id,
+        command=SimpleNamespace(qualified_name="new"),
+        response=_FakeInteractionResponse(),
+        followup=_FakeInteractionFollowup(),
+    )
+
+
 def _make_message(
     *,
     author_id: int = 123,
@@ -332,6 +371,78 @@ async def test_send_skips_when_channel_not_cached() -> None:
     await client.send_outbound(OutboundMessage(channel="discord", chat_id="123", content="hello"))
 
     assert client.get_channel(123) is None
+
+
+@pytest.mark.asyncio
+async def test_discord_client_registers_slash_commands() -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = _DiscordClient(owner, intents=discord.Intents.none())
+
+    names = {cmd.name for cmd in client.tree.get_commands()}
+
+    assert "new" in names
+    assert "help" in names
+
+
+@pytest.mark.asyncio
+async def test_slash_new_forwards_when_user_is_allowlisted() -> None:
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["123"]), MessageBus())
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+    client = _DiscordClient(channel, intents=discord.Intents.none())
+    interaction = _make_interaction(user_id=123, channel_id=456, interaction_id=321)
+
+    await client._on_slash_new(interaction)
+
+    assert interaction.response.messages == [
+        {"content": "Starting a new session...", "ephemeral": True}
+    ]
+    assert len(handled) == 1
+    assert handled[0]["content"] == "/new"
+    assert handled[0]["sender_id"] == "123"
+    assert handled[0]["chat_id"] == "456"
+    assert handled[0]["metadata"]["interaction_id"] == "321"
+    assert handled[0]["metadata"]["is_slash_command"] is True
+
+
+@pytest.mark.asyncio
+async def test_slash_new_is_blocked_for_disallowed_user() -> None:
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["999"]), MessageBus())
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+    client = _DiscordClient(channel, intents=discord.Intents.none())
+    interaction = _make_interaction(user_id=123, channel_id=456)
+
+    await client._on_slash_new(interaction)
+
+    assert interaction.response.messages == [
+        {"content": "You are not allowed to use this bot.", "ephemeral": True}
+    ]
+    assert handled == []
+
+
+@pytest.mark.asyncio
+async def test_slash_help_returns_command_list() -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = _DiscordClient(owner, intents=discord.Intents.none())
+    interaction = _make_interaction()
+    interaction.command.qualified_name = "help"
+
+    await client._on_slash_help(interaction)
+
+    assert len(interaction.response.messages) == 1
+    help_text = interaction.response.messages[0]["content"]
+    assert "/new" in help_text
+    assert "/help" in help_text
+    assert "/restart" in help_text
 
 
 @pytest.mark.asyncio
