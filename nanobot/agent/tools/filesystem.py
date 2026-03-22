@@ -101,44 +101,112 @@ class ReadFileTool(_FsTool):
             if not fp.is_file():
                 return f"Error: Not a file: {path}"
 
-            raw = fp.read_bytes()
-            if not raw:
+            # fast empty check
+            try:
+                if fp.stat().st_size == 0:
+                    return f"(Empty file: {path})"
+            except OSError:
+                pass
+
+            # Detect MIME from magic bytes without loading the whole file.
+            # We intentionally read only 12 bytes here because `detect_image_mime()` currently
+            # checks at most these ranges:
+            # - PNG:   data[:8]
+            # - JPEG:  data[:3]
+            # - GIF:   data[:6]
+            # - WEBP:  data[:4] and data[8:12]  -> requires 12 bytes total
+            # If `detect_image_mime()` starts supporting formats that require a longer header,
+            # update this read size accordingly.
+            try:
+                with fp.open("rb") as f:
+                    head = f.read(12)
+            except OSError as e:
+                return f"Error reading file: {e}"
+
+            if not head:
                 return f"(Empty file: {path})"
 
-            mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
+            mime = detect_image_mime(head) or mimetypes.guess_type(path)[0]
             if mime and mime.startswith("image/"):
+                raw = fp.read_bytes()
                 return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
 
-            try:
-                text_content = raw.decode("utf-8")
-            except UnicodeDecodeError:
-                return f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). Only UTF-8 text and images are supported."
-
-            all_lines = text_content.splitlines()
-            total = len(all_lines)
-
+            # normalize params
             if offset < 1:
                 offset = 1
+            per_page = limit or self._DEFAULT_LIMIT
+
+            selected: list[str] = []
+            selected_chars = 0
+            max_chars = self._MAX_CHARS
+            exceeded_budget = False
+
+            total = 0
+
+            try:
+                with fp.open("r", encoding="utf-8", errors="replace", newline=None) as f:
+                    for lineno, line in enumerate(f, start=1):
+                        total = lineno
+
+                        if lineno < offset:
+                            continue
+
+                        if len(selected) >= per_page or exceeded_budget:
+                            # still scan to compute total
+                            continue
+
+                        text = line.rstrip("\n").rstrip("\r")
+                        numbered = f"{lineno}| {text}"
+
+                        # account for newline join
+                        projected = selected_chars + len(numbered)
+                        if selected:
+                            projected += 1  # '\n'
+
+                        if projected > max_chars:
+                            if not selected:
+                                # ensure at least one line returned
+                                prefix = f"{lineno}| "
+                                available = max_chars - len(prefix)
+
+                                if available <= 0:
+                                    truncated = ""
+                                else:
+                                    if len(text) > available:
+                                        keep = max(0, available - 1)
+                                        truncated = text[:keep] + "…"
+                                    else:
+                                        truncated = text
+
+                                numbered = prefix + truncated
+                                selected.append(numbered)
+                                selected_chars = len(numbered)
+                            exceeded_budget = True
+                            continue
+
+                        selected.append(numbered)
+                        selected_chars = projected
+
+            except OSError as e:
+                return f"Error reading file: {e}"
+
+            if total == 0:
+                return f"(Empty file: {path})"
+
             if offset > total:
                 return f"Error: offset {offset} is beyond end of file ({total} lines)"
 
-            start = offset - 1
-            end = min(start + (limit or self._DEFAULT_LIMIT), total)
-            numbered = [f"{start + i + 1}| {line}" for i, line in enumerate(all_lines[start:end])]
-            result = "\n".join(numbered)
+            if not selected:
+                return f"(No content within budget: {path})"
 
-            if len(result) > self._MAX_CHARS:
-                trimmed, chars = [], 0
-                for line in numbered:
-                    chars += len(line) + 1
-                    if chars > self._MAX_CHARS:
-                        break
-                    trimmed.append(line)
-                end = start + len(trimmed)
-                result = "\n".join(trimmed)
+            result = "\n".join(selected)
+            end = int(selected[-1].split("|", 1)[0])
 
             if end < total:
-                result += f"\n\n(Showing lines {offset}-{end} of {total}. Use offset={end + 1} to continue.)"
+                result += (
+                    f"\n\n(Showing lines {offset}-{end} of {total}. "
+                    f"Use offset={end + 1} to continue.)"
+                )
             else:
                 result += f"\n\n(End of file — {total} lines total)"
             return result
