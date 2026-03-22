@@ -45,7 +45,7 @@ class DiscordConfig(Base):
 class DiscordBotClient(discord.Client):
     """discord.py client that forwards events to the channel."""
 
-    def __init__(self, channel: "DiscordChannel", *, intents: discord.Intents) -> None:
+    def __init__(self, channel: DiscordChannel, *, intents: discord.Intents) -> None:
         super().__init__(intents=intents)
         self._channel = channel
         self.tree = app_commands.CommandTree(self)
@@ -68,10 +68,9 @@ class DiscordBotClient(discord.Client):
         async def new_command(interaction: discord.Interaction) -> None:
             user = interaction.user
             channel_id = interaction.channel_id
-            if user is None or channel_id is None:
-                ack_text = "Unable to resolve command context."
-                should_forward = False
-            elif not self._channel.is_allowed(str(user.id)):
+            sender_id = str(user.id)
+
+            if not self._channel.is_allowed(sender_id):
                 ack_text = "You are not allowed to use this bot."
                 should_forward = False
             else:
