@@ -460,7 +460,7 @@ class AgentLoop:
                 channel=msg.channel,
                 chat_id=msg.chat_id,
                 content="\n".join(lines),
-                metadata={"render_as": "text"},
+                metadata={"render_as": "text", "source_event": msg},
             )
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 

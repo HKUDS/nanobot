@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import pprint
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -115,7 +116,8 @@ class TestRestartCommand:
         assert response is not None
         assert "/restart" in response.content
         assert "/status" in response.content
-        assert response.metadata == {"render_as": "text"}
+        assert "render_as" in response.metadata
+        assert response.metadata["render_as"] == "text"
 
     @pytest.mark.asyncio
     async def test_status_reports_runtime_info(self):
