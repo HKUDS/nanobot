@@ -194,6 +194,7 @@ async def test_start_handles_client_start_failure(monkeypatch) -> None:
 
     assert channel.is_running is False
     assert channel._client is None
+    assert _FakeDiscordClient.instances[0].intents.value == channel.config.intents
     assert _FakeDiscordClient.instances[0].closed is True
 
     _FakeDiscordClient.start_error = None

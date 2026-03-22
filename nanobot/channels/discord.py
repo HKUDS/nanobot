@@ -237,7 +237,8 @@ class DiscordChannel(BaseChannel):
             return
 
         try:
-            intents = discord.Intents(self.config.intents)
+            intents = discord.Intents.none()
+            intents.value = self.config.intents
             self._client = DiscordBotClient(self, intents=intents)
         except Exception as e:
             logger.error("Failed to initialize Discord client: {}", e)
