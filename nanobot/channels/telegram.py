@@ -187,6 +187,8 @@ class TelegramChannel(BaseChannel):
         BotCommand("help", "Show available commands"),
         BotCommand("restart", "Restart the bot"),
         BotCommand("status", "Show bot status"),
+        BotCommand("model_gpt5_nano", "Set Model to GPT-5-Nano"),
+        BotCommand("model_gpt5", "Set Model to GPT-5"),
     ]
 
     @classmethod
@@ -266,6 +268,8 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("stop", self._forward_command))
         self._app.add_handler(CommandHandler("restart", self._forward_command))
         self._app.add_handler(CommandHandler("status", self._forward_command))
+        self._app.add_handler(CommandHandler("model_gpt5_nano", self._forward_command))
+        self._app.add_handler(CommandHandler("model_gpt5", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
 
         # Add message handler for text, photos, voice, documents
@@ -515,6 +519,8 @@ class TelegramChannel(BaseChannel):
             "/stop — Stop the current task\n"
             "/restart — Restart the bot\n"
             "/status — Show bot status\n"
+            "/model-gpt-5 — Set gpt-5\n"
+            "/model-gpt-5-nano — Set gpt-5-nano\n"
             "/help — Show available commands"
         )
 

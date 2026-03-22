@@ -447,12 +447,30 @@ class AgentLoop:
                                   content="New session started.")
         if cmd == "/status":
             return self._status_response(msg, session)
+        if cmd == "/model_gpt5":
+            self.model="openai/gpt-5.4"
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="Set model to Gpt-5.4",
+                metadata={"render_as": "text"},
+            )
+        if cmd == "/model_gpt5_nano":
+            self.model="openai/gpt-5-nano"
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="Set model to Gpt-5-nano",
+                metadata={"render_as": "text"},
+            )
         if cmd == "/help":
             lines = [
                 "🐈 nanobot commands:",
                 "/new — Start a new conversation",
                 "/stop — Stop the current task",
                 "/restart — Restart the bot",
+                "/model_gpt5 — Set gpt-5",
+                "/model_gpt5_nano — Set gpt-5-nano",
                 "/status — Show bot status",
                 "/help — Show available commands",
             ]
