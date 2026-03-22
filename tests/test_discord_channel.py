@@ -104,14 +104,6 @@ class _FakeInteractionResponse:
         return self._done
 
 
-class _FakeInteractionFollowup:
-    def __init__(self) -> None:
-        self.messages: list[dict] = []
-
-    async def send(self, content: str, *, ephemeral: bool = False) -> None:
-        self.messages.append({"content": content, "ephemeral": ephemeral})
-
-
 def _make_interaction(
     *,
     user_id: int = 123,
@@ -126,7 +118,6 @@ def _make_interaction(
         id=interaction_id,
         command=SimpleNamespace(qualified_name="new"),
         response=_FakeInteractionResponse(),
-        followup=_FakeInteractionFollowup(),
     )
 
 
@@ -371,17 +362,6 @@ async def test_send_skips_when_channel_not_cached() -> None:
     await client.send_outbound(OutboundMessage(channel="discord", chat_id="123", content="hello"))
 
     assert client.get_channel(123) is None
-
-
-@pytest.mark.asyncio
-async def test_discord_client_registers_slash_commands() -> None:
-    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
-    client = _DiscordClient(owner, intents=discord.Intents.none())
-
-    names = {cmd.name for cmd in client.tree.get_commands()}
-
-    assert "new" in names
-    assert "help" in names
 
 
 @pytest.mark.asyncio

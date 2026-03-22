@@ -24,6 +24,13 @@ if TYPE_CHECKING:
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
 TYPING_INTERVAL_S = 8
+HELP_TEXT = (
+    "nanobot commands:\n"
+    "/new - Start a new conversation\n"
+    "/stop - Stop the current task\n"
+    "/restart - Restart the bot\n"
+    "/help - Show available commands"
+)
 
 
 class DiscordConfig(Base):
@@ -44,17 +51,16 @@ class _DiscordClient(discord.Client):
         super().__init__(intents=intents)
         self._owner = owner
         self.tree = app_commands.CommandTree(self)
-        self._commands_synced = False
         self._register_app_commands()
-
-    async def setup_hook(self) -> None:
-        await self._sync_app_commands()
 
     async def on_ready(self) -> None:
         self._owner._bot_user_id = str(self.user.id) if self.user else None
         logger.info("Discord bot connected as user {}", self._owner._bot_user_id)
-        if not self._commands_synced:
-            await self._sync_app_commands()
+        try:
+            synced = await self.tree.sync()
+            logger.info("Discord app commands synced: {}", len(synced))
+        except Exception as e:
+            logger.warning("Discord app command sync failed: {}", e)
 
     async def on_message(self, message: discord.Message) -> None:
         await self._owner._on_message(message)
@@ -81,29 +87,9 @@ class _DiscordClient(discord.Client):
                 error,
             )
 
-    async def _sync_app_commands(self) -> None:
-        if self._commands_synced:
-            return
-        try:
-            synced = await self.tree.sync()
-            self._commands_synced = True
-            logger.info("Discord app commands synced: {}", len(synced))
-        except Exception as e:
-            logger.warning("Discord app command sync failed: {}", e)
-
-    @staticmethod
-    def _help_text() -> str:
-        return (
-            "nanobot commands:\n"
-            "/new - Start a new conversation\n"
-            "/stop - Stop the current task\n"
-            "/restart - Restart the bot\n"
-            "/help - Show available commands"
-        )
-
     async def _on_slash_help(self, interaction: discord.Interaction) -> None:
         try:
-            await interaction.response.send_message(self._help_text(), ephemeral=True)
+            await interaction.response.send_message(HELP_TEXT, ephemeral=True)
         except Exception as e:
             logger.warning("Discord /help response failed: {}", e)
 
