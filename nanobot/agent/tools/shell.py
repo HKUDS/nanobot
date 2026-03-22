@@ -109,6 +109,11 @@ class ExecTool(Tool):
                 try:
                     await asyncio.wait_for(process.wait(), timeout=5.0)
                 except asyncio.TimeoutError:
+                    try:
+                        os.waitpid(process.pid, os.WNOHANG)
+                    except (ProcessLookupError, ChildProcessError):
+                        pass
+                except ProcessLookupError:
                     pass
                 return f"Error: Command timed out after {effective_timeout} seconds"
 
