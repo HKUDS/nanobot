@@ -222,7 +222,13 @@ class SkillsLoader:
                 for line in match.group(1).split("\n"):
                     if ":" in line:
                         key, value = line.split(":", 1)
-                        metadata[key.strip()] = value.strip().strip('"\'')
+                        val = value.strip().strip('"\'')
+                        # Convert YAML boolean strings to Python bools
+                        if val.lower() in ("true", "yes"):
+                            val = True
+                        elif val.lower() in ("false", "no"):
+                            val = False
+                        metadata[key.strip()] = val
                 return metadata
 
         return None
