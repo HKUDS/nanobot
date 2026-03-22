@@ -376,7 +376,9 @@ async def test_slash_new_forwards_when_user_is_allowlisted() -> None:
     client = DiscordBotClient(channel, intents=discord.Intents.none())
     interaction = _make_interaction(user_id=123, channel_id=456, interaction_id=321)
 
-    await client._handle_new_command(interaction)
+    new_cmd = client.tree.get_command("new")
+    assert new_cmd is not None
+    await new_cmd.callback(interaction)
 
     assert interaction.response.messages == [
         {"content": "Starting a new session...", "ephemeral": True}
@@ -401,7 +403,9 @@ async def test_slash_new_is_blocked_for_disallowed_user() -> None:
     client = DiscordBotClient(channel, intents=discord.Intents.none())
     interaction = _make_interaction(user_id=123, channel_id=456)
 
-    await client._handle_new_command(interaction)
+    new_cmd = client.tree.get_command("new")
+    assert new_cmd is not None
+    await new_cmd.callback(interaction)
 
     assert interaction.response.messages == [
         {"content": "You are not allowed to use this bot.", "ephemeral": True}
@@ -416,7 +420,9 @@ async def test_slash_help_returns_command_list() -> None:
     interaction = _make_interaction()
     interaction.command.qualified_name = "help"
 
-    await client._handle_help_command(interaction)
+    help_cmd = client.tree.get_command("help")
+    assert help_cmd is not None
+    await help_cmd.callback(interaction)
 
     assert len(interaction.response.messages) == 1
     help_text = interaction.response.messages[0]["content"]

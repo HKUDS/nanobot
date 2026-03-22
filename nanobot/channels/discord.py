@@ -66,11 +66,46 @@ class DiscordBotClient(discord.Client):
     def _register_app_commands(self) -> None:
         @self.tree.command(name="new", description="Start a new conversation")
         async def new_command(interaction: discord.Interaction) -> None:
-            await self._handle_new_command(interaction)
+            user = interaction.user
+            channel_id = interaction.channel_id
+            ack_text = "Starting a new session..."
+            should_forward = True
+
+            if user is None or channel_id is None:
+                ack_text = "Unable to resolve command context."
+                should_forward = False
+
+            sender_id = str(user.id) if user is not None else ""
+            if should_forward and not self._channel.is_allowed(sender_id):
+                ack_text = "You are not allowed to use this bot."
+                should_forward = False
+
+            try:
+                await interaction.response.send_message(ack_text, ephemeral=True)
+            except Exception as e:
+                logger.warning("Discord /new ack failed: {}", e)
+                return
+
+            if not should_forward:
+                return
+
+            await self._channel._handle_message(
+                sender_id=sender_id,
+                chat_id=str(channel_id),
+                content="/new",
+                metadata={
+                    "interaction_id": str(interaction.id),
+                    "guild_id": str(interaction.guild_id) if interaction.guild_id else None,
+                    "is_slash_command": True,
+                },
+            )
 
         @self.tree.command(name="help", description="Show available commands")
         async def help_command(interaction: discord.Interaction) -> None:
-            await self._handle_help_command(interaction)
+            try:
+                await interaction.response.send_message(HELP_TEXT, ephemeral=True)
+            except Exception as e:
+                logger.warning("Discord /help response failed: {}", e)
 
         @self.tree.error
         async def on_app_command_error(
@@ -84,47 +119,6 @@ class DiscordBotClient(discord.Client):
                 getattr(getattr(interaction, "command", None), "qualified_name", "?"),
                 error,
             )
-
-    async def _handle_help_command(self, interaction: discord.Interaction) -> None:
-        try:
-            await interaction.response.send_message(HELP_TEXT, ephemeral=True)
-        except Exception as e:
-            logger.warning("Discord /help response failed: {}", e)
-
-    async def _handle_new_command(self, interaction: discord.Interaction) -> None:
-        user = interaction.user
-        channel_id = interaction.channel_id
-        ack_text = "Starting a new session..."
-        should_forward = True
-
-        if user is None or channel_id is None:
-            ack_text = "Unable to resolve command context."
-            should_forward = False
-
-        sender_id = str(user.id) if user is not None else ""
-        if should_forward and not self._channel.is_allowed(sender_id):
-            ack_text = "You are not allowed to use this bot."
-            should_forward = False
-
-        try:
-            await interaction.response.send_message(ack_text, ephemeral=True)
-        except Exception as e:
-            logger.warning("Discord /new ack failed: {}", e)
-            return
-
-        if not should_forward:
-            return
-
-        await self._channel._handle_message(
-            sender_id=sender_id,
-            chat_id=str(channel_id),
-            content="/new",
-            metadata={
-                "interaction_id": str(interaction.id),
-                "guild_id": str(interaction.guild_id) if interaction.guild_id else None,
-                "is_slash_command": True,
-            },
-        )
 
     async def send_outbound(self, msg: OutboundMessage) -> None:
         """Send a nanobot outbound message using Discord transport rules."""
