@@ -12,6 +12,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.discord import DiscordChannel, DiscordConfig, _DiscordClient
 
 
+# Minimal Discord client test double used to control startup/readiness behavior.
 class _FakeDiscordClient:
     instances: list["_FakeDiscordClient"] = []
     start_error: Exception | None = None
@@ -50,6 +51,7 @@ class _FakeDiscordClient:
 
 
 class _FakeAttachment:
+    # Attachment double that can simulate successful or failing save() calls.
     def __init__(self, attachment_id: int, filename: str, *, size: int = 1, fail: bool = False) -> None:
         self.id = attachment_id
         self.filename = filename
@@ -63,11 +65,13 @@ class _FakeAttachment:
 
 
 class _FakePartialMessage:
+    # Lightweight stand-in for Discord partial message references used in replies.
     def __init__(self, message_id: int) -> None:
         self.id = message_id
 
 
 class _FakeChannel:
+    # Channel double that records outbound payloads and typing activity.
     def __init__(self, channel_id: int = 123) -> None:
         self.id = channel_id
         self.sent_payloads: list[dict] = []
@@ -99,6 +103,7 @@ def _make_message(
     attachments: list[object] | None = None,
     reply_to: int | None = None,
 ):
+    # Factory for incoming Discord message objects with optional guild/reply/attachments.
     guild = SimpleNamespace(id=guild_id) if guild_id is not None else None
     reference = SimpleNamespace(message_id=reply_to) if reply_to is not None else None
     return SimpleNamespace(
@@ -115,6 +120,7 @@ def _make_message(
 
 @pytest.mark.asyncio
 async def test_start_returns_when_token_missing() -> None:
+    # If no token is configured, startup should no-op and leave channel stopped.
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
 
     await channel.start()
@@ -125,6 +131,7 @@ async def test_start_returns_when_token_missing() -> None:
 
 @pytest.mark.asyncio
 async def test_start_handles_client_construction_failure(monkeypatch) -> None:
+    # Construction errors from the Discord client should be swallowed and keep state clean.
     channel = DiscordChannel(
         DiscordConfig(enabled=True, token="token", allow_from=["*"]),
         MessageBus(),
@@ -143,6 +150,7 @@ async def test_start_handles_client_construction_failure(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_start_handles_client_start_failure(monkeypatch) -> None:
+    # If client.start fails, the partially created client should be closed and detached.
     channel = DiscordChannel(
         DiscordConfig(enabled=True, token="token", allow_from=["*"]),
         MessageBus(),
@@ -163,6 +171,7 @@ async def test_start_handles_client_start_failure(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_stop_is_safe_after_partial_start(monkeypatch) -> None:
+    # stop() should close/discard the client even when startup was only partially completed.
     channel = DiscordChannel(
         DiscordConfig(enabled=True, token="token", allow_from=["*"]),
         MessageBus(),
@@ -180,6 +189,7 @@ async def test_stop_is_safe_after_partial_start(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_on_message_ignores_bot_messages() -> None:
+    # Incoming bot-authored messages must be ignored to prevent feedback loops.
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     handled: list[dict] = []
     channel._handle_message = lambda **kwargs: handled.append(kwargs)  # type: ignore[method-assign]
@@ -191,6 +201,7 @@ async def test_on_message_ignores_bot_messages() -> None:
 
 @pytest.mark.asyncio
 async def test_on_message_accepts_allowlisted_dm() -> None:
+    # Allowed direct messages should be forwarded with normalized metadata.
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["123"]), MessageBus())
     handled: list[dict] = []
 
@@ -208,6 +219,7 @@ async def test_on_message_accepts_allowlisted_dm() -> None:
 
 @pytest.mark.asyncio
 async def test_on_message_ignores_unmentioned_guild_message() -> None:
+    # With mention-only group policy, guild messages without a bot mention are dropped.
     channel = DiscordChannel(
         DiscordConfig(enabled=True, allow_from=["*"], group_policy="mention"),
         MessageBus(),
@@ -227,6 +239,7 @@ async def test_on_message_ignores_unmentioned_guild_message() -> None:
 
 @pytest.mark.asyncio
 async def test_on_message_accepts_mentioned_guild_message() -> None:
+    # Mentioned guild messages should be accepted and preserve reply threading metadata.
     channel = DiscordChannel(
         DiscordConfig(enabled=True, allow_from=["*"], group_policy="mention"),
         MessageBus(),
@@ -254,6 +267,7 @@ async def test_on_message_accepts_mentioned_guild_message() -> None:
 
 @pytest.mark.asyncio
 async def test_on_message_downloads_attachments(tmp_path, monkeypatch) -> None:
+    # Attachment downloads should be saved and referenced in forwarded content/media.
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     handled: list[dict] = []
 
@@ -277,6 +291,7 @@ async def test_on_message_downloads_attachments(tmp_path, monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_on_message_marks_failed_attachment_download(tmp_path, monkeypatch) -> None:
+    # Failed attachment downloads should emit a readable placeholder and no media path.
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     handled: list[dict] = []
 
@@ -300,6 +315,7 @@ async def test_on_message_marks_failed_attachment_download(tmp_path, monkeypatch
 
 @pytest.mark.asyncio
 async def test_send_warns_when_client_not_ready() -> None:
+    # Sending without a running/ready client should be a safe no-op.
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
 
     await channel.send(OutboundMessage(channel="discord", chat_id="123", content="hello"))
@@ -309,6 +325,7 @@ async def test_send_warns_when_client_not_ready() -> None:
 
 @pytest.mark.asyncio
 async def test_send_skips_when_channel_not_cached() -> None:
+    # Outbound sends should be skipped when the destination channel is not resolvable.
     owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     client = _DiscordClient(owner, intents=discord.Intents.none())
 
@@ -319,6 +336,7 @@ async def test_send_skips_when_channel_not_cached() -> None:
 
 @pytest.mark.asyncio
 async def test_client_send_outbound_chunks_text_replies_and_uploads_files(tmp_path) -> None:
+    # Outbound payloads should upload files, attach reply references, and chunk long text.
     owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     client = _DiscordClient(owner, intents=discord.Intents.none())
     target = _FakeChannel(channel_id=123)
@@ -346,6 +364,7 @@ async def test_client_send_outbound_chunks_text_replies_and_uploads_files(tmp_pa
 
 @pytest.mark.asyncio
 async def test_client_send_outbound_reports_failed_attachments_when_no_text(tmp_path) -> None:
+    # If all attachment sends fail and no text exists, emit a failure placeholder message.
     owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     client = _DiscordClient(owner, intents=discord.Intents.none())
     target = _FakeChannel(channel_id=123)
@@ -367,6 +386,7 @@ async def test_client_send_outbound_reports_failed_attachments_when_no_text(tmp_
 
 @pytest.mark.asyncio
 async def test_send_stops_typing_after_send() -> None:
+    # Active typing indicators should be cancelled/cleared after a successful send.
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     client = _FakeDiscordClient(channel, intents=None)
     channel._client = client
