@@ -270,12 +270,14 @@ class DiscordChannel(BaseChannel):
             logger.warning("Discord client not ready; dropping outbound message")
             return
 
+        is_progress = bool((msg.metadata or {}).get("_progress"))
         try:
             await client.send_outbound(msg)
         except Exception as e:
             logger.error("Error sending Discord message: {}", e)
         finally:
-            await self._stop_typing(msg.chat_id)
+            if not is_progress:
+                await self._stop_typing(msg.chat_id)
 
     async def _handle_discord_message(self, message: discord.Message) -> None:
         """Handle incoming Discord messages from discord.py."""
@@ -295,13 +297,17 @@ class DiscordChannel(BaseChannel):
 
         await self._start_typing(message.channel)
 
-        await self._handle_message(
-            sender_id=sender_id,
-            chat_id=channel_id,
-            content=full_content,
-            media=media_paths,
-            metadata=metadata,
-        )
+        try:
+            await self._handle_message(
+                sender_id=sender_id,
+                chat_id=channel_id,
+                content=full_content,
+                media=media_paths,
+                metadata=metadata,
+            )
+        except Exception:
+            await self._stop_typing(channel_id)
+            raise
 
     async def _on_message(self, message: discord.Message) -> None:
         """Backward-compatible alias for legacy tests/callers."""

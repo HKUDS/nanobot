@@ -228,6 +228,17 @@ async def test_on_message_ignores_bot_messages() -> None:
 
     assert handled == []
 
+    # If inbound handling raises, typing should be stopped for that channel.
+    async def fail_handle(**kwargs) -> None:
+        raise RuntimeError("boom")
+
+    channel._handle_message = fail_handle  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await channel._on_message(_make_message(author_id=123, channel_id=456))
+
+    assert channel._typing_tasks == {}
+
 
 @pytest.mark.asyncio
 async def test_on_message_accepts_allowlisted_dm() -> None:
@@ -503,6 +514,37 @@ async def test_send_stops_typing_after_send() -> None:
     await start.wait()
 
     await channel.send(OutboundMessage(channel="discord", chat_id="123", content="hello"))
+    release.set()
+    await asyncio.sleep(0)
+
+    assert channel._typing_tasks == {}
+
+    # Progress messages should keep typing active until a final (non-progress) send.
+    start = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_typing_progress() -> None:
+        start.set()
+        await release.wait()
+
+    typing_channel = _FakeChannel(channel_id=123)
+    typing_channel.trigger_typing = slow_typing_progress
+
+    await channel._start_typing(typing_channel)
+    await start.wait()
+
+    await channel.send(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="progress",
+            metadata={"_progress": True},
+        )
+    )
+
+    assert "123" in channel._typing_tasks
+
+    await channel.send(OutboundMessage(channel="discord", chat_id="123", content="final"))
     release.set()
     await asyncio.sleep(0)
 
