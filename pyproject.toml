@@ -54,6 +54,10 @@ dependencies = [
 wecom = [
     "wecom-aibot-sdk-python>=0.1.5",
 ]
+weixin = [
+    "qrcode[pil]>=8.0",
+    "pycryptodome>=3.20.0",
+]
 wecom-app-svr = [
     "wecom-app-svr>=0.1.0",
 ]
