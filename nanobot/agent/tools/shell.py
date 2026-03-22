@@ -6,6 +6,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from nanobot.agent.tools.base import Tool
 
 
@@ -109,12 +111,12 @@ class ExecTool(Tool):
                 try:
                     await asyncio.wait_for(process.wait(), timeout=5.0)
                 except asyncio.TimeoutError:
+                    pass
+                finally:
                     try:
                         os.waitpid(process.pid, os.WNOHANG)
                     except (ProcessLookupError, ChildProcessError):
                         pass
-                except ProcessLookupError:
-                    pass
                 return f"Error: Command timed out after {effective_timeout} seconds"
 
             output_parts = []
