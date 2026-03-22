@@ -23,6 +23,8 @@ class CronPayload:
     """What to do when the job runs."""
     kind: Literal["system_event", "agent_turn"] = "agent_turn"
     message: str = ""
+    # Path to a playbook (markdown) file relative to workspace, for complex tasks
+    playbook_path: str | None = None
     # Deliver response to channel
     deliver: bool = False
     channel: str | None = None  # e.g. "whatsapp"

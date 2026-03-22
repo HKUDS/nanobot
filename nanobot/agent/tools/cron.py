@@ -49,7 +49,11 @@ class CronTool(Tool):
                     "enum": ["add", "list", "remove"],
                     "description": "Action to perform",
                 },
-                "message": {"type": "string", "description": "Reminder message (for add)"},
+                "message": {"type": "string", "description": "Reminder message (for add). Should be a brief title if playbook_path is provided."},
+                "playbook_path": {
+                    "type": "string",
+                    "description": "Optional path to a markdown playbook (e.g. 'cron_jobs/my_task/playbook.md') for complex, multi-step cron jobs.",
+                },
                 "every_seconds": {
                     "type": "integer",
                     "description": "Interval in seconds (for recurring tasks)",
@@ -75,6 +79,7 @@ class CronTool(Tool):
         self,
         action: str,
         message: str = "",
+        playbook_path: str | None = None,
         every_seconds: int | None = None,
         cron_expr: str | None = None,
         tz: str | None = None,
@@ -85,7 +90,7 @@ class CronTool(Tool):
         if action == "add":
             if self._in_cron_context.get():
                 return "Error: cannot schedule new jobs from within a cron job execution"
-            return self._add_job(message, every_seconds, cron_expr, tz, at)
+            return self._add_job(message, playbook_path, every_seconds, cron_expr, tz, at)
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
@@ -95,13 +100,14 @@ class CronTool(Tool):
     def _add_job(
         self,
         message: str,
+        playbook_path: str | None,
         every_seconds: int | None,
         cron_expr: str | None,
         tz: str | None,
         at: str | None,
     ) -> str:
-        if not message:
-            return "Error: message is required for add"
+        if not message and not playbook_path:
+            return "Error: message or playbook_path is required for add"
         if not self._channel or not self._chat_id:
             return "Error: no session context (channel/chat_id)"
         if tz and not cron_expr:
@@ -133,10 +139,13 @@ class CronTool(Tool):
         else:
             return "Error: either every_seconds, cron_expr, or at is required"
 
+        job_name = message[:30] if message else playbook_path.split('/')[-1][:30]
+
         job = self._cron.add_job(
-            name=message[:30],
+            name=job_name,
             schedule=schedule,
-            message=message,
+            message=message or "",
+            playbook_path=playbook_path,
             deliver=True,
             channel=self._channel,
             to=self._chat_id,

@@ -568,11 +568,29 @@ def gateway(
         from nanobot.agent.tools.message import MessageTool
         from nanobot.utils.evaluator import evaluate_response
 
-        reminder_note = (
-            "[Scheduled Task] Timer finished.\n\n"
-            f"Task '{job.name}' has been triggered.\n"
-            f"Scheduled instruction: {job.payload.message}"
-        )
+        if job.payload.playbook_path:
+            playbook_full_path = config.workspace_path / job.payload.playbook_path
+            if playbook_full_path.exists():
+                playbook_content = playbook_full_path.read_text(encoding="utf-8")
+                reminder_note = (
+                    f"[Scheduled Task Playbook] Timer finished.\n\n"
+                    f"Task '{job.name}' has been triggered.\n"
+                    f"Please execute the following playbook strictly:\n\n"
+                    f"{playbook_content}"
+                )
+            else:
+                reminder_note = (
+                    f"[Scheduled Task Error] Timer finished, but playbook not found.\n\n"
+                    f"Task '{job.name}' has been triggered.\n"
+                    f"Playbook path: {job.payload.playbook_path}\n"
+                    f"Error: Playbook file does not exist. Please investigate."
+                )
+        else:
+            reminder_note = (
+                "[Scheduled Task] Timer finished.\n\n"
+                f"Task '{job.name}' has been triggered.\n"
+                f"Scheduled instruction: {job.payload.message}"
+            )
 
         cron_tool = agent.tools.get("cron")
         cron_token = None

@@ -106,6 +106,7 @@ class CronService:
                         payload=CronPayload(
                             kind=j["payload"].get("kind", "agent_turn"),
                             message=j["payload"].get("message", ""),
+                            playbook_path=j["payload"].get("playbookPath"),
                             deliver=j["payload"].get("deliver", False),
                             channel=j["payload"].get("channel"),
                             to=j["payload"].get("to"),
@@ -162,6 +163,7 @@ class CronService:
                     "payload": {
                         "kind": j.payload.kind,
                         "message": j.payload.message,
+                        "playbookPath": j.payload.playbook_path,
                         "deliver": j.payload.deliver,
                         "channel": j.payload.channel,
                         "to": j.payload.to,
@@ -316,6 +318,7 @@ class CronService:
         name: str,
         schedule: CronSchedule,
         message: str,
+        playbook_path: str | None = None,
         deliver: bool = False,
         channel: str | None = None,
         to: str | None = None,
@@ -334,6 +337,7 @@ class CronService:
             payload=CronPayload(
                 kind="agent_turn",
                 message=message,
+                playbook_path=playbook_path,
                 deliver=deliver,
                 channel=channel,
                 to=to,
