@@ -163,11 +163,12 @@ async def test_send_group_media_uses_image_segment(tmp_path: Path) -> None:
         )
     )
 
-    assert calls[0] == ("send_group_msg", {"group_id": 42, "message": "hello"})
-    assert calls[1][0] == "send_group_msg"
-    assert calls[1][1]["group_id"] == 42
-    assert calls[1][1]["message"][0]["type"] == "image"
-    assert calls[1][1]["message"][0]["data"]["file"] == f"base64://{base64.b64encode(b'jpg').decode('ascii')}"
+    assert len(calls) == 1
+    assert calls[0][0] == "send_group_msg"
+    assert calls[0][1]["group_id"] == 42
+    assert calls[0][1]["message"][0] == {"type": "text", "data": {"text": "hello"}}
+    assert calls[0][1]["message"][1]["type"] == "image"
+    assert calls[0][1]["message"][1]["data"]["file"] == f"base64://{base64.b64encode(b'jpg').decode('ascii')}"
 
 
 @pytest.mark.asyncio

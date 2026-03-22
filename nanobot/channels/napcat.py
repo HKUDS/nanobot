@@ -120,11 +120,12 @@ class NapCatChannel(BaseChannel):
             else self._chat_type_cache.get(msg.chat_id) == "group"
         )
 
+        if msg.media:
+            await self._send_message_with_media(msg.chat_id, msg.content or "", msg.media, is_group)
+            return
+
         if msg.content:
             await self._send_text(msg.chat_id, msg.content, is_group)
-
-        for media_path in msg.media or []:
-            await self._send_media(msg.chat_id, media_path, is_group)
 
     async def _run_connection(self) -> None:
         """Open the websocket and process inbound events until disconnect."""
@@ -167,26 +168,58 @@ class NapCatChannel(BaseChannel):
 
     async def _send_media(self, chat_id: str, media_path: str, is_group: bool) -> None:
         """Send one media message using OneBot segment arrays."""
-        if media_path.startswith(("http://", "https://")):
-            file_param = media_path
-        else:
-            file_param = await self._encode_media_file(media_path)
-            if file_param is None:
-                return
+        segment = await self._build_media_segment(media_path)
+        if segment is None:
+            return
 
-        suffix = Path(media_path).suffix.lower()
-        segment_type = "record" if suffix in {".mp3", ".wav", ".ogg", ".amr", ".silk", ".m4a"} else "image"
         action = "send_group_msg" if is_group else "send_private_msg"
         target_key = "group_id" if is_group else "user_id"
         result = await self._call_api(
             action,
             {
                 target_key: int(chat_id),
-                "message": [{"type": segment_type, "data": {"file": file_param}}],
+                "message": [segment],
             },
         )
         if result is None:
-            logger.warning("NapCat {} send failed to {}", segment_type, chat_id)
+            logger.warning("NapCat {} send failed to {}", segment["type"], chat_id)
+
+    async def _send_message_with_media(self, chat_id: str, content: str, media_paths: list[str], is_group: bool) -> None:
+        """Send one combined OneBot message containing optional text and media segments."""
+        segments: list[dict[str, Any]] = []
+        if content:
+            segments.append({"type": "text", "data": {"text": content}})
+        for media_path in media_paths:
+            segment = await self._build_media_segment(media_path)
+            if segment is not None:
+                segments.append(segment)
+        if not segments:
+            return
+
+        action = "send_group_msg" if is_group else "send_private_msg"
+        target_key = "group_id" if is_group else "user_id"
+        result = await self._call_api(
+            action,
+            {
+                target_key: int(chat_id),
+                "message": segments,
+            },
+        )
+        if result is None:
+            logger.warning("NapCat media send failed to {}", chat_id)
+
+    async def _build_media_segment(self, media_path: str) -> dict[str, Any] | None:
+        """Build a OneBot media segment from a local path or remote URL."""
+        if media_path.startswith(("http://", "https://")):
+            file_param = media_path
+        else:
+            file_param = await self._encode_media_file(media_path)
+            if file_param is None:
+                return None
+
+        suffix = Path(media_path).suffix.lower()
+        segment_type = "record" if suffix in {".mp3", ".wav", ".ogg", ".amr", ".silk", ".m4a"} else "image"
+        return {"type": segment_type, "data": {"file": file_param}}
 
     async def _encode_media_file(self, media_path: str) -> str | None:
         """Encode a local file for websocket transport so NapCat does not need host path access."""
