@@ -27,8 +27,6 @@ TYPING_INTERVAL_S = 8
 HELP_TEXT = (
     "nanobot commands:\n"
     "/new - Start a new conversation\n"
-    "/stop - Stop the current task\n"
-    "/restart - Restart the bot\n"
     "/help - Show available commands"
 )
 
@@ -96,34 +94,25 @@ class _DiscordClient(discord.Client):
     async def _on_slash_new(self, interaction: discord.Interaction) -> None:
         user = interaction.user
         channel_id = interaction.channel_id
-        if user is None or channel_id is None:
-            try:
-                await interaction.response.send_message(
-                    "Unable to resolve command context.",
-                    ephemeral=True,
-                )
-            except Exception as e:
-                logger.warning("Discord /new context response failed: {}", e)
-            return
+        ack_text = "Starting a new session..."
+        should_forward = True
 
-        sender_id = str(user.id)
-        if not self._owner.is_allowed(sender_id):
-            try:
-                await interaction.response.send_message(
-                    "You are not allowed to use this bot.",
-                    ephemeral=True,
-                )
-            except Exception as e:
-                logger.warning("Discord /new ACL response failed: {}", e)
-            return
+        if user is None or channel_id is None:
+            ack_text = "Unable to resolve command context."
+            should_forward = False
+
+        sender_id = str(user.id) if user is not None else ""
+        if should_forward and not self._owner.is_allowed(sender_id):
+            ack_text = "You are not allowed to use this bot."
+            should_forward = False
 
         try:
-            await interaction.response.send_message(
-                "Starting a new session...",
-                ephemeral=True,
-            )
+            await interaction.response.send_message(ack_text, ephemeral=True)
         except Exception as e:
             logger.warning("Discord /new ack failed: {}", e)
+            return
+
+        if not should_forward:
             return
 
         await self._owner._handle_message(
@@ -342,7 +331,7 @@ class DiscordChannel(BaseChannel):
                 file_path = media_dir / f"{attachment.id}_{safe_name}"
                 await attachment.save(file_path)
                 media_paths.append(str(file_path))
-                content_parts.append(f"[attachment: {file_path}]")
+                content_parts.append(f"[attachment: {file_path.name}]")
             except Exception as e:
                 logger.warning("Failed to download Discord attachment: {}", e)
                 content_parts.append(f"[attachment: {filename} - download failed]")

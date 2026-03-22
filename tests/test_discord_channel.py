@@ -422,7 +422,7 @@ async def test_slash_help_returns_command_list() -> None:
     help_text = interaction.response.messages[0]["content"]
     assert "/new" in help_text
     assert "/help" in help_text
-    assert "/restart" in help_text
+    assert "/restart" not in help_text
 
 
 @pytest.mark.asyncio
