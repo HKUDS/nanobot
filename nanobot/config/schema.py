@@ -40,6 +40,24 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     hide_reasoning_steps: bool = False  # Hide reasoning steps in output display
+    
+    @field_validator("context_window_tokens")
+    @classmethod
+    def validate_context_window(cls, v: int, info) -> int:
+        """Warn if context_window_tokens seems misconfigured relative to max_tokens."""
+        max_tokens = info.data.get("max_tokens", 8192)
+        if v < max_tokens * 2:
+            # This is likely a misconfiguration - context window should be much larger than max_tokens
+            import warnings
+            warnings.warn(
+                f"context_window_tokens ({v}) is set close to or less than max_tokens ({max_tokens}). "
+                f"context_window_tokens should represent the model's total context limit (e.g., 32768 for 32k models), "
+                f"while max_tokens is the response size limit. "
+                f"If you're getting "maximum context length" errors, increase context_window_tokens.",
+                UserWarning,
+                stacklevel=2
+            )
+        return v
 
 
 class AgentsConfig(Base):
