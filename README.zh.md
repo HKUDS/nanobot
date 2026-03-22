@@ -174,44 +174,150 @@ nanobot gateway
 
 ---
 
-## 🌐 Agent 社交网络
+<details>
+<summary><b>Slack</b></summary>
 
-🐈 nanobot 能够连接到 Agent 社交网络（Agent 社区）。**只需发送一条消息，你的 nanobot 就会自动加入！**
+使用 **Socket 模式** —— 无需公网 URL。
 
-| 平台 | 如何加入 (向你的机器人发送此消息) |
-|----------|-------------|
-| [**Moltbook**](https://www.moltbook.com/) | `Read https://moltbook.com/skill.md and follow the instructions to join Moltbook` |
-| [**ClawdChat**](https://clawdchat.ai/) | `Read https://clawdchat.ai/skill.md and follow the instructions to join ClawdChat` |
+1. **创建 Slack 应用**
+   - 前往 [Slack API](https://api.slack.com/apps) → **Create New App** → "From scratch"。
+2. **配置应用**
+   - **Socket Mode**: 开启 → 生成 `connections:write` 权限的 **App-Level Token** → 复制 (`xapp-...`)。
+   - **OAuth & Permissions**: 添加机器人权限 (Scopes)：`chat:write`, `reactions:write`, `app_mentions:read`。
+   - **Event Subscriptions**: 开启 → 订阅机器人事件：`message.im`, `message.channels`, `app_mention` → 保存更改。
+   - **Install App**: 点击 **Install to Workspace** → 授权 → 复制 **Bot Token** (`xoxb-...`)。
+3. **配置 nanobot**
+```json
+{
+  "channels": {
+    "slack": {
+      "enabled": true,
+      "botToken": "xoxb-...",
+      "appToken": "xapp-...",
+      "allowFrom": ["你的_SLACK_USER_ID"],
+      "groupPolicy": "mention"
+    }
+  }
+}
+```
+4. 运行：`nanobot gateway`
+
+</details>
+
+<details>
+<summary><b>电子邮件 (Email)</b></summary>
+
+为 nanobot 设置专属邮箱账号。它通过 **IMAP** 轮询新邮件，并通过 **SMTP** 回复 —— 就像一个私人邮件助手。
+
+1. **获取凭据（以 Gmail 为例）**
+   - 为机器人创建专用 Gmail 账号。
+   - 启用两步验证 → 创建 [应用专用密码 (App Password)](https://myaccount.google.com/apppasswords)。
+2. **配置**
+```json
+{
+  "channels": {
+    "email": {
+      "enabled": true,
+      "consentGranted": true,
+      "imapHost": "imap.gmail.com",
+      "imapUsername": "my-nanobot@gmail.com",
+      "imapPassword": "你的应用专用密码",
+      "smtpHost": "smtp.gmail.com",
+      "smtpUsername": "my-nanobot@gmail.com",
+      "smtpPassword": "你的应用专用密码",
+      "fromAddress": "my-nanobot@gmail.com",
+      "allowFrom": ["你的主邮箱@gmail.com"]
+    }
+  }
+}
+```
+3. 运行：`nanobot gateway`
+
+</details>
 
 ---
 
-## 🛡️ 安全性
+## ⚙️ 核心配置
 
-> [!TIP]
-> 对于生产环境部署，建议在配置中设置 `"restrictToWorkspace": true` 以启用沙箱模式。
-> 从 `v0.1.4.post4` 开始，默认拒绝所有访问。要允许所有人，请设置 `"allowFrom": ["*"]`。
+### 提供商 (Providers) 详情
 
-| 选项 | 默认值 | 描述 |
-|--------|---------|-------------|
-| `tools.restrictToWorkspace` | `false` | 为 `true` 时，限制**所有**工具仅在工作空间目录内操作。 |
-| `tools.exec.enable` | `true` | 为 `false` 时，完全禁用 Shell 执行功能。 |
+| 提供商 | 用途 | 获取 API Key |
+|----------|---------|-------------|
+| `custom` | 任何兼容 OpenAI 接口的端点 | — |
+| `openrouter` | LLM (推荐，可访问所有模型) | [openrouter.ai](https://openrouter.ai) |
+| `anthropic` | LLM (Claude 直连) | [console.anthropic.com](https://console.anthropic.com) |
+| `openai` | LLM (GPT 直连) | [platform.openai.com](https://platform.openai.com) |
+| `groq` | LLM + **语音转文字** (Whisper) | [console.groq.com](https://console.groq.com) |
+| `gemini` | LLM (Gemini 直连) | [aistudio.google.com](https://aistudio.google.com) |
 
----
+### 网页搜索 (Web Search)
 
-## 🧩 多实例运行
+nanobot 支持多种网页搜索提供商（默认使用 DuckDuckGo，无需配置）。
 
-你可以同时运行多个 nanobot 实例，每个实例拥有独立的配置和工作空间。
+| 提供商 | 配置字段 | 备注 |
+|----------|--------------|------|
+| `brave` | `apiKey` | 推荐，最稳定 |
+| `tavily` | `apiKey` | 专为 AI Agent 设计 |
+| `jina` | `apiKey` | 免费额度高 |
+| `searxng` | `baseUrl` | 自建搜索实例 |
+| `duckduckgo` | — | 免费，无需配置 |
 
-```bash
-# 初始化不同实例
-nanobot onboard --config ~/.nanobot-telegram/config.json --workspace ~/.nanobot-telegram/workspace
-nanobot onboard --config ~/.nanobot-discord/config.json --workspace ~/.nanobot-discord/workspace
+### MCP (Model Context Protocol)
 
-# 运行特定实例
-nanobot gateway --config ~/.nanobot-telegram/config.json
+nanobot 原生支持 [MCP](https://modelcontextprotocol.io/) —— 允许连接外部工具服务器。
+
+在 `config.json` 中添加 MCP 服务器：
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "filesystem": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
+      }
+    }
+  }
+}
 ```
 
 ---
+
+## 🐳 Docker 部署
+
+```bash
+# 1. 构建镜像
+docker build -t nanobot .
+
+# 2. 初始化配置 (仅第一次)
+docker run -v ~/.nanobot:/root/.nanobot --rm nanobot onboard
+
+# 3. 运行网关
+docker run -d -v ~/.nanobot:/root/.nanobot -p 18790:18790 nanobot gateway
+```
+
+## 🐧 Linux 服务 (Systemd)
+
+你可以将 nanobot 设置为 systemd 服务，使其在后台自动运行。
+
+1. 创建服务文件 `~/.config/systemd/user/nanobot-gateway.service`。
+2. 运行以下命令启动：
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now nanobot-gateway
+```
+
+## 📁 项目结构
+
+```
+nanobot/
+├── agent/          # 🧠 核心 Agent 逻辑
+├── skills/         # 🎯 捆绑技能 (github, weather, tmux...)
+├── channels/       # 📱 聊天渠道集成 (支持插件)
+├── bus/            # 🚌 消息路由
+├── cron/           # ⏰ 定时任务
+├── heartbeat/      # 💓 主动唤醒机制
+└── providers/      # 🤖 LLM 提供商适配器
+```
 
 ## 🤝 贡献与路线图
 
