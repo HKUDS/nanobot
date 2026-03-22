@@ -16,7 +16,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
-from nanobot.utils.helpers import split_message
+from nanobot.utils.helpers import safe_filename, split_message
 
 if TYPE_CHECKING:
     from discord.abc import Messageable
@@ -346,7 +346,7 @@ class DiscordChannel(BaseChannel):
                 continue
             try:
                 media_dir.mkdir(parents=True, exist_ok=True)
-                safe_name = filename.replace("/", "_")
+                safe_name = safe_filename(filename)
                 file_path = media_dir / f"{attachment.id}_{safe_name}"
                 await attachment.save(file_path)
                 media_paths.append(str(file_path))
