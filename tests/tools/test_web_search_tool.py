@@ -97,10 +97,11 @@ async def test_brave_fallback_to_duckduckgo_when_no_key(monkeypatch):
     monkeypatch.setattr("ddgs.DDGS", MockDDGS)
     monkeypatch.delenv("BRAVE_API_KEY", raising=False)
 
+    from nanobot.config.schema import WebSearchFallbackConfig
     tool = WebSearchTool(config=WebSearchConfig(
         provider="brave", 
         api_key="",
-        fallbacks=[WebSearchConfig(provider="duckduckgo")]
+        fallbacks=[WebSearchFallbackConfig(provider="duckduckgo")]
     ))
     result = await tool.execute(query="test")
     assert "Fallback" in result
@@ -154,10 +155,11 @@ async def test_searxng_no_base_url_falls_back(monkeypatch):
     monkeypatch.setattr("ddgs.DDGS", MockDDGS)
     monkeypatch.delenv("SEARXNG_BASE_URL", raising=False)
 
+    from nanobot.config.schema import WebSearchFallbackConfig
     tool = WebSearchTool(config=WebSearchConfig(
         provider="searxng", 
         base_url="",
-        fallbacks=[WebSearchConfig(provider="duckduckgo")]
+        fallbacks=[WebSearchFallbackConfig(provider="duckduckgo")]
     ))
     result = await tool.execute(query="test")
     assert "Fallback" in result
