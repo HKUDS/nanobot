@@ -116,10 +116,19 @@ class DiscordBotClient(discord.Client):
 
     async def send_outbound(self, msg: OutboundMessage) -> None:
         """Send a nanobot outbound message using Discord transport rules."""
-        channel = self.get_channel(int(msg.chat_id))
-        if channel is None:
-            logger.warning("Discord channel {} not available in client cache", msg.chat_id)
+        try:
+            channel_id = int(msg.chat_id)
+        except (TypeError, ValueError):
+            logger.warning("Invalid Discord channel id: {}", msg.chat_id)
             return
+
+        channel = self.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.fetch_channel(channel_id)
+            except Exception as e:
+                logger.warning("Discord channel {} unavailable: {}", msg.chat_id, e)
+                return
 
         reference, mention_settings = self._build_reply_context(channel, msg.reply_to)
         sent_media = False
@@ -394,7 +403,17 @@ class DiscordChannel(BaseChannel):
         async def typing_loop() -> None:
             while self._running:
                 try:
-                    await channel.trigger_typing()
+                    trigger_typing = getattr(channel, "trigger_typing", None)
+                    if callable(trigger_typing):
+                        await trigger_typing()
+                    else:
+                        typing_factory = getattr(channel, "typing", None)
+                        if not callable(typing_factory):
+                            raise AttributeError(
+                                f"Channel {getattr(channel, 'id', '?')} does not support typing indicator"
+                            )
+                        async with typing_factory():
+                            pass
                 except asyncio.CancelledError:
                     return
                 except Exception as e:
