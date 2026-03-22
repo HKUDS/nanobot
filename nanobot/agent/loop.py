@@ -461,7 +461,8 @@ class AgentLoop:
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             # Subagent results should be assistant role, other system messages use user role
-            current_role = "assistant" if msg.sender_id == "subagent" else "user"
+            # Also prevents two assistant messages in a row
+            current_role = "assistant" if msg.sender_id == "subagent" and ( not history or history[-1]['role'] != "assistant" ) else "user"
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
