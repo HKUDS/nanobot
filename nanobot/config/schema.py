@@ -24,6 +24,7 @@ class ChannelsConfig(Base):
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
+    show_usage: bool = True  # show token usage hints in responses
 
 
 class AgentDefaults(Base):

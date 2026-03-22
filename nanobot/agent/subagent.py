@@ -18,6 +18,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ExecToolConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.utils.helpers import build_assistant_message
+from nanobot.utils.stats import StatsManager
 
 
 class SubagentManager:
@@ -33,6 +34,7 @@ class SubagentManager:
         web_proxy: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
+        stats: StatsManager | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -44,6 +46,7 @@ class SubagentManager:
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
+        self.stats = stats or StatsManager(workspace)
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
 
@@ -61,7 +64,7 @@ class SubagentManager:
         origin = {"channel": origin_channel, "chat_id": origin_chat_id}
 
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin)
+            self._run_subagent(task_id, task, display_label, origin, session_key)
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -85,9 +88,11 @@ class SubagentManager:
         task: str,
         label: str,
         origin: dict[str, str],
+        session_key: str | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
+        total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
         try:
             # Build subagent tools (no message tool, no spawn tool)
@@ -127,6 +132,11 @@ class SubagentManager:
                     model=self.model,
                 )
 
+                if response.usage:
+                    total_usage["prompt_tokens"] += response.usage.get("prompt_tokens", 0)
+                    total_usage["completion_tokens"] += response.usage.get("completion_tokens", 0)
+                    total_usage["total_tokens"] += response.usage.get("total_tokens", 0)
+
                 if response.has_tool_calls:
                     tool_call_dicts = [
                         tc.to_openai_tool_call()
@@ -156,6 +166,15 @@ class SubagentManager:
 
             if final_result is None:
                 final_result = "Task completed but no final response was generated."
+
+            if session_key:
+                self.stats.record_usage(
+                    session_key=session_key,
+                    model=self.model,
+                    prompt_tokens=total_usage["prompt_tokens"],
+                    completion_tokens=total_usage["completion_tokens"],
+                    total_tokens=total_usage["total_tokens"],
+                )
 
             logger.info("Subagent [{}] completed successfully", task_id)
             await self._announce_result(task_id, label, task, final_result, origin, "ok")

@@ -7,14 +7,12 @@ import json
 import os
 import re
 import sys
-import time
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
-from nanobot import __version__
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.subagent import SubagentManager
@@ -27,10 +25,10 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.utils.helpers import build_status_content
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
+from nanobot.utils.stats import StatsManager
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
@@ -82,11 +80,10 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
-        self._start_time = time.time()
-        self._last_usage: dict[str, int] = {}
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
+        self.stats = StatsManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
             provider=provider,
@@ -97,6 +94,7 @@ class AgentLoop:
             web_proxy=web_proxy,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            stats=self.stats,
         )
 
         self._running = False
@@ -170,7 +168,7 @@ class AgentLoop:
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
-        """Remove <think>…</think> blocks that some models embed in content."""
+        """Remove <think>…< /think> blocks that some models embed in content."""
         if not text:
             return None
         return re.sub(r"<think>[\s\S]*?</think>", "", text).strip() or None
@@ -186,38 +184,17 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
-    def _status_response(self, msg: InboundMessage, session: Session) -> OutboundMessage:
-        """Build an outbound status message for a session."""
-        ctx_est = 0
-        try:
-            ctx_est, _ = self.memory_consolidator.estimate_session_prompt_tokens(session)
-        except Exception:
-            pass
-        if ctx_est <= 0:
-            ctx_est = self._last_usage.get("prompt_tokens", 0)
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content=build_status_content(
-                version=__version__, model=self.model,
-                start_time=self._start_time, last_usage=self._last_usage,
-                context_window_tokens=self.context_window_tokens,
-                session_msg_count=len(session.get_history(max_messages=0)),
-                context_tokens_estimate=ctx_est,
-            ),
-            metadata={"render_as": "text"},
-        )
-
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
-    ) -> tuple[str | None, list[str], list[dict]]:
+    ) -> tuple[str | None, list[str], list[dict], dict[str, int]]:
         """Run the agent iteration loop."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -229,11 +206,12 @@ class AgentLoop:
                 tools=tool_defs,
                 model=self.model,
             )
-            usage = response.usage or {}
-            self._last_usage = {
-                "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
-                "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
-            }
+
+            # Accumulate usage
+            if response.usage:
+                total_usage["prompt_tokens"] += response.usage.get("prompt_tokens", 0)
+                total_usage["completion_tokens"] += response.usage.get("completion_tokens", 0)
+                total_usage["total_tokens"] += response.usage.get("total_tokens", 0)
 
             if response.has_tool_calls:
                 if on_progress:
@@ -284,7 +262,7 @@ class AgentLoop:
                 "without completing the task. You can try breaking the task into smaller steps."
             )
 
-        return final_content, tools_used, messages
+        return final_content, tools_used, messages, total_usage
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
@@ -312,13 +290,34 @@ class AgentLoop:
                 await self._handle_stop(msg)
             elif cmd == "/restart":
                 await self._handle_restart(msg)
-            elif cmd == "/status":
-                session = self.sessions.get_or_create(msg.session_key)
-                await self.bus.publish_outbound(self._status_response(msg, session))
+            elif cmd == "/stats":
+                await self._handle_stats(msg)
             else:
                 task = asyncio.create_task(self._dispatch(msg))
                 self._active_tasks.setdefault(msg.session_key, []).append(task)
                 task.add_done_callback(lambda t, k=msg.session_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
+
+    async def _handle_stats(self, msg: InboundMessage) -> None:
+        """Show session and daily token usage statistics."""
+        session_stats = self.stats.get_session_stats(msg.session_key)
+        daily_stats = self.stats.get_daily_stats()
+
+        lines = [
+            "📊 **Token Usage Statistics**",
+            "",
+            "**Current Session:**",
+            f"- Prompt: {session_stats['prompt']:,}",
+            f"- Completion: {session_stats['completion']:,}",
+            f"- Total: {session_stats['total']:,}",
+            "",
+            "**Today (Global):**",
+            f"- Prompt: {daily_stats['prompt']:,}",
+            f"- Completion: {daily_stats['completion']:,}",
+            f"- Total: {daily_stats['total']:,}",
+        ]
+        await self.bus.publish_outbound(OutboundMessage(
+            channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
+        ))
 
     async def _handle_stop(self, msg: InboundMessage) -> None:
         """Cancel all active tasks and subagents for the session."""
@@ -419,9 +418,16 @@ class AgentLoop:
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
-            self._save_turn(session, all_msgs, 1 + len(history))
+            final_content, _, all_msgs, usage = await self._run_agent_loop(messages)
+            self._save_turn(session, all_msgs, 1 + len(history), usage=usage)
             self.sessions.save(session)
+            self.stats.record_usage(
+                session_key=key,
+                model=self.model,
+                prompt_tokens=usage["prompt_tokens"],
+                completion_tokens=usage["completion_tokens"],
+                total_tokens=usage["total_tokens"],
+            )
             self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
@@ -445,22 +451,17 @@ class AgentLoop:
 
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
-        if cmd == "/status":
-            return self._status_response(msg, session)
         if cmd == "/help":
             lines = [
                 "🐈 nanobot commands:",
                 "/new — Start a new conversation",
                 "/stop — Stop the current task",
                 "/restart — Restart the bot",
-                "/status — Show bot status",
+                "/stats — Show token usage statistics",
                 "/help — Show available commands",
             ]
             return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content="\n".join(lines),
-                metadata={"render_as": "text"},
+                channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
             )
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
@@ -485,15 +486,26 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
+        final_content, _, all_msgs, usage = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
         )
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        self._save_turn(session, all_msgs, 1 + len(history))
+        # Passive reporting (Option B)
+        if self.channels_config and self.channels_config.show_usage and usage["total_tokens"] > 0:
+            final_content += f"\n\n(Usage: {usage['prompt_tokens']}/{usage['completion_tokens']} tokens)"
+
+        self._save_turn(session, all_msgs, 1 + len(history), usage=usage)
         self.sessions.save(session)
+        self.stats.record_usage(
+            session_key=key,
+            model=self.model,
+            prompt_tokens=usage["prompt_tokens"],
+            completion_tokens=usage["completion_tokens"],
+            total_tokens=usage["total_tokens"],
+        )
         self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
@@ -552,14 +564,20 @@ class AgentLoop:
 
         return filtered
 
-    def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
+    def _save_turn(self, session: Session, messages: list[dict], skip: int, usage: dict[str, int] | None = None) -> None:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
-        for m in messages[skip:]:
+        new_msgs = messages[skip:]
+        for i, m in enumerate(new_msgs):
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
+            
+            # Attach usage to the last assistant message of the turn
+            if usage and role == "assistant" and i == len(new_msgs) - 1:
+                entry["usage"] = usage
+
             if role == "tool":
                 if isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
                     entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
@@ -592,8 +610,9 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
-    ) -> OutboundMessage | None:
-        """Process a message directly and return the outbound payload."""
+    ) -> str:
+        """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        return await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+        return response.content if response else ""
