@@ -6,6 +6,7 @@ import os
 import re
 import threading
 import time
+import uuid
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
@@ -1000,6 +1001,37 @@ class FeishuChannel(BaseChannel):
             logger.warning("Error stream-updating card {}: {}", card_id, e)
             return False
 
+    def _close_streaming_mode_sync(self, card_id: str, sequence: int) -> bool:
+        """Turn off CardKit streaming_mode so chat preview leaves [生成中...].
+
+        Per Feishu docs, streaming cards show "[生成中...]" in the session list until
+        streaming_mode is set to false via card settings (after final content update).
+        Sequence must strictly exceed the previous card OpenAPI operation on this entity.
+        """
+        from lark_oapi.api.cardkit.v1 import SettingsCardRequest, SettingsCardRequestBody
+        settings_payload = json.dumps({"config": {"streaming_mode": False}}, ensure_ascii=False)
+        try:
+            request = SettingsCardRequest.builder() \
+                .card_id(card_id) \
+                .request_body(
+                    SettingsCardRequestBody.builder()
+                    .settings(settings_payload)
+                    .sequence(sequence)
+                    .uuid(str(uuid.uuid4()))
+                    .build()
+                ).build()
+            response = self._client.cardkit.v1.card.settings(request)
+            if not response.success():
+                logger.warning(
+                    "Failed to close streaming on card {}: code={}, msg={}",
+                    card_id, response.code, response.msg,
+                )
+                return False
+            return True
+        except Exception as e:
+            logger.warning("Error closing streaming on card {}: {}", card_id, e)
+            return False
+
     async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
         """Progressive streaming via CardKit: create card on first delta, stream-update on subsequent."""
         if not self._client:
@@ -1017,6 +1049,11 @@ class FeishuChannel(BaseChannel):
                 buf.sequence += 1
                 await loop.run_in_executor(
                     None, self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence,
+                )
+                # Required so chat list preview stops showing [生成中...] (Feishu streaming overview).
+                buf.sequence += 1
+                await loop.run_in_executor(
+                    None, self._close_streaming_mode_sync, buf.card_id, buf.sequence,
                 )
             else:
                 for chunk in self._split_elements_by_table_limit(self._build_card_elements(buf.text)):

@@ -85,6 +85,23 @@ class TestCreateStreamingCard:
         assert ch._create_streaming_card_sync("chat_id", "oc_chat1") is None
 
 
+class TestCloseStreamingMode:
+    def test_returns_true_on_success(self):
+        ch = _make_channel()
+        ch._client.cardkit.v1.card.settings.return_value = _mock_content_response(True)
+        assert ch._close_streaming_mode_sync("card_1", 10) is True
+
+    def test_returns_false_on_failure(self):
+        ch = _make_channel()
+        ch._client.cardkit.v1.card.settings.return_value = _mock_content_response(False)
+        assert ch._close_streaming_mode_sync("card_1", 10) is False
+
+    def test_returns_false_on_exception(self):
+        ch = _make_channel()
+        ch._client.cardkit.v1.card.settings.side_effect = RuntimeError("err")
+        assert ch._close_streaming_mode_sync("card_1", 10) is False
+
+
 class TestStreamUpdateText:
     def test_returns_true_on_success(self):
         ch = _make_channel()
@@ -152,11 +169,15 @@ class TestSendDelta:
             text="Final content", card_id="card_1", sequence=3, last_edit=0.0,
         )
         ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response()
+        ch._client.cardkit.v1.card.settings.return_value = _mock_content_response()
 
         await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True})
 
         assert "oc_chat1" not in ch._stream_bufs
         ch._client.cardkit.v1.card_element.content.assert_called_once()
+        ch._client.cardkit.v1.card.settings.assert_called_once()
+        settings_call = ch._client.cardkit.v1.card.settings.call_args[0][0]
+        assert settings_call.body.sequence == 5  # after final content seq 4
 
     @pytest.mark.asyncio
     async def test_stream_end_fallback_when_no_card_id(self):
