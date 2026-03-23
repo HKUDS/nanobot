@@ -31,13 +31,17 @@ The memory subsystem has grown organically from ~6 files to 30 files. Most bound
 
 ### Change 1: Merge `retrieval.py` into `retriever.py`
 
-`retrieval.py` exports two functions: `_local_retrieve()` and `_topic_fallback_retrieve()`. Both are imported only by `retriever.py:27`. No other file imports from `retrieval.py`.
+`retrieval.py` exports five callable symbols: `_local_retrieve()`, `_topic_fallback_retrieve()`, `_bm25_score()`, `_build_bm25_index()`, `_keyword_score()`.
 
-**Action:** Move the contents of `retrieval.py` into `retriever.py` as private functions. Delete `retrieval.py`.
+**Production consumer:** `retriever.py:27` imports from `retrieval.py`.
 
-**Impact on `retriever.py`:** Grows from 1,107 to ~1,396 lines. This is large but acceptable — `MemoryRetriever` is the orchestrator for the entire read path, and the merged functions are implementation details that belong with it. An alternative would be to keep them separate but rename `retrieval.py` to something unambiguous (e.g., `keyword_search.py`).
+**Test consumer:** `tests/test_memory_helper_wave5.py:13-18` imports all five symbols directly from `nanobot.agent.memory.retrieval`.
 
-**Recommendation:** Rename to `keyword_search.py` rather than merge. This preserves the smaller file while eliminating the naming confusion. `retriever.py` imports change from `from .retrieval import ...` to `from .keyword_search import ...`.
+**Action:** Rename `retrieval.py` to `keyword_search.py`. This preserves the smaller file while eliminating the naming confusion with `retriever.py`.
+
+**Required updates:**
+- `retriever.py` — change `from .retrieval import ...` to `from .keyword_search import ...`
+- `tests/test_memory_helper_wave5.py:13-18` — change import path from `nanobot.agent.memory.retrieval` to `nanobot.agent.memory.keyword_search`
 
 ### Change 2: Flatten the ontology re-export
 
@@ -49,24 +53,35 @@ from .ontology_rules import RELATION_RULES, ...
 from .ontology_types import ...
 ```
 
-And `__init__.py` imports from `ontology.py`.
+**Production consumers of `ontology.py`:**
+- `memory/__init__.py` — imports from `ontology.py`
+- `memory/graph.py:25` — `from .ontology import (...)`
+- `memory/ingester.py:849` — `from .ontology import Triple`
+- `memory/retriever.py:1085` — `from .ontology import classify_entity_type`
 
-**Action:** Remove `ontology.py`. Update `__init__.py` to import directly from the source modules (`ontology_types.py`, `ontology_rules.py`, `entity_classifier.py`, `entity_linker.py`). Any internal memory/ files that import from `ontology.py` are updated to import from the source modules directly.
+**Test consumers (import via `nanobot.agent.memory.ontology`):**
+- `tests/test_graph_driver_paths.py` (lines 12, 42, 114)
+- `tests/test_knowledge_graph.py:10`
+- `tests/test_ontology.py:5`
 
-**Verify consumers:** Grep for `from nanobot.agent.memory.ontology import` and `from .ontology import` to find all importers.
+**Action:** Remove `ontology.py` as a re-export facade. Update all 7 importers:
+
+- `__init__.py` — import directly from `ontology_types.py`, `ontology_rules.py`, `entity_classifier.py`, `entity_linker.py`
+- `graph.py`, `ingester.py`, `retriever.py` — change `from .ontology import ...` to import from the specific source module
+- 3 test files — change `from nanobot.agent.memory.ontology import ...` to import from the specific source module (e.g., `from nanobot.agent.memory.entity_classifier import classify_entity_type`)
 
 ### Change 3: Move `eval.py` to a separate location
 
 `EvalRunner` is a benchmark runner with no runtime role — it's called from `cli/commands.py:memory_eval` and from CI scripts. It shouldn't live inside the production memory package.
 
-**Action:** Move `eval.py` to `nanobot/agent/memory/eval.py` → `nanobot/eval/memory_eval.py` (or `tests/eval/memory_eval.py` if the team prefers test-adjacent placement).
+**Action:** Move `eval.py` to `nanobot/eval/memory_eval.py`.
 
 **Update:**
-- `memory/store.py` — remove `EvalRunner` construction from `MemoryStore.__init__` (it's currently wired at construction time). Instead, `cli/commands.py:memory_eval` constructs `EvalRunner` directly.
 - `memory/__init__.py` — remove `EvalRunner` from exports
-- `cli/commands.py` — update import path
+- `cli/memory.py` (NOT `cli/commands.py` — the `memory_eval` command lives at `cli/memory.py:301`) — update import path. The CLI currently accesses `store.eval_runner.evaluate_retrieval_cases(...)` at lines 403, 407, 408, 460
+- `memory/store.py` — keep the `eval_runner` attribute on `MemoryStore` but import `EvalRunner` from the new location. The construction wiring in `store.py.__init__` (lines 234-240) passes six callables (`retrieve_fn`, `get_rollout_status_fn`, `get_rollout_fn`, `get_backend_stats_fn`, plus `MemoryPersistence` and `Path`) — this wiring stays in `store.py` since it requires access to store internals
 
-**Risk:** Low. `EvalRunner` is self-contained — it only depends on `helpers.py` and `persistence.py`.
+**Risk:** Low for the file move itself. Note that while `eval.py`'s static imports are limited (`helpers.py`, `persistence.py`), its construction requires six callables wired from `MemoryStore` internals, so `store.py` retains a dependency on the new module location.
 
 ### Change 4: Update `__init__.py` docstring
 
@@ -74,7 +89,7 @@ The current docstring (lines 1-36) describes an architecture from when the memor
 
 **Action:** Rewrite the docstring to accurately list all current modules and their roles. Group by concern:
 - **Write path:** `extractor.py`, `ingester.py`, `persistence.py`
-- **Read path:** `retriever.py`, `keyword_search.py` (renamed), `retrieval_planner.py`, `reranker.py`, `onnx_reranker.py`, `context_assembler.py`, `token_budget.py`
+- **Read path:** `retriever.py`, `keyword_search.py` (renamed from `retrieval.py` in Change 1), `retrieval_planner.py`, `reranker.py`, `onnx_reranker.py`, `context_assembler.py`, `token_budget.py`
 - **Storage:** `mem0_adapter.py`, `persistence.py`
 - **Profile:** `profile_io.py`, `profile_correction.py`
 - **Knowledge graph:** `graph.py`, `ontology_types.py`, `ontology_rules.py`, `entity_classifier.py`, `entity_linker.py`
@@ -100,8 +115,8 @@ The current docstring (lines 1-36) describes an architecture from when the memor
 
 ## Success criteria
 
-- `retrieval.py` is renamed to `keyword_search.py` (clear naming)
-- `ontology.py` facade is removed (direct imports)
+- `retrieval.py` is renamed to `keyword_search.py` (clear naming); `tests/test_memory_helper_wave5.py` updated
+- `ontology.py` facade is removed; 3 production files and 3 test files updated to direct imports
 - `eval.py` is moved out of the production memory package
 - `__init__.py` docstring accurately describes all current modules
 - `make check` passes
