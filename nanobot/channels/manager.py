@@ -31,23 +31,29 @@ class ChannelManager:
         self._init_channels()
 
     def _init_channels(self) -> None:
-        """Initialize channels discovered via pkgutil scan."""
-        from nanobot.channels.registry import discover_channel_names, load_channel_class
+        """Initialize channels discovered via pkgutil scan + entry_points plugins."""
+        from nanobot.channels.registry import discover_all
 
         groq_key = self.config.providers.groq.api_key
 
-        for modname in discover_channel_names():
-            section = getattr(self.config.channels, modname, None)
-            if not section or not getattr(section, "enabled", False):
+        for name, cls in discover_all().items():
+            section = getattr(self.config.channels, name, None)
+            if section is None:
+                continue
+            enabled = (
+                section.get("enabled", False)
+                if isinstance(section, dict)
+                else getattr(section, "enabled", False)
+            )
+            if not enabled:
                 continue
             try:
-                cls = load_channel_class(modname)
                 channel = cls(section, self.bus)
                 channel.transcription_api_key = groq_key
-                self.channels[modname] = channel
+                self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)
-            except ImportError as e:
-                logger.warning("{} channel not available: {}", modname, e)
+            except Exception as e:
+                logger.warning("{} channel not available: {}", name, e)
 
         # Web UI channel (FastAPI + WebSocket, zero npm)
         if self.config.channels.webui.enabled:
@@ -140,7 +146,12 @@ class ChannelManager:
                 channel = self.channels.get(msg.channel)
                 if channel:
                     try:
-                        await channel.send(msg)
+                        if msg.metadata.get("_stream_delta") or msg.metadata.get("_stream_end"):
+                            await channel.send_delta(msg.chat_id, msg.content, msg.metadata)
+                        elif msg.metadata.get("_streamed"):
+                            pass
+                        else:
+                            await channel.send(msg)
                     except Exception as e:
                         logger.error("Error sending to {}: {}", msg.channel, e)
                 else:
