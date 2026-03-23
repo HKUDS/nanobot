@@ -46,7 +46,7 @@ from .ingester import EventIngester
 from .maintenance import MemoryMaintenance
 from .mem0_adapter import _Mem0Adapter
 from .persistence import MemoryPersistence
-from .profile import ProfileManager
+from .profile_io import ProfileStore
 from .reranker import CompositeReranker, Reranker
 from .retrieval_planner import RetrievalPlanner
 from .retriever import MemoryRetriever
@@ -120,7 +120,7 @@ class MemoryStore:
         # Profile manager (LAN-202) — delegates profile CRUD to ProfileManager.
         # Subsystem references (_extractor, _ingester, _conflict_mgr, _snapshot)
         # are wired after all subsystems are constructed (see below).
-        self.profile_mgr = ProfileManager(self.persistence, self.profile_file, self.mem0)
+        self.profile_mgr = ProfileStore(self.persistence, self.profile_file, self.mem0)
 
         # Retrieval planner (LAN-207) — intent classification + policy + routing.
         self._planner = RetrievalPlanner()
