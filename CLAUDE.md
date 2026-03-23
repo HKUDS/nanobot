@@ -133,7 +133,7 @@ The memory subsystem (`nanobot/agent/memory/`) uses a **mem0-first strategy**:
 3. **Persistence**: `MemoryPersistence` manages `events.jsonl` (append-only JSONL), `profile.json` (user profile state), `MEMORY.md` (active knowledge snapshot), `HISTORY.md` (event log)
 4. **Consolidation**: Periodic pass merges events, updates profile, compacts MEMORY.md
 
-**Warning**: Never modify `case/memory_eval_cases.json` or `case/memory_eval_baseline.json` without re-running `make memory-eval` to verify metrics.
+**Note**: `case/memory_eval_cases.json` is used by the advisory trend benchmark (`make memory-eval`). Behavioral correctness is enforced by contract tests in `tests/contract/` and LLM round-trip tests in `tests/test_memory_roundtrip.py`.
 
 ## Adding a New Tool
 
@@ -181,7 +181,7 @@ make ci             # CI pipeline: lint + typecheck + import-check + prompt-chec
 make pre-push       # CI + merge-readiness check (run before pushing PRs)
 make import-check   # Check module boundary violations
 make prompt-check   # Check prompt manifest consistency
-make memory-eval    # Deterministic memory retrieval benchmark
+make memory-eval    # Advisory memory retrieval trend (non-gating)
 make live-eval      # Run live agent evaluation
 make clean          # Remove __pycache__, .mypy_cache, etc.
 make worktree-clean # Prune stale git worktrees and list active ones

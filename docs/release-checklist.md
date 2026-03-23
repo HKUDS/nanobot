@@ -10,7 +10,7 @@
 - [ ] `make test-cov` — coverage ≥ 85%
 - [ ] `make prompt-check` — prompt manifest verified
 - [ ] `python scripts/check_imports.py` — import boundaries pass
-- [ ] `make memory-eval` — no regression vs baseline
+- [ ] `make memory-eval` — review trend (advisory, non-blocking)
 
 ## Changelog
 

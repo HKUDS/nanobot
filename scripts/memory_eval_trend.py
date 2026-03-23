@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run deterministic memory retrieval evaluation for CI trend reporting."""
+"""Run deterministic memory retrieval evaluation for advisory trend reporting."""
 
 from __future__ import annotations
 
@@ -71,7 +71,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--embedding-provider", default="hash")
     parser.add_argument("--vector-backend", default="json")
     parser.add_argument(
-        "--strict", action="store_true", help="Fail run when baseline thresholds are violated"
+        "--strict",
+        action="store_true",
+        default=False,
+        help="(Deprecated, ignored) Previously failed run on baseline violations",
     )
     return parser.parse_args()
 
@@ -299,8 +302,7 @@ def main() -> int:
     summary_path.write_text(summary_markdown, encoding="utf-8")
     print(summary_markdown)
 
-    if args.strict and not baseline_compare.get("passed", True):
-        return 2
+    # Advisory only — always exit 0 regardless of threshold comparison.
     return 0
 
 
