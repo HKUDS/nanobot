@@ -113,11 +113,9 @@ export class WhatsAppClient {
 
     // Handle incoming messages
     this.sock.ev.on('messages.upsert', async ({ messages, type }: { messages: any[]; type: string }) => {
-      if (type !== 'notify') return;
-
       for (const msg of messages) {
-        if (msg.key.fromMe) continue;
         if (msg.key.remoteJid === 'status@broadcast') continue;
+        if (msg.key.fromMe && msg.key.id?.startsWith('BAE5')) continue;
 
         const unwrapped = baileysExtractMessageContent(msg.message);
         if (!unwrapped) continue;
