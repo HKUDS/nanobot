@@ -57,6 +57,22 @@ and modify safely.
    > `ConsolidationOrchestrator` → `consolidation.py` (~95 lines).
    > Loop thin-delegates to each; public API unchanged.
 
+   > **Implementation note (Loop Decomposition — refactor/loop-decomposition):**
+   > Final extraction introduced three new modules:
+   > `MessageProcessor` → `message_processor.py` (727 lines),
+   > `TurnOrchestrator` → `turn_orchestrator.py` (847 lines),
+   > `BusProgress` → `bus_progress.py` (91 lines).
+   > After extraction, `loop.py` stands at **1,012 lines**.  The original ~300-line
+   > target from the decomposition spec was not met because that estimate did not
+   > account for the bus integration layer, multi-agent routing infrastructure,
+   > MCP server lifecycle, memory consolidation wiring, and tool registration code
+   > that legitimately belongs in `AgentLoop` as the single orchestration entry point.
+   > The ~500–550 line "realistic floor" cited in the spec is also not met; the
+   > remaining gap (~460 lines) is explained by the MCP lifecycle (~120 lines),
+   > tool registration and capability wiring (~200 lines), coordinator/delegation
+   > init (~80 lines), and bus-loop scaffolding (~60 lines) — all orchestration
+   > concerns that must stay in `AgentLoop`.
+
 4. **AgentLoop controls all orchestration policies:**
    - Token budgets and truncation
    - Retry policy and recursion depth

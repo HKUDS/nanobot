@@ -96,10 +96,10 @@ class MessageProcessor:
 
         # Per-turn token accumulators: these are read by the pipeline when
         # building the response metadata.  The actual values are updated by
-        # _run_agent_loop (on AgentLoop) during the turn.  When using
-        # _LegacyOrchestrator, the loop's counters are read via _token_source
-        # (set by AgentLoop after construction).  When no source is wired, we
-        # fall back to local zeros.
+        # TurnOrchestrator during the turn.  When a token source is wired via
+        # _token_source (set by AgentLoop after construction), that source's
+        # counters are used instead.  When no source is wired, we fall back to
+        # local zeros.
         self._turn_tokens_prompt = 0
         self._turn_tokens_completion = 0
         self._turn_llm_calls = 0

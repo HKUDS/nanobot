@@ -153,6 +153,13 @@ Each module has a clear responsibility, a public API, and boundaries it must not
 | `errors.py` | Error taxonomy | Imported by all modules |
 | `utils/` | Path helpers, sanitization | Imported by all modules |
 
+## Agent Layer — New Module Boundaries (AgentLoop Decomposition)
+
+- `turn_orchestrator.py` must **never** import from `channels/`, `bus/`, or `session/`
+- `message_processor.py` must **never** import from `channels/`
+- `bus_progress.py` must **never** import from `agent/loop`, `agent/turn_orchestrator`, or `agent/message_processor`
+- `TurnState` is private to `turn_orchestrator.py` — never exported
+
 ## Data Flow
 
 ### Inbound Message Processing

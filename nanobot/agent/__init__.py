@@ -29,6 +29,7 @@ from nanobot.agent.scratchpad import Scratchpad
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.streaming import StreamingLLMCaller
 from nanobot.agent.tool_executor import ToolExecutor
+from nanobot.agent.turn_orchestrator import TurnResult
 from nanobot.agent.verifier import AnswerVerifier
 
 __all__ = [
@@ -57,6 +58,7 @@ __all__ = [
     "ToolCallEvent",
     "ToolExecutor",
     "ToolResultEvent",
+    "TurnResult",
     "init_langfuse",
     "shutdown_langfuse",
 ]
