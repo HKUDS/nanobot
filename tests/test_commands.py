@@ -567,7 +567,6 @@ def test_gateway_uses_config_directory_for_cron_store(monkeypatch, tmp_path: Pat
     assert isinstance(result.exception, _StopGatewayError)
     assert seen["cron_store"] == config_file.parent / "cron" / "jobs.json"
 
-
 def test_gateway_uses_configured_port_when_cli_flag_is_missing(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)
@@ -610,3 +609,44 @@ def test_gateway_cli_port_overrides_configured_port(monkeypatch, tmp_path: Path)
 
     assert isinstance(result.exception, _StopGatewayError)
     assert "port 18792" in result.stdout
+
+
+def test_provider_login_openai_codex_force_removes_cached_token(monkeypatch, tmp_path: Path) -> None:
+    token_path = tmp_path / "oauth-cli-kit" / "auth" / "codex.json"
+    token_path.parent.mkdir(parents=True)
+    token_path.write_text('{"access":"old","refresh":"old","expires":9999999999999,"account_id":"old"}')
+
+    class _Token:
+        access = "new-access"
+        account_id = "new-account"
+
+    class _Storage:
+        def __init__(self, token_filename: str = "oauth.json") -> None:
+            assert token_filename == "codex.json"
+
+        def get_token_path(self) -> Path:
+            return token_path
+
+    seen: dict[str, int] = {"get_token": 0, "login": 0}
+
+    def _get_token():
+        seen["get_token"] += 1
+        if seen["get_token"] == 1:
+            raise RuntimeError("missing token")
+        return _Token()
+
+    def _login_oauth_interactive(**_kwargs):
+        seen["login"] += 1
+        token_path.write_text('{"access":"new","refresh":"new","expires":9999999999999,"account_id":"new"}')
+        return _Token()
+
+    monkeypatch.setattr("oauth_cli_kit.storage.FileTokenStorage", _Storage)
+    monkeypatch.setattr("oauth_cli_kit.get_token", _get_token)
+    monkeypatch.setattr("oauth_cli_kit.login_oauth_interactive", _login_oauth_interactive)
+
+    result = runner.invoke(app, ["provider", "login", "openai-codex", "--force"])
+
+    assert result.exit_code == 0
+    assert "Removed cached OAuth credentials" in result.stdout
+    assert "Authenticated with OpenAI Codex" in result.stdout
+    assert seen["login"] == 1

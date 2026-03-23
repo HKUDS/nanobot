@@ -1134,6 +1134,7 @@ def _register_login(name: str):
 @provider_app.command("login")
 def provider_login(
     provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+    force: bool = typer.Option(False, "--force", help="Discard cached OAuth credentials and sign in again."),
 ):
     """Authenticate with an OAuth provider."""
     from nanobot.providers.registry import PROVIDERS
@@ -1151,13 +1152,22 @@ def provider_login(
         raise typer.Exit(1)
 
     console.print(f"{__logo__} OAuth Login - {spec.label}\n")
-    handler()
+    handler(force=force)
 
 
 @_register_login("openai_codex")
-def _login_openai_codex() -> None:
+def _login_openai_codex(force: bool = False) -> None:
     try:
         from oauth_cli_kit import get_token, login_oauth_interactive
+        from oauth_cli_kit.storage import FileTokenStorage
+
+        storage = FileTokenStorage(token_filename="codex.json")
+        token_path = storage.get_token_path()
+
+        if force and token_path.exists():
+            token_path.unlink()
+            console.print(f"[yellow]Removed cached OAuth credentials[/yellow]  [dim]{token_path}[/dim]")
+
         token = None
         try:
             token = get_token()
