@@ -162,7 +162,7 @@ class _ToolBatchResult:
     tool_calls_this_batch: int
 
 
-@dataclass
+@dataclass(slots=True)
 class TurnState:
     """Mutable state shared across iterations of the Plan-Act-Observe-Reflect loop."""
 
