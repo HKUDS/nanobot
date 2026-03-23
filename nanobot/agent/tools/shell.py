@@ -14,7 +14,7 @@ class ExecTool(Tool):
 
     def __init__(
         self,
-        timeout: int = 60,
+        timeout: int = 120,
         working_dir: str | None = None,
         deny_patterns: list[str] | None = None,
         allow_patterns: list[str] | None = None,
@@ -23,6 +23,7 @@ class ExecTool(Tool):
     ):
         self.timeout = timeout
         self.working_dir = working_dir
+        self._progress_cb = None
         self.deny_patterns = deny_patterns or [
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
             r"\bdel\s+/[fq]\b",              # del /f, del /q
@@ -37,6 +38,10 @@ class ExecTool(Tool):
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
+
+    def set_progress_callback(self, cb) -> None:
+        """Inject a progress callback so exec output streams to the frontend in real time."""
+        self._progress_cb = cb
 
     @property
     def name(self) -> str:
@@ -99,11 +104,26 @@ class ExecTool(Tool):
                 env=env,
             )
 
+            stdout_parts: list[str] = []
+            stderr_parts: list[str] = []
+
+            async def _read_stdout() -> None:
+                async for line in process.stdout:
+                    text = line.decode("utf-8", errors="replace")
+                    stdout_parts.append(text)
+                    if self._progress_cb:
+                        await self._progress_cb(text.rstrip())
+
+            async def _read_stderr() -> None:
+                async for line in process.stderr:
+                    stderr_parts.append(line.decode("utf-8", errors="replace"))
+
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
+                await asyncio.wait_for(
+                    asyncio.gather(_read_stdout(), _read_stderr()),
                     timeout=effective_timeout,
                 )
+                await process.wait()
             except asyncio.TimeoutError:
                 process.kill()
                 try:
@@ -114,13 +134,13 @@ class ExecTool(Tool):
 
             output_parts = []
 
-            if stdout:
-                output_parts.append(stdout.decode("utf-8", errors="replace"))
+            stdout_text = "".join(stdout_parts)
+            if stdout_text:
+                output_parts.append(stdout_text)
 
-            if stderr:
-                stderr_text = stderr.decode("utf-8", errors="replace")
-                if stderr_text.strip():
-                    output_parts.append(f"STDERR:\n{stderr_text}")
+            stderr_text = "".join(stderr_parts)
+            if stderr_text.strip():
+                output_parts.append(f"STDERR:\n{stderr_text}")
 
             output_parts.append(f"\nExit code: {process.returncode}")
 

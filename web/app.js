@@ -774,12 +774,30 @@ async function sendMessage(text) {
           }
           scrollToBottom();
 
+        } else if (type === 'tool_stream') {
+          if (lastToolBlock) {
+            const outputEl = lastToolBlock.querySelector('.tool-output');
+            if (outputEl) {
+              outputEl.textContent += data.text + '\n';
+              scrollToBottom();
+            }
+          }
+
         } else if (type === 'progress') {
-          // Fallback: old-style progress chips (channels without tool_call support)
-          const hint = appendHint(data.text, wrapper);
-          collectedHints.push(hint);
+          if (!data.tool_hint) {
+            // Non-tool progress (e.g. "Thinking...") — show briefly in stream area
+            currentStreamEl.textContent = data.text;
+            scrollToBottom();
+          }
 
         } else if (type === 'done') {
+          // Finalize any tool blocks still showing a spinner
+          bubble.querySelectorAll('.tool-pending').forEach(b => {
+            b.classList.remove('tool-pending');
+            const spinner = b.querySelector('.tool-spinner');
+            if (spinner) spinner.textContent = '✓';
+          });
+
           const finalText = data.text || tokenBuffer;
           if (finalText.trim()) {
             const rendered = document.createElement('div');

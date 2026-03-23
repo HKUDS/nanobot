@@ -46,7 +46,10 @@ class CustomProvider(LLMProvider):
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
         if tools:
-            kwargs.update(tools=tools, tool_choice=tool_choice or "auto")
+            tc = tool_choice or "auto"
+            if isinstance(tc, dict):
+                tc = "required"
+            kwargs.update(tools=tools, tool_choice=tc)
         return kwargs
 
     def _handle_error(self, e: Exception) -> LLMResponse:

@@ -520,8 +520,17 @@ class WebChannel(BaseChannel):
         async def on_stream(text: str) -> None:
             await q.put(("token", text))
 
+        _tool_active = [False]  # True once the first tool_call has been emitted
+
         async def on_progress(content: str, *, tool_hint: bool = False) -> None:
-            await q.put(("progress", content, tool_hint))
+            if tool_hint:
+                tool_name = content.split("(")[0].strip() if "(" in content else content
+                await q.put(("tool_call", tool_name, content))
+                _tool_active[0] = True
+            elif _tool_active[0]:
+                await q.put(("tool_stream", content))
+            else:
+                await q.put(("progress", content, False))
 
         session_key = f"web:{session_id}"
 
@@ -583,6 +592,10 @@ class WebChannel(BaseChannel):
                 kind = item[0]
                 if kind == "token":
                     await response.write(_sse("token", {"text": item[1]}))
+                elif kind == "tool_call":
+                    await response.write(_sse("tool_call", {"tool": item[1], "call_str": item[2]}))
+                elif kind == "tool_stream":
+                    await response.write(_sse("tool_stream", {"text": item[1]}))
                 elif kind == "progress":
                     await response.write(_sse("progress", {"text": item[1], "tool_hint": item[2]}))
                 elif kind == "done":

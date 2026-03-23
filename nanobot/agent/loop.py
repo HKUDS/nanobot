@@ -288,6 +288,9 @@ class AgentLoop:
                 # Re-bind tool context right before execution so that
                 # concurrent sessions don't clobber each other's routing.
                 self._set_tool_context(channel, chat_id, message_id)
+                if exec_tool := self.tools.get("exec"):
+                    if hasattr(exec_tool, "set_progress_callback"):
+                        exec_tool.set_progress_callback(on_progress)
 
                 # Execute all tool calls concurrently — the LLM batches
                 # independent calls in a single response on purpose.
@@ -444,7 +447,7 @@ class AgentLoop:
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
-            current_role = "assistant" if msg.sender_id == "subagent" else "user"
+            current_role = "user"
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
@@ -471,6 +474,9 @@ class AgentLoop:
         ctx = CommandContext(msg=msg, session=session, key=key, raw=raw, loop=self)
         if result := await self.commands.dispatch(ctx):
             return result
+
+        if on_progress:
+            await on_progress("Thinking...", tool_hint=False)
 
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
