@@ -10,6 +10,7 @@ go through ``_Mem0Adapter``.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from .helpers import _norm_text, _safe_float, _tokenize, _utc_now_iso
@@ -49,13 +50,16 @@ class ConflictManager:
         self,
         profile_mgr: ProfileManager,
         mem0: _Mem0Adapter,
+        *,
+        sanitize_mem0_text_fn: Callable[..., str] | None = None,
+        normalize_metadata_fn: Callable[..., tuple[dict, bool]] | None = None,
+        sanitize_metadata_fn: Callable[[dict], dict] | None = None,
     ) -> None:
         self.profile_mgr = profile_mgr
         self.mem0 = mem0
-        # Back-reference to the owning MemoryStore — set after construction.
-        # Needed for _sanitize_mem0_text, _normalize_memory_metadata,
-        # _sanitize_mem0_metadata which still live on MemoryStore.
-        self._store: Any = None
+        self._sanitize_mem0_text = sanitize_mem0_text_fn
+        self._normalize_metadata = normalize_metadata_fn
+        self._sanitize_metadata = sanitize_metadata_fn
         # Configurable auto-resolve confidence gap threshold — copied from
         # MemoryStore at wiring time.
         self.conflict_auto_resolve_gap: float = 0.25
@@ -349,7 +353,6 @@ class ConflictManager:
             target_norm = self._norm_text(target)
             return [v for v in values_in if self._norm_text(v) != target_norm]
 
-        store = self._store
         selected = str(action or "").strip().lower()
         mem0_ok = False
 
@@ -383,8 +386,10 @@ class ConflictManager:
                 old_entry.setdefault("supersedes_id", new_belief_id)
         elif selected == "keep_new":
             clean_new_value = (
-                store.ingester._sanitize_mem0_text(new_value, allow_archival=False) or new_value
-            )
+                self._sanitize_mem0_text(new_value, allow_archival=False)
+                if self._sanitize_mem0_text
+                else new_value
+            ) or new_value
             if old_memory_id:
                 mem0_ok = self.mem0.update(old_memory_id, clean_new_value)
                 result["mem0_operation"] = "update_old_to_new"
@@ -393,18 +398,26 @@ class ConflictManager:
                     conflict["new_memory_id"] = old_memory_id
                     result["new_memory_id"] = old_memory_id
             else:
-                conflict_metadata, _ = store.ingester._normalize_memory_metadata(
-                    {
+                if self._normalize_metadata:
+                    conflict_metadata, _ = self._normalize_metadata(
+                        {
+                            "topic": "conflict_resolution",
+                            "memory_type": "semantic",
+                            "stability": "high",
+                        },
+                        event_type="fact",
+                        summary=clean_new_value,
+                        source="chat",
+                    )
+                else:
+                    conflict_metadata = {
                         "topic": "conflict_resolution",
                         "memory_type": "semantic",
                         "stability": "high",
-                    },
-                    event_type="fact",
-                    summary=clean_new_value,
-                    source="chat",
-                )
+                    }
                 conflict_metadata.update({"event_type": "conflict_resolution", "field": key})
-                conflict_metadata = store.ingester._sanitize_mem0_metadata(conflict_metadata)
+                if self._sanitize_metadata:
+                    conflict_metadata = self._sanitize_metadata(conflict_metadata)
                 mem0_ok = (
                     self.mem0.add_text(
                         clean_new_value,

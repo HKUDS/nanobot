@@ -202,7 +202,9 @@ class TestConsolidationHelpers:
 
         session = SimpleNamespace(messages=[], last_consolidated=0)
         assert (
-            store._select_messages_for_consolidation(session, archive_all=False, memory_window=10)
+            store._consolidation._select_messages_for_consolidation(
+                session, archive_all=False, memory_window=10
+            )
             is None
         )
 
@@ -211,7 +213,9 @@ class TestConsolidationHelpers:
             last_consolidated=11,
         )
         assert (
-            store._select_messages_for_consolidation(session, archive_all=False, memory_window=10)
+            store._consolidation._select_messages_for_consolidation(
+                session, archive_all=False, memory_window=10
+            )
             is None
         )
 
@@ -221,19 +225,20 @@ class TestConsolidationHelpers:
             ],
             last_consolidated=0,
         )
-        selected = store._select_messages_for_consolidation(
+        selected = store._consolidation._select_messages_for_consolidation(
             session, archive_all=False, memory_window=10
         )
         assert selected is not None
 
-        selected_all = store._select_messages_for_consolidation(
+        selected_all = store._consolidation._select_messages_for_consolidation(
             session, archive_all=True, memory_window=10
         )
         assert selected_all is not None
 
     def test_format_prompt_and_save_tool_result(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
-        lines = store._format_conversation_lines(
+        pipeline = store._consolidation
+        lines = pipeline._format_conversation_lines(
             [
                 {
                     "timestamp": "2026-01-01T10:00:00+00:00",
@@ -245,10 +250,10 @@ class TestConsolidationHelpers:
             ]
         )
         assert len(lines) == 2
-        prompt = store._build_consolidation_prompt("# Memory", lines)
+        prompt = pipeline._build_consolidation_prompt("# Memory", lines)
         assert "Current Long-term Memory" in prompt
 
-        store._apply_save_memory_tool_result(
+        pipeline._apply_save_memory_tool_result(
             args={"history_entry": {"x": 1}, "memory_update": {"y": 2}}, current_memory=""
         )
         assert store.history_file.exists()
@@ -632,7 +637,7 @@ class TestRetrieveAndContextBranches:
         assert isinstance(out, list)
         assert len(out) >= 1
 
-    def test_retrieve_core_empty_results(self, tmp_path: Path) -> None:
+    def test_run_mem0_pipeline_empty_results(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         store.mem0.enabled = True
         store.mem0.search = MagicMock(
@@ -646,7 +651,7 @@ class TestRetrieveAndContextBranches:
                 },
             )
         )
-        final, stats = store.retriever._retrieve_core(
+        final, stats = store.retriever._run_mem0_pipeline(
             query="nothing",
             top_k=3,
             router_enabled=True,
@@ -656,7 +661,7 @@ class TestRetrieveAndContextBranches:
         assert final == []
         assert stats["retrieved_count"] == 0
 
-    def test_retrieve_core_rollout_status_injects_synthetic(self, tmp_path: Path) -> None:
+    def test_run_mem0_pipeline_rollout_status_injects_synthetic(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         store.mem0.enabled = True
         store.mem0.search = MagicMock(
@@ -670,7 +675,7 @@ class TestRetrieveAndContextBranches:
                 },
             )
         )
-        final, stats = store.retriever._retrieve_core(
+        final, stats = store.retriever._run_mem0_pipeline(
             query="rollout status",
             top_k=2,
             router_enabled=True,
@@ -681,7 +686,7 @@ class TestRetrieveAndContextBranches:
         assert any(str(item.get("id", "")).startswith("rollout_status") for item in final)
         assert stats["intent"] == "rollout_status"
 
-    def test_retrieve_core_reflection_filtering(self, tmp_path: Path) -> None:
+    def test_run_mem0_pipeline_reflection_filtering(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         store.mem0.enabled = True
         store.mem0.search = MagicMock(
@@ -703,7 +708,7 @@ class TestRetrieveAndContextBranches:
                 },
             )
         )
-        final, stats = store.retriever._retrieve_core(
+        final, stats = store.retriever._run_mem0_pipeline(
             query="reflect",
             top_k=3,
             router_enabled=True,

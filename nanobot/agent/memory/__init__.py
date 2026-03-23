@@ -38,6 +38,7 @@ Architecture
 from __future__ import annotations
 
 from .conflicts import ConflictManager
+from .consolidation_pipeline import ConsolidationPipeline
 from .context_assembler import ContextAssembler
 from .eval import EvalRunner
 from .event import BeliefRecord, KnowledgeTriple, MemoryEvent
@@ -73,6 +74,7 @@ from .store import MemoryStore
 __all__ = [
     "BeliefRecord",
     "ConflictManager",
+    "ConsolidationPipeline",
     "ContextAssembler",
     "EventIngester",
     "EvalRunner",

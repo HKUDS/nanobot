@@ -122,7 +122,7 @@ async def test_loop_new_exception_and_fallback_archive(
     assert "failed" in out.content.lower()
 
 
-def test_store_retrieve_core_router_branches(
+def test_store_run_mem0_pipeline_router_branches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = _store(
@@ -206,7 +206,7 @@ def test_store_retrieve_core_router_branches(
     store._reranker = _Reranker()
     store.retriever._reranker = _Reranker()
 
-    final, meta = store.retriever._retrieve_core(
+    final, meta = store.retriever._run_mem0_pipeline(
         query="what is rollout status",
         top_k=2,
         router_enabled=True,
@@ -217,7 +217,7 @@ def test_store_retrieve_core_router_branches(
     assert meta["counts"]["retrieval_returned"] >= 1
 
     # Reflection intent includes reflection rows.
-    final_reflect, _meta_reflect = store.retriever._retrieve_core(
+    final_reflect, _meta_reflect = store.retriever._run_mem0_pipeline(
         query="reflect on failures",
         top_k=3,
         router_enabled=True,
@@ -388,13 +388,13 @@ async def test_loop_connect_mcp_and_tool_parallel_error_path(
     assert results[1].success is False
 
 
-def test_store_retrieve_core_router_off_and_rollout_status(tmp_path: Path) -> None:
+def test_store_run_mem0_pipeline_router_off_and_rollout_status(tmp_path: Path) -> None:
     store = _store(tmp_path, memory_router_enabled=False, memory_reflection_enabled=False)
     store.mem0.enabled = True
     store.mem0.search = MagicMock(return_value=[])
     store.graph.enabled = False
 
-    rows, meta = store.retriever._retrieve_core(
+    rows, meta = store.retriever._run_mem0_pipeline(
         query="what is rollout status",
         top_k=1,
         router_enabled=False,
@@ -411,7 +411,7 @@ def test_store_retrieve_core_router_off_and_rollout_status(tmp_path: Path) -> No
             {"source_vector": 0, "source_get_all": 0, "source_history": 0, "rejected_blob_like": 0},
         )
     )
-    rows2, meta2 = store.retriever._retrieve_core(
+    rows2, meta2 = store.retriever._run_mem0_pipeline(
         query="rollout status",
         top_k=1,
         router_enabled=True,
@@ -557,7 +557,7 @@ def test_store_load_rollout_config_env_overrides(
     assert store.rollout["rollout_gates"]["min_precision_at_k"] == pytest.approx(0.6)
 
 
-def test_store_retrieve_core_reranker_enabled_and_type_counts(
+def test_store_run_mem0_pipeline_reranker_enabled_and_type_counts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = _store(tmp_path, reranker_mode="enabled", memory_reflection_enabled=True)
@@ -621,7 +621,7 @@ def test_store_retrieve_core_reranker_enabled_and_type_counts(
     store._reranker = _EnabledReranker()
     store.retriever._reranker = _EnabledReranker()
 
-    final, meta = store.retriever._retrieve_core(
+    final, meta = store.retriever._run_mem0_pipeline(
         query="open tasks and reflection",
         top_k=4,
         router_enabled=True,
@@ -815,7 +815,7 @@ async def test_loop_dispatch_delegation_route_and_exception_paths(tmp_path: Path
     assert dispatcher.record_route_trace.call_count >= 2
 
 
-def test_store_retrieve_core_profile_adjustment_paths(tmp_path: Path) -> None:
+def test_store_run_mem0_pipeline_profile_adjustment_paths(tmp_path: Path) -> None:
     store = _store(
         tmp_path,
         memory_router_enabled=True,
@@ -887,7 +887,7 @@ def test_store_retrieve_core_profile_adjustment_paths(tmp_path: Path) -> None:
     store.profile_mgr.read_profile = MagicMock(return_value=profile)
     store.retriever._profile_mgr.read_profile = MagicMock(return_value=profile)
 
-    final, _meta = store.retriever._retrieve_core(
+    final, _meta = store.retriever._run_mem0_pipeline(
         query="find constraints",
         top_k=2,
         router_enabled=True,
@@ -1103,7 +1103,7 @@ def test_store_routing_hint_and_reflection_filters(tmp_path: Path) -> None:
         }
     )
     store._status_matches_query_hint = MagicMock(return_value=True)
-    out, _meta = store.retriever._retrieve_core(
+    out, _meta = store.retriever._run_mem0_pipeline(
         query="planning architecture",
         top_k=2,
         router_enabled=True,

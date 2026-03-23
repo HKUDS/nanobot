@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from nanobot.agent.memory.retriever import MemoryRetriever
 
 
@@ -67,6 +69,34 @@ def _make_retriever(
     )
 
 
+def _make_plan(
+    *,
+    intent: str = "general",
+    policy: dict[str, Any] | None = None,
+    routing_hints: dict[str, Any] | None = None,
+    include_superseded: bool = False,
+) -> MagicMock:
+    """Build a mock RetrievalPlan."""
+    plan = MagicMock()
+    plan.intent = intent
+    plan.policy = policy or {
+        "candidate_multiplier": 3,
+        "half_life_days": 60.0,
+        "fallback_topics": [],
+        "fallback_types": [],
+        "type_boost": {},
+    }
+    plan.include_superseded = include_superseded
+    plan.routing_hints = routing_hints or {
+        "focus_task_decision": False,
+        "focus_planning": False,
+        "focus_architecture": False,
+        "requires_open": False,
+        "requires_resolved": False,
+    }
+    return plan
+
+
 class TestRetrieveMem0Disabled:
     """When mem0 is disabled, retrieve uses BM25 local path."""
 
@@ -102,7 +132,7 @@ class TestRetrieveMem0Disabled:
 
 
 class TestRetrieveMem0Enabled:
-    """When mem0 is enabled, retrieve calls _retrieve_core."""
+    """When mem0 is enabled, retrieve calls _run_mem0_pipeline."""
 
     def test_calls_mem0_search(self) -> None:
         retriever = _make_retriever(mem0_enabled=True)
@@ -254,3 +284,312 @@ class TestRetrieveAppliesTypeBoost:
         # The semantic item should get the 0.1 boost, making its score higher
         scores = {r["id"]: r["score"] for r in results}
         assert scores["e1"] > scores["e2"]
+
+
+# ======================================================================
+# Pipeline stage unit tests
+# ======================================================================
+
+
+class TestAugmentQueryWithGraph:
+    """_augment_query_with_graph expands query with entity names."""
+
+    def test_expands_with_entity_names(self) -> None:
+        retriever = _make_retriever(graph_enabled=True)
+        retriever._graph.get_related_entity_names_sync = MagicMock(
+            return_value={"python", "fastapi", "web"}
+        )
+        augmented, extra = retriever._augment_query_with_graph("web framework")
+        # "web" is already a keyword, so extra should contain python and fastapi
+        assert "python" in augmented or "fastapi" in augmented
+        assert len(extra) > 0
+
+    def test_no_graph_returns_original(self) -> None:
+        retriever = _make_retriever(graph_enabled=False)
+        # graph is not None but disabled
+        retriever._graph.enabled = False
+        augmented, extra = retriever._augment_query_with_graph("hello world")
+        assert augmented == "hello world"
+        assert extra == set()
+
+    def test_no_graph_object_returns_original(self) -> None:
+        retriever = _make_retriever()
+        retriever._graph = None
+        augmented, extra = retriever._augment_query_with_graph("test query")
+        assert augmented == "test query"
+        assert extra == set()
+
+
+class TestFilterItemsByIntent:
+    """_filter_items filters items based on routing hints and intent."""
+
+    def test_focus_task_decision_filters_non_tasks(self) -> None:
+        retriever = _make_retriever()
+        plan = _make_plan(
+            routing_hints={
+                "focus_task_decision": True,
+                "focus_planning": False,
+                "focus_architecture": False,
+                "requires_open": False,
+                "requires_resolved": False,
+            }
+        )
+        items = [
+            {"id": "t1", "type": "task", "summary": "Build feature", "topic": "task_progress"},
+            {"id": "f1", "type": "fact", "summary": "Python is great", "topic": "language"},
+        ]
+        filtered, counts = retriever._filter_items(items, plan)
+        assert len(filtered) == 1
+        assert filtered[0]["id"] == "t1"
+
+    def test_constraints_lookup_filters_non_semantic(self) -> None:
+        retriever = _make_retriever()
+        plan = _make_plan(intent="constraints_lookup")
+        items = [
+            {
+                "id": "c1",
+                "type": "constraint",
+                "summary": "Must not use eval",
+                "topic": "constraint",
+                "metadata": {"memory_type": "semantic"},
+            },
+            {
+                "id": "e1",
+                "type": "task",
+                "summary": "Deployed the app",
+                "topic": "task_progress",
+                "metadata": {"memory_type": "episodic"},
+            },
+        ]
+        filtered, _ = retriever._filter_items(items, plan)
+        assert len(filtered) == 1
+        assert filtered[0]["id"] == "c1"
+
+    def test_reflection_filtered_when_disabled(self) -> None:
+        retriever = _make_retriever()
+        plan = _make_plan()
+        items = [
+            {
+                "id": "r1",
+                "type": "reflection",
+                "summary": "I noticed a pattern",
+                "topic": "meta",
+                "metadata": {"memory_type": "reflection"},
+            },
+        ]
+        filtered, counts = retriever._filter_items(items, plan, reflection_enabled=False)
+        assert len(filtered) == 0
+        assert counts["reflection_filtered_non_reflection_intent"] == 1
+
+    def test_general_intent_passes_all(self) -> None:
+        retriever = _make_retriever()
+        plan = _make_plan()
+        items = [
+            {"id": "f1", "type": "fact", "summary": "Fact one", "topic": "general"},
+            {"id": "f2", "type": "fact", "summary": "Fact two", "topic": "general"},
+        ]
+        filtered, _ = retriever._filter_items(items, plan)
+        assert len(filtered) == 2
+
+
+class TestScoreItemsRecencyBoost:
+    """_score_items applies recency boost to recent items."""
+
+    def test_recent_items_score_higher(self) -> None:
+        retriever = _make_retriever()
+        plan = _make_plan(
+            policy={
+                "candidate_multiplier": 3,
+                "half_life_days": 30.0,
+                "fallback_topics": [],
+                "fallback_types": [],
+                "type_boost": {},
+            }
+        )
+        profile_data = {
+            "profile": {},
+            "resolved_keep_new_old": {k: set() for k in MemoryRetriever.PROFILE_KEYS},
+            "resolved_keep_new_new": {k: set() for k in MemoryRetriever.PROFILE_KEYS},
+        }
+        items = [
+            {
+                "id": "old",
+                "type": "fact",
+                "summary": "Old fact",
+                "memory_type": "semantic",
+                "timestamp": "2020-01-01T00:00:00Z",
+                "score": 0.5,
+                "stability": "medium",
+                "entities": [],
+            },
+            {
+                "id": "new",
+                "type": "fact",
+                "summary": "New fact",
+                "memory_type": "semantic",
+                "timestamp": "2026-03-21T00:00:00Z",
+                "score": 0.5,
+                "stability": "medium",
+                "entities": [],
+            },
+        ]
+        scored = retriever._score_items(
+            items,
+            plan,
+            profile_data,
+            set(),
+            use_recency=True,
+            router_enabled=True,
+            type_separation_enabled=True,
+        )
+        scores = {s["id"]: s["score"] for s in scored}
+        assert scores["new"] > scores["old"]
+
+
+class TestScoreItemsTypeBoost:
+    """_score_items applies type boost from policy."""
+
+    def test_semantic_boosted_over_episodic(self) -> None:
+        retriever = _make_retriever()
+        plan = _make_plan(
+            policy={
+                "candidate_multiplier": 3,
+                "half_life_days": 60.0,
+                "fallback_topics": [],
+                "fallback_types": [],
+                "type_boost": {"semantic": 0.15, "episodic": 0.0},
+            }
+        )
+        profile_data = {
+            "profile": {},
+            "resolved_keep_new_old": {k: set() for k in MemoryRetriever.PROFILE_KEYS},
+            "resolved_keep_new_new": {k: set() for k in MemoryRetriever.PROFILE_KEYS},
+        }
+        items = [
+            {
+                "id": "sem",
+                "type": "fact",
+                "summary": "Semantic item",
+                "memory_type": "semantic",
+                "timestamp": "2025-01-01T00:00:00Z",
+                "score": 0.5,
+                "stability": "medium",
+                "entities": [],
+            },
+            {
+                "id": "epi",
+                "type": "task",
+                "summary": "Episodic item",
+                "memory_type": "episodic",
+                "timestamp": "2025-01-01T00:00:00Z",
+                "score": 0.5,
+                "stability": "medium",
+                "entities": [],
+            },
+        ]
+        scored = retriever._score_items(
+            items,
+            plan,
+            profile_data,
+            set(),
+            use_recency=False,
+            router_enabled=True,
+            type_separation_enabled=True,
+        )
+        scores = {s["id"]: s["score"] for s in scored}
+        assert scores["sem"] > scores["epi"]
+
+
+class TestScoreItemsUnified:
+    """_score_items applies the same formula for BM25 and mem0 candidates."""
+
+    def test_same_adjustments_different_bases(self) -> None:
+        retriever = _make_retriever()
+        plan = _make_plan(
+            policy={
+                "candidate_multiplier": 3,
+                "half_life_days": 60.0,
+                "fallback_topics": [],
+                "fallback_types": [],
+                "type_boost": {"semantic": 0.1},
+            }
+        )
+        profile_data = {
+            "profile": {},
+            "resolved_keep_new_old": {k: set() for k in MemoryRetriever.PROFILE_KEYS},
+            "resolved_keep_new_new": {k: set() for k in MemoryRetriever.PROFILE_KEYS},
+        }
+        # BM25 candidate: base from retrieval_reason
+        bm25_item = {
+            "id": "bm25",
+            "type": "fact",
+            "summary": "BM25 result",
+            "memory_type": "semantic",
+            "timestamp": "2025-01-01T00:00:00Z",
+            "stability": "high",
+            "entities": [],
+            "retrieval_reason": {"score": 0.6},
+        }
+        # mem0 candidate: base from score field
+        mem0_item = {
+            "id": "mem0",
+            "type": "fact",
+            "summary": "mem0 result",
+            "memory_type": "semantic",
+            "timestamp": "2025-01-01T00:00:00Z",
+            "score": 0.7,
+            "stability": "high",
+            "entities": [],
+        }
+        bm25_scored = retriever._score_items(
+            [bm25_item],
+            plan,
+            profile_data,
+            set(),
+            use_recency=False,
+            router_enabled=True,
+            type_separation_enabled=True,
+        )
+        mem0_scored = retriever._score_items(
+            [mem0_item],
+            plan,
+            profile_data,
+            set(),
+            use_recency=True,
+            router_enabled=True,
+            type_separation_enabled=True,
+        )
+        # Both should have type_boost=0.1 and stability_boost=0.03
+        bm25_reason = bm25_scored[0]["retrieval_reason"]
+        mem0_reason = mem0_scored[0]["retrieval_reason"]
+        assert bm25_reason["type_boost"] == pytest.approx(0.1)
+        assert mem0_reason["type_boost"] == pytest.approx(0.1)
+        assert bm25_reason["stability_boost"] == pytest.approx(0.03)
+        assert mem0_reason["stability_boost"] == pytest.approx(0.03)
+
+
+class TestRerankItemsEnabled:
+    """_rerank_items calls cross-encoder when enabled."""
+
+    def test_reranker_called(self) -> None:
+        retriever = _make_retriever(rollout={"reranker_mode": "enabled"})
+        items = [
+            {"id": "a", "score": 0.5, "summary": "Item A"},
+            {"id": "b", "score": 0.3, "summary": "Item B"},
+        ]
+        reranked = retriever._rerank_items("test query", items)
+        retriever._reranker.rerank.assert_called_once_with("test query", items)
+        assert len(reranked) == 2
+
+
+class TestRerankItemsDisabled:
+    """_rerank_items passes through when disabled."""
+
+    def test_passthrough(self) -> None:
+        retriever = _make_retriever(rollout={"reranker_mode": "disabled"})
+        items = [
+            {"id": "a", "score": 0.5, "summary": "Item A"},
+        ]
+        result = retriever._rerank_items("test query", items)
+        retriever._reranker.rerank.assert_not_called()
+        assert result is items

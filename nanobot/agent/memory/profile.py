@@ -67,15 +67,21 @@ class ProfileManager:
         persistence: MemoryPersistence,
         profile_file: Path,
         mem0: _Mem0Adapter,
+        *,
+        extractor: Any | None = None,
+        ingester: Any | None = None,
+        conflict_mgr: Any | None = None,
+        snapshot: Any | None = None,
     ) -> None:
         self.persistence = persistence
         self.profile_file = profile_file
         self.mem0 = mem0
-        # Back-reference to the owning MemoryStore — set by MemoryStore.__init__
-        # after construction.  Required by apply_live_user_correction which calls
-        # store-level orchestration methods (append_events, auto_resolve_conflicts,
-        # etc.).
-        self._store: Any = None
+        # Subsystem references — set after construction by MemoryStore.__init__
+        # (required by apply_live_user_correction).
+        self._extractor: Any = extractor
+        self._ingester: Any = ingester
+        self._conflict_mgr: Any = conflict_mgr
+        self._snapshot: Any = snapshot
 
     # -- Shared helpers imported from .helpers --------------------------------
     _utc_now_iso = staticmethod(_utc_now_iso)
@@ -800,12 +806,8 @@ class ProfileManager:
         if not text:
             return {"applied": 0, "conflicts": 0, "events": 0, "needs_user": 0, "question": None}
 
-        # _store is the owning MemoryStore — needed for extractor access and
-        # store-level orchestration (append_events, auto_resolve_conflicts, etc.).
-        store = self._store
-
-        preference_corrections = store.extractor.extract_explicit_preference_corrections(text)
-        fact_corrections = store.extractor.extract_explicit_fact_corrections(text)
+        preference_corrections = self._extractor.extract_explicit_preference_corrections(text)
+        fact_corrections = self._extractor.extract_explicit_fact_corrections(text)
         if not preference_corrections and not fact_corrections:
             return {"applied": 0, "conflicts": 0, "events": 0, "needs_user": 0, "question": None}
 
@@ -891,7 +893,7 @@ class ProfileManager:
                     )
                     local_conflicts += 1
 
-                event = store.ingester._coerce_event(
+                event = self._ingester._coerce_event(
                     {
                         "timestamp": self._utc_now_iso(),
                         "type": event_type,
@@ -934,18 +936,18 @@ class ProfileManager:
         profile["last_verified_at"] = self._utc_now_iso()
         self.write_profile(profile)
 
-        events_written = store.ingester.append_events(events)
+        events_written = self._ingester.append_events(events)
 
         needs_user = 0
         question: str | None = None
         if conflicts > 0:
-            resolution = store.conflict_mgr.auto_resolve_conflicts(max_items=10)
+            resolution = self._conflict_mgr.auto_resolve_conflicts(max_items=10)
             needs_user = int(resolution.get("needs_user", 0))
             if needs_user > 0:
-                question = store.conflict_mgr.ask_user_for_conflict()
+                question = self._conflict_mgr.ask_user_for_conflict()
 
         if self.mem0.enabled:
-            correction_meta, _ = store.ingester._normalize_memory_metadata(
+            correction_meta, _ = self._ingester._normalize_memory_metadata(
                 {"topic": "user_correction", "memory_type": "episodic", "stability": "medium"},
                 event_type="fact",
                 summary=text,
@@ -959,8 +961,8 @@ class ProfileManager:
                     "chat_id": chat_id,
                 }
             )
-            correction_text = store.ingester._sanitize_mem0_text(text, allow_archival=False)
-            correction_meta = store.ingester._sanitize_mem0_metadata(correction_meta)
+            correction_text = self._ingester._sanitize_mem0_text(text, allow_archival=False)
+            correction_meta = self._ingester._sanitize_mem0_metadata(correction_meta)
             if correction_text:
                 self.mem0.add_text(
                     correction_text,
@@ -968,7 +970,7 @@ class ProfileManager:
                 )
 
         # Keep LLM-managed MEMORY.md content stable; snapshot can be generated on-demand.
-        store.snapshot.rebuild_memory_snapshot(write=False)
+        self._snapshot.rebuild_memory_snapshot(write=False)
         return {
             "applied": applied,
             "conflicts": conflicts,

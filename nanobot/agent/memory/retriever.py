@@ -4,6 +4,10 @@
 ``MemoryStore``.  It reads from mem0 vector search (or local BM25 fallback),
 applies intent-based routing, profile-aware score adjustments, graph expansion,
 and cross-encoder re-ranking.
+
+Pipeline architecture (pipes and filters)::
+
+    Source (BM25 or mem0) → Graph Augment → Filter → Score → Rerank → Truncate
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ from .helpers import (
     _norm_text,
 )
 from .retrieval import _local_retrieve, _topic_fallback_retrieve
-from .retrieval_planner import RetrievalPlanner
+from .retrieval_planner import RetrievalPlan, RetrievalPlanner
 
 if TYPE_CHECKING:
     from .extractor import MemoryExtractor
@@ -29,6 +33,42 @@ if TYPE_CHECKING:
     from .mem0_adapter import _Mem0Adapter
     from .profile import ProfileManager
     from .reranker import Reranker
+
+
+# ---------------------------------------------------------------------------
+# Module-private helpers
+# ---------------------------------------------------------------------------
+
+_FIELD_BY_EVENT_TYPE: dict[str, str] = {
+    "preference": "preferences",
+    "fact": "stable_facts",
+    "relationship": "relationships",
+    "constraint": "constraints",
+    "task": "active_projects",
+    "decision": "active_projects",
+}
+
+_STABILITY_BOOST: dict[str, float] = {
+    "high": 0.03,
+    "medium": 0.01,
+    "low": -0.02,
+}
+
+_DEFAULT_SOURCE_STATS: dict[str, int] = {
+    "source_vector": 0,
+    "source_get_all": 0,
+    "source_history": 0,
+    "rejected_blob_like": 0,
+}
+
+
+def _contains_norm_phrase(text: str, phrase_norm: str) -> bool:
+    if not phrase_norm:
+        return False
+    text_norm = _norm_text(text)
+    if not text_norm:
+        return False
+    return phrase_norm in text_norm
 
 
 class MemoryRetriever:
@@ -85,117 +125,85 @@ class MemoryRetriever:
         embedding_provider: str | None = None,
     ) -> list[dict[str, Any]]:
         t0 = time.monotonic()
-        # Local BM25 retrieval with intent routing when mem0 is unavailable.
+
         if not self._mem0.enabled:
-            events = self._read_events_fn()
-            plan = self._planner.plan(query)
-            policy = plan.policy
-            candidate_k = max(1, min(top_k * int(policy.get("candidate_multiplier", 3)), 60))
-            half_life = recency_half_life_days or float(policy.get("half_life_days", 60.0))
-
-            wants_superseded = plan.include_superseded
-
-            # Graph query augmentation: expand search terms with related entities.
-            augmented_query = query
-            if self._graph is not None and self._graph.enabled:
-                query_keywords = _extract_query_keywords(query)
-                if query_keywords:
-                    graph_related = self._graph.get_related_entity_names_sync(
-                        query_keywords,
-                        depth=2,
-                    )
-                    # Append related entity names to the query for BM25 matching.
-                    extra_terms = graph_related - query_keywords
-                    if extra_terms:
-                        augmented_query = (
-                            query
-                            + " "
-                            + " ".join(t.replace("-", " ").replace("_", " ") for t in extra_terms)
-                        )
-
-            candidates = _local_retrieve(
-                events,
-                augmented_query,
-                top_k=candidate_k,
-                recency_half_life_days=half_life,
-                include_superseded=wants_superseded,
+            return self._retrieve_bm25_path(
+                query, top_k=top_k, recency_half_life_days=recency_half_life_days, t0=t0
             )
 
-            # Topic-based fallback: fill remaining slots when BM25 yields few matches.
-            bm25_ids = {str(c.get("id", "")) for c in candidates}
-            fallback_topics = list(policy.get("fallback_topics", []))
-            fallback_types = list(policy.get("fallback_types", []))
-            remaining = max(0, candidate_k - len(candidates))
-            if remaining > 0 and (fallback_topics or fallback_types):
-                fallback = _topic_fallback_retrieve(
-                    events,
-                    target_topics=fallback_topics,
-                    target_memory_types=fallback_types,
-                    exclude_ids=bm25_ids,
-                    top_k=remaining,
-                    base_score=0.25,
-                    include_superseded=wants_superseded,
-                )
-                candidates.extend(fallback)
+        return self._retrieve_mem0_path(query, top_k=top_k, t0=t0)
 
-            # Apply intent-based type boosts and metadata enrichment.
-            graph_boost = 0.15 if self._graph is not None and self._graph.enabled else 0.0
-            query_entities = (
-                {e.lower() for e in self._extractor._extract_entities(query)}
-                if self._extractor is not None
-                else set()
-            )
-            graph_entity_names: set[str] = set()
-            if graph_boost > 0 and query_entities:
-                # Collect entity names related to query entities from event triples.
-                for evt in events:
-                    for triple in evt.get("triples") or []:
-                        subj = str(triple.get("subject", "")).lower()
-                        obj = str(triple.get("object", "")).lower()
-                        if subj in query_entities:
-                            graph_entity_names.add(obj)
-                        elif obj in query_entities:
-                            graph_entity_names.add(subj)
-                # Augment with graph neighbors when available.
-                if self._graph is not None:
-                    graph_related = self._graph.get_related_entity_names_sync(
-                        query_entities,
-                        depth=2,
-                    )
-                    graph_entity_names |= graph_related
+    # ------------------------------------------------------------------
+    # BM25 path (mem0 disabled)
+    # ------------------------------------------------------------------
 
-            for item in candidates:
-                memory_type = RetrievalPlanner.memory_type_for_item(item)
-                item["memory_type"] = memory_type
-                # Promote metadata fields to top level for downstream consumers.
-                meta = item.get("metadata", {})
-                if not item.get("topic"):
-                    item["topic"] = str(meta.get("topic", "")).strip()
-                if not item.get("stability"):
-                    item["stability"] = str(meta.get("stability", "medium")).strip()
-                base_score = float(item.get("retrieval_reason", {}).get("score", 0.0))
-                type_boost = float(policy.get("type_boost", {}).get(memory_type, 0.0))
-                stability = str(item.get("stability", "medium")).lower()
-                stability_boost = {"high": 0.03, "medium": 0.01, "low": -0.02}.get(stability, 0.0)
-                # Graph expansion boost: boost events that mention entities
-                # related to query entities via the knowledge graph.
-                g_boost = 0.0
-                if graph_entity_names:
-                    item_entities = {
-                        e.lower() for e in (item.get("entities") or []) if isinstance(e, str)
-                    }
-                    if item_entities & graph_entity_names:
-                        g_boost = graph_boost
-                item["score"] = base_score + type_boost + stability_boost + g_boost
-            candidates.sort(key=lambda x: x.get("score", 0.0), reverse=True)
-            results = candidates[:top_k]
-            bind_trace().debug(
-                "Memory retrieve source=bm25 results={} duration_ms={:.0f}",
-                len(results),
-                (time.monotonic() - t0) * 1000,
-            )
-            return results
+    def _retrieve_bm25_path(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        recency_half_life_days: float | None,
+        t0: float,
+    ) -> list[dict[str, Any]]:
+        plan = self._planner.plan(query)
+        policy = plan.policy
+        candidate_k = max(1, min(top_k * int(policy.get("candidate_multiplier", 3)), 60))
+        half_life = recency_half_life_days or float(policy.get("half_life_days", 60.0))
 
+        # 1. Augment query with graph
+        augmented_query, _ = self._augment_query_with_graph(query)
+
+        # 2. Source candidates
+        events = self._read_events_fn()
+        candidates = self._source_from_bm25(
+            events=events,
+            query=augmented_query,
+            plan=plan,
+            top_k=candidate_k,
+            half_life=half_life,
+        )
+
+        # 3. Build graph entity set for scoring
+        graph_entities = self._collect_graph_entity_names(query, events)
+
+        # 4. Enrich metadata (promote topic/stability/memory_type to top level)
+        self._enrich_item_metadata(candidates)
+
+        # 5. Score (shared pipeline — BM25 variant uses base_score from BM25)
+        profile_data = self._load_profile_scoring_data()
+        scored = self._score_items(
+            candidates,
+            plan,
+            profile_data,
+            graph_entities,
+            # BM25 path: use BM25 raw score as base, no recency decay
+            use_recency=False,
+            router_enabled=True,
+            type_separation_enabled=True,
+        )
+
+        # 6. Sort + truncate (no reranking on BM25 path)
+        scored.sort(key=lambda x: x.get("score", 0.0), reverse=True)
+        results = scored[:top_k]
+
+        bind_trace().debug(
+            "Memory retrieve source=bm25 results={} duration_ms={:.0f}",
+            len(results),
+            (time.monotonic() - t0) * 1000,
+        )
+        return results
+
+    # ------------------------------------------------------------------
+    # mem0 path
+    # ------------------------------------------------------------------
+
+    def _retrieve_mem0_path(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        t0: float,
+    ) -> list[dict[str, Any]]:
         mode = str(self._rollout.get("memory_rollout_mode", "enabled")).strip().lower()
         if mode not in self.ROLLOUT_MODES:
             mode = "enabled"
@@ -209,7 +217,7 @@ class MemoryRetriever:
         if mode == "shadow":
             router_enabled = False
 
-        final, stats = self._retrieve_core(
+        final, stats = self._run_mem0_pipeline(
             query=query,
             top_k=top_k,
             router_enabled=router_enabled,
@@ -217,6 +225,7 @@ class MemoryRetriever:
             reflection_enabled=reflection_enabled,
         )
 
+        # Shadow mode comparison
         shadow_enabled = bool(self._rollout.get("memory_shadow_mode", False))
         shadow_rate = float(self._rollout.get("memory_shadow_sample_rate", 0.2) or 0.0)
         if shadow_enabled and shadow_rate > 0 and mode != "disabled":
@@ -225,7 +234,7 @@ class MemoryRetriever:
             )
             if shadow_should_run:
                 shadow_router_enabled = not router_enabled
-                shadow_final, _ = self._retrieve_core(
+                shadow_final, _ = self._run_mem0_pipeline(
                     query=query,
                     top_k=top_k,
                     router_enabled=shadow_router_enabled,
@@ -248,6 +257,7 @@ class MemoryRetriever:
                         len(primary_ids),
                         len(shadow_ids),
                     )
+
         bind_trace().debug(
             "Memory retrieve source=mem0 results={} intent={} duration_ms={:.0f}",
             len(final),
@@ -256,11 +266,7 @@ class MemoryRetriever:
         )
         return final
 
-    # ------------------------------------------------------------------
-    # Core mem0 retrieval pipeline
-    # ------------------------------------------------------------------
-
-    def _retrieve_core(
+    def _run_mem0_pipeline(
         self,
         *,
         query: str,
@@ -269,36 +275,160 @@ class MemoryRetriever:
         type_separation_enabled: bool,
         reflection_enabled: bool,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        from .helpers import _utc_now_iso
-
+        """Execute the full mem0 retrieval pipeline: source → filter → score → rerank."""
+        # 1. Plan
         planner = RetrievalPlanner(
             router_enabled=router_enabled,
             type_separation_enabled=type_separation_enabled,
         )
         plan = planner.plan(query)
-        intent = plan.intent
         policy = plan.policy
         candidate_multiplier = (
             max(int(policy.get("candidate_multiplier", 3)), 1) if router_enabled else 1
         )
         candidate_k = max(1, min(max(top_k, top_k * candidate_multiplier), 60))
+
+        # 2. Graph augmentation
+        _, graph_extra_terms = self._augment_query_with_graph(query)
+
+        # 3. Source from mem0
+        retrieved, source_stats = self._source_from_mem0(query, plan, candidate_k)
+
+        # 4. Inject rollout status if needed
+        retrieved = self._inject_rollout_status(retrieved, plan)
+
+        # 5. Supplementary BM25 merge (graph-augmented)
+        retrieved = self._merge_graph_bm25_supplement(
+            query, retrieved, graph_extra_terms, candidate_k, policy
+        )
+
+        if not retrieved:
+            return [], self._build_result_stats([], plan.intent, 0, source_stats)
+
+        # 6. Filter
+        filtered, filter_counts = self._filter_items(
+            retrieved,
+            plan,
+            reflection_enabled=reflection_enabled,
+            type_separation_enabled=type_separation_enabled,
+        )
+
+        # 7. Score (shared pipeline)
+        profile_data = self._load_profile_scoring_data()
+        scored = self._score_items(
+            filtered,
+            plan,
+            profile_data,
+            set(),  # graph_entities not used in mem0 path (graph boost via supplement)
+            use_recency=True,
+            router_enabled=router_enabled,
+            type_separation_enabled=type_separation_enabled,
+        )
+
+        # 8. Rerank
+        scored = self._rerank_items(query, scored)
+
+        # 9. Sort + truncate
+        scored.sort(key=lambda item: item.get("score", 0.0), reverse=True)
+        final = scored[: max(1, top_k)]
+
+        stats = self._build_result_stats(
+            final,
+            plan.intent,
+            len(retrieved),
+            source_stats,
+            filter_counts=filter_counts,
+        )
+        return final, stats
+
+    # ------------------------------------------------------------------
+    # Pipeline stage: graph query augmentation
+    # ------------------------------------------------------------------
+
+    def _augment_query_with_graph(self, query: str) -> tuple[str, set[str]]:
+        """Expand query with graph entity names.
+
+        Returns (augmented_query, extra_terms).
+        """
+        if self._graph is None or not self._graph.enabled:
+            return query, set()
+
+        query_keywords = _extract_query_keywords(query)
+        if not query_keywords:
+            return query, set()
+
+        graph_related = self._graph.get_related_entity_names_sync(
+            query_keywords,
+            depth=2,
+        )
+        extra_terms = graph_related - query_keywords
+        if not extra_terms:
+            return query, set()
+
+        augmented_query = (
+            query + " " + " ".join(t.replace("-", " ").replace("_", " ") for t in extra_terms)
+        )
+        return augmented_query, extra_terms
+
+    # ------------------------------------------------------------------
+    # Pipeline stage: BM25 candidate sourcing
+    # ------------------------------------------------------------------
+
+    def _source_from_bm25(
+        self,
+        *,
+        events: list[dict[str, Any]],
+        query: str,
+        plan: RetrievalPlan,
+        top_k: int,
+        half_life: float,
+    ) -> list[dict[str, Any]]:
+        """Source candidates from BM25 local retrieval + topic fallback."""
+        candidates = _local_retrieve(
+            events,
+            query,
+            top_k=top_k,
+            recency_half_life_days=half_life,
+            include_superseded=plan.include_superseded,
+        )
+
+        # Topic-based fallback: fill remaining slots when BM25 yields few matches.
+        policy = plan.policy
+        bm25_ids = {str(c.get("id", "")) for c in candidates}
+        fallback_topics = list(policy.get("fallback_topics", []))
+        fallback_types = list(policy.get("fallback_types", []))
+        remaining = max(0, top_k - len(candidates))
+        if remaining > 0 and (fallback_topics or fallback_types):
+            fallback = _topic_fallback_retrieve(
+                events,
+                target_topics=fallback_topics,
+                target_memory_types=fallback_types,
+                exclude_ids=bm25_ids,
+                top_k=remaining,
+                base_score=0.25,
+                include_superseded=plan.include_superseded,
+            )
+            candidates.extend(fallback)
+
+        return candidates
+
+    # ------------------------------------------------------------------
+    # Pipeline stage: mem0 candidate sourcing
+    # ------------------------------------------------------------------
+
+    def _source_from_mem0(
+        self,
+        query: str,
+        plan: RetrievalPlan,
+        candidate_k: int,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Source candidates from mem0 vector search."""
         allowed_sources = {
             str(item).strip().lower()
             for item in self._rollout.get("memory_fallback_allowed_sources", [])
             if str(item).strip()
         }
         max_summary_chars = int(self._rollout.get("memory_fallback_max_summary_chars", 280) or 280)
-
-        # Compute graph-expanded terms (used for supplementary BM25 pass below).
-        graph_extra_terms: set[str] = set()
-        if self._graph is not None and self._graph.enabled:
-            query_keywords = _extract_query_keywords(query)
-            if query_keywords:
-                graph_related = self._graph.get_related_entity_names_sync(
-                    query_keywords,
-                    depth=2,
-                )
-                graph_extra_terms = graph_related - query_keywords
 
         search_result = self._mem0.search(
             query,
@@ -316,102 +446,118 @@ class MemoryRetriever:
             retrieved, source_stats = search_result
         else:
             retrieved = search_result if isinstance(search_result, list) else []
-            source_stats = {
-                "source_vector": 0,
-                "source_get_all": 0,
-                "source_history": 0,
-                "rejected_blob_like": 0,
-            }
-        if intent == "rollout_status":
-            retrieved.append(
-                {
-                    "id": "rollout_status_snapshot",
-                    "timestamp": _utc_now_iso(),
-                    "type": "fact",
-                    "summary": (
-                        "Memory rollout status: "
-                        f"mode={self._rollout.get('memory_rollout_mode')}, "
-                        f"router={self._rollout.get('memory_router_enabled')}, "
-                        f"shadow={self._rollout.get('memory_shadow_mode')}, "
-                        f"reflection={self._rollout.get('memory_reflection_enabled')}, "
-                        f"type_separation={self._rollout.get('memory_type_separation_enabled')}."
-                    ),
-                    "entities": [],
-                    "score": 0.95,
-                    "memory_type": "semantic",
-                    "topic": "rollout",
-                    "stability": "high",
-                    "source": "config",
-                    "confidence": 1.0,
-                    "evidence_refs": [],
-                    "retrieval_reason": {
-                        "provider": "nanobot",
-                        "backend": "synthetic_rollout",
-                        "semantic": 0.95,
-                        "recency": 0.0,
-                    },
-                    "provenance": {
-                        "canonical_id": "rollout_status_snapshot",
-                        "source_span": None,
-                    },
-                }
-            )
+            source_stats = dict(_DEFAULT_SOURCE_STATS)
 
-        # Supplementary BM25 pass: pull in events matching graph-related entities
-        # that mem0 vector search may have missed.
-        if graph_extra_terms and retrieved is not None:
-            retrieved_ids = {str(r.get("id", "")) for r in retrieved}
-            graph_query = (
-                query
-                + " "
-                + " ".join(t.replace("-", " ").replace("_", " ") for t in graph_extra_terms)
-            )
-            events = self._read_events_fn()
-            bm25_supplement = _local_retrieve(
-                events,
-                graph_query,
-                top_k=candidate_k,
-                recency_half_life_days=float(policy.get("half_life_days", 60.0)),
-                include_superseded=False,
-            )
-            for item in bm25_supplement:
-                eid = str(item.get("id", ""))
-                if eid and eid not in retrieved_ids:
-                    # Mark source as graph-augmented BM25
-                    reason = item.get("retrieval_reason", {})
-                    if not isinstance(reason, dict):
-                        reason = {}
-                    reason["provider"] = "bm25_graph"
-                    item["retrieval_reason"] = reason
-                    retrieved.append(item)
-                    retrieved_ids.add(eid)
+        return retrieved, source_stats
 
-        if not retrieved:
-            return [], {
-                "intent": intent,
-                "retrieved_count": 0,
-                "counts": {
-                    "retrieval_returned": 0,
-                    "retrieval_source_vector_count": int(source_stats.get("source_vector", 0)),
-                    "retrieval_source_get_all_count": int(source_stats.get("source_get_all", 0)),
-                    "retrieval_source_history_count": int(source_stats.get("source_history", 0)),
-                    "retrieval_rejected_blob_count": int(source_stats.get("rejected_blob_like", 0)),
+    # ------------------------------------------------------------------
+    # Pipeline stage: supplementary BM25 merge (graph-augmented)
+    # ------------------------------------------------------------------
+
+    def _merge_graph_bm25_supplement(
+        self,
+        query: str,
+        retrieved: list[dict[str, Any]],
+        graph_extra_terms: set[str],
+        candidate_k: int,
+        policy: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Merge graph-augmented BM25 results into mem0 candidates."""
+        if not graph_extra_terms or not retrieved:
+            return retrieved
+
+        retrieved_ids = {str(r.get("id", "")) for r in retrieved}
+        graph_query = (
+            query + " " + " ".join(t.replace("-", " ").replace("_", " ") for t in graph_extra_terms)
+        )
+        events = self._read_events_fn()
+        bm25_supplement = _local_retrieve(
+            events,
+            graph_query,
+            top_k=candidate_k,
+            recency_half_life_days=float(policy.get("half_life_days", 60.0)),
+            include_superseded=False,
+        )
+        for item in bm25_supplement:
+            eid = str(item.get("id", ""))
+            if eid and eid not in retrieved_ids:
+                reason = item.get("retrieval_reason", {})
+                if not isinstance(reason, dict):
+                    reason = {}
+                reason["provider"] = "bm25_graph"
+                item["retrieval_reason"] = reason
+                retrieved.append(item)
+                retrieved_ids.add(eid)
+
+        return retrieved
+
+    # ------------------------------------------------------------------
+    # Pipeline stage: rollout status injection
+    # ------------------------------------------------------------------
+
+    def _inject_rollout_status(
+        self,
+        items: list[dict[str, Any]],
+        plan: RetrievalPlan,
+    ) -> list[dict[str, Any]]:
+        """Inject a synthetic rollout-status item when intent is ``rollout_status``."""
+        if plan.intent != "rollout_status":
+            return items
+
+        from .helpers import _utc_now_iso
+
+        items.append(
+            {
+                "id": "rollout_status_snapshot",
+                "timestamp": _utc_now_iso(),
+                "type": "fact",
+                "summary": (
+                    "Memory rollout status: "
+                    f"mode={self._rollout.get('memory_rollout_mode')}, "
+                    f"router={self._rollout.get('memory_router_enabled')}, "
+                    f"shadow={self._rollout.get('memory_shadow_mode')}, "
+                    f"reflection={self._rollout.get('memory_reflection_enabled')}, "
+                    f"type_separation={self._rollout.get('memory_type_separation_enabled')}."
+                ),
+                "entities": [],
+                "score": 0.95,
+                "memory_type": "semantic",
+                "topic": "rollout",
+                "stability": "high",
+                "source": "config",
+                "confidence": 1.0,
+                "evidence_refs": [],
+                "retrieval_reason": {
+                    "provider": "nanobot",
+                    "backend": "synthetic_rollout",
+                    "semantic": 0.95,
+                    "recency": 0.0,
+                },
+                "provenance": {
+                    "canonical_id": "rollout_status_snapshot",
+                    "source_span": None,
                 },
             }
+        )
+        return items
 
+    # ------------------------------------------------------------------
+    # Pipeline stage: load profile scoring data
+    # ------------------------------------------------------------------
+
+    def _load_profile_scoring_data(self) -> dict[str, Any]:
+        """Read profile and extract resolved-conflict scoring data.
+
+        Returns a dict with keys:
+        - ``profile``: the full profile dict
+        - ``resolved_keep_new_old``: {field: set(norm_phrase)} for old values
+        - ``resolved_keep_new_new``: {field: set(norm_phrase)} for new values
+        """
         profile = self._profile_mgr.read_profile()
         conflicts = (
             profile.get("conflicts", []) if isinstance(profile.get("conflicts"), list) else []
         )
 
-        field_by_event_type = {
-            "preference": "preferences",
-            "fact": "stable_facts",
-            "relationship": "relationships",
-            "constraint": "constraints",
-            "task": "active_projects",
-            "decision": "active_projects",
-        }
         resolved_keep_new_old: dict[str, set[str]] = {key: set() for key in self.PROFILE_KEYS}
         resolved_keep_new_new: dict[str, set[str]] = {key: set() for key in self.PROFILE_KEYS}
         for conflict in conflicts:
@@ -431,19 +577,35 @@ class MemoryRetriever:
             if new_value:
                 resolved_keep_new_new[field].add(_norm_text(new_value))
 
-        def _contains_norm_phrase(text: str, phrase_norm: str) -> bool:
-            if not phrase_norm:
-                return False
-            text_norm = _norm_text(text)
-            if not text_norm:
-                return False
-            return phrase_norm in text_norm
+        return {
+            "profile": profile,
+            "resolved_keep_new_old": resolved_keep_new_old,
+            "resolved_keep_new_new": resolved_keep_new_new,
+        }
 
-        adjusted: list[dict[str, Any]] = []
+    # ------------------------------------------------------------------
+    # Pipeline stage: intent-based filtering
+    # ------------------------------------------------------------------
+
+    def _filter_items(
+        self,
+        items: list[dict[str, Any]],
+        plan: RetrievalPlan,
+        *,
+        reflection_enabled: bool = True,
+        type_separation_enabled: bool = True,
+    ) -> tuple[list[dict[str, Any]], dict[str, int]]:
+        """Filter items by intent routing hints and reflection rules.
+
+        Returns (filtered_items, filter_counts).
+        """
+        intent = plan.intent
+        routing_hints = plan.routing_hints
+        filtered: list[dict[str, Any]] = []
         reflection_filtered_non_reflection_intent = 0
         reflection_filtered_no_evidence = 0
-        routing_hints = plan.routing_hints
-        for item in retrieved:
+
+        for item in items:
             event_type = str(item.get("type", "fact"))
             memory_type = RetrievalPlanner.memory_type_for_item(item)
             item["memory_type"] = memory_type
@@ -451,6 +613,8 @@ class MemoryRetriever:
             topic = str(item.get("topic", "")).strip().lower()
             summary = str(item.get("summary", ""))
             event_status = str(item.get("status", "")).strip().lower()
+
+            # -- Routing-hint filters -----------------------------------------
             task_or_decision_like = event_type in {
                 "task",
                 "decision",
@@ -467,15 +631,11 @@ class MemoryRetriever:
             architecture_like = (
                 "architecture" in topic
                 or _contains_any(
-                    summary,
-                    (
-                        "architecture",
-                        "design decision",
-                        "memory architecture",
-                    ),
+                    summary, ("architecture", "design decision", "memory architecture")
                 )
                 or event_type == "decision"
             )
+
             if (
                 routing_hints["focus_task_decision"]
                 and not task_or_decision_like
@@ -490,18 +650,18 @@ class MemoryRetriever:
                 status=event_status,
                 summary=summary,
                 requires_open=bool(routing_hints["requires_open"]),
-                # debug_history needs the full timeline (failures + resolutions).
                 requires_resolved=(
                     bool(routing_hints["requires_resolved"]) and intent != "debug_history"
                 ),
             ):
                 continue
+
+            # -- Intent-specific filters --------------------------------------
             if intent == "constraints_lookup":
                 if memory_type != "semantic":
                     continue
                 if "constraint" not in topic and not _contains_any(
-                    summary,
-                    ("must", "cannot", "constraint", "should not"),
+                    summary, ("must", "cannot", "constraint", "should not")
                 ):
                     continue
             if intent == "debug_history":
@@ -514,28 +674,17 @@ class MemoryRetriever:
             if intent == "conflict_review":
                 if not _contains_any(
                     summary,
-                    (
-                        "conflict",
-                        "needs_user",
-                        "resolved",
-                        "keep_new",
-                        "decision",
-                    ),
+                    ("conflict", "needs_user", "resolved", "keep_new", "decision"),
                 ):
                     continue
             if intent == "rollout_status":
                 if not _contains_any(
                     summary,
-                    (
-                        "rollout",
-                        "router",
-                        "shadow",
-                        "reflection",
-                        "type_separation",
-                    ),
+                    ("rollout", "router", "shadow", "reflection", "type_separation"),
                 ):
                     continue
 
+            # -- Reflection filters -------------------------------------------
             if reflection_enabled:
                 if (
                     memory_type == "reflection"
@@ -554,11 +703,72 @@ class MemoryRetriever:
                 reflection_filtered_non_reflection_intent += 1
                 continue
 
-            field = field_by_event_type.get(event_type)  # type: ignore[assignment]
+            filtered.append(item)
+
+        filter_counts = {
+            "reflection_filtered_non_reflection_intent": reflection_filtered_non_reflection_intent,
+            "reflection_filtered_no_evidence": reflection_filtered_no_evidence,
+        }
+        return filtered, filter_counts
+
+    # ------------------------------------------------------------------
+    # Pipeline stage: unified scoring
+    # ------------------------------------------------------------------
+
+    def _score_items(
+        self,
+        items: list[dict[str, Any]],
+        plan: RetrievalPlan,
+        profile_data: dict[str, Any],
+        graph_entities: set[str],
+        *,
+        use_recency: bool,
+        router_enabled: bool,
+        type_separation_enabled: bool,
+    ) -> list[dict[str, Any]]:
+        """Apply the shared scoring formula to items from any source.
+
+        Both BM25 and mem0 paths use the same adjustment logic on top of their
+        respective base scores.  The base score (BM25 raw or mem0 similarity)
+        is preserved — only the adjustments are unified.
+        """
+        policy = plan.policy
+        intent = plan.intent
+        profile = profile_data["profile"]
+        resolved_keep_new_old = profile_data["resolved_keep_new_old"]
+        resolved_keep_new_new = profile_data["resolved_keep_new_new"]
+
+        graph_boost_value = 0.15 if graph_entities else 0.0
+
+        scored: list[dict[str, Any]] = []
+        for item in items:
+            memory_type = str(item.get("memory_type", ""))
+            if not memory_type:
+                memory_type = RetrievalPlanner.memory_type_for_item(item)
+                item["memory_type"] = memory_type
+
+            event_type = str(item.get("type", "fact"))
+            event_status = str(item.get("status", "")).strip().lower()
             summary = str(item.get("summary", ""))
-            score = float(item.get("score", 0.0))
+
+            # -- Base score (preserved from source) ---------------------------
+            if use_recency:
+                base_score = float(item.get("score", 0.0))
+            else:
+                # BM25 path: base score comes from retrieval_reason
+                base_score = float(
+                    item.get("retrieval_reason", {}).get("score", 0.0)
+                    if isinstance(item.get("retrieval_reason"), dict)
+                    else 0.0
+                )
+
+            # -- Profile adjustments (mem0 path only) --------------------------
+            # The BM25 path historically applied only lightweight boosts (type,
+            # stability, graph).  Profile adjustments, superseded penalties, and
+            # reflection penalties are mem0-specific scoring refinements.
             adjustment = 0.0
             adjustment_reasons: list[str] = []
+            field = _FIELD_BY_EVENT_TYPE.get(event_type) if use_recency else None
             if field:
                 for old_norm in resolved_keep_new_old.get(field, set()):
                     if _contains_norm_phrase(summary, old_norm):
@@ -587,7 +797,9 @@ class MemoryRetriever:
                             adjustment -= 0.05
                             adjustment_reasons.append("conflicted_profile_penalty")
                             break
-            if memory_type == "semantic":
+
+            # Superseded semantic penalty (mem0 path only)
+            if use_recency and memory_type == "semantic":
                 if (
                     event_status == "superseded"
                     or str(item.get("superseded_by_event_id", "")).strip()
@@ -595,6 +807,7 @@ class MemoryRetriever:
                     adjustment -= 0.2
                     adjustment_reasons.append("semantic_superseded_penalty")
 
+            # -- Record profile adjustment in retrieval_reason ----------------
             reason = item.get("retrieval_reason")
             if not isinstance(reason, dict):
                 reason = {}
@@ -603,18 +816,24 @@ class MemoryRetriever:
                 reason["profile_adjustment"] = round(adjustment, 4)
                 reason["profile_adjustment_reasons"] = adjustment_reasons
 
-            recency = RetrievalPlanner.recency_signal(
-                str(item.get("timestamp", "")),
-                half_life_days=float(policy.get("half_life_days", 60.0)),
-            )
+            # -- Type / recency / stability / reflection boosts ---------------
             type_boost = (
                 float(policy.get("type_boost", {}).get(memory_type, 0.0))
                 if type_separation_enabled
                 else 0.0
             )
             stability = str(item.get("stability", "medium")).strip().lower()
-            stability_boost = {"high": 0.03, "medium": 0.01, "low": -0.02}.get(stability, 0.0)
-            reflection_penalty = -0.06 if memory_type == "reflection" else 0.0
+            stability_boost = _STABILITY_BOOST.get(stability, 0.0)
+            reflection_penalty = -0.06 if (use_recency and memory_type == "reflection") else 0.0
+
+            if use_recency:
+                recency = RetrievalPlanner.recency_signal(
+                    str(item.get("timestamp", "")),
+                    half_life_days=float(policy.get("half_life_days", 60.0)),
+                )
+            else:
+                recency = 0.0
+
             if not router_enabled:
                 recency = 0.0
                 stability_boost = 0.0
@@ -622,43 +841,83 @@ class MemoryRetriever:
                 type_boost = 0.0
             elif reflection_penalty:
                 adjustment_reasons.append("reflection_default_penalty")
+
+            # -- Graph entity boost (BM25 path only) --------------------------
+            g_boost = 0.0
+            if graph_entities:
+                item_entities = {
+                    e.lower() for e in (item.get("entities") or []) if isinstance(e, str)
+                }
+                if item_entities & graph_entities:
+                    g_boost = graph_boost_value
+
             intent_bonus = type_boost + (0.08 * recency) + stability_boost + reflection_penalty
-            item["score"] = score + adjustment + intent_bonus
+            item["score"] = base_score + adjustment + intent_bonus + g_boost
+
+            # Record scoring metadata
             reason["recency"] = round(recency, 4)
             reason["intent"] = intent
             reason["type_boost"] = round(type_boost, 4)
             reason["stability_boost"] = round(stability_boost, 4)
             if reflection_penalty:
                 reason["reflection_penalty"] = round(reflection_penalty, 4)
-            adjusted.append(item)
 
-        # ------------------------------------------------------------------
-        # Cross-encoder re-ranking (Step 7)
-        # ------------------------------------------------------------------
+            scored.append(item)
+
+        return scored
+
+    # ------------------------------------------------------------------
+    # Pipeline stage: cross-encoder reranking
+    # ------------------------------------------------------------------
+
+    def _rerank_items(
+        self,
+        query: str,
+        items: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Apply cross-encoder reranking (enabled/shadow/disabled)."""
         reranker_mode = str(self._rollout.get("reranker_mode", "disabled")).strip().lower()
-        if reranker_mode in ("enabled", "shadow") and adjusted:
-            if reranker_mode == "enabled":
-                adjusted = self._reranker.rerank(query, adjusted)
-            else:
-                # Shadow: compute re-ranked order but keep heuristic order.
-                shadow_items = copy.deepcopy(adjusted)
-                shadow_items = self._reranker.rerank(query, shadow_items)
-                heuristic_ids = [str(it.get("id", "")) for it in adjusted]
-                reranked_ids = [str(it.get("id", "")) for it in shadow_items]
-                # Rank delta computed for observability logging; result intentionally unused.
-                self._reranker.compute_rank_delta(heuristic_ids, reranked_ids)
+        if reranker_mode not in ("enabled", "shadow") or not items:
+            return items
 
-        adjusted.sort(key=lambda item: item.get("score", 0.0), reverse=True)
-        final = adjusted[: max(1, top_k)]
-        counts = {
+        if reranker_mode == "enabled":
+            return self._reranker.rerank(query, items)
+
+        # Shadow: compute re-ranked order but keep heuristic order.
+        shadow_items = copy.deepcopy(items)
+        shadow_items = self._reranker.rerank(query, shadow_items)
+        heuristic_ids = [str(it.get("id", "")) for it in items]
+        reranked_ids = [str(it.get("id", "")) for it in shadow_items]
+        # Rank delta computed for observability logging; result intentionally unused.
+        self._reranker.compute_rank_delta(heuristic_ids, reranked_ids)
+        return items
+
+    # ------------------------------------------------------------------
+    # Pipeline stage: result statistics
+    # ------------------------------------------------------------------
+
+    def _build_result_stats(
+        self,
+        final: list[dict[str, Any]],
+        intent: str,
+        retrieved_count: int,
+        source_stats: dict[str, Any],
+        *,
+        filter_counts: dict[str, int] | None = None,
+    ) -> dict[str, Any]:
+        """Build the result statistics dict returned alongside final items."""
+        fc = filter_counts or {}
+        counts: dict[str, int] = {
             "retrieval_returned": len(final),
-            "retrieval_filtered_out": max(len(retrieved) - len(final), 0),
+            "retrieval_filtered_out": max(retrieved_count - len(final), 0),
             "retrieval_source_vector_count": int(source_stats.get("source_vector", 0)),
             "retrieval_source_get_all_count": int(source_stats.get("source_get_all", 0)),
             "retrieval_source_history_count": int(source_stats.get("source_history", 0)),
             "retrieval_rejected_blob_count": int(source_stats.get("rejected_blob_like", 0)),
-            "reflection_filtered_non_reflection_intent": reflection_filtered_non_reflection_intent,
-            "reflection_filtered_no_evidence": reflection_filtered_no_evidence,
+            "reflection_filtered_non_reflection_intent": fc.get(
+                "reflection_filtered_non_reflection_intent", 0
+            ),
+            "reflection_filtered_no_evidence": fc.get("reflection_filtered_no_evidence", 0),
             "retrieval_returned_semantic": 0,
             "retrieval_returned_episodic": 0,
             "retrieval_returned_reflection": 0,
@@ -674,11 +933,61 @@ class MemoryRetriever:
                 counts["retrieval_returned_reflection"] += 1
             else:
                 counts["retrieval_returned_unknown"] += 1
-        return final, {
+        return {
             "intent": intent,
-            "retrieved_count": len(retrieved),
+            "retrieved_count": retrieved_count,
             "counts": counts,
         }
+
+    # ------------------------------------------------------------------
+    # BM25-path helpers: metadata enrichment + graph entity collection
+    # ------------------------------------------------------------------
+
+    def _enrich_item_metadata(self, items: list[dict[str, Any]]) -> None:
+        """Promote metadata fields (topic, stability, memory_type) to top level."""
+        for item in items:
+            memory_type = RetrievalPlanner.memory_type_for_item(item)
+            item["memory_type"] = memory_type
+            meta = item.get("metadata", {})
+            if not item.get("topic"):
+                item["topic"] = str(meta.get("topic", "")).strip()
+            if not item.get("stability"):
+                item["stability"] = str(meta.get("stability", "medium")).strip()
+
+    def _collect_graph_entity_names(
+        self,
+        query: str,
+        events: list[dict[str, Any]],
+    ) -> set[str]:
+        """Collect entity names related to query entities via graph and event triples."""
+        if self._graph is None or not self._graph.enabled:
+            return set()
+
+        query_entities = (
+            {e.lower() for e in self._extractor._extract_entities(query)}
+            if self._extractor is not None
+            else set()
+        )
+        if not query_entities:
+            return set()
+
+        graph_entity_names: set[str] = set()
+        # Collect from event triples
+        for evt in events:
+            for triple in evt.get("triples") or []:
+                subj = str(triple.get("subject", "")).lower()
+                obj = str(triple.get("object", "")).lower()
+                if subj in query_entities:
+                    graph_entity_names.add(obj)
+                elif obj in query_entities:
+                    graph_entity_names.add(subj)
+        # Augment with graph neighbors
+        graph_related = self._graph.get_related_entity_names_sync(
+            query_entities,
+            depth=2,
+        )
+        graph_entity_names |= graph_related
+        return graph_entity_names
 
     # ------------------------------------------------------------------
     # Query entity extraction via entity-index lookup
