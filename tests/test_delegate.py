@@ -186,7 +186,7 @@ class TestDelegationDispatch:
     async def test_cycle_detection(self, tmp_path: Path) -> None:
         """Delegating to a role already in the ancestry raises _CycleError."""
         from nanobot.agent.agent_factory import build_agent
-        from nanobot.agent.loop import _delegation_ancestry
+        from nanobot.agent.delegation import _delegation_ancestry
         from nanobot.bus.queue import MessageBus
 
         provider = FakeProvider(['{"role": "code"}', "result"])
@@ -212,7 +212,7 @@ class TestDelegationDispatch:
     async def test_deep_chain_allowed(self, tmp_path: Path) -> None:
         """A → B → C is allowed (no cycle)."""
         from nanobot.agent.agent_factory import build_agent
-        from nanobot.agent.loop import _delegation_ancestry
+        from nanobot.agent.delegation import _delegation_ancestry
         from nanobot.bus.queue import MessageBus
 
         # Provider returns responses for: classify → research, then agent response
@@ -297,7 +297,7 @@ class TestDelegationDispatch:
     async def test_parallel_same_role_at_depth_zero(self, tmp_path: Path) -> None:
         """At depth 0 (empty ancestry), delegating to the same role twice is allowed."""
         from nanobot.agent.agent_factory import build_agent
-        from nanobot.agent.loop import _delegation_ancestry
+        from nanobot.agent.delegation import _delegation_ancestry
         from nanobot.bus.queue import MessageBus
 
         provider = FakeProvider(["result"])

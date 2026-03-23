@@ -191,9 +191,7 @@ class TestClassifyTaskType:
         assert result == "report_writing"
 
     def test_research_role_web(self):
-        result = classify_task_type(
-            "research", "what are the current industry benchmarks"
-        )
+        result = classify_task_type("research", "what are the current industry benchmarks")
         assert result == "web_research"
 
     def test_research_role_project(self):
@@ -214,9 +212,7 @@ class TestClassifyTaskType:
 
     def test_hybrid_web_plus_arch_signals(self) -> None:
         """Web + architecture signals -> hybrid, not repo_architecture."""
-        result = classify_task_type(
-            "research", "architecture of best practice DI frameworks"
-        )
+        result = classify_task_type("research", "architecture of best practice DI frameworks")
         assert result == "hybrid"
 
     def test_hybrid_web_plus_project_signals(self) -> None:
@@ -228,16 +224,12 @@ class TestClassifyTaskType:
 
     def test_hybrid_web_plus_code_signals(self) -> None:
         """Web + code signals -> hybrid, not local_code_analysis."""
-        result = classify_task_type(
-            "research", "latest best practices for Python module structure"
-        )
+        result = classify_task_type("research", "latest best practices for Python module structure")
         assert result == "hybrid"
 
     def test_pure_web_still_web_research(self) -> None:
         """Pure web signals without local signals -> web_research."""
-        result = classify_task_type(
-            "research", "what are the current industry trends"
-        )
+        result = classify_task_type("research", "what are the current industry trends")
         assert result == "web_research"
 
     def test_task_types_dict_complete(self):
@@ -261,18 +253,14 @@ class TestClassifyTaskType:
 
 class TestHasParallelStructure:
     def test_enumerated_list(self):
-        assert has_parallel_structure(
-            "Analyze three areas: frontend, backend, and database"
-        )
+        assert has_parallel_structure("Analyze three areas: frontend, backend, and database")
 
     def test_numbered_items(self):
         text = "1. First task\n2. Second task\n3. Third task"
         assert has_parallel_structure(text)
 
     def test_comma_separated_and(self):
-        assert has_parallel_structure(
-            "Check performance, security, and reliability"
-        )
+        assert has_parallel_structure("Check performance, security, and reliability")
 
     def test_no_parallel(self):
         assert not has_parallel_structure("Review the code for bugs")
@@ -331,8 +319,13 @@ class TestBuildDelegationContract:
     def test_basic_contract(self, tmp_path: Path):
         msgs: list[dict[str, Any]] = [{"role": "user", "content": "test request"}]
         content, schema = build_delegation_contract(
-            "code", "analyze the module", None, "local_code_analysis",
-            workspace=tmp_path, active_messages=msgs, scratchpad=None,
+            "code",
+            "analyze the module",
+            None,
+            "local_code_analysis",
+            workspace=tmp_path,
+            active_messages=msgs,
+            scratchpad=None,
         )
         assert "analyze the module" in content
         assert "Findings" in schema
@@ -340,15 +333,25 @@ class TestBuildDelegationContract:
 
     def test_contract_includes_context(self, tmp_path: Path):
         content, _ = build_delegation_contract(
-            "code", "task", "extra context here", "general",
-            workspace=tmp_path, active_messages=[], scratchpad=None,
+            "code",
+            "task",
+            "extra context here",
+            "general",
+            workspace=tmp_path,
+            active_messages=[],
+            scratchpad=None,
         )
         assert "extra context here" in content
 
     def test_contract_includes_tool_guidance(self, tmp_path: Path):
         content, _ = build_delegation_contract(
-            "code", "analyze code", None, "local_code_analysis",
-            workspace=tmp_path, active_messages=[], scratchpad=None,
+            "code",
+            "analyze code",
+            None,
+            "local_code_analysis",
+            workspace=tmp_path,
+            active_messages=[],
+            scratchpad=None,
         )
         assert "Preferred tools" in content
 

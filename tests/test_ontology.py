@@ -2,22 +2,26 @@
 
 from __future__ import annotations
 
-from nanobot.agent.memory.ontology import (
+from nanobot.agent.memory.entity_classifier import (
+    classify_entity_type,
+    classify_entity_type_scored,
+    refine_type_from_predicate,
+)
+from nanobot.agent.memory.entity_linker import resolve_alias
+from nanobot.agent.memory.ontology_rules import (
+    RELATION_RULES,
+    TripleValidation,
+    validate_triple_types,
+)
+from nanobot.agent.memory.ontology_types import (
     AGENT_NATIVE_TYPES,
     AGENT_RELATION_TYPES,
-    RELATION_RULES,
     Entity,
     EntityType,
     Relationship,
     RelationType,
     Triple,
-    TripleValidation,
     TypeScore,
-    classify_entity_type,
-    classify_entity_type_scored,
-    refine_type_from_predicate,
-    resolve_alias,
-    validate_triple_types,
 )
 
 

@@ -216,7 +216,7 @@ class TestBuildGraphContextLines:
                 ],
             }
         ]
-        with patch("nanobot.agent.memory.ontology.classify_entity_type") as mock_classify:
+        with patch("nanobot.agent.memory.entity_classifier.classify_entity_type") as mock_classify:
             mock_type = MagicMock()
             mock_type.value = "unknown"
             mock_classify.return_value = mock_type

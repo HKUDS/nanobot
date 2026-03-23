@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.loop import AgentLoop, _delegation_ancestry
+from nanobot.agent.delegation import _delegation_ancestry
+from nanobot.agent.loop import AgentLoop
 from nanobot.agent.memory import mem0_adapter as mem0_mod
 from nanobot.agent.memory.extractor import MemoryExtractor
 from nanobot.agent.memory.graph import KnowledgeGraph

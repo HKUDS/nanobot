@@ -24,7 +24,7 @@ from .helpers import (
     _extract_query_keywords,
     _norm_text,
 )
-from .retrieval import _local_retrieve, _topic_fallback_retrieve
+from .keyword_search import _local_retrieve, _topic_fallback_retrieve
 from .retrieval_planner import RetrievalPlan, RetrievalPlanner
 
 if TYPE_CHECKING:
@@ -1082,7 +1082,7 @@ class MemoryRetriever:
 
         # Deduplicate and format as compact lines, respecting token budget.
         # Annotate entities with ontology types to help the LLM disambiguate.
-        from .ontology import classify_entity_type
+        from .entity_classifier import classify_entity_type
 
         seen: set[tuple[str, str, str]] = set()
         graph_lines: list[str] = []

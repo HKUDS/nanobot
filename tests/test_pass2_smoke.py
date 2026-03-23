@@ -15,9 +15,10 @@ from nanobot.agent.compression import (
     compress_context,
     estimate_messages_tokens,
 )
-from nanobot.agent.loop import AgentLoop, _dynamic_preserve_recent
+from nanobot.agent.loop import AgentLoop
 from nanobot.agent.scratchpad import Scratchpad
 from nanobot.agent.tools.delegate import DelegateTool, DelegationResult
+from nanobot.agent.turn_orchestrator import _dynamic_preserve_recent
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.email import EmailChannel

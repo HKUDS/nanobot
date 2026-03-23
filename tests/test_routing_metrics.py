@@ -158,7 +158,7 @@ class TestDispatchRecordsTrace:
 
     async def test_cycle_block_records_trace(self, tmp_path: Path) -> None:
         """Cycle detection records delegate_cycle_blocked in trace."""
-        from nanobot.agent.loop import _delegation_ancestry
+        from nanobot.agent.delegation import _delegation_ancestry
 
         loop = _make_loop(tmp_path)
 

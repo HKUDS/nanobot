@@ -846,7 +846,7 @@ class EventIngester:
         if not self._graph or not self._graph.enabled:
             return 0
 
-        from .ontology import Triple
+        from .ontology_types import Triple
 
         total = 0
         for event in events:

@@ -23,8 +23,10 @@ import pytest
 
 from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.coordinator import Coordinator, build_default_registry
-from nanobot.agent.delegation import DelegationDispatcher
+from nanobot.agent.delegation import _delegation_ancestry
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.task_types import has_parallel_structure
+from nanobot.agent.turn_orchestrator import _needs_planning
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig
@@ -93,7 +95,7 @@ class TestPlanningHeuristic:
         ],
     )
     def test_needs_planning(self, text: str, expected: bool) -> None:
-        assert AgentLoop._needs_planning(text) is expected
+        assert _needs_planning(text) is expected
 
 
 class TestParallelStructureDetection:
@@ -121,7 +123,7 @@ class TestParallelStructureDetection:
         ],
     )
     def test_has_parallel_structure(self, text: str, expected: bool) -> None:
-        assert DelegationDispatcher.has_parallel_structure(text) is expected
+        assert has_parallel_structure(text) is expected
 
 
 class TestParallelDelegationE2E:
@@ -442,7 +444,6 @@ class TestCycleDetectionInMultiAgent:
         loop = _loop(tmp_path, provider, planning_enabled=False)
 
         # Simulate being inside a "code" delegation via ContextVar
-        from nanobot.agent.loop import _delegation_ancestry
 
         token = _delegation_ancestry.set(("code",))
         try:
@@ -476,7 +477,6 @@ class TestCycleDetectionInMultiAgent:
         loop = _loop(tmp_path, provider, planning_enabled=False)
 
         # Simulate being inside a "code" delegation via ContextVar
-        from nanobot.agent.loop import _delegation_ancestry
 
         token = _delegation_ancestry.set(("code",))
         try:

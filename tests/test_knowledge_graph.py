@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.memory.graph import KnowledgeGraph
-from nanobot.agent.memory.ontology import (
+from nanobot.agent.memory.ontology_types import (
     Entity,
     EntityType,
     Relationship,

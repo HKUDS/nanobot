@@ -40,6 +40,7 @@ from __future__ import annotations
 from .conflicts import ConflictManager
 from .consolidation_pipeline import ConsolidationPipeline
 from .context_assembler import ContextAssembler
+from .entity_classifier import classify_entity_type
 from .eval import EvalRunner
 from .event import BeliefRecord, KnowledgeTriple, MemoryEvent
 from .extractor import MemoryExtractor
@@ -49,18 +50,15 @@ from .maintenance import MemoryMaintenance
 from .mem0_adapter import _Mem0Adapter, _Mem0RuntimeInfo
 from .onnx_reranker import OnnxCrossEncoderReranker
 from .onnx_reranker import OnnxCrossEncoderReranker as CrossEncoderReranker  # backward-compat
-from .ontology import (
+from .ontology_rules import RELATION_RULES, TripleValidation, validate_triple_types
+from .ontology_types import (
     AGENT_NATIVE_TYPES,
     AGENT_RELATION_TYPES,
-    RELATION_RULES,
     Entity,
     EntityType,
     Relationship,
     RelationType,
     Triple,
-    TripleValidation,
-    classify_entity_type,
-    validate_triple_types,
 )
 from .persistence import MemoryPersistence
 from .profile_io import ProfileStore

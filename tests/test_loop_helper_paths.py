@@ -49,36 +49,18 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
 def test_classify_task_type_paths() -> None:
     assert classify_task_type("writing", "write a summary") == "report_writing"
     assert classify_task_type("code", "fix this bug") == "bug_investigation"
-    assert (
-        classify_task_type("research", "architecture dependency map")
-        == "repo_architecture"
-    )
-    assert (
-        classify_task_type("research", "current industry trends")
-        == "web_research"
-    )
-    assert (
-        classify_task_type("research", "nanobot architecture overview")
-        == "repo_architecture"
-    )
+    assert classify_task_type("research", "architecture dependency map") == "repo_architecture"
+    assert classify_task_type("research", "current industry trends") == "web_research"
+    assert classify_task_type("research", "nanobot architecture overview") == "repo_architecture"
     assert classify_task_type("general", "hello world") == "general"
     # hybrid: web + arch/code/project signals combined
+    assert classify_task_type("research", "architecture of best practice DI frameworks") == "hybrid"
     assert (
-        classify_task_type(
-            "research", "architecture of best practice DI frameworks"
-        )
+        classify_task_type("research", "compare our codebase with current industry best practices")
         == "hybrid"
     )
     assert (
-        classify_task_type(
-            "research", "compare our codebase with current industry best practices"
-        )
-        == "hybrid"
-    )
-    assert (
-        classify_task_type(
-            "research", "latest best practices for Python module structure"
-        )
+        classify_task_type("research", "latest best practices for Python module structure")
         == "hybrid"
     )
 
@@ -111,7 +93,8 @@ def test_build_execution_context_includes_conditional_excerpts(tmp_path: Path) -
 
 
 def test_build_parallel_and_contract_includes_optional_sections(
-    tmp_path: Path, monkeypatch: object,
+    tmp_path: Path,
+    monkeypatch: object,
 ) -> None:
     from nanobot.agent import delegation_contract
 
@@ -128,13 +111,19 @@ def test_build_parallel_and_contract_includes_optional_sections(
 
     # Mock helpers to verify contract assembly without real workspace I/O
     monkeypatch.setattr(  # type: ignore[union-attr]
-        delegation_contract, "extract_plan_text", lambda msgs: "1. p",
+        delegation_contract,
+        "extract_plan_text",
+        lambda msgs: "1. p",
     )
     monkeypatch.setattr(  # type: ignore[union-attr]
-        delegation_contract, "build_execution_context", lambda ws, tt: "ctx",
+        delegation_contract,
+        "build_execution_context",
+        lambda ws, tt: "ctx",
     )
     monkeypatch.setattr(  # type: ignore[union-attr]
-        delegation_contract, "gather_recent_tool_results", lambda msgs, **kw: "prior",
+        delegation_contract,
+        "gather_recent_tool_results",
+        lambda msgs, **kw: "prior",
     )
 
     from nanobot.agent.delegation_contract import build_delegation_contract

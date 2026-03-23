@@ -22,15 +22,9 @@ from typing import Any
 import networkx as nx
 from loguru import logger
 
-from .ontology import (
-    Entity,
-    EntityType,
-    Relationship,
-    Triple,
-    classify_entity_type,
-    refine_type_from_predicate,
-    validate_triple_types,
-)
+from .entity_classifier import classify_entity_type, refine_type_from_predicate
+from .ontology_rules import validate_triple_types
+from .ontology_types import Entity, EntityType, Relationship, Triple
 
 
 class KnowledgeGraph:
