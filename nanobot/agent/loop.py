@@ -280,6 +280,10 @@ class AgentLoop:
                     sandbox=self.exec_config.sandbox,
                     path_append=self.exec_config.path_append,
                     allowed_env_keys=self.exec_config.allowed_env_keys,
+                    tirith_enabled=self.exec_config.tirith.enabled,
+                    tirith_bin=self.exec_config.tirith.bin,
+                    tirith_timeout=self.exec_config.tirith.timeout,
+                    tirith_fail_open=self.exec_config.tirith.fail_open,
                 )
             )
         if self.web_config.enable:

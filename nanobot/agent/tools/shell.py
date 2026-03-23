@@ -50,10 +50,18 @@ class ExecTool(Tool):
         sandbox: str = "",
         path_append: str = "",
         allowed_env_keys: list[str] | None = None,
+        tirith_enabled: bool = True,
+        tirith_bin: str = "tirith",
+        tirith_timeout: int = 5,
+        tirith_fail_open: bool = True,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
         self.sandbox = sandbox
+        self.tirith_enabled = tirith_enabled
+        self.tirith_bin = tirith_bin
+        self.tirith_timeout = tirith_timeout
+        self.tirith_fail_open = tirith_fail_open
         self.deny_patterns = deny_patterns or [
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
             r"\bdel\s+/[fq]\b",              # del /f, del /q
@@ -331,33 +339,20 @@ class ExecTool(Tool):
 
         Runs after _guard_command() (cheap regex guards). Detects homograph
         URLs, pipe-to-shell patterns, terminal injection, and more.
-        Fail-open if tirith is not installed.
+        Fail-open if tirith is not installed. Uses instance config fields
+        passed via __init__ (wired from exec_config.tirith at construction).
         """
         try:
             from nanobot.agent.tools.tirith_security import check_security
         except ImportError:
             return None
 
-        try:
-            from nanobot.config.loader import get_config
-            cfg = get_config()
-            tirith_cfg = cfg.tools.exec.tirith
-            enabled = tirith_cfg.enabled
-            tirith_bin = tirith_cfg.bin
-            timeout = tirith_cfg.timeout
-            fail_open = tirith_cfg.fail_open
-        except Exception:
-            enabled = True
-            tirith_bin = "tirith"
-            timeout = 5
-            fail_open = True
-
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, lambda: check_security(
                 command, context="exec",
-                enabled=enabled, tirith_bin=tirith_bin,
-                timeout=timeout, fail_open=fail_open,
+                enabled=self.tirith_enabled, tirith_bin=self.tirith_bin,
+                timeout=self.tirith_timeout, fail_open=self.tirith_fail_open,
             )
         )
 

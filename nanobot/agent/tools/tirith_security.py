@@ -230,16 +230,33 @@ def _resolve_tirith_path(configured: str = "tirith") -> str:
     if _resolved_path is _INSTALL_FAILED or _is_install_failed_on_disk():
         return expanded
 
-    installed, reason = _install_tirith()
-    if installed:
-        _resolved_path = installed
-        _clear_install_failed()
-        return installed
+    with _install_lock:
+        # Re-check after acquiring lock (another thread may have resolved)
+        if _resolved_path is not None and _resolved_path is not _INSTALL_FAILED:
+            return _resolved_path
 
-    _resolved_path = _INSTALL_FAILED
-    _install_failure_reason = reason
-    _mark_install_failed(reason)
-    return expanded
+        found = shutil.which("tirith")
+        if found:
+            _resolved_path = found
+            _clear_install_failed()
+            return found
+
+        local_bin = os.path.join(_nanobot_bin_dir(), bin_name)
+        if os.path.isfile(local_bin) and os.access(local_bin, os.X_OK):
+            _resolved_path = local_bin
+            _clear_install_failed()
+            return local_bin
+
+        installed, reason = _install_tirith()
+        if installed:
+            _resolved_path = installed
+            _clear_install_failed()
+            return installed
+
+        _resolved_path = _INSTALL_FAILED
+        _install_failure_reason = reason
+        _mark_install_failed(reason)
+        return expanded
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +308,7 @@ def check_security(
         logger.warning("tirith timed out after %ds", timeout)
         if fail_open:
             return {"action": "allow", "findings": [], "summary": f"tirith timed out ({timeout}s)"}
-        return {"action": "block", "findings": [], "summary": f"tirith timed out (fail-closed)"}
+        return {"action": "block", "findings": [], "summary": "tirith timed out (fail-closed)"}
 
     exit_code = result.returncode
     if exit_code == 0:
