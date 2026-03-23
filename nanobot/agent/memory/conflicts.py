@@ -19,6 +19,7 @@ from .profile_io import ProfileStore as ProfileManager
 if TYPE_CHECKING:
     from .mem0_adapter import _Mem0Adapter
     from .profile_io import ProfileStore
+    from .unified_db import UnifiedMemoryDB
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -55,6 +56,7 @@ class ConflictManager:
         sanitize_mem0_text_fn: Callable[..., str] | None = None,
         normalize_metadata_fn: Callable[..., tuple[dict, bool]] | None = None,
         sanitize_metadata_fn: Callable[[dict], dict] | None = None,
+        db: UnifiedMemoryDB | None = None,
     ) -> None:
         # Stored as profile_mgr for backward compat with resolve_conflict_details callers.
         self.profile_mgr = profile_store
@@ -62,6 +64,7 @@ class ConflictManager:
         self._sanitize_mem0_text = sanitize_mem0_text_fn
         self._normalize_metadata = normalize_metadata_fn
         self._sanitize_metadata = sanitize_metadata_fn
+        self._db = db
         # Configurable auto-resolve confidence gap threshold — copied from
         # MemoryStore at wiring time.
         self.conflict_auto_resolve_gap: float = 0.25
@@ -528,7 +531,12 @@ class ConflictManager:
         new_belief_id = new_entry.get("id", "")
 
         if selected == "keep_old":
-            if new_memory_id:
+            if self._db is not None:
+                # Conflict resolution operates on profile data; no vector-store
+                # sync needed when using UnifiedMemoryDB.
+                mem0_ok = True
+                result["mem0_operation"] = "none_db"
+            elif new_memory_id:
                 mem0_ok = self.mem0.delete(new_memory_id)
                 result["mem0_operation"] = "delete_new"
             else:
@@ -555,7 +563,11 @@ class ConflictManager:
                 if self._sanitize_mem0_text
                 else new_value
             ) or new_value
-            if old_memory_id:
+            if self._db is not None:
+                # No vector-store sync needed when using UnifiedMemoryDB.
+                mem0_ok = True
+                result["mem0_operation"] = "none_db"
+            elif old_memory_id:
                 mem0_ok = self.mem0.update(old_memory_id, clean_new_value)
                 result["mem0_operation"] = "update_old_to_new"
                 if mem0_ok and new_memory_id and new_memory_id != old_memory_id:

@@ -10,13 +10,16 @@ import json
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from .helpers import _norm_text, _to_str_list, _utc_now_iso
 from .mem0_adapter import _Mem0Adapter
 from .persistence import MemoryPersistence
+
+if TYPE_CHECKING:
+    from .unified_db import UnifiedMemoryDB
 
 _COUNT_CACHE_TTL: float = 60.0  # seconds — SQLite counts change infrequently (LAN-102)
 
@@ -34,10 +37,12 @@ class MemoryMaintenance:
         mem0: _Mem0Adapter,
         persistence: MemoryPersistence,
         rollout: dict[str, Any],
+        db: UnifiedMemoryDB | None = None,
     ) -> None:
         self.mem0 = mem0
         self.persistence = persistence
         self.rollout = rollout
+        self._db = db
 
         # TTL caches for SQLite count queries (LAN-102)
         self._vector_count_cache: tuple[float, int] | None = None
@@ -245,6 +250,16 @@ class MemoryMaintenance:
         ``read_profile_fn``, ``read_events_fn``, and ``ingester`` are injected
         by ``MemoryStore`` at call-time so this class stays decoupled.
         """
+        if self._db is not None:
+            # Events are already in SQLite; reindex of events_vec is a
+            # future concern.  Return a no-op success result.
+            return {
+                "ok": True,
+                "reason": "unified_db_active",
+                "written": 0,
+                "failed": 0,
+            }
+
         if not self.mem0.enabled:
             return {"ok": False, "reason": "mem0_disabled", "written": 0, "failed": 0}
 

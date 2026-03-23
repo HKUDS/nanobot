@@ -23,6 +23,7 @@ from .helpers import _norm_text, _safe_float, _to_str_list, _tokenize, _utc_now_
 if TYPE_CHECKING:
     from .mem0_adapter import _Mem0Adapter
     from .persistence import MemoryPersistence
+    from .unified_db import UnifiedMemoryDB
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -125,10 +126,12 @@ class ProfileStore:
         ingester: Any | None = None,
         conflict_mgr: Any | None = None,
         snapshot: Any | None = None,
+        db: UnifiedMemoryDB | None = None,
     ) -> None:
         self.persistence = persistence
         self.profile_file = profile_file
         self.mem0 = mem0
+        self._db = db
         # Subsystem references — set after construction by MemoryStore.__init__
         # (required by apply_live_user_correction).
         self._extractor: Any = extractor
@@ -156,7 +159,10 @@ class ProfileStore:
     # ------------------------------------------------------------------
 
     def read_profile(self) -> dict[str, Any]:
-        data = self._cache.read()
+        if self._db is not None:
+            data = self._db.read_profile("profile")
+        else:
+            data = self._cache.read()
         if isinstance(data, dict) and data:
             # normalise legacy entries — same logic as before
             for key in self.PROFILE_KEYS:
@@ -208,7 +214,10 @@ class ProfileStore:
 
     def write_profile(self, profile: dict[str, Any]) -> None:
         profile["updated_at"] = self._utc_now_iso()
-        self._cache.write(profile)
+        if self._db is not None:
+            self._db.write_profile("profile", profile)
+        else:
+            self._cache.write(profile)
 
     def _meta_section(self, profile: dict[str, Any], key: str) -> dict[str, Any]:
         profile.setdefault("meta", {})
@@ -714,7 +723,17 @@ class ProfileStore:
 
     def _find_mem0_id_for_text(self, text: str, *, top_k: int = 8) -> str | None:
         target = self._norm_text(text)
-        if not target or not self.mem0.enabled:
+        if not target:
+            return None
+
+        if self._db is not None:
+            rows = self._db.search_fts(text, k=top_k)
+            if rows:
+                value = str(rows[0].get("id", "")).strip()
+                return value or None
+            return None
+
+        if not self.mem0.enabled:
             return None
         search_result = self.mem0.search(text, top_k=top_k)
         if isinstance(search_result, tuple) and len(search_result) == 2:
