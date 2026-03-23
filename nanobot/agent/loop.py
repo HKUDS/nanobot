@@ -307,7 +307,6 @@ class AgentLoop:
             context=self.context,
             provider=self.provider,
             model=self.model,
-            max_iterations=self.max_iterations,
             role_name=self.role_name,
         )
 
@@ -571,9 +570,8 @@ class AgentLoop:
         """Run the Plan-Act-Observe-Reflect agent loop.
 
         Delegates to ``TurnOrchestrator.run()`` and unpacks the ``TurnResult``
-        into the legacy 3-tuple format for backward compatibility with
-        ``MessageProcessor._LegacyOrchestrator`` and any callers that still
-        reference this method directly.
+        into the legacy 3-tuple format for backward compatibility with any
+        callers that still reference this method directly.
 
         Returns ``(final_content, tools_used, messages)``.
         """

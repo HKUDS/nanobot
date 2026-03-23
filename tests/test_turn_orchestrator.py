@@ -65,6 +65,7 @@ def _make_minimal_mocks() -> dict[str, Any]:
     config.context_window_tokens = 0
     config.max_session_wall_time_seconds = 0
     config.planning_enabled = False
+    config.max_iterations = 10
 
     # Tool executor mock
     tool_executor = MagicMock()

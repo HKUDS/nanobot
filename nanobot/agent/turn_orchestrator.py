@@ -225,11 +225,12 @@ class TurnOrchestrator:
         config: AgentConfig,
         prompts: PromptLoader,
         context: ContextBuilder,
-        # Additional collaborators needed by the PAOR loop that are not
-        # derivable from the above objects.
+        # Note: spec Section 3 defines 8 keyword-only params. Three additional params
+        # (provider, model, role_name) are needed for context compression and delegation
+        # routing. Eliminating them would require changes to ContextBuilder or
+        # DelegationAdvisor — explicitly out-of-scope per design spec Section 6.
         provider: LLMProvider | None = None,
         model: str = "",
-        max_iterations: int = 10,
         role_name: str = "",
     ) -> None:
         self._llm_caller = llm_caller
@@ -242,7 +243,7 @@ class TurnOrchestrator:
         self._context = context
         self._provider = provider
         self._model = model
-        self._max_iterations = max_iterations
+        self._max_iterations = config.max_iterations
         self._role_name = role_name
 
         # Per-turn token accumulators (reset at start of each run)
