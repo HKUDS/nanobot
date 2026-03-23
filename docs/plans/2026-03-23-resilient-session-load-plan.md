@@ -562,7 +562,13 @@ git commit -m "style: lint/format fixes" || true
 
 ---
 
-### Task 8: Push and create PR
+### Task 8: Push and create PR ⛔ GATE
+
+> **Execution policy:** Tasks 1–7 may be executed autonomously. Task 8 (push + PR) requires **explicit user approval** before execution. The user may also choose to push and create the PR themselves.
+
+**Step 0: Wait for user approval**
+
+Before proceeding, present the completion summary from Tasks 1–7 and ask for approval to push.
 
 **Step 1: Push feature branch to origin**
 
