@@ -59,6 +59,19 @@ class TestReadFileTool:
         assert "Empty file" in result
 
     @pytest.mark.asyncio
+    async def test_image_file_returns_multimodal_blocks(self, tool, tmp_path):
+        f = tmp_path / "pixel.png"
+        f.write_bytes(b"\x89PNG\r\n\x1a\nfake-png-data")
+
+        result = await tool.execute(path=str(f))
+
+        assert isinstance(result, list)
+        assert result[0]["type"] == "image_url"
+        assert result[0]["image_url"]["url"].startswith("data:image/png;base64,")
+        assert result[0]["_meta"]["path"] == str(f)
+        assert result[1] == {"type": "text", "text": f"(Image file: {f})"}
+
+    @pytest.mark.asyncio
     async def test_file_not_found(self, tool, tmp_path):
         result = await tool.execute(path=str(tmp_path / "nope.txt"))
         assert "Error" in result
@@ -222,8 +235,10 @@ class TestListDirTool:
     @pytest.mark.asyncio
     async def test_recursive(self, tool, populated_dir):
         result = await tool.execute(path=str(populated_dir), recursive=True)
-        assert "src/main.py" in result
-        assert "src/utils.py" in result
+        # Normalize path separators for cross-platform compatibility
+        normalized = result.replace("\\", "/")
+        assert "src/main.py" in normalized
+        assert "src/utils.py" in normalized
         assert "README.md" in result
         # Ignored dirs should not appear
         assert ".git" not in result
@@ -249,3 +264,114 @@ class TestListDirTool:
         result = await tool.execute(path=str(tmp_path / "nope"))
         assert "Error" in result
         assert "not found" in result
+
+
+# ---------------------------------------------------------------------------
+# Workspace restriction + extra_allowed_dirs
+# ---------------------------------------------------------------------------
+
+class TestWorkspaceRestriction:
+
+    @pytest.mark.asyncio
+    async def test_read_blocked_outside_workspace(self, tmp_path):
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        secret = outside / "secret.txt"
+        secret.write_text("top secret")
+
+        tool = ReadFileTool(workspace=workspace, allowed_dir=workspace)
+        result = await tool.execute(path=str(secret))
+        assert "Error" in result
+        assert "outside" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_read_allowed_with_extra_dir(self, tmp_path):
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        skill_file = skills_dir / "test_skill" / "SKILL.md"
+        skill_file.parent.mkdir()
+        skill_file.write_text("# Test Skill\nDo something.")
+
+        tool = ReadFileTool(
+            workspace=workspace, allowed_dir=workspace,
+            extra_allowed_dirs=[skills_dir],
+        )
+        result = await tool.execute(path=str(skill_file))
+        assert "Test Skill" in result
+        assert "Error" not in result
+
+    @pytest.mark.asyncio
+    async def test_extra_dirs_does_not_widen_write(self, tmp_path):
+        from nanobot.agent.tools.filesystem import WriteFileTool
+
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+
+        tool = WriteFileTool(workspace=workspace, allowed_dir=workspace)
+        result = await tool.execute(path=str(outside / "hack.txt"), content="pwned")
+        assert "Error" in result
+        assert "outside" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_read_still_blocked_for_unrelated_dir(self, tmp_path):
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        unrelated = tmp_path / "other"
+        unrelated.mkdir()
+        secret = unrelated / "secret.txt"
+        secret.write_text("nope")
+
+        tool = ReadFileTool(
+            workspace=workspace, allowed_dir=workspace,
+            extra_allowed_dirs=[skills_dir],
+        )
+        result = await tool.execute(path=str(secret))
+        assert "Error" in result
+        assert "outside" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_workspace_file_still_readable_with_extra_dirs(self, tmp_path):
+        """Adding extra_allowed_dirs must not break normal workspace reads."""
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        ws_file = workspace / "README.md"
+        ws_file.write_text("hello from workspace")
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+
+        tool = ReadFileTool(
+            workspace=workspace, allowed_dir=workspace,
+            extra_allowed_dirs=[skills_dir],
+        )
+        result = await tool.execute(path=str(ws_file))
+        assert "hello from workspace" in result
+        assert "Error" not in result
+
+    @pytest.mark.asyncio
+    async def test_edit_blocked_in_extra_dir(self, tmp_path):
+        """edit_file must not be able to modify files in extra_allowed_dirs."""
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        skill_file = skills_dir / "weather" / "SKILL.md"
+        skill_file.parent.mkdir()
+        skill_file.write_text("# Weather\nOriginal content.")
+
+        tool = EditFileTool(workspace=workspace, allowed_dir=workspace)
+        result = await tool.execute(
+            path=str(skill_file),
+            old_text="Original content.",
+            new_text="Hacked content.",
+        )
+        assert "Error" in result
+        assert "outside" in result.lower()
+        assert skill_file.read_text() == "# Weather\nOriginal content."
