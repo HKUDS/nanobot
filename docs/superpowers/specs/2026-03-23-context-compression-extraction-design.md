@@ -94,7 +94,13 @@ This preserves all existing test imports:
 - `tests/test_compression_coherence.py` imports `_paired_drop_tools` from `context`
 - `tests/test_observability_plumbing.py` imports `summarize_and_compress` from `context`
 
-Note: `_summary_cache` and `_paired_drop_tools` are private symbols accessed directly by tests. The backward-compat re-exports cover the public symbols; tests importing private symbols will need to update their import path to `compression` (or we add private re-exports with `# noqa`).
+**Private symbol handling — tests must be updated:**
+
+The following test files import private symbols that move to `compression.py`. Since these are private (`_`-prefixed), we update the test imports directly rather than adding backward-compat re-exports:
+
+- `tests/test_context.py` lines 170, 210: `from nanobot.agent.context import _summary_cache` → `from nanobot.agent.compression import _summary_cache`
+- `tests/test_compression_coherence.py` lines 12-13: `from nanobot.agent.context import _collect_tail_tool_call_ids, _paired_drop_tools` → `from nanobot.agent.compression import _collect_tail_tool_call_ids, _paired_drop_tools`
+- `tests/test_observability_plumbing.py` line 527: patch target `"nanobot.agent.context.langfuse_span"` → `"nanobot.agent.compression.langfuse_span"` (the `langfuse_span` call inside `summarize_and_compress` moves with it; patching the old module would silently stop working)
 
 ### `__init__.py` exports
 
