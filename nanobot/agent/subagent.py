@@ -92,20 +92,43 @@ class SubagentManager:
         try:
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
+            from nanobot.config.loader import get_config_path
+            from nanobot.security.guards import (
+                BwrapGuard,
+                DeniedPathsGuard,
+                NetworkGuard,
+                PatternGuard,
+                WorkspaceGuard,
+            )
+
             allowed_dir = self.workspace if self.restrict_to_workspace else None
             extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
-            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
-            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
+
+            # Always protect the config file (contains API keys) from agent access.
+            config_path = get_config_path()
+            denied_paths = [config_path, config_path.parent]
+
+            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read, denied_paths=denied_paths))
+            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir, denied_paths=denied_paths))
+            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir, denied_paths=denied_paths))
+            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir, denied_paths=denied_paths))
             tools.register(ExecTool(
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,
-                restrict_to_workspace=self.restrict_to_workspace,
                 path_append=self.exec_config.path_append,
             ))
             tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
             tools.register(WebFetchTool(proxy=self.web_proxy))
+
+            # Register guards (same as main agent loop)
+            tools.add_guard(DeniedPathsGuard(denied_paths))
+            tools.add_guard(PatternGuard())
+            tools.add_guard(NetworkGuard())
+            if self.restrict_to_workspace:
+                tools.add_guard(WorkspaceGuard(self.workspace))
+            bwrap_guard = BwrapGuard(hidden_paths=denied_paths, workspace=self.workspace)
+            if bwrap_guard.available:
+                tools.add_guard(bwrap_guard)
             
             system_prompt = self._build_subagent_prompt()
             messages: list[dict[str, Any]] = [

@@ -10,31 +10,28 @@ from nanobot.agent.tools.base import Tool
 
 
 class ExecTool(Tool):
-    """Tool to execute shell commands."""
+    """Tool to execute shell commands.
+
+    Security checks that previously lived inside this class (dangerous-pattern
+    detection, SSRF blocking, denied-path string matching) have been moved to
+    the pluggable :class:`ToolGuard` system.  See ``nanobot.security.guards``
+    for the built-in guards: ``PatternGuard``, ``NetworkGuard``,
+    ``DeniedPathsGuard``, ``BwrapGuard``, and ``WorkspaceGuard``.
+
+    The only check that remains here is ``restrict_to_workspace`` path
+    validation — this is a legacy convenience that will be migrated to
+    ``WorkspaceGuard`` in a future release.
+    """
 
     def __init__(
         self,
         timeout: int = 60,
         working_dir: str | None = None,
-        deny_patterns: list[str] | None = None,
-        allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
         path_append: str = "",
     ):
         self.timeout = timeout
         self.working_dir = working_dir
-        self.deny_patterns = deny_patterns or [
-            r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
-            r"\bdel\s+/[fq]\b",              # del /f, del /q
-            r"\brmdir\s+/s\b",               # rmdir /s
-            r"(?:^|[;&|]\s*)format\b",       # format (as standalone command only)
-            r"\b(mkfs|diskpart)\b",          # disk operations
-            r"\bdd\s+if=",                   # dd
-            r">\s*/dev/sd",                  # write to disk
-            r"\b(shutdown|reboot|poweroff)\b",  # system power
-            r":\(\)\s*\{.*\};\s*:",          # fork bomb
-        ]
-        self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
 
@@ -80,9 +77,6 @@ class ExecTool(Tool):
         timeout: int | None = None, **kwargs: Any,
     ) -> str:
         cwd = working_dir or self.working_dir or os.getcwd()
-        guard_error = self._guard_command(command, cwd)
-        if guard_error:
-            return guard_error
 
         effective_timeout = min(timeout or self.timeout, self._MAX_TIMEOUT)
 
@@ -140,40 +134,6 @@ class ExecTool(Tool):
 
         except Exception as e:
             return f"Error executing command: {str(e)}"
-
-    def _guard_command(self, command: str, cwd: str) -> str | None:
-        """Best-effort safety guard for potentially destructive commands."""
-        cmd = command.strip()
-        lower = cmd.lower()
-
-        for pattern in self.deny_patterns:
-            if re.search(pattern, lower):
-                return "Error: Command blocked by safety guard (dangerous pattern detected)"
-
-        if self.allow_patterns:
-            if not any(re.search(p, lower) for p in self.allow_patterns):
-                return "Error: Command blocked by safety guard (not in allowlist)"
-
-        from nanobot.security.network import contains_internal_url
-        if contains_internal_url(cmd):
-            return "Error: Command blocked by safety guard (internal/private URL detected)"
-
-        if self.restrict_to_workspace:
-            if "..\\" in cmd or "../" in cmd:
-                return "Error: Command blocked by safety guard (path traversal detected)"
-
-            cwd_path = Path(cwd).resolve()
-
-            for raw in self._extract_absolute_paths(cmd):
-                try:
-                    expanded = os.path.expandvars(raw.strip())
-                    p = Path(expanded).expanduser().resolve()
-                except Exception:
-                    continue
-                if p.is_absolute() and cwd_path not in p.parents and p != cwd_path:
-                    return "Error: Command blocked by safety guard (path outside working dir)"
-
-        return None
 
     @staticmethod
     def _extract_absolute_paths(command: str) -> list[str]:

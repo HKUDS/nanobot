@@ -122,16 +122,32 @@ def test_exec_extract_absolute_paths_captures_quoted_paths() -> None:
     assert "~/.nanobot/config.json" in paths
 
 
-def test_exec_guard_blocks_home_path_outside_workspace(tmp_path) -> None:
-    tool = ExecTool(restrict_to_workspace=True)
-    error = tool._guard_command("cat ~/.nanobot/config.json", str(tmp_path))
-    assert error == "Error: Command blocked by safety guard (path outside working dir)"
+def test_workspace_guard_blocks_home_path_outside_workspace(tmp_path) -> None:
+    from nanobot.security.guards import GuardContext, WorkspaceGuard
+
+    guard = WorkspaceGuard(tmp_path)
+    ctx = GuardContext(
+        tool_name="exec",
+        params={"command": "cat ~/.nanobot/config.json"},
+        working_dir=str(tmp_path),
+    )
+    result = guard.check(ctx)
+    assert not result.allowed
+    assert "path outside working dir" in result.reason
 
 
-def test_exec_guard_blocks_quoted_home_path_outside_workspace(tmp_path) -> None:
-    tool = ExecTool(restrict_to_workspace=True)
-    error = tool._guard_command('cat "~/.nanobot/config.json"', str(tmp_path))
-    assert error == "Error: Command blocked by safety guard (path outside working dir)"
+def test_workspace_guard_blocks_quoted_home_path_outside_workspace(tmp_path) -> None:
+    from nanobot.security.guards import GuardContext, WorkspaceGuard
+
+    guard = WorkspaceGuard(tmp_path)
+    ctx = GuardContext(
+        tool_name="exec",
+        params={"command": 'cat "~/.nanobot/config.json"'},
+        working_dir=str(tmp_path),
+    )
+    result = guard.check(ctx)
+    assert not result.allowed
+    assert "path outside working dir" in result.reason
 
 
 # --- cast_params tests ---
@@ -406,3 +422,9 @@ async def test_exec_timeout_capped_at_max() -> None:
     # Should not raise — just clamp to 600
     result = await tool.execute(command="echo ok", timeout=9999)
     assert "Exit code: 0" in result
+
+
+# --- ExecTool denied_paths tests moved to test_tool_guards.py ---
+# The exec-layer security checks (denied paths, dangerous patterns, SSRF)
+# are now handled by the pluggable ToolGuard system.
+# See tests/test_tool_guards.py for comprehensive guard tests.

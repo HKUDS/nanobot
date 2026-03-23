@@ -115,23 +115,69 @@ class AgentLoop:
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
+        from nanobot.config.loader import get_config_path
+        from nanobot.security.guards import (
+            BwrapGuard,
+            DeniedPathsGuard,
+            NetworkGuard,
+            PatternGuard,
+            WorkspaceGuard,
+        )
+
         allowed_dir = self.workspace if self.restrict_to_workspace else None
         extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
-        self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
+
+        # Always protect the config file (contains API keys) from agent access.
+        config_path = get_config_path()
+        denied_paths = [config_path, config_path.parent]
+
+        # -- File system tools (denied_paths baked in for defense-in-depth) --
+        self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read, denied_paths=denied_paths))
         for cls in (WriteFileTool, EditFileTool, ListDirTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
+            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir, denied_paths=denied_paths))
+
+        # -- Exec tool (security checks delegated to guards) ----------------
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
-            restrict_to_workspace=self.restrict_to_workspace,
             path_append=self.exec_config.path_append,
         ))
+
+        # -- Other tools ----------------------------------------------------
         self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+
+        # -- Pluggable tool guards ------------------------------------------
+        # Guards run in registration order before every tool invocation.
+        # The DeniedPathsGuard provides defense-in-depth for file tools
+        # (the tools themselves also check, but the guard catches edge cases).
+        self.tools.add_guard(DeniedPathsGuard(denied_paths))
+
+        # Exec guards: pattern-based (blocks rm -rf, fork bombs, etc.)
+        self.tools.add_guard(PatternGuard())
+
+        # Exec guards: SSRF protection
+        self.tools.add_guard(NetworkGuard())
+
+        # Exec guards: workspace restriction (if enabled)
+        if self.restrict_to_workspace:
+            self.tools.add_guard(WorkspaceGuard(self.workspace))
+
+        # Exec guards: Bubblewrap OS-level sandbox (Linux only, optional).
+        # When available, this wraps exec commands in a namespace sandbox
+        # that hides the config directory at the kernel level — no string
+        # matching needed.
+        bwrap_guard = BwrapGuard(
+            hidden_paths=denied_paths,
+            workspace=self.workspace,
+        )
+        if bwrap_guard.available:
+            self.tools.add_guard(bwrap_guard)
+            logger.info("Bubblewrap sandbox enabled for exec tool")
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
