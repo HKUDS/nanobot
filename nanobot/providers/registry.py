@@ -61,6 +61,9 @@ class ProviderSpec:
     # Provider supports cache_control on content blocks (e.g. Anthropic prompt caching)
     supports_prompt_caching: bool = False
 
+    # Provider works without an API key (e.g. uses cloud IAM / ADC auth)
+    no_api_key_ok: bool = False
+
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
@@ -325,6 +328,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="",
         strip_model_prefix=False,
         model_overrides=(),
+    ),
+    # Vertex AI: Google Cloud-hosted Gemini, uses ADC instead of API keys.
+    # Requires VERTEXAI_PROJECT and VERTEXAI_LOCATION env vars (set from config).
+    ProviderSpec(
+        name="vertex_ai",
+        keywords=("vertex", "vertex_ai"),
+        env_key="",
+        display_name="Vertex AI",
+        litellm_prefix="vertex_ai",  # gemini-2.5-pro → vertex_ai/gemini-2.5-pro
+        skip_prefixes=("vertex_ai/",),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="",
+        strip_model_prefix=False,
+        model_overrides=(),
+        no_api_key_ok=True,
     ),
     # Zhipu: LiteLLM uses "zai/" prefix.
     # Also mirrors key to ZHIPUAI_API_KEY (some LiteLLM paths check that).
