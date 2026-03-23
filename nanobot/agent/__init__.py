@@ -19,6 +19,7 @@ from nanobot.agent.delegation import DelegationDispatcher
 from nanobot.agent.delegation_advisor import DelegationAdvisor
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.message_processor import MessageProcessor
 from nanobot.agent.mission import MissionManager
 from nanobot.agent.observability import init_langfuse
 from nanobot.agent.observability import shutdown as shutdown_langfuse
@@ -28,6 +29,7 @@ from nanobot.agent.scratchpad import Scratchpad
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.streaming import StreamingLLMCaller
 from nanobot.agent.tool_executor import ToolExecutor
+from nanobot.agent.turn_orchestrator import TurnResult
 from nanobot.agent.verifier import AnswerVerifier
 
 __all__ = [
@@ -43,6 +45,7 @@ __all__ = [
     "DelegationAdvisor",
     "DelegationDispatcher",
     "MemoryStore",
+    "MessageProcessor",
     "MissionManager",
     "ProgressCallback",
     "ProgressEvent",
@@ -55,6 +58,7 @@ __all__ = [
     "ToolCallEvent",
     "ToolExecutor",
     "ToolResultEvent",
+    "TurnResult",
     "init_langfuse",
     "shutdown_langfuse",
 ]

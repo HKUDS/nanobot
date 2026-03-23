@@ -31,36 +31,22 @@ tools are available again in the next turn.
 from __future__ import annotations
 
 import asyncio
-import json
+import sys
 import time
-import uuid
 from contextlib import AsyncExitStack
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
-from nanobot.agent.callbacks import (
-    DelegateEndEvent,
-    DelegateStartEvent,
-    ProgressCallback,
-    ProgressEvent,
-    StatusEvent,
-    TextChunk,
-    ToolCallEvent,
-    ToolResultEvent,
-)
+from nanobot.agent.bus_progress import make_bus_progress
+from nanobot.agent.callbacks import ProgressCallback
 from nanobot.agent.capability import CapabilityRegistry
 from nanobot.agent.consolidation import ConsolidationOrchestrator
-from nanobot.agent.context import (
-    ContextBuilder,
-    estimate_messages_tokens,
-    summarize_and_compress,
-)
+from nanobot.agent.context import ContextBuilder
 from nanobot.agent.delegation import DelegationConfig, DelegationDispatcher
-from nanobot.agent.failure import FailureClass, ToolCallTracker, _build_failure_prompt
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.message_processor import MessageProcessor
 from nanobot.agent.mission import MissionManager
 from nanobot.agent.observability import (
     flush as flush_langfuse,
@@ -74,7 +60,7 @@ from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.reaction import classify_reaction
 from nanobot.agent.role_switching import TurnContext, TurnRoleManager
 from nanobot.agent.scratchpad import Scratchpad
-from nanobot.agent.streaming import StreamingLLMCaller, strip_think
+from nanobot.agent.streaming import StreamingLLMCaller
 from nanobot.agent.tool_executor import ToolExecutor
 from nanobot.agent.tool_setup import register_default_tools
 from nanobot.agent.tools.cron import CronTool
@@ -85,84 +71,42 @@ from nanobot.agent.tools.mission import MissionStartTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.result_cache import ToolResultCache
 from nanobot.agent.tools.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
-from nanobot.agent.tracing import TraceContext, bind_trace
+from nanobot.agent.tracing import TraceContext
+from nanobot.agent.turn_orchestrator import TurnOrchestrator, TurnState
+from nanobot.agent.turn_orchestrator import TurnResult as TurnResult  # noqa: F401 — re-export
 from nanobot.agent.verifier import AnswerVerifier
 from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import DeliveryResult, InboundMessage, OutboundMessage, ReactionEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig, AgentRoleConfig, ExecToolConfig
-from nanobot.providers.base import LLMProvider, LLMResponse
+from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
     from nanobot.agent.coordinator import ClassificationResult, Coordinator
-    from nanobot.agent.delegation_advisor import DelegationAction
     from nanobot.config.schema import ChannelsConfig, RoutingConfig
     from nanobot.cron.service import CronService
 
 
 # Per-coroutine delegation ancestry — canonical definition in delegation.py,
 # re-exported here for backward compatibility with tests.
+# Backward-compat re-exports: these symbols moved to turn_orchestrator.py or
+# their original modules.  Tests that import them from loop.py still work.
+from nanobot.agent.context import summarize_and_compress as summarize_and_compress  # noqa: F401
 from nanobot.agent.delegation import _delegation_ancestry  # noqa: F401
-
-# Tools whose arguments may contain sensitive data (file contents, credentials,
-# command strings). Their call arguments are omitted from structured log output
-# to prevent leaking sensitive information into log files or tracing backends.
-_ARGS_REDACT_TOOLS: frozenset[str] = frozenset(
-    {"write_file", "edit_file", "exec", "web_fetch", "web_search"}
+from nanobot.agent.failure import FailureClass as FailureClass  # noqa: F401
+from nanobot.agent.failure import ToolCallTracker as ToolCallTracker  # noqa: F401
+from nanobot.agent.failure import _build_failure_prompt as _build_failure_prompt  # noqa: F401
+from nanobot.agent.turn_orchestrator import (  # noqa: F401
+    _dynamic_preserve_recent as _dynamic_preserve_recent,
+)
+from nanobot.agent.turn_orchestrator import (
+    _needs_planning as _needs_planning,
 )
 
-# Delegation tool names — hoisted here to avoid rebuilding the set each iteration.
-_DELEGATION_TOOL_NAMES: frozenset[str] = frozenset({"delegate", "delegate_parallel"})
-
-# Named constants for magic numbers used across the agent loop (CQ-L6).
-_GREETING_MAX_LEN: int = 20  # Messages shorter than this are treated as greetings / simple Qs
-_CONTEXT_RESERVE_RATIO: float = (
-    0.80  # Fraction of context window reserved for prompt; ~20% for reply
-)
 _DEFAULT_CONFIDENCE_THRESHOLD: float = (
     0.6  # Fallback routing confidence threshold (no RoutingConfig)
 )
-
-# Multi-step planning signal substrings for _needs_planning().
-# Defined at module level so the tuple is allocated once, not per call.
-_PLANNING_SIGNALS: tuple[str, ...] = (
-    " and ",
-    " then ",
-    " after that",
-    " also ",
-    " steps",
-    " first ",
-    " second ",
-    " finally ",
-    "\n-",
-    "\n*",
-    "\n1.",
-    "\n2.",
-    " research ",
-    " analyze ",
-    " compare ",
-    " investigate ",
-    " create ",
-    " build ",
-    " implement ",
-    " set up ",
-    " configure ",
-    " plan ",
-    " schedule ",
-    " organize ",
-)
-
-
-@dataclass(slots=True)
-class _ToolBatchResult:
-    """Return value of ``_process_tool_results`` — scalar state that changes per batch."""
-
-    any_failed: bool
-    failed_this_batch: list[tuple[str, "FailureClass"]]
-    nudged_for_final: bool
-    last_tool_call_msg_idx: int
-    tool_calls_this_batch: int
 
 
 def _user_friendly_error(exc: Exception) -> str:
@@ -175,41 +119,6 @@ def _user_friendly_error(exc: Exception) -> str:
     if "auth" in msg and ("invalid" in msg or "denied" in msg or "missing" in msg):
         return "There's a configuration issue with the AI provider. Please contact the admin."
     return "Sorry, I couldn't process that. Please try again."
-
-
-def _dynamic_preserve_recent(
-    messages: list[dict[str, Any]],
-    last_tool_call_idx: int = -1,
-    *,
-    floor: int = 6,
-    cap: int = 30,
-) -> int:
-    """Calculate how many tail messages to preserve during compression.
-
-    Ensures the last complete tool-call cycle (assistant with tool_calls →
-    all corresponding tool results → next message) is never split.
-    Falls back to *floor* when no tool calls are present.
-
-    *last_tool_call_idx* is the index of the last assistant message that
-    contained tool_calls.  When provided (>= 0), the backward scan is skipped
-    entirely, making this function O(1).
-    """
-    n = len(messages)
-    if n <= floor:
-        return floor
-
-    if last_tool_call_idx >= 0:
-        needed = n - last_tool_call_idx
-        return max(floor, min(needed, cap))
-
-    # Fallback: scan backwards (O(n), bounded by cap) when index unknown
-    for offset in range(1, n):
-        idx = n - offset
-        m = messages[idx]
-        if m.get("role") == "assistant" and m.get("tool_calls"):
-            needed = n - idx
-            return max(floor, min(needed, cap))
-    return floor
 
 
 class AgentLoop:
@@ -382,10 +291,62 @@ class AgentLoop:
             memory_store=self.context.memory,
         )
 
-        # Per-turn token accumulators (reset in _run_agent_loop)
+        # Per-turn token accumulators (reset in _run_agent_loop / TurnOrchestrator)
         self._turn_tokens_prompt = 0
         self._turn_tokens_completion = 0
         self._turn_llm_calls = 0
+
+        # TurnOrchestrator: owns the PAOR state machine (Task 6 decomposition).
+        self._orchestrator = TurnOrchestrator(
+            llm_caller=self._llm_caller,
+            tool_executor=self.tools,
+            verifier=self._verifier,
+            dispatcher=self._dispatcher,
+            delegation_advisor=self._delegation_advisor,
+            config=self.config,
+            prompts=prompts,
+            context=self.context,
+            provider=self.provider,
+            model=self.model,
+            role_name=self.role_name,
+        )
+
+        # MessageProcessor: per-message pipeline (Task 3 decomposition).
+        self._processor = MessageProcessor(
+            orchestrator=self._orchestrator,
+            context=self.context,
+            sessions=self.sessions,
+            tools=self.tools,
+            consolidator=self._consolidator,  # type: ignore[has-type]
+            verifier=self._verifier,
+            bus=self.bus,
+            config=self.config,
+            workspace=self.workspace,
+            role_name=self.role_name,
+            role_manager=self._role_manager,
+            provider=self.provider,
+            model=self.model,
+        )
+        # Share consolidation state: processor owns the mutable sets, AgentLoop
+        # aliases them for backward compatibility with tests that access
+        # loop._consolidating or loop._consolidation_tasks directly.
+        self._consolidating: set[str] = self._processor._consolidating  # type: ignore[no-redef]
+        self._consolidation_tasks: set[asyncio.Task[None]] = self._processor._consolidation_tasks  # type: ignore[no-redef]
+        self._consolidation_sem = self._processor._consolidation_sem
+
+        # Backward compat: tests may monkey-patch loop._consolidate_memory.
+        # Store a reference that the processor resolves at call time so
+        # patches on AgentLoop take effect.
+        self._processor._consolidate_memory_ref = self  # type: ignore[attr-defined]
+
+        # Wire token counter source: _run_agent_loop updates self._turn_tokens_*
+        # on AgentLoop; the processor syncs from this reference before reading.
+        self._processor._token_source = self
+
+        # Wire span module so that tests patching
+        # nanobot.agent.loop.update_current_span see their patches take effect.
+        _loop_module = sys.modules[__name__]  # get our own module reference for test patching
+        self._processor._span_module = _loop_module
 
     def _build_tools(self) -> None:
         """Construct and wire the tool/capability layer.
@@ -449,8 +410,8 @@ class AgentLoop:
         Called once from __init__ after _build_tools(). Initialises consolidation
         state and the ConsolidationOrchestrator that wraps self.context.memory.
         """
-        self._consolidating: set[str] = set()  # Session keys with consolidation in progress
-        self._consolidation_tasks: set[asyncio.Task[None]] = set()  # Strong refs to in-flight tasks
+        self._consolidating: set[str] = set()  # type: ignore[no-redef]
+        self._consolidation_tasks: set[asyncio.Task[None]] = set()  # type: ignore[no-redef]
         self._consolidation_sem = asyncio.Semaphore(3)  # Cap concurrent consolidation LLM calls
         self._consolidator = ConsolidationOrchestrator(self.context.memory)
 
@@ -533,6 +494,7 @@ class AgentLoop:
     ) -> None:
         """Set a callback that returns known email contacts (refreshed per-turn)."""
         self._contacts_provider = provider
+        self._processor._contacts_provider = provider  # forward to processor
 
     def set_email_fetch(
         self,
@@ -587,372 +549,35 @@ class AgentLoop:
             read_tool._scratchpad = self._scratchpad
 
     # ------------------------------------------------------------------
-    # Agent loop (Plan → Act → Observe → Reflect)
+    # Backward-compat static method — delegates to module-level function
+    # in turn_orchestrator.py.  Tests reference AgentLoop._needs_planning.
     # ------------------------------------------------------------------
-    # Planning & Reflection prompts
-    # ------------------------------------------------------------------
-
-    # Prompts loaded from nanobot/templates/prompts/*.md via PromptLoader.
-    # Override by placing files in <workspace>/prompts/.
 
     @staticmethod
-    def _needs_planning(text: str) -> bool:
-        """Heuristic: does this message benefit from explicit planning?
-
-        Short greetings, simple questions, or single-action requests don't
-        need a plan. Multi-step tasks, research queries, and complex
-        instructions do.
-        """
-        if not text:
-            return False
-        text_lower = text.strip().lower()
-        # Very short messages (< 20 chars) are usually greetings or simple Qs
-        if len(text_lower) < _GREETING_MAX_LEN:
-            return False
-        # Explicit multi-step indicators
-        return any(signal in text_lower for signal in _PLANNING_SIGNALS)
+    def _needs_planning(text: str) -> bool:  # pragma: no cover — delegate
+        """Heuristic: does this message benefit from explicit planning?"""
+        return _needs_planning(text)
 
     # ------------------------------------------------------------------
-    # _run_agent_loop helpers (extracted for readability)
+    # Agent loop delegation to TurnOrchestrator
     # ------------------------------------------------------------------
-
-    async def _handle_llm_error(
-        self,
-        response: "LLMResponse",
-        consecutive_errors: int,
-        messages: list[dict],
-        on_progress: ProgressCallback | None,
-    ) -> tuple[Literal["continue", "break", "proceed"], int, str | None]:
-        """Handle LLM-level error finish reasons.
-
-        Returns ``(action, consecutive_errors, final_content)`` where *action*
-        is ``"continue"`` (retry this iteration), ``"break"`` (end the loop),
-        or ``"proceed"`` (no error — continue normal processing).
-        *messages* is mutated in-place when a final answer is injected.
-        """
-        if response.finish_reason == "error":
-            consecutive_errors += 1
-            logger.warning(
-                "LLM returned error (attempt {}): {}", consecutive_errors, response.content
-            )
-            if consecutive_errors >= 3:
-                final_content = (
-                    "I'm having trouble reaching the language model right now. "
-                    "Please try again in a moment."
-                )
-                messages[:] = self.context.add_assistant_message(messages, final_content)
-                return "break", consecutive_errors, final_content
-            if on_progress:
-                await on_progress(StatusEvent(status_code="retrying"))
-            await asyncio.sleep(min(2**consecutive_errors, 10))
-            return "continue", consecutive_errors, None
-
-        if response.finish_reason == "content_filter":
-            consecutive_errors += 1
-            logger.warning("Content filter triggered (attempt {})", consecutive_errors)
-            if consecutive_errors >= 2:
-                final_content = (
-                    "The AI provider's content filter blocked my response. "
-                    "Try rephrasing your question."
-                )
-                messages[:] = self.context.add_assistant_message(messages, final_content)
-                return "break", consecutive_errors, final_content
-            await asyncio.sleep(1)
-            return "continue", consecutive_errors, None
-
-        if response.finish_reason == "length" and not response.content:
-            consecutive_errors += 1
-            logger.warning("Response truncated to zero content (attempt {})", consecutive_errors)
-            if consecutive_errors >= 2:
-                final_content = (
-                    "My response was too long and got cut off. Try asking a more specific question."
-                )
-                messages[:] = self.context.add_assistant_message(messages, final_content)
-                return "break", consecutive_errors, final_content
-            await asyncio.sleep(1)
-            return "continue", consecutive_errors, None
-
-        return "proceed", consecutive_errors, None
-
-    async def _process_tool_results(
-        self,
-        response: "LLMResponse",
-        messages: list[dict],
-        tools_used: list[str],
-        disabled_tools: set[str],
-        tracker: "ToolCallTracker",
-        _tools_def_cache: list[dict],
-        on_progress: ProgressCallback | None,
-        nudged_for_final: bool,
-    ) -> _ToolBatchResult:
-        """Execute tool calls and process their results.
-
-        Mutates *messages*, *tools_used*, and *disabled_tools* in-place.
-        Returns a ``_ToolBatchResult`` with the scalar state changes.
-        """
-        _args_json: dict[str, str] = {
-            tc.id: json.dumps(tc.arguments, ensure_ascii=False) for tc in response.tool_calls
-        }
-        tool_call_dicts = [
-            {
-                "id": tc.id,
-                "type": "function",
-                "function": {"name": tc.name, "arguments": _args_json[tc.id]},
-            }
-            for tc in response.tool_calls
-        ]
-        # Suppress draft content when tool calls are present; keep as reasoning.
-        reasoning = response.reasoning_content or response.content
-        new_messages = self.context.add_assistant_message(
-            messages,
-            None,
-            tool_call_dicts,
-            reasoning_content=reasoning,
-        )
-        last_tool_call_msg_idx = len(new_messages) - 1
-        messages[:] = new_messages
-
-        # Execute tools (parallel for readonly, sequential for writes)
-        t0_tools = time.monotonic()
-        tool_results = await self.tools.execute_batch(response.tool_calls)
-        tools_elapsed_ms = (time.monotonic() - t0_tools) * 1000
-
-        any_failed = False
-        failed_this_batch: list[tuple[str, FailureClass]] = []
-        tools_to_remove: list[str] = []
-        tool_calls_this_batch = 0
-        for tool_call, result in zip(response.tool_calls, tool_results):
-            tool_calls_this_batch += 1
-            tools_used.append(tool_call.name)
-            args_str = _args_json[tool_call.id]
-            status = "OK" if result.success else "FAIL"
-            bind_trace().info(
-                "tool_exec | {} | {} | {:.0f}ms batch",
-                status,
-                tool_call.name,
-                tools_elapsed_ms,
-            )
-            if tool_call.name not in _ARGS_REDACT_TOOLS:
-                bind_trace().debug("tool_exec args | {}({})", tool_call.name, args_str[:200])
-            if on_progress:
-                await on_progress(
-                    ToolResultEvent(
-                        tool_call_id=tool_call.id,
-                        result=result.to_llm_string(),
-                        tool_name=tool_call.name,
-                    )
-                )
-            messages[:] = self.context.add_tool_result(
-                messages, tool_call.id, tool_call.name, result.to_llm_string()
-            )
-            if not result.success:
-                any_failed = True
-                count, fc = tracker.record_failure(tool_call.name, tool_call.arguments, result)
-                failed_this_batch.append((tool_call.name, fc))
-                remove_now = count >= ToolCallTracker.REMOVE_THRESHOLD or fc.is_permanent
-                if remove_now:
-                    tools_to_remove.append(tool_call.name)
-                    reason = (
-                        f"permanently unavailable ({fc.value})"
-                        if fc.is_permanent
-                        else f"failed {count} times with identical arguments"
-                    )
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": (
-                                f"TOOL REMOVED: `{tool_call.name}` is {reason} "
-                                "and has been disabled. Use a different approach."
-                            ),
-                        }
-                    )
-                elif count >= ToolCallTracker.WARN_THRESHOLD:
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": (
-                                f"STOP: `{tool_call.name}` has failed {count} "
-                                "times with the same arguments and error. Do NOT "
-                                "call it again with the same arguments. Use a "
-                                "different approach or provide your best answer."
-                            ),
-                        }
-                    )
-            else:
-                tracker.record_success(tool_call.name, tool_call.arguments)
-
-        disabled_tools.update(tools_to_remove)
-
-        # Global failure budget: force final answer
-        if tracker.budget_exhausted:
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        f"You have {tracker.total_failures} failed tool calls "
-                        "this turn. Stop calling tools and produce your final "
-                        "answer NOW with whatever information you have."
-                    ),
-                }
-            )
-            nudged_for_final = True
-
-        return _ToolBatchResult(
-            any_failed=any_failed,
-            failed_this_batch=failed_this_batch,
-            nudged_for_final=nudged_for_final,
-            last_tool_call_msg_idx=last_tool_call_msg_idx,
-            tool_calls_this_batch=tool_calls_this_batch,
-        )
-
-    def _evaluate_progress(
-        self,
-        response: "LLMResponse",
-        messages: list[dict],
-        tracker: "ToolCallTracker",
-        _tools_def_cache: list[dict],
-        any_failed: bool,
-        failed_this_batch: list[tuple[str, FailureClass]],
-        has_plan: bool,
-        turn_tool_calls: int,
-        user_text: str,
-        nudged_for_final: bool,
-        iteration: int,
-        previous_advice: "DelegationAction | None",
-    ) -> tuple[bool, "DelegationAction | None", list[dict]]:
-        """Append REFLECT-phase system messages based on the current turn state.
-
-        Mutates *messages* in-place; returns a tuple of:
-        - updated *nudged_for_final* flag
-        - the latest delegation advice action (for escalation tracking)
-        - potentially filtered *_tools_def_cache* (when delegate tools removed)
-        """
-        from nanobot.agent.delegation_advisor import DelegationAction
-
-        had_delegations = any(tc.name in _DELEGATION_TOOL_NAMES for tc in response.tool_calls)
-
-        # --- Delegation advisor (replaces 3 independent triggers) ---
-        delegation_advice = self._delegation_advisor.advise_reflect_phase(
-            role_name=self.role_name,
-            turn_tool_calls=turn_tool_calls,
-            delegation_count=self._dispatcher.delegation_count,
-            max_delegations=self._dispatcher.max_delegations,
-            had_delegations_this_batch=had_delegations,
-            used_sequential_delegate=had_delegations
-            and not any(tc.name == "delegate_parallel" for tc in response.tool_calls),
-            has_parallel_structure=DelegationDispatcher.has_parallel_structure(user_text),
-            any_ungrounded=any(
-                "grounded=False" in (m.get("content") or "")
-                for m in messages[-len(response.tool_calls) :]
-                if m.get("role") == "tool"
-            ),
-            any_failed=any_failed,
-            iteration=iteration,
-            previous_advice=previous_advice,
-        )
-        _last_advice = delegation_advice.action
-
-        # --- Render delegation advice OR fall through to other nudges ---
-        if delegation_advice.action == DelegationAction.HARD_GATE:
-            messages.append(
-                {"role": "system", "content": prompts.get("nudge_delegation_exhausted")}
-            )
-        elif delegation_advice.action == DelegationAction.SYNTHESIZE:
-            nudge = prompts.get("nudge_post_delegation")
-            if delegation_advice.warn_ungrounded:
-                nudge += "\n\n" + prompts.get("nudge_ungrounded_warning")
-            messages.append({"role": "system", "content": nudge})
-        elif delegation_advice.action in (DelegationAction.SOFT_NUDGE, DelegationAction.HARD_NUDGE):
-            if delegation_advice.suggested_mode == "delegate_parallel":
-                messages.append({"role": "system", "content": prompts.get("nudge_use_parallel")})
-            else:
-                messages.append({"role": "system", "content": delegation_advice.reason})
-        elif any_failed:
-            # PRESERVED: failure handling (advisor returns NONE when any_failed=True)
-            _permanent = tracker.permanent_failures
-            _available = [
-                t["function"]["name"]
-                for t in _tools_def_cache
-                if t["function"]["name"] not in _permanent
-            ]
-            messages.append(
-                {
-                    "role": "system",
-                    "content": _build_failure_prompt(
-                        failed_this_batch,
-                        _permanent,
-                        _available,
-                    ),
-                }
-            )
-        elif has_plan and len(response.tool_calls) >= 1:
-            # PRESERVED: progress nudge (not delegation-related)
-            messages.append(
-                {
-                    "role": "system",
-                    "content": prompts.get("progress"),
-                }
-            )
-        elif len(response.tool_calls) >= 3:
-            # PRESERVED: reflect nudge (not delegation-related)
-            messages.append(
-                {
-                    "role": "system",
-                    "content": prompts.get("reflect"),
-                }
-            )
-
-        # Remove delegate tools when advisor says budget is exhausted
-        if delegation_advice.remove_delegate_tools:
-            _tools_def_cache = [
-                t for t in _tools_def_cache if t["function"]["name"] not in _DELEGATION_TOOL_NAMES
-            ]
-
-        return nudged_for_final, _last_advice, _tools_def_cache
 
     async def _run_agent_loop(
         self,
-        initial_messages: list[dict],
+        initial_messages: list[dict[str, Any]],
         on_progress: ProgressCallback | None = None,
-    ) -> tuple[str | None, list[str], list[dict]]:
+    ) -> tuple[str | None, list[str], list[dict[str, Any]]]:
         """Run the Plan-Act-Observe-Reflect agent loop.
 
-        Returns (final_content, tools_used, messages).
+        Delegates to ``TurnOrchestrator.run()`` and unpacks the ``TurnResult``
+        into the legacy 3-tuple format for backward compatibility with any
+        callers that still reference this method directly.
+
+        Returns ``(final_content, tools_used, messages)``.
         """
-        messages = initial_messages
-        self._dispatcher.active_messages = messages
-        self._dispatcher.delegation_count = 0
-        iteration = 0
-        final_content = None
-        tools_used: list[str] = []
-        turn_tool_calls = 0
-        nudged_for_final = False
-        consecutive_errors = 0
-        has_plan = False
-        plan_enforced = False
-        _last_tool_call_msg_idx: int = -1  # index of last assistant msg with tool_calls
-        tracker = ToolCallTracker()
-        # Tools suppressed this turn due to repeated or permanent failures.
-        # Stored separately from the registry so removal is scoped to this turn
-        # only — the registry is never mutated, keeping tools available for
-        # subsequent turns.
-        disabled_tools: set[str] = set()
-        # Cache tools_def between iterations; recomputed only when disabled_tools changes.
-        # Eagerly built here so the first iteration has a valid (non-empty) list.
-        _tools_def_snapshot: frozenset[str] = frozenset()
-        _tools_def_cache: list[dict] = list(self.tools.get_definitions())
-
-        # Reset per-turn token accumulators
-        self._turn_tokens_prompt = 0
-        self._turn_tokens_completion = 0
-        self._turn_llm_calls = 0
-
-        # Reserve ~20% of context window for the model's response
-        context_budget = int(self.config.context_window_tokens * _CONTEXT_RESERVE_RATIO)
-
         # Extract the last user message (used by planning + verification)
         user_text = ""
-        for m in reversed(messages):
+        for m in reversed(initial_messages):
             if m.get("role") == "user":
                 content = m.get("content", "")
                 if isinstance(content, str):
@@ -965,261 +590,23 @@ class AgentLoop:
                     )
                 break
 
-        # --- PLAN phase: inject planning prompt for complex tasks ----------
-        from nanobot.agent.delegation_advisor import DelegationAction
+        state = TurnState(
+            messages=initial_messages,
+            user_text=user_text,
+            tools_def_cache=list(self.tools.get_definitions()),
+        )
 
-        _last_delegation_advice: DelegationAction | None = None
+        # Forward coordinator classification to the orchestrator
+        self._orchestrator._last_classification_result = self._last_classification_result
 
-        if self.config.planning_enabled:
-            if self._needs_planning(user_text):
-                messages.append(
-                    {
-                        "role": "system",
-                        "content": prompts.get("plan"),
-                    }
-                )
-                has_plan = True
-                logger.debug("Planning prompt injected for: {}...", user_text[:60])
-                # Delegation advisor plan-phase: replaces the old
-                # DelegationDispatcher.has_parallel_structure() check.
-                cr = self._last_classification_result
-                plan_advice = self._delegation_advisor.advise_plan_phase(
-                    role_name=self.role_name,
-                    needs_orchestration=cr.needs_orchestration if cr else False,
-                    relevant_roles=cr.relevant_roles if cr else [],
-                    user_text=user_text,
-                    delegate_tools_available=bool(self.tools.get("delegate_parallel")),
-                )
-                if plan_advice.action != DelegationAction.NONE:
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": prompts.get("nudge_parallel_structure"),
-                        }
-                    )
-                    logger.debug("Delegation advisor plan-phase: {}", plan_advice.reason)
+        result = await self._orchestrator.run(state, on_progress)
 
-        _wall_time_limit = self.config.max_session_wall_time_seconds
-        _wall_time_start = time.monotonic()
+        # Sync token counters back to AgentLoop for the processor to read
+        self._turn_tokens_prompt = self._orchestrator._turn_tokens_prompt
+        self._turn_tokens_completion = self._orchestrator._turn_tokens_completion
+        self._turn_llm_calls = self._orchestrator._turn_llm_calls
 
-        while iteration < self.max_iterations:
-            iteration += 1
-
-            # Wall-time guardrail (LAN-193)
-            if _wall_time_limit > 0:
-                elapsed = time.monotonic() - _wall_time_start
-                if elapsed >= _wall_time_limit:
-                    logger.warning(
-                        "Session wall-time limit reached: {:.0f}s >= {}s",
-                        elapsed,
-                        _wall_time_limit,
-                    )
-                    final_content = (
-                        f"Session duration limit reached ({_wall_time_limit}s). "
-                        "Please start a new conversation."
-                    )
-                    break
-
-            # --- Context compression: keep messages within budget ----------
-            # Skip the (expensive) compression pass when well under budget.
-            if estimate_messages_tokens(messages) > int(context_budget * 0.85):
-                summary_model = self.config.summary_model or self.model
-                preserve_n = _dynamic_preserve_recent(messages, _last_tool_call_msg_idx)
-                messages = await summarize_and_compress(
-                    messages,
-                    context_budget,
-                    provider=self.provider,
-                    model=summary_model,
-                    tool_token_threshold=self.config.tool_result_context_tokens,
-                    preserve_recent=preserve_n,
-                )
-
-            # Exclude tools disabled this turn (failure threshold or permanent failure).
-            # Read after removals so the LLM never sees a tool it cannot use.
-            # Recompute only when disabled_tools has changed since last iteration.
-            if frozenset(disabled_tools) != _tools_def_snapshot:
-                _tools_def_cache = [
-                    t
-                    for t in self.tools.get_definitions()
-                    if t["function"]["name"] not in disabled_tools
-                ]
-                _tools_def_snapshot = frozenset(disabled_tools)
-            tools_def = _tools_def_cache
-            active_tools = tools_def if not nudged_for_final else None
-
-            # --- LLM call (streaming when a progress callback exists) ------
-            if on_progress and iteration > 1:
-                # Emit "thinking" status on subsequent iterations (first is implicit from run.start)
-                await on_progress(StatusEvent(status_code="thinking"))
-            response = await self._llm_caller.call(
-                messages,
-                active_tools,
-                on_progress,
-            )
-            # Accumulate token usage from this LLM call
-            self._turn_llm_calls += 1
-            self._turn_tokens_prompt += response.usage.get("prompt_tokens", 0)
-            self._turn_tokens_completion += response.usage.get("completion_tokens", 0)
-
-            # --- Check for LLM-level errors --------------------------------
-            _err_action, consecutive_errors, _err_content = await self._handle_llm_error(
-                response, consecutive_errors, messages, on_progress
-            )
-            if _err_action == "continue":
-                continue
-            if _err_action == "break":
-                final_content = _err_content
-                break
-
-            consecutive_errors = 0
-
-            # --- ACT: execute tool calls -----------------------------------
-            if response.has_tool_calls:
-                # Plan enforcement: if planning was requested but model jumped
-                # straight to tools without producing a plan, nudge it once.
-                # Delegation calls (delegate/delegate_parallel) are exempt
-                # because delegation itself is a form of planning.
-                is_delegation = all(tc.name in _DELEGATION_TOOL_NAMES for tc in response.tool_calls)
-                if (
-                    has_plan
-                    and not plan_enforced
-                    and turn_tool_calls == 0
-                    and not response.content
-                    and not is_delegation
-                ):
-                    plan_enforced = True
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": prompts.get("nudge_plan_enforcement"),
-                        }
-                    )
-                    logger.debug("Plan enforcement: nudging model to produce plan first")
-                    continue
-
-                # Filter out malformed tool calls (empty name or empty arguments)
-                valid_calls = [
-                    tc for tc in response.tool_calls if tc.name and tc.name.strip() and tc.arguments
-                ]
-                skipped = len(response.tool_calls) - len(valid_calls)
-                if skipped:
-                    logger.warning(
-                        "Filtered {} malformed tool call(s) with empty name/arguments",
-                        skipped,
-                    )
-                if not valid_calls:
-                    # All calls were malformed — treat as empty response
-                    if not response.content and turn_tool_calls > 0 and not nudged_for_final:
-                        nudged_for_final = True
-                        messages.append(
-                            {
-                                "role": "system",
-                                "content": prompts.get("nudge_malformed_fallback"),
-                            }
-                        )
-                        continue
-                    final_content = strip_think(response.content)
-                    messages = self.context.add_assistant_message(
-                        messages,
-                        final_content,
-                        reasoning_content=response.reasoning_content,
-                    )
-                    break
-
-                # Replace with filtered list
-                response = LLMResponse(
-                    content=response.content,
-                    tool_calls=valid_calls,
-                    finish_reason=response.finish_reason,
-                    usage=response.usage,
-                    reasoning_content=response.reasoning_content,
-                )
-
-                if on_progress:
-                    # Note: StreamingLLMCaller already routed response.content as
-                    # a status event (Option B) — do NOT re-emit here as text.
-                    await on_progress(StatusEvent(status_code="calling_tool"))
-                    for tc in response.tool_calls:
-                        await on_progress(
-                            ToolCallEvent(
-                                tool_call_id=tc.id,
-                                tool_name=tc.name,
-                                args=tc.arguments,
-                            )
-                        )
-
-                # --- ACT + OBSERVE: execute tools and process results ------
-                batch = await self._process_tool_results(
-                    response,
-                    messages,
-                    tools_used,
-                    disabled_tools,
-                    tracker,
-                    _tools_def_cache,
-                    on_progress,
-                    nudged_for_final,
-                )
-                turn_tool_calls += batch.tool_calls_this_batch
-                nudged_for_final = batch.nudged_for_final
-                _last_tool_call_msg_idx = batch.last_tool_call_msg_idx
-
-                # --- REFLECT: evaluate progress and inject guidance ---------
-                nudged_for_final, _last_delegation_advice, _tools_def_cache = (
-                    self._evaluate_progress(
-                        response,
-                        messages,
-                        tracker,
-                        _tools_def_cache,
-                        batch.any_failed,
-                        batch.failed_this_batch,
-                        has_plan,
-                        turn_tool_calls,
-                        user_text,
-                        nudged_for_final,
-                        iteration,
-                        _last_delegation_advice,
-                    )
-                )
-
-            else:
-                # --- No tool calls: the model is producing a text answer ---
-                if not response.content and turn_tool_calls > 0 and not nudged_for_final:
-                    nudged_for_final = True
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": prompts.get("nudge_final_answer"),
-                        }
-                    )
-                    logger.info(
-                        "Tool results present but no final text; retrying once for final answer."
-                    )
-                    continue
-                final_content = strip_think(response.content)
-                messages = self.context.add_assistant_message(
-                    messages,
-                    final_content,
-                    reasoning_content=response.reasoning_content,
-                )
-                break
-
-        if final_content is None and iteration >= self.max_iterations:
-            logger.warning("Max iterations ({}) reached", self.max_iterations)
-            final_content = (
-                f"I reached the maximum number of tool call iterations ({self.max_iterations}) "
-                "without completing the task. You can try breaking the task into smaller steps."
-            )
-            messages = self.context.add_assistant_message(messages, final_content)
-
-        # --- Verification pass ---------------------------------------------
-        if final_content is not None:
-            final_content, messages = await self._verifier.verify(
-                user_text,
-                final_content,
-                messages,
-            )
-
-        return final_content, tools_used, messages
+        return result.content or None, result.tools_used, result.messages
 
     # ------------------------------------------------------------------
     # Reaction handling (Step 8 — Feedback loop)
@@ -1505,58 +892,17 @@ class AgentLoop:
         self,
         channel: str,
         chat_id: str,
-        base_meta: dict,
+        base_meta: dict[str, Any],
         canonical_builder: CanonicalEventBuilder,
     ) -> ProgressCallback:
-        """Return a ``ProgressCallback`` that publishes structured progress events onto the bus.
-
-        Each call shallow-copies ``base_meta``, merges per-event fields, and
-        attaches the appropriate canonical event from ``canonical_builder``
-        before publishing an ``OutboundMessage`` with ``_progress=True``.
-
-        The returned coroutine captures ``channel``, ``chat_id``, ``base_meta``,
-        and ``canonical_builder`` by value so it remains valid for the full turn
-        even if the caller rebinds its local variables.
-        """
-
-        async def _progress(event: ProgressEvent) -> None:
-            meta = dict(base_meta)  # inherits _progress=True from base_meta
-            match event:
-                case TextChunk(content=content, streaming=streaming):
-                    meta["_streaming"] = streaming
-                    if content:
-                        meta["_canonical"] = canonical_builder.text_flush(content)
-                case ToolCallEvent(tool_call_id=tcid, tool_name=name, args=args):
-                    meta["_tool_hint"] = True  # preserved for ChannelManager gate
-                    meta["_tool_call"] = {"toolCallId": tcid, "toolName": name, "args": args}
-                    meta["_canonical"] = canonical_builder.tool_call(
-                        tool_call_id=tcid, tool_name=name, args=args
-                    )
-                case ToolResultEvent(tool_call_id=tcid, result=result, tool_name=name):
-                    meta["_tool_result"] = {"toolCallId": tcid, "result": result}
-                    meta["_canonical"] = canonical_builder.tool_result(
-                        tool_call_id=tcid, tool_name=name, result=result
-                    )
-                case DelegateStartEvent(delegation_id=did, child_role=role, task_title=title):
-                    meta["_canonical"] = canonical_builder.delegate_start(
-                        delegation_id=did, child_role=role, task_title=title
-                    )
-                case DelegateEndEvent(delegation_id=did, success=success):
-                    meta["_canonical"] = canonical_builder.delegate_end(
-                        delegation_id=did, success=success
-                    )
-                case StatusEvent(status_code=code, label=label):
-                    meta["_canonical"] = canonical_builder.status(code, label=label)
-            await self.bus.publish_outbound(
-                OutboundMessage(
-                    channel=channel,
-                    chat_id=chat_id,
-                    content=event.content if isinstance(event, TextChunk) else "",
-                    metadata=meta,
-                )
-            )
-
-        return _progress
+        """Delegate to the standalone make_bus_progress factory."""
+        return make_bus_progress(
+            bus=self.bus,
+            channel=channel,
+            chat_id=chat_id,
+            base_meta=base_meta,
+            canonical_builder=canonical_builder,
+        )
 
     async def _process_message(
         self,
@@ -1564,298 +910,14 @@ class AgentLoop:
         session_key: str | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> OutboundMessage | None:
-        """Process a single inbound message and return the response."""
-        t0_request = time.monotonic()
+        """Delegate to MessageProcessor.
 
-        # System messages: parse origin from chat_id ("channel:chat_id")
-        if msg.channel == "system":
-            channel, chat_id = (
-                msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
-            )
-            logger.info("Processing system message from {}", msg.sender_id)
-            key = f"{channel}:{chat_id}"
-            session = self.sessions.get_or_create(key)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
-            history = session.get_history(max_messages=self.config.memory_window)
-            skill_names = self.context.skills.detect_relevant_skills(msg.content)
-            messages = await self.context.build_messages(
-                history=history,
-                current_message=msg.content,
-                skill_names=skill_names,
-                channel=channel,
-                chat_id=chat_id,
-            )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
-            self._save_turn(session, all_msgs, 1 + len(history))
-            self.sessions.save(session)
-            return OutboundMessage(
-                channel=channel,
-                chat_id=chat_id,
-                content=final_content or "Background task completed.",
-            )
-
-        preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
-        bind_trace().info(
-            "Processing message from {}:{}: {}",
-            msg.channel,
-            msg.sender_id,
-            preview,
-        )
-
-        key = session_key or msg.session_key
-        session = self.sessions.get_or_create(key)
-
-        # Slash commands
-        cmd = msg.content.strip().lower()
-        if cmd == "/new":
-            lock = self._consolidator.get_lock(session.key)
-            self._consolidating.add(session.key)
-            try:
-                async with lock:
-                    snapshot = session.messages[session.last_consolidated :]
-                    if snapshot:
-                        temp = Session(key=session.key)
-                        temp.messages = list(snapshot)
-                        archived = await self._consolidate_memory(temp, archive_all=True)
-                        if not archived:
-                            return OutboundMessage(
-                                channel=msg.channel,
-                                chat_id=msg.chat_id,
-                                content="Memory archival failed, session not cleared. Please try again.",
-                            )
-            except (RuntimeError, asyncio.TimeoutError):
-                logger.exception("/new archival failed for {}", session.key)
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content="Memory archival failed, session not cleared. Please try again.",
-                )
-            finally:
-                self._consolidating.discard(session.key)
-                self._consolidator.prune_lock(session.key, lock)
-
-            session.clear()
-            self.sessions.save(session)
-            self.sessions.invalidate(session.key)
-            return OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id, content="New session started."
-            )
-        if cmd == "/help":
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands",
-            )
-
-        memory_store = self.context.memory
-
-        # Run both memory pre-checks in a single thread dispatch to avoid
-        # two round-trips through asyncio.to_thread for what are in-memory ops.
-        # handle_user_conflict_reply short-circuits when message is a conflict
-        # resolution; apply_live_user_correction extracts preference/fact edits.
-        _channel = msg.channel
-        _chat_id = msg.chat_id
-        _content = msg.content
-        _enable_cc = self.config.memory_enable_contradiction_check
-
-        def _pre_turn_memory() -> tuple[dict[str, Any], dict[str, Any] | None]:
-            cr = memory_store.conflict_mgr.handle_user_conflict_reply(_content)
-            if cr.get("handled"):
-                return cr, None
-            try:
-                corr = memory_store.profile_mgr.apply_live_user_correction(
-                    _content,
-                    channel=_channel,
-                    chat_id=_chat_id,
-                    enable_contradiction_check=_enable_cc,
-                )
-            except (RuntimeError, KeyError, TypeError):
-                logger.exception("Live correction capture failed")
-                corr = {}
-            return cr, corr
-
-        conflict_reply, correction_result = await asyncio.to_thread(_pre_turn_memory)
-        if conflict_reply.get("handled"):
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=str(conflict_reply.get("message", "")),
-            )
-
-        if correction_result and correction_result.get("question"):
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=str(correction_result.get("question", "")),
-            )
-
-        # Defer conflict questions until after the agent answers the user's message.
-        # We check here and append to the response later instead of blocking.
-        pending_conflict_question = memory_store.conflict_mgr.ask_user_for_conflict(
-            user_message=msg.content,
-        )
-
-        unconsolidated = len(session.messages) - session.last_consolidated
-        if (
-            self.config.memory_enabled
-            and unconsolidated >= self.config.memory_window
-            and session.key not in self._consolidating
-        ):
-            self._consolidating.add(session.key)
-            lock = self._consolidator.get_lock(session.key)
-            _task = asyncio.create_task(self._run_consolidation_task(session, lock))
-            self._consolidation_tasks.add(_task)
-            _task.add_done_callback(self._consolidation_tasks.discard)
-            _task.add_done_callback(
-                lambda t: (
-                    logger.exception("Consolidation task failed")
-                    if not t.cancelled() and t.exception()
-                    else None
-                )
-            )
-
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
-        self._ensure_scratchpad(key)
-        if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool):
-                message_tool.start_turn()
-
-        history = session.get_history(max_messages=self.config.memory_window)
-        verify_before_answer = self._verifier.should_force_verification(msg.content)
-        skill_names = self.context.skills.detect_relevant_skills(msg.content)
-        initial_messages = await self.context.build_messages(
-            history=history,
-            current_message=msg.content,
-            skill_names=skill_names,
-            media=msg.media if msg.media else None,
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            verify_before_answer=verify_before_answer,
-        )
-
-        # Build a canonical event builder scoped to this request.
-        # turn_id is derived from the number of complete turns already in session.
-        _turn_num = len(session.messages) // 2
-        _canonical_message_id = "msg_asst_" + uuid.uuid4().hex[:12]
-        _canonical_builder = CanonicalEventBuilder(
-            run_id=TraceContext.get()["request_id"] or key,
-            session_id=key,
-            turn_id=f"turn_{_turn_num:05d}",
-            actor_id=self.role_name,
-        )
-
-        # Build a base metadata dict once for this turn; per-event fields are
-        # shallow-merged on each call to avoid re-copying msg.metadata each time.
-        _base_meta: dict = dict(msg.metadata or {})
-        _base_meta["_progress"] = True
-
-        _bus_progress = self._make_bus_progress(
-            msg.channel, msg.chat_id, _base_meta, _canonical_builder
-        )
-
-        # Emit run.start + message.start before the agent loop begins.
-        for _start_event in (
-            _canonical_builder.run_start(),
-            _canonical_builder.message_start(_canonical_message_id),
-        ):
-            await self.bus.publish_outbound(
-                OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content="",
-                    metadata={"_progress": True, "_canonical": _start_event},
-                )
-            )
-
-        # Wire the per-turn progress callback into the delegation dispatcher
-        # so delegation lifecycle events surface to the web stream.
-        self._dispatcher.on_progress = _bus_progress
-
-        final_content, tools_used, all_msgs = await self._run_agent_loop(
-            initial_messages,
-            on_progress=(on_progress or _bus_progress) if self.config.streaming_enabled else None,
-        )
-
-        # Clear the per-turn callback to prevent cross-turn leakage.
-        self._dispatcher.on_progress = None
-
-        if final_content is None:
-            final_content = await self._verifier.attempt_recovery(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                all_msgs=all_msgs,
-            )
-
-        if final_content is None:
-            final_content = AnswerVerifier.build_no_answer_explanation(msg.content, all_msgs)
-            # Ensure fallback responses are recorded in the session log.
-            all_msgs = self.context.add_assistant_message(all_msgs, final_content)
-
-        # Annotate the active langfuse span with request metadata + output.
-        # Token counts are intentionally omitted — the authoritative values
-        # are on the child GENERATION observations emitted by litellm's OTEL
-        # callback.  Duplicating them here with our internal streaming counter
-        # creates a confusing discrepancy (the streaming counter under-counts
-        # when the provider applies prompt-caching or tool-token adjustments).
-        update_current_span(
-            output=final_content[:500] if final_content else None,
-            metadata={
-                "channel": msg.channel,
-                "sender": msg.sender_id,
-                "model": self.model,
-                "role": self.role_name,
-                "session_key": key,
-                "llm_calls": str(self._turn_llm_calls),
-            },
-        )
-
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
-
-        # --- Request audit line ---
-        duration_ms = (time.monotonic() - t0_request) * 1000
-        bind_trace().info(
-            "request_complete | {ch}:{cid} | {dur:.0f}ms | model={mdl} | tools={tc} | len={rlen}"
-            " | llm_calls={lc} | prompt_tokens={pt} | completion_tokens={ct}",
-            ch=msg.channel,
-            cid=msg.chat_id,
-            dur=duration_ms,
-            mdl=self.model,
-            tc=len(tools_used),
-            rlen=len(final_content),
-            lc=self._turn_llm_calls,
-            pt=self._turn_tokens_prompt,
-            ct=self._turn_tokens_completion,
-        )
-
-        self._save_turn(session, all_msgs, 1 + len(history))
-        self.sessions.save(session)
-
-        # Append deferred conflict question after answering the user's message.
-        if pending_conflict_question:
-            final_content += "\n\n---\n" + pending_conflict_question
-
-        if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
-                return None
-
-        response_meta = dict(msg.metadata or {})
-        response_meta["usage"] = {
-            "prompt_tokens": self._turn_tokens_prompt,
-            "completion_tokens": self._turn_tokens_completion,
-        }
-        # message.end carries the authoritative usage and signals the end of the
-        # assistant turn. SSE projection treats message.end the same as run.end.
-        response_meta["_canonical"] = _canonical_builder.message_end(
-            _canonical_message_id,
-            input_tokens=self._turn_tokens_prompt,
-            output_tokens=self._turn_tokens_completion,
-        )
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content=final_content,
-            metadata=response_meta,
+        This method is kept on ``AgentLoop`` for backward compatibility with
+        tests and callers that monkey-patch ``_process_message``.  The real
+        implementation lives in ``MessageProcessor._process_message``.
+        """
+        return await self._processor._process_message(
+            msg, session_key=session_key, on_progress=on_progress
         )
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
@@ -1881,7 +943,12 @@ class AgentLoop:
         session.updated_at = datetime.now(timezone.utc)
 
     async def _consolidate_memory(self, session: Session, archive_all: bool = False) -> bool:
-        """Delegate to ConsolidationOrchestrator."""
+        """Delegate to ConsolidationOrchestrator.
+
+        Kept on AgentLoop for backward compatibility with tests that
+        monkey-patch ``loop._consolidate_memory``.  The processor routes
+        through this method via ``_consolidate_memory_ref``.
+        """
         return await self._consolidator.consolidate(
             session,
             self.provider,
@@ -1910,7 +977,6 @@ class AgentLoop:
         await self._connect_mcp()
         self._ensure_coordinator()
         self._last_classification_result = None
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
 
         # Resolve forced role (if any) before entering the trace context so
         # that the role name is included in the trace metadata.
@@ -1939,9 +1005,8 @@ class AgentLoop:
                     "role": self.role_name,
                 },
             ):
-                response = await self._process_message(
-                    msg, session_key=session_key, on_progress=on_progress
+                return await self._processor.process_direct(
+                    content, session_key, channel, chat_id, on_progress, forced_role
                 )
         finally:
             self._role_manager.reset(turn_ctx)
-        return response.content if response else ""
