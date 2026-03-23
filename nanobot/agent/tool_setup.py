@@ -37,16 +37,16 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 
 if TYPE_CHECKING:
+    from nanobot.agent.capability import CapabilityRegistry
     from nanobot.agent.mission import MissionManager
     from nanobot.agent.skills import SkillsLoader
-    from nanobot.agent.tool_executor import ToolExecutor
     from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
     from nanobot.cron.service import CronService
 
 
 def register_default_tools(  # noqa: PLR0913
     *,
-    tools: ToolExecutor,
+    capabilities: CapabilityRegistry,
     role_config: AgentRoleConfig | None,
     workspace: Path,
     restrict_to_workspace: bool,
@@ -65,7 +65,7 @@ def register_default_tools(  # noqa: PLR0913
     """Register the default set of tools, filtered by role config.
 
     This is a pure construction function — no async, no persistent state beyond
-    the ``tools`` registry that is mutated in place.
+    the ``capabilities`` registry that is mutated in place.
     """
     allowed = (
         set(role_config.allowed_tools)
@@ -83,7 +83,7 @@ def register_default_tools(  # noqa: PLR0913
     for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
         tool = cls(workspace=workspace, allowed_dir=allowed_dir)
         if _should_register(tool.name):
-            tools.register(tool)
+            capabilities.register_tool(tool)
 
     spreadsheet_tool = ReadSpreadsheetTool(
         workspace=workspace,
@@ -91,7 +91,7 @@ def register_default_tools(  # noqa: PLR0913
         cache=result_cache,
     )
     if _should_register(spreadsheet_tool.name):
-        tools.register(spreadsheet_tool)
+        capabilities.register_tool(spreadsheet_tool)
 
     # PowerPoint tools
     pptx_read = ReadPptxTool(
@@ -100,7 +100,7 @@ def register_default_tools(  # noqa: PLR0913
         cache=result_cache,
     )
     if _should_register(pptx_read.name):
-        tools.register(pptx_read)
+        capabilities.register_tool(pptx_read)
 
     _pptx_kw: dict[str, Any] = {
         "workspace": workspace,
@@ -111,7 +111,7 @@ def register_default_tools(  # noqa: PLR0913
         _pptx_kw["vision_model"] = vision_model
     pptx_analyze = AnalyzePptxTool(**_pptx_kw)
     if _should_register(pptx_analyze.name):
-        tools.register(pptx_analyze)
+        capabilities.register_tool(pptx_analyze)
 
     exec_tool = ExecTool(
         working_dir=str(workspace),
@@ -120,7 +120,7 @@ def register_default_tools(  # noqa: PLR0913
         shell_mode=shell_mode,
     )
     if _should_register(exec_tool.name):
-        tools.register(exec_tool)
+        capabilities.register_tool(exec_tool)
 
     for extra_tool in (
         WebSearchTool(api_key=brave_api_key),
@@ -129,38 +129,38 @@ def register_default_tools(  # noqa: PLR0913
         FeedbackTool(events_file=workspace / "memory" / "events.jsonl"),
     ):
         if _should_register(extra_tool.name):
-            tools.register(extra_tool)
+            capabilities.register_tool(extra_tool)
 
     # Email checking tool (callback set later by gateway via set_email_fetch)
     email_tool = CheckEmailTool()
     if _should_register(email_tool.name):
-        tools.register(email_tool)
+        capabilities.register_tool(email_tool)
 
     if cron_service:
         cron_tool = CronTool(cron_service)
         if _should_register(cron_tool.name):
-            tools.register(cron_tool)
+            capabilities.register_tool(cron_tool)
 
     # Delegation tools
     if delegation_enabled:
         delegate_tool = DelegateTool()
         if _should_register(delegate_tool.name):
-            tools.register(delegate_tool)
+            capabilities.register_tool(delegate_tool)
         delegate_parallel_tool = DelegateParallelTool()
         if _should_register(delegate_parallel_tool.name):
-            tools.register(delegate_parallel_tool)
+            capabilities.register_tool(delegate_parallel_tool)
         mission_tool = MissionStartTool(manager=missions)
         if _should_register(mission_tool.name):
-            tools.register(mission_tool)
+            capabilities.register_tool(mission_tool)
         mission_status = MissionStatusTool(manager=missions)
         if _should_register(mission_status.name):
-            tools.register(mission_status)
+            capabilities.register_tool(mission_status)
         mission_list = MissionListTool(manager=missions)
         if _should_register(mission_list.name):
-            tools.register(mission_list)
+            capabilities.register_tool(mission_list)
         mission_cancel = MissionCancelTool(manager=missions)
         if _should_register(mission_cancel.name):
-            tools.register(mission_cancel)
+            capabilities.register_tool(mission_cancel)
 
     # Scratchpad tools (scratchpad instance swapped per session in _ensure_scratchpad)
     placeholder_pad = Scratchpad(workspace / "sessions" / "_placeholder")
@@ -169,34 +169,34 @@ def register_default_tools(  # noqa: PLR0913
         ScratchpadReadTool(placeholder_pad),
     ):
         if _should_register(st.name):
-            tools.register(st)
+            capabilities.register_tool(st)
 
     # Skill-provided custom tools (Step 14)
     if skills_enabled:
         for skill_tool in skills_loader.discover_tools():
-            tools.register(skill_tool)
+            capabilities.register_tool(skill_tool)
 
     # Cache retrieval tools
     cache_slice = CacheGetSliceTool(cache=result_cache)
     if _should_register(cache_slice.name):
-        tools.register(cache_slice)
+        capabilities.register_tool(cache_slice)
 
     excel_rows = ExcelGetRowsTool(cache=result_cache)
     if _should_register(excel_rows.name):
-        tools.register(excel_rows)
+        capabilities.register_tool(excel_rows)
 
     excel_find = ExcelFindTool(cache=result_cache)
     if _should_register(excel_find.name):
-        tools.register(excel_find)
+        capabilities.register_tool(excel_find)
 
     pptx_get_slide = PptxGetSlideTool(cache=result_cache)
     if _should_register(pptx_get_slide.name):
-        tools.register(pptx_get_slide)
+        capabilities.register_tool(pptx_get_slide)
 
     query_tool = QueryDataTool(cache=result_cache)
     if _should_register(query_tool.name):
-        tools.register(query_tool)
+        capabilities.register_tool(query_tool)
 
     describe_tool = DescribeDataTool(cache=result_cache)
     if _should_register(describe_tool.name):
-        tools.register(describe_tool)
+        capabilities.register_tool(describe_tool)

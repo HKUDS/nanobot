@@ -220,7 +220,7 @@ def _build_tools(
     )
     if tool_registry is None:
         register_default_tools(
-            tools=tools,
+            capabilities=capabilities,
             role_config=role_config,
             workspace=workspace,
             restrict_to_workspace=config.restrict_to_workspace,
