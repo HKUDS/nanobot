@@ -49,7 +49,7 @@ class CronTool(Tool):
                     "enum": ["add", "list", "remove"],
                     "description": "Action to perform",
                 },
-                "message": {"type": "string", "description": "Reminder message (for add)"},
+                "message": {"type": "string", "description": "Task instruction or reminder text (for add). The agent will execute this as a full task when triggered — e.g. 'Check the weather and report' or 'Remind me to drink water'. You can write any actionable instruction here."},
                 "every_seconds": {
                     "type": "integer",
                     "description": "Interval in seconds (for recurring tasks)",
