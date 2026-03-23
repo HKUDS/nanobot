@@ -997,158 +997,33 @@ def _get_bridge_dir() -> Path:
 
 
 @channels_app.command("login")
-def channels_login():
-    """Link device via QR code."""
-    import shutil
-    import subprocess
-
+def channels_login(
+    channel_name: str = typer.Argument(..., help="Channel name (e.g. weixin, whatsapp)"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force re-authentication even if already logged in"),
+):
+    """Authenticate with a channel via QR code or other interactive login."""
+    from nanobot.channels.registry import discover_all, load_channel_class
     from nanobot.config.loader import load_config
-    from nanobot.config.paths import get_runtime_subdir
 
     config = load_config()
-    bridge_dir = _get_bridge_dir()
+    channel_cfg = getattr(config.channels, channel_name, None) or {}
 
-    console.print(f"{__logo__} Starting bridge...")
-    console.print("Scan the QR code to connect.\n")
-
-    env = {**os.environ}
-    wa_cfg = getattr(config.channels, "whatsapp", None) or {}
-    bridge_token = wa_cfg.get("bridgeToken", "") if isinstance(wa_cfg, dict) else getattr(wa_cfg, "bridge_token", "")
-    if bridge_token:
-        env["BRIDGE_TOKEN"] = bridge_token
-    env["AUTH_DIR"] = str(get_runtime_subdir("whatsapp-auth"))
-
-    npm_path = shutil.which("npm")
-    if not npm_path:
-        console.print("[red]npm not found. Please install Node.js.[/red]")
+    # Validate channel exists
+    all_channels = discover_all()
+    if channel_name not in all_channels:
+        available = ", ".join(all_channels.keys())
+        console.print(f"[red]Unknown channel: {channel_name}[/red]  Available: {available}")
         raise typer.Exit(1)
 
-    try:
-        subprocess.run([npm_path, "start"], cwd=bridge_dir, check=True, env=env)
-    except subprocess.CalledProcessError as e:
-        console.print(f"[red]Bridge failed: {e}[/red]")
+    console.print(f"{__logo__} {all_channels[channel_name].display_name} Login\n")
 
+    channel_cls = load_channel_class(channel_name)
+    channel = channel_cls(channel_cfg, bus=None)
 
-# ============================================================================
-# WeChat (WeXin) Commands
-# ============================================================================
+    success = asyncio.run(channel.login(force=force))
 
-weixin_app = typer.Typer(help="WeChat (微信) account management")
-app.add_typer(weixin_app, name="weixin")
-
-
-@weixin_app.command("login")
-def weixin_login():
-    """Authenticate with personal WeChat via QR code scan."""
-    import json as _json
-
-    from nanobot.config.loader import load_config
-    from nanobot.config.paths import get_runtime_subdir
-
-    config = load_config()
-    weixin_cfg = getattr(config.channels, "weixin", None) or {}
-    base_url = (
-        weixin_cfg.get("baseUrl", "https://ilinkai.weixin.qq.com")
-        if isinstance(weixin_cfg, dict)
-        else getattr(weixin_cfg, "base_url", "https://ilinkai.weixin.qq.com")
-    )
-
-    state_dir = get_runtime_subdir("weixin")
-    account_file = state_dir / "account.json"
-    console.print(f"{__logo__} WeChat QR Code Login\n")
-
-    async def _run_login():
-        import httpx as _httpx
-
-        headers = {
-            "Content-Type": "application/json",
-        }
-
-        async with _httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-            # Step 1: Get QR code
-            console.print("[cyan]Fetching QR code...[/cyan]")
-            resp = await client.get(
-                f"{base_url}/ilink/bot/get_bot_qrcode",
-                params={"bot_type": "3"},
-                headers=headers,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            # qrcode_img_content is the scannable URL; qrcode is the poll ID
-            qrcode_img_content = data.get("qrcode_img_content", "")
-            qrcode_id = data.get("qrcode", "")
-
-            if not qrcode_id:
-                console.print(f"[red]Failed to get QR code: {data}[/red]")
-                return
-
-            scan_url = qrcode_img_content or qrcode_id
-
-            # Print QR code
-            try:
-                import qrcode as qr_lib
-
-                qr = qr_lib.QRCode(border=1)
-                qr.add_data(scan_url)
-                qr.make(fit=True)
-                qr.print_ascii(invert=True)
-            except ImportError:
-                console.print("\n[yellow]Install 'qrcode' for terminal QR display[/yellow]")
-                console.print(f"\nLogin URL: {scan_url}\n")
-
-            console.print("\n[cyan]Scan the QR code with WeChat...[/cyan]")
-
-            # Step 2: Poll for scan (iLink-App-ClientVersion header per login-qr.ts)
-            poll_headers = {**headers, "iLink-App-ClientVersion": "1"}
-            for _ in range(120):  # ~4 minute timeout
-                try:
-                    resp = await client.get(
-                        f"{base_url}/ilink/bot/get_qrcode_status",
-                        params={"qrcode": qrcode_id},
-                        headers=poll_headers,
-                    )
-                    resp.raise_for_status()
-                    status_data = resp.json()
-                except _httpx.TimeoutException:
-                    continue
-
-                status = status_data.get("status", "")
-                if status == "confirmed":
-                    token = status_data.get("bot_token", "")
-                    bot_id = status_data.get("ilink_bot_id", "")
-                    base_url_resp = status_data.get("baseurl", "")
-                    user_id = status_data.get("ilink_user_id", "")
-                    if token:
-                        account = {
-                            "token": token,
-                            "get_updates_buf": "",
-                        }
-                        if base_url_resp:
-                            account["base_url"] = base_url_resp
-                        account_file.write_text(_json.dumps(account, ensure_ascii=False))
-                        console.print("\n[green]✓ WeChat login successful![/green]")
-                        if bot_id:
-                            console.print(f"[dim]Bot ID: {bot_id}[/dim]")
-                        if user_id:
-                            console.print(
-                                f"[dim]User ID: {user_id} (add to allowFrom in config)[/dim]"
-                            )
-                        console.print(f"[dim]Credentials saved to {account_file}[/dim]")
-                        return
-                    else:
-                        console.print("[red]Login confirmed but no token received.[/red]")
-                        return
-                elif status == "scaned":
-                    console.print("[cyan]Scanned! Confirm on your phone...[/cyan]")
-                elif status == "expired":
-                    console.print("[red]QR code expired. Please try again.[/red]")
-                    return
-
-                await asyncio.sleep(2)
-
-            console.print("[red]Login timed out. Please try again.[/red]")
-
-    asyncio.run(_run_login())
+    if not success:
+        raise typer.Exit(1)
 
 
 # ============================================================================

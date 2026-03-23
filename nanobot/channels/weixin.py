@@ -311,6 +311,31 @@ class WeixinChannel(BaseChannel):
     # Channel lifecycle
     # ------------------------------------------------------------------
 
+    async def login(self, force: bool = False) -> bool:
+        """Perform QR code login and save token. Returns True on success."""
+        if force:
+            self._token = ""
+            self._get_updates_buf = ""
+            state_file = self._get_state_dir() / "account.json"
+            if state_file.exists():
+                state_file.unlink()
+        if self._token or self._load_state():
+            return True
+
+        # Initialize HTTP client for the login flow
+        self._client = httpx.AsyncClient(
+            timeout=httpx.Timeout(60, connect=30),
+            follow_redirects=True,
+        )
+        self._running = True  # Enable polling loop in _qr_login()
+        try:
+            return await self._qr_login()
+        finally:
+            self._running = False
+            if self._client:
+                await self._client.aclose()
+                self._client = None
+
     async def start(self) -> None:
         self._running = True
         self._next_poll_timeout_s = self.config.poll_timeout
@@ -323,7 +348,7 @@ class WeixinChannel(BaseChannel):
             self._token = self.config.token
         elif not self._load_state():
             if not await self._qr_login():
-                logger.error("WeChat login failed. Run 'nanobot weixin login' to authenticate.")
+                logger.error("WeChat login failed. Run 'nanobot channels login weixin' to authenticate.")
                 self._running = False
                 return
 

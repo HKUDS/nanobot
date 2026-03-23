@@ -178,6 +178,35 @@ The agent receives the message and processes it. Replies arrive in your `send()`
 | `async stop()` | Set `self._running = False` and clean up. Called when gateway shuts down. |
 | `async send(msg: OutboundMessage)` | Deliver an outbound message to the platform. |
 
+### Interactive Login
+
+If your channel requires interactive authentication (e.g. QR code scan), override `login(force=False)`:
+
+```python
+async def login(self, force: bool = False) -> bool:
+    """
+    Perform channel-specific interactive login.
+
+    Args:
+        force: If True, ignore existing credentials and re-authenticate.
+
+    Returns True if already authenticated or login succeeds.
+    """
+    # For QR-code-based login:
+    # 1. If force, clear saved credentials
+    # 2. Check if already authenticated (load from disk/state)
+    # 3. If not, show QR code and poll for confirmation
+    # 4. Save token on success
+```
+
+Channels that don't need interactive login (e.g. Telegram with bot token, Discord with bot token) inherit the default `login()` which just returns `True`.
+
+Users trigger interactive login via:
+```bash
+nanobot channels login <channel_name>
+nanobot channels login <channel_name> --force  # re-authenticate
+```
+
 ### Provided by Base
 
 | Method / Property | Description |
@@ -188,6 +217,7 @@ The agent receives the message and processes it. Replies arrive in your `send()`
 | `transcribe_audio(file_path)` | Transcribes audio via Groq Whisper (if configured). |
 | `supports_streaming` (property) | `True` when config has `"streaming": true` **and** subclass overrides `send_delta()`. |
 | `is_running` | Returns `self._running`. |
+| `login(force=False)` | Perform interactive login (e.g. QR code scan). Returns `True` if already authenticated or login succeeds. Override in subclasses that support interactive login. |
 
 ### Optional (streaming)
 
