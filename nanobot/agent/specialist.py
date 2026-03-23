@@ -128,7 +128,6 @@ class SpecialistRunner:
 
         self.loader = SpecialistLoader(workspace)
         self.memory = MemoryStore(workspace)
-        self.skills = SkillsLoader(workspace)
 
     async def run(self, name: str, task: str, session_key: str | None = None) -> str:
         """Execute a specialist agent and return its final response."""
@@ -233,8 +232,11 @@ Use it to understand the context of the task you've been delegated.
 
 {history_text}""")
 
-        # Skills summary
-        skills_summary = self.skills.build_skills_summary()
+        # Skills summary (shared workspace skills + specialist's private skills)
+        specialist_skills_dir = self.workspace / "specialists" / spec["name"] / "skills"
+        extra = [specialist_skills_dir] if specialist_skills_dir.exists() else []
+        skills = SkillsLoader(self.workspace, shared_only=True, extra_skills_dirs=extra)
+        skills_summary = skills.build_skills_summary()
         if skills_summary:
             parts.append(f"## Skills\n\nRead SKILL.md with read_file to use a skill.\n\n{skills_summary}")
 

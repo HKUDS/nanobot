@@ -18,10 +18,18 @@ class SkillsLoader:
     specific tools or perform certain tasks.
     """
 
-    def __init__(self, workspace: Path, builtin_skills_dir: Path | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        builtin_skills_dir: Path | None = None,
+        extra_skills_dirs: list[Path] | None = None,
+        shared_only: bool = False,
+    ):
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
+        self.extra_skills_dirs = extra_skills_dirs or []
+        self.shared_only = shared_only
 
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """
@@ -34,22 +42,39 @@ class SkillsLoader:
             List of skill info dicts with 'name', 'path', 'source'.
         """
         skills = []
+        seen_names: set[str] = set()
 
-        # Workspace skills (highest priority)
+        # Extra skills directories (highest priority — e.g. specialist-private)
+        for extra_dir in self.extra_skills_dirs:
+            if extra_dir.exists():
+                for skill_dir in extra_dir.iterdir():
+                    if skill_dir.is_dir():
+                        skill_file = skill_dir / "SKILL.md"
+                        if skill_file.exists() and skill_dir.name not in seen_names:
+                            skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "extra"})
+                            seen_names.add(skill_dir.name)
+
+        # Workspace skills
         if self.workspace_skills.exists():
             for skill_dir in self.workspace_skills.iterdir():
-                if skill_dir.is_dir():
+                if skill_dir.is_dir() and skill_dir.name not in seen_names:
                     skill_file = skill_dir / "SKILL.md"
                     if skill_file.exists():
                         skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "workspace"})
+                        seen_names.add(skill_dir.name)
 
         # Built-in skills
         if self.builtin_skills and self.builtin_skills.exists():
             for skill_dir in self.builtin_skills.iterdir():
-                if skill_dir.is_dir():
+                if skill_dir.is_dir() and skill_dir.name not in seen_names:
                     skill_file = skill_dir / "SKILL.md"
-                    if skill_file.exists() and not any(s["name"] == skill_dir.name for s in skills):
+                    if skill_file.exists():
                         skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "builtin"})
+                        seen_names.add(skill_dir.name)
+
+        # Filter non-shared workspace skills when running for a specialist
+        if self.shared_only:
+            skills = [s for s in skills if s["source"] != "workspace" or self._is_shared(s["name"])]
 
         # Filter by requirements
         if filter_unavailable:
@@ -66,10 +91,19 @@ class SkillsLoader:
         Returns:
             Skill content or None if not found.
         """
-        # Check workspace first
+        # Check extra dirs first (specialist-private skills)
+        for extra_dir in self.extra_skills_dirs:
+            extra_skill = extra_dir / name / "SKILL.md"
+            if extra_skill.exists():
+                return extra_skill.read_text(encoding="utf-8")
+
+        # Check workspace (respecting shared_only filter)
         workspace_skill = self.workspace_skills / name / "SKILL.md"
         if workspace_skill.exists():
-            return workspace_skill.read_text(encoding="utf-8")
+            if self.shared_only and not self._is_shared(name):
+                pass  # skip non-shared workspace skills for specialists
+            else:
+                return workspace_skill.read_text(encoding="utf-8")
 
         # Check built-in
         if self.builtin_skills:
@@ -173,6 +207,22 @@ class SkillsLoader:
             return data.get("nanobot", data.get("openclaw", {})) if isinstance(data, dict) else {}
         except (json.JSONDecodeError, TypeError):
             return {}
+
+    def _is_shared(self, name: str) -> bool:
+        """Check if a workspace skill is shared with specialists.
+
+        A skill is shared unless its frontmatter explicitly sets shared to false,
+        either as a top-level key or inside nanobot metadata JSON.
+        """
+        meta = self.get_skill_metadata(name) or {}
+        # Top-level frontmatter: shared: false
+        if str(meta.get("shared", "")).lower() == "false":
+            return False
+        # Nested nanobot metadata: {"nanobot": {"shared": false}}
+        skill_meta = self._parse_nanobot_metadata(meta.get("metadata", ""))
+        if str(skill_meta.get("shared", "")).lower() == "false":
+            return False
+        return True
 
     def _check_requirements(self, skill_meta: dict) -> bool:
         """Check if skill requirements are met (bins, env vars)."""
