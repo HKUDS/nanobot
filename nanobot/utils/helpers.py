@@ -6,9 +6,10 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import tiktoken
+from loguru import logger
 
 
 def strip_think(text: str) -> str:
@@ -199,6 +200,58 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
         return max(4, len(enc.encode(payload)) + 4)
     except Exception:
         return max(4, len(payload) // 4 + 4)
+
+
+def trim_history_for_budget(
+    messages: list[dict[str, Any]],
+    turn_start_index: int,
+    iteration: int,
+    context_budget_tokens: int,
+    find_legal_start: Callable[[list[dict[str, Any]]], int],
+) -> list[dict[str, Any]]:
+    """Trim old session history to fit within context_budget_tokens.
+
+    Returns the original list unchanged when no trimming is needed.
+    Only trims on iteration >= 2 when context_budget_tokens > 0.
+    Current-turn messages (from turn_start_index onward) are never trimmed.
+    """
+    if context_budget_tokens <= 0 or iteration <= 1:
+        return messages
+    if turn_start_index <= 1:
+        return messages  # no old history to trim
+
+    system = messages[:1]
+    old_history = messages[1:turn_start_index]
+    current_turn = messages[turn_start_index:]
+
+    # Pre-compute token counts to avoid double-estimation
+    token_counts = [estimate_message_tokens(m) for m in old_history]
+    total = sum(token_counts)
+    if total <= context_budget_tokens:
+        return messages  # fits, no trim needed
+
+    # Find cut index (O(n) scan, then single slice)
+    cut = 0
+    removed_tokens = 0
+    while cut < len(old_history) and total > context_budget_tokens:
+        removed_tokens += token_counts[cut]
+        total -= token_counts[cut]
+        cut += 1
+    old_history = old_history[cut:]
+
+    # Fix orphaned tool results after trimming
+    legal_start = find_legal_start(old_history)
+    if legal_start > 0:
+        old_history = old_history[legal_start:]
+
+    removed_count = turn_start_index - 1 - len(old_history)
+    if removed_count > 0:
+        logger.debug(
+            "Context budget: trimmed {} history messages ({} tokens) for iteration {}",
+            removed_count, removed_tokens, iteration,
+        )
+
+    return system + old_history + current_turn
 
 
 def estimate_prompt_tokens_chain(
