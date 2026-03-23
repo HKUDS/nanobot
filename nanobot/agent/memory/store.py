@@ -52,6 +52,7 @@ from .retrieval_planner import RetrievalPlanner
 from .retriever import MemoryRetriever
 from .rollout import RolloutConfig
 from .snapshot import MemorySnapshot
+from .token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -125,6 +126,9 @@ class MemoryStore:
         # Retrieval planner (LAN-207) — intent classification + policy + routing.
         self._planner = RetrievalPlanner()
 
+        # TODO: pass config.memory_section_weights when MemoryStore receives config
+        self._budget_allocator = TokenBudgetAllocator(DEFAULT_SECTION_WEIGHTS)
+
         # Context assembler (LAN-210) — prompt rendering extracted from MemoryStore.
         self._assembler = ContextAssembler(
             profile_mgr=self.profile_mgr,
@@ -136,6 +140,7 @@ class MemoryStore:
             build_graph_context_lines_fn=lambda *a, **kw: self.retriever._build_graph_context_lines(
                 *a, **kw
             ),
+            budget_allocator=self._budget_allocator,
         )
 
         # MemoryMaintenance: reindex, seed, health checks, backend stats.
@@ -333,6 +338,7 @@ class MemoryStore:
             build_graph_context_lines_fn=lambda *a, **kw: self.retriever._build_graph_context_lines(
                 *a, **kw
             ),
+            budget_allocator=getattr(self, "_budget_allocator", None),
         )
         return self._assembler
 

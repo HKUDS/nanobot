@@ -157,6 +157,22 @@ class MissionConfig(Base):
     result_max_chars: int = 4000
 
 
+class MemorySectionWeights(Base):
+    """Per-section token budget weights for one retrieval intent.
+
+    Values are normalised to sum to 1.0 at allocation time — only relative
+    ratios matter. An empty dict means 'use DEFAULT_SECTION_WEIGHTS'.
+    """
+
+    long_term: float = Field(default=0.0, ge=0.0)
+    profile: float = Field(default=0.0, ge=0.0)
+    semantic: float = Field(default=0.0, ge=0.0)
+    episodic: float = Field(default=0.0, ge=0.0)
+    reflection: float = Field(default=0.0, ge=0.0)
+    graph: float = Field(default=0.0, ge=0.0)
+    unresolved: float = Field(default=0.0, ge=0.0)
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -215,6 +231,9 @@ class AgentDefaults(Base):
 
     # Delegation cost guard (LAN-83)
     max_delegation_depth: int = 8  # Max total delegations per turn (0 = unlimited)
+
+    # Memory section token budget weights (keyed by intent name)
+    memory_section_weights: dict[str, MemorySectionWeights] = Field(default_factory=dict)
 
 
 class AgentConfig(Base):
@@ -317,6 +336,9 @@ class AgentConfig(Base):
     # Delegation cost guard (LAN-83)
     max_delegation_depth: int = 8  # Max total delegations per turn (0 = unlimited)
 
+    # Memory section token budget weights (keyed by intent name)
+    memory_section_weights: dict[str, MemorySectionWeights] = Field(default_factory=dict)
+
     @classmethod
     def from_defaults(cls, defaults: "AgentDefaults", **overrides: Any) -> "AgentConfig":
         """Build an ``AgentConfig`` from the ``AgentDefaults`` section of the config file.
@@ -376,6 +398,7 @@ class AgentConfig(Base):
             "max_session_cost_usd": defaults.max_session_cost_usd,
             "max_session_wall_time_seconds": defaults.max_session_wall_time_seconds,
             "max_delegation_depth": defaults.max_delegation_depth,
+            "memory_section_weights": defaults.memory_section_weights,
         }
         data.update(overrides)
         return cls(**data)  # type: ignore[arg-type]

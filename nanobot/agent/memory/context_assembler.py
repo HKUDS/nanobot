@@ -17,6 +17,7 @@ from .helpers import _estimate_tokens, _norm_text, _safe_float, _to_str_list
 from .persistence import MemoryPersistence
 from .profile_io import ProfileStore as ProfileManager
 from .retrieval_planner import RetrievalPlanner
+from .token_budget import TokenBudgetAllocator
 
 # Intents that benefit from scanning recent unresolved events.
 # For all other intents (fact_lookup, chitchat, …) the scan is skipped.
@@ -140,6 +141,7 @@ class ContextAssembler:
         cap_long_term_text_fn: Callable[[str, int, str], str] | None = None,
         profile_section_lines_fn: Callable[[dict[str, Any]], list[str]] | None = None,
         read_profile_fn: Callable[[], dict[str, Any]] | None = None,
+        budget_allocator: TokenBudgetAllocator | None = None,
     ) -> None:
         self._profile_mgr = profile_mgr
         self._retrieve_fn = retrieve_fn
@@ -151,6 +153,7 @@ class ContextAssembler:
         self._cap_long_term_text_fn = cap_long_term_text_fn
         self._profile_section_lines_fn = profile_section_lines_fn
         self._read_profile_fn = read_profile_fn
+        self._budget = budget_allocator
 
     # ------------------------------------------------------------------
     # Public API
@@ -266,7 +269,20 @@ class ContextAssembler:
             "unresolved": self._estimate_tokens("\n".join(raw_unresolved)),
         }
 
-        alloc = self._allocate_section_budgets(budget, intent, section_sizes)
+        if self._budget is not None:
+            _alloc = self._budget.allocate(budget, intent)
+            section_budgets = {
+                "long_term": _alloc.long_term,
+                "profile": _alloc.profile,
+                "semantic": _alloc.semantic,
+                "episodic": _alloc.episodic,
+                "reflection": _alloc.reflection,
+                "graph": _alloc.graph,
+                "unresolved": _alloc.unresolved,
+            }
+        else:
+            section_budgets = self._allocate_section_budgets(budget, intent, section_sizes)
+        alloc = section_budgets
 
         # ── Phase 3: fit each section to its allocated budget ──
 
