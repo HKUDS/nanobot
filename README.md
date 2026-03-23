@@ -833,3 +833,129 @@ nanobot memory outdated       # Show outdated memories
 ```
 
 </details>
+
+## Architecture
+
+Nanobot uses an **async bus-based message routing** architecture where chat channels publish messages to a central bus and agent loops consume them independently. LLM integration is **provider-agnostic** via LiteLLM, so any supported model can be swapped in through configuration alone. A **plugin skill system** lets you drop a `SKILL.md` file (with optional tool code) into `nanobot/skills/` for automatic discovery at startup. The entire framework runs as a **single process** — no microservices, no containers, no orchestrators — making it simple to deploy and debug.
+
+### Project Structure
+
+```
+nanobot/
+├── agent/                          # Core agent engine
+│   ├── loop.py                     # Plan-Act-Observe-Reflect main loop
+│   ├── turn_orchestrator.py        # Turn lifecycle orchestration
+│   ├── message_processor.py        # Message processing pipeline
+│   ├── streaming.py                # Streaming LLM calls
+│   ├── verifier.py                 # Answer verification
+│   ├── consolidation.py            # Memory consolidation orchestration
+│   ├── context.py                  # Prompt assembly + token budgeting
+│   ├── coordinator.py              # Multi-agent intent routing
+│   ├── delegation.py               # Delegation routing + cycle detection
+│   ├── delegation_advisor.py       # Delegation decision advisor
+│   ├── tool_executor.py            # Tool batching (parallel/sequential)
+│   ├── tool_loop.py                # Think-act-observe loop
+│   ├── tool_setup.py               # Tool initialization
+│   ├── registry.py                 # Agent role registry
+│   ├── capability.py               # Unified capability registry
+│   ├── failure.py                  # Failure classification + loop detection
+│   ├── mission.py                  # Background mission manager
+│   ├── scratchpad.py               # Session-scoped artifact sharing
+│   ├── skills.py                   # Skill discovery + loading
+│   ├── observability.py            # Langfuse OTEL tracing
+│   ├── tracing.py                  # Correlation IDs + structured logging
+│   ├── bus_progress.py             # Bus progress reporting
+│   ├── callbacks.py                # Agent callbacks
+│   ├── metrics.py                  # Agent metrics
+│   ├── prompt_loader.py            # Prompt template loading
+│   ├── reaction.py                 # Reaction handling
+│   ├── role_switching.py           # Role switching logic
+│   ├── memory/                     # Memory subsystem
+│   │   ├── store.py                # MemoryStore primary API
+│   │   ├── event.py                # MemoryEvent model
+│   │   ├── extractor.py            # LLM + heuristic event extraction
+│   │   ├── ingester.py             # Memory ingestion pipeline
+│   │   ├── retriever.py            # Memory retrieval engine
+│   │   ├── retrieval.py            # Local keyword search fallback
+│   │   ├── retrieval_planner.py    # Retrieval strategy planning
+│   │   ├── reranker.py             # Cross-encoder re-ranking
+│   │   ├── onnx_reranker.py        # ONNX Runtime re-ranker
+│   │   ├── mem0_adapter.py         # mem0 vector store adapter
+│   │   ├── persistence.py          # File I/O (events.jsonl, MEMORY.md)
+│   │   ├── profile_io.py           # Profile file I/O
+│   │   ├── profile_correction.py   # Profile correction logic
+│   │   ├── consolidation_pipeline.py # Consolidation pipeline
+│   │   ├── context_assembler.py    # Memory context assembly
+│   │   ├── snapshot.py             # Memory snapshots
+│   │   ├── maintenance.py          # Memory maintenance tasks
+│   │   ├── graph.py                # Knowledge graph (networkx)
+│   │   ├── ontology.py             # Ontology management
+│   │   ├── ontology_types.py       # Ontology type definitions
+│   │   ├── ontology_rules.py       # Ontology rules
+│   │   ├── entity_classifier.py    # Entity type classification
+│   │   ├── entity_linker.py        # Entity linking + resolution
+│   │   ├── conflicts.py            # Memory conflict detection
+│   │   ├── helpers.py              # Memory helpers
+│   │   ├── rollout.py              # Feature rollout gates
+│   │   ├── token_budget.py         # Token budget management
+│   │   ├── constants.py            # Constants + tool schemas
+│   │   └── eval.py                 # Memory evaluation
+│   └── tools/                      # Tool implementations
+│       ├── base.py                 # Tool ABC + ToolResult
+│       ├── registry.py             # Tool registry
+│       ├── shell.py                # Shell execution (deny/allow)
+│       ├── filesystem.py           # File read/write/edit/list
+│       ├── web.py                  # WebFetch + WebSearch
+│       ├── mcp.py                  # Model Context Protocol
+│       ├── delegate.py             # Multi-agent delegation
+│       ├── result_cache.py         # Result caching + summarization
+│       ├── email.py                # Email checking
+│       ├── excel.py                # Spreadsheet tools
+│       ├── powerpoint.py           # PowerPoint tools
+│       ├── cron.py                 # Scheduled task tools
+│       ├── feedback.py             # User feedback
+│       ├── message.py              # Outbound messaging
+│       ├── mission.py              # Background mission tools
+│       └── scratchpad.py           # Scratchpad read/write
+├── channels/                       # Chat platforms (Telegram, Discord, Slack, WhatsApp, Email)
+├── bus/                            # Async message bus
+├── providers/                      # LLM providers
+├── session/                        # Conversation sessions
+├── cron/                           # Scheduled task service
+├── heartbeat/                      # Periodic task execution
+├── skills/                         # Built-in skills
+├── config/                         # Pydantic config + loader
+├── cli/                            # Typer CLI
+├── errors.py                       # Error taxonomy
+└── utils/                          # Helpers
+```
+
+## Contribute
+
+PRs welcome!
+
+**Roadmap** — pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls):
+
+- [x] **Long-term memory** — mem0-backed persistent memory with hybrid retrieval
+- [x] **Better reasoning** — Multi-step planning, task decomposition, and self-critique
+- [x] **Self-improvement** — Learn from feedback (emoji reactions + explicit feedback tool)
+- [ ] **Multi-modal** — See and hear (images, voice, video)
+- [ ] **More integrations** — Calendar and more
+
+### Contributors
+
+<a href="https://github.com/HKUDS/nanobot/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=HKUDS/nanobot&max=100&columns=12&updated=20260210" alt="Contributors" />
+</a>
+
+## Star History
+
+<div align="center">
+  <a href="https://star-history.com/#HKUDS/nanobot&Date">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=HKUDS/nanobot&type=Date&theme=dark" />
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=HKUDS/nanobot&type=Date" />
+      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=HKUDS/nanobot&type=Date" style="border-radius: 15px; box-shadow: 0 0 30px rgba(0, 217, 255, 0.3);" />
+    </picture>
+  </a>
+</div>
