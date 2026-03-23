@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
+TYPING_INTERVAL_S = 8
 HELP_TEXT = (
     "nanobot commands:\n"
     "/new - Start a new conversation\n"
@@ -36,10 +37,8 @@ class DiscordConfig(Base):
     enabled: bool = False
     token: str = ""
     allow_from: list[str] = Field(default_factory=list)
-    gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377
     group_policy: Literal["mention", "open"] = "mention"
-    typing_interval_s: int = 8
 
 
 class DiscordBotClient(discord.Client):
@@ -401,7 +400,7 @@ class DiscordChannel(BaseChannel):
             while self._running:
                 try:
                     async with channel.typing():
-                        await asyncio.sleep(self.config.typing_interval_s)
+                        await asyncio.sleep(TYPING_INTERVAL_S)
                 except asyncio.CancelledError:
                     return
                 except Exception as e:
