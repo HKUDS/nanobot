@@ -141,11 +141,33 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
-        return [
+        messages = [
             {"role": "system", "content": self.build_system_prompt(skill_names)},
             *history,
             {"role": current_role, "content": merged},
         ]
+
+        # Coalesce consecutive messages with the same role to prevent LLM errors
+        # (e.g. "Cannot have 2 or more assistant messages at the end of the list")
+        coalesced_messages = []
+        for msg in messages:
+            if coalesced_messages and coalesced_messages[-1]["role"] == msg["role"]:
+                # Merge content
+                prev_content = coalesced_messages[-1]["content"]
+                curr_content = msg["content"]
+                
+                if isinstance(prev_content, str) and isinstance(curr_content, str):
+                    coalesced_messages[-1]["content"] = f"{prev_content}\n\n{curr_content}"
+                elif isinstance(prev_content, list) and isinstance(curr_content, list):
+                    coalesced_messages[-1]["content"] = prev_content + curr_content
+                elif isinstance(prev_content, str) and isinstance(curr_content, list):
+                    coalesced_messages[-1]["content"] = [{"type": "text", "text": prev_content}] + curr_content
+                elif isinstance(prev_content, list) and isinstance(curr_content, str):
+                    coalesced_messages[-1]["content"] = prev_content + [{"type": "text", "text": curr_content}]
+            else:
+                coalesced_messages.append(msg.copy())
+
+        return coalesced_messages
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
         """Build user message content with optional base64-encoded images."""
