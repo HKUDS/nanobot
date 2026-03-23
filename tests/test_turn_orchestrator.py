@@ -19,14 +19,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-# These imports will succeed (already implemented by Task 4)
-from nanobot.agent.loop import TurnState
-
-# These imports will FAIL until Task 6 creates turn_orchestrator.py
-# ModuleNotFoundError: No module named 'nanobot.agent.turn_orchestrator'
-from nanobot.agent.turn_orchestrator import (  # noqa: E402
+from nanobot.agent.turn_orchestrator import (
     TurnOrchestrator,
     TurnResult,
+    TurnState,
 )
 
 # ---------------------------------------------------------------------------
