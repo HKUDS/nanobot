@@ -58,6 +58,8 @@ class _AgentComponents:
     mcp_servers: dict
     brave_api_key: str | None
     exec_config: ExecToolConfig
+    cron_service: CronService | None
+    memory_rollout_overrides: dict
 
     # Subsystems
     memory: MemoryStore
@@ -152,6 +154,8 @@ def __init__(self, *, components: _AgentComponents) -> None:
     self._mcp_servers = components.mcp_servers
     self.brave_api_key = components.brave_api_key
     self.exec_config = components.exec_config
+    self.cron_service = components.cron_service
+    self.memory_rollout_overrides = components.memory_rollout_overrides
 
     # Cached tool references
     self._ctx_message_tool = components.ctx_message_tool
@@ -172,16 +176,24 @@ def __init__(self, *, components: _AgentComponents) -> None:
     self._turn_tokens_prompt = 0
     self._turn_tokens_completion = 0
     self._turn_llm_calls = 0
+
+    # Named seam for future extension (currently empty)
+    self._register_handlers()
 ```
+
+Note: `_injected_tool_registry` is intentionally NOT stored on the AgentLoop instance. It is only used during construction inside `_build_tools()` in the factory. No post-construction code reads this attribute.
 
 ### Wiring note: TurnRoleManager circular reference
 
-`TurnRoleManager.__init__` takes a `_LoopLike` Protocol reference (the AgentLoop). Since the factory constructs the manager before the AgentLoop exists, the factory must:
-1. Create the AgentLoop first (with a placeholder or None for role_manager)
-2. Create TurnRoleManager with the AgentLoop reference
-3. Assign it back: `loop._role_manager = role_manager`
+`TurnRoleManager.__init__` takes a `_LoopLike` Protocol reference (the AgentLoop) and reads `loop.model`, `loop.temperature`, etc. in `apply()`. The factory must use post-construction wiring:
 
-Alternatively, the factory can create TurnRoleManager with a sentinel and wire the loop reference in step 11 (post-construction wiring). The existing `_LoopLike` Protocol makes this safe — only the protocol methods are called, never during construction.
+1. Pack `_AgentComponents` with `role_manager=None` (or a sentinel)
+2. Construct `AgentLoop(components=components)`
+3. Create `TurnRoleManager(loop)` with the real AgentLoop instance
+4. Assign `loop._role_manager = role_manager`
+5. Also update `loop._processor._role_manager = role_manager` since MessageProcessor holds a reference
+
+This is safe because `TurnRoleManager.apply()` is only called during message processing (inside `run()`), never during construction. The `_LoopLike` Protocol guarantees the interface contract.
 
 ### What stays in `loop.py`
 
@@ -207,20 +219,27 @@ All runtime methods remain:
 
 ### Impact on callers
 
-**`cli/commands.py`** — the only production caller of `AgentLoop(...)`:
-- Changes from `AgentLoop(bus, provider, config, ...)` to `build_agent(bus, provider, config, ...)`
-- Same parameters, same return type
+**Production callers** (5 call sites, all in `nanobot/cli/`):
+- `cli/agent.py:190` — `AgentLoop(...)` → `build_agent(...)`
+- `cli/gateway.py:72` and `cli/gateway.py:327` — same change
+- `cli/routing.py:316` — same change
+- `cli/cron.py:199` — same change
+- `cli/_shared.py:189` — same change (if AgentLoop is constructed here)
 
-**Tests** — tests that construct AgentLoop directly:
-- Most tests use `ScriptedProvider` and inject a `tool_registry`. These can use `build_agent()` or construct `_AgentComponents` manually.
-- Tests that patch `AgentLoop.__init__` will need updating — they should patch `build_agent` instead.
-- The backward-compat re-exports in `loop.py` are preserved so existing test imports don't break.
+All use the same parameter signature — the change is mechanical.
+
+**Tests** — tests that construct or patch AgentLoop:
+- Tests using `ScriptedProvider` + injected `tool_registry`: use `build_agent()` or construct `_AgentComponents` manually with mocks
+- `tests/test_commands_gateway_agent.py` (lines ~144, 173, 228) patches `nanobot.agent.loop.AgentLoop` → must patch `build_agent` at the caller's import path instead
+- `tests/test_commands_routing_cron.py` (line ~130) — same pattern
+- The backward-compat re-exports in `loop.py` are preserved so existing test imports for `FailureClass`, `ToolCallTracker`, etc. don't break
 
 ### `__init__.py` exports
 
 Add to `nanobot/agent/__init__.py`:
-- `build_agent` — the factory function
-- `_AgentComponents` — exported with underscore prefix (semi-public, for test construction)
+- `build_agent` — the factory function (added to `__all__`)
+
+`_AgentComponents` is NOT added to `__all__` — it is an internal implementation detail. Tests that need it import directly from `nanobot.agent.agent_factory`. This follows the project convention that `__all__` lists only public exports.
 
 ## Constraints
 
