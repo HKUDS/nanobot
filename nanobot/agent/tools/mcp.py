@@ -1,14 +1,26 @@
 """MCP client: connects to MCP servers and wraps their tools as native nanobot tools."""
 
 import asyncio
+import base64
+import os
+import tempfile
 from contextlib import AsyncExitStack
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
+
+_MIME_TO_EXT = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "image/bmp": ".bmp",
+    "image/svg+xml": ".svg",
+}
 
 
 def _extract_nullable_branch(options: Any) -> tuple[dict[str, Any], bool] | None:
@@ -57,9 +69,7 @@ def _normalize_schema_for_openai(schema: Any) -> dict[str, Any]:
 
     if "properties" in normalized and isinstance(normalized["properties"], dict):
         normalized["properties"] = {
-            name: _normalize_schema_for_openai(prop)
-            if isinstance(prop, dict)
-            else prop
+            name: _normalize_schema_for_openai(prop) if isinstance(prop, dict) else prop
             for name, prop in normalized["properties"].items()
         }
 
@@ -76,6 +86,15 @@ def _normalize_schema_for_openai(schema: Any) -> dict[str, Any]:
 
 class MCPToolWrapper(Tool):
     """Wraps a single MCP server tool as a nanobot Tool."""
+
+    _pending_media: ClassVar[list[str]] = []
+
+    @classmethod
+    def collect_pending_media(cls) -> list[str]:
+        """Collect and clear any image files saved during tool execution."""
+        media = cls._pending_media[:]
+        cls._pending_media.clear()
+        return media
 
     def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30):
         self._session = session
@@ -130,9 +149,28 @@ class MCPToolWrapper(Tool):
         for block in result.content:
             if isinstance(block, types.TextContent):
                 parts.append(block.text)
+            elif isinstance(block, types.ImageContent):
+                saved = self._save_image(block.data, block.mimeType)
+                if saved:
+                    MCPToolWrapper._pending_media.append(saved)
+                    parts.append(f"[Image: {os.path.basename(saved)}]")
             else:
                 parts.append(str(block))
         return "\n".join(parts) or "(no output)"
+
+    @staticmethod
+    def _save_image(data_b64: str, mime_type: str) -> str | None:
+        ext = _MIME_TO_EXT.get(mime_type, ".png")
+        try:
+            raw = base64.b64decode(data_b64)
+            fd, path = tempfile.mkstemp(suffix=ext, prefix="mcp_img_")
+            with os.fdopen(fd, "wb") as f:
+                f.write(raw)
+            logger.debug("MCP image saved: {} ({} bytes)", path, len(raw))
+            return path
+        except Exception as e:
+            logger.error("Failed to save MCP image: {}", e)
+            return None
 
 
 async def connect_mcp_servers(
