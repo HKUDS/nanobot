@@ -28,11 +28,13 @@ from .keyword_search import _local_retrieve, _topic_fallback_retrieve
 from .retrieval_planner import RetrievalPlan, RetrievalPlanner
 
 if TYPE_CHECKING:
+    from .embedder import Embedder
     from .extractor import MemoryExtractor
     from .graph import KnowledgeGraph
     from .mem0_adapter import _Mem0Adapter
     from .profile_io import ProfileStore as ProfileManager
     from .reranker import Reranker
+    from .unified_db import UnifiedMemoryDB
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +91,8 @@ class MemoryRetriever:
         rollout: dict[str, Any],  # live rollout dict reference
         read_events_fn: Callable[..., list[dict[str, Any]]],
         extractor: MemoryExtractor | None = None,
+        db: UnifiedMemoryDB | None = None,
+        embedder: Embedder | None = None,
     ) -> None:
         self._mem0 = mem0
         self._graph = graph
@@ -98,6 +102,8 @@ class MemoryRetriever:
         self._rollout = rollout
         self._read_events_fn = read_events_fn
         self._extractor = extractor
+        self._db = db
+        self._embedder = embedder
         self._graph_cache: dict[frozenset[str], set[str]] = {}
 
     # -- Constants re-used from MemoryStore -----------------------------------
@@ -127,6 +133,15 @@ class MemoryRetriever:
     ) -> list[dict[str, Any]]:
         self._graph_cache = {}  # reset per-request
         t0 = time.monotonic()
+
+        # Unified path: vector + FTS5 + RRF when db and embedder are injected
+        if self._db is not None and self._embedder is not None:
+            return self._retrieve_unified(
+                query,
+                top_k=top_k,
+                recency_half_life_days=recency_half_life_days,
+                t0=t0,
+            )
 
         if not self._mem0.enabled:
             return self._retrieve_bm25_path(
@@ -267,6 +282,126 @@ class MemoryRetriever:
             (time.monotonic() - t0) * 1000,
         )
         return final
+
+    # ------------------------------------------------------------------
+    # Unified path (vector + FTS5 + RRF)
+    # ------------------------------------------------------------------
+
+    def _retrieve_unified(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        recency_half_life_days: float | None,
+        t0: float,
+    ) -> list[dict[str, Any]]:
+        """Single fused retrieval: vector + FTS5 + RRF.
+
+        Used when ``UnifiedMemoryDB`` and ``Embedder`` are injected.  Runs
+        embedding and dual-source search (vector KNN + FTS5), fuses via
+        Reciprocal Rank Fusion, then applies the standard scoring pipeline.
+        """
+        import asyncio
+
+        assert self._db is not None  # noqa: S101 — guarded by caller
+        assert self._embedder is not None  # noqa: S101
+
+        plan = self._planner.plan(query)
+        policy = plan.policy
+        candidate_k = max(1, min(top_k * int(policy.get("candidate_multiplier", 3)), 60))
+
+        # 1. Embed query (async → sync bridge)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None and loop.is_running():
+            # Already inside an event loop — use a helper thread
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                query_vec = pool.submit(asyncio.run, self._embedder.embed(query)).result()
+        else:
+            query_vec = asyncio.run(self._embedder.embed(query))
+
+        # 2. Dual source — DB methods are synchronous
+        vec_results = self._db.search_vector(query_vec, candidate_k)
+        fts_results = self._db.search_fts(query, candidate_k)
+
+        # 3. Fuse via RRF
+        candidates = self._fuse_results(vec_results, fts_results, vector_weight=0.7)
+
+        if not candidates:
+            bind_trace().debug(
+                "Memory retrieve source=unified results=0 duration_ms={:.0f}",
+                (time.monotonic() - t0) * 1000,
+            )
+            return []
+
+        # 4. Enrich metadata
+        self._enrich_item_metadata(candidates)
+
+        # 5. Filter
+        filtered, _filter_counts = self._filter_items(candidates, plan)
+
+        # 6. Score
+        profile_data = self._load_profile_scoring_data()
+        graph_entities = self._collect_graph_entity_names(query, self._read_events_fn())
+        scored = self._score_items(
+            filtered,
+            plan,
+            profile_data,
+            graph_entities,
+            use_recency=True,
+            router_enabled=True,
+            type_separation_enabled=True,
+        )
+
+        # 7. Rerank
+        scored = self._rerank_items(query, scored)
+
+        # 8. Sort + truncate
+        scored.sort(key=lambda x: x.get("score", 0.0), reverse=True)
+        results = scored[:top_k]
+
+        bind_trace().debug(
+            "Memory retrieve source=unified results={} duration_ms={:.0f}",
+            len(results),
+            (time.monotonic() - t0) * 1000,
+        )
+        return results
+
+    @staticmethod
+    def _fuse_results(
+        vec_results: list[dict[str, Any]],
+        fts_results: list[dict[str, Any]],
+        vector_weight: float = 0.7,
+    ) -> list[dict[str, Any]]:
+        """Reciprocal Rank Fusion of vector and FTS5 results."""
+        k = 60  # standard RRF constant
+        scores: dict[str, float] = {}
+        items: dict[str, dict[str, Any]] = {}
+
+        for rank, item in enumerate(vec_results):
+            eid = str(item.get("id", ""))
+            scores[eid] = scores.get(eid, 0.0) + vector_weight / (k + rank)
+            items[eid] = item
+
+        for rank, item in enumerate(fts_results):
+            eid = str(item.get("id", ""))
+            scores[eid] = scores.get(eid, 0.0) + (1 - vector_weight) / (k + rank)
+            if eid not in items:
+                items[eid] = item
+
+        # Sort by fused score descending
+        ranked = sorted(scores.keys(), key=lambda eid: scores[eid], reverse=True)
+        result: list[dict[str, Any]] = []
+        for eid in ranked:
+            entry = dict(items[eid])
+            entry["_rrf_score"] = scores[eid]
+            result.append(entry)
+        return result
 
     def _run_mem0_pipeline(
         self,

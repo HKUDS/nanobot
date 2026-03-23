@@ -595,6 +595,141 @@ class TestRerankItemsDisabled:
         assert result is items
 
 
+# ======================================================================
+# Reciprocal Rank Fusion tests
+# ======================================================================
+
+
+class TestRRFFusion:
+    """Tests for Reciprocal Rank Fusion."""
+
+    def test_fuse_combines_results(self) -> None:
+        vec = [{"id": "a", "summary": "alpha"}, {"id": "b", "summary": "beta"}]
+        fts = [{"id": "b", "summary": "beta"}, {"id": "c", "summary": "gamma"}]
+        fused = MemoryRetriever._fuse_results(vec, fts, vector_weight=0.7)
+        ids = [r["id"] for r in fused]
+        assert "a" in ids
+        assert "b" in ids
+        assert "c" in ids
+        # b appears in both — should have highest score
+        assert ids[0] == "b"
+
+    def test_fuse_empty_inputs(self) -> None:
+        fused = MemoryRetriever._fuse_results([], [], vector_weight=0.7)
+        assert fused == []
+
+    def test_fuse_vector_only(self) -> None:
+        vec = [{"id": "a", "summary": "alpha"}]
+        fused = MemoryRetriever._fuse_results(vec, [], vector_weight=0.7)
+        assert len(fused) == 1
+        assert fused[0]["id"] == "a"
+
+    def test_fuse_fts_only(self) -> None:
+        fts = [{"id": "x", "summary": "xray"}]
+        fused = MemoryRetriever._fuse_results([], fts, vector_weight=0.7)
+        assert len(fused) == 1
+        assert fused[0]["id"] == "x"
+
+    def test_fuse_preserves_rrf_score(self) -> None:
+        vec = [{"id": "a", "summary": "alpha"}]
+        fts = [{"id": "a", "summary": "alpha"}]
+        fused = MemoryRetriever._fuse_results(vec, fts, vector_weight=0.7)
+        assert "_rrf_score" in fused[0]
+        assert fused[0]["_rrf_score"] > 0
+
+    def test_fuse_score_ordering(self) -> None:
+        """Items appearing in both lists should rank above single-list items."""
+        vec = [{"id": "a", "summary": "a"}, {"id": "b", "summary": "b"}]
+        fts = [{"id": "c", "summary": "c"}, {"id": "a", "summary": "a"}]
+        fused = MemoryRetriever._fuse_results(vec, fts, vector_weight=0.7)
+        ids = [r["id"] for r in fused]
+        # "a" is in both lists so should be first
+        assert ids[0] == "a"
+
+    def test_fuse_vector_weight_respected(self) -> None:
+        """Higher vector_weight means vector-only items score above FTS-only."""
+        vec = [{"id": "v", "summary": "vec"}]
+        fts = [{"id": "f", "summary": "fts"}]
+        fused = MemoryRetriever._fuse_results(vec, fts, vector_weight=0.9)
+        # v gets 0.9/60, f gets 0.1/60 — v should be first
+        assert fused[0]["id"] == "v"
+        assert fused[0]["_rrf_score"] > fused[1]["_rrf_score"]
+
+
+class TestUnifiedRetrievePath:
+    """Tests for the unified retrieval path (db + embedder injected)."""
+
+    def test_unified_path_dispatched_when_db_and_embedder_set(self) -> None:
+        """When db and embedder are provided, retrieve uses unified path."""
+        retriever = _make_retriever()
+
+        mock_db = MagicMock()
+        mock_db.search_vector = MagicMock(
+            return_value=[
+                {
+                    "id": "v1",
+                    "type": "fact",
+                    "summary": "vector hit",
+                    "timestamp": "2025-01-01T00:00:00Z",
+                    "entities": [],
+                    "status": "active",
+                },
+            ]
+        )
+        mock_db.search_fts = MagicMock(
+            return_value=[
+                {
+                    "id": "f1",
+                    "type": "fact",
+                    "summary": "fts hit",
+                    "timestamp": "2025-01-01T00:00:00Z",
+                    "entities": [],
+                    "status": "active",
+                },
+            ]
+        )
+
+        mock_embedder = MagicMock()
+
+        async def _fake_embed(text: str) -> list[float]:
+            return [0.1, 0.2, 0.3]
+
+        mock_embedder.embed = _fake_embed
+
+        retriever._db = mock_db
+        retriever._embedder = mock_embedder
+
+        results = retriever.retrieve("test query", top_k=5)
+        mock_db.search_vector.assert_called_once()
+        mock_db.search_fts.assert_called_once()
+        assert len(results) >= 1
+
+    def test_unified_path_skipped_when_db_is_none(self) -> None:
+        """Without db, falls through to mem0/BM25 path."""
+        retriever = _make_retriever()
+        retriever._db = None
+        retriever._embedder = MagicMock()
+        # Should fall through to BM25 path (mem0 disabled by default)
+        with patch(
+            "nanobot.agent.memory.retriever._local_retrieve",
+            return_value=[],
+        ):
+            results = retriever.retrieve("test", top_k=3)
+        assert results == []
+
+    def test_unified_path_skipped_when_embedder_is_none(self) -> None:
+        """Without embedder, falls through to mem0/BM25 path."""
+        retriever = _make_retriever()
+        retriever._db = MagicMock()
+        retriever._embedder = None
+        with patch(
+            "nanobot.agent.memory.retriever._local_retrieve",
+            return_value=[],
+        ):
+            results = retriever.retrieve("test", top_k=3)
+        assert results == []
+
+
 class TestGraphEntityCache:
     """Graph entity name cache is reset per retrieve() call."""
 
