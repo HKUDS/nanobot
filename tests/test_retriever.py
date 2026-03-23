@@ -593,3 +593,62 @@ class TestRerankItemsDisabled:
         result = retriever._rerank_items("test query", items)
         retriever._reranker.rerank.assert_not_called()
         assert result is items
+
+
+class TestGraphEntityCache:
+    """Graph entity name cache is reset per retrieve() call."""
+
+    def _make_retriever_with_graph(self):
+        from unittest.mock import MagicMock
+
+        from nanobot.agent.memory.retriever import MemoryRetriever
+
+        mem0 = MagicMock()
+        graph = MagicMock()
+        graph.enabled = True
+        graph.get_related_entity_names_sync.return_value = {"alice", "bob"}
+        planner = MagicMock()
+        reranker = MagicMock()
+        reranker.rerank.side_effect = lambda items, **kw: items
+        profile_mgr = MagicMock()
+        profile_mgr.read_profile.return_value = {}
+        extractor = MagicMock()
+        extractor._extract_entities.return_value = ["coffee"]
+
+        retriever = MemoryRetriever(
+            mem0=mem0,
+            graph=graph,
+            planner=planner,
+            reranker=reranker,
+            profile_mgr=profile_mgr,
+            rollout={"enabled": True},
+            read_events_fn=lambda **kw: [],
+            extractor=extractor,
+        )
+        return retriever
+
+    def test_graph_cache_initialized_in_init(self):
+        r = self._make_retriever_with_graph()
+        assert hasattr(r, "_graph_cache")
+        assert r._graph_cache == {}
+
+    def test_same_entities_use_cache_within_retrieve(self):
+        r = self._make_retriever_with_graph()
+        # Directly call _collect_graph_entity_names twice with same query
+        r._graph_cache = {}  # ensure clean state
+        r._collect_graph_entity_names("coffee query", [])
+        r._collect_graph_entity_names("coffee query", [])
+        # get_related_entity_names_sync should be called only once
+        assert r._graph.get_related_entity_names_sync.call_count == 1
+
+    def test_cache_reset_triggers_fresh_traversal(self):
+        r = self._make_retriever_with_graph()
+        # First call populates the cache
+        r._collect_graph_entity_names("coffee query", [])
+        assert len(r._graph_cache) > 0, "cache should be populated after first call"
+        # Simulate retrieve() resetting the cache at the start of a new request
+        r._graph_cache = {}
+        # Second call after reset should trigger a fresh graph traversal
+        r._collect_graph_entity_names("coffee query", [])
+        # get_related_entity_names_sync called twice: once before reset, once after
+        assert r._graph.get_related_entity_names_sync.call_count == 2

@@ -98,6 +98,7 @@ class MemoryRetriever:
         self._rollout = rollout
         self._read_events_fn = read_events_fn
         self._extractor = extractor
+        self._graph_cache: dict[frozenset[str], set[str]] = {}
 
     # -- Constants re-used from MemoryStore -----------------------------------
 
@@ -124,6 +125,7 @@ class MemoryRetriever:
         recency_half_life_days: float | None = None,
         embedding_provider: str | None = None,
     ) -> list[dict[str, Any]]:
+        self._graph_cache = {}  # reset per-request
         t0 = time.monotonic()
 
         if not self._mem0.enabled:
@@ -971,6 +973,10 @@ class MemoryRetriever:
         if not query_entities:
             return set()
 
+        cache_key = frozenset(query_entities)
+        if cache_key in self._graph_cache:
+            return self._graph_cache[cache_key]
+
         graph_entity_names: set[str] = set()
         # Collect from event triples
         for evt in events:
@@ -986,8 +992,9 @@ class MemoryRetriever:
             query_entities,
             depth=2,
         )
-        graph_entity_names |= graph_related
-        return graph_entity_names
+        result = graph_entity_names | graph_related
+        self._graph_cache[cache_key] = result
+        return result
 
     # ------------------------------------------------------------------
     # Query entity extraction via entity-index lookup
