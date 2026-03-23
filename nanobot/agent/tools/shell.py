@@ -106,10 +106,7 @@ class ExecTool(Tool):
                 )
             except asyncio.TimeoutError:
                 process.kill()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    pass
+                await process.wait()
                 return f"Error: Command timed out after {effective_timeout} seconds"
 
             output_parts = []
