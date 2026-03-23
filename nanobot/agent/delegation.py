@@ -31,23 +31,13 @@ from nanobot.agent.callbacks import (
     ProgressCallback,
 )
 from nanobot.agent.delegation_contract import (
-    _SCRATCHPAD_INJECTION_LIMIT,  # noqa: F401 — backward-compat re-export
     _cap_scratchpad_for_injection,
-    build_execution_context,
-    build_parallel_work_summary,
-    extract_plan_text,
-    extract_user_request,
-    gather_recent_tool_results,
+    build_delegation_contract,
 )
 from nanobot.agent.observability import span as langfuse_span
 from nanobot.agent.prompt_loader import prompts
-from nanobot.agent.task_types import (
-    TASK_TYPES,  # noqa: F401 — backward-compat re-export
-    classify_task_type,
-    has_parallel_structure,
-)
+from nanobot.agent.task_types import classify_task_type
 from nanobot.agent.tool_loop import run_tool_loop
-from nanobot.agent.tools.base import ToolResult  # noqa: F401 — re-export for tests
 from nanobot.agent.tools.delegate import (
     DelegateParallelTool,
     DelegateTool,
@@ -286,153 +276,6 @@ class DelegationDispatcher:
         return list(self.routing_trace)
 
     # ------------------------------------------------------------------
-    # Context helpers
-    # ------------------------------------------------------------------
-
-    def gather_recent_tool_results(self, max_results: int = 15, max_chars: int = 8000) -> str:
-        """Extract recent tool results from the current turn only.
-
-        Delegates to :func:`delegation_contract.gather_recent_tool_results`.
-        """
-        if not self.active_messages:
-            return ""
-        return gather_recent_tool_results(
-            list(self.active_messages), max_results=max_results, max_chars=max_chars
-        )
-
-    def extract_plan_text(self) -> str:
-        """Pull the plan from active_messages if planning was triggered.
-
-        Delegates to :func:`delegation_contract.extract_plan_text`.
-        """
-        if not self.active_messages:
-            return ""
-        return extract_plan_text(list(self.active_messages))
-
-    def extract_user_request(self) -> str:
-        """Pull the original user message from active_messages.
-
-        Delegates to :func:`delegation_contract.extract_user_request`.
-        """
-        if not self.active_messages:
-            return ""
-        return extract_user_request(list(self.active_messages))
-
-    def build_execution_context(self, task_type: str) -> str:
-        """Assemble project knowledge with tier-based stratification.
-
-        Delegates to :func:`delegation_contract.build_execution_context`.
-        """
-        return build_execution_context(self.workspace, task_type)
-
-    def build_parallel_work_summary(self, role: str) -> str:
-        """Build a brief summary of what other agents are doing.
-
-        Delegates to :func:`delegation_contract.build_parallel_work_summary`.
-        """
-        return build_parallel_work_summary(self.scratchpad, role)
-
-    # ------------------------------------------------------------------
-    # Task classification
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def classify_task_type(role: str, task: str) -> str:
-        """Classify a delegation task into a task type from the taxonomy.
-
-        Delegates to :func:`task_types.classify_task_type`.
-        """
-        return classify_task_type(role, task)
-
-    @staticmethod
-    def has_parallel_structure(text: str) -> bool:
-        """Detect enumerated independent subtasks in the user message.
-
-        Delegates to :func:`task_types.has_parallel_structure`.
-        """
-        return has_parallel_structure(text)
-
-    # ------------------------------------------------------------------
-    # Delegation contract
-    # ------------------------------------------------------------------
-
-    def build_delegation_contract(
-        self,
-        role: str,
-        task: str,
-        context: str | None,
-        task_type: str,
-    ) -> tuple[str, str]:
-        """Build a typed delegation contract.
-
-        Returns ``(user_content, output_schema_instruction)``.
-
-        Routes through instance wrapper methods (``extract_user_request``,
-        ``extract_plan_text``, ``build_execution_context``,
-        ``build_parallel_work_summary``, ``gather_recent_tool_results``)
-        so that subclasses or test monkey-patches can override individual
-        helpers.
-        """
-        tt = TASK_TYPES.get(task_type, TASK_TYPES["general"])
-        sections: list[str] = []
-
-        # --- Tier A: always present ---
-        user_request = self.extract_user_request()
-        if user_request:
-            sections.append(f"## Original User Request\n{user_request}")
-        sections.append(f"## Your Mission\n{task}")
-        if context:
-            sections.append(f"### Additional Context\n{context}")
-        sections.append(f"## Project Root\n`{self.workspace.name}`")
-
-        non_goals: list[str] = []
-        avoid = tt.get("avoid_first", [])
-        if avoid:
-            non_goals.append(f"Do not start with: {', '.join(avoid)}")
-        parallel = self.build_parallel_work_summary(role)
-        if parallel:
-            sections.append(f"## Other Agents' Work (do not duplicate)\n{parallel}")
-            non_goals.append("Do not duplicate work already done by other agents.")
-        if non_goals:
-            sections.append("## Non-Goals\n" + "\n".join(f"- {g}" for g in non_goals))
-
-        prefer = tt.get("prefer", [])
-        tool_lines: list[str] = []
-        if prefer:
-            tool_lines.append(f"Preferred tools: {', '.join(prefer)}")
-        if avoid:
-            tool_lines.append(
-                f"Avoid using first (use only if preferred tools insufficient): {', '.join(avoid)}"
-            )
-        if tool_lines:
-            sections.append("## Tool Guidance\n" + "\n".join(tool_lines))
-
-        completion = tt.get("completion", "")
-        if completion:
-            sections.append(f"## Completion Criteria\n{completion}")
-        anti_h = tt.get("anti_hallucination", "")
-        if anti_h:
-            sections.append(f"## Evidence Rules\n{anti_h}")
-
-        # --- Tier B: when available ---
-        plan_text = self.extract_plan_text()
-        if plan_text:
-            sections.append(f"## Overall Plan (for context)\n{plan_text}")
-        # Skip workspace I/O for synthesis-only tasks where context is unused (LAN-126).
-        if task_type != "report_writing":
-            execution_ctx = self.build_execution_context(task_type)
-            if execution_ctx:
-                sections.append(f"## Project Context\n{execution_ctx}")
-        parent_findings = self.gather_recent_tool_results()
-        if parent_findings:
-            sections.append(f"## Prior Results\n{parent_findings}")
-
-        evidence_type = tt.get("evidence", "tool output excerpts")
-        output_schema = "\n\n" + prompts.render("delegation_schema", evidence_type=evidence_type)
-
-        return "\n\n".join(sections), output_schema
-
-    # ------------------------------------------------------------------
     # Dispatch entry point
     # ------------------------------------------------------------------
 
@@ -585,7 +428,7 @@ class DelegationDispatcher:
 
         Returns ``(summary, tools_used)``.
         """
-        task_type = self.classify_task_type(role.name, task)
+        task_type = classify_task_type(role.name, task)
         logger.debug("Delegation task type: {} (role={})", task_type, role.name)
 
         # Build isolated tool set.
@@ -635,11 +478,14 @@ class DelegationDispatcher:
                 tools.register(tool)
 
         # Build delegation contract
-        user_content, output_schema = self.build_delegation_contract(
+        user_content, output_schema = build_delegation_contract(
             role=role.name,
             task=task,
             context=context,
             task_type=task_type,
+            workspace=self.workspace,
+            active_messages=list(self.active_messages) if self.active_messages else [],
+            scratchpad=self.scratchpad,
         )
 
         # Inject scratchpad for all delegated agents so prior findings are visible.
