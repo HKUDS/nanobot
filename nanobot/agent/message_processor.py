@@ -15,12 +15,11 @@ Module boundary: this module must **never** import from ``nanobot.channels.*``.
 from __future__ import annotations
 
 import asyncio
-import inspect
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
@@ -44,18 +43,6 @@ if TYPE_CHECKING:
     from nanobot.agent.scratchpad import Scratchpad
     from nanobot.agent.tool_executor import ToolExecutor
     from nanobot.providers.base import LLMProvider
-
-
-async def _maybe_await(result: Any) -> Any:
-    """Await coroutines; pass through plain values.
-
-    This allows ``MessageProcessor`` to work with both real async collaborators
-    (which return coroutines) and ``MagicMock`` test doubles (which return plain
-    values).  ``inspect.isawaitable`` covers coroutines, tasks, and futures.
-    """
-    if inspect.isawaitable(result):
-        return await result
-    return result
 
 
 class _LegacyOrchestrator:
@@ -144,6 +131,9 @@ class MessageProcessor:
         # take effect at call time (the attribute is resolved late).
         self._span_module: Any | None = None
 
+        # Contacts provider callback (forwarded from AgentLoop.set_contacts_provider)
+        self._contacts_provider: Callable[[], list[str]] | None = None
+
         # Scratchpad reference (set lazily via _ensure_scratchpad)
         self._scratchpad: Scratchpad | None = None
 
@@ -178,6 +168,10 @@ class MessageProcessor:
         the former ``AgentLoop.process_direct``.
 
         Builds an ``InboundMessage`` and delegates to ``process()``.
+
+        Note: ``forced_role`` is accepted for API compatibility but is a
+        no-op at this layer.  Role switching based on ``forced_role`` is
+        resolved by the ``AgentLoop`` before calling into the processor.
         """
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         response = await self.process(msg, on_progress=on_progress)
@@ -207,14 +201,12 @@ class MessageProcessor:
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=self.config.memory_window)
             skill_names = self.context.skills.detect_relevant_skills(msg.content)
-            messages = await _maybe_await(
-                self.context.build_messages(
-                    history=history,
-                    current_message=msg.content,
-                    skill_names=skill_names,
-                    channel=channel,
-                    chat_id=chat_id,
-                )
+            messages = await self.context.build_messages(
+                history=history,
+                current_message=msg.content,
+                skill_names=skill_names,
+                channel=channel,
+                chat_id=chat_id,
             )
             final_content, tools_used, all_msgs = await self._run_orchestrator(
                 messages, on_progress
@@ -309,16 +301,14 @@ class MessageProcessor:
         history = session.get_history(max_messages=self.config.memory_window)
         verify_before_answer = self.verifier.should_force_verification(msg.content)
         skill_names = self.context.skills.detect_relevant_skills(msg.content)
-        initial_messages = await _maybe_await(
-            self.context.build_messages(
-                history=history,
-                current_message=msg.content,
-                skill_names=skill_names,
-                media=msg.media if msg.media else None,
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                verify_before_answer=verify_before_answer,
-            )
+        initial_messages = await self.context.build_messages(
+            history=history,
+            current_message=msg.content,
+            skill_names=skill_names,
+            media=msg.media if msg.media else None,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            verify_before_answer=verify_before_answer,
         )
 
         # Build canonical event builder scoped to this request
@@ -348,14 +338,12 @@ class MessageProcessor:
             _canonical_builder.run_start(),
             _canonical_builder.message_start(_canonical_message_id),
         ):
-            await _maybe_await(
-                self.bus.publish_outbound(
-                    OutboundMessage(
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        content="",
-                        metadata={"_progress": True, "_canonical": _start_event},
-                    )
+            await self.bus.publish_outbound(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="",
+                    metadata={"_progress": True, "_canonical": _start_event},
                 )
             )
 
@@ -374,12 +362,10 @@ class MessageProcessor:
             self.orchestrator._loop._dispatcher.on_progress = None
 
         if final_content is None:
-            _recovered = await _maybe_await(
-                self.verifier.attempt_recovery(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    all_msgs=all_msgs,
-                )
+            _recovered = await self.verifier.attempt_recovery(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                all_msgs=all_msgs,
             )
             if isinstance(_recovered, str):
                 final_content = _recovered
@@ -501,7 +487,7 @@ class MessageProcessor:
         Future ``TurnOrchestrator`` will return ``TurnResult``; this helper
         isolates the unpacking logic.
         """
-        result = await _maybe_await(self.orchestrator.run(messages, on_progress))
+        result = await self.orchestrator.run(messages, on_progress)
         if isinstance(result, tuple):
             return result  # type: ignore[return-value]
         # Forward-compat for TurnResult or mock objects.
@@ -604,7 +590,7 @@ class MessageProcessor:
         from nanobot.agent.tools.feedback import FeedbackTool
         from nanobot.agent.tools.mission import MissionStartTool
 
-        if hasattr(self, "_contacts_provider"):
+        if self._contacts_provider is not None:
             self.context.set_contacts_context(self._contacts_provider())
 
         msg_t = self.tools.get("message")

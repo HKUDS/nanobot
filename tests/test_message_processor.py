@@ -16,7 +16,6 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 from nanobot.agent.message_processor import MessageProcessor
-
 from nanobot.bus.events import InboundMessage, OutboundMessage
 
 # ---------------------------------------------------------------------------
@@ -30,14 +29,17 @@ def _make_processor(tmp_path: Path) -> MessageProcessor:
     orchestrator.run = AsyncMock(return_value=MagicMock(reply="hello from mock", error=None))
 
     context = MagicMock()
+    context.build_messages = AsyncMock(return_value=[])
     sessions = MagicMock()
     sessions.get_or_create = MagicMock(return_value=MagicMock(messages=[], key="cli:direct"))
 
     tools = MagicMock()
     consolidator = MagicMock()
     verifier = MagicMock()
+    verifier.attempt_recovery = AsyncMock(return_value=None)
     bus = MagicMock()
     bus.publish = AsyncMock()
+    bus.publish_outbound = AsyncMock()
 
     config = MagicMock()
     config.memory_enabled = False

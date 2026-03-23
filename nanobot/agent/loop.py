@@ -570,6 +570,7 @@ class AgentLoop:
     ) -> None:
         """Set a callback that returns known email contacts (refreshed per-turn)."""
         self._contacts_provider = provider
+        self._processor._contacts_provider = provider  # forward to processor
 
     def set_email_fetch(
         self,
