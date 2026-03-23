@@ -670,3 +670,166 @@ nanobot traces LLM calls, tool invocations, and agent turns to [Langfuse](https:
 > For production deployments, set `"restrictToWorkspace": true` to sandbox the agent.
 
 </details>
+
+## Deployment
+
+<details>
+<summary><b>Docker Compose</b></summary>
+
+```bash
+docker compose run --rm nanobot-cli onboard   # first-time setup
+vim ~/.nanobot/config.json                     # add API keys
+docker compose up -d nanobot-gateway           # start gateway
+```
+
+```bash
+docker compose run --rm nanobot-cli agent -m "Hello!"   # run CLI
+docker compose logs -f nanobot-gateway                   # view logs
+docker compose down                                      # stop
+```
+
+> [!TIP]
+> The `-v ~/.nanobot:/root/.nanobot` flag mounts your local config directory into the container, so your config and workspace persist across container restarts.
+
+</details>
+
+<details>
+<summary><b>Docker</b></summary>
+
+```bash
+# Build the image
+docker build -t nanobot .
+
+# Initialize config (first time only)
+docker run -v ~/.nanobot:/root/.nanobot --rm nanobot onboard
+
+# Edit config on host to add API keys
+vim ~/.nanobot/config.json
+
+# Run gateway (connects to enabled channels)
+docker run -v ~/.nanobot:/root/.nanobot -p 18790:18790 nanobot gateway
+
+# Or run a single command
+docker run -v ~/.nanobot:/root/.nanobot --rm nanobot agent -m "Hello!"
+docker run -v ~/.nanobot:/root/.nanobot --rm nanobot status
+```
+
+</details>
+
+<details>
+<summary><b>Production and Staging</b></summary>
+
+Use the deployment script for production and staging environments:
+
+```bash
+# Deploy to production
+bash deploy/deploy.sh --env production
+
+# Deploy to staging
+bash deploy/deploy.sh --env staging
+
+# Rollback
+bash deploy/deploy.sh --env production --rollback
+```
+
+Configuration files:
+- Production: `deploy/production/docker-compose.yml` + `deploy/production/.env.example`
+- Staging: `deploy/staging/docker-compose.yml` + `deploy/staging/.env.example`
+- Caddy reverse proxy: `deploy/caddy-snippet.conf`
+
+> Former systemd users: run `deploy/migrate-from-systemd.sh` to migrate to Docker Compose.
+
+</details>
+
+## CLI Reference
+
+| Command | Description |
+|---------|-------------|
+| `nanobot onboard` | Initialize config and workspace |
+| `nanobot agent` | Interactive chat (REPL) |
+| `nanobot agent -m "..."` | Single-shot message |
+| `nanobot gateway` | Start the gateway (all channels) |
+| `nanobot ui` | Launch web UI |
+| `nanobot status` | Show provider and channel status |
+| `nanobot provider login <name>` | OAuth login (openai-codex, github-copilot) |
+| `nanobot channels status` | Show channel connection status |
+| `nanobot channels login` | Link WhatsApp (scan QR) |
+| `nanobot replay-deadletters` | Replay failed messages from dead-letter queue |
+
+Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
+
+<details>
+<summary><b>Scheduled Tasks (Cron)</b></summary>
+
+```bash
+# Add a cron job
+nanobot cron add --name "daily" --message "Good morning!" --cron "0 9 * * *"
+nanobot cron add --name "hourly" --message "Check status" --every 3600
+
+# List jobs
+nanobot cron list
+
+# Remove a job
+nanobot cron remove <job_id>
+
+# Enable/disable a job
+nanobot cron enable <job_id>
+nanobot cron enable <job_id> --disable
+
+# Manually run a job
+nanobot cron run <job_id>
+```
+
+</details>
+
+<details>
+<summary><b>Heartbeat (Periodic Tasks)</b></summary>
+
+The gateway wakes up every 30 minutes and checks `HEARTBEAT.md` in your workspace (`~/.nanobot/workspace/HEARTBEAT.md`). If the file has tasks, the agent executes them and delivers results to your most recently active chat channel.
+
+**Setup:** edit `~/.nanobot/workspace/HEARTBEAT.md` (created automatically by `nanobot onboard`):
+
+```markdown
+## Periodic Tasks
+
+- [ ] Check weather forecast and send a summary
+- [ ] Scan inbox for urgent emails
+```
+
+The agent can also manage this file itself — ask it to "add a periodic task" and it will update `HEARTBEAT.md` for you.
+
+> **Note:** The gateway must be running (`nanobot gateway`) and you must have chatted with the bot at least once so it knows which channel to deliver to.
+
+</details>
+
+<details>
+<summary><b>Routing Diagnostics</b></summary>
+
+```bash
+nanobot routing trace         # Show recent routing decisions
+nanobot routing metrics       # Show routing metrics/stats
+nanobot routing dlq           # Show dead-letter queue
+nanobot routing replay        # Replay from dead-letter queue
+```
+
+</details>
+
+<details>
+<summary><b>Memory Management</b></summary>
+
+```bash
+nanobot memory inspect        # Inspect memory state
+nanobot memory metrics        # Show memory metrics
+nanobot memory rebuild        # Rebuild memory store
+nanobot memory reindex        # Reindex vector store
+nanobot memory compact        # Compact memory
+nanobot memory verify         # Verify memory integrity
+nanobot memory eval           # Run memory evaluation
+nanobot memory conflicts      # Show memory conflicts
+nanobot memory resolve        # Resolve memory conflicts
+nanobot memory pin            # Pin a memory (prevent deletion)
+nanobot memory unpin          # Unpin a memory
+nanobot memory outdated       # Show outdated memories
+```
+
+</details>
