@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.callbacks import (
     DelegateEndEvent,
     DelegateStartEvent,
@@ -59,6 +60,7 @@ __all__ = [
     "ToolExecutor",
     "ToolResultEvent",
     "TurnResult",
+    "build_agent",
     "init_langfuse",
     "shutdown_langfuse",
 ]
