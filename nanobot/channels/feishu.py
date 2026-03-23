@@ -5,7 +5,9 @@ import json
 import os
 import re
 import threading
+import time
 from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -236,6 +238,15 @@ def _extract_post_text(content_json: dict) -> str:
     return text
 
 
+@dataclass
+class _StreamBuf:
+    """Per-chat streaming accumulator for progressive message editing."""
+    text: str = ""
+    message_id: str | None = None
+    last_edit: float = 0.0
+    edit_count: int = 0
+
+
 class FeishuConfig(Base):
     """Feishu/Lark channel configuration using WebSocket long connection."""
 
@@ -248,6 +259,7 @@ class FeishuConfig(Base):
     react_emoji: str = "THUMBSUP"
     group_policy: Literal["open", "mention"] = "mention"
     reply_to_message: bool = False  # If True, bot replies quote the user's original message
+    streaming: bool = False
 
 
 class FeishuChannel(BaseChannel):
@@ -264,6 +276,8 @@ class FeishuChannel(BaseChannel):
 
     name = "feishu"
     display_name = "Feishu"
+    _STREAM_EDIT_INTERVAL = 2.0
+    _STREAM_MAX_EDITS = 20
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -279,6 +293,7 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._stream_bufs: dict[str, _StreamBuf] = {}
 
     @staticmethod
     def _register_optional_event(builder: Any, method_name: str, handler: Any) -> Any:
@@ -1031,6 +1046,80 @@ class FeishuChannel(BaseChannel):
 
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)
+
+    def _build_stream_card(self, text: str) -> str:
+        elements = self._build_card_elements(text)
+        card = {"config": {"wide_screen_mode": True, "update_multi": True}, "elements": elements}
+        return json.dumps(card, ensure_ascii=False)
+
+    async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
+        if not self._client:
+            return
+        meta = metadata or {}
+        receive_id_type = "chat_id" if chat_id.startswith("oc_") else "open_id"
+        loop = asyncio.get_running_loop()
+
+        if meta.get("_stream_end"):
+            buf = self._stream_bufs.pop(chat_id, None)
+            if not buf or not buf.message_id or not buf.text:
+                return
+            card_body = self._build_stream_card(buf.text)
+            await loop.run_in_executor(None, self._patch_card_sync, buf.message_id, card_body)
+            return
+
+        buf = self._stream_bufs.get(chat_id)
+        if buf is None:
+            buf = _StreamBuf()
+            self._stream_bufs[chat_id] = buf
+        buf.text += delta
+
+        if not buf.text.strip():
+            return
+
+        now = time.monotonic()
+        if buf.message_id is None:
+            card_body = self._build_stream_card(buf.text)
+            msg_id = await loop.run_in_executor(
+                None, self._create_card_sync, receive_id_type, chat_id, card_body,
+            )
+            if msg_id:
+                buf.message_id = msg_id
+                buf.last_edit = now
+                buf.edit_count = 1
+        elif (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL and buf.edit_count < self._STREAM_MAX_EDITS:
+            card_body = self._build_stream_card(buf.text)
+            await loop.run_in_executor(None, self._patch_card_sync, buf.message_id, card_body)
+            buf.last_edit = now
+            buf.edit_count += 1
+
+    def _create_card_sync(self, receive_id_type: str, receive_id: str, content: str) -> str | None:
+        from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
+        try:
+            request = CreateMessageRequest.builder() \
+                .receive_id_type(receive_id_type) \
+                .request_body(
+                    CreateMessageRequestBody.builder()
+                    .receive_id(receive_id).msg_type("interactive").content(content).build()
+                ).build()
+            response = self._client.im.v1.message.create(request)
+            if response.success():
+                return response.data.message_id
+        except Exception as e:
+            logger.warning("Feishu stream create failed: {}", e)
+        return None
+
+    def _patch_card_sync(self, message_id: str, content: str) -> bool:
+        from lark_oapi.api.im.v1 import PatchMessageRequest, PatchMessageRequestBody
+        try:
+            request = PatchMessageRequest.builder() \
+                .message_id(message_id) \
+                .request_body(
+                    PatchMessageRequestBody.builder().content(content).build()
+                ).build()
+            response = self._client.im.v1.message.patch(request)
+            return response.success()
+        except Exception:
+            return False
 
     def _on_message_sync(self, data: Any) -> None:
         """
