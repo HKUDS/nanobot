@@ -31,16 +31,20 @@ class TestHandleStop:
     @pytest.mark.asyncio
     async def test_stop_no_active_task(self):
         from nanobot.bus.events import InboundMessage
+        from nanobot.command.builtin import cmd_stop
+        from nanobot.command.router import CommandContext
 
         loop, bus = _make_loop()
         msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/stop")
-        await loop._handle_stop(msg)
-        out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/stop", loop=loop)
+        out = await cmd_stop(ctx)
         assert "No active task" in out.content
 
     @pytest.mark.asyncio
     async def test_stop_cancels_active_task(self):
         from nanobot.bus.events import InboundMessage
+        from nanobot.command.builtin import cmd_stop
+        from nanobot.command.router import CommandContext
 
         loop, bus = _make_loop()
         cancelled = asyncio.Event()
@@ -57,15 +61,17 @@ class TestHandleStop:
         loop._active_tasks["test:c1"] = [task]
 
         msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/stop")
-        await loop._handle_stop(msg)
+        ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/stop", loop=loop)
+        out = await cmd_stop(ctx)
 
         assert cancelled.is_set()
-        out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
         assert "stopped" in out.content.lower()
 
     @pytest.mark.asyncio
     async def test_stop_cancels_multiple_tasks(self):
         from nanobot.bus.events import InboundMessage
+        from nanobot.command.builtin import cmd_stop
+        from nanobot.command.router import CommandContext
 
         loop, bus = _make_loop()
         events = [asyncio.Event(), asyncio.Event()]
@@ -82,10 +88,10 @@ class TestHandleStop:
         loop._active_tasks["test:c1"] = tasks
 
         msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/stop")
-        await loop._handle_stop(msg)
+        ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/stop", loop=loop)
+        out = await cmd_stop(ctx)
 
         assert all(e.is_set() for e in events)
-        out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
         assert "2 task" in out.content
 
 
