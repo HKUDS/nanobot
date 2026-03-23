@@ -272,7 +272,14 @@ class LiteLLMProvider(LLMProvider):
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
             kwargs["drop_params"] = True
-        
+            # Providers like Kimi require reasoning_content on every assistant
+            # message that carries tool_calls when reasoning is enabled.
+            # Ensure the field is present (empty string) so the API won't
+            # reject the request with "reasoning_content is missing".
+            for msg in kwargs["messages"]:
+                if msg.get("role") == "assistant" and msg.get("tool_calls") and "reasoning_content" not in msg:
+                    msg["reasoning_content"] = ""
+
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
