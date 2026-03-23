@@ -1009,7 +1009,7 @@ def channels_login(
     force: bool = typer.Option(False, "--force", "-f", help="Force re-authentication even if already logged in"),
 ):
     """Authenticate with a channel via QR code or other interactive login."""
-    from nanobot.channels.registry import discover_all, load_channel_class
+    from nanobot.channels.registry import discover_all
     from nanobot.config.loader import load_config
 
     config = load_config()
@@ -1024,7 +1024,7 @@ def channels_login(
 
     console.print(f"{__logo__} {all_channels[channel_name].display_name} Login\n")
 
-    channel_cls = load_channel_class(channel_name)
+    channel_cls = all_channels[channel_name]
     channel = channel_cls(channel_cfg, bus=None)
 
     success = asyncio.run(channel.login(force=force))
