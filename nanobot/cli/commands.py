@@ -1,4 +1,8 @@
-"""CLI commands for nanobot."""
+"""CLI commands for nanobot — assembly module.
+
+This module creates the top-level Typer ``app`` and registers all sub-commands
+and sub-apps from the extracted CLI modules.  No business logic lives here.
+"""
 
 from __future__ import annotations
 
@@ -30,8 +34,8 @@ app = typer.Typer(
 )
 
 # On Windows the default console encoding (cp1252) cannot render many Unicode
-# characters the LLM emits (↳, →, — etc.).  Reconfigure stdout to UTF-8 so
-# Rich can write them without a UnicodeEncodeError.
+# characters the LLM emits (arrows, dashes, etc.).  Reconfigure stdout to
+# UTF-8 so Rich can write them without a UnicodeEncodeError.
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -48,9 +52,9 @@ def main(
     pass
 
 
-# ============================================================================
-# Onboard / Setup
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Top-level commands
+# ---------------------------------------------------------------------------
 
 
 @app.command()
@@ -59,65 +63,27 @@ def onboard() -> None:
     _onboard_impl()
 
 
-# ============================================================================
-# Gateway / Server / UI / Agent — delegated to extracted modules
-# ============================================================================
-
-app.command()(_gateway_impl)
-app.command()(_ui_impl)
-app.command()(_agent_impl)
-
-
-# ============================================================================
-# Channel Commands — delegated to nanobot/cli/channels.py
-# ============================================================================
-
-app.add_typer(channels_app, name="channels")
-
-
-# ============================================================================
-# Cron Commands — delegated to nanobot/cli/cron.py
-# ============================================================================
-
-app.add_typer(cron_app, name="cron")
-
-
-# ============================================================================
-# Routing Commands
-# ============================================================================
-
-app.add_typer(routing_app, name="routing")
-
-
-# Routing commands are now in nanobot/cli/routing.py — registered via routing_app above.
-
-
-# ============================================================================
-# Status Commands
-# ============================================================================
-
-
-app.add_typer(memory_app, name="memory")
-
-
-# Memory commands are now in nanobot/cli/memory.py — registered via memory_app above.
-
-
-app.command("replay-deadletters")(replay_deadletters)
-
-
 @app.command()
 def status() -> None:
     """Show nanobot status."""
     _status_impl()
 
 
-# ============================================================================
-# OAuth Login — delegated to nanobot/cli/provider.py
-# ============================================================================
+app.command()(_gateway_impl)
+app.command()(_ui_impl)
+app.command()(_agent_impl)
 
+# ---------------------------------------------------------------------------
+# Sub-apps
+# ---------------------------------------------------------------------------
+
+app.add_typer(channels_app, name="channels")
+app.add_typer(cron_app, name="cron")
+app.add_typer(routing_app, name="routing")
+app.add_typer(memory_app, name="memory")
 app.add_typer(provider_app, name="provider")
 
+app.command("replay-deadletters")(replay_deadletters)
 
 if __name__ == "__main__":
     app()
