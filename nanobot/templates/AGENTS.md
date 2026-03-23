@@ -19,3 +19,7 @@ Get USER_ID and CHANNEL from the current session (e.g., `8281248569` and `telegr
 - **Rewrite**: `write_file` to replace all tasks
 
 When the user asks for a recurring/periodic task, update `HEARTBEAT.md` instead of creating a one-time cron reminder.
+
+## Specialists
+
+If specialists are configured (in `specialists/*/SOUL.md`), use the `delegate` tool to route domain-specific queries to the appropriate specialist. The specialist will have access to shared memory and conversation context. Prefer delegation when the query clearly falls within a specialist's domain.

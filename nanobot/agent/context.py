@@ -10,6 +10,7 @@ from nanobot.utils.helpers import current_time_str
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
+from nanobot.agent.specialist import SpecialistLoader
 from nanobot.utils.helpers import build_assistant_message, detect_image_mime
 
 
@@ -23,6 +24,7 @@ class ContextBuilder:
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
+        self.specialists = SpecialistLoader(workspace)
 
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
@@ -50,6 +52,15 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
 
 {skills_summary}""")
+
+        specialists_summary = self.specialists.build_specialists_summary()
+        if specialists_summary:
+            parts.append(f"""# Specialists
+
+Use the 'delegate' tool to assign domain-specific tasks to a specialist.
+Each specialist has its own expertise and will have access to conversation context and shared memory.
+
+{specialists_summary}""")
 
         return "\n\n---\n\n".join(parts)
 

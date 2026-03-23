@@ -1323,6 +1323,62 @@ The agent can also manage this file itself — ask it to "add a periodic task" a
 
 </details>
 
+## 🤖 Specialists
+
+Specialists are **domain-specific agents** that the main agent can delegate tasks to. Unlike background subagents (`spawn`), specialists run **synchronously** — the main agent waits for the result and incorporates it into its response.
+
+Each specialist has its own identity (SOUL.md), but shares the workspace memory and receives the recent conversation context as read-only text.
+
+### Creating a Specialist
+
+Create a directory under `workspace/specialists/` with a `SOUL.md` file:
+
+```
+workspace/
+└── specialists/
+    └── ventas/
+        └── SOUL.md
+```
+
+The `SOUL.md` file uses YAML frontmatter:
+
+```markdown
+---
+name: ventas
+description: "Experto en ventas: pedidos, clientes, tarifas, presupuestos"
+model: null
+max_iterations: 25
+---
+
+# Especialista en Ventas
+
+Eres el experto en ventas de la empresa. Cuando te deleguen una consulta...
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Identifier used in the `delegate` tool call |
+| `description` | Yes | Shown to the main agent so it knows when to delegate |
+| `model` | No | LLM model override (inherits from main agent if null) |
+| `max_iterations` | No | Max tool-call iterations (default: 25) |
+
+### How It Works
+
+1. The main agent sees available specialists listed in its system prompt
+2. When a query matches a specialist's domain, the LLM calls `delegate(specialist="ventas", task="...")`
+3. The specialist runs with its own SOUL.md, shared memory, conversation context, and standard tools
+4. The result is returned to the main agent, which formulates the final response to the user
+
+### Specialist vs Subagent
+
+| | `delegate` (Specialist) | `spawn` (Subagent) |
+|---|---|---|
+| Execution | Synchronous (blocks) | Background (fire-and-forget) |
+| Identity | Own SOUL.md | Generic |
+| Memory | Shared (read-only) | None |
+| Session context | Last 30 messages (read-only) | None |
+| Use case | Domain expertise | Independent tasks |
+
 ## 🐳 Docker
 
 > [!TIP]
@@ -1419,13 +1475,14 @@ If you edit the `.service` file itself, run `systemctl --user daemon-reload` bef
 
 ```
 nanobot/
-├── agent/          # 🧠 Core agent logic
-│   ├── loop.py     #    Agent loop (LLM ↔ tool execution)
-│   ├── context.py  #    Prompt builder
-│   ├── memory.py   #    Persistent memory
-│   ├── skills.py   #    Skills loader
-│   ├── subagent.py #    Background task execution
-│   └── tools/      #    Built-in tools (incl. spawn)
+├── agent/            # 🧠 Core agent logic
+│   ├── loop.py       #    Agent loop (LLM ↔ tool execution)
+│   ├── context.py    #    Prompt builder
+│   ├── memory.py     #    Persistent memory
+│   ├── skills.py     #    Skills loader
+│   ├── subagent.py   #    Background task execution
+│   ├── specialist.py #    Specialist agents (domain-specific delegation)
+│   └── tools/        #    Built-in tools (spawn, delegate, ...)
 ├── skills/         # 🎯 Bundled skills (github, weather, tmux...)
 ├── channels/       # 📱 Chat channel integrations (supports plugins)
 ├── bus/            # 🚌 Message routing
