@@ -49,6 +49,7 @@ from nanobot.agent.observability import (
     trace_request,
     update_current_span,
 )
+from nanobot.agent.orchestrator_protocol import TurnState
 from nanobot.agent.reaction import classify_reaction
 from nanobot.agent.role_switching import TurnContext
 from nanobot.agent.scratchpad import Scratchpad
@@ -57,8 +58,6 @@ from nanobot.agent.tools.feedback import FeedbackTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
 from nanobot.agent.tracing import TraceContext
-from nanobot.agent.turn_orchestrator import TurnResult as TurnResult  # noqa: F401 — re-export
-from nanobot.agent.turn_orchestrator import TurnState
 from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import DeliveryResult, InboundMessage, OutboundMessage, ReactionEvent
 from nanobot.config.schema import AgentRoleConfig
@@ -67,22 +66,6 @@ from nanobot.session.manager import Session
 if TYPE_CHECKING:
     from nanobot.agent.coordinator import ClassificationResult, Coordinator
 
-
-# Per-coroutine delegation ancestry — canonical definition in delegation.py,
-# re-exported here for backward compatibility with tests.
-# Backward-compat re-exports: these symbols moved to turn_orchestrator.py or
-# their original modules.  Tests that import them from loop.py still work.
-from nanobot.agent.compression import summarize_and_compress as summarize_and_compress  # noqa: F401
-from nanobot.agent.delegation import _delegation_ancestry  # noqa: F401
-from nanobot.agent.failure import FailureClass as FailureClass  # noqa: F401
-from nanobot.agent.failure import ToolCallTracker as ToolCallTracker  # noqa: F401
-from nanobot.agent.failure import _build_failure_prompt as _build_failure_prompt  # noqa: F401
-from nanobot.agent.turn_orchestrator import (  # noqa: F401
-    _dynamic_preserve_recent as _dynamic_preserve_recent,
-)
-from nanobot.agent.turn_orchestrator import (
-    _needs_planning as _needs_planning,
-)
 
 _DEFAULT_CONFIDENCE_THRESHOLD: float = (
     0.6  # Fallback routing confidence threshold (no RoutingConfig)
@@ -294,16 +277,6 @@ class AgentLoop:
         read_tool = self.tools.get("read_scratchpad")
         if isinstance(read_tool, ScratchpadReadTool):
             read_tool._scratchpad = self._scratchpad
-
-    # ------------------------------------------------------------------
-    # Backward-compat static method — delegates to module-level function
-    # in turn_orchestrator.py.  Tests reference AgentLoop._needs_planning.
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _needs_planning(text: str) -> bool:  # pragma: no cover — delegate
-        """Heuristic: does this message benefit from explicit planning?"""
-        return _needs_planning(text)
 
     # ------------------------------------------------------------------
     # Agent loop delegation to TurnOrchestrator

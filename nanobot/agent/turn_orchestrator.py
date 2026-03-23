@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
@@ -32,6 +32,7 @@ from nanobot.agent.compression import estimate_messages_tokens, summarize_and_co
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.delegation import DelegationDispatcher
 from nanobot.agent.failure import FailureClass, ToolCallTracker, _build_failure_prompt
+from nanobot.agent.orchestrator_protocol import TurnState as TurnState  # re-export
 from nanobot.agent.prompt_loader import PromptLoader
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
 from nanobot.agent.task_types import has_parallel_structure
@@ -41,7 +42,7 @@ from nanobot.agent.verifier import AnswerVerifier
 
 if TYPE_CHECKING:
     from nanobot.agent.coordinator import ClassificationResult
-    from nanobot.agent.delegation_advisor import DelegationAction, DelegationAdvisor
+    from nanobot.agent.delegation_advisor import DelegationAdvisor
     from nanobot.config.schema import AgentConfig
     from nanobot.providers.base import LLMProvider, LLMResponse
 
@@ -168,26 +169,6 @@ class _ToolBatchResult:
     nudged_for_final: bool
     last_tool_call_msg_idx: int
     tool_calls_this_batch: int
-
-
-@dataclass(slots=True)
-class TurnState:
-    """Mutable state shared across iterations of the Plan-Act-Observe-Reflect loop."""
-
-    messages: list[dict[str, Any]]
-    user_text: str
-    disabled_tools: set[str] = field(default_factory=set)
-    tracker: ToolCallTracker = field(default_factory=ToolCallTracker)
-    nudged_for_final: bool = False
-    turn_tool_calls: int = 0
-    last_tool_call_msg_idx: int = -1
-    last_delegation_advice: DelegationAction | None = None
-    has_plan: bool = False
-    plan_enforced: bool = False
-    consecutive_errors: int = 0
-    iteration: int = 0
-    tools_def_cache: list[dict[str, Any]] = field(default_factory=list)
-    tools_def_snapshot: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True, slots=True)

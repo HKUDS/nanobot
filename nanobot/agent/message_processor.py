@@ -28,6 +28,7 @@ from nanobot.agent.callbacks import ProgressCallback
 from nanobot.agent.consolidation import ConsolidationOrchestrator
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.observability import update_current_span
+from nanobot.agent.orchestrator_protocol import Orchestrator, TurnState
 from nanobot.agent.role_switching import TurnRoleManager
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
@@ -60,7 +61,7 @@ class MessageProcessor:
     def __init__(
         self,
         *,
-        orchestrator: Any,
+        orchestrator: Orchestrator,
         context: ContextBuilder | Any,
         sessions: SessionManager | Any,
         tools: ToolExecutor | Any,
@@ -473,36 +474,31 @@ class MessageProcessor:
         the rest of the pipeline.  Also supports mock orchestrators that
         return tuples or duck-typed result objects.
         """
-        from nanobot.agent.turn_orchestrator import TurnOrchestrator, TurnState
-
-        if isinstance(self.orchestrator, TurnOrchestrator):
-            # Extract user text from the last user message (matches _run_agent_loop)
-            user_text = ""
-            for m in reversed(messages):
-                if m.get("role") == "user":
-                    _content = m.get("content", "")
-                    if isinstance(_content, str):
-                        user_text = _content
-                    elif isinstance(_content, list):
-                        user_text = " ".join(
-                            p.get("text", "")
-                            for p in _content
-                            if isinstance(p, dict) and p.get("type") == "text"
-                        )
-                    break
-            state = TurnState(
-                messages=messages,
-                user_text=user_text,
-                tools_def_cache=list(self.tools.get_definitions()),
+        # Extract user text from the last user message (matches _run_agent_loop)
+        user_text = ""
+        for m in reversed(messages):
+            if m.get("role") == "user":
+                _content = m.get("content", "")
+                if isinstance(_content, str):
+                    user_text = _content
+                elif isinstance(_content, list):
+                    user_text = " ".join(
+                        p.get("text", "")
+                        for p in _content
+                        if isinstance(p, dict) and p.get("type") == "text"
+                    )
+                break
+        state = TurnState(
+            messages=messages,
+            user_text=user_text,
+            tools_def_cache=list(self.tools.get_definitions()),
+        )
+        # Forward classification result for plan-phase delegation advice
+        if hasattr(self, "_last_classification_result"):
+            self.orchestrator._last_classification_result = (
+                self._last_classification_result  # type: ignore[attr-defined]
             )
-            # Forward classification result for plan-phase delegation advice
-            if hasattr(self, "_last_classification_result"):
-                self.orchestrator._last_classification_result = (
-                    self._last_classification_result  # type: ignore[attr-defined]
-                )
-            result = await self.orchestrator.run(state, on_progress)
-        else:
-            result = await self.orchestrator.run(messages, on_progress)
+        result = await self.orchestrator.run(state, on_progress)
 
         if isinstance(result, tuple):
             return result  # type: ignore[return-value]
