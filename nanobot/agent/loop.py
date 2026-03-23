@@ -1628,7 +1628,6 @@ class AgentLoop:
         await self._connect_mcp()
         self._ensure_coordinator()
         self._last_classification_result = None
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
 
         # Resolve forced role (if any) before entering the trace context so
         # that the role name is included in the trace metadata.
@@ -1657,9 +1656,8 @@ class AgentLoop:
                     "role": self.role_name,
                 },
             ):
-                response = await self._processor._process_message(
-                    msg, session_key=session_key, on_progress=on_progress
+                return await self._processor.process_direct(
+                    content, session_key, channel, chat_id, on_progress, forced_role
                 )
         finally:
             self._role_manager.reset(turn_ctx)
-        return response.content if response else ""

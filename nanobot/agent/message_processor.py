@@ -167,14 +167,18 @@ class MessageProcessor:
         This is the main direct-invocation entry point, equivalent to
         the former ``AgentLoop.process_direct``.
 
-        Builds an ``InboundMessage`` and delegates to ``process()``.
+        Builds an ``InboundMessage`` and delegates to ``_process_message()``,
+        passing the explicit ``session_key`` so callers can override the
+        default ``channel:chat_id`` key.
 
         Note: ``forced_role`` is accepted for API compatibility but is a
         no-op at this layer.  Role switching based on ``forced_role`` is
         resolved by the ``AgentLoop`` before calling into the processor.
         """
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self.process(msg, on_progress=on_progress)
+        response = await self._process_message(
+            msg, session_key=session_key, on_progress=on_progress
+        )
         return response.content if response else ""
 
     # ------------------------------------------------------------------
