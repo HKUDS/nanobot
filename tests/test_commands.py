@@ -138,10 +138,10 @@ def test_onboard_help_shows_workspace_and_config_options():
 def test_onboard_interactive_discard_does_not_save_or_create_workspace(mock_paths, monkeypatch):
     config_file, workspace_dir, _ = mock_paths
 
-    from nanobot.cli.onboard_wizard import OnboardResult
+    from nanobot.cli.onboard import OnboardResult
 
     monkeypatch.setattr(
-        "nanobot.cli.onboard_wizard.run_onboard",
+        "nanobot.cli.onboard.run_onboard",
         lambda initial_config: OnboardResult(config=initial_config, should_save=False),
     )
 
@@ -179,10 +179,10 @@ def test_onboard_wizard_preserves_explicit_config_in_next_steps(tmp_path, monkey
     config_path = tmp_path / "instance" / "config.json"
     workspace_path = tmp_path / "workspace"
 
-    from nanobot.cli.onboard_wizard import OnboardResult
+    from nanobot.cli.onboard import OnboardResult
 
     monkeypatch.setattr(
-        "nanobot.cli.onboard_wizard.run_onboard",
+        "nanobot.cli.onboard.run_onboard",
         lambda initial_config: OnboardResult(config=initial_config, should_save=True),
     )
     monkeypatch.setattr("nanobot.channels.registry.discover_all", lambda: {})
