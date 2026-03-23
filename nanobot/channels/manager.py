@@ -138,7 +138,12 @@ class ChannelManager:
                 channel = self.channels.get(msg.channel)
                 if channel:
                     try:
-                        await channel.send(msg)
+                        if msg.metadata.get("_stream_delta") or msg.metadata.get("_stream_end"):
+                            await channel.send_delta(msg.chat_id, msg.content, msg.metadata)
+                        elif msg.metadata.get("_streamed"):
+                            pass
+                        else:
+                            await channel.send(msg)
                     except Exception as e:
                         logger.error("Error sending to {}: {}", msg.channel, e)
                 else:

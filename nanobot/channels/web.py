@@ -517,18 +517,11 @@ class WebChannel(BaseChannel):
         q: asyncio.Queue[Any] = asyncio.Queue()
         self._queues[session_id] = q
 
-        async def on_token(text: str) -> None:
+        async def on_stream(text: str) -> None:
             await q.put(("token", text))
 
         async def on_progress(content: str, *, tool_hint: bool = False) -> None:
             await q.put(("progress", content, tool_hint))
-
-        async def on_tool_call(tool_name: str, call_str: str, arguments: dict) -> None:
-            await q.put(("tool_call", tool_name, call_str, arguments))
-
-        async def on_tool_result(tool_name: str, output: str) -> None:
-            truncated = len(output) > self._TOOL_OUTPUT_MAX
-            await q.put(("tool_result", tool_name, output[:self._TOOL_OUTPUT_MAX], truncated))
 
         session_key = f"web:{session_id}"
 
@@ -536,17 +529,16 @@ class WebChannel(BaseChannel):
             try:
                 if self._agent_loop is None:
                     raise RuntimeError("WebChannel has no agent_loop reference")
-                final = await self._agent_loop.process_direct(
+                result = await self._agent_loop.process_direct(
                     content=message,
                     session_key=session_key,
                     channel=self.name,
                     chat_id=session_id,
                     media=media_paths or None,
                     on_progress=on_progress,
-                    on_token=on_token,
-                    on_tool_call=on_tool_call,
-                    on_tool_result=on_tool_result,
+                    on_stream=on_stream,
                 )
+                final = result.content if result else ""
                 await q.put(("done", final or ""))
             except asyncio.CancelledError:
                 await q.put(("error", "Request cancelled"))
@@ -593,14 +585,6 @@ class WebChannel(BaseChannel):
                     await response.write(_sse("token", {"text": item[1]}))
                 elif kind == "progress":
                     await response.write(_sse("progress", {"text": item[1], "tool_hint": item[2]}))
-                elif kind == "tool_call":
-                    await response.write(_sse("tool_call", {
-                        "tool": item[1], "call_str": item[2], "args": item[3],
-                    }))
-                elif kind == "tool_result":
-                    await response.write(_sse("tool_result", {
-                        "tool": item[1], "output": item[2], "truncated": item[3],
-                    }))
                 elif kind == "done":
                     await response.write(_sse("done", {"text": item[1]}))
                     break
