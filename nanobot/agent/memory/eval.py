@@ -16,6 +16,7 @@ from typing import Any
 
 from nanobot.utils.helpers import ensure_dir
 
+from .helpers import _safe_float, _utc_now_iso
 from .persistence import MemoryPersistence
 
 
@@ -39,21 +40,6 @@ class EvalRunner:
         self._get_rollout_status = get_rollout_status_fn
         self._get_rollout = get_rollout_fn
         self._get_backend_stats = get_backend_stats_fn
-
-    # ------------------------------------------------------------------
-    # Static helpers (duplicated from MemoryStore to avoid coupling)
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _utc_now_iso() -> str:
-        return datetime.now(timezone.utc).isoformat()
-
-    @staticmethod
-    def _safe_float(value: Any, default: float) -> float:
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return default
 
     # ------------------------------------------------------------------
     # Public API
@@ -348,7 +334,7 @@ class EvalRunner:
             path = reports_dir / f"memory_eval_{ts}.json"
 
         payload = {
-            "generated_at": self._utc_now_iso(),
+            "generated_at": _utc_now_iso(),
             "evaluation": evaluation,
             "observability": observability,
             "rollout": rollout or self._get_rollout_status(),
@@ -366,17 +352,17 @@ class EvalRunner:
         if not isinstance(gates, dict):
             gates = {}
 
-        min_recall = self._safe_float(gates.get("min_recall_at_k"), 0.55)
-        min_precision = self._safe_float(gates.get("min_precision_at_k"), 0.25)
-        max_tokens = self._safe_float(gates.get("max_avg_memory_context_tokens"), 1400.0)
-        max_history_fallback_ratio = self._safe_float(gates.get("max_history_fallback_ratio"), 0.05)
+        min_recall = _safe_float(gates.get("min_recall_at_k"), 0.55)
+        min_precision = _safe_float(gates.get("min_precision_at_k"), 0.25)
+        max_tokens = _safe_float(gates.get("max_avg_memory_context_tokens"), 1400.0)
+        max_history_fallback_ratio = _safe_float(gates.get("max_history_fallback_ratio"), 0.05)
 
         summary = evaluation.get("summary", {}) if isinstance(evaluation, dict) else {}
-        recall = self._safe_float(summary.get("recall_at_k"), 0.0)
-        precision = self._safe_float(summary.get("precision_at_k"), 0.0)
+        recall = _safe_float(summary.get("recall_at_k"), 0.0)
+        precision = _safe_float(summary.get("precision_at_k"), 0.0)
         kpis = observability.get("kpis", {}) if isinstance(observability, dict) else {}
-        avg_ctx_tokens = self._safe_float(kpis.get("avg_memory_context_tokens"), 0.0)
-        history_fallback_ratio = self._safe_float(kpis.get("history_fallback_ratio"), 0.0)
+        avg_ctx_tokens = _safe_float(kpis.get("avg_memory_context_tokens"), 0.0)
+        history_fallback_ratio = _safe_float(kpis.get("history_fallback_ratio"), 0.0)
 
         checks = [
             {
