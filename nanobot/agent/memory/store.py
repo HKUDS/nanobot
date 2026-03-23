@@ -29,6 +29,7 @@ from .conflicts import (
 )
 from .consolidation_pipeline import ConsolidationPipeline
 from .context_assembler import ContextAssembler
+from .embedder import LocalEmbedder, OpenAIEmbedder
 from .extractor import MemoryExtractor
 from .graph import KnowledgeGraph
 from .helpers import (
@@ -46,6 +47,7 @@ from .helpers import (
 from .ingester import EventIngester
 from .maintenance import MemoryMaintenance
 from .mem0_adapter import _Mem0Adapter
+from .migration import migrate_to_sqlite
 from .persistence import MemoryPersistence
 from .profile_io import ProfileStore
 from .reranker import CompositeReranker, Reranker
@@ -54,10 +56,13 @@ from .retriever import MemoryRetriever
 from .rollout import RolloutConfig
 from .snapshot import MemorySnapshot
 from .token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
+from .unified_db import UnifiedMemoryDB
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session
+
+    from .embedder import Embedder
 
 
 class MemoryStore:
@@ -92,6 +97,23 @@ class MemoryStore:
         vector_backend: str | None = None,
     ):
         self.workspace = workspace
+
+        # Construct embedder — try OpenAI first, fall back to local ONNX
+        self._embedder: Embedder | None = None
+        try:
+            _oai = OpenAIEmbedder()
+            if _oai.available:
+                self._embedder = _oai
+        except Exception:  # crash-barrier: OpenAI init failure
+            pass
+        if self._embedder is None:
+            try:
+                _local = LocalEmbedder()
+                if _local.available:
+                    self._embedder = _local
+            except Exception:  # crash-barrier: local embedder init failure
+                pass
+
         self.persistence = MemoryPersistence(workspace)
         self.memory_dir = self.persistence.memory_dir
         self.memory_file = self.persistence.memory_file
@@ -99,6 +121,24 @@ class MemoryStore:
         self.events_file = self.persistence.events_file
         self.profile_file = self.persistence.profile_file
         self.index_dir: Path = self.memory_dir / "index"
+
+        # Construct unified SQLite database (migrates old files if needed).
+        # Only activate the DB path when memory.db already exists (prior migration)
+        # or when old files are present and will be migrated.  For fresh workspaces
+        # with no prior data, keep db=None so the file-based fallback path is used.
+        _dims = self._embedder.dims if self._embedder is not None else 384
+        self.db: UnifiedMemoryDB | None = None
+        _db_path = self.memory_dir / "memory.db"
+        _has_old_files = any(
+            (self.memory_dir / f).exists()
+            for f in ("events.jsonl", "profile.json", "HISTORY.md", "MEMORY.md")
+        )
+        if _db_path.exists() or _has_old_files:
+            try:
+                self.db = migrate_to_sqlite(self.memory_dir, dims=_dims, embedder=self._embedder)
+            except Exception:  # crash-barrier: sqlite-vec unavailable or migration failure
+                pass
+
         self.retriever: MemoryRetriever  # set after graph/ingester init
         # EventIngester is constructed after persistence/mem0/graph are ready.
         # Deferred until graph is built below; placeholder here for type checkers.
@@ -122,7 +162,7 @@ class MemoryStore:
         # Profile manager (LAN-202) — delegates profile CRUD to ProfileManager.
         # Subsystem references (_extractor, _ingester, _conflict_mgr, _snapshot)
         # are wired after all subsystems are constructed (see below).
-        self.profile_mgr = ProfileStore(self.persistence, self.profile_file, self.mem0)
+        self.profile_mgr = ProfileStore(self.persistence, self.profile_file, self.mem0, db=self.db)
 
         # Retrieval planner (LAN-207) — intent classification + policy + routing.
         self._planner = RetrievalPlanner()
@@ -142,6 +182,8 @@ class MemoryStore:
                 *a, **kw
             ),
             budget_allocator=self._budget_allocator,
+            db=self.db,
+            embedder_available=self._embedder is not None or self.db is None,
         )
 
         # MemoryMaintenance: reindex, seed, health checks, backend stats.
@@ -149,6 +191,7 @@ class MemoryStore:
             mem0=self.mem0,
             persistence=self.persistence,
             rollout=self.rollout,
+            db=self.db,
         )
         # Wire reindex callback so health check can trigger reindex.
         self.maintenance._reindex_fn = lambda: self.maintenance.reindex_from_structured_memory(
@@ -189,6 +232,8 @@ class MemoryStore:
             graph=self.graph,
             rollout=self.rollout,
             conflict_pair_fn=lambda old, new: self.profile_mgr._conflict_pair(old, new),
+            db=self.db,
+            embedder=self._embedder,
         )
 
         # Conflict manager (LAN-203) — now that ingester is built, wire callables.
@@ -198,6 +243,7 @@ class MemoryStore:
             sanitize_mem0_text_fn=self.ingester._sanitize_mem0_text,
             normalize_metadata_fn=self.ingester._normalize_memory_metadata,
             sanitize_metadata_fn=EventIngester._sanitize_mem0_metadata,
+            db=self.db,
         )
 
         # MemoryRetriever: owns the full retrieval read path.
@@ -210,6 +256,8 @@ class MemoryStore:
             rollout=self.rollout,
             read_events_fn=self.ingester.read_events,
             extractor=self.extractor,
+            db=self.db,
+            embedder=self._embedder,
         )
 
         # LAN-208: gate raw conversation turn ingestion into mem0.
@@ -258,6 +306,7 @@ class MemoryStore:
             verify_beliefs_fn=lambda: self.profile_mgr.verify_beliefs(),
             write_profile_fn=lambda profile: self.profile_mgr.write_profile(profile),
             profile_keys=self.PROFILE_KEYS,
+            db=self.db,
         )
 
         # Wire profile_mgr subsystem dependencies (must happen after all are built).
@@ -340,6 +389,10 @@ class MemoryStore:
                 *a, **kw
             ),
             budget_allocator=getattr(self, "_budget_allocator", None),
+            db=getattr(self, "db", None),
+            embedder_available=(
+                getattr(self, "_embedder", None) is not None or getattr(self, "db", None) is None
+            ),
         )
         return self._assembler
 
