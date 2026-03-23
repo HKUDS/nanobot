@@ -116,6 +116,34 @@ class TestFTS5Search:
         assert any("coffee" in r["summary"].lower() for r in results)
         db.close()
 
+    def test_search_fts_after_replace_finds_new_not_old(self, tmp_path: Path):
+        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
+        event = {
+            "id": "evt-replace",
+            "type": "fact",
+            "summary": "User likes tea",
+            "timestamp": "2026-03-23T12:00:00Z",
+            "source": "test",
+            "status": "active",
+            "metadata": None,
+            "created_at": "2026-03-23T12:00:00Z",
+        }
+        db.insert_event(event, embedding=[1.0, 0.0, 0.0, 0.0])
+        # Replace with new summary
+        event["summary"] = "User likes coffee"
+        db.insert_event(event, embedding=[0.0, 1.0, 0.0, 0.0])
+        # Old term should not match
+        assert len(db.search_fts("tea", k=5)) == 0
+        # New term should match
+        results = db.search_fts("coffee", k=5)
+        assert len(results) == 1
+        assert results[0]["id"] == "evt-replace"
+        # Vector search should find only the new embedding
+        vec_results = db.search_vector([0.0, 1.0, 0.0, 0.0], k=5)
+        assert len(vec_results) == 1
+        assert vec_results[0]["id"] == "evt-replace"
+        db.close()
+
     def test_search_fts_returns_empty_for_no_match(self, tmp_path: Path):
         db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
         db.insert_event(

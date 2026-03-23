@@ -52,13 +52,21 @@ class UnifiedMemoryDB:
 
     def __init__(self, db_path: Path, *, dims: int) -> None:
         self._db_path = Path(db_path)
-        self._dims = dims
+        self._dims = int(dims)  # coerce + raise ValueError if not castable
+        if self._dims <= 0:
+            raise ValueError(f"dims must be positive, got {self._dims}")
         self._conn = sqlite3.connect(str(db_path))
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.enable_load_extension(True)
-        sqlite_vec.load(self._conn)
-        self._conn.enable_load_extension(False)
+        try:
+            self._conn.enable_load_extension(True)
+            sqlite_vec.load(self._conn)
+            self._conn.enable_load_extension(False)
+        except Exception:  # crash-barrier: sqlite-vec extension load failure
+            self._conn.close()
+            raise RuntimeError(
+                "Failed to load sqlite-vec extension. Install with: pip install sqlite-vec"
+            ) from None
         self._init_schema()
 
     def _init_schema(self) -> None:
@@ -117,6 +125,13 @@ class UnifiedMemoryDB:
     ) -> None:
         """Insert an event with optional vector embedding (single transaction)."""
         with self._conn:
+            # Clean up any existing vector entry before replace (rowid changes
+            # on INSERT OR REPLACE)
+            old_row = self._conn.execute(
+                "SELECT rowid FROM events WHERE id = ?", (event["id"],)
+            ).fetchone()
+            if old_row is not None:
+                self._conn.execute("DELETE FROM events_vec WHERE id = ?", (old_row[0],))
             self._conn.execute(
                 """INSERT OR REPLACE INTO events
                    (id, type, summary, timestamp, source, status, metadata, created_at)
@@ -297,6 +312,12 @@ class UnifiedMemoryDB:
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
+
+    def __enter__(self) -> UnifiedMemoryDB:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
 
     def close(self) -> None:
         """Close the database connection."""
