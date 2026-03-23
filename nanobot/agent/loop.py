@@ -31,6 +31,7 @@ tools are available again in the next turn.
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
 from contextlib import AsyncExitStack
 from datetime import datetime, timezone
@@ -344,8 +345,7 @@ class AgentLoop:
 
         # Wire span module so that tests patching
         # nanobot.agent.loop.update_current_span see their patches take effect.
-        import nanobot.agent.loop as _loop_module
-
+        _loop_module = sys.modules[__name__]  # get our own module reference for test patching
         self._processor._span_module = _loop_module
 
     def _build_tools(self) -> None:

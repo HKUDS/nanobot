@@ -51,10 +51,10 @@ def make_bus_progress(
     async def _progress(event: ProgressEvent) -> None:
         meta = dict(base_meta)  # inherits _progress=True from base_meta
         match event:
-            case TextChunk(content=content, streaming=streaming):
-                meta["_streaming"] = streaming
-                if content:
-                    meta["_canonical"] = canonical_builder.text_flush(content)
+            case TextChunk() as tc:
+                meta["_streaming"] = tc.streaming
+                if tc.content:
+                    meta["_canonical"] = canonical_builder.text_flush(tc.content)
             case ToolCallEvent(tool_call_id=tcid, tool_name=name, args=args):
                 meta["_tool_hint"] = True  # preserved for ChannelManager gate
                 meta["_tool_call"] = {"toolCallId": tcid, "toolName": name, "args": args}

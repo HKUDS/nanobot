@@ -475,7 +475,7 @@ class MessageProcessor:
                 src._turn_tokens_completion = self._turn_tokens_completion
                 src._turn_llm_calls = self._turn_llm_calls
             except AttributeError:
-                pass
+                pass  # _token_source may not expose these attrs (e.g., during testing with mocks)
 
     # ------------------------------------------------------------------
     # Orchestrator interaction
