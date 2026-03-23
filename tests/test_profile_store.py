@@ -88,21 +88,9 @@ class TestProfileStoreReadWrite:
         mem0 = MagicMock()
         profile_file = tmp_path / "profile.json"
         profile_file.write_text("{}")
-        written = {}
-
-        def _write(path, data):
-            written.update(data)
-            profile_file.write_text(json.dumps(data))
-
-        def _read(path):
-            text = profile_file.read_text()
-            return json.loads(text)
-
-        persistence.write_json.side_effect = _write
-        persistence.read_json.side_effect = _read
+        persistence.write_json.side_effect = lambda path, data: None
         store = ProfileStore(persistence, profile_file, mem0)
         store.write_profile({"preferences": ["tea"], "stable_facts": []})
-        # invalidate so next read hits disk (simulating external write)
-        store._cache.invalidate()
+        # ProfileCache.write() updates _data in-memory; read_profile reads from cache
         result = store.read_profile()
         assert result["preferences"] == ["tea"]

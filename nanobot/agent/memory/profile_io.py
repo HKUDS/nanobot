@@ -40,6 +40,15 @@ PROFILE_STATUS_ACTIVE = "active"
 PROFILE_STATUS_CONFLICTED = "conflicted"
 PROFILE_STATUS_STALE = "stale"
 
+__all__ = [
+    "PROFILE_KEYS",
+    "PROFILE_STATUS_ACTIVE",
+    "PROFILE_STATUS_CONFLICTED",
+    "PROFILE_STATUS_STALE",
+    "ProfileCache",
+    "ProfileStore",
+]
+
 
 # ---------------------------------------------------------------------------
 # ProfileCache
@@ -182,17 +191,18 @@ class ProfileStore:
                         entry.setdefault("created_at", created)
                         entry["id"] = self._generate_belief_id(key, norm, entry["created_at"])
             return data
-        if self.profile_file.exists() and data is not None and not data:
-            pass  # empty file — not an error, just use defaults below
-        elif self.profile_file.exists():
+        if self.profile_file.exists() and data is None:
             logger.warning("Failed to parse memory profile, resetting")
         return {
             "preferences": [], "stable_facts": [], "active_projects": [],
             "relationships": [], "constraints": [], "conflicts": [],
-            "last_verified_at": None, "meta": {},
+            "last_verified_at": None,
+            "meta": {key: {} for key in self.PROFILE_KEYS},
+            "updated_at": self._utc_now_iso(),
         }
 
     def write_profile(self, profile: dict[str, Any]) -> None:
+        profile["updated_at"] = self._utc_now_iso()
         self._cache.write(profile)
 
     def _meta_section(self, profile: dict[str, Any], key: str) -> dict[str, Any]:
