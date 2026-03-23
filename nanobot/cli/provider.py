@@ -62,7 +62,7 @@ def _login_openai_codex() -> None:
             console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
             token = login_oauth_interactive(
                 print_fn=lambda s: console.print(s),
-                prompt_fn=lambda s: typer.prompt(s),
+                prompt_fn=typer.prompt,
             )
         if not (token and token.access):
             console.print("[red]✗ Authentication failed[/red]")

@@ -78,7 +78,7 @@ def _restore_terminal() -> None:
 
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
     except (OSError, ImportError, AttributeError):
-        pass
+        pass  # terminal restore is best-effort; ignore if unavailable
 
 
 def _init_prompt_session() -> None:
@@ -91,7 +91,7 @@ def _init_prompt_session() -> None:
 
         _SAVED_TERM_ATTRS = termios.tcgetattr(sys.stdin.fileno())
     except (OSError, ImportError, AttributeError):
-        pass
+        pass  # terminal state save is best-effort; ignore if unavailable
 
     history_file = Path.home() / ".nanobot" / "history" / "cli_history"
     history_file.parent.mkdir(parents=True, exist_ok=True)
@@ -237,7 +237,7 @@ def agent(
                 try:
                     await asyncio.wait_for(_drain_pending_tasks(), timeout=2.0)
                 except TimeoutError:
-                    pass
+                    pass  # drain is best-effort; proceed with shutdown
                 shutdown_langfuse()
 
         watchdog: threading.Timer | None = None
