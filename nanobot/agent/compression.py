@@ -34,7 +34,8 @@ class _ChatProvider(Protocol):
 
     async def chat(
         self, *, messages: list[dict], tools: Any, model: str, temperature: float, max_tokens: int
-    ) -> Any: ...
+    ) -> Any:
+        """Send a chat completion request."""  # Protocol stub — no implementation needed
 
 
 # ---------------------------------------------------------------------------

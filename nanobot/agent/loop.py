@@ -38,7 +38,6 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
-from nanobot.agent.agent_factory import _AgentComponents
 from nanobot.agent.bus_progress import make_bus_progress
 from nanobot.agent.callbacks import ProgressCallback
 from nanobot.agent.observability import (
@@ -64,6 +63,7 @@ from nanobot.config.schema import AgentRoleConfig
 from nanobot.session.manager import Session
 
 if TYPE_CHECKING:
+    from nanobot.agent.agent_factory import _AgentComponents
     from nanobot.agent.coordinator import ClassificationResult, Coordinator
 
 

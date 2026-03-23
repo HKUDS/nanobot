@@ -53,4 +53,5 @@ class Orchestrator(Protocol):
         self,
         state: TurnState,
         on_progress: Any = None,
-    ) -> Any: ...
+    ) -> Any:
+        """Execute one full turn of the Plan-Act-Observe-Reflect loop."""  # Protocol stub

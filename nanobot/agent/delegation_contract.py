@@ -127,7 +127,7 @@ def build_execution_context(workspace: Path, task_type: str) -> str:
         if tree_lines:
             parts.append("Directory layout:\n" + "\n".join(tree_lines))
     except OSError:
-        pass
+        pass  # crash-barrier: directory listing may fail on restricted paths
     if task_type in ("local_code_analysis", "repo_architecture", "bug_investigation", "hybrid"):
         for name in ("AGENTS.md", "README.md", "SOUL.md"):
             path = workspace / name
@@ -137,7 +137,7 @@ def build_execution_context(workspace: Path, task_type: str) -> str:
                     if text.strip():
                         parts.append(f"--- {name} (excerpt) ---\n{text.strip()}")
             except OSError:
-                pass
+                pass  # crash-barrier: file read may fail on restricted paths
     return "\n\n".join(parts)
 
 
