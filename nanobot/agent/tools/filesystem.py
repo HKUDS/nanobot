@@ -187,6 +187,8 @@ class ReadFileTool(_FsTool):
                         selected.append(numbered)
                         selected_chars = projected
 
+            except UnicodeDecodeError as e:
+                return f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). Only UTF-8 text and images are supported."
             except OSError as e:
                 return f"Error reading file: {e}"
 
@@ -197,7 +199,7 @@ class ReadFileTool(_FsTool):
                 return f"Error: offset {offset} is beyond end of file ({total} lines)"
 
             if not selected:
-                return f"(No content within budget: {path})"
+                return f"(No content within budget. file:{path} has {total} lines. Try smaller offset or larger budget.)"
 
             result = "\n".join(selected)
             end = int(selected[-1].split("|", 1)[0])

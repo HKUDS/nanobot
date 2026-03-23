@@ -102,6 +102,14 @@ class TestReadFileTool:
         for i in range(10, 15):
             assert f"{i}| line {i}" in result
 
+    @pytest.mark.asyncio
+    async def test_non_utf8_text_returns_clear_error(self, tool, tmp_path):
+        f = tmp_path / "gbk.txt"
+        f.write_bytes("你好\n".encode("gbk"))
+        result = await tool.execute(path=str(f))
+        assert "Error" in result
+        assert "UTF-8" in result
+
 
 # ---------------------------------------------------------------------------
 # _find_match  (unit tests for the helper)
