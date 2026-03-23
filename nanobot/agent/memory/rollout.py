@@ -51,6 +51,7 @@ class RolloutConfig:
             "mem0_add_debug": False,
             "mem0_verify_write": True,
             "mem0_force_infer_true": False,
+            "consolidation_single_tool": True,
         }
         rollout = dict(defaults)
 
@@ -188,6 +189,7 @@ class RolloutConfig:
             "mem0_verify_write",
             "mem0_force_infer_true",
             "mem0_raw_turn_ingestion",
+            "consolidation_single_tool",
         ):
             if bk in overrides:
                 self.rollout[bk] = bool(overrides[bk])

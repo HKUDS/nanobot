@@ -25,7 +25,7 @@ from loguru import logger
 from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.tracing import bind_trace
 
-from .constants import _SAVE_MEMORY_TOOL
+from .constants import _CONSOLIDATE_MEMORY_TOOL, _SAVE_MEMORY_TOOL
 from .helpers import _contains_any, _utc_now_iso
 from .ingester import EventIngester
 
@@ -59,6 +59,7 @@ class ConsolidationPipeline:
         mem0_raw_turn_ingestion: bool,
         memory_file: Path,
         history_file: Path,
+        rollout: dict[str, Any] | None = None,
     ) -> None:
         self._persistence = persistence
         self._extractor = extractor
@@ -70,6 +71,7 @@ class ConsolidationPipeline:
         self._mem0_raw_turn_ingestion = mem0_raw_turn_ingestion
         self._memory_file = memory_file
         self._history_file = history_file
+        self._rollout: dict[str, Any] = rollout or {}
 
     # ------------------------------------------------------------------
     # Helper methods
@@ -125,6 +127,18 @@ class ConsolidationPipeline:
 ## Conversation to Process
 {chr(10).join(lines)}"""
 
+    @staticmethod
+    def _build_single_tool_prompt(current_memory: str, lines: list[str]) -> str:
+        return (
+            "Process this conversation and call the consolidate_memory tool with:\n"
+            "1. A history_entry summarizing key events, decisions, and topics "
+            "(2-5 sentences).\n"
+            "2. Structured events for long-term memory.\n"
+            "3. Any profile updates.\n\n"
+            f"## Current Long-term Memory\n{current_memory or '(empty)'}\n\n"
+            f"## Conversation to Process\n{chr(10).join(lines)}"
+        )
+
     def _apply_save_memory_tool_result(self, *, args: dict[str, Any], current_memory: str) -> None:
         if entry := args.get("history_entry"):
             if not isinstance(entry, str):
@@ -142,6 +156,178 @@ class ConsolidationPipeline:
             len(session.messages),
             session.last_consolidated,
         )
+
+    # ------------------------------------------------------------------
+    # Single-tool consolidation path (Task 6)
+    # ------------------------------------------------------------------
+
+    async def _consolidate_single_tool(
+        self,
+        session: Session,
+        provider: LLMProvider,
+        model: str,
+        lines: list[str],
+        old_messages: list[dict[str, Any]],
+        current_memory: str,
+        *,
+        source_start: int,
+        archive_all: bool,
+        keep_count: int,
+        enable_contradiction_check: bool,
+    ) -> bool:
+        """Single LLM call that produces history_entry + events + profile_updates."""
+        prompt = self._build_single_tool_prompt(current_memory, lines)
+
+        response = await provider.chat(
+            messages=[
+                {
+                    "role": "system",
+                    "content": prompts.get("consolidation"),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            tools=_CONSOLIDATE_MEMORY_TOOL,
+            tool_choice={
+                "type": "function",
+                "function": {"name": "consolidate_memory"},
+            },
+            model=model,
+        )
+
+        # -- Parse tool call arguments --
+        args: dict[str, Any] = {}
+        if response.has_tool_calls:
+            parsed = self._extractor.parse_tool_args(response.tool_calls[0].arguments)
+            if parsed:
+                args = parsed
+
+        # -- History entry (fallback: first few lines) --
+        history_entry = args.get("history_entry")
+        if not history_entry or not isinstance(history_entry, str):
+            history_entry = " ".join(lines[:3]) if lines else ""
+            logger.warning("consolidate_memory: history_entry missing, generated from first lines")
+        if history_entry:
+            self._persistence.append_text(self._history_file, history_entry.rstrip() + "\n\n")
+
+        # -- Events (fallback: heuristic extractor) --
+        raw_events = args.get("events")
+        events: list[dict[str, Any]] = []
+        profile_updates: dict[str, list[str]] = self._extractor.default_profile_updates()
+
+        if isinstance(raw_events, list) and raw_events:
+            for item in raw_events:
+                if not isinstance(item, dict):
+                    continue
+                source_span = item.get("source_span")
+                if (
+                    not isinstance(source_span, list)
+                    or len(source_span) != 2
+                    or not all(isinstance(x, int) for x in source_span)
+                ):
+                    source_span = [
+                        source_start,
+                        source_start + max(len(old_messages) - 1, 0),
+                    ]
+                event = self._extractor.coerce_event(item, source_span=source_span)
+                if event:
+                    events.append(event)
+                if len(events) >= 40:
+                    break
+
+            # Parse profile updates from the same tool call
+            raw_updates = args.get("profile_updates")
+            if isinstance(raw_updates, dict):
+                for key in profile_updates:
+                    profile_updates[key] = self._extractor.to_str_list(raw_updates.get(key))
+        else:
+            logger.warning(
+                "consolidate_memory: events missing or malformed, "
+                "falling back to heuristic extraction"
+            )
+            events, profile_updates = self._extractor.heuristic_extract_events(
+                old_messages, source_start=source_start
+            )
+
+        # -- Apply results (same as two-call path) --
+        events_written = self._ingester.append_events(events)
+        await self._ingester._ingest_graph_triples(events)
+
+        event_ids = [e.get("id", "") for e in events if e.get("id")]
+        profile = self._profile_mgr.read_profile()
+        profile_added, _, profile_touched = self._profile_mgr._apply_profile_updates(
+            profile,
+            profile_updates,
+            enable_contradiction_check=enable_contradiction_check,
+            source_event_ids=event_ids,
+        )
+        if events_written > 0 or profile_added > 0 or profile_touched > 0:
+            profile["last_verified_at"] = _utc_now_iso()
+            self._profile_mgr.write_profile(profile)
+
+        if profile_added > 0:
+            self._conflict_mgr.auto_resolve_conflicts(max_items=10)
+
+        self._snapshot.rebuild_memory_snapshot(write=True)
+
+        if self._mem0.enabled and events:
+            self._ingester._sync_events_to_mem0(events)
+
+        if self._mem0.enabled and self._mem0_raw_turn_ingestion:
+            for m in old_messages:
+                role = str(m.get("role", "user")).strip().lower() or "user"
+                content = str(m.get("content", "")).strip()
+                if not content:
+                    continue
+                memory_type = "episodic"
+                if role == "user":
+                    memory_type = (
+                        "semantic"
+                        if _contains_any(
+                            content,
+                            (
+                                "prefer",
+                                "always",
+                                "never",
+                                "must",
+                                "cannot",
+                                "my setup",
+                                "i use",
+                            ),
+                        )
+                        else "episodic"
+                    )
+                turn_meta, _ = self._ingester._normalize_memory_metadata(
+                    {
+                        "topic": "conversation_turn",
+                        "memory_type": memory_type,
+                        "stability": "medium",
+                    },
+                    event_type="fact",
+                    summary=content,
+                    source="chat",
+                )
+                turn_meta.update(
+                    {
+                        "event_type": "conversation_turn",
+                        "role": role,
+                        "timestamp": str(m.get("timestamp", "")),
+                        "session": session.key,
+                    }
+                )
+                clean_content = self._ingester._sanitize_mem0_text(content, allow_archival=False)
+                turn_meta = EventIngester._sanitize_mem0_metadata(turn_meta)
+                if clean_content:
+                    self._mem0.add_text(
+                        clean_content,
+                        metadata=turn_meta,
+                    )
+
+        self._finalize_consolidation(
+            session,
+            archive_all=archive_all,
+            keep_count=keep_count,
+        )
+        return True
 
     # ------------------------------------------------------------------
     # Main pipeline
@@ -175,9 +361,34 @@ class ConsolidationPipeline:
         lines = self._format_conversation_lines(old_messages)
 
         current_memory = self._persistence.read_text(self._memory_file)
-        prompt = self._build_consolidation_prompt(current_memory, lines)
 
         try:
+            # Task 6: branch on rollout flag — single-tool vs. legacy two-call path.
+            # Default is False for backward compat when no rollout dict is provided;
+            # RolloutConfig._load_defaults() sets this to True explicitly.
+            single_tool = self._rollout.get("consolidation_single_tool", False)
+            if single_tool:
+                result = await self._consolidate_single_tool(
+                    session,
+                    provider,
+                    model,
+                    lines,
+                    old_messages,
+                    current_memory,
+                    source_start=source_start,
+                    archive_all=archive_all,
+                    keep_count=keep_count,
+                    enable_contradiction_check=enable_contradiction_check,
+                )
+                bind_trace().debug(
+                    "Memory consolidate (single-tool) duration_ms={:.0f}",
+                    (time.monotonic() - t0) * 1000,
+                )
+                return result
+
+            # -- Legacy two-call path (save_memory + save_events) --
+            prompt = self._build_consolidation_prompt(current_memory, lines)
+
             response = await provider.chat(
                 messages=[
                     {

@@ -95,3 +95,37 @@ _SAVE_EVENTS_TOOL = [
         },
     }
 ]
+
+
+# -- Combined single-tool schema for one-call consolidation (Task 6) ----------
+
+_CONSOLIDATE_MEMORY_TOOL = [
+    {
+        "type": "function",
+        "function": {
+            "name": "consolidate_memory",
+            "description": (
+                "Consolidate conversation into memory: history summary, "
+                "structured events, and profile updates."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "history_entry": {
+                        "type": "string",
+                        "description": (
+                            "2-5 sentence summary of key events, decisions, and topics discussed."
+                        ),
+                    },
+                    "events": _SAVE_EVENTS_TOOL[0]["function"]["parameters"]["properties"][
+                        "events"
+                    ],
+                    "profile_updates": _SAVE_EVENTS_TOOL[0]["function"]["parameters"]["properties"][
+                        "profile_updates"
+                    ],
+                },
+                "required": ["history_entry", "events"],
+            },
+        },
+    }
+]
