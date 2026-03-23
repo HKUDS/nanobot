@@ -762,10 +762,13 @@ class MemoryRetriever:
                     else 0.0
                 )
 
-            # -- Profile adjustments ------------------------------------------
+            # -- Profile adjustments (mem0 path only) --------------------------
+            # The BM25 path historically applied only lightweight boosts (type,
+            # stability, graph).  Profile adjustments, superseded penalties, and
+            # reflection penalties are mem0-specific scoring refinements.
             adjustment = 0.0
             adjustment_reasons: list[str] = []
-            field = _FIELD_BY_EVENT_TYPE.get(event_type)
+            field = _FIELD_BY_EVENT_TYPE.get(event_type) if use_recency else None
             if field:
                 for old_norm in resolved_keep_new_old.get(field, set()):
                     if _contains_norm_phrase(summary, old_norm):
@@ -795,8 +798,8 @@ class MemoryRetriever:
                             adjustment_reasons.append("conflicted_profile_penalty")
                             break
 
-            # Superseded semantic penalty
-            if memory_type == "semantic":
+            # Superseded semantic penalty (mem0 path only)
+            if use_recency and memory_type == "semantic":
                 if (
                     event_status == "superseded"
                     or str(item.get("superseded_by_event_id", "")).strip()
@@ -821,7 +824,7 @@ class MemoryRetriever:
             )
             stability = str(item.get("stability", "medium")).strip().lower()
             stability_boost = _STABILITY_BOOST.get(stability, 0.0)
-            reflection_penalty = -0.06 if memory_type == "reflection" else 0.0
+            reflection_penalty = -0.06 if (use_recency and memory_type == "reflection") else 0.0
 
             if use_recency:
                 recency = RetrievalPlanner.recency_signal(
