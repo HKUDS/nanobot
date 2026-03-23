@@ -1502,7 +1502,7 @@ class AgentLoop:
         self,
         channel: str,
         chat_id: str,
-        base_meta: dict,
+        base_meta: dict[str, Any],
         canonical_builder: CanonicalEventBuilder,
     ) -> ProgressCallback:
         """Delegate to the standalone make_bus_progress factory."""
@@ -1702,7 +1702,7 @@ class AgentLoop:
 
         # Build a base metadata dict once for this turn; per-event fields are
         # shallow-merged on each call to avoid re-copying msg.metadata each time.
-        _base_meta: dict = dict(msg.metadata or {})
+        _base_meta: dict[str, Any] = dict(msg.metadata or {})
         _base_meta["_progress"] = True
 
         _bus_progress = self._make_bus_progress(
