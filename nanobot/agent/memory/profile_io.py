@@ -682,7 +682,7 @@ class ProfileStore:
         )
         return result
 
-    def _has_open_conflict(
+    def _has_exact_conflict_pair(
         self, profile: dict[str, Any], *, field: str, old_value: str, new_value: str
     ) -> bool:
         """Check for an open conflict matching the exact old/new value pair."""
@@ -702,6 +702,10 @@ class ProfileStore:
                 continue
             return True
         return False
+
+    def _has_open_conflict(self, profile: dict[str, Any], key: str) -> bool:
+        """Delegating wrapper — see ConflictManager.has_open_conflict."""
+        return self._conflict_mgr.has_open_conflict(profile, key)
 
     # ------------------------------------------------------------------
     # mem0 helpers
@@ -795,7 +799,7 @@ class ProfileStore:
                 if (
                     enable_contradiction_check
                     and old_norm in by_norm
-                    and not self._has_open_conflict(
+                    and not self._has_exact_conflict_pair(
                         profile,
                         field=field,
                         old_value=by_norm[old_norm],
