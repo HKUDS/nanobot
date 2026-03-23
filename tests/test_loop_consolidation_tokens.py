@@ -13,7 +13,9 @@ def _make_loop(tmp_path, *, estimated_tokens: int, context_window_tokens: int) -
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.estimate_prompt_tokens.return_value = (estimated_tokens, "test-counter")
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+    _response = LLMResponse(content="ok", tool_calls=[])
+    provider.chat_with_retry = AsyncMock(return_value=_response)
+    provider.chat_stream_with_retry = AsyncMock(return_value=_response)
 
     loop = AgentLoop(
         bus=MessageBus(),
@@ -171,6 +173,7 @@ async def test_preflight_consolidation_runs_in_background(tmp_path, monkeypatch)
         order.append("llm")
         return LLMResponse(content="ok", tool_calls=[])
     loop.provider.chat_with_retry = track_llm
+    loop.provider.chat_stream_with_retry = track_llm
 
     session = loop.sessions.get_or_create("cli:test")
     session.messages = [

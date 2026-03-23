@@ -67,3 +67,47 @@ async def test_web_fetch_result_contains_untrusted_flag():
     data = json.loads(result)
     assert data.get("untrusted") is True
     assert "[External content" in data.get("text", "")
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_blocks_private_redirect_before_returning_image(monkeypatch):
+    tool = WebFetchTool()
+
+    class FakeStreamResponse:
+        headers = {"content-type": "image/png"}
+        url = "http://127.0.0.1/secret.png"
+        content = b"\x89PNG\r\n\x1a\n"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def aread(self):
+            return self.content
+
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, method, url, headers=None):
+            return FakeStreamResponse()
+
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", FakeClient)
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        result = await tool.execute(url="https://example.com/image.png")
+
+    data = json.loads(result)
+    assert "error" in data
+    assert "redirect blocked" in data["error"].lower()

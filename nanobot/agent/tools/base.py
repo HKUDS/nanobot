@@ -54,7 +54,7 @@ class Tool(ABC):
         pass
 
     @abstractmethod
-    async def execute(self, **kwargs: Any) -> str:
+    async def execute(self, **kwargs: Any) -> Any:
         """
         Execute the tool with given parameters.
 
@@ -62,7 +62,7 @@ class Tool(ABC):
             **kwargs: Tool-specific parameters.
 
         Returns:
-            String result of the tool execution.
+            Result of the tool execution (string or list of content blocks).
         """
         pass
 
@@ -146,7 +146,9 @@ class Tool(ABC):
 
     def _validate(self, val: Any, schema: dict[str, Any], path: str) -> list[str]:
         raw_type = schema.get("type")
-        nullable = isinstance(raw_type, list) and "null" in raw_type
+        nullable = (isinstance(raw_type, list) and "null" in raw_type) or schema.get(
+            "nullable", False
+        )
         t, label = self._resolve_type(raw_type), path or "parameter"
         if nullable and val is None:
             return []

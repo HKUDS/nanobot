@@ -269,11 +269,9 @@ class CronService:
         start_ms = _now_ms()
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
 
-        error_msg: str | None = None
         try:
-            response = None
             if self.on_job:
-                response = await self.on_job(job)
+                await self.on_job(job)
 
             job.state.last_status = "ok"
             job.state.last_error = None
@@ -282,19 +280,18 @@ class CronService:
         except Exception as e:
             job.state.last_status = "error"
             job.state.last_error = str(e)
-            error_msg = str(e)
             logger.error("Cron: job '{}' failed: {}", job.name, e)
 
         end_ms = _now_ms()
         job.state.last_run_at_ms = start_ms
         job.updated_at_ms = end_ms
 
-        # Record run history (keep last MAX_RUN_HISTORY entries)
+        # Record run history (keep last N entries per max_run_history)
         job.state.run_history.append(CronRunRecord(
             run_at_ms=start_ms,
             status=job.state.last_status,
             duration_ms=end_ms - start_ms,
-            error=error_msg,
+            error=job.state.last_error,
         ))
         job.state.run_history = job.state.run_history[-self.max_run_history:]
 

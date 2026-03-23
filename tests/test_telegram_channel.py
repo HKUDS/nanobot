@@ -177,6 +177,7 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
     assert poll_req.kwargs["connection_pool_size"] == 4
     assert builder.request_value is api_req
     assert builder.get_updates_request_value is poll_req
+    assert any(cmd.command == "status" for cmd in app.bot.commands)
 
 
 @pytest.mark.asyncio
@@ -836,3 +837,4 @@ async def test_on_help_includes_restart_command() -> None:
     update.message.reply_text.assert_awaited_once()
     help_text = update.message.reply_text.await_args.args[0]
     assert "/restart" in help_text
+    assert "/status" in help_text

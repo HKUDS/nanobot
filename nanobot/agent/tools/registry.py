@@ -40,7 +40,7 @@ class ToolRegistry:
             self._definitions_cache = [tool.to_schema() for tool in self._tools.values()]
         return self._definitions_cache
 
-    async def execute(self, name: str, params: dict[str, Any]) -> str:
+    async def execute(self, name: str, params: dict[str, Any]) -> Any:
         """Execute a tool by name with given parameters."""
         _HINT = "\n\n[Analyze the error above and try a different approach.]"
 
