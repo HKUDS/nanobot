@@ -34,7 +34,7 @@ import asyncio
 import json
 import time
 from contextlib import AsyncExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal
 
@@ -160,6 +160,26 @@ class _ToolBatchResult:
     nudged_for_final: bool
     last_tool_call_msg_idx: int
     tool_calls_this_batch: int
+
+
+@dataclass
+class TurnState:
+    """Mutable state shared across iterations of the Plan-Act-Observe-Reflect loop."""
+
+    messages: list[dict[str, Any]]
+    user_text: str
+    disabled_tools: set[str] = field(default_factory=set)
+    tracker: ToolCallTracker = field(default_factory=ToolCallTracker)
+    nudged_for_final: bool = False
+    turn_tool_calls: int = 0
+    last_tool_call_msg_idx: int = -1
+    last_delegation_advice: DelegationAction | None = None
+    has_plan: bool = False
+    plan_enforced: bool = False
+    consecutive_errors: int = 0
+    iteration: int = 0
+    tools_def_cache: list[dict[str, Any]] = field(default_factory=list)
+    tools_def_snapshot: frozenset[str] = field(default_factory=frozenset)
 
 
 def _user_friendly_error(exc: Exception) -> str:
@@ -656,77 +676,82 @@ class AgentLoop:
 
     async def _handle_llm_error(
         self,
+        state: TurnState,
         response: "LLMResponse",
-        consecutive_errors: int,
-        messages: list[dict],
         on_progress: ProgressCallback | None,
-    ) -> tuple[Literal["continue", "break", "proceed"], int, str | None]:
+    ) -> tuple[Literal["continue", "break", "proceed"], str | None]:
         """Handle LLM-level error finish reasons.
 
-        Returns ``(action, consecutive_errors, final_content)`` where *action*
+        Returns ``(action, final_content)`` where *action*
         is ``"continue"`` (retry this iteration), ``"break"`` (end the loop),
         or ``"proceed"`` (no error — continue normal processing).
-        *messages* is mutated in-place when a final answer is injected.
+        Mutates ``state.consecutive_errors`` and ``state.messages`` in-place.
         """
         if response.finish_reason == "error":
-            consecutive_errors += 1
+            state.consecutive_errors += 1
             logger.warning(
-                "LLM returned error (attempt {}): {}", consecutive_errors, response.content
+                "LLM returned error (attempt {}): {}",
+                state.consecutive_errors,
+                response.content,
             )
-            if consecutive_errors >= 3:
+            if state.consecutive_errors >= 3:
                 final_content = (
                     "I'm having trouble reaching the language model right now. "
                     "Please try again in a moment."
                 )
-                messages[:] = self.context.add_assistant_message(messages, final_content)
-                return "break", consecutive_errors, final_content
+                state.messages[:] = self.context.add_assistant_message(
+                    state.messages, final_content
+                )
+                return "break", final_content
             if on_progress:
                 await on_progress(StatusEvent(status_code="retrying"))
-            await asyncio.sleep(min(2**consecutive_errors, 10))
-            return "continue", consecutive_errors, None
+            await asyncio.sleep(min(2**state.consecutive_errors, 10))
+            return "continue", None
 
         if response.finish_reason == "content_filter":
-            consecutive_errors += 1
-            logger.warning("Content filter triggered (attempt {})", consecutive_errors)
-            if consecutive_errors >= 2:
+            state.consecutive_errors += 1
+            logger.warning("Content filter triggered (attempt {})", state.consecutive_errors)
+            if state.consecutive_errors >= 2:
                 final_content = (
                     "The AI provider's content filter blocked my response. "
                     "Try rephrasing your question."
                 )
-                messages[:] = self.context.add_assistant_message(messages, final_content)
-                return "break", consecutive_errors, final_content
+                state.messages[:] = self.context.add_assistant_message(
+                    state.messages, final_content
+                )
+                return "break", final_content
             await asyncio.sleep(1)
-            return "continue", consecutive_errors, None
+            return "continue", None
 
         if response.finish_reason == "length" and not response.content:
-            consecutive_errors += 1
-            logger.warning("Response truncated to zero content (attempt {})", consecutive_errors)
-            if consecutive_errors >= 2:
+            state.consecutive_errors += 1
+            logger.warning(
+                "Response truncated to zero content (attempt {})", state.consecutive_errors
+            )
+            if state.consecutive_errors >= 2:
                 final_content = (
                     "My response was too long and got cut off. Try asking a more specific question."
                 )
-                messages[:] = self.context.add_assistant_message(messages, final_content)
-                return "break", consecutive_errors, final_content
+                state.messages[:] = self.context.add_assistant_message(
+                    state.messages, final_content
+                )
+                return "break", final_content
             await asyncio.sleep(1)
-            return "continue", consecutive_errors, None
+            return "continue", None
 
-        return "proceed", consecutive_errors, None
+        return "proceed", None
 
     async def _process_tool_results(
         self,
+        state: TurnState,
         response: "LLMResponse",
-        messages: list[dict],
         tools_used: list[str],
-        disabled_tools: set[str],
-        tracker: "ToolCallTracker",
-        _tools_def_cache: list[dict],
         on_progress: ProgressCallback | None,
-        nudged_for_final: bool,
     ) -> _ToolBatchResult:
         """Execute tool calls and process their results.
 
-        Mutates *messages*, *tools_used*, and *disabled_tools* in-place.
-        Returns a ``_ToolBatchResult`` with the scalar state changes.
+        Mutates ``state.messages``, *tools_used*, and ``state.disabled_tools``
+        in-place.  Returns a ``_ToolBatchResult`` with the scalar state changes.
         """
         _args_json: dict[str, str] = {
             tc.id: json.dumps(tc.arguments, ensure_ascii=False) for tc in response.tool_calls
@@ -742,13 +767,13 @@ class AgentLoop:
         # Suppress draft content when tool calls are present; keep as reasoning.
         reasoning = response.reasoning_content or response.content
         new_messages = self.context.add_assistant_message(
-            messages,
+            state.messages,
             None,
             tool_call_dicts,
             reasoning_content=reasoning,
         )
         last_tool_call_msg_idx = len(new_messages) - 1
-        messages[:] = new_messages
+        state.messages[:] = new_messages
 
         # Execute tools (parallel for readonly, sequential for writes)
         t0_tools = time.monotonic()
@@ -780,12 +805,14 @@ class AgentLoop:
                         tool_name=tool_call.name,
                     )
                 )
-            messages[:] = self.context.add_tool_result(
-                messages, tool_call.id, tool_call.name, result.to_llm_string()
+            state.messages[:] = self.context.add_tool_result(
+                state.messages, tool_call.id, tool_call.name, result.to_llm_string()
             )
             if not result.success:
                 any_failed = True
-                count, fc = tracker.record_failure(tool_call.name, tool_call.arguments, result)
+                count, fc = state.tracker.record_failure(
+                    tool_call.name, tool_call.arguments, result
+                )
                 failed_this_batch.append((tool_call.name, fc))
                 remove_now = count >= ToolCallTracker.REMOVE_THRESHOLD or fc.is_permanent
                 if remove_now:
@@ -795,7 +822,7 @@ class AgentLoop:
                         if fc.is_permanent
                         else f"failed {count} times with identical arguments"
                     )
-                    messages.append(
+                    state.messages.append(
                         {
                             "role": "system",
                             "content": (
@@ -805,7 +832,7 @@ class AgentLoop:
                         }
                     )
                 elif count >= ToolCallTracker.WARN_THRESHOLD:
-                    messages.append(
+                    state.messages.append(
                         {
                             "role": "system",
                             "content": (
@@ -817,17 +844,18 @@ class AgentLoop:
                         }
                     )
             else:
-                tracker.record_success(tool_call.name, tool_call.arguments)
+                state.tracker.record_success(tool_call.name, tool_call.arguments)
 
-        disabled_tools.update(tools_to_remove)
+        state.disabled_tools.update(tools_to_remove)
 
         # Global failure budget: force final answer
-        if tracker.budget_exhausted:
-            messages.append(
+        nudged_for_final = state.nudged_for_final
+        if state.tracker.budget_exhausted:
+            state.messages.append(
                 {
                     "role": "system",
                     "content": (
-                        f"You have {tracker.total_failures} failed tool calls "
+                        f"You have {state.tracker.total_failures} failed tool calls "
                         "this turn. Stop calling tools and produce your final "
                         "answer NOW with whatever information you have."
                     ),
@@ -845,25 +873,15 @@ class AgentLoop:
 
     def _evaluate_progress(
         self,
+        state: TurnState,
         response: "LLMResponse",
-        messages: list[dict],
-        tracker: "ToolCallTracker",
-        _tools_def_cache: list[dict],
         any_failed: bool,
         failed_this_batch: list[tuple[str, FailureClass]],
-        has_plan: bool,
-        turn_tool_calls: int,
-        user_text: str,
-        nudged_for_final: bool,
-        iteration: int,
-        previous_advice: "DelegationAction | None",
-    ) -> tuple[bool, "DelegationAction | None", list[dict]]:
+    ) -> None:
         """Append REFLECT-phase system messages based on the current turn state.
 
-        Mutates *messages* in-place; returns a tuple of:
-        - updated *nudged_for_final* flag
-        - the latest delegation advice action (for escalation tracking)
-        - potentially filtered *_tools_def_cache* (when delegate tools removed)
+        Mutates ``state`` in-place: updates ``last_delegation_advice`` and may
+        filter ``tools_def_cache`` when delegate tools are removed.
         """
         from nanobot.agent.delegation_advisor import DelegationAction
 
@@ -872,48 +890,50 @@ class AgentLoop:
         # --- Delegation advisor (replaces 3 independent triggers) ---
         delegation_advice = self._delegation_advisor.advise_reflect_phase(
             role_name=self.role_name,
-            turn_tool_calls=turn_tool_calls,
+            turn_tool_calls=state.turn_tool_calls,
             delegation_count=self._dispatcher.delegation_count,
             max_delegations=self._dispatcher.max_delegations,
             had_delegations_this_batch=had_delegations,
             used_sequential_delegate=had_delegations
             and not any(tc.name == "delegate_parallel" for tc in response.tool_calls),
-            has_parallel_structure=DelegationDispatcher.has_parallel_structure(user_text),
+            has_parallel_structure=DelegationDispatcher.has_parallel_structure(state.user_text),
             any_ungrounded=any(
                 "grounded=False" in (m.get("content") or "")
-                for m in messages[-len(response.tool_calls) :]
+                for m in state.messages[-len(response.tool_calls) :]
                 if m.get("role") == "tool"
             ),
             any_failed=any_failed,
-            iteration=iteration,
-            previous_advice=previous_advice,
+            iteration=state.iteration,
+            previous_advice=state.last_delegation_advice,
         )
-        _last_advice = delegation_advice.action
+        state.last_delegation_advice = delegation_advice.action
 
         # --- Render delegation advice OR fall through to other nudges ---
         if delegation_advice.action == DelegationAction.HARD_GATE:
-            messages.append(
+            state.messages.append(
                 {"role": "system", "content": prompts.get("nudge_delegation_exhausted")}
             )
         elif delegation_advice.action == DelegationAction.SYNTHESIZE:
             nudge = prompts.get("nudge_post_delegation")
             if delegation_advice.warn_ungrounded:
                 nudge += "\n\n" + prompts.get("nudge_ungrounded_warning")
-            messages.append({"role": "system", "content": nudge})
+            state.messages.append({"role": "system", "content": nudge})
         elif delegation_advice.action in (DelegationAction.SOFT_NUDGE, DelegationAction.HARD_NUDGE):
             if delegation_advice.suggested_mode == "delegate_parallel":
-                messages.append({"role": "system", "content": prompts.get("nudge_use_parallel")})
+                state.messages.append(
+                    {"role": "system", "content": prompts.get("nudge_use_parallel")}
+                )
             else:
-                messages.append({"role": "system", "content": delegation_advice.reason})
+                state.messages.append({"role": "system", "content": delegation_advice.reason})
         elif any_failed:
             # PRESERVED: failure handling (advisor returns NONE when any_failed=True)
-            _permanent = tracker.permanent_failures
+            _permanent = state.tracker.permanent_failures
             _available = [
                 t["function"]["name"]
-                for t in _tools_def_cache
+                for t in state.tools_def_cache
                 if t["function"]["name"] not in _permanent
             ]
-            messages.append(
+            state.messages.append(
                 {
                     "role": "system",
                     "content": _build_failure_prompt(
@@ -923,9 +943,9 @@ class AgentLoop:
                     ),
                 }
             )
-        elif has_plan and len(response.tool_calls) >= 1:
+        elif state.has_plan and len(response.tool_calls) >= 1:
             # PRESERVED: progress nudge (not delegation-related)
-            messages.append(
+            state.messages.append(
                 {
                     "role": "system",
                     "content": prompts.get("progress"),
@@ -933,7 +953,7 @@ class AgentLoop:
             )
         elif len(response.tool_calls) >= 3:
             # PRESERVED: reflect nudge (not delegation-related)
-            messages.append(
+            state.messages.append(
                 {
                     "role": "system",
                     "content": prompts.get("reflect"),
@@ -942,11 +962,11 @@ class AgentLoop:
 
         # Remove delegate tools when advisor says budget is exhausted
         if delegation_advice.remove_delegate_tools:
-            _tools_def_cache = [
-                t for t in _tools_def_cache if t["function"]["name"] not in _DELEGATION_TOOL_NAMES
+            state.tools_def_cache = [
+                t
+                for t in state.tools_def_cache
+                if t["function"]["name"] not in _DELEGATION_TOOL_NAMES
             ]
-
-        return nudged_for_final, _last_advice, _tools_def_cache
 
     async def _run_agent_loop(
         self,
@@ -957,40 +977,9 @@ class AgentLoop:
 
         Returns (final_content, tools_used, messages).
         """
-        messages = initial_messages
-        self._dispatcher.active_messages = messages
-        self._dispatcher.delegation_count = 0
-        iteration = 0
-        final_content = None
-        tools_used: list[str] = []
-        turn_tool_calls = 0
-        nudged_for_final = False
-        consecutive_errors = 0
-        has_plan = False
-        plan_enforced = False
-        _last_tool_call_msg_idx: int = -1  # index of last assistant msg with tool_calls
-        tracker = ToolCallTracker()
-        # Tools suppressed this turn due to repeated or permanent failures.
-        # Stored separately from the registry so removal is scoped to this turn
-        # only — the registry is never mutated, keeping tools available for
-        # subsequent turns.
-        disabled_tools: set[str] = set()
-        # Cache tools_def between iterations; recomputed only when disabled_tools changes.
-        # Eagerly built here so the first iteration has a valid (non-empty) list.
-        _tools_def_snapshot: frozenset[str] = frozenset()
-        _tools_def_cache: list[dict] = list(self.tools.get_definitions())
-
-        # Reset per-turn token accumulators
-        self._turn_tokens_prompt = 0
-        self._turn_tokens_completion = 0
-        self._turn_llm_calls = 0
-
-        # Reserve ~20% of context window for the model's response
-        context_budget = int(self.config.context_window_tokens * _CONTEXT_RESERVE_RATIO)
-
         # Extract the last user message (used by planning + verification)
         user_text = ""
-        for m in reversed(messages):
+        for m in reversed(initial_messages):
             if m.get("role") == "user":
                 content = m.get("content", "")
                 if isinstance(content, str):
@@ -1003,21 +992,40 @@ class AgentLoop:
                     )
                 break
 
+        # Build shared mutable state for this turn.
+        # Cache tools_def eagerly so the first iteration has a valid (non-empty) list.
+        state = TurnState(
+            messages=initial_messages,
+            user_text=user_text,
+            tools_def_cache=list(self.tools.get_definitions()),
+        )
+
+        self._dispatcher.active_messages = state.messages
+        self._dispatcher.delegation_count = 0
+        final_content = None
+        tools_used: list[str] = []
+
+        # Reset per-turn token accumulators
+        self._turn_tokens_prompt = 0
+        self._turn_tokens_completion = 0
+        self._turn_llm_calls = 0
+
+        # Reserve ~20% of context window for the model's response
+        context_budget = int(self.config.context_window_tokens * _CONTEXT_RESERVE_RATIO)
+
         # --- PLAN phase: inject planning prompt for complex tasks ----------
         from nanobot.agent.delegation_advisor import DelegationAction
 
-        _last_delegation_advice: DelegationAction | None = None
-
         if self.config.planning_enabled:
-            if self._needs_planning(user_text):
-                messages.append(
+            if self._needs_planning(state.user_text):
+                state.messages.append(
                     {
                         "role": "system",
                         "content": prompts.get("plan"),
                     }
                 )
-                has_plan = True
-                logger.debug("Planning prompt injected for: {}...", user_text[:60])
+                state.has_plan = True
+                logger.debug("Planning prompt injected for: {}...", state.user_text[:60])
                 # Delegation advisor plan-phase: replaces the old
                 # DelegationDispatcher.has_parallel_structure() check.
                 cr = self._last_classification_result
@@ -1025,11 +1033,11 @@ class AgentLoop:
                     role_name=self.role_name,
                     needs_orchestration=cr.needs_orchestration if cr else False,
                     relevant_roles=cr.relevant_roles if cr else [],
-                    user_text=user_text,
+                    user_text=state.user_text,
                     delegate_tools_available=bool(self.tools.get("delegate_parallel")),
                 )
                 if plan_advice.action != DelegationAction.NONE:
-                    messages.append(
+                    state.messages.append(
                         {
                             "role": "system",
                             "content": prompts.get("nudge_parallel_structure"),
@@ -1040,8 +1048,8 @@ class AgentLoop:
         _wall_time_limit = self.config.max_session_wall_time_seconds
         _wall_time_start = time.monotonic()
 
-        while iteration < self.max_iterations:
-            iteration += 1
+        while state.iteration < self.max_iterations:
+            state.iteration += 1
 
             # Wall-time guardrail (LAN-193)
             if _wall_time_limit > 0:
@@ -1060,11 +1068,11 @@ class AgentLoop:
 
             # --- Context compression: keep messages within budget ----------
             # Skip the (expensive) compression pass when well under budget.
-            if estimate_messages_tokens(messages) > int(context_budget * 0.85):
+            if estimate_messages_tokens(state.messages) > int(context_budget * 0.85):
                 summary_model = self.config.summary_model or self.model
-                preserve_n = _dynamic_preserve_recent(messages, _last_tool_call_msg_idx)
-                messages = await summarize_and_compress(
-                    messages,
+                preserve_n = _dynamic_preserve_recent(state.messages, state.last_tool_call_msg_idx)
+                state.messages = await summarize_and_compress(
+                    state.messages,
                     context_budget,
                     provider=self.provider,
                     model=summary_model,
@@ -1075,22 +1083,22 @@ class AgentLoop:
             # Exclude tools disabled this turn (failure threshold or permanent failure).
             # Read after removals so the LLM never sees a tool it cannot use.
             # Recompute only when disabled_tools has changed since last iteration.
-            if frozenset(disabled_tools) != _tools_def_snapshot:
-                _tools_def_cache = [
+            if frozenset(state.disabled_tools) != state.tools_def_snapshot:
+                state.tools_def_cache = [
                     t
                     for t in self.tools.get_definitions()
-                    if t["function"]["name"] not in disabled_tools
+                    if t["function"]["name"] not in state.disabled_tools
                 ]
-                _tools_def_snapshot = frozenset(disabled_tools)
-            tools_def = _tools_def_cache
-            active_tools = tools_def if not nudged_for_final else None
+                state.tools_def_snapshot = frozenset(state.disabled_tools)
+            tools_def = state.tools_def_cache
+            active_tools = tools_def if not state.nudged_for_final else None
 
             # --- LLM call (streaming when a progress callback exists) ------
-            if on_progress and iteration > 1:
+            if on_progress and state.iteration > 1:
                 # Emit "thinking" status on subsequent iterations (first is implicit from run.start)
                 await on_progress(StatusEvent(status_code="thinking"))
             response = await self._llm_caller.call(
-                messages,
+                state.messages,
                 active_tools,
                 on_progress,
             )
@@ -1100,16 +1108,14 @@ class AgentLoop:
             self._turn_tokens_completion += response.usage.get("completion_tokens", 0)
 
             # --- Check for LLM-level errors --------------------------------
-            _err_action, consecutive_errors, _err_content = await self._handle_llm_error(
-                response, consecutive_errors, messages, on_progress
-            )
+            _err_action, _err_content = await self._handle_llm_error(state, response, on_progress)
             if _err_action == "continue":
                 continue
             if _err_action == "break":
                 final_content = _err_content
                 break
 
-            consecutive_errors = 0
+            state.consecutive_errors = 0
 
             # --- ACT: execute tool calls -----------------------------------
             if response.has_tool_calls:
@@ -1119,14 +1125,14 @@ class AgentLoop:
                 # because delegation itself is a form of planning.
                 is_delegation = all(tc.name in _DELEGATION_TOOL_NAMES for tc in response.tool_calls)
                 if (
-                    has_plan
-                    and not plan_enforced
-                    and turn_tool_calls == 0
+                    state.has_plan
+                    and not state.plan_enforced
+                    and state.turn_tool_calls == 0
                     and not response.content
                     and not is_delegation
                 ):
-                    plan_enforced = True
-                    messages.append(
+                    state.plan_enforced = True
+                    state.messages.append(
                         {
                             "role": "system",
                             "content": prompts.get("nudge_plan_enforcement"),
@@ -1147,9 +1153,13 @@ class AgentLoop:
                     )
                 if not valid_calls:
                     # All calls were malformed — treat as empty response
-                    if not response.content and turn_tool_calls > 0 and not nudged_for_final:
-                        nudged_for_final = True
-                        messages.append(
+                    if (
+                        not response.content
+                        and state.turn_tool_calls > 0
+                        and not state.nudged_for_final
+                    ):
+                        state.nudged_for_final = True
+                        state.messages.append(
                             {
                                 "role": "system",
                                 "content": prompts.get("nudge_malformed_fallback"),
@@ -1157,8 +1167,8 @@ class AgentLoop:
                         )
                         continue
                     final_content = strip_think(response.content)
-                    messages = self.context.add_assistant_message(
-                        messages,
+                    state.messages = self.context.add_assistant_message(
+                        state.messages,
                         final_content,
                         reasoning_content=response.reasoning_content,
                     )
@@ -1188,42 +1198,32 @@ class AgentLoop:
 
                 # --- ACT + OBSERVE: execute tools and process results ------
                 batch = await self._process_tool_results(
+                    state,
                     response,
-                    messages,
                     tools_used,
-                    disabled_tools,
-                    tracker,
-                    _tools_def_cache,
                     on_progress,
-                    nudged_for_final,
                 )
-                turn_tool_calls += batch.tool_calls_this_batch
-                nudged_for_final = batch.nudged_for_final
-                _last_tool_call_msg_idx = batch.last_tool_call_msg_idx
+                state.turn_tool_calls += batch.tool_calls_this_batch
+                state.nudged_for_final = batch.nudged_for_final
+                state.last_tool_call_msg_idx = batch.last_tool_call_msg_idx
 
                 # --- REFLECT: evaluate progress and inject guidance ---------
-                nudged_for_final, _last_delegation_advice, _tools_def_cache = (
-                    self._evaluate_progress(
-                        response,
-                        messages,
-                        tracker,
-                        _tools_def_cache,
-                        batch.any_failed,
-                        batch.failed_this_batch,
-                        has_plan,
-                        turn_tool_calls,
-                        user_text,
-                        nudged_for_final,
-                        iteration,
-                        _last_delegation_advice,
-                    )
+                self._evaluate_progress(
+                    state,
+                    response,
+                    batch.any_failed,
+                    batch.failed_this_batch,
                 )
 
             else:
                 # --- No tool calls: the model is producing a text answer ---
-                if not response.content and turn_tool_calls > 0 and not nudged_for_final:
-                    nudged_for_final = True
-                    messages.append(
+                if (
+                    not response.content
+                    and state.turn_tool_calls > 0
+                    and not state.nudged_for_final
+                ):
+                    state.nudged_for_final = True
+                    state.messages.append(
                         {
                             "role": "system",
                             "content": prompts.get("nudge_final_answer"),
@@ -1234,30 +1234,30 @@ class AgentLoop:
                     )
                     continue
                 final_content = strip_think(response.content)
-                messages = self.context.add_assistant_message(
-                    messages,
+                state.messages = self.context.add_assistant_message(
+                    state.messages,
                     final_content,
                     reasoning_content=response.reasoning_content,
                 )
                 break
 
-        if final_content is None and iteration >= self.max_iterations:
+        if final_content is None and state.iteration >= self.max_iterations:
             logger.warning("Max iterations ({}) reached", self.max_iterations)
             final_content = (
                 f"I reached the maximum number of tool call iterations ({self.max_iterations}) "
                 "without completing the task. You can try breaking the task into smaller steps."
             )
-            messages = self.context.add_assistant_message(messages, final_content)
+            state.messages = self.context.add_assistant_message(state.messages, final_content)
 
         # --- Verification pass ---------------------------------------------
         if final_content is not None:
-            final_content, messages = await self._verifier.verify(
-                user_text,
+            final_content, state.messages = await self._verifier.verify(
+                state.user_text,
                 final_content,
-                messages,
+                state.messages,
             )
 
-        return final_content, tools_used, messages
+        return final_content, tools_used, state.messages
 
     # ------------------------------------------------------------------
     # Reaction handling (Step 8 — Feedback loop)
