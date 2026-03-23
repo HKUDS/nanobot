@@ -612,14 +612,10 @@ def gateway(
             on_progress=_silent,
         )
 
-        # Trim heartbeat session to prevent unbounded token growth
-        # Keep only recent messages for minimal context while avoiding history explosion
+        # Use the existing consolidation mechanism to archive old heartbeat messages
+        # This prevents unbounded token growth while preserving context in MEMORY.md/HISTORY.md
         session = agent.sessions.get_or_create("heartbeat")
-        max_heartbeat_messages = 20
-        if len(session.messages) > max_heartbeat_messages:
-            session.messages = session.messages[-max_heartbeat_messages:]
-            session.last_consolidated = 0  # Reset consolidation marker
-            logger.debug("Heartbeat session trimmed to last {} messages to prevent token accumulation", max_heartbeat_messages)
+        await agent.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         return resp.content if resp else ""
 
