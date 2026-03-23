@@ -1,6 +1,7 @@
 """Shell execution tool."""
 
 import asyncio
+import logging
 import os
 import re
 import shutil
@@ -16,6 +17,8 @@ from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_paramet
 from nanobot.config.paths import get_media_dir
 
 _IS_WINDOWS = sys.platform == "win32"
+
+logger = logging.getLogger(__name__)
 
 
 @tool_parameters(
@@ -119,6 +122,12 @@ class ExecTool(Tool):
         guard_error = self._guard_command(command, cwd)
         if guard_error:
             return guard_error
+
+        # Tirith content-level security gate (after cheap regex guards,
+        # before sandbox wrapping — scans the raw user command).
+        tirith_error = await self._tirith_guard(command)
+        if tirith_error:
+            return tirith_error
 
         if self.sandbox:
             if _IS_WINDOWS:
@@ -316,3 +325,49 @@ class ExecTool(Tool):
         posix_paths = re.findall(r"(?:^|[\s|>'\"])(/[^\s\"'>;|<]+)", command) # POSIX: /absolute only
         home_paths = re.findall(r"(?:^|[\s|>'\"])(~[^\s\"'>;|<]*)", command) # POSIX/Windows home shortcut: ~
         return win_paths + posix_paths + home_paths
+
+    async def _tirith_guard(self, command: str) -> str | None:
+        """Scan command with tirith for content-level threats.
+
+        Runs after _guard_command() (cheap regex guards). Detects homograph
+        URLs, pipe-to-shell patterns, terminal injection, and more.
+        Fail-open if tirith is not installed.
+        """
+        try:
+            from nanobot.agent.tools.tirith_security import check_security
+        except ImportError:
+            return None
+
+        try:
+            from nanobot.config.loader import get_config
+            cfg = get_config()
+            tirith_cfg = cfg.tools.exec.tirith
+            enabled = tirith_cfg.enabled
+            tirith_bin = tirith_cfg.bin
+            timeout = tirith_cfg.timeout
+            fail_open = tirith_cfg.fail_open
+        except Exception:
+            enabled = True
+            tirith_bin = "tirith"
+            timeout = 5
+            fail_open = True
+
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None, lambda: check_security(
+                command, context="exec",
+                enabled=enabled, tirith_bin=tirith_bin,
+                timeout=timeout, fail_open=fail_open,
+            )
+        )
+
+        if result["action"] == "block":
+            summary = result.get("summary") or "security issue detected"
+            return f"Error: Command blocked by Tirith security scan ({summary})"
+
+        if result["action"] == "warn":
+            warnings = [f.get("title", "") for f in result.get("findings", [])]
+            msg = "; ".join(filter(None, warnings)) or result.get("summary", "security warning")
+            logger.warning("Tirith: %s", msg)
+
+        return None
