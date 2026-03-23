@@ -105,11 +105,12 @@ class DiscordBotClient(discord.Client):
             interaction: discord.Interaction,
             error: app_commands.AppCommandError,
         ) -> None:
+            command_name = interaction.command.qualified_name if interaction.command else "?"
             logger.warning(
                 "Discord app command failed user={} channel={} cmd={} error={}",
-                getattr(getattr(interaction, "user", None), "id", "?"),
-                getattr(interaction, "channel_id", "?"),
-                getattr(getattr(interaction, "command", None), "qualified_name", "?"),
+                interaction.user.id,
+                interaction.channel_id,
+                command_name,
                 error,
             )
 
@@ -197,7 +198,7 @@ class DiscordBotClient(discord.Client):
             return None, mention_settings
         try:
             message_id = int(reply_to)
-        except (TypeError, ValueError):
+        except ValueError:
             logger.warning("Invalid Discord reply target: {}", reply_to)
             return None, mention_settings
 
@@ -415,7 +416,7 @@ class DiscordChannel(BaseChannel):
 
     async def _stop_typing(self, channel_id: str) -> None:
         """Stop typing indicator for a channel."""
-        task = self._typing_tasks.pop(str(channel_id), None)
+        task = self._typing_tasks.pop(channel_id, None)
         if task is None:
             return
         task.cancel()
