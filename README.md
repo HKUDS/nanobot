@@ -245,6 +245,7 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
 | **Slack** | Bot token + App-Level token |
 | **Email** | IMAP/SMTP credentials |
 | **QQ** | App ID + App Secret |
+| **NapCat** | Websocket URL + Token|
 | **Wecom** | Bot ID + Bot Secret |
 
 <details>
@@ -601,7 +602,7 @@ Uses **[NapCatQQ](https://github.com/NapNeko/NapCatQQ) OneBot 11 forward WebSock
 
 **2. Configure**
 
-> - `url`: NapCat forward WebSocket URL. Default is `ws://127.0.0.1:3001/`.
+> - `ws_url`: NapCat forward WebSocket URL. Default is `ws://127.0.0.1:3001/`.
 > - `accessToken`: Set this to the forward websocket server's token.
 > - `allowFrom`: Add QQ user IDs. Use `["*"]` to allow all users.
 > - `groupPolicy`: `"mention"` (default — respond only when @mentioned in groups), `"open"` (respond to all allowed group messages). Private chats always respond.
@@ -615,7 +616,7 @@ Uses **[NapCatQQ](https://github.com/NapNeko/NapCatQQ) OneBot 11 forward WebSock
   "channels": {
     "napcat": {
       "enabled": true,
-      "url": "ws://127.0.0.1:3001/",
+      "ws_url": "ws://127.0.0.1:3001/",
       "accessToken": "",
       "allowFrom": ["*"],
       "groupPolicy": "mention",
