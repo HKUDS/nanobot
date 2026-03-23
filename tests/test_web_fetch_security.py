@@ -70,6 +70,16 @@ async def test_web_fetch_result_contains_untrusted_flag():
 
 
 @pytest.mark.asyncio
+async def test_fetch_jina_skipped_without_api_key(monkeypatch):
+    """When JINA_API_KEY is not set, _fetch_jina should return None immediately
+    to avoid sending URLs to third-party service without explicit opt-in."""
+    tool = WebFetchTool()
+    monkeypatch.delenv("JINA_API_KEY", raising=False)
+    result = await tool._fetch_jina("https://example.com", max_chars=1000)
+    assert result is None
+
+
+@pytest.mark.asyncio
 async def test_web_fetch_blocks_private_redirect_before_returning_image(monkeypatch):
     tool = WebFetchTool()
 

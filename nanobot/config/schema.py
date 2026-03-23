@@ -40,6 +40,7 @@ class AgentDefaults(Base):
     temperature: float = 0.1
     max_tool_iterations: int = 40
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
+    hide_reasoning_steps: bool = False  # Hide reasoning steps in output display
 
 
 class AgentsConfig(Base):
