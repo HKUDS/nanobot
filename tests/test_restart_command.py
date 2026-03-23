@@ -34,12 +34,15 @@ class TestRestartCommand:
 
     @pytest.mark.asyncio
     async def test_restart_sends_message_and_calls_execv(self):
+        from nanobot.command.builtin import cmd_restart
+        from nanobot.command.router import CommandContext
+
         loop, bus = _make_loop()
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="/restart")
+        ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/restart", loop=loop)
 
-        with patch("nanobot.agent.loop.os.execv") as mock_execv:
-            await loop._handle_restart(msg)
-            out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        with patch("nanobot.command.builtin.os.execv") as mock_execv:
+            out = await cmd_restart(ctx)
             assert "Restarting" in out.content
 
             await asyncio.sleep(1.5)
@@ -51,8 +54,8 @@ class TestRestartCommand:
         loop, bus = _make_loop()
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/restart")
 
-        with patch.object(loop, "_handle_restart") as mock_handle:
-            mock_handle.return_value = None
+        with patch.object(loop, "_dispatch", new_callable=AsyncMock) as mock_dispatch, \
+             patch("nanobot.command.builtin.os.execv"):
             await bus.publish_inbound(msg)
 
             loop._running = True
@@ -65,7 +68,9 @@ class TestRestartCommand:
             except asyncio.CancelledError:
                 pass
 
-            mock_handle.assert_called_once()
+            mock_dispatch.assert_not_called()
+            out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+            assert "Restarting" in out.content
 
     @pytest.mark.asyncio
     async def test_status_intercepted_in_run_loop(self):
@@ -73,10 +78,7 @@ class TestRestartCommand:
         loop, bus = _make_loop()
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/status")
 
-        with patch.object(loop, "_status_response") as mock_status:
-            mock_status.return_value = OutboundMessage(
-                channel="telegram", chat_id="c1", content="status ok"
-            )
+        with patch.object(loop, "_dispatch", new_callable=AsyncMock) as mock_dispatch:
             await bus.publish_inbound(msg)
 
             loop._running = True
@@ -89,9 +91,9 @@ class TestRestartCommand:
             except asyncio.CancelledError:
                 pass
 
-            mock_status.assert_called_once()
+            mock_dispatch.assert_not_called()
             out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
-            assert out.content == "status ok"
+            assert "nanobot" in out.content.lower() or "Model" in out.content
 
     @pytest.mark.asyncio
     async def test_run_propagates_external_cancellation(self):

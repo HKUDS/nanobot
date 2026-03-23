@@ -12,11 +12,11 @@ from typing import Any, cast
 import pytest
 from pydantic import BaseModel, Field
 
-from nanobot.cli import onboard_wizard
+from nanobot.cli import onboard as onboard_wizard
 
 # Import functions to test
 from nanobot.cli.commands import _merge_missing_defaults
-from nanobot.cli.onboard_wizard import (
+from nanobot.cli.onboard import (
     _BACK_PRESSED,
     _configure_pydantic_model,
     _format_value,
@@ -352,7 +352,7 @@ class TestProviderChannelInfo:
     """Tests for provider and channel info retrieval."""
 
     def test_get_provider_names_returns_dict(self):
-        from nanobot.cli.onboard_wizard import _get_provider_names
+        from nanobot.cli.onboard import _get_provider_names
 
         names = _get_provider_names()
         assert isinstance(names, dict)
@@ -363,7 +363,7 @@ class TestProviderChannelInfo:
         assert "github_copilot" not in names
 
     def test_get_channel_names_returns_dict(self):
-        from nanobot.cli.onboard_wizard import _get_channel_names
+        from nanobot.cli.onboard import _get_channel_names
 
         names = _get_channel_names()
         assert isinstance(names, dict)
@@ -371,7 +371,7 @@ class TestProviderChannelInfo:
         assert len(names) >= 0
 
     def test_get_provider_info_returns_valid_structure(self):
-        from nanobot.cli.onboard_wizard import _get_provider_info
+        from nanobot.cli.onboard import _get_provider_info
 
         info = _get_provider_info()
         assert isinstance(info, dict)

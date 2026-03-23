@@ -16,7 +16,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from nanobot.cli.model_info import (
+from nanobot.cli.models import (
     format_token_count,
     get_model_context_limit,
     get_model_suggestions,
