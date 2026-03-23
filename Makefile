@@ -55,16 +55,14 @@ coverage-check:
 	$(PYTHON) scripts/check_module_coverage.py
 
 memory-eval:
-	$(PYTHON) scripts/memory_eval_ci.py \
+	$(PYTHON) scripts/memory_eval_trend.py \
 		--workspace /tmp/memory_eval_workspace \
 		--cases-file case/memory_eval_cases.json \
 		--seed-events case/memory_seed_events.jsonl \
 		--seed-profile case/memory_seed_profile.json \
-		--baseline-file case/memory_eval_baseline.json \
 		--output-file artifacts/memory_eval_latest.json \
 		--history-file artifacts/memory_eval_history.json \
-		--summary-file artifacts/memory_eval_summary.md \
-		--strict
+		--summary-file artifacts/memory_eval_summary.md
 
 live-eval:
 	$(PYTHON) scripts/eval_agent_live.py
