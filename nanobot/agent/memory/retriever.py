@@ -305,6 +305,7 @@ class MemoryRetriever:
 
         assert self._db is not None  # noqa: S101 — guarded by caller
         assert self._embedder is not None  # noqa: S101
+        embedder = self._embedder  # local ref for lambda closure (mypy narrowing)
 
         plan = self._planner.plan(query)
         policy = plan.policy
@@ -321,9 +322,9 @@ class MemoryRetriever:
             import concurrent.futures
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                query_vec = pool.submit(asyncio.run, self._embedder.embed(query)).result()
+                query_vec = pool.submit(lambda: asyncio.run(embedder.embed(query))).result()
         else:
-            query_vec = asyncio.run(self._embedder.embed(query))
+            query_vec = asyncio.run(embedder.embed(query))
 
         # 2. Dual source — DB methods are synchronous
         vec_results = self._db.search_vector(query_vec, candidate_k)
