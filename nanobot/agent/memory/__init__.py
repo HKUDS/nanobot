@@ -1,38 +1,51 @@
-"""Memory system for persistent agent memory.
+"""Memory subsystem — persistent memory with hybrid retrieval.
 
-This package decomposes the memory subsystem into focused modules while
-preserving backward-compatible imports::
+Write path:
+    extractor.py            LLM + heuristic event extraction
+    ingester.py             Event ingestion pipeline
+    persistence.py          JSONL/file I/O primitives
 
-    from nanobot.agent.memory import MemoryStore      # facade (coordination)
-    from nanobot.agent.memory import EventIngester     # write path
-    from nanobot.agent.memory import MemoryRetriever   # read path
-    from nanobot.agent.memory import MemoryMaintenance # reindex, seed, health
-    from nanobot.agent.memory import MemorySnapshot    # MEMORY.md rebuild
-    from nanobot.agent.memory import RolloutConfig     # feature flags
+Read path:
+    retriever.py            Memory retrieval orchestrator
+    keyword_search.py       Local keyword/BM25 search
+    retrieval_planner.py    Retrieval strategy planning
+    reranker.py             Cross-encoder re-ranking interface
+    onnx_reranker.py        ONNX Runtime re-ranker implementation
+    context_assembler.py    Memory context assembly for prompts
+    token_budget.py         Token budget management
 
-Architecture
-------------
-- **store.py** — ``MemoryStore``: thin facade composing subsystem modules;
-  owns cross-cutting coordination (consolidate, get_memory_context).
-- **ingester.py** — ``EventIngester``: event write path (classify, dedup,
-  merge, append).
-- **retriever.py** — ``MemoryRetriever``: retrieval read path (mem0, BM25
-  fallback, reranking).
-- **maintenance.py** — ``MemoryMaintenance``: reindex, seed, health checks.
-- **snapshot.py** — ``MemorySnapshot``: rebuild and verify MEMORY.md.
-- **rollout.py** — ``RolloutConfig``: feature flag management.
-- **extractor.py** — ``MemoryExtractor``: LLM + heuristic pipeline that
-  converts raw conversation turns into structured memory events.
-- **persistence.py** — ``MemoryPersistence``: low-level I/O for
-  ``events.jsonl`` (append-only), ``profile.json``, ``MEMORY.md``, and
-  ``HISTORY.md``.
-- **mem0_adapter.py** — ``_Mem0Adapter``: wraps the mem0 SDK with health
-  checks and automatic fallback.
-- **reranker.py** — ``Reranker`` protocol and ``CompositeReranker``
-  (zero-dependency lightweight alternative).
-- **onnx_reranker.py** — ``OnnxCrossEncoderReranker`` (ONNX Runtime-based
-  cross-encoder, replaces the old sentence-transformers implementation).
-- **constants.py** — Shared constants and tool schemas.
+Storage:
+    mem0_adapter.py         mem0 vector store adapter
+    persistence.py          File I/O (events.jsonl, MEMORY.md)
+
+Profile:
+    profile_io.py           Profile CRUD + belief verification
+    profile_correction.py   LLM-driven profile correction
+
+Knowledge graph:
+    graph.py                Knowledge graph (networkx)
+    ontology_types.py       Entity/relation type definitions
+    ontology_rules.py       Relation constraint rules
+    entity_classifier.py    Entity type classification
+    entity_linker.py        Entity linking + resolution
+
+Lifecycle:
+    consolidation_pipeline.py  Consolidation pipeline
+    maintenance.py          Reindex, seed, health checks
+    snapshot.py             MEMORY.md rebuild
+    conflicts.py            Memory conflict detection/resolution
+
+Infrastructure:
+    event.py                MemoryEvent Pydantic model
+    constants.py            Shared constants + tool schemas
+    helpers.py              Utility functions
+    rollout.py              Feature rollout gates
+
+Public API:
+    store.py                MemoryStore — the sole external interface
+
+Evaluation (moved to nanobot/eval/):
+    memory_eval.py          EvalRunner — retrieval benchmarks + observability
 """
 
 from __future__ import annotations
@@ -41,7 +54,6 @@ from .conflicts import ConflictManager
 from .consolidation_pipeline import ConsolidationPipeline
 from .context_assembler import ContextAssembler
 from .entity_classifier import classify_entity_type
-from .eval import EvalRunner
 from .event import BeliefRecord, KnowledgeTriple, MemoryEvent
 from .extractor import MemoryExtractor
 from .graph import KnowledgeGraph
@@ -76,7 +88,6 @@ __all__ = [
     "ConsolidationPipeline",
     "ContextAssembler",
     "EventIngester",
-    "EvalRunner",
     "KnowledgeTriple",
     "MemoryEvent",
     "MemoryMaintenance",
