@@ -7,7 +7,7 @@ import re
 import threading
 import time
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -253,11 +253,14 @@ class FeishuConfig(Base):
     streaming: bool = True
 
 
+_STREAM_ELEMENT_ID = "streaming_md"
+
 @dataclass
 class _FeishuStreamBuf:
-    """Per-chat streaming accumulator using Feishu interactive cards."""
+    """Per-chat streaming accumulator using CardKit streaming API."""
     text: str = ""
-    message_id: str | None = None
+    card_id: str | None = None
+    sequence: int = 0
     last_edit: float = 0.0
 
 
@@ -276,7 +279,7 @@ class FeishuChannel(BaseChannel):
     name = "feishu"
     display_name = "Feishu"
 
-    _STREAM_EDIT_INTERVAL = 0.5  # Feishu PATCH API allows ~5 QPS
+    _STREAM_EDIT_INTERVAL = 0.5  # throttle between CardKit streaming updates
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -947,95 +950,98 @@ class FeishuChannel(BaseChannel):
             logger.error("Error sending Feishu {} message: {}", msg_type, e)
             return None
 
-    def _patch_card_sync(self, message_id: str, card: dict) -> bool:
-        """Update an existing interactive card via PATCH API."""
-        from lark_oapi.api.im.v1 import PatchMessageRequest, PatchMessageRequestBody
+    def _create_streaming_card_sync(self, receive_id_type: str, chat_id: str) -> str | None:
+        """Create a CardKit streaming card, send it to chat, return card_id."""
+        from lark_oapi.api.cardkit.v1 import CreateCardRequest, CreateCardRequestBody
+        card_json = {
+            "schema": "2.0",
+            "config": {"wide_screen_mode": True, "update_multi": True, "streaming_mode": True},
+            "body": {"elements": [{"tag": "markdown", "content": "", "element_id": _STREAM_ELEMENT_ID}]},
+        }
         try:
-            request = PatchMessageRequest.builder() \
-                .message_id(message_id) \
-                .request_body(
-                    PatchMessageRequestBody.builder()
-                    .content(json.dumps(card, ensure_ascii=False))
-                    .build()
-                ).build()
-            response = self._client.im.v1.message.patch(request)
+            request = CreateCardRequest.builder().request_body(
+                CreateCardRequestBody.builder()
+                .type("card_json")
+                .data(json.dumps(card_json, ensure_ascii=False))
+                .build()
+            ).build()
+            response = self._client.cardkit.v1.card.create(request)
             if not response.success():
-                logger.warning(
-                    "Failed to patch Feishu card {}: code={}, msg={}",
-                    message_id, response.code, response.msg,
-                )
+                logger.warning("Failed to create streaming card: code={}, msg={}", response.code, response.msg)
+                return None
+            card_id = getattr(response.data, "card_id", None)
+            if card_id:
+                self._send_message_sync(receive_id_type, chat_id, "interactive", json.dumps({"card_id": card_id}))
+            return card_id
+        except Exception as e:
+            logger.warning("Error creating streaming card: {}", e)
+            return None
+
+    def _stream_update_text_sync(self, card_id: str, content: str, sequence: int) -> bool:
+        """Stream-update the markdown element on a CardKit card (typewriter effect)."""
+        from lark_oapi.api.cardkit.v1 import ContentCardElementRequest, ContentCardElementRequestBody
+        try:
+            request = ContentCardElementRequest.builder() \
+                .card_id(card_id) \
+                .element_id(_STREAM_ELEMENT_ID) \
+                .request_body(
+                    ContentCardElementRequestBody.builder()
+                    .content(content).sequence(sequence).build()
+                ).build()
+            response = self._client.cardkit.v1.card_element.content(request)
+            if not response.success():
+                logger.warning("Failed to stream-update card {}: code={}, msg={}", card_id, response.code, response.msg)
                 return False
             return True
         except Exception as e:
-            logger.warning("Error patching Feishu card {}: {}", message_id, e)
+            logger.warning("Error stream-updating card {}: {}", card_id, e)
             return False
 
-    @staticmethod
-    def _streaming_card(text: str, *, streaming: bool = True) -> dict:
-        """Build a minimal interactive card for streaming updates."""
-        suffix = "\n\n`▍`" if streaming else ""
-        return {
-            "config": {"wide_screen_mode": True, "update_multi": True},
-            "elements": [{"tag": "markdown", "content": text + suffix}],
-        }
-
     async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
-        """Progressive card editing: create card on first delta, PATCH on subsequent."""
+        """Progressive streaming via CardKit: create card on first delta, stream-update on subsequent."""
         if not self._client:
             return
         meta = metadata or {}
         loop = asyncio.get_running_loop()
-        receive_id_type = "chat_id" if chat_id.startswith("oc_") else "open_id"
+        rid_type = "chat_id" if chat_id.startswith("oc_") else "open_id"
 
+        # --- stream end: final update or fallback ---
         if meta.get("_stream_end"):
             buf = self._stream_bufs.pop(chat_id, None)
-            if not buf or not buf.message_id or not buf.text:
+            if not buf or not buf.text:
                 return
-            elements = self._build_card_elements(buf.text)
-            chunks = list(self._split_elements_by_table_limit(elements))
-            final_card = {"config": {"wide_screen_mode": True}, "elements": chunks[0]}
-            try:
-                await loop.run_in_executor(None, self._patch_card_sync, buf.message_id, final_card)
-            except Exception as e:
-                logger.debug("Final stream patch failed: {}", e)
-            for extra in chunks[1:]:
-                card = {"config": {"wide_screen_mode": True}, "elements": extra}
+            if buf.card_id:
+                buf.sequence += 1
                 await loop.run_in_executor(
-                    None, self._send_message_sync,
-                    receive_id_type, chat_id, "interactive",
-                    json.dumps(card, ensure_ascii=False),
+                    None, self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence,
                 )
+            else:
+                for chunk in self._split_elements_by_table_limit(self._build_card_elements(buf.text)):
+                    card = json.dumps({"config": {"wide_screen_mode": True}, "elements": chunk}, ensure_ascii=False)
+                    await loop.run_in_executor(None, self._send_message_sync, rid_type, chat_id, "interactive", card)
             return
 
+        # --- accumulate delta ---
         buf = self._stream_bufs.get(chat_id)
         if buf is None:
             buf = _FeishuStreamBuf()
             self._stream_bufs[chat_id] = buf
         buf.text += delta
-
         if not buf.text.strip():
             return
 
         now = time.monotonic()
-        if buf.message_id is None:
-            card = self._streaming_card(buf.text)
-            try:
-                msg_id = await loop.run_in_executor(
-                    None, self._send_message_sync,
-                    receive_id_type, chat_id, "interactive",
-                    json.dumps(card, ensure_ascii=False),
-                )
-                buf.message_id = msg_id
+        if buf.card_id is None:
+            card_id = await loop.run_in_executor(None, self._create_streaming_card_sync, rid_type, chat_id)
+            if card_id:
+                buf.card_id = card_id
+                buf.sequence = 1
+                await loop.run_in_executor(None, self._stream_update_text_sync, card_id, buf.text, 1)
                 buf.last_edit = now
-            except Exception as e:
-                logger.warning("Feishu stream initial send failed: {}", e)
         elif (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL:
-            card = self._streaming_card(buf.text)
-            try:
-                await loop.run_in_executor(None, self._patch_card_sync, buf.message_id, card)
-                buf.last_edit = now
-            except Exception:
-                pass
+            buf.sequence += 1
+            await loop.run_in_executor(None, self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence)
+            buf.last_edit = now
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Feishu, including media (images/files) if present."""
