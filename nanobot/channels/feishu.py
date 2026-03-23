@@ -5,7 +5,9 @@ import json
 import os
 import re
 import threading
+import time
 from collections import OrderedDict
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -248,6 +250,15 @@ class FeishuConfig(Base):
     react_emoji: str = "THUMBSUP"
     group_policy: Literal["open", "mention"] = "mention"
     reply_to_message: bool = False  # If True, bot replies quote the user's original message
+    streaming: bool = True
+
+
+@dataclass
+class _FeishuStreamBuf:
+    """Per-chat streaming accumulator using Feishu interactive cards."""
+    text: str = ""
+    message_id: str | None = None
+    last_edit: float = 0.0
 
 
 class FeishuChannel(BaseChannel):
@@ -265,6 +276,8 @@ class FeishuChannel(BaseChannel):
     name = "feishu"
     display_name = "Feishu"
 
+    _STREAM_EDIT_INTERVAL = 0.5  # Feishu PATCH API allows ~5 QPS
+
     @classmethod
     def default_config(cls) -> dict[str, Any]:
         return FeishuConfig().model_dump(by_alias=True)
@@ -279,6 +292,7 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._stream_bufs: dict[str, _FeishuStreamBuf] = {}
 
     @staticmethod
     def _register_optional_event(builder: Any, method_name: str, handler: Any) -> Any:
@@ -906,8 +920,8 @@ class FeishuChannel(BaseChannel):
             logger.error("Error replying to Feishu message {}: {}", parent_message_id, e)
             return False
 
-    def _send_message_sync(self, receive_id_type: str, receive_id: str, msg_type: str, content: str) -> bool:
-        """Send a single message (text/image/file/interactive) synchronously."""
+    def _send_message_sync(self, receive_id_type: str, receive_id: str, msg_type: str, content: str) -> str | None:
+        """Send a single message and return the message_id on success."""
         from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
         try:
             request = CreateMessageRequest.builder() \
@@ -925,12 +939,103 @@ class FeishuChannel(BaseChannel):
                     "Failed to send Feishu {} message: code={}, msg={}, log_id={}",
                     msg_type, response.code, response.msg, response.get_log_id()
                 )
-                return False
-            logger.debug("Feishu {} message sent to {}", msg_type, receive_id)
-            return True
+                return None
+            msg_id = getattr(response.data, "message_id", None)
+            logger.debug("Feishu {} message sent to {}: {}", msg_type, receive_id, msg_id)
+            return msg_id
         except Exception as e:
             logger.error("Error sending Feishu {} message: {}", msg_type, e)
+            return None
+
+    def _patch_card_sync(self, message_id: str, card: dict) -> bool:
+        """Update an existing interactive card via PATCH API."""
+        from lark_oapi.api.im.v1 import PatchMessageRequest, PatchMessageRequestBody
+        try:
+            request = PatchMessageRequest.builder() \
+                .message_id(message_id) \
+                .request_body(
+                    PatchMessageRequestBody.builder()
+                    .content(json.dumps(card, ensure_ascii=False))
+                    .build()
+                ).build()
+            response = self._client.im.v1.message.patch(request)
+            if not response.success():
+                logger.warning(
+                    "Failed to patch Feishu card {}: code={}, msg={}",
+                    message_id, response.code, response.msg,
+                )
+                return False
+            return True
+        except Exception as e:
+            logger.warning("Error patching Feishu card {}: {}", message_id, e)
             return False
+
+    @staticmethod
+    def _streaming_card(text: str, *, streaming: bool = True) -> dict:
+        """Build a minimal interactive card for streaming updates."""
+        suffix = "\n\n`▍`" if streaming else ""
+        return {
+            "config": {"wide_screen_mode": True, "update_multi": True},
+            "elements": [{"tag": "markdown", "content": text + suffix}],
+        }
+
+    async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
+        """Progressive card editing: create card on first delta, PATCH on subsequent."""
+        if not self._client:
+            return
+        meta = metadata or {}
+        loop = asyncio.get_running_loop()
+        receive_id_type = "chat_id" if chat_id.startswith("oc_") else "open_id"
+
+        if meta.get("_stream_end"):
+            buf = self._stream_bufs.pop(chat_id, None)
+            if not buf or not buf.message_id or not buf.text:
+                return
+            elements = self._build_card_elements(buf.text)
+            chunks = list(self._split_elements_by_table_limit(elements))
+            final_card = {"config": {"wide_screen_mode": True}, "elements": chunks[0]}
+            try:
+                await loop.run_in_executor(None, self._patch_card_sync, buf.message_id, final_card)
+            except Exception as e:
+                logger.debug("Final stream patch failed: {}", e)
+            for extra in chunks[1:]:
+                card = {"config": {"wide_screen_mode": True}, "elements": extra}
+                await loop.run_in_executor(
+                    None, self._send_message_sync,
+                    receive_id_type, chat_id, "interactive",
+                    json.dumps(card, ensure_ascii=False),
+                )
+            return
+
+        buf = self._stream_bufs.get(chat_id)
+        if buf is None:
+            buf = _FeishuStreamBuf()
+            self._stream_bufs[chat_id] = buf
+        buf.text += delta
+
+        if not buf.text.strip():
+            return
+
+        now = time.monotonic()
+        if buf.message_id is None:
+            card = self._streaming_card(buf.text)
+            try:
+                msg_id = await loop.run_in_executor(
+                    None, self._send_message_sync,
+                    receive_id_type, chat_id, "interactive",
+                    json.dumps(card, ensure_ascii=False),
+                )
+                buf.message_id = msg_id
+                buf.last_edit = now
+            except Exception as e:
+                logger.warning("Feishu stream initial send failed: {}", e)
+        elif (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL:
+            card = self._streaming_card(buf.text)
+            try:
+                await loop.run_in_executor(None, self._patch_card_sync, buf.message_id, card)
+                buf.last_edit = now
+            except Exception:
+                pass
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Feishu, including media (images/files) if present."""
