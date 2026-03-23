@@ -247,6 +247,11 @@ def _resolve_tirith_path(configured: str = "tirith") -> str:
             _clear_install_failed()
             return local_bin
 
+        # Re-check failure state inside lock — a previous waiter may have
+        # already failed while we were queued.
+        if _resolved_path is _INSTALL_FAILED or _is_install_failed_on_disk():
+            return expanded
+
         installed, reason = _install_tirith()
         if installed:
             _resolved_path = installed
