@@ -177,6 +177,10 @@ class MessageProcessor:
         workspace: Path,
         role_name: str,
         role_manager: TurnRoleManager,
+        # provider and model are needed by _consolidate_memory, which calls
+        # ConsolidationOrchestrator.consolidate(session, provider, model, ...).
+        provider: ChatProvider,
+        model: str,
     ) -> None: ...
 
     async def process(
@@ -187,10 +191,21 @@ class MessageProcessor:
 
     async def process_direct(
         self,
-        text: str,
-        session_id: str,
+        content: str,
+        session_key: str = "cli:direct",
+        channel: str = "cli",
+        chat_id: str = "direct",
         on_progress: ProgressCallback | None = None,
+        forced_role: str | None = None,
     ) -> str: ...
+```
+
+`AgentLoop.process_direct` preserves its current full signature and delegates:
+```python
+async def process_direct(self, content, session_key, channel, chat_id, on_progress, forced_role):
+    return await self._processor.process_direct(
+        content, session_key, channel, chat_id, on_progress, forced_role
+    )
 ```
 
 `_make_bus_progress` moves into `MessageProcessor` (or is called from it via
