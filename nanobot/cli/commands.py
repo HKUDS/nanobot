@@ -619,6 +619,12 @@ def gateway(
             chat_id=chat_id,
             on_progress=_silent,
         )
+        
+        # Clear the heartbeat session to prevent token overflow from accumulated tasks
+        session = agent.sessions.get_or_create("heartbeat")
+        session.clear()
+        agent.sessions.save(session)
+        
         return resp.content if resp else ""
 
     async def on_heartbeat_notify(response: str) -> None:
