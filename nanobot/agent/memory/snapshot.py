@@ -33,6 +33,9 @@ class MemorySnapshot:
     ``MemoryStore.__init__``.
     """
 
+    _PINNED_START = "<!-- user-pinned -->"
+    _PINNED_END = "<!-- end-user-pinned -->"
+
     def __init__(
         self,
         *,
@@ -43,8 +46,6 @@ class MemorySnapshot:
         recent_unresolved_fn: Callable[..., list[dict[str, Any]]],
         read_long_term_fn: Callable[[], str],
         write_long_term_fn: Callable[[str], None],
-        extract_pinned_section_fn: Callable[[str], str | None],
-        restore_pinned_section_fn: Callable[[str, str], str],
         verify_beliefs_fn: Callable[[], dict[str, Any]],
         write_profile_fn: Callable[[dict[str, Any]], None],
         profile_keys: tuple[str, ...] = PROFILE_KEYS,
@@ -56,11 +57,38 @@ class MemorySnapshot:
         self._recent_unresolved = recent_unresolved_fn
         self._read_long_term = read_long_term_fn
         self._write_long_term = write_long_term_fn
-        self._extract_pinned_section = extract_pinned_section_fn
-        self._restore_pinned_section = restore_pinned_section_fn
         self._verify_beliefs = verify_beliefs_fn
         self._write_profile = write_profile_fn
         self._profile_keys = profile_keys
+
+    @classmethod
+    def _extract_pinned_section(cls, text: str) -> str | None:
+        """Extract user-pinned content from MEMORY.md, if present."""
+        start = text.find(cls._PINNED_START)
+        end = text.find(cls._PINNED_END)
+        if start == -1 or end == -1 or end <= start:
+            return None
+        return text[start : end + len(cls._PINNED_END)]
+
+    @classmethod
+    def _restore_pinned_section(cls, new_text: str, pinned: str) -> str:
+        """Re-insert a pinned section into new MEMORY.md content.
+
+        If the new text already contains a pinned fence, replace it.
+        Otherwise insert the pinned block after the first heading.
+        """
+        existing = cls._extract_pinned_section(new_text)
+        if existing:
+            return new_text.replace(existing, pinned)
+        # Insert after the first heading line (or at the top).
+        lines = new_text.split("\n")
+        insert_at = 0
+        for i, line in enumerate(lines):
+            if line.startswith("#"):
+                insert_at = i + 1
+                break
+        lines.insert(insert_at, pinned)
+        return "\n".join(lines)
 
     def rebuild_memory_snapshot(self, *, max_events: int = 30, write: bool = True) -> str:
         """Rebuild MEMORY.md from profile + events."""

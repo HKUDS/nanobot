@@ -249,8 +249,6 @@ class MemoryStore:
             write_long_term_fn=lambda content: self.persistence.write_text(
                 self.memory_file, content
             ),
-            extract_pinned_section_fn=self._extract_pinned_section,
-            restore_pinned_section_fn=self._restore_pinned_section,
             verify_beliefs_fn=lambda: self.profile_mgr.verify_beliefs(),
             write_profile_fn=lambda profile: self.profile_mgr.write_profile(profile),
             profile_keys=self.PROFILE_KEYS,
@@ -386,38 +384,6 @@ class MemoryStore:
 
 ## Conversation to Process
 {chr(10).join(lines)}"""
-
-    _PINNED_START = "<!-- user-pinned -->"
-    _PINNED_END = "<!-- end-user-pinned -->"
-
-    @classmethod
-    def _extract_pinned_section(cls, text: str) -> str | None:
-        """Extract user-pinned content from MEMORY.md, if present."""
-        start = text.find(cls._PINNED_START)
-        end = text.find(cls._PINNED_END)
-        if start == -1 or end == -1 or end <= start:
-            return None
-        return text[start : end + len(cls._PINNED_END)]
-
-    @classmethod
-    def _restore_pinned_section(cls, new_text: str, pinned: str) -> str:
-        """Re-insert a pinned section into new MEMORY.md content.
-
-        If the new text already contains a pinned fence, replace it.
-        Otherwise insert the pinned block after the first heading.
-        """
-        existing = cls._extract_pinned_section(new_text)
-        if existing:
-            return new_text.replace(existing, pinned)
-        # Insert after the first heading line (or at the top).
-        lines = new_text.split("\n")
-        insert_at = 0
-        for i, line in enumerate(lines):
-            if line.startswith("#"):
-                insert_at = i + 1
-                break
-        lines.insert(insert_at, pinned)
-        return "\n".join(lines)
 
     def _apply_save_memory_tool_result(self, *, args: dict[str, Any], current_memory: str) -> None:
         if entry := args.get("history_entry"):

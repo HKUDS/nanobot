@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.memory.snapshot import MemorySnapshot
 
 # ---------------------------------------------------------------------------
 # LAN-196: Stable IDs for profile item metadata
@@ -96,31 +97,31 @@ class TestPinnedSectionProtection:
             "<!-- end-user-pinned -->\n"
             "Other content.\n"
         )
-        pinned = MemoryStore._extract_pinned_section(text)
+        pinned = MemorySnapshot._extract_pinned_section(text)
         assert pinned is not None
         assert "Critical info." in pinned
         assert pinned.startswith("<!-- user-pinned -->")
         assert pinned.endswith("<!-- end-user-pinned -->")
 
     def test_extract_returns_none_when_no_fence(self) -> None:
-        assert MemoryStore._extract_pinned_section("# Memory\nNo fence here.") is None
+        assert MemorySnapshot._extract_pinned_section("# Memory\nNo fence here.") is None
 
     def test_extract_returns_none_when_malformed(self) -> None:
         # End before start.
         text = "<!-- end-user-pinned -->\n<!-- user-pinned -->"
-        assert MemoryStore._extract_pinned_section(text) is None
+        assert MemorySnapshot._extract_pinned_section(text) is None
 
     def test_restore_inserts_pinned_into_new_content(self) -> None:
         pinned = "<!-- user-pinned -->\nKeep this.\n<!-- end-user-pinned -->"
         new_text = "# Memory\nNew LLM content."
-        result = MemoryStore._restore_pinned_section(new_text, pinned)
+        result = MemorySnapshot._restore_pinned_section(new_text, pinned)
         assert "Keep this." in result
         assert "New LLM content." in result
 
     def test_restore_replaces_existing_fence(self) -> None:
         pinned = "<!-- user-pinned -->\nUpdated.\n<!-- end-user-pinned -->"
         new_text = "# Memory\n<!-- user-pinned -->\nOld.\n<!-- end-user-pinned -->\nOther."
-        result = MemoryStore._restore_pinned_section(new_text, pinned)
+        result = MemorySnapshot._restore_pinned_section(new_text, pinned)
         assert "Updated." in result
         assert "Old." not in result
         assert "Other." in result

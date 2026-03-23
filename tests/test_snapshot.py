@@ -40,8 +40,6 @@ def _make_snapshot(
         ],
         read_long_term_fn=lambda: _long_term["content"],
         write_long_term_fn=lambda content: _long_term.__setitem__("content", content),
-        extract_pinned_section_fn=lambda text: None,
-        restore_pinned_section_fn=lambda new_text, pinned: new_text,
         verify_beliefs_fn=lambda: {"summary": {"total": 0, "well_supported": 0}},
         write_profile_fn=lambda p: None,
     )
