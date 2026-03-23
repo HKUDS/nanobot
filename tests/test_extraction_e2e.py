@@ -32,7 +32,7 @@ class TestExtractionToRetrieval:
             for m in messages
         ]
         events, _updates = store.extractor.heuristic_extract_events(msg_dicts, source_start=0)
-        return store.append_events(events)
+        return store.ingester.append_events(events)
 
     def test_preference_roundtrip(self, tmp_path: Path) -> None:
         """A preference message should be extractable and retrievable."""
@@ -45,7 +45,7 @@ class TestExtractionToRetrieval:
         )
         assert written >= 1
 
-        results = store.retrieve("dark mode preference", top_k=5)
+        results = store.retriever.retrieve("dark mode preference", top_k=5)
         summaries = [r.get("summary", "").lower() for r in results]
         assert any("dark mode" in s for s in summaries), f"Expected dark mode in {summaries}"
 
@@ -60,11 +60,11 @@ class TestExtractionToRetrieval:
         )
         assert written >= 1
 
-        events = store.read_events()
+        events = store.ingester.read_events()
         constraint_events = [e for e in events if e.get("type") == "constraint"]
         assert len(constraint_events) >= 1
 
-        results = store.retrieve("deployment constraints", top_k=5)
+        results = store.retriever.retrieve("deployment constraints", top_k=5)
         assert len(results) >= 1
 
     def test_entity_extraction_heuristic(self, tmp_path: Path) -> None:
@@ -79,7 +79,7 @@ class TestExtractionToRetrieval:
                 },
             ],
         )
-        events = store.read_events()
+        events = store.ingester.read_events()
         assert len(events) >= 1
         entities = events[0].get("entities", [])
         entity_text = " ".join(entities).lower()
@@ -109,7 +109,7 @@ class TestExtractionToRetrieval:
                 {"role": "user", "content": "Remember that the server runs on port 8080."},
             ],
         )
-        events = store.read_events()
+        events = store.ingester.read_events()
         pref_events = [e for e in events if e.get("type") == "preference"]
         fact_events = [e for e in events if e.get("type") == "fact"]
         if pref_events and fact_events:
@@ -125,7 +125,7 @@ class TestExtractionToRetrieval:
                 {"role": "user", "content": "I prefer dark mode for all my editors."},
             ],
         )
-        events = store.read_events()
+        events = store.ingester.read_events()
         # Should have at most 1 event (second is deduped)
         assert len(events) <= 1 or written <= 1
 

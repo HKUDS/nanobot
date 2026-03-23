@@ -88,17 +88,17 @@ class TestHybridMemoryStore:
         assert store.events_file.exists()
         assert store.profile_file.exists()
 
-        events = store.read_events()
+        events = store.ingester.read_events()
         assert len(events) == 1
         assert events[0]["type"] == "preference"
 
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         assert "User prefers concise responses." in profile["preferences"]
         assert "Never use dark mode." in profile["constraints"]
 
     def test_retrieve_and_verify_report(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        store.append_events(
+        store.ingester.append_events(
             [
                 {
                     "id": "e1",
@@ -129,11 +129,11 @@ class TestHybridMemoryStore:
             ]
         )
 
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         profile["stable_facts"] = ["Project uses OAuth2 for API authentication."]
-        store.write_profile(profile)
+        store.profile_mgr.write_profile(profile)
 
-        retrieved = store.retrieve(
+        retrieved = store.retriever.retrieve(
             "oauth2 api",
             top_k=2,
             recency_half_life_days=30.0,
@@ -144,19 +144,19 @@ class TestHybridMemoryStore:
         assert retrieved[0]["retrieval_reason"]["provider"] in ("bm25", "mem0")
         assert retrieved[0]["provenance"]["canonical_id"] == retrieved[0]["id"]
 
-        report = store.verify_memory(stale_days=90)
+        report = store.snapshot.verify_memory(stale_days=90)
         assert report["events"] == 2
         assert report["profile_items"] >= 1
         assert report["stale_events"] >= 1
 
     def test_rebuild_memory_snapshot(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         profile["preferences"] = ["Prefer concise summaries."]
         profile["stable_facts"] = ["Service is deployed in eu-west-1."]
-        store.write_profile(profile)
+        store.profile_mgr.write_profile(profile)
 
-        store.append_events(
+        store.ingester.append_events(
             [
                 {
                     "id": "e3",
@@ -174,17 +174,17 @@ class TestHybridMemoryStore:
             ]
         )
 
-        snapshot = store.rebuild_memory_snapshot(max_events=10, write=True)
+        snapshot = store.snapshot.rebuild_memory_snapshot(max_events=10, write=True)
         assert "Prefer concise summaries." in snapshot
         assert "Adopt hybrid memory mode in staging." in snapshot
         assert store.memory_file.exists()
 
     def test_profile_conflict_tracking_updates_meta_confidence(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         profile["constraints"] = ["Use dark mode"]
 
-        added, conflicts, touched = store._apply_profile_updates(
+        added, conflicts, touched = store.profile_mgr._apply_profile_updates(
             profile,
             updates={
                 "preferences": [],
@@ -212,7 +212,7 @@ class TestHybridMemoryStore:
         self, tmp_path: Path
     ) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         profile["stable_facts"] = ["API uses OAuth2"]
         profile["meta"]["stable_facts"] = {
             "api uses oauth2": {
@@ -223,9 +223,9 @@ class TestHybridMemoryStore:
                 "last_seen_at": "2024-01-01T00:00:00+00:00",
             }
         }
-        store.write_profile(profile)
+        store.profile_mgr.write_profile(profile)
 
-        store.append_events(
+        store.ingester.append_events(
             [
                 {
                     "id": "t-open",
@@ -256,15 +256,15 @@ class TestHybridMemoryStore:
             ]
         )
 
-        report = store.verify_memory(stale_days=90, update_profile=True)
+        report = store.snapshot.verify_memory(stale_days=90, update_profile=True)
         assert report["stale_profile_items"] >= 1
         assert report["last_verified_at"] is not None
 
-        updated = store.read_profile()
+        updated = store.profile_mgr.read_profile()
         stale_meta = updated["meta"]["stable_facts"]["api uses oauth2"]
         assert stale_meta["status"] == "stale"
 
-        snapshot = store.rebuild_memory_snapshot(max_events=10, write=False)
+        snapshot = store.snapshot.rebuild_memory_snapshot(max_events=10, write=False)
         assert "Open Tasks & Decisions" in snapshot
         open_section = snapshot.split("## Open Tasks & Decisions", 1)[1].split(
             "## Recent Episodic Highlights", 1
@@ -353,12 +353,12 @@ class TestHybridMemoryStore:
             embedding_provider="hash",
         )
 
-        report = store.get_observability_report()
+        report = store.eval_runner.get_observability_report()
         assert "backend" in report
 
     def test_evaluate_retrieval_cases_metrics(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        store.append_events(
+        store.ingester.append_events(
             [
                 {
                     "id": "ev-oauth",
@@ -389,7 +389,7 @@ class TestHybridMemoryStore:
             ]
         )
 
-        report = store.evaluate_retrieval_cases(
+        report = store.eval_runner.evaluate_retrieval_cases(
             [
                 {
                     "query": "oauth2 auth",
@@ -415,7 +415,9 @@ class TestHybridMemoryStore:
 
     def test_evaluate_retrieval_cases_empty_input(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        report = store.evaluate_retrieval_cases([], default_top_k=6, embedding_provider="hash")
+        report = store.eval_runner.evaluate_retrieval_cases(
+            [], default_top_k=6, embedding_provider="hash"
+        )
         assert report["cases"] == 0
         assert report["summary"]["recall_at_k"] == 0.0
         assert report["summary"]["precision_at_k"] == 0.0
@@ -432,7 +434,7 @@ class TestHybridMemoryStore:
             "kpis": {"retrieval_hit_rate": 0.7},
         }
 
-        out_path = store.save_evaluation_report(evaluation, observability)
+        out_path = store.eval_runner.save_evaluation_report(evaluation, observability)
         assert out_path.exists()
         assert out_path.name.startswith("memory_eval_")
 
@@ -442,34 +444,38 @@ class TestHybridMemoryStore:
 
     def test_pin_unpin_and_mark_outdated_controls(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         profile["stable_facts"] = ["API uses OAuth2"]
-        store.write_profile(profile)
+        store.profile_mgr.write_profile(profile)
 
-        assert store.set_item_pin("stable_facts", "API uses OAuth2", pinned=True) is True
-        pinned_profile = store.read_profile()
+        assert (
+            store.profile_mgr.set_item_pin("stable_facts", "API uses OAuth2", pinned=True) is True
+        )
+        pinned_profile = store.profile_mgr.read_profile()
         meta = pinned_profile["meta"]["stable_facts"]["api uses oauth2"]
         assert meta["pinned"] is True
 
-        snapshot = store.rebuild_memory_snapshot(write=False)
+        snapshot = store.snapshot.rebuild_memory_snapshot(write=False)
         assert "API uses OAuth2" in snapshot
         assert "📌" in snapshot
 
-        assert store.set_item_pin("stable_facts", "API uses OAuth2", pinned=False) is True
-        unpinned_profile = store.read_profile()
+        assert (
+            store.profile_mgr.set_item_pin("stable_facts", "API uses OAuth2", pinned=False) is True
+        )
+        unpinned_profile = store.profile_mgr.read_profile()
         assert unpinned_profile["meta"]["stable_facts"]["api uses oauth2"]["pinned"] is False
 
-        assert store.mark_item_outdated("stable_facts", "API uses OAuth2") is True
-        stale_profile = store.read_profile()
+        assert store.profile_mgr.mark_item_outdated("stable_facts", "API uses OAuth2") is True
+        stale_profile = store.profile_mgr.read_profile()
         assert stale_profile["meta"]["stable_facts"]["api uses oauth2"]["status"] == "stale"
 
     def test_conflict_list_and_resolve(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
         store.mem0.enabled = False  # Test local-only conflict resolution
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         profile["constraints"] = ["Use dark mode"]
 
-        added, conflicts, _ = store._apply_profile_updates(
+        added, conflicts, _ = store.profile_mgr._apply_profile_updates(
             profile,
             updates={
                 "preferences": [],
@@ -482,32 +488,32 @@ class TestHybridMemoryStore:
         )
         assert added == 1
         assert conflicts >= 1
-        store.write_profile(profile)
+        store.profile_mgr.write_profile(profile)
 
-        open_conflicts = store.list_conflicts()
+        open_conflicts = store.conflict_mgr.list_conflicts()
         assert len(open_conflicts) >= 1
         idx = int(open_conflicts[0]["index"])
 
-        ok = store.resolve_conflict(idx, "keep_new")
+        ok = store.conflict_mgr.resolve_conflict(idx, "keep_new")
         assert ok is True
 
-        updated = store.read_profile()
+        updated = store.profile_mgr.read_profile()
         constraints = updated.get("constraints", [])
         assert "Do not use dark mode" in constraints
         assert "Use dark mode" not in constraints
 
-        all_conflicts = store.list_conflicts(include_closed=True)
+        all_conflicts = store.conflict_mgr.list_conflicts(include_closed=True)
         resolved = [c for c in all_conflicts if c.get("index") == idx]
         assert resolved
         assert resolved[0]["status"] == "resolved"
 
     def test_live_user_correction_creates_profile_conflict_and_event(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         profile["preferences"] = ["dark mode"]
-        store.write_profile(profile)
+        store.profile_mgr.write_profile(profile)
 
-        out = store.apply_live_user_correction(
+        out = store.profile_mgr.apply_live_user_correction(
             "Correction: I now prefer light mode, not dark mode.",
             channel="cli",
             chat_id="direct",
@@ -518,7 +524,7 @@ class TestHybridMemoryStore:
         assert out["conflicts"] >= 1
         assert out["events"] >= 1
 
-        updated = store.read_profile()
+        updated = store.profile_mgr.read_profile()
         prefs = updated.get("preferences", [])
         assert "dark mode" in prefs
         assert "light mode" in prefs
@@ -530,7 +536,7 @@ class TestHybridMemoryStore:
         assert open_conflicts[0]["old"] == "dark mode"
         assert open_conflicts[0]["new"] == "light mode"
 
-        events = store.read_events()
+        events = store.ingester.read_events()
         assert events
         assert any("corrected preference" in str(e.get("summary", "")).lower() for e in events)
 
@@ -538,11 +544,11 @@ class TestHybridMemoryStore:
         self, tmp_path: Path
     ) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         profile["stable_facts"] = ["deployment region is eu-west-1"]
-        store.write_profile(profile)
+        store.profile_mgr.write_profile(profile)
 
-        out = store.apply_live_user_correction(
+        out = store.profile_mgr.apply_live_user_correction(
             "Correction: deployment region is us-east-1, not eu-west-1.",
             channel="cli",
             chat_id="direct",
@@ -553,7 +559,7 @@ class TestHybridMemoryStore:
         assert out["conflicts"] >= 1
         assert out["events"] >= 1
 
-        updated = store.read_profile()
+        updated = store.profile_mgr.read_profile()
         facts = [str(v).lower() for v in updated.get("stable_facts", [])]
         assert "deployment region is eu-west-1" in facts
         assert "deployment region is us-east-1" in facts
@@ -568,7 +574,7 @@ class TestHybridMemoryStore:
         assert str(open_conflicts[0]["old"]).lower() == "deployment region is eu-west-1"
         assert str(open_conflicts[0]["new"]).lower() == "deployment region is us-east-1"
 
-        events = store.read_events()
+        events = store.ingester.read_events()
         assert any("corrected fact" in str(e.get("summary", "")).lower() for e in events)
 
     def test_retrieval_prefers_keep_new_resolved_fact(self, tmp_path: Path) -> None:
@@ -603,13 +609,14 @@ class TestHybridMemoryStore:
             },
         ]
         store.persistence.write_jsonl(store.events_file, events)
-        store.retriever.rebuild_event_embeddings(events, embedding_provider="hash")
+        # rebuild_event_embeddings was a no-op on the old _Mem0RuntimeInfo.
+        # After extraction, MemoryRetriever doesn't own this method; skip it.
 
-        profile = store.read_profile()
+        profile = store.profile_mgr.read_profile()
         profile["stable_facts"] = ["Deployment region is eu-west-1"]
-        store.write_profile(profile)
+        store.profile_mgr.write_profile(profile)
 
-        out = store.apply_live_user_correction(
+        out = store.profile_mgr.apply_live_user_correction(
             "Correction: deployment region is us-east-1, not eu-west-1.",
             channel="cli",
             chat_id="direct",
@@ -617,12 +624,12 @@ class TestHybridMemoryStore:
         )
         assert out["conflicts"] >= 1
 
-        open_conflicts = store.list_conflicts()
+        open_conflicts = store.conflict_mgr.list_conflicts()
         assert open_conflicts
         idx = int(open_conflicts[0]["index"])
-        assert store.resolve_conflict(idx, "keep_new") is True
+        assert store.conflict_mgr.resolve_conflict(idx, "keep_new") is True
 
-        retrieved = store.retrieve(
+        retrieved = store.retriever.retrieve(
             "deployment region us-east-1 eu-west-1",
             top_k=2,
             recency_half_life_days=30.0,
@@ -635,7 +642,7 @@ class TestHybridMemoryStore:
         store = MemoryStore(tmp_path, embedding_provider="hash")
         store.mem0.enabled = False  # Test local dedup (mem0 generates its own IDs)
 
-        written_1 = store.append_events(
+        written_1 = store.ingester.append_events(
             [
                 {
                     "id": "dup-1",
@@ -652,7 +659,7 @@ class TestHybridMemoryStore:
                 }
             ]
         )
-        written_2 = store.append_events(
+        written_2 = store.ingester.append_events(
             [
                 {
                     "id": "dup-2",
@@ -673,7 +680,7 @@ class TestHybridMemoryStore:
         assert written_1 == 1
         assert written_2 == 0
 
-        events = store.read_events()
+        events = store.ingester.read_events()
         assert len(events) == 1
         event = events[0]
         assert event["canonical_id"] == "dup-1"
@@ -681,13 +688,13 @@ class TestHybridMemoryStore:
         assert len(event.get("aliases", [])) >= 2
         assert len(event.get("evidence", [])) >= 2
 
-        retrieved = store.retrieve("oauth2 tokens", top_k=2, embedding_provider="hash")
+        retrieved = store.retriever.retrieve("oauth2 tokens", top_k=2, embedding_provider="hash")
         assert retrieved
         assert "provenance" in retrieved[0]
 
     def test_non_duplicate_events_remain_separate(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        written = store.append_events(
+        written = store.ingester.append_events(
             [
                 {
                     "id": "nd-1",
@@ -719,7 +726,7 @@ class TestHybridMemoryStore:
         )
 
         assert written == 2
-        events = store.read_events()
+        events = store.ingester.read_events()
         assert len(events) == 2
         ids = {str(e.get("id")) for e in events}
         assert {"nd-1", "nd-2"}.issubset(ids)
@@ -728,7 +735,7 @@ class TestHybridMemoryStore:
         """When mem0 is unavailable, retrieve() uses local keyword matching."""
         store = MemoryStore(tmp_path, embedding_provider="hash", vector_backend="sqlite")
         store.mem0.enabled = False  # Explicitly disable mem0 for this test
-        store.append_events(
+        store.ingester.append_events(
             [
                 {
                     "id": "sql-ev-1",
@@ -746,7 +753,9 @@ class TestHybridMemoryStore:
             ]
         )
 
-        retrieved = store.retrieve("postgresql database", top_k=2, embedding_provider="hash")
+        retrieved = store.retriever.retrieve(
+            "postgresql database", top_k=2, embedding_provider="hash"
+        )
         assert retrieved
         assert retrieved[0]["retrieval_reason"]["provider"] == "bm25"
         assert retrieved[0]["retrieval_reason"]["backend"] == "jsonl"
@@ -755,7 +764,7 @@ class TestHybridMemoryStore:
         """Recency weighting should boost recent events of same type over old ones."""
         store = MemoryStore(tmp_path, embedding_provider="hash", vector_backend="faiss")
         store.mem0.enabled = False  # Test local recency scoring (mem0 ordering differs)
-        store.append_events(
+        store.ingester.append_events(
             [
                 {
                     "id": "old-ev",
@@ -786,7 +795,7 @@ class TestHybridMemoryStore:
             ]
         )
 
-        retrieved = store.retrieve(
+        retrieved = store.retriever.retrieve(
             "postgresql",
             top_k=2,
             recency_half_life_days=30.0,
@@ -806,7 +815,7 @@ class TestHybridMemoryStore:
         store = MemoryStore(tmp_path, embedding_provider="hash")
         store.mem0.enabled = False  # Force local BM25 path
 
-        store.append_events(
+        store.ingester.append_events(
             [
                 {
                     "id": "bound-ev-1",
@@ -834,7 +843,7 @@ class TestHybridMemoryStore:
             "read_jsonl",
             wraps=real_read_jsonl,
         ) as mock_read:
-            store.retrieve("test event", top_k=3, embedding_provider="hash")
+            store.retriever.retrieve("test event", top_k=3, embedding_provider="hash")
 
         # The events file should have been read at most once.
         assert mock_read.call_count <= 1, (

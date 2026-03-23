@@ -11,14 +11,13 @@ through ``_Mem0Adapter``.
 from __future__ import annotations
 
 import hashlib
-import re
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from .event import BeliefRecord
+from .helpers import _norm_text, _safe_float, _to_str_list, _tokenize, _utc_now_iso
 
 if TYPE_CHECKING:
     from .mem0_adapter import _Mem0Adapter
@@ -78,39 +77,12 @@ class ProfileManager:
         # etc.).
         self._store: Any = None
 
-    # ------------------------------------------------------------------
-    # Static helpers (duplicated from MemoryStore so ProfileManager is
-    # self-contained; the originals remain on MemoryStore for other callers)
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _utc_now_iso() -> str:
-        return datetime.now(timezone.utc).isoformat()
-
-    @staticmethod
-    def _safe_float(value: Any, default: float) -> float:
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return default
-
-    @staticmethod
-    def _norm_text(value: str) -> str:
-        return re.sub(r"\s+", " ", value.strip().lower())
-
-    @staticmethod
-    def _tokenize(value: str) -> set[str]:
-        return {t for t in re.findall(r"[a-zA-Z0-9_\-]+", value.lower()) if len(t) > 1}
-
-    @staticmethod
-    def _to_str_list(value: Any) -> list[str]:
-        if not isinstance(value, list):
-            return []
-        out: list[str] = []
-        for item in value:
-            if isinstance(item, str) and item.strip():
-                out.append(item.strip())
-        return out
+    # -- Shared helpers imported from .helpers --------------------------------
+    _utc_now_iso = staticmethod(_utc_now_iso)
+    _safe_float = staticmethod(_safe_float)
+    _norm_text = staticmethod(_norm_text)
+    _tokenize = staticmethod(_tokenize)
+    _to_str_list = staticmethod(_to_str_list)
 
     @staticmethod
     def _generate_belief_id(section: str, norm_text: str, created_at: str) -> str:
@@ -919,7 +891,7 @@ class ProfileManager:
                     )
                     local_conflicts += 1
 
-                event = store._coerce_event(
+                event = store.ingester._coerce_event(
                     {
                         "timestamp": self._utc_now_iso(),
                         "type": event_type,
@@ -962,18 +934,18 @@ class ProfileManager:
         profile["last_verified_at"] = self._utc_now_iso()
         self.write_profile(profile)
 
-        events_written = store.append_events(events)
+        events_written = store.ingester.append_events(events)
 
         needs_user = 0
         question: str | None = None
         if conflicts > 0:
-            resolution = store.auto_resolve_conflicts(max_items=10)
+            resolution = store.conflict_mgr.auto_resolve_conflicts(max_items=10)
             needs_user = int(resolution.get("needs_user", 0))
             if needs_user > 0:
-                question = store.ask_user_for_conflict()
+                question = store.conflict_mgr.ask_user_for_conflict()
 
         if self.mem0.enabled:
-            correction_meta, _ = store._normalize_memory_metadata(
+            correction_meta, _ = store.ingester._normalize_memory_metadata(
                 {"topic": "user_correction", "memory_type": "episodic", "stability": "medium"},
                 event_type="fact",
                 summary=text,
@@ -987,8 +959,8 @@ class ProfileManager:
                     "chat_id": chat_id,
                 }
             )
-            correction_text = store._sanitize_mem0_text(text, allow_archival=False)
-            correction_meta = store._sanitize_mem0_metadata(correction_meta)
+            correction_text = store.ingester._sanitize_mem0_text(text, allow_archival=False)
+            correction_meta = store.ingester._sanitize_mem0_metadata(correction_meta)
             if correction_text:
                 self.mem0.add_text(
                     correction_text,
@@ -996,7 +968,7 @@ class ProfileManager:
                 )
 
         # Keep LLM-managed MEMORY.md content stable; snapshot can be generated on-demand.
-        store.rebuild_memory_snapshot(write=False)
+        store.snapshot.rebuild_memory_snapshot(write=False)
         return {
             "applied": applied,
             "conflicts": conflicts,

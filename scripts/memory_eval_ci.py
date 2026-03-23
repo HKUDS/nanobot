@@ -45,20 +45,34 @@ def _load_seed_profile(profile_path: Path) -> dict[str, Any] | None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run deterministic memory eval benchmark for CI")
-    parser.add_argument("--workspace", required=True, help="Workspace path for temporary memory files")
+    parser.add_argument(
+        "--workspace", required=True, help="Workspace path for temporary memory files"
+    )
     parser.add_argument("--cases-file", required=True, help="Benchmark cases JSON file")
-    parser.add_argument("--seed-events", default="case/memory_seed_events.jsonl",
-                        help="JSONL file with seed events (default: case/memory_seed_events.jsonl)")
-    parser.add_argument("--seed-profile", default="case/memory_seed_profile.json",
-                        help="JSON file with seed profile (default: case/memory_seed_profile.json)")
-    parser.add_argument("--baseline-file", required=False, default="", help="Baseline thresholds JSON file")
+    parser.add_argument(
+        "--seed-events",
+        default="case/memory_seed_events.jsonl",
+        help="JSONL file with seed events (default: case/memory_seed_events.jsonl)",
+    )
+    parser.add_argument(
+        "--seed-profile",
+        default="case/memory_seed_profile.json",
+        help="JSON file with seed profile (default: case/memory_seed_profile.json)",
+    )
+    parser.add_argument(
+        "--baseline-file", required=False, default="", help="Baseline thresholds JSON file"
+    )
     parser.add_argument("--output-file", required=True, help="Latest evaluation output JSON")
-    parser.add_argument("--history-file", required=True, help="Append-only history JSON file for trends")
+    parser.add_argument(
+        "--history-file", required=True, help="Append-only history JSON file for trends"
+    )
     parser.add_argument("--summary-file", required=True, help="Markdown summary output path")
     parser.add_argument("--top-k", type=int, default=6)
     parser.add_argument("--embedding-provider", default="hash")
     parser.add_argument("--vector-backend", default="json")
-    parser.add_argument("--strict", action="store_true", help="Fail run when baseline thresholds are violated")
+    parser.add_argument(
+        "--strict", action="store_true", help="Fail run when baseline thresholds are violated"
+    )
     return parser.parse_args()
 
 
@@ -83,7 +97,11 @@ def _load_cases(path: Path) -> list[dict[str, Any]]:
         raise ValueError("cases file must be a JSON array or {'cases': [...]} object")
     out: list[dict[str, Any]] = []
     for item in raw:
-        if isinstance(item, dict) and isinstance(item.get("query"), str) and item.get("query", "").strip():
+        if (
+            isinstance(item, dict)
+            and isinstance(item.get("query"), str)
+            and item.get("query", "").strip()
+        ):
             out.append(item)
     if not out:
         raise ValueError("cases file contains no valid benchmark cases")
@@ -96,7 +114,9 @@ def _prepare_workspace(path: Path) -> None:
     (path / "memory").mkdir(parents=True, exist_ok=True)
 
 
-def _compare_with_baseline(summary: dict[str, Any], kpis: dict[str, Any], baseline: dict[str, Any]) -> dict[str, Any]:
+def _compare_with_baseline(
+    summary: dict[str, Any], kpis: dict[str, Any], baseline: dict[str, Any]
+) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
 
     def check_min(metric: str, actual: float, threshold: float) -> None:
@@ -122,9 +142,17 @@ def _compare_with_baseline(summary: dict[str, Any], kpis: dict[str, Any], baseli
         )
 
     if "min_recall_at_k" in baseline:
-        check_min("recall_at_k", float(summary.get("recall_at_k", 0.0)), float(baseline["min_recall_at_k"]))
+        check_min(
+            "recall_at_k",
+            float(summary.get("recall_at_k", 0.0)),
+            float(baseline["min_recall_at_k"]),
+        )
     if "min_precision_at_k" in baseline:
-        check_min("precision_at_k", float(summary.get("precision_at_k", 0.0)), float(baseline["min_precision_at_k"]))
+        check_min(
+            "precision_at_k",
+            float(summary.get("precision_at_k", 0.0)),
+            float(baseline["min_precision_at_k"]),
+        )
     if "min_retrieval_hit_rate" in baseline:
         check_min(
             "retrieval_hit_rate",
@@ -219,23 +247,25 @@ def main() -> int:
     seed_profile_path = Path(args.seed_profile).expanduser().resolve()
     seed_profile = _load_seed_profile(seed_profile_path)
     if seed_profile:
-        store.write_profile(seed_profile)
+        store.profile_mgr.write_profile(seed_profile)
 
-    store.append_events(seed_events)
+    store.ingester.append_events(seed_events)
 
-    evaluation = store.evaluate_retrieval_cases(
+    evaluation = store.eval_runner.evaluate_retrieval_cases(
         cases,
         default_top_k=max(1, int(args.top_k)),
         recency_half_life_days=30.0,
         embedding_provider=args.embedding_provider,
     )
-    observability = store.get_observability_report()
+    observability = store.eval_runner.get_observability_report()
 
     summary_metrics = evaluation.get("summary", {}) if isinstance(evaluation, dict) else {}
     kpis = observability.get("kpis", {}) if isinstance(observability, dict) else {}
 
     baseline_payload = _read_json(baseline_path, default={}) if baseline_path else {}
-    baseline_compare = _compare_with_baseline(summary_metrics, kpis, baseline_payload if isinstance(baseline_payload, dict) else {})
+    baseline_compare = _compare_with_baseline(
+        summary_metrics, kpis, baseline_payload if isinstance(baseline_payload, dict) else {}
+    )
 
     history = _read_json(history_path, default=[])
     if not isinstance(history, list):

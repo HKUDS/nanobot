@@ -559,7 +559,7 @@ class TestGraphContextBuilder:
         ]
         store.persistence.write_jsonl(store.events_file, events)
 
-        lines = store._build_graph_context_lines(
+        lines = store.retriever._build_graph_context_lines(
             query="Tell me about Carlos",
             retrieved=[{"entities": ["Carlos"]}],
         )
@@ -588,7 +588,7 @@ class TestGraphContextBuilder:
         ]
         store.persistence.write_jsonl(store.events_file, events)
 
-        lines = store._build_graph_context_lines(
+        lines = store.retriever._build_graph_context_lines(
             query="Tell me about Carlos",
             retrieved=[],
         )

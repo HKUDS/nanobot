@@ -89,8 +89,8 @@ class TestFallbackArchive:
         ]
         result = orch.fallback_archive_snapshot(snapshot)
         assert result is True
-        store.append_history.assert_called_once()
-        entry = store.append_history.call_args[0][0]
+        store.persistence.append_text.assert_called_once()
+        entry = store.persistence.append_text.call_args[0][1]
         assert "USER: Hello" in entry
         assert "[tools: web_search]" in entry
         assert "ASSISTANT" in entry
@@ -105,12 +105,12 @@ class TestFallbackArchive:
         ]
         result = orch.fallback_archive_snapshot(snapshot)
         assert result is True
-        entry = store.append_history.call_args[0][0]
+        entry = store.persistence.append_text.call_args[0][1]
         assert "actual content" in entry
 
     def test_exception_returns_false(self):
         store = MagicMock()
-        store.append_history.side_effect = RuntimeError("disk full")
+        store.persistence.append_text.side_effect = RuntimeError("disk full")
         orch = ConsolidationOrchestrator(store)
         snapshot = [{"role": "user", "content": "Hello"}]
         result = orch.fallback_archive_snapshot(snapshot)

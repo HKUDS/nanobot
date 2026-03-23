@@ -244,10 +244,10 @@ class TestWorkflowMemoryRoundtrip:
                 "source": "test",
             }
         ]
-        store.append_events(events)
+        store.ingester.append_events(events)
 
         # Retrieve it
-        results = store.retrieve("vim keybindings", top_k=5)
+        results = store.retriever.retrieve("vim keybindings", top_k=5)
         summaries = [r.get("summary", "").lower() for r in results]
         assert any("vim" in s for s in summaries)
 
