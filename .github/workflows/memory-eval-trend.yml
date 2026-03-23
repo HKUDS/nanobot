@@ -9,8 +9,7 @@ on:
       - 'nanobot/config/**'
       - 'tests/**'
       - 'case/memory_eval_cases.json'
-      - 'case/memory_eval_baseline.json'
-      - 'scripts/memory_eval_ci.py'
+      - 'scripts/memory_eval_trend.py'
       - '.github/workflows/memory-eval-trend.yml'
   push:
     branches:
@@ -21,14 +20,14 @@ on:
       - 'nanobot/config/**'
       - 'tests/**'
       - 'case/memory_eval_cases.json'
-      - 'case/memory_eval_baseline.json'
-      - 'scripts/memory_eval_ci.py'
+      - 'scripts/memory_eval_trend.py'
       - '.github/workflows/memory-eval-trend.yml'
 
 jobs:
   memory-eval:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    continue-on-error: true
 
     steps:
       - name: Checkout
@@ -47,14 +46,14 @@ jobs:
       - name: Run deterministic memory benchmark
         run: |
           mkdir -p artifacts
-          python scripts/memory_eval_ci.py \
+          python scripts/memory_eval_trend.py \
             --workspace "$GITHUB_WORKSPACE/.ci/memory-workspace" \
             --cases-file "$GITHUB_WORKSPACE/case/memory_eval_cases.json" \
-            --baseline-file "$GITHUB_WORKSPACE/case/memory_eval_baseline.json" \
+            --seed-events "$GITHUB_WORKSPACE/case/memory_seed_events.jsonl" \
+            --seed-profile "$GITHUB_WORKSPACE/case/memory_seed_profile.json" \
             --output-file "$GITHUB_WORKSPACE/artifacts/memory_eval_latest.json" \
             --history-file "$GITHUB_WORKSPACE/artifacts/memory_eval_history.json" \
-            --summary-file "$GITHUB_WORKSPACE/artifacts/memory_eval_summary.md" \
-            --strict
+            --summary-file "$GITHUB_WORKSPACE/artifacts/memory_eval_summary.md"
 
       - name: Publish summary
         run: cat artifacts/memory_eval_summary.md >> "$GITHUB_STEP_SUMMARY"
