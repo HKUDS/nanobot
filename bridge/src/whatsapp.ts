@@ -24,6 +24,12 @@ import { randomBytes } from 'crypto';
 
 const VERSION = '0.1.0';
 
+export interface AudioData {
+  data: string;      // base64-encoded audio bytes
+  mimetype: string;  // e.g. "audio/ogg; codecs=opus"
+  duration?: number; // duration in seconds, if known
+}
+
 export interface InboundMessage {
   id: string;
   sender: string;
@@ -32,6 +38,7 @@ export interface InboundMessage {
   timestamp: number;
   isGroup: boolean;
   media?: string[];
+  audio?: AudioData; // present when message is a voice/audio note
 }
 
 export interface WhatsAppClientOptions {
@@ -128,6 +135,8 @@ export class WhatsAppClient {
         let fallbackContent: string | null = null;
         const mediaPaths: string[] = [];
 
+        let audioData: AudioData | undefined;
+
         if (unwrapped.imageMessage) {
           fallbackContent = '[Image]';
           const path = await this.downloadMedia(msg, unwrapped.imageMessage.mimetype ?? undefined);
@@ -141,10 +150,23 @@ export class WhatsAppClient {
           fallbackContent = '[Video]';
           const path = await this.downloadMedia(msg, unwrapped.videoMessage.mimetype ?? undefined);
           if (path) mediaPaths.push(path);
+        } else if (unwrapped.audioMessage) {
+          // Voice note (ptt) or audio file — download to memory as base64, never to disk
+          fallbackContent = '[Voice Message]';
+          const audioBuffer = await this.downloadMediaToBuffer(msg);
+          if (audioBuffer) {
+            const mimetype = unwrapped.audioMessage.mimetype ?? 'audio/ogg; codecs=opus';
+            const duration = unwrapped.audioMessage.seconds ?? undefined;
+            audioData = {
+              data: audioBuffer.toString('base64'),
+              mimetype,
+              ...(duration !== undefined ? { duration } : {}),
+            };
+          }
         }
 
-        const finalContent = content || (mediaPaths.length === 0 ? fallbackContent : '') || '';
-        if (!finalContent && mediaPaths.length === 0) continue;
+        const finalContent = content || (mediaPaths.length === 0 && !audioData ? fallbackContent : '') || '';
+        if (!finalContent && mediaPaths.length === 0 && !audioData) continue;
 
         const isGroup = msg.key.remoteJid?.endsWith('@g.us') || false;
 
@@ -156,9 +178,20 @@ export class WhatsAppClient {
           timestamp: msg.messageTimestamp as number,
           isGroup,
           ...(mediaPaths.length > 0 ? { media: mediaPaths } : {}),
+          ...(audioData ? { audio: audioData } : {}),
         });
       }
     });
+  }
+
+  private async downloadMediaToBuffer(msg: any): Promise<Buffer | null> {
+    try {
+      const buffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer;
+      return buffer;
+    } catch (err) {
+      console.error('Failed to download audio to buffer:', err);
+      return null;
+    }
   }
 
   private async downloadMedia(msg: any, mimetype?: string, fileName?: string): Promise<string | null> {
@@ -216,9 +249,9 @@ export class WhatsAppClient {
       return message.documentMessage.caption || '';
     }
 
-    // Voice/Audio message
+    // Voice/Audio message — handled separately via the audio field; return null here
     if (message.audioMessage) {
-      return `[Voice Message]`;
+      return null;
     }
 
     // Contact card (vCard)

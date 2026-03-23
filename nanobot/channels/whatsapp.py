@@ -1,6 +1,7 @@
 """WhatsApp channel implementation using Node.js bridge."""
 
 import asyncio
+import base64
 import json
 import mimetypes
 from collections import OrderedDict
@@ -11,6 +12,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import WhatsAppConfig
+from nanobot.providers.transcription import TranscriptionProvider
 
 
 class WhatsAppChannel(BaseChannel):
@@ -23,9 +25,15 @@ class WhatsAppChannel(BaseChannel):
 
     name = "whatsapp"
 
-    def __init__(self, config: WhatsAppConfig, bus: MessageBus):
+    def __init__(
+        self,
+        config: WhatsAppConfig,
+        bus: MessageBus,
+        transcription_provider: TranscriptionProvider | None = None,
+    ):
         super().__init__(config, bus)
         self.config: WhatsAppConfig = config
+        self._transcription_provider = transcription_provider
         self._ws = None
         self._connected = False
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
@@ -160,10 +168,10 @@ class WhatsAppChannel(BaseChannel):
             sender_id = user_id.split("@")[0] if "@" in user_id else user_id
             logger.info("Sender {}", sender)
 
-            # Handle voice transcription if it's a voice message
-            if content == "[Voice Message]":
-                logger.info("Voice message received from {}, but direct download from bridge is not yet supported.", sender_id)
-                content = "[Voice Message: Transcription not available for WhatsApp yet]"
+            # Handle voice/audio message transcription
+            audio_data = data.get("audio")
+            if audio_data:
+                content = await self._transcribe_audio(audio_data, sender_id)
 
             # Extract media paths (images/documents/videos downloaded by the bridge)
             media_paths = data.get("media") or []
@@ -206,3 +214,48 @@ class WhatsAppChannel(BaseChannel):
 
         elif msg_type == "error":
             logger.error("WhatsApp bridge error: {}", data.get('error'))
+
+    async def _transcribe_audio(self, audio_data: dict, sender_id: str) -> str:
+        """Transcribe a voice/audio message via the injected transcription provider.
+
+        Audio bytes from the bridge are base64-encoded and decoded in memory —
+        nothing is written to disk on the Python side.
+
+        Args:
+            audio_data: Dict with keys ``data`` (base64 str), ``mimetype`` (str),
+                        and optionally ``duration`` (float seconds).
+            sender_id: Sender identifier used for log context.
+
+        Returns:
+            Transcript string, or a sentinel message on failure.
+        """
+        if self._transcription_provider is None:
+            return "[Voice Message]"
+
+        try:
+            audio_bytes = base64.b64decode(audio_data.get("data", ""))
+        except Exception as e:
+            logger.error("Failed to decode audio bytes from bridge for {}: {}", sender_id, e)
+            return "[Voice message - transcription failed]"
+
+        mimetype = audio_data.get("mimetype", "audio/ogg; codecs=opus")
+        duration = audio_data.get("duration")
+
+        logger.info(
+            "Transcribing voice message from {} ({} bytes, mimetype={}, duration={}s)",
+            sender_id, len(audio_bytes), mimetype, duration,
+        )
+
+        transcript = await self._transcription_provider.transcribe(
+            audio_bytes=audio_bytes,
+            mime_type=mimetype,
+            duration_seconds=duration,
+        )
+
+        if transcript:
+            logger.info("Transcribed voice message from {}: {}...", sender_id, transcript[:80])
+        else:
+            logger.warning("Empty transcript for voice message from {}", sender_id)
+            transcript = "[Voice message - transcription failed]"
+
+        return transcript

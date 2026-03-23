@@ -248,9 +248,17 @@ class ProviderConfig(Base):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
 
 
+class TranscriptionConfig(Base):
+    """Voice transcription configuration."""
+
+    model: str = ""      # e.g. "gemini/gemini-2.5-flash"; reads VOICE_TRANSCRIPTION_MODEL if blank
+    api_key: str = ""    # if blank, falls back to the matching provider key by model prefix
+
+
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
+    transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)

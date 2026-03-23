@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any
 
 from loguru import logger
@@ -11,6 +12,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
+from nanobot.providers.transcription import create_transcription_provider
 
 
 class ChannelManager:
@@ -34,6 +36,25 @@ class ChannelManager:
     def _init_channels(self) -> None:
         """Initialize channels based on config."""
 
+        # Build transcription provider once; inject into any channel that handles voice.
+        # Model resolution order:
+        #   1. providers.transcription.model (explicit override)
+        #   2. VOICE_TRANSCRIPTION_MODEL env var
+        #   3. agents.defaults.model (reuse the main agent model — most are multimodal)
+        # API key resolution: transcription.api_key → provider key for the resolved model.
+        t = self.config.providers.transcription
+        t_model = (
+            t.model
+            or os.environ.get("VOICE_TRANSCRIPTION_MODEL")
+            or self.config.agents.defaults.model
+            or None
+        )
+        t_api_key = t.api_key or (self.config.get_api_key(t_model) if t_model else None)
+        transcription_provider = create_transcription_provider(
+            model=t_model,
+            api_key=t_api_key or None,
+        )
+
         # Telegram channel
         if self.config.channels.telegram.enabled:
             try:
@@ -41,7 +62,7 @@ class ChannelManager:
                 self.channels["telegram"] = TelegramChannel(
                     self.config.channels.telegram,
                     self.bus,
-                    groq_api_key=self.config.providers.groq.api_key,
+                    transcription_provider=transcription_provider,
                 )
                 logger.info("Telegram channel enabled")
             except ImportError as e:
@@ -52,7 +73,9 @@ class ChannelManager:
             try:
                 from nanobot.channels.whatsapp import WhatsAppChannel
                 self.channels["whatsapp"] = WhatsAppChannel(
-                    self.config.channels.whatsapp, self.bus
+                    self.config.channels.whatsapp,
+                    self.bus,
+                    transcription_provider=transcription_provider,
                 )
                 logger.info("WhatsApp channel enabled")
             except ImportError as e:
