@@ -184,7 +184,7 @@ class ExecTool(Tool):
 
     @staticmethod
     def _is_win_gui_command(command: str) -> bool:
-        """Detect Windows GUI commands that return non-zero exit codes on success."""
+        """Detect Windows GUI commands that may return exit code 1 on success (e.g. explorer)."""
         if sys.platform != "win32":
             return False
         try:
