@@ -6,17 +6,11 @@
 - **Background** -- ``submit()`` schedules fire-and-forget tasks via ``asyncio.TaskGroup``.
 - **Blocking** -- ``consolidate_and_wait()`` runs consolidation inline (used by /new).
 - **Archival** -- ``archive_fn`` closure called on failure; decoupled from MemoryPersistence.
-
-Backward-compatible shims (``get_lock``, ``prune_lock``, ``consolidate``,
-``fallback_archive_snapshot``) are retained so existing callers that construct
-with ``ConsolidationOrchestrator(memory_store)`` continue to work.
 """
 
 from __future__ import annotations
 
 import asyncio
-import weakref
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
@@ -32,31 +26,22 @@ class ConsolidationOrchestrator:
 
     def __init__(
         self,
-        memory_store: MemoryStore | None = None,
         *,
-        memory: MemoryStore | None = None,
+        memory: MemoryStore,
         archive_fn: Callable[[list[dict[str, Any]]], None] | None = None,
         max_concurrent: int = 3,
         memory_window: int = 50,
         enable_contradiction_check: bool = True,
     ) -> None:
-        # Support both old positional API and new keyword API
-        resolved = memory or memory_store
-        assert resolved is not None, "either memory_store or memory= must be provided"
-        self._memory: MemoryStore = resolved
+        self._memory: MemoryStore = memory
         self._archive_fn = archive_fn
         self._max_concurrent = max_concurrent
         self._memory_window = memory_window
         self._enable_contradiction_check = enable_contradiction_check
-        self._locks: dict[str, asyncio.Lock] | weakref.WeakValueDictionary[str, asyncio.Lock] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
         self._in_progress: set[str] = set()
         self._sem: asyncio.Semaphore | None = None
         self._tg: Any = None  # asyncio.TaskGroup (typed as Any for mypy compat)
-
-        # Backward compatibility: when constructed with old positional API,
-        # use WeakValueDictionary for locks (matches old behaviour).
-        if memory_store is not None and memory is None:
-            self._locks = weakref.WeakValueDictionary()
 
     async def __aenter__(self) -> ConsolidationOrchestrator:
         self._sem = asyncio.Semaphore(self._max_concurrent)
@@ -86,7 +71,9 @@ class ConsolidationOrchestrator:
         Silently skips if a consolidation for this session is already
         in progress (preserves the deduplication from _consolidating guard).
         """
-        assert self._tg is not None, "must be used as async context manager"
+        if self._tg is None:
+            logger.warning("submit() called before entering context manager; skipping")
+            return
         if session_key in self._in_progress:
             return
         self._in_progress.add(session_key)
@@ -118,83 +105,6 @@ class ConsolidationOrchestrator:
                 )
         finally:
             self._prune_lock_if_idle(session_key)
-
-    # ------------------------------------------------------------------
-    # Backward-compatible API (retained for existing callers)
-    # ------------------------------------------------------------------
-
-    def get_lock(self, session_key: str) -> asyncio.Lock:
-        """Get or create a per-session consolidation lock.
-
-        .. deprecated:: Use ``submit()`` or ``consolidate_and_wait()`` instead.
-        """
-        return self._get_or_create_lock(session_key)
-
-    def prune_lock(self, session_key: str, lock: asyncio.Lock) -> None:
-        """Remove the lock entry for a session key when it is no longer in use.
-
-        .. deprecated:: Use ``submit()`` or ``consolidate_and_wait()`` instead.
-        """
-        existing = self._locks.get(session_key)
-        if existing is lock and not lock.locked():
-            try:
-                del self._locks[session_key]
-            except KeyError:
-                pass
-
-    async def consolidate(
-        self,
-        session: Session,
-        provider: LLMProvider,
-        model: str,
-        *,
-        memory_window: int,
-        enable_contradiction_check: bool,
-        archive_all: bool = False,
-    ) -> bool:
-        """Delegate to ``MemoryStore.consolidate()``. Returns True on success.
-
-        .. deprecated:: Use ``submit()`` or ``consolidate_and_wait()`` instead.
-        """
-        return await self._memory.consolidate(
-            session,
-            provider,
-            model,
-            archive_all=archive_all,
-            memory_window=memory_window,
-            enable_contradiction_check=enable_contradiction_check,
-        )
-
-    def fallback_archive_snapshot(self, snapshot: list[dict]) -> bool:
-        """Fallback archival used by ``/new`` when AI consolidation fails.
-
-        .. deprecated:: Inject ``archive_fn`` at construction instead.
-        """
-        try:
-            lines: list[str] = []
-            for m in snapshot:
-                content = m.get("content")
-                if not content:
-                    continue
-                tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
-                timestamp = str(m.get("timestamp", "?"))[:16]
-                role = str(m.get("role", "unknown")).upper()
-                lines.append(f"[{timestamp}] {role}{tools}: {content}")
-
-            if not lines:
-                return True
-
-            header = (
-                f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}] "
-                f"Fallback archive from /new ({len(lines)} messages)"
-            )
-            entry = header + "\n" + "\n".join(lines)
-            self._memory.persistence.append_text(self._memory.history_file, entry.rstrip() + "\n\n")
-            logger.warning("/new used fallback archival: {} messages", len(lines))
-            return True
-        except Exception:  # crash-barrier: memory subsystem archival
-            logger.exception("Fallback archival failed")
-            return False
 
     # ------------------------------------------------------------------
     # Internal

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from nanobot.agent.consolidation import ConsolidationOrchestrator
 
 
@@ -28,10 +26,11 @@ def _make_orchestrator(archive_fn=None, memory_window=50, enable_contradiction_c
 
 
 class TestContextManager:
-    async def test_must_be_used_as_context_manager(self):
-        orch, _, _ = _make_orchestrator()
-        with pytest.raises(AssertionError, match="async context manager"):
-            orch.submit("key", MagicMock(), MagicMock(), "model")
+    async def test_submit_before_context_manager_is_noop(self):
+        orch, memory, _ = _make_orchestrator()
+        # submit() before entering context manager logs a warning and skips
+        orch.submit("key", MagicMock(), MagicMock(), "model")
+        memory.consolidate.assert_not_called()
 
     async def test_enter_exit_without_tasks(self):
         orch, _, _ = _make_orchestrator()
