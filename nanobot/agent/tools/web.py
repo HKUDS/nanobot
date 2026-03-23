@@ -264,12 +264,13 @@ class WebFetchTool(Tool):
         return result
 
     async def _fetch_jina(self, url: str, max_chars: int) -> str | None:
-        """Try fetching via Jina Reader API. Returns None on failure."""
+        """Try fetching via Jina Reader API. Returns None on failure or if no API key is set."""
+        jina_key = os.environ.get("JINA_API_KEY", "")
+        if not jina_key:
+            # Skip Jina to avoid sending URLs to third-party service without explicit opt-in
+            return None
         try:
-            headers = {"Accept": "application/json", "User-Agent": USER_AGENT}
-            jina_key = os.environ.get("JINA_API_KEY", "")
-            if jina_key:
-                headers["Authorization"] = f"Bearer {jina_key}"
+            headers = {"Accept": "application/json", "User-Agent": USER_AGENT, "Authorization": f"Bearer {jina_key}"}
             async with httpx.AsyncClient(proxy=self.proxy, timeout=20.0) as client:
                 r = await client.get(f"https://r.jina.ai/{url}", headers=headers)
                 if r.status_code == 429:

@@ -188,6 +188,11 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         thinking_blocks: list[dict] | None = None,
     ) -> list[dict[str, Any]]:
         """Add an assistant message to the message list."""
+        # Filter reasoning_content if hide_reasoning_steps is enabled
+        from nanobot.config.loader import load_config
+        cfg = load_config()
+        if cfg.agents.defaults.hide_reasoning_steps:
+            reasoning_content = None
         messages.append(build_assistant_message(
             content,
             tool_calls=tool_calls,
