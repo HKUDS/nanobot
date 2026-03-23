@@ -228,6 +228,51 @@ nanobot agent
 
 That's it! You have a working AI assistant in 2 minutes.
 
+## /provider Command
+
+Inside chat channels and `nanobot agent`, `/provider` manages backend switching through:
+
+- `agents.defaults.provider`
+- `agents.defaults.model`
+
+Examples:
+
+```text
+/provider
+/provider openai
+/provider gemini
+```
+
+Behavior:
+
+- `/provider` shows the current config path, current provider/model, and the configured providers that are usable from the current config
+- `/provider <provider>` switches to that provider and sets the model to the first model discovered from that provider endpoint
+- If no models can be discovered from the target provider URL, the switch is rejected instead of saving a half-broken config
+- Saving a change updates `~/.nanobot/config.json` (or the active `--config` file) directly
+- Restart nanobot after changing `/provider`
+
+## /model Command
+
+Inside chat channels and `nanobot agent`, `/model` selects models for the current provider:
+
+Examples:
+
+```text
+/model
+/model gpt-4o
+/model claude-sonnet-4-5
+/model ollama llama3.2
+```
+
+Behavior:
+
+- `/model` shows the current config path, current provider/model, the active provider URL, and the model options discovered from that provider endpoint
+- `/model <model>` saves the selected model for the current provider only
+- `/model <provider> <model>` is accepted only when `<provider>` matches the current provider
+- Use `/provider` if you want to switch providers first
+- Saving a change updates `~/.nanobot/config.json` (or the active `--config` file) directly
+- Restart nanobot after changing `/model`
+
 ## 💬 Chat Apps
 
 Connect nanobot to your favorite chat platform. Want to build your own? See the [Channel Plugin Guide](./docs/CHANNEL_PLUGIN_GUIDE.md).

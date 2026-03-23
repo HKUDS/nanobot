@@ -509,6 +509,8 @@ class AgentLoop:
             lines = [
                 "🐈 nanobot commands:",
                 "/new — Start a new conversation",
+                "/provider — Show or change the configured provider",
+                "/model — Show or change the configured model",
                 "/stop — Stop the current task",
                 "/restart — Restart the bot",
                 "/status — Show bot status",
@@ -519,6 +521,22 @@ class AgentLoop:
                 chat_id=msg.chat_id,
                 content="\n".join(lines),
                 metadata={"render_as": "text"},
+            )
+        if cmd == "/provider" or cmd.startswith("/provider "):
+            from nanobot.model_management import handle_provider_command
+
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=handle_provider_command(msg.content),
+            )
+        if cmd == "/model" or cmd.startswith("/model "):
+            from nanobot.model_management import handle_model_command
+
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=handle_model_command(msg.content),
             )
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
