@@ -327,18 +327,6 @@ class AgentLoop:
             provider=self.provider,
             model=self.model,
         )
-        # Share consolidation state: processor owns the mutable sets, AgentLoop
-        # aliases them for backward compatibility with tests that access
-        # loop._consolidating or loop._consolidation_tasks directly.
-        self._consolidating: set[str] = self._processor._consolidating  # type: ignore[no-redef]
-        self._consolidation_tasks: set[asyncio.Task[None]] = self._processor._consolidation_tasks  # type: ignore[no-redef]
-        self._consolidation_sem = self._processor._consolidation_sem
-
-        # Backward compat: tests may monkey-patch loop._consolidate_memory.
-        # Store a reference that the processor resolves at call time so
-        # patches on AgentLoop take effect.
-        self._processor._consolidate_memory_ref = self  # type: ignore[attr-defined]
-
         # Wire token counter source: _run_agent_loop updates self._turn_tokens_*
         # on AgentLoop; the processor syncs from this reference before reading.
         self._processor._token_source = self
@@ -407,13 +395,37 @@ class AgentLoop:
     def _wire_memory(self) -> None:
         """Set up the memory consolidation subsystem.
 
-        Called once from __init__ after _build_tools(). Initialises consolidation
-        state and the ConsolidationOrchestrator that wraps self.context.memory.
+        Called once from __init__ after _build_tools(). Initialises the
+        ConsolidationOrchestrator that wraps self.context.memory.
         """
-        self._consolidating: set[str] = set()  # type: ignore[no-redef]
-        self._consolidation_tasks: set[asyncio.Task[None]] = set()  # type: ignore[no-redef]
-        self._consolidation_sem = asyncio.Semaphore(3)  # Cap concurrent consolidation LLM calls
-        self._consolidator = ConsolidationOrchestrator(self.context.memory)
+
+        def _archive(messages: list[dict[str, Any]]) -> None:
+            lines: list[str] = []
+            for m in messages:
+                content = m.get("content")
+                if not content:
+                    continue
+                tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
+                timestamp = str(m.get("timestamp", "?"))[:16]
+                role = str(m.get("role", "unknown")).upper()
+                lines.append(f"[{timestamp}] {role}{tools}: {content}")
+            if lines:
+                header = (
+                    f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}] "
+                    f"Fallback archive ({len(lines)} messages)"
+                )
+                self.context.memory.persistence.append_text(
+                    self.context.memory.history_file,
+                    header + "\n" + "\n".join(lines) + "\n\n",
+                )
+
+        self._consolidator = ConsolidationOrchestrator(
+            memory=self.context.memory,
+            archive_fn=_archive,
+            max_concurrent=3,
+            memory_window=self.config.memory_window,
+            enable_contradiction_check=self.config.memory_enable_contradiction_check,
+        )
 
     def _register_handlers(self) -> None:
         """Register bus message handlers.
@@ -664,157 +676,171 @@ class AgentLoop:
 
         logger.info("Agent loop started")
 
-        while self._running:
-            try:
-                # Race consume_inbound against the stop event so that stop()
-                # wakes the loop immediately instead of waiting up to 5 s.
-                _consume = asyncio.create_task(self.bus.consume_inbound())
-                _stop_wait = asyncio.create_task(self._stop_event.wait())  # type: ignore[union-attr]
-                done, pending = await asyncio.wait(
-                    {_consume, _stop_wait},
-                    timeout=5.0,
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                for t in pending:
-                    t.cancel()
-                if not self._running or _stop_wait in done:
-                    break
-                if _consume not in done:
-                    # True timeout — no message, no stop signal
-                    continue
-                msg = _consume.result()
-                turn_ctx: TurnContext | None = None
-                # Set correlation IDs for this request
-                TraceContext.new_request(
-                    session_id=msg.session_key,
-                    agent_id=self.role_name,
-                )
-
-                # Detach any stale OTEL span context from a previous iteration
-                # to prevent context leaks that silently orphan all subsequent
-                # traces (see ADR-005 / Langfuse v4 hardening).
-                reset_trace_context()
-
+        # The consolidation orchestrator context enables submit() to schedule
+        # background tasks.  __aexit__ drains all pending tasks on shutdown.
+        async with self._consolidator:
+            while self._running:
                 try:
-                    # Route through coordinator if enabled (skip system messages)
-
-                    # Wrap entire request (classify + process) in a single trace
-                    async with trace_request(
-                        name="request",
-                        input=msg.content[:200],
+                    # Race consume_inbound against the stop event so that stop()
+                    # wakes the loop immediately instead of waiting up to 5 s.
+                    _consume = asyncio.create_task(self.bus.consume_inbound())
+                    _stop_wait = asyncio.create_task(self._stop_event.wait())  # type: ignore[union-attr]
+                    done, pending = await asyncio.wait(
+                        {_consume, _stop_wait},
+                        timeout=5.0,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    for t in pending:
+                        t.cancel()
+                    if not self._running or _stop_wait in done:
+                        break
+                    if _consume not in done:
+                        # True timeout — no message, no stop signal
+                        continue
+                    msg = _consume.result()
+                    turn_ctx: TurnContext | None = None
+                    # Set correlation IDs for this request
+                    TraceContext.new_request(
                         session_id=msg.session_key,
-                        user_id=msg.sender_id,
-                        tags=[msg.channel],
-                        metadata={
-                            "channel": msg.channel,
-                            "sender": msg.sender_id,
-                            "session_key": msg.session_key,
-                            "model": self.model,
-                            "role": self.role_name,
-                        },
-                    ):
-                        if self._coordinator and msg.channel != "system":
-                            t0_classify = time.monotonic()
-                            cls_result = await self._coordinator.classify(msg.content)
-                            self._last_classification_result = cls_result
-                            role_name, confidence = cls_result.role_name, cls_result.confidence
-                            classify_latency_ms = (time.monotonic() - t0_classify) * 1000
-                            # Confidence-aware: fall back to default on low confidence
-                            threshold = (
-                                self._routing_config.confidence_threshold
-                                if self._routing_config
-                                else _DEFAULT_CONFIDENCE_THRESHOLD
-                            )
-                            if confidence < threshold:
-                                role_name = (
-                                    self._routing_config.default_role
+                        agent_id=self.role_name,
+                    )
+
+                    # Detach any stale OTEL span context from a previous iteration
+                    # to prevent context leaks that silently orphan all subsequent
+                    # traces (see ADR-005 / Langfuse v4 hardening).
+                    reset_trace_context()
+
+                    try:
+                        # Route through coordinator if enabled (skip system messages)
+
+                        # Wrap entire request (classify + process) in a single trace
+                        async with trace_request(
+                            name="request",
+                            input=msg.content[:200],
+                            session_id=msg.session_key,
+                            user_id=msg.sender_id,
+                            tags=[msg.channel],
+                            metadata={
+                                "channel": msg.channel,
+                                "sender": msg.sender_id,
+                                "session_key": msg.session_key,
+                                "model": self.model,
+                                "role": self.role_name,
+                            },
+                        ):
+                            if self._coordinator and msg.channel != "system":
+                                t0_classify = time.monotonic()
+                                cls_result = await self._coordinator.classify(msg.content)
+                                self._last_classification_result = cls_result
+                                role_name, confidence = (
+                                    cls_result.role_name,
+                                    cls_result.confidence,
+                                )
+                                classify_latency_ms = (time.monotonic() - t0_classify) * 1000
+                                # Confidence-aware: fall back to default on low confidence
+                                threshold = (
+                                    self._routing_config.confidence_threshold
                                     if self._routing_config
-                                    else "general"
+                                    else _DEFAULT_CONFIDENCE_THRESHOLD
                                 )
-                                logger.info(
-                                    "Low confidence ({:.2f} < {:.2f}), using default role '{}'",
-                                    confidence,
-                                    threshold,
-                                    role_name,
+                                if confidence < threshold:
+                                    role_name = (
+                                        self._routing_config.default_role
+                                        if self._routing_config
+                                        else "general"
+                                    )
+                                    logger.info(
+                                        "Low confidence ({:.2f} < {:.2f}), using default role '{}'",
+                                        confidence,
+                                        threshold,
+                                        role_name,
+                                    )
+                                role = (
+                                    self._coordinator.route_direct(role_name)
+                                    or self._coordinator.registry.get_default()
+                                    or AgentRoleConfig(
+                                        name=role_name,
+                                        description="General assistant",
+                                    )
                                 )
-                            role = (
-                                self._coordinator.route_direct(role_name)
-                                or self._coordinator.registry.get_default()
-                                or AgentRoleConfig(name=role_name, description="General assistant")
-                            )
-                            self._dispatcher.record_route_trace(
-                                "route",
-                                role=role.name,
-                                confidence=confidence,
-                                latency_ms=classify_latency_ms,
-                                message_excerpt=msg.content,
-                            )
-                            turn_ctx = self._role_manager.apply(role)
-
-                        # Wrap with timeout to prevent infinite processing
-                        timeout = (
-                            self.config.message_timeout if self.config.message_timeout > 0 else None
-                        )
-                        try:
-                            if timeout:
-                                response = await asyncio.wait_for(
-                                    self._process_message(msg), timeout=timeout
+                                self._dispatcher.record_route_trace(
+                                    "route",
+                                    role=role.name,
+                                    confidence=confidence,
+                                    latency_ms=classify_latency_ms,
+                                    message_excerpt=msg.content,
                                 )
-                            else:
-                                response = await self._process_message(msg)
-                        except asyncio.TimeoutError:
-                            logger.error(
-                                "Message processing timed out after {}s for {}:{}",
-                                self.config.message_timeout,
-                                msg.channel,
-                                msg.chat_id,
+                                turn_ctx = self._role_manager.apply(role)
+
+                            # Wrap with timeout to prevent infinite processing
+                            timeout = (
+                                self.config.message_timeout
+                                if self.config.message_timeout > 0
+                                else None
                             )
-                            update_current_span(
-                                output="TIMEOUT",
-                                metadata={"timeout_s": str(self.config.message_timeout)},
-                                level="ERROR",
-                            )
-                            response = OutboundMessage(
-                                channel=msg.channel,
-                                chat_id=msg.chat_id,
-                                content=(
-                                    "Sorry, I ran out of time processing your request. "
-                                    "Try breaking it into smaller steps."
-                                ),
+                            try:
+                                if timeout:
+                                    response = await asyncio.wait_for(
+                                        self._process_message(msg),
+                                        timeout=timeout,
+                                    )
+                                else:
+                                    response = await self._process_message(msg)
+                            except asyncio.TimeoutError:
+                                logger.error(
+                                    "Message processing timed out after {}s for {}:{}",
+                                    self.config.message_timeout,
+                                    msg.channel,
+                                    msg.chat_id,
+                                )
+                                update_current_span(
+                                    output="TIMEOUT",
+                                    metadata={"timeout_s": str(self.config.message_timeout)},
+                                    level="ERROR",
+                                )
+                                response = OutboundMessage(
+                                    channel=msg.channel,
+                                    chat_id=msg.chat_id,
+                                    content=(
+                                        "Sorry, I ran out of time processing"
+                                        " your request. "
+                                        "Try breaking it into smaller steps."
+                                    ),
+                                )
+
+                        self._role_manager.reset(turn_ctx)
+
+                        if response is not None:
+                            await self.bus.publish_outbound(response)
+                        elif msg.channel in {"cli", "telegram"}:
+                            await self.bus.publish_outbound(
+                                OutboundMessage(
+                                    channel=msg.channel,
+                                    chat_id=msg.chat_id,
+                                    content="",
+                                    metadata=msg.metadata or {},
+                                )
                             )
 
-                    self._role_manager.reset(turn_ctx)
+                        # Explicit flush: the gateway run() loop never calls
+                        # shutdown_langfuse() during normal operation, so
+                        # without this, traces rely on the OTEL
+                        # BatchSpanProcessor timer.
+                        # Flushing per-request guarantees delivery.
+                        flush_langfuse()
 
-                    if response is not None:
-                        await self.bus.publish_outbound(response)
-                    elif msg.channel in {"cli", "telegram"}:
+                    except Exception as e:  # crash-barrier: message processing
+                        logger.exception("Error processing message")
+                        self._role_manager.reset(turn_ctx)
                         await self.bus.publish_outbound(
                             OutboundMessage(
                                 channel=msg.channel,
                                 chat_id=msg.chat_id,
-                                content="",
-                                metadata=msg.metadata or {},
+                                content=_user_friendly_error(e),
                             )
                         )
-
-                    # Explicit flush: the gateway run() loop never calls
-                    # shutdown_langfuse() during normal operation, so without
-                    # this, traces rely on the OTEL BatchSpanProcessor timer.
-                    # Flushing per-request guarantees delivery.
-                    flush_langfuse()
-
-                except Exception as e:  # crash-barrier: message processing
-                    logger.exception("Error processing message")
-                    self._role_manager.reset(turn_ctx)
-                    await self.bus.publish_outbound(
-                        OutboundMessage(
-                            channel=msg.channel,
-                            chat_id=msg.chat_id,
-                            content=_user_friendly_error(e),
-                        )
-                    )
-            except asyncio.TimeoutError:
-                continue
+                except asyncio.TimeoutError:
+                    continue
 
     # ------------------------------------------------------------------
     # Delegation dispatch
@@ -878,16 +904,6 @@ class AgentLoop:
             self._stop_event.set()
         logger.info("Agent loop stopping")
 
-    async def _run_consolidation_task(self, session: Session, lock: asyncio.Lock) -> None:
-        """Run one consolidation pass; holds the semaphore and per-session lock."""
-        try:
-            async with self._consolidation_sem:
-                async with lock:
-                    await self._consolidate_memory(session)
-        finally:
-            self._consolidating.discard(session.key)
-            self._consolidator.prune_lock(session.key, lock)
-
     def _make_bus_progress(
         self,
         channel: str,
@@ -943,20 +959,17 @@ class AgentLoop:
         session.updated_at = datetime.now(timezone.utc)
 
     async def _consolidate_memory(self, session: Session, archive_all: bool = False) -> bool:
-        """Delegate to ConsolidationOrchestrator.
-
-        Kept on AgentLoop for backward compatibility with tests that
-        monkey-patch ``loop._consolidate_memory``.  The processor routes
-        through this method via ``_consolidate_memory_ref``.
-        """
-        return await self._consolidator.consolidate(
-            session,
-            self.provider,
-            self.model,
-            memory_window=self.config.memory_window,
-            enable_contradiction_check=self.config.memory_enable_contradiction_check,
-            archive_all=archive_all,
-        )
+        """Delegate to ConsolidationOrchestrator."""
+        if archive_all:
+            return await self._consolidator.consolidate_and_wait(
+                session.key,
+                session,
+                self.provider,
+                self.model,
+                archive_all=True,
+            )
+        self._consolidator.submit(session.key, session, self.provider, self.model)
+        return True
 
     async def process_direct(
         self,

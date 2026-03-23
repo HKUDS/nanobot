@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from .extractor import MemoryExtractor
     from .mem0_adapter import _Mem0Adapter
     from .persistence import MemoryPersistence
-    from .profile import ProfileManager
+    from .profile_io import ProfileStore as ProfileManager
     from .snapshot import MemorySnapshot
 
 

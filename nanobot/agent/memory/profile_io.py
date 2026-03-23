@@ -1,6 +1,6 @@
 """Profile/belief management extracted from MemoryStore (LAN-202).
 
-``ProfileManager`` owns the profile CRUD lifecycle: reading/writing
+``ProfileStore`` owns the profile CRUD lifecycle: reading/writing
 ``profile.json``, metadata bookkeeping, belief confidence tracking,
 pin/stale management, contradiction detection, and live user corrections.
 
@@ -11,6 +11,7 @@ through ``_Mem0Adapter``.
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -39,13 +40,65 @@ PROFILE_STATUS_ACTIVE = "active"
 PROFILE_STATUS_CONFLICTED = "conflicted"
 PROFILE_STATUS_STALE = "stale"
 
+__all__ = [
+    "PROFILE_KEYS",
+    "PROFILE_STATUS_ACTIVE",
+    "PROFILE_STATUS_CONFLICTED",
+    "PROFILE_STATUS_STALE",
+    "ProfileCache",
+    "ProfileStore",
+]
+
 
 # ---------------------------------------------------------------------------
-# ProfileManager
+# ProfileCache
 # ---------------------------------------------------------------------------
 
 
-class ProfileManager:
+@dataclass(slots=True)
+class ProfileCache:
+    """Mtime-aware cache for profile.json. Owned exclusively by ProfileStore."""
+
+    _path: Path
+    _persistence: MemoryPersistence
+
+    _data: dict[str, Any] | None = field(default=None, init=False)
+    _mtime: float = field(default=-1.0, init=False)
+
+    def read(self) -> dict[str, Any]:
+        """Return cached data if file unchanged, else reload from disk."""
+        try:
+            mtime = self._path.stat().st_mtime
+        except FileNotFoundError:
+            return {}
+        if self._data is not None and mtime == self._mtime:
+            return self._data
+        raw = self._persistence.read_json(self._path)
+        self._data = raw if isinstance(raw, dict) else {}
+        self._mtime = mtime
+        return self._data
+
+    def write(self, data: dict[str, Any]) -> None:
+        """Write to disk and update cache atomically."""
+        self._persistence.write_json(self._path, data)
+        self._data = data
+        try:
+            self._mtime = self._path.stat().st_mtime
+        except FileNotFoundError:
+            self._mtime = -1.0
+
+    def invalidate(self) -> None:
+        """Force next read() to reload from disk."""
+        self._data = None
+        self._mtime = -1.0
+
+
+# ---------------------------------------------------------------------------
+# ProfileStore
+# ---------------------------------------------------------------------------
+
+
+class ProfileStore:
     """Profile/belief CRUD, metadata bookkeeping, and live corrections."""
 
     # Duplicate constants as class attributes so call-sites using
@@ -82,6 +135,8 @@ class ProfileManager:
         self._ingester: Any = ingester
         self._conflict_mgr: Any = conflict_mgr
         self._snapshot: Any = snapshot
+        self._cache = ProfileCache(_path=profile_file, _persistence=persistence)
+        self._corrector: Any = None  # wired post-construction by MemoryStore
 
     # -- Shared helpers imported from .helpers --------------------------------
     _utc_now_iso = staticmethod(_utc_now_iso)
@@ -101,8 +156,9 @@ class ProfileManager:
     # ------------------------------------------------------------------
 
     def read_profile(self) -> dict[str, Any]:
-        data = self.persistence.read_json(self.profile_file)
-        if isinstance(data, dict):
+        data = self._cache.read()
+        if isinstance(data, dict) and data:
+            # normalise legacy entries — same logic as before
             for key in self.PROFILE_KEYS:
                 data.setdefault(key, [])
                 if not isinstance(data[key], list):
@@ -132,12 +188,11 @@ class ProfileManager:
                             "last_seen_at": fallback_ts,
                         }
                     elif not entry.get("id"):
-                        # Backfill stable ID on legacy entries.
                         created = entry.get("last_seen_at") or self._utc_now_iso()
                         entry.setdefault("created_at", created)
                         entry["id"] = self._generate_belief_id(key, norm, entry["created_at"])
             return data
-        if self.profile_file.exists():
+        if self.profile_file.exists() and data is None:
             logger.warning("Failed to parse memory profile, resetting")
         return {
             "preferences": [],
@@ -153,7 +208,7 @@ class ProfileManager:
 
     def write_profile(self, profile: dict[str, Any]) -> None:
         profile["updated_at"] = self._utc_now_iso()
-        self.persistence.write_json(self.profile_file, profile)
+        self._cache.write(profile)
 
     def _meta_section(self, profile: dict[str, Any], key: str) -> dict[str, Any]:
         profile.setdefault("meta", {})
@@ -502,10 +557,10 @@ class ProfileManager:
             "stale": [],
         }
 
-        for field in PROFILE_KEYS:
-            for item in self._to_str_list(profile.get(field)):
+        for section_field in PROFILE_KEYS:
+            for item in self._to_str_list(profile.get(section_field)):
                 norm = self._norm_text(item)
-                meta = profile.get("meta", {}).get(field, {}).get(norm, {})
+                meta = profile.get("meta", {}).get(section_field, {}).get(norm, {})
 
                 confidence = self._safe_float(meta.get("confidence"), 0.65)
                 evidence_count = int(meta.get("evidence_count", 1))
@@ -515,7 +570,7 @@ class ProfileManager:
                 if superseded_by or status in ("stale", "retracted"):
                     report["stale"].append(
                         {
-                            "field": field,
+                            "field": section_field,
                             "text": item,
                             "reason": "superseded or retracted",
                         }
@@ -523,7 +578,7 @@ class ProfileManager:
                 elif status == PROFILE_STATUS_CONFLICTED:
                     report["contradicted"].append(
                         {
-                            "field": field,
+                            "field": section_field,
                             "text": item,
                             "reason": "has open conflict",
                         }
@@ -531,7 +586,7 @@ class ProfileManager:
                 elif confidence < 0.4 or evidence_count < 2:
                     report["weak"].append(
                         {
-                            "field": field,
+                            "field": section_field,
                             "text": item,
                             "reason": (
                                 f"low evidence (count={evidence_count}, conf={confidence:.2f})"
@@ -541,7 +596,7 @@ class ProfileManager:
                 else:
                     report["healthy"].append(
                         {
-                            "field": field,
+                            "field": section_field,
                             "text": item,
                             "confidence": confidence,
                         }
@@ -597,6 +652,7 @@ class ProfileManager:
             if self._norm_text(item) == normalized:
                 existing = item
                 break
+
         if existing is None:
             return False
 
@@ -607,20 +663,8 @@ class ProfileManager:
         return True
 
     def _conflict_pair(self, old_value: str, new_value: str) -> bool:
-        old_n = self._norm_text(old_value)
-        new_n = self._norm_text(new_value)
-        if not old_n or not new_n or old_n == new_n:
-            return False
-        old_has_not = " not " in f" {old_n} " or "n't" in old_n
-        new_has_not = " not " in f" {new_n} " or "n't" in new_n
-        if old_has_not == new_has_not:
-            return False
-        old_tokens = self._tokenize(old_n.replace("not", ""))
-        new_tokens = self._tokenize(new_n.replace("not", ""))
-        if not old_tokens or not new_tokens:
-            return False
-        overlap = len(old_tokens & new_tokens) / max(len(old_tokens | new_tokens), 1)
-        return overlap >= 0.55
+        """Delegate to ConflictManager._conflict_pair."""
+        return bool(self._conflict_mgr._conflict_pair(old_value, new_value))
 
     def _apply_profile_updates(
         self,
@@ -630,124 +674,19 @@ class ProfileManager:
         enable_contradiction_check: bool,
         source_event_ids: list[str] | None = None,
     ) -> tuple[int, int, int]:
-        added = 0
-        conflicts = 0
-        touched = 0
-        profile.setdefault("conflicts", [])
-        # Use the first source event ID as evidence link for all updates in this
-        # batch.  More granular per-item linking requires changes to the extractor
-        # output format (future work).
-        evidence_ids = [source_event_ids[0]] if source_event_ids else None
+        """Delegate to ConflictManager._apply_profile_updates."""
+        result: tuple[int, int, int] = self._conflict_mgr._apply_profile_updates(
+            profile,
+            updates,
+            enable_contradiction_check=enable_contradiction_check,
+            source_event_ids=source_event_ids,
+        )
+        return result
 
-        for key in self.PROFILE_KEYS:
-            values = self._to_str_list(profile.get(key))
-            seen = {self._norm_text(v) for v in values}
-            for candidate in self._to_str_list(updates.get(key)):
-                normalized = self._norm_text(candidate)
-                if not normalized:
-                    continue
-
-                if normalized in seen:
-                    # Existing belief — bump confidence.
-                    entry = self._meta_entry(profile, key, candidate)
-                    belief_id = entry.get("id", "")
-                    if belief_id:
-                        self._update_belief_in_profile(
-                            profile,
-                            belief_id,
-                            confidence_delta=0.03,
-                            new_evidence_ids=evidence_ids,
-                            status=self.PROFILE_STATUS_ACTIVE,
-                        )
-                    else:
-                        self._touch_meta_entry(
-                            entry,
-                            confidence_delta=0.03,
-                            status=self.PROFILE_STATUS_ACTIVE,
-                            evidence_event_id=evidence_ids[0] if evidence_ids else None,
-                        )
-                    touched += 1
-                    continue
-
-                # Check for contradictions against the existing values
-                # (before appending the candidate).
-                existing_values_snapshot = list(values)
-
-                # Use _add_belief_to_profile to create the entry and append
-                # to the profile list.
-                self._add_belief_to_profile(
-                    profile,
-                    key,
-                    candidate,
-                    confidence=0.65,
-                    evidence_event_ids=evidence_ids,
-                    source="consolidation",
-                )
-                # Reconcile: _add_belief_to_profile appends to profile[key],
-                # keep local values/seen in sync.
-                values = self._to_str_list(profile.get(key))
-                seen.add(normalized)
-
-                has_conflict = False
-                if enable_contradiction_check:
-                    for existing in existing_values_snapshot:
-                        if self._conflict_pair(existing, candidate):
-                            has_conflict = True
-                            old_entry = self._meta_entry(profile, key, existing)
-                            self._touch_meta_entry(
-                                old_entry,
-                                confidence_delta=-0.12,
-                                status=self.PROFILE_STATUS_CONFLICTED,
-                            )
-                            new_entry = self._meta_entry(profile, key, candidate)
-                            self._touch_meta_entry(
-                                new_entry,
-                                confidence_delta=-0.2,
-                                min_confidence=0.35,
-                                status=self.PROFILE_STATUS_CONFLICTED,
-                                evidence_event_id=evidence_ids[0] if evidence_ids else None,
-                            )
-                            # Include belief IDs in conflict record (LAN-198).
-                            profile["conflicts"].append(
-                                {
-                                    "timestamp": self._utc_now_iso(),
-                                    "field": key,
-                                    "old": existing,
-                                    "new": candidate,
-                                    "old_memory_id": self._find_mem0_id_for_text(existing),
-                                    "new_memory_id": self._find_mem0_id_for_text(candidate),
-                                    "belief_id_old": old_entry.get("id", ""),
-                                    "belief_id_new": new_entry.get("id", ""),
-                                    "status": self.CONFLICT_STATUS_OPEN,
-                                    "old_confidence": old_entry.get("confidence"),
-                                    "new_confidence": new_entry.get("confidence"),
-                                    "old_last_seen_at": old_entry.get("last_seen_at", ""),
-                                    "new_last_seen_at": new_entry.get("last_seen_at", ""),
-                                }
-                            )
-                            conflicts += 1
-                            touched += 2
-                            break
-
-                if not has_conflict:
-                    # Boost confidence for non-conflicted new beliefs.
-                    entry = self._meta_entry(profile, key, candidate)
-                    self._touch_meta_entry(
-                        entry,
-                        confidence_delta=0.1,
-                        status=self.PROFILE_STATUS_ACTIVE,
-                        evidence_event_id=evidence_ids[0] if evidence_ids else None,
-                    )
-                    touched += 1
-                added += 1
-
-            profile[key] = values
-
-        return added, conflicts, touched
-
-    def _has_open_conflict(
+    def _has_exact_conflict_pair(
         self, profile: dict[str, Any], *, field: str, old_value: str, new_value: str
     ) -> bool:
+        """Check for an open conflict matching the exact old/new value pair."""
         old_norm = self._norm_text(old_value)
         new_norm = self._norm_text(new_value)
         for item in profile.get("conflicts", []):
@@ -764,6 +703,10 @@ class ProfileManager:
                 continue
             return True
         return False
+
+    def _has_open_conflict(self, profile: dict[str, Any], key: str) -> bool:
+        """Delegating wrapper — see ConflictManager.has_open_conflict."""
+        return bool(self._conflict_mgr.has_open_conflict(profile, key))
 
     # ------------------------------------------------------------------
     # mem0 helpers
@@ -802,179 +745,12 @@ class ProfileManager:
         chat_id: str = "",
         enable_contradiction_check: bool = True,
     ) -> dict[str, Any]:
-        text = str(content or "").strip()
-        if not text:
-            return {"applied": 0, "conflicts": 0, "events": 0, "needs_user": 0, "question": None}
-
-        preference_corrections = self._extractor.extract_explicit_preference_corrections(text)
-        fact_corrections = self._extractor.extract_explicit_fact_corrections(text)
-        if not preference_corrections and not fact_corrections:
-            return {"applied": 0, "conflicts": 0, "events": 0, "needs_user": 0, "question": None}
-
-        profile = self.read_profile()
-        profile.setdefault("conflicts", [])
-        applied = 0
-        conflicts = 0
-        events: list[dict[str, Any]] = []
-
-        def _apply_field_corrections(
-            *,
-            field: str,
-            event_type: str,
-            correction_label: str,
-            correction_pairs: list[tuple[str, str]],
-        ) -> tuple[int, int]:
-            local_applied = 0
-            local_conflicts = 0
-            values = self._to_str_list(profile.get(field))
-            by_norm = {self._norm_text(v): v for v in values}
-
-            for new_value, old_value in correction_pairs:
-                old_norm = self._norm_text(old_value)
-                new_norm = self._norm_text(new_value)
-                if not new_norm:
-                    continue
-
-                # Add or touch the new belief via the mutation API.
-                if new_norm not in by_norm:
-                    self._add_belief_to_profile(
-                        profile,
-                        field,
-                        new_value,
-                        confidence=0.65,
-                        source="live_correction",
-                    )
-                    # Sync local tracking structures after add.
-                    values = self._to_str_list(profile.get(field))
-                    by_norm[new_norm] = new_value
-                    local_applied += 1
-
-                new_entry = self._meta_entry(profile, field, by_norm[new_norm])
-                self._touch_meta_entry(
-                    new_entry, confidence_delta=0.08, status=self.PROFILE_STATUS_ACTIVE
-                )
-
-                if (
-                    enable_contradiction_check
-                    and old_norm in by_norm
-                    and not self._has_open_conflict(
-                        profile,
-                        field=field,
-                        old_value=by_norm[old_norm],
-                        new_value=by_norm[new_norm],
-                    )
-                ):
-                    old_entry = self._meta_entry(profile, field, by_norm[old_norm])
-                    self._touch_meta_entry(
-                        old_entry,
-                        confidence_delta=-0.2,
-                        min_confidence=0.35,
-                        status=self.PROFILE_STATUS_CONFLICTED,
-                    )
-                    self._touch_meta_entry(
-                        new_entry,
-                        confidence_delta=-0.08,
-                        min_confidence=0.35,
-                        status=self.PROFILE_STATUS_CONFLICTED,
-                    )
-                    profile["conflicts"].append(
-                        {
-                            "timestamp": self._utc_now_iso(),
-                            "field": field,
-                            "old": by_norm[old_norm],
-                            "new": by_norm[new_norm],
-                            "old_memory_id": self._find_mem0_id_for_text(by_norm[old_norm]),
-                            "new_memory_id": self._find_mem0_id_for_text(by_norm[new_norm]),
-                            "status": self.CONFLICT_STATUS_OPEN,
-                            "old_confidence": old_entry.get("confidence"),
-                            "new_confidence": new_entry.get("confidence"),
-                            "source": "live_correction",
-                        }
-                    )
-                    local_conflicts += 1
-
-                event = self._ingester._coerce_event(
-                    {
-                        "timestamp": self._utc_now_iso(),
-                        "type": event_type,
-                        "summary": (
-                            f"User corrected {correction_label}: {new_value} (not {old_value})."
-                        ),
-                        "entities": [new_value, old_value],
-                        "salience": 0.85,
-                        "confidence": 0.9,
-                        "ttl_days": 365,
-                    },
-                    source_span=[0, 0],
-                    channel=channel,
-                    chat_id=chat_id,
-                )
-                if event:
-                    events.append(event)
-
-            profile[field] = values
-            return local_applied, local_conflicts
-
-        pref_applied, pref_conflicts = _apply_field_corrections(
-            field="preferences",
-            event_type="preference",
-            correction_label="preference",
-            correction_pairs=preference_corrections,
+        """Facade — delegates to CorrectionOrchestrator wired by MemoryStore."""
+        assert self._corrector is not None, "_corrector not wired by MemoryStore"
+        result: dict[str, Any] = self._corrector.apply_live_user_correction(
+            content,
+            channel=channel,
+            chat_id=chat_id,
+            enable_contradiction_check=enable_contradiction_check,
         )
-        fact_applied, fact_conflicts = _apply_field_corrections(
-            field="stable_facts",
-            event_type="fact",
-            correction_label="fact",
-            correction_pairs=fact_corrections,
-        )
-        applied += pref_applied + fact_applied
-        conflicts += pref_conflicts + fact_conflicts
-
-        if not applied and not conflicts:
-            return {"applied": 0, "conflicts": 0, "events": 0, "needs_user": 0, "question": None}
-
-        profile["last_verified_at"] = self._utc_now_iso()
-        self.write_profile(profile)
-
-        events_written = self._ingester.append_events(events)
-
-        needs_user = 0
-        question: str | None = None
-        if conflicts > 0:
-            resolution = self._conflict_mgr.auto_resolve_conflicts(max_items=10)
-            needs_user = int(resolution.get("needs_user", 0))
-            if needs_user > 0:
-                question = self._conflict_mgr.ask_user_for_conflict()
-
-        if self.mem0.enabled:
-            correction_meta, _ = self._ingester._normalize_memory_metadata(
-                {"topic": "user_correction", "memory_type": "episodic", "stability": "medium"},
-                event_type="fact",
-                summary=text,
-                source="chat",
-            )
-            correction_meta.update(
-                {
-                    "event_type": "user_correction",
-                    "timestamp": self._utc_now_iso(),
-                    "channel": channel,
-                    "chat_id": chat_id,
-                }
-            )
-            correction_text = self._ingester._sanitize_mem0_text(text, allow_archival=False)
-            correction_meta = self._ingester._sanitize_mem0_metadata(correction_meta)
-            if correction_text:
-                self.mem0.add_text(
-                    correction_text,
-                    metadata=correction_meta,
-                )
-
-        # Keep LLM-managed MEMORY.md content stable; snapshot can be generated on-demand.
-        self._snapshot.rebuild_memory_snapshot(write=False)
-        return {
-            "applied": applied,
-            "conflicts": conflicts,
-            "events": events_written,
-            "needs_user": needs_user,
-            "question": question,
-        }
+        return result

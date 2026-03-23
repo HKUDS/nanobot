@@ -53,9 +53,8 @@ class MessageProcessor:
     pre-checks, context assembly, canonical events, turn orchestration
     (via the injected orchestrator), session save, and response assembly.
 
-    Consolidation infrastructure (semaphore, task tracking) lives here
-    because consolidation is triggered per-message and belongs to the
-    per-message lifecycle, not the runtime.
+    Consolidation is triggered per-message via the injected
+    ``ConsolidationOrchestrator`` (submit / consolidate_and_wait).
     """
 
     def __init__(
@@ -88,11 +87,6 @@ class MessageProcessor:
         self._role_manager = role_manager
         self.provider = provider
         self.model = model
-
-        # Consolidation infrastructure (moved from AgentLoop._wire_memory)
-        self._consolidating: set[str] = set()
-        self._consolidation_tasks: set[asyncio.Task[None]] = set()
-        self._consolidation_sem = asyncio.Semaphore(3)
 
         # Per-turn token accumulators: these are read by the pipeline when
         # building the response metadata.  The actual values are updated by
@@ -259,23 +253,8 @@ class MessageProcessor:
 
         # Trigger background consolidation if needed
         unconsolidated = len(session.messages) - session.last_consolidated
-        if (
-            self.config.memory_enabled
-            and unconsolidated >= self.config.memory_window
-            and session.key not in self._consolidating
-        ):
-            self._consolidating.add(session.key)
-            lock = self._consolidator.get_lock(session.key)
-            _task = asyncio.create_task(self._run_consolidation_task(session, lock))
-            self._consolidation_tasks.add(_task)
-            _task.add_done_callback(self._consolidation_tasks.discard)
-            _task.add_done_callback(
-                lambda t: (
-                    logger.exception("Consolidation task failed")
-                    if not t.cancelled() and t.exception()
-                    else None
-                )
-            )
+        if self.config.memory_enabled and unconsolidated >= self.config.memory_window:
+            self._consolidator.submit(session.key, session, self.provider, self.model)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         self._ensure_scratchpad(key)
@@ -544,21 +523,18 @@ class MessageProcessor:
 
     async def _handle_slash_new(self, msg: InboundMessage, session: Session) -> OutboundMessage:
         """Handle the /new slash command: archive and clear the session."""
-        lock = self._consolidator.get_lock(session.key)
-        self._consolidating.add(session.key)
         try:
-            async with lock:
-                snapshot = session.messages[session.last_consolidated :]
-                if snapshot:
-                    temp = Session(key=session.key)
-                    temp.messages = list(snapshot)
-                    archived = await self._consolidate_memory(temp, archive_all=True)
-                    if not archived:
-                        return OutboundMessage(
-                            channel=msg.channel,
-                            chat_id=msg.chat_id,
-                            content="Memory archival failed, session not cleared. Please try again.",
-                        )
+            snapshot = session.messages[session.last_consolidated :]
+            if snapshot:
+                temp = Session(key=session.key)
+                temp.messages = list(snapshot)
+                archived = await self._consolidate_memory(temp, archive_all=True)
+                if not archived:
+                    return OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content="Memory archival failed, session not cleared. Please try again.",
+                    )
         except (RuntimeError, asyncio.TimeoutError):
             logger.exception("/new archival failed for {}", session.key)
             return OutboundMessage(
@@ -566,9 +542,6 @@ class MessageProcessor:
                 chat_id=msg.chat_id,
                 content="Memory archival failed, session not cleared. Please try again.",
             )
-        finally:
-            self._consolidating.discard(session.key)
-            self._consolidator.prune_lock(session.key, lock)
 
         session.clear()
         self.sessions.save(session)
@@ -696,32 +669,11 @@ class MessageProcessor:
     # Consolidation
     # ------------------------------------------------------------------
 
-    async def _run_consolidation_task(self, session: Session, lock: asyncio.Lock) -> None:
-        """Run one consolidation pass; holds the semaphore and per-session lock."""
-        try:
-            async with self._consolidation_sem:
-                async with lock:
-                    await self._consolidate_memory(session)
-        finally:
-            self._consolidating.discard(session.key)
-            self._consolidator.prune_lock(session.key, lock)
-
     async def _consolidate_memory(self, session: Session, archive_all: bool = False) -> bool:
-        """Delegate to ConsolidationOrchestrator.
-
-        When ``_consolidate_memory_ref`` is set (by ``AgentLoop`` for backward
-        compatibility), calls are routed through the parent loop so that tests
-        which monkey-patch ``loop._consolidate_memory`` see their patches take
-        effect.
-        """
-        ref = getattr(self, "_consolidate_memory_ref", None)
-        if ref is not None and hasattr(ref, "_consolidate_memory") and ref is not self:
-            return await ref._consolidate_memory(session, archive_all=archive_all)  # type: ignore[no-any-return]
-        return await self._consolidator.consolidate(
-            session,
-            self.provider,
-            self.model,
-            memory_window=self.config.memory_window,
-            enable_contradiction_check=self.config.memory_enable_contradiction_check,
-            archive_all=archive_all,
-        )
+        """Delegate to ConsolidationOrchestrator."""
+        if archive_all:
+            return await self._consolidator.consolidate_and_wait(
+                session.key, session, self.provider, self.model, archive_all=True
+            )
+        self._consolidator.submit(session.key, session, self.provider, self.model)
+        return True

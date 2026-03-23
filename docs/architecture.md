@@ -279,3 +279,13 @@ These imports **must never exist** (enforced by `scripts/check_imports.py` in CI
 - **Lifecycle**: `init_langfuse()` at CLI startup, `shutdown_langfuse()` in all `finally` blocks, `flush()` after each bus-loop request
 - **Request audit**: Each completed request emits `request_complete` log with duration, tool count
 - **JSON log sink**: Optional via `config.log.json_file` (loguru serialize mode, 10MB rotation)
+
+## Memory Subsystem Module Boundaries (Post-Completion)
+
+The following boundaries were established during the memory subsystem completion refactor:
+
+- **`profile_io.py`** owns profile CRUD and caching (`ProfileStore`, `ProfileCache`). Never imports from `channels/`, `bus/`, `session/`, or `agent/loop`.
+- **`profile_correction.py`** owns live user correction (`CorrectionOrchestrator`). Never imports from `channels/` or `bus/`.
+- **`token_budget.py`** is pure logic (`TokenBudgetAllocator`, `SectionBudget`). Never imports from any `nanobot.agent.memory.*` or `nanobot.config.*` module.
+- **`consolidation.py`** owns structured concurrency for consolidation (`ConsolidationOrchestrator`). Never imports from `channels/` or `agent/loop`. Must be used as an async context manager.
+- **`ProfileCache`** is internal to `ProfileStore`; not exported from `nanobot/agent/memory/__init__.py`.

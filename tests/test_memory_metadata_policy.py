@@ -9,7 +9,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from nanobot.agent.memory import MemoryStore
-from nanobot.agent.memory.context_assembler import ContextAssembler
 from nanobot.agent.memory.retrieval_planner import RetrievalPlanner
 
 
@@ -572,67 +571,38 @@ def test_vector_health_marks_degraded_when_history_exists_but_no_vectors(tmp_pat
 
 def test_allocate_section_budgets_proportional(tmp_path: Path) -> None:
     """Sections receive budget proportional to their priority weight."""
-    sizes = {
-        "long_term": 500,
-        "profile": 400,
-        "semantic": 300,
-        "episodic": 0,
-        "reflection": 0,
-        "graph": 200,
-        "unresolved": 50,
-    }
-    alloc = ContextAssembler._allocate_section_budgets(900, "fact_lookup", sizes)
+    from nanobot.agent.memory.token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
 
-    # Every section with content should get *some* allocation.
-    assert alloc["long_term"] > 0
-    assert alloc["profile"] > 0
-    assert alloc["semantic"] > 0
-    assert alloc["graph"] > 0
-    # Empty sections get nothing.
-    assert alloc["episodic"] == 0
-    assert alloc["reflection"] == 0
+    allocator = TokenBudgetAllocator(DEFAULT_SECTION_WEIGHTS)
+    alloc = allocator.allocate(900, "fact_lookup")
+
+    # Every section with non-zero weight should get *some* allocation.
+    assert alloc.long_term > 0
+    assert alloc.profile > 0
+    assert alloc.semantic > 0
+    assert alloc.graph > 0
+    # Sections with zero weight get nothing.
+    assert alloc.reflection == 0
     # Total allocation should not exceed budget.
-    assert sum(alloc.values()) <= 900
+    total = (
+        alloc.long_term
+        + alloc.profile
+        + alloc.semantic
+        + alloc.episodic
+        + alloc.reflection
+        + alloc.graph
+        + alloc.unresolved
+    )
+    assert total <= 900
 
 
-def test_allocate_section_budgets_caps_at_actual_size() -> None:
-    """A section smaller than its share should not get inflated."""
-    sizes = {
-        "long_term": 10,
-        "profile": 10,
-        "semantic": 10,
-        "episodic": 0,
-        "reflection": 0,
-        "graph": 10,
-        "unresolved": 10,
-    }
-    alloc = ContextAssembler._allocate_section_budgets(2000, "fact_lookup", sizes)
+def test_allocate_proportional_respects_zero_weight() -> None:
+    from nanobot.agent.memory.token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
 
-    # Each section is tiny — should be capped at its actual size.
-    for name, sz in sizes.items():
-        assert alloc[name] <= max(sz, 0)
-
-
-def test_allocate_section_budgets_redistributes_surplus() -> None:
-    """Surplus from small sections flows to sections that need more."""
-    sizes = {
-        "long_term": 10,  # tiny
-        "profile": 10,  # tiny
-        "semantic": 500,  # large
-        "episodic": 0,
-        "reflection": 0,
-        "graph": 500,  # large
-        "unresolved": 0,
-    }
-    alloc = ContextAssembler._allocate_section_budgets(600, "fact_lookup", sizes)
-
-    # long_term and profile freed most of their share to semantic + graph.
-    assert alloc["long_term"] == 10
-    assert alloc["profile"] == 10
-    # semantic and graph should each get substantially more than their
-    # base proportional share (0.20 * 600 = 120).
-    assert alloc["semantic"] > 120
-    assert alloc["graph"] > 120
+    allocator = TokenBudgetAllocator(DEFAULT_SECTION_WEIGHTS)
+    result = allocator.allocate(900, "fact_lookup")
+    # reflection weight is 0.0 for fact_lookup — must allocate 0 tokens
+    assert result.reflection == 0
 
 
 def test_get_memory_context_graph_not_truncated_at_default_budget(
