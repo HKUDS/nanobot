@@ -497,7 +497,7 @@ class TestContextBuilderSpan:
     """summarize_and_compress wraps LLM compression in a langfuse span."""
 
     async def test_compress_span_created(self):
-        from nanobot.agent.context import summarize_and_compress
+        from nanobot.agent.compression import summarize_and_compress
         from nanobot.providers.base import LLMResponse
 
         provider = ScriptedProvider(
@@ -525,7 +525,7 @@ class TestContextBuilderSpan:
             messages.append({"role": "user", "content": f"Message {i} " + "x" * 200})
             messages.append({"role": "assistant", "content": f"Reply {i} " + "y" * 200})
 
-        with patch("nanobot.agent.context.langfuse_span", side_effect=fake_span):
+        with patch("nanobot.agent.compression.langfuse_span", side_effect=fake_span):
             await summarize_and_compress(
                 messages=messages,
                 provider=provider,

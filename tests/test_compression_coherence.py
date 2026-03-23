@@ -8,7 +8,7 @@ Covers:
 
 from __future__ import annotations
 
-from nanobot.agent.context import (
+from nanobot.agent.compression import (
     _collect_tail_tool_call_ids,
     _paired_drop_tools,
 )

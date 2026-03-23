@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.agent_factory import build_agent
-from nanobot.agent.context import (
+from nanobot.agent.compression import (
     compress_context,
     estimate_messages_tokens,
 )
