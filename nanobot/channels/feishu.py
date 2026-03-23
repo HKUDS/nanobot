@@ -247,7 +247,7 @@ class FeishuConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     react_emoji: str = "THUMBSUP"
     group_policy: Literal["open", "mention"] = "mention"
-    reply_to_message: bool = False  # If True, bot replies quote the user's original message
+    reply_to_message: bool = True  # If True, bot replies in thread form (creates topic/thread)
 
 
 class FeishuChannel(BaseChannel):
@@ -881,8 +881,13 @@ class FeishuChannel(BaseChannel):
             logger.debug("Feishu: error fetching parent message {}: {}", message_id, e)
             return None
 
-    def _reply_message_sync(self, parent_message_id: str, msg_type: str, content: str) -> bool:
-        """Reply to an existing Feishu message using the Reply API (synchronous)."""
+    def _reply_message_sync(self, parent_message_id: str, msg_type: str, content: str, reply_in_thread: bool = True) -> bool:
+        """Reply to an existing Feishu message using the Reply API (synchronous).
+        
+        Args:
+            reply_in_thread: If True, reply in thread form (creates/uses a topic thread).
+                           This is the default to match DeerFlow behavior.
+        """
         from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody
         try:
             request = ReplyMessageRequest.builder() \
@@ -891,6 +896,7 @@ class FeishuChannel(BaseChannel):
                     ReplyMessageRequestBody.builder()
                     .msg_type(msg_type)
                     .content(content)
+                    .reply_in_thread(reply_in_thread)
                     .build()
                 ).build()
             response = self._client.im.v1.message.reply(request)
@@ -964,14 +970,27 @@ class FeishuChannel(BaseChannel):
             first_send = True  # tracks whether the reply has already been used
 
             def _do_send(m_type: str, content: str) -> None:
-                """Send via reply (first message) or create (subsequent)."""
+                """Send via reply (first message) or create (subsequent).
+                
+                When reply_to_message is enabled, ALL messages use reply API to ensure
+                they all appear in the same topic/thread, not just the first one.
+                """
                 nonlocal first_send
-                if reply_message_id and first_send:
-                    first_send = False
+                if reply_message_id:
+                    # Always use reply API when reply_to_message is enabled
+                    # This ensures all chunks/media appear in the same topic/thread
                     ok = self._reply_message_sync(reply_message_id, m_type, content)
                     if ok:
+                        first_send = False
                         return
-                    # Fall back to regular send if reply fails
+                    # When reply_to_message is enabled, do NOT fallback to regular send
+                    # to ensure consistent thread/topic behavior. Log error instead.
+                    if self.config.reply_to_message:
+                        logger.error(
+                            "Reply message failed and reply_to_message is enabled; "
+                            "not falling back to regular send to maintain thread consistency"
+                        )
+                        return
                 self._send_message_sync(receive_id_type, msg.chat_id, m_type, content)
 
             for file_path in msg.media:
@@ -1043,7 +1062,7 @@ class FeishuChannel(BaseChannel):
             event = data.event
             message = event.message
             sender = event.sender
-            
+
             # Deduplication check
             message_id = message.message_id
             if message_id in self._processed_message_ids:
@@ -1136,8 +1155,24 @@ class FeishuChannel(BaseChannel):
             if not content and not media_paths:
                 return
 
+            # Build topic-scoped session key for conversation isolation
+            # Same topic (root_id) shares context; different topics are isolated
+            if chat_type == "group":
+                reply_to = chat_id
+                if root_id and root_id != message_id:
+                    # Message is part of a topic thread (group chat only)
+                    session_key = f"feishu:{chat_id}:{root_id}"
+                else:
+                    # Top-level message in group
+                    session_key = f"feishu:{chat_id}"
+            else:
+                # Private chat: use root_id for topic grouping, message_id for new topic
+                # root_id identifies the topic; all replies share the same root_id
+                reply_to = sender_id
+                topic_id = root_id if root_id else message_id
+                session_key = f"feishu:{sender_id}:{topic_id}"
+
             # Forward to message bus
-            reply_to = chat_id if chat_type == "group" else sender_id
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=reply_to,
@@ -1149,7 +1184,8 @@ class FeishuChannel(BaseChannel):
                     "msg_type": msg_type,
                     "parent_id": parent_id,
                     "root_id": root_id,
-                }
+                },
+                session_key=session_key,
             )
 
         except Exception as e:
