@@ -47,6 +47,7 @@ class AgentLoop:
     """
 
     _TOOL_RESULT_MAX_CHARS = 16_000
+    _DEBUG_CHAT_DUMP_PATH = Path(__file__).resolve().parents[2] / "first_all_chat.json"
 
     def __init__(
         self,
@@ -180,6 +181,22 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    def _dump_chat_request(self, messages: list[dict], tools: list[dict]) -> None:
+        """Persist the current LLM request payload for local inspection."""
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "tools": tools,
+            "tool_choice": "auto",
+        }
+        try:
+            self._DEBUG_CHAT_DUMP_PATH.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            logger.warning("Failed to dump chat payload to {}: {}", self._DEBUG_CHAT_DUMP_PATH, e)
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -195,6 +212,7 @@ class AgentLoop:
             iteration += 1
 
             tool_defs = self.tools.get_definitions()
+            #self._dump_chat_request(messages, tool_defs)
 
             response = await self.provider.chat_with_retry(
                 messages=messages,
