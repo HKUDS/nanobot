@@ -619,6 +619,12 @@ def gateway(
             chat_id=chat_id,
             on_progress=_silent,
         )
+
+        # Use the existing consolidation mechanism to archive old heartbeat messages
+        # This prevents unbounded token growth while preserving context in MEMORY.md/HISTORY.md
+        session = agent.sessions.get_or_create("heartbeat")
+        await agent.memory_consolidator.maybe_consolidate_by_tokens(session)
+
         return resp.content if resp else ""
 
     async def on_heartbeat_notify(response: str) -> None:
