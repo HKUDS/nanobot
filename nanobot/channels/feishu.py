@@ -971,7 +971,10 @@ class FeishuChannel(BaseChannel):
                 return None
             card_id = getattr(response.data, "card_id", None)
             if card_id:
-                self._send_message_sync(receive_id_type, chat_id, "interactive", json.dumps({"card_id": card_id}))
+                self._send_message_sync(
+                    receive_id_type, chat_id, "interactive",
+                    json.dumps({"type": "card", "data": {"card_id": card_id}}),
+                )
             return card_id
         except Exception as e:
             logger.warning("Error creating streaming card: {}", e)
