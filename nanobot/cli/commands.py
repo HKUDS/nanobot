@@ -762,6 +762,15 @@ def channels_status():
         qq_config
     )
 
+    # WeChat
+    wx = config.channels.weixin
+    wx_config = f"account: {wx.account_id[:16]}..." if wx.account_id else "[dim]not configured[/dim]"
+    table.add_row(
+        "WeChat",
+        "✓" if wx.enabled else "✗",
+        wx_config
+    )
+
     # Email
     em = config.channels.email
     em_config = em.imap_host if em.imap_host else "[dim]not configured[/dim]"
@@ -832,6 +841,37 @@ def _get_bridge_dir() -> Path:
         raise typer.Exit(1)
 
     return user_bridge
+
+
+@channels_app.command("weixin-login")
+def channels_weixin_login(
+    base_url: str = typer.Option("https://ilinkai.weixin.qq.com", "--base-url", "-b", help="WeChat API base URL"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Login to WeChat via QR code scan."""
+    from nanobot.channels.weixin import weixin_qr_login, save_account
+    from nanobot.config.loader import load_config, save_config
+
+    console.print(f"{__logo__} WeChat QR Login\n")
+
+    async def _run():
+        result = await weixin_qr_login(base_url=base_url)
+        if result:
+            loaded = load_config()
+            loaded.channels.weixin.token = result.get("token", "")
+            loaded.channels.weixin.account_id = result.get("account_id", "")
+            loaded.channels.weixin.base_url = result.get("base_url", base_url)
+            loaded.channels.weixin.enabled = True
+            if not loaded.channels.weixin.allow_from:
+                loaded.channels.weixin.allow_from = ["*"]
+            save_config(loaded)
+            console.print(f"[green]✓[/green] WeChat config saved and enabled!")
+            console.print(f"  Account: {result.get('account_id', '')}")
+            console.print(f"\nStart the gateway: [cyan]nanobot gateway[/cyan]")
+        else:
+            console.print("[red]✗ WeChat login failed[/red]")
+
+    asyncio.run(_run())
 
 
 @channels_app.command("login")

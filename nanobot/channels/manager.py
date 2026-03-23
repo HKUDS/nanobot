@@ -150,6 +150,18 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Matrix channel not available: {}", e)
 
+        # WeChat channel
+        if self.config.channels.weixin.enabled:
+            try:
+                from nanobot.channels.weixin import WeixinChannel
+                self.channels["weixin"] = WeixinChannel(
+                    self.config.channels.weixin,
+                    self.bus,
+                )
+                logger.info("WeChat (weixin) channel enabled")
+            except ImportError as e:
+                logger.warning("WeChat channel not available: {}", e)
+
         self._validate_allow_from()
 
     def _validate_allow_from(self) -> None:

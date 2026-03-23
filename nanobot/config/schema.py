@@ -189,6 +189,17 @@ class SlackConfig(Base):
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
 
 
+class WeixinConfig(Base):
+    """WeChat channel configuration using openclaw-weixin ilink HTTP API."""
+
+    enabled: bool = False
+    token: str = ""  # Bot token from QR code login
+    account_id: str = ""  # ilink bot ID (e.g. "xxx@im.bot")
+    base_url: str = "https://ilinkai.weixin.qq.com"
+    poll_timeout_ms: int = 30000  # Long-poll timeout in ms
+    allow_from: list[str] = Field(default_factory=list)  # Allowed WeChat user IDs
+
+
 class QQConfig(Base):
     """QQ channel configuration using botpy SDK."""
 
@@ -217,6 +228,7 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+    weixin: WeixinConfig = Field(default_factory=WeixinConfig)
 
 
 class AgentDefaults(Base):
