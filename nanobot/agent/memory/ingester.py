@@ -827,15 +827,11 @@ class EventIngester:
         if self._db is not None:
             import json as _json
 
-            for event in existing_events:
+            for event in appended_events:
+                # Events are inserted without embeddings in the sync write path.
+                # Embeddings are backfilled by maintenance.reindex() or by the
+                # caller via db.insert_event() with a pre-computed embedding.
                 embedding = None
-                if self._embedder is not None:
-                    try:
-                        import asyncio
-
-                        embedding = asyncio.run(self._embedder.embed(event.get("summary", "")))
-                    except Exception:  # crash-barrier: embedding failure non-fatal
-                        bind_trace().warning("Failed to embed event {}", event.get("id", "?"))
                 # Serialize metadata if dict
                 evt_copy = dict(event)
                 if isinstance(evt_copy.get("metadata"), dict):
