@@ -301,7 +301,7 @@ class MemoryStore:
 
     # Keep class-level constants as aliases so test code referencing
     # MemoryStore._SECTION_PRIORITY_WEIGHTS / ._SECTION_MIN_TOKENS still works.
-    _SECTION_PRIORITY_WEIGHTS = ContextAssembler._SECTION_PRIORITY_WEIGHTS
+    _SECTION_PRIORITY_WEIGHTS = DEFAULT_SECTION_WEIGHTS
     _SECTION_MIN_TOKENS = ContextAssembler._SECTION_MIN_TOKENS
     _MAX_EVIDENCE_REFS = 10  # Cap evidence_event_ids to avoid unbounded growth.
     _CORRECTION_MARKERS = ConflictManager._CORRECTION_MARKERS

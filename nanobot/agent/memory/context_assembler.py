@@ -17,7 +17,7 @@ from .helpers import _estimate_tokens, _norm_text, _safe_float, _to_str_list
 from .persistence import MemoryPersistence
 from .profile_io import ProfileStore as ProfileManager
 from .retrieval_planner import RetrievalPlanner
-from .token_budget import TokenBudgetAllocator
+from .token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
 
 # Intents that benefit from scanning recent unresolved events.
 # For all other intents (fact_lookup, chitchat, …) the scan is skipped.
@@ -47,75 +47,6 @@ class ContextAssembler:
 
     PROFILE_STATUS_STALE = "stale"
     EPISODIC_STATUS_RESOLVED = "resolved"
-
-    # Intent → per-section priority weights.  Higher weight means the
-    # section receives a larger share of the total token budget.  Weights
-    # are relative — they're normalised to sum to 1.0 during allocation.
-    _SECTION_PRIORITY_WEIGHTS: dict[str, dict[str, float]] = {
-        "fact_lookup": {
-            "long_term": 0.28,
-            "profile": 0.23,
-            "semantic": 0.20,
-            "episodic": 0.05,
-            "reflection": 0.00,
-            "graph": 0.19,
-            "unresolved": 0.05,
-        },
-        "debug_history": {
-            "long_term": 0.15,
-            "profile": 0.10,
-            "semantic": 0.10,
-            "episodic": 0.35,
-            "reflection": 0.05,
-            "graph": 0.15,
-            "unresolved": 0.10,
-        },
-        "planning": {
-            "long_term": 0.15,
-            "profile": 0.15,
-            "semantic": 0.20,
-            "episodic": 0.20,
-            "reflection": 0.05,
-            "graph": 0.15,
-            "unresolved": 0.10,
-        },
-        "reflection": {
-            "long_term": 0.15,
-            "profile": 0.10,
-            "semantic": 0.15,
-            "episodic": 0.10,
-            "reflection": 0.25,
-            "graph": 0.15,
-            "unresolved": 0.10,
-        },
-        "constraints_lookup": {
-            "long_term": 0.19,
-            "profile": 0.28,
-            "semantic": 0.24,
-            "episodic": 0.05,
-            "reflection": 0.00,
-            "graph": 0.19,
-            "unresolved": 0.05,
-        },
-        "rollout_status": {
-            "long_term": 0.25,
-            "profile": 0.15,
-            "semantic": 0.30,
-            "episodic": 0.00,
-            "reflection": 0.00,
-            "graph": 0.20,
-            "unresolved": 0.10,
-        },
-        "conflict_review": {
-            "long_term": 0.15,
-            "profile": 0.20,
-            "semantic": 0.20,
-            "episodic": 0.15,
-            "reflection": 0.00,
-            "graph": 0.20,
-            "unresolved": 0.10,
-        },
-    }
 
     # Minimum token allocation per section — ensures every section gets at
     # least this much budget regardless of priority weight, as long as the
@@ -596,9 +527,9 @@ class ContextAssembler:
         -------
         dict mapping section name -> allocated token budget.
         """
-        weights = cls._SECTION_PRIORITY_WEIGHTS.get(
+        weights = DEFAULT_SECTION_WEIGHTS.get(
             intent,
-            cls._SECTION_PRIORITY_WEIGHTS["fact_lookup"],
+            DEFAULT_SECTION_WEIGHTS["fact_lookup"],
         )
 
         # Filter to sections that actually have content *and* non-zero weight.
