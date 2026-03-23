@@ -720,6 +720,55 @@ nanobot gateway
 </details>
 
 <details>
+<summary><b>WeChat (微信 / Weixin)</b></summary>
+
+Uses **HTTP long-poll** with QR-code login via the ilinkai personal WeChat API. No local WeChat desktop client is required.
+
+**1. Install the optional dependency**
+
+```bash
+pip install nanobot-ai[weixin]
+```
+
+**2. Configure**
+
+```json
+{
+  "channels": {
+    "weixin": {
+      "enabled": true,
+      "allowFrom": ["YOUR_WECHAT_USER_ID"]
+    }
+  }
+}
+```
+
+> - `allowFrom`: Add the sender ID you see in nanobot logs for your WeChat account. Use `["*"]` to allow all users.
+> - `token`: Optional. If omitted, log in interactively and nanobot will save the token for you.
+> - `stateDir`: Optional. Defaults to nanobot's runtime directory for Weixin state.
+> - `pollTimeout`: Optional long-poll timeout in seconds.
+
+**3. Login**
+
+```bash
+nanobot channels login weixin
+```
+
+Use `--force` to re-authenticate and ignore any saved token:
+
+```bash
+nanobot channels login weixin --force
+```
+
+**4. Run**
+
+```bash
+nanobot gateway
+```
+
+</details>
+
+<details>
 <summary><b>Wecom (企业微信)</b></summary>
 
 > Here we use [wecom-aibot-sdk-python](https://github.com/chengyongru/wecom_aibot_sdk) (community Python version of the official [@wecom/aibot-node-sdk](https://www.npmjs.com/package/@wecom/aibot-node-sdk)).
