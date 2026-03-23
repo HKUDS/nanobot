@@ -73,7 +73,7 @@ class TurnState:
     nudged_for_final: bool = False
     turn_tool_calls: int = 0
     last_tool_call_msg_idx: int = -1
-    last_delegation_advice: Any = None
+    last_delegation_advice: DelegationAction | None = None  # TYPE_CHECKING import from delegation_advisor
     has_plan: bool = False
     plan_enforced: bool = False
     consecutive_errors: int = 0
@@ -105,7 +105,12 @@ from nanobot.agent.orchestrator_protocol import TurnState  # canonical home
 from nanobot.agent.orchestrator_protocol import TurnState as TurnState  # re-export for existing importers
 ```
 
-Tests importing `TurnState` from `turn_orchestrator` continue to work via re-export.
+Tests importing `TurnState` from `turn_orchestrator` continue to work via re-export. Known consumers:
+- `turn_orchestrator.py` — imports and re-exports `TurnState` (canonical re-export)
+- `loop.py:75` — imports `TurnState` from `turn_orchestrator` (two-hop: loop → turn_orchestrator → orchestrator_protocol)
+- `tests/test_turn_orchestrator.py:23` — imports `TurnState` via `nanobot.agent.loop` (three-hop chain)
+
+All three resolve correctly as long as the re-export in `turn_orchestrator.py` is preserved.
 
 ### Impact
 
@@ -178,7 +183,7 @@ It only fixes the registration path so data flows through `CapabilityRegistry` a
 
 - `message_processor.py` has zero deferred imports
 - `message_processor.py` types orchestrator as `Orchestrator` Protocol, not `Any`
-- All tool registrations go through `CapabilityRegistry.register_tool()`
+- All tools registered via `register_default_tools()` go through `CapabilityRegistry.register_tool()` (note: `mission.py._build_tool_registry()` and `delegation.py`'s per-delegation `ToolRegistry` are intentionally out of scope — they create isolated tool sets for sub-agent contexts and do not participate in the main registry)
 - `CapabilityRegistry.get_available(kind="tool")` returns the correct tool list
 - `CapabilityRegistry.refresh_health()` covers tools
 - Compensating fallback scan removed from `get_unavailable_summary()`
