@@ -68,7 +68,7 @@ class TestComputeRankDelta:
 
 
 # ---------------------------------------------------------------------------
-# Integration with MemoryStore._retrieve_core (rollout gating)
+# Integration with MemoryStore._run_mem0_pipeline (rollout gating)
 # ---------------------------------------------------------------------------
 
 

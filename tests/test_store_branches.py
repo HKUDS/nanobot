@@ -637,7 +637,7 @@ class TestRetrieveAndContextBranches:
         assert isinstance(out, list)
         assert len(out) >= 1
 
-    def test_retrieve_core_empty_results(self, tmp_path: Path) -> None:
+    def test_run_mem0_pipeline_empty_results(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         store.mem0.enabled = True
         store.mem0.search = MagicMock(
@@ -651,7 +651,7 @@ class TestRetrieveAndContextBranches:
                 },
             )
         )
-        final, stats = store.retriever._retrieve_core(
+        final, stats = store.retriever._run_mem0_pipeline(
             query="nothing",
             top_k=3,
             router_enabled=True,
@@ -661,7 +661,7 @@ class TestRetrieveAndContextBranches:
         assert final == []
         assert stats["retrieved_count"] == 0
 
-    def test_retrieve_core_rollout_status_injects_synthetic(self, tmp_path: Path) -> None:
+    def test_run_mem0_pipeline_rollout_status_injects_synthetic(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         store.mem0.enabled = True
         store.mem0.search = MagicMock(
@@ -675,7 +675,7 @@ class TestRetrieveAndContextBranches:
                 },
             )
         )
-        final, stats = store.retriever._retrieve_core(
+        final, stats = store.retriever._run_mem0_pipeline(
             query="rollout status",
             top_k=2,
             router_enabled=True,
@@ -686,7 +686,7 @@ class TestRetrieveAndContextBranches:
         assert any(str(item.get("id", "")).startswith("rollout_status") for item in final)
         assert stats["intent"] == "rollout_status"
 
-    def test_retrieve_core_reflection_filtering(self, tmp_path: Path) -> None:
+    def test_run_mem0_pipeline_reflection_filtering(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         store.mem0.enabled = True
         store.mem0.search = MagicMock(
@@ -708,7 +708,7 @@ class TestRetrieveAndContextBranches:
                 },
             )
         )
-        final, stats = store.retriever._retrieve_core(
+        final, stats = store.retriever._run_mem0_pipeline(
             query="reflect",
             top_k=3,
             router_enabled=True,
