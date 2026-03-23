@@ -213,8 +213,10 @@ class SkillsLoader:
 
         A skill is shared unless its frontmatter explicitly sets shared to false,
         either as a top-level key or inside nanobot metadata JSON.
+
+        Reads the workspace file directly to avoid recursion with load_skill.
         """
-        meta = self.get_skill_metadata(name) or {}
+        meta = self._read_workspace_skill_metadata(name) or {}
         # Top-level frontmatter: shared: false
         if str(meta.get("shared", "")).lower() == "false":
             return False
@@ -223,6 +225,26 @@ class SkillsLoader:
         if str(skill_meta.get("shared", "")).lower() == "false":
             return False
         return True
+
+    def _read_workspace_skill_metadata(self, name: str) -> dict | None:
+        """Read frontmatter metadata directly from the workspace skill file.
+
+        This bypasses load_skill() to avoid recursion when called from _is_shared().
+        """
+        path = self.workspace_skills / name / "SKILL.md"
+        if not path.exists():
+            return None
+        content = path.read_text(encoding="utf-8")
+        if content.startswith("---"):
+            match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
+            if match:
+                metadata: dict[str, str] = {}
+                for line in match.group(1).split("\n"):
+                    if ":" in line:
+                        key, value = line.split(":", 1)
+                        metadata[key.strip()] = value.strip().strip('"\'')
+                return metadata
+        return None
 
     def _check_requirements(self, skill_meta: dict) -> bool:
         """Check if skill requirements are met (bins, env vars)."""
