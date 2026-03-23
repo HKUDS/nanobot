@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from nanobot.cli.commands import app
 from nanobot.cli.progress import CliProgressHandler
 
-__all__ = ["CliProgressHandler"]
+__all__ = ["CliProgressHandler", "app"]

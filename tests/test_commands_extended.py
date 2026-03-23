@@ -7,7 +7,9 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from nanobot.cli.commands import _get_bridge_dir, _make_provider, app
+from nanobot.cli._shared import _make_provider
+from nanobot.cli.channels import _get_bridge_dir
+from nanobot.cli.commands import app
 from nanobot.config.schema import Config
 from nanobot.providers.custom_provider import CustomProvider
 from nanobot.providers.litellm_provider import LiteLLMProvider
