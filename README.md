@@ -245,6 +245,7 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
 | **Slack** | Bot token + App-Level token |
 | **Email** | IMAP/SMTP credentials |
 | **QQ** | App ID + App Secret |
+| **NapCat** | Websocket URL + Token|
 | **Wecom** | Bot ID + Bot Secret |
 
 <details>
