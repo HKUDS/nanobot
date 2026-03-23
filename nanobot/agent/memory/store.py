@@ -121,10 +121,6 @@ class MemoryStore:
         self.profile_mgr = ProfileManager(self.persistence, self.profile_file, self.mem0)
         self.profile_mgr._store = self
 
-        # Conflict manager (LAN-203) — delegates conflict resolution to ConflictManager.
-        self.conflict_mgr = ConflictManager(self.profile_mgr, self.mem0)
-        self.conflict_mgr._store = self
-
         # Retrieval planner (LAN-207) — intent classification + policy + routing.
         self._planner = RetrievalPlanner()
 
@@ -186,6 +182,15 @@ class MemoryStore:
             graph=self.graph,
             rollout=self.rollout,
             conflict_pair_fn=lambda old, new: self.profile_mgr._conflict_pair(old, new),
+        )
+
+        # Conflict manager (LAN-203) — now that ingester is built, wire callables.
+        self.conflict_mgr = ConflictManager(
+            self.profile_mgr,
+            self.mem0,
+            sanitize_mem0_text_fn=self.ingester._sanitize_mem0_text,
+            normalize_metadata_fn=self.ingester._normalize_memory_metadata,
+            sanitize_metadata_fn=EventIngester._sanitize_mem0_metadata,
         )
 
         # MemoryRetriever: owns the full retrieval read path.
