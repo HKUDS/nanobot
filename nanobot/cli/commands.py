@@ -611,6 +611,16 @@ def gateway(
             chat_id=chat_id,
             on_progress=_silent,
         )
+
+        # Trim heartbeat session to prevent unbounded token growth
+        # Keep only recent messages for minimal context while avoiding history explosion
+        session = agent.sessions.get_or_create("heartbeat")
+        max_heartbeat_messages = 20
+        if len(session.messages) > max_heartbeat_messages:
+            session.messages = session.messages[-max_heartbeat_messages:]
+            session.last_consolidated = 0  # Reset consolidation marker
+            logger.debug("Heartbeat session trimmed to last {} messages to prevent token accumulation", max_heartbeat_messages)
+
         return resp.content if resp else ""
 
     async def on_heartbeat_notify(response: str) -> None:
