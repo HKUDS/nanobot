@@ -76,8 +76,9 @@ def _make_get_message_response(text: str, msg_type: str = "text", success: bool 
 # Config tests
 # ---------------------------------------------------------------------------
 
-def test_feishu_config_reply_to_message_defaults_false() -> None:
-    assert FeishuConfig().reply_to_message is False
+def test_feishu_config_reply_to_message_defaults_true() -> None:
+    # Default changed to True for better UX with thread/topic support
+    assert FeishuConfig().reply_to_message is True
 
 
 def test_feishu_config_reply_to_message_can_be_enabled() -> None:
@@ -310,7 +311,9 @@ async def test_send_skips_reply_for_progress_messages() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_fallback_to_create_when_reply_fails() -> None:
+async def test_send_no_fallback_when_reply_fails_with_thread_enabled() -> None:
+    """When reply_to_message is True, failed replies do NOT fallback to create
+    to maintain thread/topic consistency."""
     channel = _make_feishu_channel(reply_to_message=True)
 
     reply_resp = MagicMock()
@@ -331,9 +334,29 @@ async def test_send_fallback_to_create_when_reply_fails() -> None:
         metadata={"message_id": "om_001"},
     ))
 
-    # reply attempted first, then falls back to create
+    # reply attempted but no fallback to create for thread consistency
     channel._client.im.v1.message.reply.assert_called_once()
+    channel._client.im.v1.message.create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_fallback_to_create_when_reply_disabled() -> None:
+    """When reply_to_message is False, we use create API directly."""
+    channel = _make_feishu_channel(reply_to_message=False)
+
+    create_resp = MagicMock()
+    create_resp.success.return_value = True
+    channel._client.im.v1.message.create.return_value = create_resp
+
+    await channel.send(OutboundMessage(
+        channel="feishu",
+        chat_id="oc_abc",
+        content="hello",
+        metadata={"message_id": "om_001"},
+    ))
+
     channel._client.im.v1.message.create.assert_called_once()
+    channel._client.im.v1.message.reply.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
