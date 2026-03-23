@@ -72,7 +72,7 @@ if TYPE_CHECKING:
 # re-exported here for backward compatibility with tests.
 # Backward-compat re-exports: these symbols moved to turn_orchestrator.py or
 # their original modules.  Tests that import them from loop.py still work.
-from nanobot.agent.context import summarize_and_compress as summarize_and_compress  # noqa: F401
+from nanobot.agent.compression import summarize_and_compress as summarize_and_compress  # noqa: F401
 from nanobot.agent.delegation import _delegation_ancestry  # noqa: F401
 from nanobot.agent.failure import FailureClass as FailureClass  # noqa: F401
 from nanobot.agent.failure import ToolCallTracker as ToolCallTracker  # noqa: F401

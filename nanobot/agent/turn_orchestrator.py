@@ -28,11 +28,8 @@ from nanobot.agent.callbacks import (
     ToolCallEvent,
     ToolResultEvent,
 )
-from nanobot.agent.context import (
-    ContextBuilder,
-    estimate_messages_tokens,
-    summarize_and_compress,
-)
+from nanobot.agent.compression import estimate_messages_tokens, summarize_and_compress
+from nanobot.agent.context import ContextBuilder
 from nanobot.agent.delegation import DelegationDispatcher
 from nanobot.agent.failure import FailureClass, ToolCallTracker, _build_failure_prompt
 from nanobot.agent.prompt_loader import PromptLoader
