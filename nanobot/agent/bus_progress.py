@@ -10,7 +10,7 @@ area of ``loop.py`` and allow independent testing.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.callbacks import (
     DelegateEndEvent,
@@ -34,7 +34,7 @@ def make_bus_progress(
     bus: MessageBus,
     channel: str,
     chat_id: str,
-    base_meta: dict,
+    base_meta: dict[str, Any],
     canonical_builder: CanonicalEventBuilder,
 ) -> ProgressCallback:
     """Return a ``ProgressCallback`` that publishes structured progress events onto the bus.
