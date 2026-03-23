@@ -49,11 +49,9 @@ class ConsolidationOrchestrator:
         await self._tg.__aenter__()
         return self
 
-    async def __aexit__(
-        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any
-    ) -> None:  # noqa: E501
+    async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
         if self._tg is not None:
-            await self._tg.__aexit__(exc_type, exc_val, exc_tb)
+            await self._tg.__aexit__(None, None, None)
 
     # ------------------------------------------------------------------
     # New public API
@@ -93,18 +91,15 @@ class ConsolidationOrchestrator:
         Used by _consolidate_memory for the archive_all=True path (/new command).
         """
         lock = self._get_or_create_lock(session_key)
-        try:
-            async with lock:
-                return await self._memory.consolidate(
-                    session,
-                    provider,
-                    model,
-                    memory_window=self._memory_window,
-                    enable_contradiction_check=self._enable_contradiction_check,
-                    archive_all=archive_all,
-                )
-        finally:
-            self._prune_lock_if_idle(session_key)
+        async with lock:
+            return await self._memory.consolidate(
+                session,
+                provider,
+                model,
+                memory_window=self._memory_window,
+                enable_contradiction_check=self._enable_contradiction_check,
+                archive_all=archive_all,
+            )
 
     # ------------------------------------------------------------------
     # Internal
@@ -116,14 +111,6 @@ class ConsolidationOrchestrator:
             lock = asyncio.Lock()
             self._locks[session_key] = lock
         return lock
-
-    def _prune_lock_if_idle(self, session_key: str) -> None:
-        entry = self._locks.get(session_key)
-        if entry is not None and not entry.locked():
-            try:
-                del self._locks[session_key]
-            except KeyError:
-                pass
 
     async def _run(
         self,
@@ -151,4 +138,3 @@ class ConsolidationOrchestrator:
                             self._archive_fn(list(session.messages))
         finally:
             self._in_progress.discard(session_key)
-            self._prune_lock_if_idle(session_key)
