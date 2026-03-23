@@ -121,3 +121,38 @@ class TestMessageProcessorContract:
         # Should complete without error; we don't assert on the return value beyond type
         result = await processor.process_direct("hello", forced_role="assistant")
         assert isinstance(result, str)
+
+    async def test_slash_command_bypasses_llm(self, tmp_path: Path) -> None:
+        """Slash commands (/help, /new) must be handled without calling the LLM orchestrator.
+
+        In loop.py _process_message, '/help' and '/new' return early with a canned
+        OutboundMessage before any TurnOrchestrator.run() call.  MessageProcessor
+        must preserve that contract: the orchestrator mock must NOT be called.
+        """
+        processor = _make_processor(tmp_path)
+        # Invoke a known slash command
+        result = await processor.process_direct("/help")
+        # The result must be a plain string (process_direct contract)
+        assert isinstance(result, str)
+        # The LLM orchestrator must not have been invoked
+        processor.orchestrator.run.assert_not_called()
+
+    async def test_memory_verifier_consulted(self, tmp_path: Path) -> None:
+        """MessageProcessor must consult the verifier when processing a message.
+
+        loop.py calls self._verifier.should_force_verification(msg.content) on
+        every non-slash, non-system message.  MessageProcessor must honour the same
+        contract so that callers can control verification behaviour via the injected
+        verifier.
+        """
+        processor = _make_processor(tmp_path)
+        # Configure verifier to report that forced verification is needed
+        processor.verifier.should_force_verification = MagicMock(return_value=True)
+
+        result = await processor.process_direct("remind me about our last meeting")
+
+        assert isinstance(result, str)
+        # The verifier must have been asked about the message content
+        processor.verifier.should_force_verification.assert_called_once_with(
+            "remind me about our last meeting"
+        )
