@@ -137,11 +137,28 @@ class WhatsAppChannel(BaseChannel):
             logger.warning("WhatsApp bridge not connected")
             return
 
-        try:
-            payload = {"type": "send", "to": msg.chat_id, "text": msg.content}
-            await self._ws.send(json.dumps(payload, ensure_ascii=False))
-        except Exception as e:
-            logger.error("Error sending WhatsApp message: {}", e)
+        chat_id = msg.chat_id
+
+        if msg.content:
+            try:
+                payload = {"type": "send", "to": chat_id, "text": msg.content}
+                await self._ws.send(json.dumps(payload, ensure_ascii=False))
+            except Exception as e:
+                logger.error("Error sending WhatsApp message: {}", e)
+
+        for media_path in msg.media or []:
+            try:
+                mime, _ = mimetypes.guess_type(media_path)
+                payload = {
+                    "type": "send_media",
+                    "to": chat_id,
+                    "filePath": media_path,
+                    "mimetype": mime or "application/octet-stream",
+                    "fileName": media_path.rsplit("/", 1)[-1],
+                }
+                await self._ws.send(json.dumps(payload, ensure_ascii=False))
+            except Exception as e:
+                logger.error("Error sending WhatsApp media {}: {}", media_path, e)
 
     async def _handle_bridge_message(self, raw: str) -> None:
         """Handle a message from the bridge."""
