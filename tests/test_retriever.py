@@ -652,3 +652,41 @@ class TestGraphEntityCache:
         r._collect_graph_entity_names("coffee query", [])
         # get_related_entity_names_sync called twice: once before reset, once after
         assert r._graph.get_related_entity_names_sync.call_count == 2
+
+    def test_retrieve_resets_cache_between_calls(self):
+        """retrieve() resets _graph_cache so each call gets a fresh traversal."""
+        r = self._make_retriever_with_graph()
+        # Force BM25 path by disabling mem0
+        r._mem0.enabled = False
+
+        # Configure planner to return a proper plan
+        plan = MagicMock()
+        plan.intent = "fact_lookup"
+        plan.policy = {
+            "candidate_multiplier": 3,
+            "half_life_days": 60.0,
+            "fallback_topics": [],
+            "fallback_types": [],
+            "type_boost": {},
+        }
+        plan.include_superseded = False
+        plan.routing_hints = {
+            "focus_task_decision": False,
+            "focus_planning": False,
+            "focus_architecture": False,
+            "requires_open": False,
+            "requires_resolved": False,
+        }
+        r._planner.plan.return_value = plan
+
+        r.retrieve(query="coffee query", top_k=3)
+        count_after_first = r._graph.get_related_entity_names_sync.call_count
+
+        r.retrieve(query="coffee query", top_k=3)
+        count_after_second = r._graph.get_related_entity_names_sync.call_count
+
+        # If cache resets between retrieve() calls, graph is queried again on second call
+        assert count_after_second > count_after_first, (
+            f"Expected graph traversal to re-run after cache reset; "
+            f"call_count was {count_after_first} after first, {count_after_second} after second"
+        )
