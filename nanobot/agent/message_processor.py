@@ -45,25 +45,6 @@ if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
 
-class _LegacyOrchestrator:
-    """Temporary shim: wraps AgentLoop._run_agent_loop until TurnOrchestrator is extracted (Task 6).
-
-    Exposes the TurnOrchestrator interface (.run(state, on_progress) -> tuple)
-    so MessageProcessor can be written against the final interface from day one.
-    """
-
-    def __init__(self, loop: Any) -> None:
-        self._loop = loop
-
-    async def run(
-        self,
-        messages: list[dict[str, Any]],
-        on_progress: ProgressCallback | None,
-    ) -> tuple[str | None, list[str], list[dict[str, Any]]]:
-        """Delegate to loop._run_agent_loop."""
-        return await self._loop._run_agent_loop(messages, on_progress)  # type: ignore[no-any-return]
-
-
 class MessageProcessor:
     """Per-message processing pipeline.
 
@@ -352,9 +333,8 @@ class MessageProcessor:
             )
 
         # Wire the per-turn progress callback into the delegation dispatcher
-        # (if the orchestrator exposes it — _LegacyOrchestrator delegates to the loop)
-        if hasattr(self.orchestrator, "_loop") and hasattr(self.orchestrator._loop, "_dispatcher"):
-            self.orchestrator._loop._dispatcher.on_progress = _bus_progress
+        if hasattr(self.orchestrator, "_dispatcher"):
+            self.orchestrator._dispatcher.on_progress = _bus_progress
 
         final_content, tools_used, all_msgs = await self._run_orchestrator(
             initial_messages,
@@ -362,8 +342,8 @@ class MessageProcessor:
         )
 
         # Clear per-turn callback to prevent cross-turn leakage
-        if hasattr(self.orchestrator, "_loop") and hasattr(self.orchestrator._loop, "_dispatcher"):
-            self.orchestrator._loop._dispatcher.on_progress = None
+        if hasattr(self.orchestrator, "_dispatcher"):
+            self.orchestrator._dispatcher.on_progress = None
 
         if final_content is None:
             _recovered = await self.verifier.attempt_recovery(
@@ -462,18 +442,40 @@ class MessageProcessor:
     # ------------------------------------------------------------------
 
     def _sync_token_counters(self) -> None:
-        """Pull token counters from the AgentLoop (via _token_source).
+        """Pull token counters from the orchestrator or legacy token source.
 
-        ``_run_agent_loop`` updates ``AgentLoop._turn_tokens_*`` during the
-        turn.  Since the processor reads these counters for response metadata
-        and audit logging, we sync them here.  When no source is wired (e.g.
-        in unit tests with mock orchestrators), the local zeros are used.
+        ``TurnOrchestrator.run()`` updates ``_turn_tokens_*`` during the turn.
+        Since the processor reads these counters for response metadata and
+        audit logging, we sync them here.  When no source is wired (e.g. in
+        unit tests with mock orchestrators), the local zeros are used.
+
+        Also pushes the values back to ``_token_source`` (AgentLoop) so that
+        tests reading ``loop._turn_tokens_prompt`` see the updated values.
         """
+        # Prefer the orchestrator's counters directly
+        orch = self.orchestrator
+        if hasattr(orch, "_turn_tokens_prompt"):
+            self._turn_tokens_prompt = getattr(orch, "_turn_tokens_prompt", 0)
+            self._turn_tokens_completion = getattr(orch, "_turn_tokens_completion", 0)
+            self._turn_llm_calls = getattr(orch, "_turn_llm_calls", 0)
+        else:
+            # Fallback: legacy _token_source (e.g. AgentLoop reference)
+            src = self._token_source
+            if src is not None:
+                self._turn_tokens_prompt = getattr(src, "_turn_tokens_prompt", 0)
+                self._turn_tokens_completion = getattr(src, "_turn_tokens_completion", 0)
+                self._turn_llm_calls = getattr(src, "_turn_llm_calls", 0)
+
+        # Push back to AgentLoop for backward-compat with tests that read
+        # loop._turn_tokens_prompt directly.
         src = self._token_source
         if src is not None:
-            self._turn_tokens_prompt = getattr(src, "_turn_tokens_prompt", 0)
-            self._turn_tokens_completion = getattr(src, "_turn_tokens_completion", 0)
-            self._turn_llm_calls = getattr(src, "_turn_llm_calls", 0)
+            try:
+                src._turn_tokens_prompt = self._turn_tokens_prompt
+                src._turn_tokens_completion = self._turn_tokens_completion
+                src._turn_llm_calls = self._turn_llm_calls
+            except AttributeError:
+                pass
 
     # ------------------------------------------------------------------
     # Orchestrator interaction
@@ -486,18 +488,50 @@ class MessageProcessor:
     ) -> tuple[str | None, list[str], list[dict[str, Any]]]:
         """Call the orchestrator and normalise the result.
 
-        ``_LegacyOrchestrator.run()`` returns a 3-tuple matching
-        ``_run_agent_loop``'s signature: ``(content, tools_used, messages)``.
-        Future ``TurnOrchestrator`` will return ``TurnResult``; this helper
-        isolates the unpacking logic.
+        Wraps the ``messages`` list in a ``TurnState`` for
+        ``TurnOrchestrator.run()`` and unpacks the returned ``TurnResult``
+        into the 3-tuple ``(content, tools_used, messages)`` expected by
+        the rest of the pipeline.  Also supports mock orchestrators that
+        return tuples or duck-typed result objects.
         """
-        result = await self.orchestrator.run(messages, on_progress)
+        from nanobot.agent.turn_orchestrator import TurnOrchestrator, TurnState
+
+        if isinstance(self.orchestrator, TurnOrchestrator):
+            # Extract user text from the last user message (matches _run_agent_loop)
+            user_text = ""
+            for m in reversed(messages):
+                if m.get("role") == "user":
+                    _content = m.get("content", "")
+                    if isinstance(_content, str):
+                        user_text = _content
+                    elif isinstance(_content, list):
+                        user_text = " ".join(
+                            p.get("text", "")
+                            for p in _content
+                            if isinstance(p, dict) and p.get("type") == "text"
+                        )
+                    break
+            state = TurnState(
+                messages=messages,
+                user_text=user_text,
+                tools_def_cache=list(self.tools.get_definitions()),
+            )
+            # Forward classification result for plan-phase delegation advice
+            if hasattr(self, "_last_classification_result"):
+                self.orchestrator._last_classification_result = (
+                    self._last_classification_result  # type: ignore[attr-defined]
+                )
+            result = await self.orchestrator.run(state, on_progress)
+        else:
+            result = await self.orchestrator.run(messages, on_progress)
+
         if isinstance(result, tuple):
             return result  # type: ignore[return-value]
         # Forward-compat for TurnResult or mock objects.
         # Use explicit str/list checks to avoid propagating MagicMock values.
+        # Convert empty string content to None so the recovery path triggers.
         _content = getattr(result, "content", None)
-        content: str | None = _content if isinstance(_content, str) else None
+        content: str | None = (_content or None) if isinstance(_content, str) else None
         _tools = getattr(result, "tools_used", [])
         tools_used: list[str] = _tools if isinstance(_tools, list) else []
         _msgs = getattr(result, "messages", None)
@@ -620,14 +654,10 @@ class MessageProcessor:
         session_dir.mkdir(parents=True, exist_ok=True)
         self._scratchpad = Scratchpad(session_dir)
 
-        # Update scratchpad in delegation dispatcher and missions if accessible
-        if hasattr(self.orchestrator, "_loop"):
-            loop = self.orchestrator._loop
-            if hasattr(loop, "_dispatcher"):
-                loop._dispatcher.scratchpad = self._scratchpad
-                loop._dispatcher._trace_path = session_dir / "routing_trace.jsonl"
-            if hasattr(loop, "missions"):
-                loop.missions.scratchpad = self._scratchpad
+        # Update scratchpad in delegation dispatcher if accessible
+        if hasattr(self.orchestrator, "_dispatcher"):
+            self.orchestrator._dispatcher.scratchpad = self._scratchpad
+            self.orchestrator._dispatcher._trace_path = session_dir / "routing_trace.jsonl"
 
         # Update scratchpad tool references
         write_tool = self.tools.get("write_scratchpad")

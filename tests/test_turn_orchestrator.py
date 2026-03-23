@@ -19,6 +19,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+# These imports will succeed (already implemented by Task 4)
+from nanobot.agent.loop import TurnState
+
 # These imports will FAIL until Task 6 creates turn_orchestrator.py
 # ModuleNotFoundError: No module named 'nanobot.agent.turn_orchestrator'
 from nanobot.agent.turn_orchestrator import (  # noqa: E402
@@ -26,25 +29,56 @@ from nanobot.agent.turn_orchestrator import (  # noqa: E402
     TurnResult,
 )
 
-# These imports will succeed (already implemented by Task 4)
-from nanobot.agent.loop import TurnState
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
 def _make_minimal_mocks() -> dict[str, Any]:
-    """Return a dict of minimal mocks for TurnOrchestrator constructor."""
+    """Return a dict of minimal mocks for TurnOrchestrator constructor.
+
+    Async methods that the orchestrator ``await``s must be ``AsyncMock``
+    instances; plain ``MagicMock`` is not awaitable and would raise
+    ``TypeError`` at runtime.
+    """
+    # Context mock: add_assistant_message must return a list (messages)
+    context = MagicMock()
+    context.add_assistant_message = MagicMock(
+        side_effect=lambda msgs, content, *a, **kw: (
+            msgs + [{"role": "assistant", "content": content or ""}]
+        )
+    )
+    context.add_tool_result = MagicMock(
+        side_effect=lambda msgs, tid, tname, result: (
+            msgs + [{"role": "tool", "tool_call_id": tid, "content": result}]
+        )
+    )
+
+    # Verifier mock: verify is async and returns (content, messages)
+    verifier = MagicMock()
+    verifier.verify = AsyncMock(
+        side_effect=lambda user_text, content, messages: (content, messages)
+    )
+
+    # Config mock: use a simple namespace with numeric defaults
+    config = MagicMock()
+    config.context_window_tokens = 0
+    config.max_session_wall_time_seconds = 0
+    config.planning_enabled = False
+
+    # Tool executor mock
+    tool_executor = MagicMock()
+    tool_executor.get_definitions = MagicMock(return_value=[])
+
     return {
         "llm_caller": MagicMock(),
-        "tool_executor": MagicMock(),
-        "verifier": MagicMock(),
+        "tool_executor": tool_executor,
+        "verifier": verifier,
         "dispatcher": MagicMock(),
         "delegation_advisor": MagicMock(),
-        "config": MagicMock(),
+        "config": config,
         "prompts": MagicMock(),
-        "context": MagicMock(),
+        "context": context,
     }
 
 
@@ -137,10 +171,12 @@ class TestRunWithToolCall:
         mocks["llm_caller"] = llm_caller
 
         # Tool executor returns a successful result
-        tool_executor = AsyncMock()
-        tool_executor.execute = AsyncMock(
-            return_value=[{"tool_call_id": "call_1", "content": "hello"}]
-        )
+        tool_result = MagicMock()
+        tool_result.success = True
+        tool_result.to_llm_string = MagicMock(return_value="hello")
+        tool_executor = MagicMock()
+        tool_executor.execute_batch = AsyncMock(return_value=[tool_result])
+        tool_executor.get_definitions = MagicMock(return_value=[])
         mocks["tool_executor"] = tool_executor
 
         orchestrator = TurnOrchestrator(**mocks)
