@@ -144,7 +144,7 @@ class ReadFileTool(_FsTool):
             total = 0
 
             try:
-                with fp.open("r", encoding="utf-8", errors="replace", newline=None) as f:
+                with fp.open("r", encoding="utf-8", newline=None) as f:
                     for lineno, line in enumerate(f, start=1):
                         total = lineno
 

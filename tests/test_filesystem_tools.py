@@ -93,7 +93,7 @@ class TestReadFileTool:
         f = tmp_path / "huge.txt"
         f.write_text("\n".join(f"line {i}" for i in range(1, 1000)), encoding="utf-8")
 
-        def _boom(self):  # noqa: ANN001
+        def _boom(self):
             raise AssertionError("read_bytes() should not be called for text files")
 
         monkeypatch.setattr(type(f), "read_bytes", _boom, raising=True)
