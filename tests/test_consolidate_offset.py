@@ -750,4 +750,3 @@ class TestConsolidationDeduplicationGuard:
         assert response is not None
         assert "new session started" in response.content.lower()
         assert archive_called, "Expected /new to trigger archival consolidation"
-

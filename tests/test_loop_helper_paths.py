@@ -156,7 +156,6 @@ def test_verification_helpers_and_lock_lifecycle(tmp_path: Path) -> None:
     assert v.should_force_verification("What is this") is True
 
 
-
 async def test_attempt_recovery_missing_or_error_paths(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path)
     verifier = loop._verifier

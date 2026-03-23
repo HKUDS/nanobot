@@ -58,5 +58,3 @@ class TestArchiveFnOnFailure:
         async with orch:
             orch.submit("s", session, MagicMock(), "m")
         archive.assert_called_once()
-
-

@@ -253,10 +253,7 @@ class MessageProcessor:
 
         # Trigger background consolidation if needed
         unconsolidated = len(session.messages) - session.last_consolidated
-        if (
-            self.config.memory_enabled
-            and unconsolidated >= self.config.memory_window
-        ):
+        if self.config.memory_enabled and unconsolidated >= self.config.memory_window:
             self._consolidator.submit(session.key, session, self.provider, self.model)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))

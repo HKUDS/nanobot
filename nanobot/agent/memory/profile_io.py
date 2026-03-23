@@ -73,7 +73,8 @@ class ProfileCache:
             return {}
         if self._data is not None and mtime == self._mtime:
             return self._data
-        self._data = self._persistence.read_json(self._path) or {}
+        raw = self._persistence.read_json(self._path)
+        self._data = raw if isinstance(raw, dict) else {}
         self._mtime = mtime
         return self._data
 
@@ -705,7 +706,7 @@ class ProfileStore:
 
     def _has_open_conflict(self, profile: dict[str, Any], key: str) -> bool:
         """Delegating wrapper — see ConflictManager.has_open_conflict."""
-        return self._conflict_mgr.has_open_conflict(profile, key)
+        return bool(self._conflict_mgr.has_open_conflict(profile, key))
 
     # ------------------------------------------------------------------
     # mem0 helpers

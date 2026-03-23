@@ -736,9 +736,7 @@ class AgentLoop:
                                     cls_result.role_name,
                                     cls_result.confidence,
                                 )
-                                classify_latency_ms = (
-                                    time.monotonic() - t0_classify
-                                ) * 1000
+                                classify_latency_ms = (time.monotonic() - t0_classify) * 1000
                                 # Confidence-aware: fall back to default on low confidence
                                 threshold = (
                                     self._routing_config.confidence_threshold
@@ -752,8 +750,7 @@ class AgentLoop:
                                         else "general"
                                     )
                                     logger.info(
-                                        "Low confidence ({:.2f} < {:.2f}),"
-                                        " using default role '{}'",
+                                        "Low confidence ({:.2f} < {:.2f}), using default role '{}'",
                                         confidence,
                                         threshold,
                                         role_name,
@@ -791,19 +788,14 @@ class AgentLoop:
                                     response = await self._process_message(msg)
                             except asyncio.TimeoutError:
                                 logger.error(
-                                    "Message processing timed out after {}s"
-                                    " for {}:{}",
+                                    "Message processing timed out after {}s for {}:{}",
                                     self.config.message_timeout,
                                     msg.channel,
                                     msg.chat_id,
                                 )
                                 update_current_span(
                                     output="TIMEOUT",
-                                    metadata={
-                                        "timeout_s": str(
-                                            self.config.message_timeout
-                                        )
-                                    },
+                                    metadata={"timeout_s": str(self.config.message_timeout)},
                                     level="ERROR",
                                 )
                                 response = OutboundMessage(
@@ -970,7 +962,11 @@ class AgentLoop:
         """Delegate to ConsolidationOrchestrator."""
         if archive_all:
             return await self._consolidator.consolidate_and_wait(
-                session.key, session, self.provider, self.model, archive_all=True,
+                session.key,
+                session,
+                self.provider,
+                self.model,
+                archive_all=True,
             )
         self._consolidator.submit(session.key, session, self.provider, self.model)
         return True
