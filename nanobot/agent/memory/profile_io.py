@@ -194,8 +194,12 @@ class ProfileStore:
         if self.profile_file.exists() and data is None:
             logger.warning("Failed to parse memory profile, resetting")
         return {
-            "preferences": [], "stable_facts": [], "active_projects": [],
-            "relationships": [], "constraints": [], "conflicts": [],
+            "preferences": [],
+            "stable_facts": [],
+            "active_projects": [],
+            "relationships": [],
+            "constraints": [],
+            "conflicts": [],
             "last_verified_at": None,
             "meta": {key: {} for key in self.PROFILE_KEYS},
             "updated_at": self._utc_now_iso(),
@@ -658,20 +662,8 @@ class ProfileStore:
         return True
 
     def _conflict_pair(self, old_value: str, new_value: str) -> bool:
-        old_n = self._norm_text(old_value)
-        new_n = self._norm_text(new_value)
-        if not old_n or not new_n or old_n == new_n:
-            return False
-        old_has_not = " not " in f" {old_n} " or "n't" in old_n
-        new_has_not = " not " in f" {new_n} " or "n't" in new_n
-        if old_has_not == new_has_not:
-            return False
-        old_tokens = self._tokenize(old_n.replace("not", ""))
-        new_tokens = self._tokenize(new_n.replace("not", ""))
-        if not old_tokens or not new_tokens:
-            return False
-        overlap = len(old_tokens & new_tokens) / max(len(old_tokens | new_tokens), 1)
-        return overlap >= 0.55
+        """Delegate to ConflictManager._conflict_pair."""
+        return bool(self._conflict_mgr._conflict_pair(old_value, new_value))
 
     def _apply_profile_updates(
         self,
@@ -681,124 +673,19 @@ class ProfileStore:
         enable_contradiction_check: bool,
         source_event_ids: list[str] | None = None,
     ) -> tuple[int, int, int]:
-        added = 0
-        conflicts = 0
-        touched = 0
-        profile.setdefault("conflicts", [])
-        # Use the first source event ID as evidence link for all updates in this
-        # batch.  More granular per-item linking requires changes to the extractor
-        # output format (future work).
-        evidence_ids = [source_event_ids[0]] if source_event_ids else None
-
-        for key in self.PROFILE_KEYS:
-            values = self._to_str_list(profile.get(key))
-            seen = {self._norm_text(v) for v in values}
-            for candidate in self._to_str_list(updates.get(key)):
-                normalized = self._norm_text(candidate)
-                if not normalized:
-                    continue
-
-                if normalized in seen:
-                    # Existing belief — bump confidence.
-                    entry = self._meta_entry(profile, key, candidate)
-                    belief_id = entry.get("id", "")
-                    if belief_id:
-                        self._update_belief_in_profile(
-                            profile,
-                            belief_id,
-                            confidence_delta=0.03,
-                            new_evidence_ids=evidence_ids,
-                            status=self.PROFILE_STATUS_ACTIVE,
-                        )
-                    else:
-                        self._touch_meta_entry(
-                            entry,
-                            confidence_delta=0.03,
-                            status=self.PROFILE_STATUS_ACTIVE,
-                            evidence_event_id=evidence_ids[0] if evidence_ids else None,
-                        )
-                    touched += 1
-                    continue
-
-                # Check for contradictions against the existing values
-                # (before appending the candidate).
-                existing_values_snapshot = list(values)
-
-                # Use _add_belief_to_profile to create the entry and append
-                # to the profile list.
-                self._add_belief_to_profile(
-                    profile,
-                    key,
-                    candidate,
-                    confidence=0.65,
-                    evidence_event_ids=evidence_ids,
-                    source="consolidation",
-                )
-                # Reconcile: _add_belief_to_profile appends to profile[key],
-                # keep local values/seen in sync.
-                values = self._to_str_list(profile.get(key))
-                seen.add(normalized)
-
-                has_conflict = False
-                if enable_contradiction_check:
-                    for existing in existing_values_snapshot:
-                        if self._conflict_pair(existing, candidate):
-                            has_conflict = True
-                            old_entry = self._meta_entry(profile, key, existing)
-                            self._touch_meta_entry(
-                                old_entry,
-                                confidence_delta=-0.12,
-                                status=self.PROFILE_STATUS_CONFLICTED,
-                            )
-                            new_entry = self._meta_entry(profile, key, candidate)
-                            self._touch_meta_entry(
-                                new_entry,
-                                confidence_delta=-0.2,
-                                min_confidence=0.35,
-                                status=self.PROFILE_STATUS_CONFLICTED,
-                                evidence_event_id=evidence_ids[0] if evidence_ids else None,
-                            )
-                            # Include belief IDs in conflict record (LAN-198).
-                            profile["conflicts"].append(
-                                {
-                                    "timestamp": self._utc_now_iso(),
-                                    "field": key,
-                                    "old": existing,
-                                    "new": candidate,
-                                    "old_memory_id": self._find_mem0_id_for_text(existing),
-                                    "new_memory_id": self._find_mem0_id_for_text(candidate),
-                                    "belief_id_old": old_entry.get("id", ""),
-                                    "belief_id_new": new_entry.get("id", ""),
-                                    "status": self.CONFLICT_STATUS_OPEN,
-                                    "old_confidence": old_entry.get("confidence"),
-                                    "new_confidence": new_entry.get("confidence"),
-                                    "old_last_seen_at": old_entry.get("last_seen_at", ""),
-                                    "new_last_seen_at": new_entry.get("last_seen_at", ""),
-                                }
-                            )
-                            conflicts += 1
-                            touched += 2
-                            break
-
-                if not has_conflict:
-                    # Boost confidence for non-conflicted new beliefs.
-                    entry = self._meta_entry(profile, key, candidate)
-                    self._touch_meta_entry(
-                        entry,
-                        confidence_delta=0.1,
-                        status=self.PROFILE_STATUS_ACTIVE,
-                        evidence_event_id=evidence_ids[0] if evidence_ids else None,
-                    )
-                    touched += 1
-                added += 1
-
-            profile[key] = values
-
-        return added, conflicts, touched
+        """Delegate to ConflictManager._apply_profile_updates."""
+        result: tuple[int, int, int] = self._conflict_mgr._apply_profile_updates(
+            profile,
+            updates,
+            enable_contradiction_check=enable_contradiction_check,
+            source_event_ids=source_event_ids,
+        )
+        return result
 
     def _has_open_conflict(
         self, profile: dict[str, Any], *, field: str, old_value: str, new_value: str
     ) -> bool:
+        """Check for an open conflict matching the exact old/new value pair."""
         old_norm = self._norm_text(old_value)
         new_norm = self._norm_text(new_value)
         for item in profile.get("conflicts", []):

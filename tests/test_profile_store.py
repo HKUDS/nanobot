@@ -1,11 +1,9 @@
 """Tests for ProfileCache and ProfileStore."""
+
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from nanobot.agent.memory.profile_io import ProfileCache, ProfileStore
 
