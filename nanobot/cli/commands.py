@@ -619,6 +619,13 @@ def gateway(
             chat_id=chat_id,
             on_progress=_silent,
         )
+
+        # Keep a small tail of heartbeat history so the loop stays bounded
+        # without losing all short-term context between runs.
+        session = agent.sessions.get_or_create("heartbeat")
+        session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+        agent.sessions.save(session)
+
         return resp.content if resp else ""
 
     async def on_heartbeat_notify(response: str) -> None:

@@ -90,6 +90,7 @@ class HeartbeatConfig(Base):
 
     enabled: bool = True
     interval_s: int = 30 * 60  # 30 minutes
+    keep_recent_messages: int = 8
 
 
 class GatewayConfig(Base):
