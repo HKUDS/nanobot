@@ -215,6 +215,12 @@ class DiscordChannel(BaseChannel):
     def default_config(cls) -> dict[str, Any]:
         return DiscordConfig().model_dump(by_alias=True)
 
+    @staticmethod
+    def _channel_key(channel_or_id: Any) -> str:
+        """Normalize channel-like objects and ids to a stable string key."""
+        channel_id = getattr(channel_or_id, "id", channel_or_id)
+        return str(channel_id)
+
     def __init__(self, config: Any, bus: MessageBus):
         if isinstance(config, dict):
             config = DiscordConfig.model_validate(config)
@@ -280,7 +286,7 @@ class DiscordChannel(BaseChannel):
             return
 
         sender_id = str(message.author.id)
-        channel_id = str(message.channel.id)
+        channel_id = self._channel_key(message.channel)
         content = message.content or ""
 
         if not self._should_accept_inbound(message, sender_id, content):
@@ -388,7 +394,7 @@ class DiscordChannel(BaseChannel):
 
     async def _start_typing(self, channel: "Messageable") -> None:
         """Start periodic typing indicator for a channel."""
-        channel_id = str(channel.id)
+        channel_id = self._channel_key(channel)
         await self._stop_typing(channel_id)
 
         async def typing_loop() -> None:
@@ -406,7 +412,7 @@ class DiscordChannel(BaseChannel):
 
     async def _stop_typing(self, channel_id: str) -> None:
         """Stop typing indicator for a channel."""
-        task = self._typing_tasks.pop(channel_id, None)
+        task = self._typing_tasks.pop(self._channel_key(channel_id), None)
         if task is None:
             return
         task.cancel()
