@@ -410,10 +410,38 @@ class AgentLoop:
         Called once from __init__ after _build_tools(). Initialises consolidation
         state and the ConsolidationOrchestrator that wraps self.context.memory.
         """
+        # Backward-compat attributes: external tests may access these directly.
         self._consolidating: set[str] = set()  # type: ignore[no-redef]
         self._consolidation_tasks: set[asyncio.Task[None]] = set()  # type: ignore[no-redef]
         self._consolidation_sem = asyncio.Semaphore(3)  # Cap concurrent consolidation LLM calls
-        self._consolidator = ConsolidationOrchestrator(self.context.memory)
+
+        def _archive(messages: list[dict[str, Any]]) -> None:
+            lines: list[str] = []
+            for m in messages:
+                content = m.get("content")
+                if not content:
+                    continue
+                tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
+                timestamp = str(m.get("timestamp", "?"))[:16]
+                role = str(m.get("role", "unknown")).upper()
+                lines.append(f"[{timestamp}] {role}{tools}: {content}")
+            if lines:
+                header = (
+                    f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}] "
+                    f"Fallback archive ({len(lines)} messages)"
+                )
+                self.context.memory.persistence.append_text(
+                    self.context.memory.history_file,
+                    header + "\n" + "\n".join(lines) + "\n\n",
+                )
+
+        self._consolidator = ConsolidationOrchestrator(
+            memory=self.context.memory,
+            archive_fn=_archive,
+            max_concurrent=3,
+            memory_window=self.config.memory_window,
+            enable_contradiction_check=self.config.memory_enable_contradiction_check,
+        )
 
     def _register_handlers(self) -> None:
         """Register bus message handlers.
@@ -664,6 +692,10 @@ class AgentLoop:
 
         logger.info("Agent loop started")
 
+        # Enter the consolidation orchestrator context so that submit()
+        # can schedule background tasks.  __aexit__ drains pending tasks.
+        await self._consolidator.__aenter__()
+
         while self._running:
             try:
                 # Race consume_inbound against the stop event so that stop()
@@ -815,6 +847,9 @@ class AgentLoop:
                     )
             except asyncio.TimeoutError:
                 continue
+
+        # Drain pending consolidation tasks before returning.
+        await self._consolidator.__aexit__(None, None, None)
 
     # ------------------------------------------------------------------
     # Delegation dispatch
