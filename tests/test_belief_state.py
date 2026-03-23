@@ -65,7 +65,7 @@ class TestStableBeliefIds:
             },
             "updated_at": "2026-01-01T00:00:00+00:00",
         }
-        store.persistence.write_json(store.profile_file, legacy)
+        store.profile_mgr.write_profile(legacy)
 
         profile = store.profile_mgr.read_profile()
         entry = profile["meta"]["stable_facts"]["user uses python"]
@@ -136,8 +136,8 @@ class TestPinnedSectionProtection:
             args={"memory_update": "# Memory\nNew summary from LLM."},
             current_memory=current,
         )
-        # memory_update should be ignored — MEMORY.md is not written
-        written = store.persistence.read_text(store.memory_file)
+        # memory_update should be ignored — snapshot is not written
+        written = store.db.read_snapshot("current") if store.db else ""
         assert written == ""
 
     def test_rebuild_memory_snapshot_preserves_pinned(self, tmp_path: Path) -> None:
@@ -148,10 +148,11 @@ class TestPinnedSectionProtection:
             "<!-- user-pinned -->\nDO NOT DELETE\n<!-- end-user-pinned -->\n"
             "Old summary.\n"
         )
-        store.persistence.write_text(store.memory_file, pinned_content)
+        if store.db:
+            store.db.write_snapshot("current", pinned_content)
         snapshot = store.snapshot.rebuild_memory_snapshot(write=True)
         assert "DO NOT DELETE" in snapshot
-        written = store.persistence.read_text(store.memory_file)
+        written = store.db.read_snapshot("current") if store.db else ""
         assert "DO NOT DELETE" in written
 
 

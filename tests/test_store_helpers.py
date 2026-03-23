@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -19,9 +18,8 @@ def _store(tmp_path: Path, **overrides: object) -> MemoryStore:
 
 
 def _seed_events(store: MemoryStore, events: list[dict[str, object]]) -> None:
-    existing = store.ingester.read_events()
-    rows = [*existing, *events]
-    store.persistence.write_jsonl(store.events_file, rows)
+    for event in events:
+        store.ingester.append_events([event])
 
 
 class TestMemoryStoreExtraHelpers:
@@ -34,10 +32,6 @@ class TestMemoryStoreExtraHelpers:
         store._rollout_config.apply_overrides(
             {
                 "memory_rollout_mode": "shadow",
-                "memory_shadow_mode": True,
-                "memory_shadow_sample_rate": 0.9,
-                "memory_fallback_allowed_sources": ["events", "profile"],
-                "memory_fallback_max_summary_chars": 222,
                 "rollout_gates": {"min_recall_at_k": 0.91},
                 "reranker_mode": "shadow",
                 "reranker_alpha": 0.8,
@@ -46,10 +40,6 @@ class TestMemoryStoreExtraHelpers:
         )
         status = store._rollout_config.get_status()
         assert status["memory_rollout_mode"] == "shadow"
-        assert status["memory_shadow_mode"] is True
-        assert status["memory_shadow_sample_rate"] == pytest.approx(0.9)
-        assert status["memory_fallback_allowed_sources"] == ["events", "profile"]
-        assert status["memory_fallback_max_summary_chars"] == 222
         assert status["rollout_gates"]["min_recall_at_k"] == pytest.approx(0.91)
         assert status["reranker_mode"] == "shadow"
         assert status["reranker_alpha"] == pytest.approx(0.8)
@@ -140,19 +130,6 @@ class TestMemoryStoreExtraHelpers:
             ]
         )
         assert len(compacted) == 2
-
-    def test_vector_health_probe_paths(self, tmp_path: Path) -> None:
-        store = _store(tmp_path)
-        store.rollout["memory_vector_health_enabled"] = True
-        store.mem0.enabled = True
-        store.mem0.search = MagicMock(return_value=[])
-        store.maintenance._mem0_get_all_rows = MagicMock(return_value=[])
-        store.maintenance._vector_points_count = MagicMock(return_value=0)
-        store.maintenance._history_row_count = MagicMock(return_value=5)
-        store.maintenance._reindex_fn = MagicMock(return_value={"ok": True})
-
-        store.maintenance._ensure_vector_health()
-        store.maintenance._reindex_fn.assert_called_once()
 
 
 class TestMemoryStoreExtraProfileAndConflicts:
@@ -277,38 +254,6 @@ class TestMemoryStoreExtraRetrievalAndContext:
         context = store.get_memory_context(query="open tasks", token_budget=500)
         assert isinstance(context, str)
 
-    def test_retrieve_with_mem0_enabled_mocked(self, tmp_path: Path) -> None:
-        store = _store(tmp_path, memory_shadow_mode=True, memory_shadow_sample_rate=1.0)
-        store.mem0.enabled = True
-
-        def _fake_search(
-            *args: object, **kwargs: object
-        ) -> tuple[list[dict[str, object]], dict[str, int]]:
-            return (
-                [
-                    {
-                        "id": "m1",
-                        "text": "User prefers concise responses",
-                        "score": 0.9,
-                        "metadata": {
-                            "memory_type": "semantic",
-                            "topic": "user_preference",
-                            "timestamp": "2026-02-20T10:00:00+00:00",
-                        },
-                    }
-                ],
-                {
-                    "source_vector": 1,
-                    "source_get_all": 0,
-                    "source_history": 0,
-                    "rejected_blob_like": 0,
-                },
-            )
-
-        store.mem0.search = MagicMock(side_effect=_fake_search)
-        out = store.retriever.retrieve("concise responses", top_k=2)
-        assert isinstance(out, list)
-
     def test_split_and_cap_long_term_text(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         from nanobot.agent.memory.context_assembler import ContextAssembler
@@ -393,8 +338,6 @@ class TestMemoryStoreExtraCorpusAndEvaluation:
             read_events_fn=store.ingester.read_events,
             ingester=store.ingester,
             profile_keys=store.PROFILE_KEYS,
-            vector_points_count_fn=store.maintenance._vector_points_count,
-            mem0_get_all_rows_fn=store.maintenance._mem0_get_all_rows,
         )
         assert isinstance(seeded, dict)
 
@@ -403,8 +346,6 @@ class TestMemoryStoreExtraCorpusAndEvaluation:
             read_events_fn=store.ingester.read_events,
             ingester=store.ingester,
             profile_keys=store.PROFILE_KEYS,
-            vector_points_count_fn=store.maintenance._vector_points_count,
-            mem0_get_all_rows_fn=store.maintenance._mem0_get_all_rows,
         )
         assert isinstance(reindexed, dict)
 

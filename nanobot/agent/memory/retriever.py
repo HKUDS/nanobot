@@ -24,17 +24,45 @@ from .helpers import (
     _extract_query_keywords,
     _norm_text,
 )
-from .keyword_search import _local_retrieve, _topic_fallback_retrieve
 from .retrieval_planner import RetrievalPlan, RetrievalPlanner
 
 if TYPE_CHECKING:
     from .embedder import Embedder
     from .extractor import MemoryExtractor
     from .graph import KnowledgeGraph
-    from .mem0_adapter import _Mem0Adapter
     from .profile_io import ProfileStore as ProfileManager
     from .reranker import Reranker
     from .unified_db import UnifiedMemoryDB
+
+
+# ---------------------------------------------------------------------------
+# Stubs for removed retrieval.py — these are only reachable from legacy code
+# paths that are no longer invoked by the main ``retrieve()`` entry point.
+# ---------------------------------------------------------------------------
+
+
+def _local_retrieve(
+    events: list[dict[str, Any]],
+    query: str,
+    *,
+    recency_half_life_days: float | None = None,
+    include_superseded: bool = False,
+    top_k: int = 20,
+) -> list[dict[str, Any]]:
+    """Stub: local BM25 retrieval removed with persistence.py."""
+    return []
+
+
+def _topic_fallback_retrieve(
+    events: list[dict[str, Any]],
+    *,
+    target_topics: list[str],
+    target_memory_types: list[str],
+    exclude_ids: set[str],
+    top_k: int = 5,
+) -> list[dict[str, Any]]:
+    """Stub: topic fallback retrieval removed with retrieval.py."""
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +111,6 @@ class MemoryRetriever:
     def __init__(
         self,
         *,
-        mem0: _Mem0Adapter,
         graph: KnowledgeGraph | None,
         planner: RetrievalPlanner,
         reranker: Reranker,
@@ -94,7 +121,6 @@ class MemoryRetriever:
         db: UnifiedMemoryDB | None = None,
         embedder: Embedder | None = None,
     ) -> None:
-        self._mem0 = mem0
         self._graph = graph
         self._planner = planner
         self._reranker = reranker
@@ -143,12 +169,7 @@ class MemoryRetriever:
                 t0=t0,
             )
 
-        if not self._mem0.enabled:
-            return self._retrieve_bm25_path(
-                query, top_k=top_k, recency_half_life_days=recency_half_life_days, t0=t0
-            )
-
-        return self._retrieve_mem0_path(query, top_k=top_k, t0=t0)
+        return []
 
     # ------------------------------------------------------------------
     # BM25 path (mem0 disabled)
@@ -1083,10 +1104,19 @@ class MemoryRetriever:
 
     def _enrich_item_metadata(self, items: list[dict[str, Any]]) -> None:
         """Promote metadata fields (topic, stability, memory_type) to top level."""
+        import json as _json
+
         for item in items:
             memory_type = RetrievalPlanner.memory_type_for_item(item)
             item["memory_type"] = memory_type
             meta = item.get("metadata", {})
+            if isinstance(meta, str):
+                try:
+                    meta = _json.loads(meta)
+                except (ValueError, TypeError):
+                    meta = {}
+            if not isinstance(meta, dict):
+                meta = {}
             if not item.get("topic"):
                 item["topic"] = str(meta.get("topic", "")).strip()
             if not item.get("stability"):

@@ -26,8 +26,8 @@ class EvalRunner:
     def __init__(
         self,
         retrieve_fn: Callable[..., list[dict[str, Any]]],
-        persistence: MemoryPersistence,
         workspace: Path,
+        memory_dir: Path,
         *,
         get_rollout_status_fn: Callable[[], dict[str, Any]],
         get_rollout_fn: Callable[[], dict[str, Any]],
@@ -35,9 +35,8 @@ class EvalRunner:
         db: UnifiedMemoryDB | None = None,
     ) -> None:
         self._retrieve = retrieve_fn
-        self.persistence = persistence
         self.workspace = workspace
-        self.memory_dir = persistence.memory_dir
+        self.memory_dir = memory_dir
         self._get_rollout_status = get_rollout_status_fn
         self._get_rollout = get_rollout_fn
         self._get_backend_stats = get_backend_stats_fn
@@ -341,12 +340,9 @@ class EvalRunner:
             "observability": observability,
             "rollout": rollout or self._get_rollout_status(),
         }
-        if self._db is not None:
-            import json as _json
+        import json as _json
 
-            path.write_text(_json.dumps(payload, default=str, indent=2), encoding="utf-8")
-        else:
-            self.persistence.write_json(path, payload)
+        path.write_text(_json.dumps(payload, default=str, indent=2), encoding="utf-8")
         return path
 
     def evaluate_rollout_gates(

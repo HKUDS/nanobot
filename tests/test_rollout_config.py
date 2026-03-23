@@ -17,26 +17,8 @@ class TestRolloutConfigDefaults:
         assert cfg.rollout["memory_type_separation_enabled"] is True
         assert cfg.rollout["memory_router_enabled"] is True
         assert cfg.rollout["memory_reflection_enabled"] is True
-        assert cfg.rollout["memory_shadow_mode"] is False
         assert cfg.rollout["memory_vector_health_enabled"] is True
         assert cfg.rollout["memory_auto_reindex_on_empty_vector"] is True
-        assert cfg.rollout["memory_history_fallback_enabled"] is False
-
-    def test_default_fallback_sources(self) -> None:
-        cfg = RolloutConfig()
-        assert cfg.rollout["memory_fallback_allowed_sources"] == [
-            "profile",
-            "events",
-            "mem0_get_all",
-        ]
-
-    def test_default_max_summary_chars(self) -> None:
-        cfg = RolloutConfig()
-        assert cfg.rollout["memory_fallback_max_summary_chars"] == 280
-
-    def test_default_shadow_sample_rate(self) -> None:
-        cfg = RolloutConfig()
-        assert cfg.rollout["memory_shadow_sample_rate"] == 0.2
 
     def test_default_rollout_gates(self) -> None:
         cfg = RolloutConfig()
@@ -52,12 +34,9 @@ class TestRolloutConfigDefaults:
         assert cfg.rollout["reranker_alpha"] == 0.5
         assert cfg.rollout["reranker_model"] == "onnx:ms-marco-MiniLM-L-6-v2"
 
-    def test_default_mem0_settings(self) -> None:
+    def test_default_consolidation_single_tool(self) -> None:
         cfg = RolloutConfig()
-        assert cfg.rollout["mem0_user_id"] == "nanobot"
-        assert cfg.rollout["mem0_add_debug"] is False
-        assert cfg.rollout["mem0_verify_write"] is True
-        assert cfg.rollout["mem0_force_infer_true"] is False
+        assert cfg.rollout["consolidation_single_tool"] is True
 
 
 class TestRolloutConfigOverrides:
@@ -75,26 +54,6 @@ class TestRolloutConfigOverrides:
         cfg = RolloutConfig(overrides={"memory_router_enabled": False})
         assert cfg.rollout["memory_router_enabled"] is False
 
-    def test_override_shadow_sample_rate_clamped(self) -> None:
-        cfg = RolloutConfig(overrides={"memory_shadow_sample_rate": 5.0})
-        assert cfg.rollout["memory_shadow_sample_rate"] == 1.0
-
-    def test_override_shadow_sample_rate_floor(self) -> None:
-        cfg = RolloutConfig(overrides={"memory_shadow_sample_rate": -1.0})
-        assert cfg.rollout["memory_shadow_sample_rate"] == 0.0
-
-    def test_override_max_summary_chars_clamped(self) -> None:
-        cfg = RolloutConfig(overrides={"memory_fallback_max_summary_chars": 99999})
-        assert cfg.rollout["memory_fallback_max_summary_chars"] == 4000
-
-    def test_override_max_summary_chars_floor(self) -> None:
-        cfg = RolloutConfig(overrides={"memory_fallback_max_summary_chars": 10})
-        assert cfg.rollout["memory_fallback_max_summary_chars"] == 80
-
-    def test_override_fallback_sources(self) -> None:
-        cfg = RolloutConfig(overrides={"memory_fallback_allowed_sources": ["profile"]})
-        assert cfg.rollout["memory_fallback_allowed_sources"] == ["profile"]
-
     def test_override_rollout_gates_partial(self) -> None:
         cfg = RolloutConfig(overrides={"rollout_gates": {"min_recall_at_k": 0.9}})
         assert cfg.rollout["rollout_gates"]["min_recall_at_k"] == 0.9
@@ -108,14 +67,6 @@ class TestRolloutConfigOverrides:
     def test_override_reranker_alpha_clamped(self) -> None:
         cfg = RolloutConfig(overrides={"reranker_alpha": 2.0})
         assert cfg.rollout["reranker_alpha"] == 1.0
-
-    def test_override_mem0_user_id(self) -> None:
-        cfg = RolloutConfig(overrides={"mem0_user_id": "alice"})
-        assert cfg.rollout["mem0_user_id"] == "alice"
-
-    def test_override_mem0_boolean(self) -> None:
-        cfg = RolloutConfig(overrides={"mem0_add_debug": True})
-        assert cfg.rollout["mem0_add_debug"] is True
 
     def test_empty_overrides_no_change(self) -> None:
         cfg = RolloutConfig(overrides={})
@@ -146,21 +97,13 @@ class TestGetStatus:
             "memory_type_separation_enabled",
             "memory_router_enabled",
             "memory_reflection_enabled",
-            "memory_shadow_mode",
-            "memory_shadow_sample_rate",
             "memory_vector_health_enabled",
             "memory_auto_reindex_on_empty_vector",
-            "memory_history_fallback_enabled",
-            "memory_fallback_allowed_sources",
-            "memory_fallback_max_summary_chars",
             "rollout_gates",
             "reranker_mode",
             "reranker_alpha",
             "reranker_model",
-            "mem0_user_id",
-            "mem0_add_debug",
-            "mem0_verify_write",
-            "mem0_force_infer_true",
+            "consolidation_single_tool",
         }
         assert expected_keys.issubset(set(status.keys()))
 

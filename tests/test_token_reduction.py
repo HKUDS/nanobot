@@ -32,7 +32,8 @@ def test_cap_long_term_text_called_once(tmp_path):
     store._assembler._cap_long_term_text = counting_cap  # type: ignore[method-assign]
 
     long_term_text = "fact. " * 300  # ~300 tokens, well within the 1500 cap
-    store.persistence.write_text(store.memory_file, long_term_text)
+    if store.db:
+        store.db.write_snapshot("current", long_term_text)
 
     store.get_memory_context(query="test query", token_budget=900, memory_md_token_cap=1500)
 

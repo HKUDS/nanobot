@@ -196,29 +196,6 @@ class CorrectionOrchestrator:
             if needs_user > 0:
                 question = self._conflict_mgr.ask_user_for_conflict()
 
-        if self._profile_store.mem0.enabled:
-            correction_meta, _ = self._ingester._normalize_memory_metadata(
-                {"topic": "user_correction", "memory_type": "episodic", "stability": "medium"},
-                event_type="fact",
-                summary=text,
-                source="chat",
-            )
-            correction_meta.update(
-                {
-                    "event_type": "user_correction",
-                    "timestamp": self._profile_store._utc_now_iso(),
-                    "channel": channel,
-                    "chat_id": chat_id,
-                }
-            )
-            correction_text = self._ingester._sanitize_mem0_text(text, allow_archival=False)
-            correction_meta = self._ingester._sanitize_mem0_metadata(correction_meta)
-            if correction_text:
-                self._profile_store.mem0.add_text(
-                    correction_text,
-                    metadata=correction_meta,
-                )
-
         # Keep LLM-managed MEMORY.md content stable; snapshot can be generated on-demand.
         self._snapshot.rebuild_memory_snapshot(write=False)
         return {

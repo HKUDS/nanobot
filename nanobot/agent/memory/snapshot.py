@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable
 
 from .helpers import _to_datetime, _to_str_list, _utc_now_iso
-from .persistence import MemoryPersistence
 from .profile_io import ProfileStore as ProfileManager
 
 if TYPE_CHECKING:
@@ -43,7 +42,6 @@ class MemorySnapshot:
         self,
         *,
         profile_mgr: ProfileManager,
-        persistence: MemoryPersistence,
         read_events_fn: Callable[..., list[dict[str, Any]]],
         profile_section_lines_fn: Callable[..., list[str]],
         recent_unresolved_fn: Callable[..., list[dict[str, Any]]],
@@ -55,7 +53,6 @@ class MemorySnapshot:
         db: UnifiedMemoryDB | None = None,
     ) -> None:
         self.profile_mgr = profile_mgr
-        self.persistence = persistence
         self._read_events = read_events_fn
         self._profile_section_lines = profile_section_lines_fn
         self._recent_unresolved = recent_unresolved_fn
@@ -101,13 +98,13 @@ class MemorySnapshot:
         if self._db is not None:
             events = self._db.read_events(limit=max_events)
         else:
-            events = self._read_events(limit=max_events)
+            events = self._read_events(limit=max_events) or []
 
         # Preserve user-pinned sections across rebuilds (LAN-199 / LAN-206).
         if self._db is not None:
             existing_memory = self._db.read_snapshot("current")
         else:
-            existing_memory = self._read_long_term()
+            existing_memory = self._read_long_term() if self._read_long_term else ""
         pinned = self._extract_pinned_section(existing_memory) if existing_memory else None
 
         parts: list[str] = ["# Memory", ""]
@@ -136,7 +133,7 @@ class MemorySnapshot:
         if write:
             if self._db is not None:
                 self._db.write_snapshot("current", snapshot)
-            else:
+            elif self._write_long_term is not None:
                 self._write_long_term(snapshot)
         return snapshot
 
@@ -148,7 +145,7 @@ class MemorySnapshot:
         if self._db is not None:
             events = self._db.read_events(limit=1000)
         else:
-            events = self._read_events()
+            events = self._read_events() if self._read_events else []
         now = datetime.now(timezone.utc)
         stale = 0
         total_ttl = 0

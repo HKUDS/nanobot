@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any, Callable
 from loguru import logger
 
 from .helpers import _estimate_tokens, _norm_text, _safe_float, _to_str_list
-from .persistence import MemoryPersistence
 from .profile_io import ProfileStore as ProfileManager
 from .retrieval_planner import RetrievalPlanner
 from .token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
@@ -64,7 +63,6 @@ class ContextAssembler:
         self,
         profile_mgr: ProfileManager,
         retrieve_fn: Callable[..., list[dict[str, Any]]],
-        persistence: MemoryPersistence,
         planner: RetrievalPlanner,
         *,
         read_events_fn: Callable[..., list[dict[str, Any]]] | None = None,
@@ -81,7 +79,6 @@ class ContextAssembler:
     ) -> None:
         self._profile_mgr = profile_mgr
         self._retrieve_fn = retrieve_fn
-        self._persistence = persistence
         self._planner = planner
         self._read_events_fn = read_events_fn
         self._read_long_term_fn = read_long_term_fn
@@ -317,7 +314,7 @@ class ContextAssembler:
             return self._db.read_snapshot("current")
         if self._read_long_term_fn is not None:
             return self._read_long_term_fn()
-        return self._persistence.read_text(self._persistence.memory_file)
+        return ""
 
     def _read_events(self, limit: int | None = None) -> list[dict[str, Any]]:
         if self._read_events_fn is not None:

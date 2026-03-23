@@ -35,8 +35,6 @@ if TYPE_CHECKING:
 
     from .conflicts import ConflictManager
     from .extractor import MemoryExtractor
-    from .mem0_adapter import _Mem0Adapter
-    from .persistence import MemoryPersistence
     from .profile_io import ProfileStore as ProfileManager
     from .snapshot import MemorySnapshot
 
@@ -49,14 +47,14 @@ class ConsolidationPipeline:
     def __init__(
         self,
         *,
-        persistence: MemoryPersistence,
+        persistence: Any = None,
         extractor: MemoryExtractor,
         ingester: EventIngester,
         profile_mgr: ProfileManager,
         conflict_mgr: ConflictManager,
         snapshot: MemorySnapshot,
-        mem0: _Mem0Adapter,
-        mem0_raw_turn_ingestion: bool,
+        mem0: Any = None,
+        mem0_raw_turn_ingestion: bool = False,
         memory_file: Path,
         history_file: Path,
         rollout: dict[str, Any] | None = None,
@@ -143,7 +141,8 @@ class ConsolidationPipeline:
         if entry := args.get("history_entry"):
             if not isinstance(entry, str):
                 entry = json.dumps(entry, ensure_ascii=False)
-            self._persistence.append_text(self._history_file, entry.rstrip() + "\n\n")
+            with open(self._history_file, "a", encoding="utf-8") as _f:
+                _f.write(entry.rstrip() + "\n\n")
         # memory_update is intentionally ignored (LAN-206): MEMORY.md is now a
         # pure projection rebuilt deterministically via rebuild_memory_snapshot().
 
@@ -207,7 +206,8 @@ class ConsolidationPipeline:
             history_entry = " ".join(lines[:3]) if lines else ""
             logger.warning("consolidate_memory: history_entry missing, generated from first lines")
         if history_entry:
-            self._persistence.append_text(self._history_file, history_entry.rstrip() + "\n\n")
+            with open(self._history_file, "a", encoding="utf-8") as _f:
+                _f.write(history_entry.rstrip() + "\n\n")
 
         # -- Events (fallback: heuristic extractor) --
         raw_events = args.get("events")
@@ -269,10 +269,10 @@ class ConsolidationPipeline:
 
         self._snapshot.rebuild_memory_snapshot(write=True)
 
-        if self._mem0.enabled and events:
+        if self._mem0 is not None and self._mem0.enabled and events:
             self._ingester._sync_events_to_mem0(events)
 
-        if self._mem0.enabled and self._mem0_raw_turn_ingestion:
+        if self._mem0 is not None and self._mem0.enabled and self._mem0_raw_turn_ingestion:
             for m in old_messages:
                 role = str(m.get("role", "user")).strip().lower() or "user"
                 content = str(m.get("content", "")).strip()
@@ -360,7 +360,10 @@ class ConsolidationPipeline:
 
         lines = self._format_conversation_lines(old_messages)
 
-        current_memory = self._persistence.read_text(self._memory_file)
+        try:
+            current_memory = self._memory_file.read_text(encoding="utf-8")
+        except (FileNotFoundError, OSError):
+            current_memory = ""
 
         try:
             # Task 6: branch on rollout flag — single-tool vs. legacy two-call path.
@@ -447,12 +450,12 @@ class ConsolidationPipeline:
 
             # LAN-208: sync structured events to mem0 as the primary indexing
             # path — mem0 is a semantic index, not a raw transcript store.
-            if self._mem0.enabled and events:
+            if self._mem0 is not None and self._mem0.enabled and events:
                 self._ingester._sync_events_to_mem0(events)
 
             # LAN-208: raw conversation turn ingestion — legacy behaviour, gated
             # behind _mem0_raw_turn_ingestion (default True for backward compat).
-            if self._mem0.enabled and self._mem0_raw_turn_ingestion:
+            if self._mem0 is not None and self._mem0.enabled and self._mem0_raw_turn_ingestion:
                 for m in old_messages:
                     role = str(m.get("role", "user")).strip().lower() or "user"
                     content = str(m.get("content", "")).strip()

@@ -17,7 +17,6 @@ from .helpers import _norm_text, _safe_float, _tokenize, _utc_now_iso
 from .profile_io import ProfileStore as ProfileManager
 
 if TYPE_CHECKING:
-    from .mem0_adapter import _Mem0Adapter
     from .profile_io import ProfileStore
     from .unified_db import UnifiedMemoryDB
 
@@ -51,7 +50,6 @@ class ConflictManager:
     def __init__(
         self,
         profile_store: ProfileStore | ProfileManager,
-        mem0: _Mem0Adapter,
         *,
         sanitize_mem0_text_fn: Callable[..., str] | None = None,
         normalize_metadata_fn: Callable[..., tuple[dict, bool]] | None = None,
@@ -60,7 +58,6 @@ class ConflictManager:
     ) -> None:
         # Stored as profile_mgr for backward compat with resolve_conflict_details callers.
         self.profile_mgr = profile_store
-        self.mem0 = mem0
         self._sanitize_mem0_text = sanitize_mem0_text_fn
         self._normalize_metadata = normalize_metadata_fn
         self._sanitize_metadata = sanitize_metadata_fn
@@ -531,17 +528,8 @@ class ConflictManager:
         new_belief_id = new_entry.get("id", "")
 
         if selected == "keep_old":
-            if self._db is not None:
-                # Conflict resolution operates on profile data; no vector-store
-                # sync needed when using UnifiedMemoryDB.
-                mem0_ok = True
-                result["mem0_operation"] = "none_db"
-            elif new_memory_id:
-                mem0_ok = self.mem0.delete(new_memory_id)
-                result["mem0_operation"] = "delete_new"
-            else:
-                mem0_ok = True
-                result["mem0_operation"] = "none"
+            mem0_ok = True
+            result["mem0_operation"] = "none_db"
             values = _remove_value(values, new_value)
             # Boost winner confidence via update_belief.
             self.profile_mgr._update_belief_in_profile(
@@ -558,53 +546,8 @@ class ConflictManager:
                 new_entry["superseded_by_id"] = old_belief_id
                 old_entry.setdefault("supersedes_id", new_belief_id)
         elif selected == "keep_new":
-            clean_new_value = (
-                self._sanitize_mem0_text(new_value, allow_archival=False)
-                if self._sanitize_mem0_text
-                else new_value
-            ) or new_value
-            if self._db is not None:
-                # No vector-store sync needed when using UnifiedMemoryDB.
-                mem0_ok = True
-                result["mem0_operation"] = "none_db"
-            elif old_memory_id:
-                mem0_ok = self.mem0.update(old_memory_id, clean_new_value)
-                result["mem0_operation"] = "update_old_to_new"
-                if mem0_ok and new_memory_id and new_memory_id != old_memory_id:
-                    self.mem0.delete(new_memory_id)
-                    conflict["new_memory_id"] = old_memory_id
-                    result["new_memory_id"] = old_memory_id
-            else:
-                if self._normalize_metadata:
-                    conflict_metadata, _ = self._normalize_metadata(
-                        {
-                            "topic": "conflict_resolution",
-                            "memory_type": "semantic",
-                            "stability": "high",
-                        },
-                        event_type="fact",
-                        summary=clean_new_value,
-                        source="chat",
-                    )
-                else:
-                    conflict_metadata = {
-                        "topic": "conflict_resolution",
-                        "memory_type": "semantic",
-                        "stability": "high",
-                    }
-                conflict_metadata.update({"event_type": "conflict_resolution", "field": key})
-                if self._sanitize_metadata:
-                    conflict_metadata = self._sanitize_metadata(conflict_metadata)
-                mem0_ok = (
-                    self.mem0.add_text(
-                        clean_new_value,
-                        metadata=conflict_metadata,
-                    )
-                    if clean_new_value
-                    else False
-                )
-                if mem0_ok:
-                    result["mem0_operation"] = "add_new"
+            mem0_ok = True
+            result["mem0_operation"] = "none_db"
             values = _remove_value(values, old_value)
             # Boost winner confidence via update_belief.
             self.profile_mgr._update_belief_in_profile(
@@ -637,7 +580,7 @@ class ConflictManager:
             return result
 
         result["mem0_ok"] = mem0_ok
-        if not mem0_ok and self.mem0.enabled:
+        if not mem0_ok:
             return result
 
         profile[key] = values

@@ -12,16 +12,11 @@ from nanobot.agent.memory.retriever import MemoryRetriever
 
 def _make_retriever(
     *,
-    mem0_enabled: bool = False,
     rollout: dict[str, Any] | None = None,
     events: list[dict[str, Any]] | None = None,
     graph_enabled: bool = False,
 ) -> MemoryRetriever:
     """Build a MemoryRetriever with mocked dependencies."""
-    mem0 = MagicMock()
-    mem0.enabled = mem0_enabled
-    mem0.mode = "local"
-
     graph = MagicMock()
     graph.enabled = graph_enabled
     graph.get_related_entity_names_sync = MagicMock(return_value=set())
@@ -58,7 +53,6 @@ def _make_retriever(
     extractor._extract_entities = MagicMock(return_value=[])
 
     return MemoryRetriever(
-        mem0=mem0,
         graph=graph,
         planner=planner,
         reranker=reranker,
@@ -97,89 +91,12 @@ def _make_plan(
     return plan
 
 
-class TestRetrieveMem0Disabled:
-    """When mem0 is disabled, retrieve uses BM25 local path."""
+class TestRetrieveWithoutDB:
+    """When neither db nor embedder is available, retrieve returns empty."""
 
-    def test_returns_local_results(self) -> None:
-        events = [
-            {
-                "id": "e1",
-                "type": "fact",
-                "summary": "Python is great",
-                "timestamp": "2025-01-01T00:00:00Z",
-                "entities": [],
-                "status": "active",
-            }
-        ]
-        retriever = _make_retriever(events=events)
-        with patch(
-            "nanobot.agent.memory.retriever._local_retrieve",
-            return_value=[
-                {
-                    "id": "e1",
-                    "type": "fact",
-                    "summary": "Python is great",
-                    "timestamp": "2025-01-01T00:00:00Z",
-                    "retrieval_reason": {"score": 0.5},
-                    "entities": [],
-                }
-            ],
-        ):
-            results = retriever.retrieve("Python", top_k=3)
-        assert len(results) == 1
-        assert results[0]["id"] == "e1"
-        assert "score" in results[0]
-
-
-class TestRetrieveMem0Enabled:
-    """When mem0 is enabled, retrieve calls _run_mem0_pipeline."""
-
-    def test_calls_mem0_search(self) -> None:
-        retriever = _make_retriever(mem0_enabled=True)
-        retriever._mem0.search = MagicMock(
-            return_value=(
-                [
-                    {
-                        "id": "m1",
-                        "type": "fact",
-                        "summary": "Test memory",
-                        "timestamp": "2025-01-01T00:00:00Z",
-                        "score": 0.8,
-                        "stability": "high",
-                        "entities": [],
-                    }
-                ],
-                {
-                    "source_vector": 1,
-                    "source_get_all": 0,
-                    "source_history": 0,
-                    "rejected_blob_like": 0,
-                },
-            )
-        )
-        results = retriever.retrieve("test", top_k=3)
-        assert len(results) == 1
-        assert results[0]["id"] == "m1"
-        retriever._mem0.search.assert_called_once()
-
-
-class TestRetrieveEmptyResults:
-    """Empty mem0 results return empty list."""
-
-    def test_empty_mem0(self) -> None:
-        retriever = _make_retriever(mem0_enabled=True)
-        retriever._mem0.search = MagicMock(
-            return_value=(
-                [],
-                {
-                    "source_vector": 0,
-                    "source_get_all": 0,
-                    "source_history": 0,
-                    "rejected_blob_like": 0,
-                },
-            )
-        )
-        results = retriever.retrieve("anything", top_k=3)
+    def test_returns_empty_without_db(self) -> None:
+        retriever = _make_retriever()
+        results = retriever.retrieve("Python", top_k=3)
         assert results == []
 
 
@@ -791,8 +708,7 @@ class TestGraphEntityCache:
     def test_retrieve_resets_cache_between_calls(self):
         """retrieve() resets _graph_cache so each call gets a fresh traversal."""
         r = self._make_retriever_with_graph()
-        # Force BM25 path by disabling mem0
-        r._mem0.enabled = False
+        # Force stub path — no db/embedder injected
 
         # Configure planner to return a proper plan
         plan = MagicMock()

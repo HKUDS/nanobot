@@ -38,8 +38,6 @@ from .retrieval_planner import RetrievalPlanner
 if TYPE_CHECKING:
     from .embedder import Embedder
     from .graph import KnowledgeGraph
-    from .mem0_adapter import _Mem0Adapter
-    from .persistence import MemoryPersistence
     from .unified_db import UnifiedMemoryDB
 
 # ---------------------------------------------------------------------------
@@ -65,8 +63,6 @@ class EventIngester:
 
     def __init__(
         self,
-        persistence: MemoryPersistence,
-        mem0: _Mem0Adapter,
         graph: KnowledgeGraph | None,
         rollout: dict[str, Any],
         *,
@@ -74,17 +70,11 @@ class EventIngester:
         db: UnifiedMemoryDB | None = None,
         embedder: Embedder | None = None,
     ) -> None:
-        self._persistence = persistence
-        self._mem0 = mem0
         self._graph = graph
         self._rollout = rollout
         self._conflict_pair_fn = conflict_pair_fn
         self._db = db
         self._embedder = embedder
-
-        # mtime-based cache for events.jsonl (P-01/P-02).
-        self._events_cache: list[dict[str, Any]] | None = None
-        self._events_cache_mtime: float = -1.0
 
     # ------------------------------------------------------------------
     # Event coercion & ID building
@@ -452,24 +442,10 @@ class EventIngester:
     # ------------------------------------------------------------------
 
     def read_events(self, limit: int | None = None) -> list[dict[str, Any]]:
-        """Read events from persistence with mtime-based caching."""
+        """Read events from UnifiedMemoryDB."""
         if self._db is not None:
             return self._db.read_events(limit=limit or 100)
-
-        events_file = self._persistence.events_file
-        try:
-            current_mtime = events_file.stat().st_mtime if events_file.exists() else -1.0
-        except OSError:
-            current_mtime = -1.0
-
-        if self._events_cache is None or current_mtime != self._events_cache_mtime:
-            self._events_cache = self._persistence.read_jsonl(events_file)
-            self._events_cache_mtime = current_mtime
-
-        out = self._events_cache
-        if limit is not None and limit > 0:
-            return out[-limit:]
-        return out
+        return []
 
     @staticmethod
     def _merge_source_span(base: list[int] | Any, incoming: list[int] | Any) -> list[int]:
@@ -823,7 +799,7 @@ class EventIngester:
         if written <= 0 and merged <= 0:
             return 0
 
-        # New path: write to UnifiedMemoryDB
+        # Write to UnifiedMemoryDB
         if self._db is not None:
             import json as _json
 
@@ -838,23 +814,6 @@ class EventIngester:
                     evt_copy["metadata"] = _json.dumps(evt_copy["metadata"])
                 evt_copy.setdefault("created_at", evt_copy.get("timestamp", _utc_now_iso()))
                 self._db.insert_event(evt_copy, embedding=embedding)
-        else:
-            # Old path: write to persistence + sync to mem0
-            events_file = self._persistence.events_file
-            self._persistence.write_jsonl(events_file, existing_events)
-
-            if written > 0 and self._mem0.enabled:
-                for event in appended_events:
-                    plan = self._event_mem0_write_plan(event)
-                    for text, metadata in plan:
-                        clean_text = self._sanitize_mem0_text(
-                            text,
-                            allow_archival=bool(metadata.get("archival")),
-                        )
-                        if not clean_text:
-                            continue
-                        clean_metadata = self._sanitize_mem0_metadata(metadata)
-                        self._mem0.add_text(clean_text, metadata=clean_metadata)
         bind_trace().debug(
             "memory_append | written={} | merged={} | superseded={} | {:.0f}ms",
             written,
@@ -894,30 +853,8 @@ class EventIngester:
     # ------------------------------------------------------------------
 
     def _sync_events_to_mem0(self, events: list[dict[str, Any]]) -> int:
-        """Write structured events to mem0 as semantic index entries.
+        """No-op: events are stored directly in UnifiedMemoryDB.
 
-        This is the preferred path for populating mem0 — it indexes the same
-        structured events that are persisted to ``events.jsonl``, ensuring
-        mem0 acts as a **semantic index** rather than a raw transcript store.
-
-        Uses ``_event_mem0_write_plan`` to derive (text, metadata) pairs for
-        each event, matching the logic used by the full reindex path.
-
-        Returns the number of entries successfully written.
+        Legacy mem0 sync has been removed.  Returns 0.
         """
-        if self._db is not None:
-            return 0  # events already in SQLite with vectors
-        written = 0
-        for event in events:
-            for text, raw_metadata in self._event_mem0_write_plan(event):
-                summary = self._sanitize_mem0_text(
-                    text,
-                    allow_archival=bool(raw_metadata.get("archival")),
-                )
-                if not summary:
-                    continue
-                metadata = self._sanitize_mem0_metadata(dict(raw_metadata))
-                metadata["source"] = "events"
-                if self._mem0.add_text(summary, metadata=metadata):
-                    written += 1
-        return written
+        return 0

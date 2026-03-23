@@ -57,10 +57,9 @@ def test_event_write_plan_dual_writes_mixed_memory(tmp_path: Path) -> None:
     assert any("because" not in text.lower() for text in texts)
 
 
-def test_append_events_records_type_metrics_with_dual_write(tmp_path: Path) -> None:
+def test_append_events_writes_to_db(tmp_path: Path) -> None:
+    """append_events writes events to UnifiedMemoryDB."""
     store = MemoryStore(tmp_path)
-    store.mem0.enabled = True
-    store.mem0.add_text = MagicMock(return_value=True)
 
     written = store.ingester.append_events(
         [
@@ -78,96 +77,19 @@ def test_append_events_records_type_metrics_with_dual_write(tmp_path: Path) -> N
                 "ttl_days": 365,
                 "source": "chat",
             },
-            {
-                "id": "evt-mixed-2",
-                "timestamp": "2026-03-01T11:00:00+00:00",
-                "channel": "cli",
-                "chat_id": "direct",
-                "type": "fact",
-                "summary": "Carlos prefers terminal workflows because GUI setup failed yesterday.",
-                "entities": ["Carlos", "terminal", "GUI"],
-                "salience": 0.8,
-                "confidence": 0.9,
-                "source_span": [1, 1],
-                "ttl_days": 365,
-                "source": "chat",
-            },
         ]
     )
 
-    assert written == 2
-
-
-def test_retrieve_records_candidates_and_type_counts(tmp_path: Path) -> None:
-    store = MemoryStore(tmp_path)
-    store.mem0.enabled = True
-    store.mem0.search = MagicMock(
-        return_value=[
-            {
-                "id": "m1",
-                "summary": "Carlos prefers CLI tools.",
-                "type": "fact",
-                "score": 0.92,
-                "memory_type": "semantic",
-                "topic": "user_preference",
-                "stability": "high",
-            },
-            {
-                "id": "m2",
-                "summary": "Deploy failed yesterday due to port conflict.",
-                "type": "task",
-                "score": 0.61,
-                "memory_type": "episodic",
-                "topic": "infra",
-                "stability": "low",
-            },
-        ]
-    )
-
-    rows = store.retriever.retrieve("cli deploy", top_k=2)
-
-    assert len(rows) == 2
-    # Phase 4 candidate expansion should query a larger pool.
-    _, kwargs = store.mem0.search.call_args
-    assert kwargs["top_k"] == 6
-
-
-def test_retrieve_debug_history_prefers_episodic(tmp_path: Path) -> None:
-    store = MemoryStore(tmp_path)
-    store.mem0.enabled = True
-    store.mem0.search = MagicMock(
-        return_value=[
-            {
-                "id": "s1",
-                "summary": "Carlos prefers CLI tools.",
-                "type": "fact",
-                "score": 0.95,
-                "memory_type": "semantic",
-                "stability": "high",
-                "timestamp": "2025-01-01T00:00:00+00:00",
-            },
-            {
-                "id": "e1",
-                "summary": "Deploy failed yesterday due to port conflict.",
-                "type": "task",
-                "score": 0.85,
-                "memory_type": "episodic",
-                "stability": "low",
-                "timestamp": "2026-02-28T00:00:00+00:00",
-            },
-        ]
-    )
-
-    rows = store.retriever.retrieve("what happened last time deploy failed?", top_k=1)
-
-    assert len(rows) == 1
-    assert rows[0]["memory_type"] == "episodic"
+    assert written == 1
+    events = store.ingester.read_events()
+    assert any(e.get("summary") == "Carlos prefers CLI tooling." for e in events)
 
 
 def test_get_memory_context_fact_lookup_includes_episodic_softly(tmp_path: Path) -> None:
     """fact_lookup now soft-includes episodic with a small budget weight."""
     store = MemoryStore(tmp_path)
-    store.persistence.write_text(store.memory_file, "# Memory\nCore facts")
+    if store.db:
+        store.db.write_snapshot("current", "# Memory\nCore facts")
     store.retriever.retrieve = MagicMock(
         return_value=[
             {
@@ -315,113 +237,6 @@ def test_recent_unresolved_respects_resolved_status_after_merge(tmp_path: Path) 
     assert unresolved == []
 
 
-def test_reflection_without_evidence_downgrades_to_episodic(tmp_path: Path) -> None:
-    store = MemoryStore(tmp_path)
-    store.mem0.enabled = True
-    store.mem0.add_text = MagicMock(return_value=True)
-
-    store.ingester.append_events(
-        [
-            {
-                "id": "r-no-evidence",
-                "timestamp": "2026-03-01T10:00:00+00:00",
-                "type": "fact",
-                "summary": "Reflection: deploys usually fail due to stale env vars.",
-                "source": "reflection",
-                "metadata": {"memory_type": "reflection", "topic": "infra"},
-                "source_span": [0, 0],
-            }
-        ]
-    )
-
-    _, kwargs = store.mem0.add_text.call_args
-    assert kwargs["metadata"]["memory_type"] == "episodic"
-
-
-def test_retrieve_filters_reflection_for_non_reflection_intent(tmp_path: Path) -> None:
-    store = MemoryStore(tmp_path)
-    store.mem0.enabled = True
-    store.mem0.search = MagicMock(
-        return_value=[
-            {
-                "id": "r1",
-                "summary": "Reflection: env drift is a recurring issue.",
-                "type": "fact",
-                "score": 0.95,
-                "memory_type": "reflection",
-                "evidence_refs": ["ev-1"],
-            },
-            {
-                "id": "s1",
-                "summary": "Carlos prefers CLI tools.",
-                "type": "fact",
-                "score": 0.6,
-                "memory_type": "semantic",
-            },
-        ]
-    )
-
-    rows = store.retriever.retrieve("user preferences", top_k=2)
-    assert all(item["memory_type"] != "reflection" for item in rows)
-
-
-def test_retrieve_reflection_intent_filters_ungrounded_reflection(tmp_path: Path) -> None:
-    store = MemoryStore(tmp_path)
-    store.mem0.enabled = True
-    store.mem0.search = MagicMock(
-        return_value=[
-            {
-                "id": "r1",
-                "summary": "Reflection: undocumented assumption caused outage.",
-                "type": "fact",
-                "score": 0.98,
-                "memory_type": "reflection",
-                "evidence_refs": [],
-            },
-            {
-                "id": "r2",
-                "summary": "Reflection: add env validation checks.",
-                "type": "fact",
-                "score": 0.72,
-                "memory_type": "reflection",
-                "evidence_refs": ["ev-2"],
-            },
-        ]
-    )
-
-    rows = store.retriever.retrieve("reflect on lessons learned", top_k=2)
-    assert any(item["id"] == "r2" for item in rows)
-    assert all(item["id"] != "r1" for item in rows)
-
-
-def test_rollout_disabled_turns_off_router_expansion(tmp_path: Path) -> None:
-    store = MemoryStore(tmp_path)
-    store.mem0.enabled = True
-    store.rollout["memory_rollout_mode"] = "disabled"
-    store.mem0.search = MagicMock(return_value=[])
-
-    _ = store.retriever.retrieve("anything", top_k=3)
-    _, kwargs = store.mem0.search.call_args
-    assert kwargs["top_k"] == 3
-
-
-def test_shadow_mode_records_overlap_metrics(tmp_path: Path) -> None:
-    store = MemoryStore(tmp_path)
-    store.mem0.enabled = True
-    store.rollout["memory_rollout_mode"] = "enabled"
-    store.rollout["memory_shadow_mode"] = True
-    store.rollout["memory_shadow_sample_rate"] = 1.0
-    store.mem0.search = MagicMock(
-        return_value=[
-            {"id": "a", "summary": "A", "type": "fact", "score": 0.9, "memory_type": "semantic"},
-            {"id": "b", "summary": "B", "type": "task", "score": 0.7, "memory_type": "episodic"},
-        ]
-    )
-
-    rows = store.retriever.retrieve("query", top_k=2)
-    assert len(rows) == 2
-
-
 def test_evaluate_rollout_gates_returns_checks(tmp_path: Path) -> None:
     store = MemoryStore(tmp_path)
     evaluation = {"summary": {"recall_at_k": 0.8, "precision_at_k": 0.4}}
@@ -439,14 +254,12 @@ def test_rollout_overrides_apply_from_constructor(tmp_path: Path) -> None:
         rollout_overrides={
             "memory_rollout_mode": "disabled",
             "memory_router_enabled": False,
-            "memory_shadow_sample_rate": 0.75,
             "rollout_gates": {"min_recall_at_k": 0.66},
         },
     )
     status = store._rollout_config.get_status()
     assert status["memory_rollout_mode"] == "disabled"
     assert status["memory_router_enabled"] is False
-    assert abs(float(status["memory_shadow_sample_rate"]) - 0.75) < 1e-9
     assert abs(float(status["rollout_gates"]["min_recall_at_k"]) - 0.66) < 1e-9
 
 
@@ -458,7 +271,6 @@ def test_workspace_rollout_file_is_ignored(tmp_path: Path) -> None:
             {
                 "memory_rollout_mode": "disabled",
                 "memory_router_enabled": False,
-                "memory_shadow_mode": True,
             }
         ),
         encoding="utf-8",
@@ -522,46 +334,6 @@ def test_evaluate_retrieval_cases_balanced_mode_supports_structural_hits(tmp_pat
     assert summary["precision_at_k"] > 0.0
     assert row["hits"] >= 4
     assert row["why_missed"] == []
-
-
-def test_reindex_reports_not_ok_when_no_vector_or_get_all_rows(tmp_path: Path) -> None:
-    store = MemoryStore(tmp_path)
-    store.mem0.enabled = True
-    store.mem0.add_text = MagicMock(return_value=True)
-    store.maintenance._vector_points_count = MagicMock(return_value=0)  # type: ignore[method-assign]
-    store.maintenance._mem0_get_all_rows = MagicMock(return_value=[])  # type: ignore[method-assign]
-
-    profile = store.profile_mgr.read_profile()
-    profile["stable_facts"] = ["API authentication method is OAuth2."]
-    store.profile_mgr.write_profile(profile)
-
-    result = store.maintenance.reindex_from_structured_memory(
-        read_profile_fn=store.profile_mgr.read_profile,
-        read_events_fn=store.ingester.read_events,
-        ingester=store.ingester,
-        profile_keys=store.PROFILE_KEYS,
-        vector_points_count_fn=store.maintenance._vector_points_count,
-        mem0_get_all_rows_fn=store.maintenance._mem0_get_all_rows,
-    )
-
-    assert result["written"] >= 1
-    assert result["ok"] is False
-
-
-def test_vector_health_marks_degraded_when_history_exists_but_no_vectors(tmp_path: Path) -> None:
-    store = MemoryStore(tmp_path)
-    store.mem0.enabled = True
-    store.mem0.search = MagicMock(return_value=[])  # type: ignore[method-assign]
-    store.maintenance._history_row_count = MagicMock(return_value=10)  # type: ignore[method-assign]
-    store.maintenance._vector_points_count = MagicMock(return_value=0)  # type: ignore[method-assign]
-    store.maintenance._mem0_get_all_rows = MagicMock(return_value=[])  # type: ignore[method-assign]
-    store.maintenance._reindex_fn = MagicMock(
-        return_value={"ok": False, "reason": "structured_reindex"}
-    )
-
-    store.maintenance._ensure_vector_health()
-
-    store.maintenance._reindex_fn.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

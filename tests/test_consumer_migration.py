@@ -29,24 +29,6 @@ def db(db_path: Path) -> UnifiedMemoryDB:
     return UnifiedMemoryDB(db_path, dims=4)
 
 
-def _stub_mem0() -> MagicMock:
-    mem0 = MagicMock()
-    mem0.enabled = False
-    mem0.client = None
-    mem0.mode = "disabled"
-    mem0.last_add_mode = "none"
-    return mem0
-
-
-def _stub_persistence(tmp_path: Path) -> MagicMock:
-    p = MagicMock()
-    p.memory_dir = tmp_path
-    p.events_file = tmp_path / "events.jsonl"
-    p.read_json = MagicMock(return_value={})
-    p.write_json = MagicMock()
-    return p
-
-
 # ---------------------------------------------------------------------------
 # snapshot.py
 # ---------------------------------------------------------------------------
@@ -68,14 +50,11 @@ class TestSnapshotDBPath:
             "meta": {},
         }
 
-        persistence = _stub_persistence(tmp_path)
-
         # Seed snapshot so read_snapshot returns something
         db.write_snapshot("current", "# Old Memory\n")
 
         snap = MemorySnapshot(
             profile_mgr=profile_mgr,
-            persistence=persistence,
             read_events_fn=MagicMock(side_effect=AssertionError("should not be called")),
             profile_section_lines_fn=lambda p, **kw: [],
             recent_unresolved_fn=lambda e, **kw: [],
@@ -120,11 +99,8 @@ class TestSnapshotDBPath:
         }
         profile_mgr._meta_section = MagicMock(return_value={})
 
-        persistence = _stub_persistence(tmp_path)
-
         snap = MemorySnapshot(
             profile_mgr=profile_mgr,
-            persistence=persistence,
             read_events_fn=MagicMock(side_effect=AssertionError("should not be called")),
             profile_section_lines_fn=lambda p, **kw: [],
             recent_unresolved_fn=lambda e, **kw: [],
@@ -149,12 +125,7 @@ class TestMaintenanceDBPath:
     def test_reindex_returns_early_with_db(self, db: UnifiedMemoryDB, tmp_path: Path) -> None:
         from nanobot.agent.memory.maintenance import MemoryMaintenance
 
-        mem0 = _stub_mem0()
-        persistence = _stub_persistence(tmp_path)
-
         maint = MemoryMaintenance(
-            mem0=mem0,
-            persistence=persistence,
             rollout={},
             db=db,
         )
@@ -209,14 +180,8 @@ class TestConflictsDBPath:
         }
         profile_mgr.write_profile = MagicMock()
 
-        mem0 = _stub_mem0()
-        mem0.delete = MagicMock(side_effect=AssertionError("should not call mem0.delete"))
-        mem0.update = MagicMock(side_effect=AssertionError("should not call mem0.update"))
-        mem0.add_text = MagicMock(side_effect=AssertionError("should not call mem0.add_text"))
-
         mgr = ConflictManager(
             profile_mgr,
-            mem0,
             db=db,
         )
 
@@ -262,14 +227,8 @@ class TestConflictsDBPath:
         }
         profile_mgr.write_profile = MagicMock()
 
-        mem0 = _stub_mem0()
-        mem0.delete = MagicMock(side_effect=AssertionError("should not call mem0.delete"))
-        mem0.update = MagicMock(side_effect=AssertionError("should not call mem0.update"))
-        mem0.add_text = MagicMock(side_effect=AssertionError("should not call mem0.add_text"))
-
         mgr = ConflictManager(
             profile_mgr,
-            mem0,
             db=db,
         )
 
@@ -306,15 +265,7 @@ class TestProfileIODBPath:
         }
         db.write_profile("profile", profile_data)
 
-        persistence = _stub_persistence(tmp_path)
-        mem0 = _stub_mem0()
-
-        store = ProfileStore(
-            persistence,
-            tmp_path / "profile.json",
-            mem0,
-            db=db,
-        )
+        store = ProfileStore(db=db)
 
         result = store.read_profile()
         assert "coffee" in result["preferences"]
@@ -322,15 +273,7 @@ class TestProfileIODBPath:
     def test_write_profile_to_db(self, db: UnifiedMemoryDB, tmp_path: Path) -> None:
         from nanobot.agent.memory.profile_io import ProfileStore
 
-        persistence = _stub_persistence(tmp_path)
-        mem0 = _stub_mem0()
-
-        store = ProfileStore(
-            persistence,
-            tmp_path / "profile.json",
-            mem0,
-            db=db,
-        )
+        store = ProfileStore(db=db)
 
         profile = {
             "preferences": ["tea"],
@@ -352,16 +295,7 @@ class TestProfileIODBPath:
     def test_find_mem0_id_uses_db_fts(self, db: UnifiedMemoryDB, tmp_path: Path) -> None:
         from nanobot.agent.memory.profile_io import ProfileStore
 
-        persistence = _stub_persistence(tmp_path)
-        mem0 = _stub_mem0()
-        mem0.search = MagicMock(side_effect=AssertionError("should not call mem0.search"))
-
-        store = ProfileStore(
-            persistence,
-            tmp_path / "profile.json",
-            mem0,
-            db=db,
-        )
+        store = ProfileStore(db=db)
 
         # Insert an event so FTS can find it
         db.insert_event(
@@ -382,15 +316,7 @@ class TestProfileIODBPath:
     ) -> None:
         from nanobot.agent.memory.profile_io import ProfileStore
 
-        persistence = _stub_persistence(tmp_path)
-        mem0 = _stub_mem0()
-
-        store = ProfileStore(
-            persistence,
-            tmp_path / "profile.json",
-            mem0,
-            db=db,
-        )
+        store = ProfileStore(db=db)
 
         result = store._find_mem0_id_for_text("nonexistent")
         assert result is None
@@ -405,12 +331,10 @@ class TestEvalDBPath:
     def test_save_report_uses_db_path(self, db: UnifiedMemoryDB, tmp_path: Path) -> None:
         from nanobot.agent.memory.eval import EvalRunner
 
-        persistence = _stub_persistence(tmp_path)
-
         runner = EvalRunner(
             retrieve_fn=MagicMock(return_value=[]),
-            persistence=persistence,
             workspace=tmp_path,
+            memory_dir=tmp_path / "memory",
             get_rollout_status_fn=lambda: {"mode": "enabled"},
             get_rollout_fn=lambda: {},
             get_backend_stats_fn=lambda: {
@@ -429,9 +353,7 @@ class TestEvalDBPath:
             output_file=str(tmp_path / "report.json"),
         )
 
-        # Verify it wrote the file directly (not through persistence)
+        # Verify it wrote the file directly
         assert report_path.exists()
         content = json.loads(report_path.read_text(encoding="utf-8"))
         assert "evaluation" in content
-        # persistence.write_json should NOT have been called
-        persistence.write_json.assert_not_called()

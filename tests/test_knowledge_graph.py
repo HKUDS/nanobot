@@ -557,7 +557,13 @@ class TestGraphContextBuilder:
                 "confidence": 0.8,
             }
         ]
-        store.persistence.write_jsonl(store.events_file, events)
+        store.ingester.append_events(events)
+        # Manually add triples to graph since async ingest doesn't run in sync tests.
+        # Use the internal networkx graph directly.
+        g = store.graph._graph
+        g.add_node("carlos", canonical_name="carlos", name="Carlos")
+        g.add_node("platform-team", canonical_name="platform-team", name="platform-team")
+        g.add_edge("carlos", "platform-team", type="WORKS_WITH")
 
         lines = store.retriever._build_graph_context_lines(
             query="Tell me about Carlos",
@@ -586,7 +592,7 @@ class TestGraphContextBuilder:
                 "confidence": 0.5,
             }
         ]
-        store.persistence.write_jsonl(store.events_file, events)
+        store.ingester.append_events(events)
 
         lines = store.retriever._build_graph_context_lines(
             query="Tell me about Carlos",

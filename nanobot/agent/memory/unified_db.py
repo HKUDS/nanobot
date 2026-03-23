@@ -144,7 +144,7 @@ class UnifiedMemoryDB:
                     event.get("source"),
                     event.get("status", "active"),
                     event.get("metadata"),
-                    event["created_at"],
+                    event.get("created_at", event.get("timestamp", _utc_now_iso())),
                 ),
             )
             if embedding is not None:
@@ -203,11 +203,12 @@ class UnifiedMemoryDB:
         so that "coffee preference" matches documents containing both terms
         anywhere, not just the exact phrase.
         """
-        # Quote each term individually to escape FTS5 operators
+        # Quote each term individually to escape FTS5 operators.
+        # Use OR logic so that any matching term returns results.
         terms = re.findall(r"\w+", query_text)
         if not terms:
             return []
-        safe_query = " ".join(f'"{t}"' for t in terms)
+        safe_query = " OR ".join(f'"{t}"' for t in terms)
         try:
             rows = self._conn.execute(
                 """SELECT e.*, rank

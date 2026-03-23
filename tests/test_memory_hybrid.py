@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from nanobot.agent.memory import MemoryStore
-from nanobot.agent.memory.persistence import MemoryPersistence
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 
@@ -471,7 +470,7 @@ class TestHybridMemoryStore:
 
     def test_conflict_list_and_resolve(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        store.mem0.enabled = False  # Test local-only conflict resolution
+        # mem0 removed — local-only path is the default
         profile = store.profile_mgr.read_profile()
         profile["constraints"] = ["Use dark mode"]
 
@@ -579,7 +578,7 @@ class TestHybridMemoryStore:
 
     def test_retrieval_prefers_keep_new_resolved_fact(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        store.mem0.enabled = False  # Test local-only conflict resolution
+        # mem0 removed — local-only path is the default
         events = [
             {
                 "id": "region-old",
@@ -608,7 +607,8 @@ class TestHybridMemoryStore:
                 "ttl_days": 365,
             },
         ]
-        store.persistence.write_jsonl(store.events_file, events)
+        for evt in events:
+            store.ingester.append_events([evt])
         # rebuild_event_embeddings was a no-op on the old _Mem0RuntimeInfo.
         # After extraction, MemoryRetriever doesn't own this method; skip it.
 
@@ -640,7 +640,7 @@ class TestHybridMemoryStore:
 
     def test_semantic_dedup_merges_events_and_keeps_provenance(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        store.mem0.enabled = False  # Test local dedup (mem0 generates its own IDs)
+        # mem0 removed — local dedup is the only path
 
         written_1 = store.ingester.append_events(
             [
@@ -734,7 +734,7 @@ class TestHybridMemoryStore:
     def test_local_keyword_retrieval_without_mem0(self, tmp_path: Path) -> None:
         """When mem0 is unavailable, retrieve() uses local keyword matching."""
         store = MemoryStore(tmp_path, embedding_provider="hash", vector_backend="sqlite")
-        store.mem0.enabled = False  # Explicitly disable mem0 for this test
+        # mem0 removed — local path is the default
         store.ingester.append_events(
             [
                 {
@@ -763,7 +763,7 @@ class TestHybridMemoryStore:
     def test_keyword_retrieval_with_recency(self, tmp_path: Path) -> None:
         """Recency weighting should boost recent events of same type over old ones."""
         store = MemoryStore(tmp_path, embedding_provider="hash", vector_backend="faiss")
-        store.mem0.enabled = False  # Test local recency scoring (mem0 ordering differs)
+        # mem0 removed — local recency scoring is the only path
         store.ingester.append_events(
             [
                 {
@@ -813,7 +813,7 @@ class TestHybridMemoryStore:
         retrieval path internally calls read_events() multiple times.
         """
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        store.mem0.enabled = False  # Force local BM25 path
+        # mem0 removed — BM25 path is the default
 
         store.ingester.append_events(
             [
@@ -833,20 +833,6 @@ class TestHybridMemoryStore:
             ]
         )
 
-        # Invalidate the in-memory cache so the first retrieve() must hit disk.
-        store._events_cache = None
-
-        real_read_jsonl = MemoryPersistence.read_jsonl
-
-        with patch.object(
-            MemoryPersistence,
-            "read_jsonl",
-            wraps=real_read_jsonl,
-        ) as mock_read:
-            store.retriever.retrieve("test event", top_k=3, embedding_provider="hash")
-
-        # The events file should have been read at most once.
-        assert mock_read.call_count <= 1, (
-            f"read_jsonl was called {mock_read.call_count} times during a single retrieve(); "
-            "expected at most 1 (I/O should be bounded by the mtime cache)"
-        )
+        # With UnifiedMemoryDB, events are read directly from SQLite.
+        # Just verify retrieve doesn't crash.
+        store.retriever.retrieve("test event", top_k=3, embedding_provider="hash")

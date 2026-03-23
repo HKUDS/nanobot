@@ -29,9 +29,12 @@ from nanobot.agent.memory.constants import (
 
 
 def _make_pipeline(
-    rollout: dict[str, Any] | None = None, **overrides: object
+    tmp_path: Path | None = None,
+    rollout: dict[str, Any] | None = None,
+    **overrides: object,
 ) -> ConsolidationPipeline:
     """Build a ``ConsolidationPipeline`` with all dependencies mocked."""
+    _base = tmp_path or Path("/tmp/test")
     defaults: dict[str, object] = {
         "persistence": MagicMock(),
         "extractor": MagicMock(),
@@ -41,8 +44,8 @@ def _make_pipeline(
         "snapshot": MagicMock(),
         "mem0": MagicMock(enabled=False),
         "mem0_raw_turn_ingestion": False,
-        "memory_file": Path("/tmp/test/MEMORY.md"),
-        "history_file": Path("/tmp/test/HISTORY.md"),
+        "memory_file": _base / "MEMORY.md",
+        "history_file": _base / "HISTORY.md",
         "rollout": rollout,
     }
     defaults.update(overrides)
@@ -135,11 +138,10 @@ class TestConsolidateMemoryToolSchema:
 
 class TestConsolidationRouting:
     @pytest.mark.asyncio
-    async def test_single_tool_path_when_flag_true(self) -> None:
+    async def test_single_tool_path_when_flag_true(self, tmp_path: Path) -> None:
         """When consolidation_single_tool is True, single-tool path is used."""
-        pipeline = _make_pipeline(rollout={"consolidation_single_tool": True})
+        pipeline = _make_pipeline(tmp_path, rollout={"consolidation_single_tool": True})
         session = _make_session(messages=_enough_messages())
-        pipeline._persistence.read_text.return_value = "old memory"
 
         args = {
             "history_entry": "Summary of conversation.",
@@ -180,11 +182,10 @@ class TestConsolidationRouting:
         )
 
     @pytest.mark.asyncio
-    async def test_two_call_path_when_flag_false(self) -> None:
+    async def test_two_call_path_when_flag_false(self, tmp_path: Path) -> None:
         """When consolidation_single_tool is False, legacy two-call path is used."""
-        pipeline = _make_pipeline(rollout={"consolidation_single_tool": False})
+        pipeline = _make_pipeline(tmp_path, rollout={"consolidation_single_tool": False})
         session = _make_session(messages=_enough_messages())
-        pipeline._persistence.read_text.return_value = "old memory"
 
         # First call: save_memory tool
         tool_call = MagicMock()
@@ -215,15 +216,14 @@ class TestConsolidationRouting:
         pipeline._extractor.extract_structured_memory.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_empty_rollout_defaults_to_two_call_path(self) -> None:
+    async def test_empty_rollout_defaults_to_two_call_path(self, tmp_path: Path) -> None:
         """When rollout dict is empty (no explicit flag), defaults to legacy two-call path.
 
         RolloutConfig._load_defaults() sets consolidation_single_tool=True explicitly.
         Without it, the pipeline preserves backward compat by defaulting to False.
         """
-        pipeline = _make_pipeline(rollout={})
+        pipeline = _make_pipeline(tmp_path, rollout={})
         session = _make_session(messages=_enough_messages())
-        pipeline._persistence.read_text.return_value = ""
 
         tool_call = MagicMock()
         tool_call.arguments = '{"history_entry": "summary"}'
@@ -257,11 +257,10 @@ class TestConsolidationRouting:
 
 class TestSingleToolFallbacks:
     @pytest.mark.asyncio
-    async def test_fallback_to_extractor_when_events_missing(self) -> None:
+    async def test_fallback_to_extractor_when_events_missing(self, tmp_path: Path) -> None:
         """When events are missing from tool response, fall back to heuristic."""
-        pipeline = _make_pipeline(rollout={"consolidation_single_tool": True})
+        pipeline = _make_pipeline(tmp_path, rollout={"consolidation_single_tool": True})
         session = _make_session(messages=_enough_messages())
-        pipeline._persistence.read_text.return_value = ""
 
         # Response has history_entry but no events
         args: dict[str, Any] = {"history_entry": "Summary of things."}
@@ -297,11 +296,10 @@ class TestSingleToolFallbacks:
         pipeline._extractor.heuristic_extract_events.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_fallback_to_extractor_when_events_malformed(self) -> None:
+    async def test_fallback_to_extractor_when_events_malformed(self, tmp_path: Path) -> None:
         """When events is not a list, fall back to heuristic."""
-        pipeline = _make_pipeline(rollout={"consolidation_single_tool": True})
+        pipeline = _make_pipeline(tmp_path, rollout={"consolidation_single_tool": True})
         session = _make_session(messages=_enough_messages())
-        pipeline._persistence.read_text.return_value = ""
 
         args = {"history_entry": "Summary.", "events": "not-a-list"}
         provider = _make_provider_with_tool_response(args)
@@ -336,11 +334,10 @@ class TestSingleToolFallbacks:
         pipeline._extractor.heuristic_extract_events.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_fallback_to_extractor_when_events_empty_list(self) -> None:
+    async def test_fallback_to_extractor_when_events_empty_list(self, tmp_path: Path) -> None:
         """When events is an empty list, fall back to heuristic."""
-        pipeline = _make_pipeline(rollout={"consolidation_single_tool": True})
+        pipeline = _make_pipeline(tmp_path, rollout={"consolidation_single_tool": True})
         session = _make_session(messages=_enough_messages())
-        pipeline._persistence.read_text.return_value = ""
 
         args: dict[str, Any] = {"history_entry": "Summary.", "events": []}
         provider = _make_provider_with_tool_response(args)
@@ -382,11 +379,10 @@ class TestSingleToolFallbacks:
 
 class TestHistoryEntryExtraction:
     @pytest.mark.asyncio
-    async def test_history_entry_from_tool_response(self) -> None:
+    async def test_history_entry_from_tool_response(self, tmp_path: Path) -> None:
         """History entry from tool response is written to history file."""
-        pipeline = _make_pipeline(rollout={"consolidation_single_tool": True})
+        pipeline = _make_pipeline(tmp_path, rollout={"consolidation_single_tool": True})
         session = _make_session(messages=_enough_messages())
-        pipeline._persistence.read_text.return_value = ""
 
         args = {
             "history_entry": "Discussed Python preferences and project setup.",
@@ -417,17 +413,17 @@ class TestHistoryEntryExtraction:
             mock_prompts.get.return_value = "system prompt"
             await pipeline.consolidate(session, provider, "gpt-4")
 
-        pipeline._persistence.append_text.assert_called_once()
-        written = pipeline._persistence.append_text.call_args[0][1]
+        history_file = tmp_path / "HISTORY.md"
+        assert history_file.exists()
+        written = history_file.read_text(encoding="utf-8")
         assert "Discussed Python preferences" in written
 
     @pytest.mark.asyncio
-    async def test_history_entry_fallback_from_lines(self) -> None:
+    async def test_history_entry_fallback_from_lines(self, tmp_path: Path) -> None:
         """When history_entry is missing, a fallback is generated from lines."""
-        pipeline = _make_pipeline(rollout={"consolidation_single_tool": True})
+        pipeline = _make_pipeline(tmp_path, rollout={"consolidation_single_tool": True})
         msgs = _enough_messages()
         session = _make_session(messages=msgs)
-        pipeline._persistence.read_text.return_value = ""
 
         # No history_entry in response
         args: dict[str, Any] = {"events": [{"type": "fact", "summary": "something"}]}
@@ -457,14 +453,14 @@ class TestHistoryEntryExtraction:
             await pipeline.consolidate(session, provider, "gpt-4")
 
         # History file should still be written with fallback content
-        pipeline._persistence.append_text.assert_called_once()
+        history_file = tmp_path / "HISTORY.md"
+        assert history_file.exists()
 
     @pytest.mark.asyncio
-    async def test_no_tool_calls_still_generates_history(self) -> None:
+    async def test_no_tool_calls_still_generates_history(self, tmp_path: Path) -> None:
         """When LLM returns no tool calls, history_entry fallback still works."""
-        pipeline = _make_pipeline(rollout={"consolidation_single_tool": True})
+        pipeline = _make_pipeline(tmp_path, rollout={"consolidation_single_tool": True})
         session = _make_session(messages=_enough_messages())
-        pipeline._persistence.read_text.return_value = ""
 
         response = MagicMock()
         response.has_tool_calls = False
@@ -499,7 +495,8 @@ class TestHistoryEntryExtraction:
             mock_prompts.get.return_value = "system prompt"
             result = await pipeline.consolidate(session, provider, "gpt-4")
 
-        # Should still succeed — the fallback chain handles missing data
+        # Should still succeed -- the fallback chain handles missing data
         assert result is True
         # History file should have the fallback content from first lines
-        pipeline._persistence.append_text.assert_called_once()
+        history_file = tmp_path / "HISTORY.md"
+        assert history_file.exists()

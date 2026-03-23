@@ -10,8 +10,9 @@ import pytest
 from nanobot.agent.memory.consolidation_pipeline import ConsolidationPipeline
 
 
-def _make_pipeline(**overrides: object) -> ConsolidationPipeline:
+def _make_pipeline(tmp_path: Path | None = None, **overrides: object) -> ConsolidationPipeline:
     """Build a ``ConsolidationPipeline`` with all dependencies mocked."""
+    _base = tmp_path or Path("/tmp/test")
     defaults: dict[str, object] = {
         "persistence": MagicMock(),
         "extractor": MagicMock(),
@@ -21,8 +22,9 @@ def _make_pipeline(**overrides: object) -> ConsolidationPipeline:
         "snapshot": MagicMock(),
         "mem0": MagicMock(enabled=False),
         "mem0_raw_turn_ingestion": False,
-        "memory_file": Path("/tmp/test/MEMORY.md"),
-        "history_file": Path("/tmp/test/HISTORY.md"),
+        "memory_file": _base / "MEMORY.md",
+        "history_file": _base / "HISTORY.md",
+        "rollout": {"consolidation_single_tool": True},
     }
     defaults.update(overrides)
     return ConsolidationPipeline(**defaults)  # type: ignore[arg-type]
@@ -83,7 +85,7 @@ class TestSelectMessages:
         result = pipeline._select_messages_for_consolidation(
             session, archive_all=False, memory_window=10
         )
-        # 3 messages <= keep_count (5) → returns None
+        # 3 messages <= keep_count (5) -> returns None
         assert result is None
 
     def test_nothing_new_to_consolidate(self) -> None:
@@ -175,7 +177,7 @@ class TestFinalizeConsolidation:
 
 
 # ---------------------------------------------------------------------------
-# consolidate — integration-level tests
+# consolidate -- integration-level tests
 # ---------------------------------------------------------------------------
 
 
@@ -191,13 +193,11 @@ class TestConsolidate:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_no_tool_call_returns_false(self) -> None:
+    async def test_no_tool_call_returns_false(self, tmp_path: Path) -> None:
         """When LLM does not call save_memory, consolidate returns False."""
-        pipeline = _make_pipeline()
+        pipeline = _make_pipeline(tmp_path)
         msgs = [{"role": "user", "content": f"msg-{i}"} for i in range(30)]
         session = _make_session(messages=msgs)
-
-        pipeline._persistence.read_text.return_value = "old memory"
 
         response = MagicMock()
         response.has_tool_calls = False
@@ -211,19 +211,17 @@ class TestConsolidate:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_success_happy_path(self) -> None:
-        """Full happy-path: LLM calls save_memory, extraction runs, returns True."""
-        pipeline = _make_pipeline()
+    async def test_success_happy_path(self, tmp_path: Path) -> None:
+        """Full happy-path: LLM calls consolidate_memory, extraction runs, returns True."""
+        pipeline = _make_pipeline(tmp_path)
         msgs = [
             {"role": "user", "content": f"msg-{i}", "timestamp": "2026-01-01T00:00:00"}
             for i in range(30)
         ]
         session = _make_session(messages=msgs)
 
-        pipeline._persistence.read_text.return_value = "old memory"
-
         tool_call = MagicMock()
-        tool_call.arguments = '{"history_entry": "summary"}'
+        tool_call.arguments = '{"history_entry": "summary", "events": [], "profile_updates": {}}'
         response = MagicMock()
         response.has_tool_calls = True
         response.tool_calls = [tool_call]
@@ -231,8 +229,21 @@ class TestConsolidate:
         provider = MagicMock()
         provider.chat = AsyncMock(return_value=response)
 
-        pipeline._extractor.parse_tool_args.return_value = {"history_entry": "summary"}
-        pipeline._extractor.extract_structured_memory = AsyncMock(return_value=([], []))
+        pipeline._extractor.parse_tool_args.return_value = {
+            "history_entry": "summary",
+            "events": [
+                {"type": "fact", "summary": "test event", "timestamp": "2026-01-01T00:00:00"},
+            ],
+            "profile_updates": {},
+        }
+        pipeline._extractor.default_profile_updates.return_value = {}
+        pipeline._extractor.coerce_event.return_value = {
+            "id": "e1",
+            "type": "fact",
+            "summary": "test event",
+            "timestamp": "2026-01-01T00:00:00",
+        }
+        pipeline._extractor.extract_structured_memory = AsyncMock(return_value=([], {}))
         pipeline._ingester.append_events.return_value = 0
         pipeline._ingester._ingest_graph_triples = AsyncMock()
         pipeline._profile_mgr.read_profile.return_value = {}
@@ -243,17 +254,16 @@ class TestConsolidate:
             result = await pipeline.consolidate(session, provider, "gpt-4")
 
         assert result is True
-        pipeline._persistence.append_text.assert_called_once()
+        # History entry should have been written to history_file
+        assert (tmp_path / "HISTORY.md").exists()
         pipeline._snapshot.rebuild_memory_snapshot.assert_called_once_with(write=True)
 
     @pytest.mark.asyncio
-    async def test_exception_returns_false(self) -> None:
+    async def test_exception_returns_false(self, tmp_path: Path) -> None:
         """Crash-barrier: exceptions inside try block are caught, returns False."""
-        pipeline = _make_pipeline()
+        pipeline = _make_pipeline(tmp_path)
         msgs = [{"role": "user", "content": f"msg-{i}"} for i in range(30)]
         session = _make_session(messages=msgs)
-
-        pipeline._persistence.read_text.return_value = "old memory"
 
         provider = MagicMock()
         provider.chat = AsyncMock(side_effect=RuntimeError("provider crash"))

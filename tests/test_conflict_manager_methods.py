@@ -8,11 +8,9 @@ from nanobot.agent.memory.conflicts import ConflictManager
 
 
 def _make_mgr(profile_store=None):
-    mem0 = MagicMock()
     ps = profile_store or MagicMock()
     return ConflictManager(
         ps,
-        mem0,
         sanitize_mem0_text_fn=lambda t: t,
         normalize_metadata_fn=lambda m, **kw: (m, False),
         sanitize_metadata_fn=lambda m: m,
@@ -88,31 +86,20 @@ class TestHasOpenConflict:
 
 
 def _make_real_store(tmp_path):
-    """Build a minimal ProfileStore with real persistence for delegation tests."""
-    from unittest.mock import MagicMock
-
+    """Build a minimal ProfileStore for delegation tests."""
     from nanobot.agent.memory.profile_io import ProfileStore
 
-    persistence = MagicMock()
-    mem0 = MagicMock()
-    profile_file = tmp_path / "profile.json"
-    profile_file.write_text("{}")
-    persistence.read_json.return_value = {}
-    store = ProfileStore(persistence, profile_file, mem0)
+    store = ProfileStore()
     return store
 
 
 class TestApplyProfileUpdates:
     def _make_mgr_with_store(self, tmp_path):
-        from unittest.mock import MagicMock
-
         from nanobot.agent.memory.conflicts import ConflictManager
 
         store = _make_real_store(tmp_path)
-        mem0 = MagicMock()
         mgr = ConflictManager(
             store,
-            mem0,
             sanitize_mem0_text_fn=lambda t: t,
             normalize_metadata_fn=lambda m, **kw: (m, False),
             sanitize_metadata_fn=lambda m: m,
