@@ -4,13 +4,13 @@
 
 - ``EventIngester`` — event write path (classify, dedup, merge, append)
 - ``MemoryRetriever`` — retrieval read path (mem0, BM25, reranking)
+- ``ConsolidationPipeline`` — LLM-driven memory consolidation
 - ``MemoryMaintenance`` — reindex, seed, health checks
 - ``MemorySnapshot`` — rebuild and verify MEMORY.md
 - ``RolloutConfig`` — feature flag management
 
-Cross-cutting coordination (``get_memory_context``) stays on ``MemoryStore``;
-``consolidate`` delegates to ``ConsolidationPipeline``.  Callers access
-subsystems directly for specific operations:
+Cross-cutting coordination (``get_memory_context``) stays on ``MemoryStore``.
+Callers access subsystems directly for specific operations:
 ``store.ingester.append_events(...)``.
 """
 
