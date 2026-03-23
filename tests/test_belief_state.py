@@ -132,7 +132,7 @@ class TestPinnedSectionProtection:
         current = (
             "# Memory\n<!-- user-pinned -->\nDO NOT DELETE\n<!-- end-user-pinned -->\nOld summary."
         )
-        store._apply_save_memory_tool_result(
+        store._consolidation._apply_save_memory_tool_result(
             args={"memory_update": "# Memory\nNew summary from LLM."},
             current_memory=current,
         )
