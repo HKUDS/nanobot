@@ -33,7 +33,6 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-import uuid
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -58,6 +57,7 @@ from nanobot.agent.context import (
 from nanobot.agent.delegation import DelegationConfig, DelegationDispatcher
 from nanobot.agent.failure import FailureClass, ToolCallTracker, _build_failure_prompt
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.message_processor import MessageProcessor, _LegacyOrchestrator
 from nanobot.agent.mission import MissionManager
 from nanobot.agent.observability import (
     flush as flush_langfuse,
@@ -384,6 +384,46 @@ class AgentLoop:
         self._turn_tokens_completion = 0
         self._turn_llm_calls = 0
 
+        # MessageProcessor: per-message pipeline (Task 3 decomposition).
+        # Uses _LegacyOrchestrator as a temporary shim wrapping _run_agent_loop
+        # until TurnOrchestrator is extracted in Task 6.
+        self._processor = MessageProcessor(
+            orchestrator=_LegacyOrchestrator(self),
+            context=self.context,
+            sessions=self.sessions,
+            tools=self.tools,
+            consolidator=self._consolidator,  # type: ignore[has-type]
+            verifier=self._verifier,
+            bus=self.bus,
+            config=self.config,
+            workspace=self.workspace,
+            role_name=self.role_name,
+            role_manager=self._role_manager,
+            provider=self.provider,
+            model=self.model,
+        )
+        # Share consolidation state: processor owns the mutable sets, AgentLoop
+        # aliases them for backward compatibility with tests that access
+        # loop._consolidating or loop._consolidation_tasks directly.
+        self._consolidating: set[str] = self._processor._consolidating  # type: ignore[no-redef]
+        self._consolidation_tasks: set[asyncio.Task[None]] = self._processor._consolidation_tasks  # type: ignore[no-redef]
+        self._consolidation_sem = self._processor._consolidation_sem
+
+        # Backward compat: tests may monkey-patch loop._consolidate_memory.
+        # Store a reference that the processor resolves at call time so
+        # patches on AgentLoop take effect.
+        self._processor._consolidate_memory_ref = self  # type: ignore[attr-defined]
+
+        # Wire token counter source: _run_agent_loop updates self._turn_tokens_*
+        # on AgentLoop; the processor syncs from this reference before reading.
+        self._processor._token_source = self
+
+        # Wire span module so that tests patching
+        # nanobot.agent.loop.update_current_span see their patches take effect.
+        import nanobot.agent.loop as _loop_module
+
+        self._processor._span_module = _loop_module
+
     def _build_tools(self) -> None:
         """Construct and wire the tool/capability layer.
 
@@ -446,8 +486,8 @@ class AgentLoop:
         Called once from __init__ after _build_tools(). Initialises consolidation
         state and the ConsolidationOrchestrator that wraps self.context.memory.
         """
-        self._consolidating: set[str] = set()  # Session keys with consolidation in progress
-        self._consolidation_tasks: set[asyncio.Task[None]] = set()  # Strong refs to in-flight tasks
+        self._consolidating: set[str] = set()  # type: ignore[no-redef]
+        self._consolidation_tasks: set[asyncio.Task[None]] = set()  # type: ignore[no-redef]
         self._consolidation_sem = asyncio.Semaphore(3)  # Cap concurrent consolidation LLM calls
         self._consolidator = ConsolidationOrchestrator(self.context.memory)
 
@@ -1520,298 +1560,14 @@ class AgentLoop:
         session_key: str | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> OutboundMessage | None:
-        """Process a single inbound message and return the response."""
-        t0_request = time.monotonic()
+        """Delegate to MessageProcessor.
 
-        # System messages: parse origin from chat_id ("channel:chat_id")
-        if msg.channel == "system":
-            channel, chat_id = (
-                msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
-            )
-            logger.info("Processing system message from {}", msg.sender_id)
-            key = f"{channel}:{chat_id}"
-            session = self.sessions.get_or_create(key)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
-            history = session.get_history(max_messages=self.config.memory_window)
-            skill_names = self.context.skills.detect_relevant_skills(msg.content)
-            messages = await self.context.build_messages(
-                history=history,
-                current_message=msg.content,
-                skill_names=skill_names,
-                channel=channel,
-                chat_id=chat_id,
-            )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
-            self._save_turn(session, all_msgs, 1 + len(history))
-            self.sessions.save(session)
-            return OutboundMessage(
-                channel=channel,
-                chat_id=chat_id,
-                content=final_content or "Background task completed.",
-            )
-
-        preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
-        bind_trace().info(
-            "Processing message from {}:{}: {}",
-            msg.channel,
-            msg.sender_id,
-            preview,
-        )
-
-        key = session_key or msg.session_key
-        session = self.sessions.get_or_create(key)
-
-        # Slash commands
-        cmd = msg.content.strip().lower()
-        if cmd == "/new":
-            lock = self._consolidator.get_lock(session.key)
-            self._consolidating.add(session.key)
-            try:
-                async with lock:
-                    snapshot = session.messages[session.last_consolidated :]
-                    if snapshot:
-                        temp = Session(key=session.key)
-                        temp.messages = list(snapshot)
-                        archived = await self._consolidate_memory(temp, archive_all=True)
-                        if not archived:
-                            return OutboundMessage(
-                                channel=msg.channel,
-                                chat_id=msg.chat_id,
-                                content="Memory archival failed, session not cleared. Please try again.",
-                            )
-            except (RuntimeError, asyncio.TimeoutError):
-                logger.exception("/new archival failed for {}", session.key)
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content="Memory archival failed, session not cleared. Please try again.",
-                )
-            finally:
-                self._consolidating.discard(session.key)
-                self._consolidator.prune_lock(session.key, lock)
-
-            session.clear()
-            self.sessions.save(session)
-            self.sessions.invalidate(session.key)
-            return OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id, content="New session started."
-            )
-        if cmd == "/help":
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands",
-            )
-
-        memory_store = self.context.memory
-
-        # Run both memory pre-checks in a single thread dispatch to avoid
-        # two round-trips through asyncio.to_thread for what are in-memory ops.
-        # handle_user_conflict_reply short-circuits when message is a conflict
-        # resolution; apply_live_user_correction extracts preference/fact edits.
-        _channel = msg.channel
-        _chat_id = msg.chat_id
-        _content = msg.content
-        _enable_cc = self.config.memory_enable_contradiction_check
-
-        def _pre_turn_memory() -> tuple[dict[str, Any], dict[str, Any] | None]:
-            cr = memory_store.conflict_mgr.handle_user_conflict_reply(_content)
-            if cr.get("handled"):
-                return cr, None
-            try:
-                corr = memory_store.profile_mgr.apply_live_user_correction(
-                    _content,
-                    channel=_channel,
-                    chat_id=_chat_id,
-                    enable_contradiction_check=_enable_cc,
-                )
-            except (RuntimeError, KeyError, TypeError):
-                logger.exception("Live correction capture failed")
-                corr = {}
-            return cr, corr
-
-        conflict_reply, correction_result = await asyncio.to_thread(_pre_turn_memory)
-        if conflict_reply.get("handled"):
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=str(conflict_reply.get("message", "")),
-            )
-
-        if correction_result and correction_result.get("question"):
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=str(correction_result.get("question", "")),
-            )
-
-        # Defer conflict questions until after the agent answers the user's message.
-        # We check here and append to the response later instead of blocking.
-        pending_conflict_question = memory_store.conflict_mgr.ask_user_for_conflict(
-            user_message=msg.content,
-        )
-
-        unconsolidated = len(session.messages) - session.last_consolidated
-        if (
-            self.config.memory_enabled
-            and unconsolidated >= self.config.memory_window
-            and session.key not in self._consolidating
-        ):
-            self._consolidating.add(session.key)
-            lock = self._consolidator.get_lock(session.key)
-            _task = asyncio.create_task(self._run_consolidation_task(session, lock))
-            self._consolidation_tasks.add(_task)
-            _task.add_done_callback(self._consolidation_tasks.discard)
-            _task.add_done_callback(
-                lambda t: (
-                    logger.exception("Consolidation task failed")
-                    if not t.cancelled() and t.exception()
-                    else None
-                )
-            )
-
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
-        self._ensure_scratchpad(key)
-        if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool):
-                message_tool.start_turn()
-
-        history = session.get_history(max_messages=self.config.memory_window)
-        verify_before_answer = self._verifier.should_force_verification(msg.content)
-        skill_names = self.context.skills.detect_relevant_skills(msg.content)
-        initial_messages = await self.context.build_messages(
-            history=history,
-            current_message=msg.content,
-            skill_names=skill_names,
-            media=msg.media if msg.media else None,
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            verify_before_answer=verify_before_answer,
-        )
-
-        # Build a canonical event builder scoped to this request.
-        # turn_id is derived from the number of complete turns already in session.
-        _turn_num = len(session.messages) // 2
-        _canonical_message_id = "msg_asst_" + uuid.uuid4().hex[:12]
-        _canonical_builder = CanonicalEventBuilder(
-            run_id=TraceContext.get()["request_id"] or key,
-            session_id=key,
-            turn_id=f"turn_{_turn_num:05d}",
-            actor_id=self.role_name,
-        )
-
-        # Build a base metadata dict once for this turn; per-event fields are
-        # shallow-merged on each call to avoid re-copying msg.metadata each time.
-        _base_meta: dict[str, Any] = dict(msg.metadata or {})
-        _base_meta["_progress"] = True
-
-        _bus_progress = self._make_bus_progress(
-            msg.channel, msg.chat_id, _base_meta, _canonical_builder
-        )
-
-        # Emit run.start + message.start before the agent loop begins.
-        for _start_event in (
-            _canonical_builder.run_start(),
-            _canonical_builder.message_start(_canonical_message_id),
-        ):
-            await self.bus.publish_outbound(
-                OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content="",
-                    metadata={"_progress": True, "_canonical": _start_event},
-                )
-            )
-
-        # Wire the per-turn progress callback into the delegation dispatcher
-        # so delegation lifecycle events surface to the web stream.
-        self._dispatcher.on_progress = _bus_progress
-
-        final_content, tools_used, all_msgs = await self._run_agent_loop(
-            initial_messages,
-            on_progress=(on_progress or _bus_progress) if self.config.streaming_enabled else None,
-        )
-
-        # Clear the per-turn callback to prevent cross-turn leakage.
-        self._dispatcher.on_progress = None
-
-        if final_content is None:
-            final_content = await self._verifier.attempt_recovery(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                all_msgs=all_msgs,
-            )
-
-        if final_content is None:
-            final_content = AnswerVerifier.build_no_answer_explanation(msg.content, all_msgs)
-            # Ensure fallback responses are recorded in the session log.
-            all_msgs = self.context.add_assistant_message(all_msgs, final_content)
-
-        # Annotate the active langfuse span with request metadata + output.
-        # Token counts are intentionally omitted — the authoritative values
-        # are on the child GENERATION observations emitted by litellm's OTEL
-        # callback.  Duplicating them here with our internal streaming counter
-        # creates a confusing discrepancy (the streaming counter under-counts
-        # when the provider applies prompt-caching or tool-token adjustments).
-        update_current_span(
-            output=final_content[:500] if final_content else None,
-            metadata={
-                "channel": msg.channel,
-                "sender": msg.sender_id,
-                "model": self.model,
-                "role": self.role_name,
-                "session_key": key,
-                "llm_calls": str(self._turn_llm_calls),
-            },
-        )
-
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
-
-        # --- Request audit line ---
-        duration_ms = (time.monotonic() - t0_request) * 1000
-        bind_trace().info(
-            "request_complete | {ch}:{cid} | {dur:.0f}ms | model={mdl} | tools={tc} | len={rlen}"
-            " | llm_calls={lc} | prompt_tokens={pt} | completion_tokens={ct}",
-            ch=msg.channel,
-            cid=msg.chat_id,
-            dur=duration_ms,
-            mdl=self.model,
-            tc=len(tools_used),
-            rlen=len(final_content),
-            lc=self._turn_llm_calls,
-            pt=self._turn_tokens_prompt,
-            ct=self._turn_tokens_completion,
-        )
-
-        self._save_turn(session, all_msgs, 1 + len(history))
-        self.sessions.save(session)
-
-        # Append deferred conflict question after answering the user's message.
-        if pending_conflict_question:
-            final_content += "\n\n---\n" + pending_conflict_question
-
-        if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
-                return None
-
-        response_meta = dict(msg.metadata or {})
-        response_meta["usage"] = {
-            "prompt_tokens": self._turn_tokens_prompt,
-            "completion_tokens": self._turn_tokens_completion,
-        }
-        # message.end carries the authoritative usage and signals the end of the
-        # assistant turn. SSE projection treats message.end the same as run.end.
-        response_meta["_canonical"] = _canonical_builder.message_end(
-            _canonical_message_id,
-            input_tokens=self._turn_tokens_prompt,
-            output_tokens=self._turn_tokens_completion,
-        )
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content=final_content,
-            metadata=response_meta,
+        This method is kept on ``AgentLoop`` for backward compatibility with
+        tests and callers that monkey-patch ``_process_message``.  The real
+        implementation lives in ``MessageProcessor._process_message``.
+        """
+        return await self._processor._process_message(
+            msg, session_key=session_key, on_progress=on_progress
         )
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
@@ -1837,7 +1593,12 @@ class AgentLoop:
         session.updated_at = datetime.now(timezone.utc)
 
     async def _consolidate_memory(self, session: Session, archive_all: bool = False) -> bool:
-        """Delegate to ConsolidationOrchestrator."""
+        """Delegate to ConsolidationOrchestrator.
+
+        Kept on AgentLoop for backward compatibility with tests that
+        monkey-patch ``loop._consolidate_memory``.  The processor routes
+        through this method via ``_consolidate_memory_ref``.
+        """
         return await self._consolidator.consolidate(
             session,
             self.provider,
@@ -1895,7 +1656,7 @@ class AgentLoop:
                     "role": self.role_name,
                 },
             ):
-                response = await self._process_message(
+                response = await self._processor._process_message(
                     msg, session_key=session_key, on_progress=on_progress
                 )
         finally:
