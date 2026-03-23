@@ -134,7 +134,7 @@ class SkillsLoader:
             else:
                 missing = "N/A"
 
-            lines.append(f"{cnt},{str(available).lower()},{name},{desc},{path},{missing}")
+            lines.append(f"{cnt}. ,'{str(available).lower()}', '{name}', '{desc}', '{path}', '{missing}'")
             cnt += 1
 
 
