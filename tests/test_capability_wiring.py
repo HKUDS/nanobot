@@ -138,9 +138,9 @@ class TestUnavailableToolsCallback:
 
     def test_unavailable_summary_wired(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
-        # Register an unavailable tool
+        # Register an unavailable tool through CapabilityRegistry
         unavail = _UnavailFakeTool()
-        loop.tools.register(unavail)
+        loop._capabilities.register_tool(unavail)
         # The callback on context should produce output
         summary = loop._capabilities.get_unavailable_summary()
         assert "unavail_fake" in summary
