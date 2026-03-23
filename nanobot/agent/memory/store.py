@@ -118,8 +118,9 @@ class MemoryStore:
         )
 
         # Profile manager (LAN-202) — delegates profile CRUD to ProfileManager.
+        # Subsystem references (_extractor, _ingester, _conflict_mgr, _snapshot)
+        # are wired after all subsystems are constructed (see below).
         self.profile_mgr = ProfileManager(self.persistence, self.profile_file, self.mem0)
-        self.profile_mgr._store = self
 
         # Retrieval planner (LAN-207) — intent classification + policy + routing.
         self._planner = RetrievalPlanner()
@@ -252,6 +253,12 @@ class MemoryStore:
             write_profile_fn=lambda profile: self.profile_mgr.write_profile(profile),
             profile_keys=self.PROFILE_KEYS,
         )
+
+        # Wire profile_mgr subsystem dependencies (must happen after all are built).
+        self.profile_mgr._extractor = self.extractor
+        self.profile_mgr._ingester = self.ingester
+        self.profile_mgr._conflict_mgr = self.conflict_mgr
+        self.profile_mgr._snapshot = self.snapshot
 
         # ConsolidationPipeline: full consolidate workflow (LAN-215).
         self._consolidation = ConsolidationPipeline(
