@@ -13,7 +13,7 @@
 
 ## What is nanobot?
 
-Nanobot is a self-hosted AI assistant that connects to your chat apps — Telegram, Discord, Slack, WhatsApp, and Email — and runs entirely on your own machine. It works with any LLM provider (OpenRouter, Anthropic, OpenAI, DeepSeek, Gemini, or a local model), so you keep full control over your data and costs. Nanobot remembers context across conversations through its persistent memory system and can take actions using built-in tools like file operations, web search, shell commands, and a plugin skill system. The core framework is around 4,000 lines of async Python with a bus-based architecture — no microservices, no containers, just a single process.
+Nanobot is a self-hosted AI assistant that connects to your chat apps — Telegram, Discord, Slack, WhatsApp, and Email — and runs entirely on your own machine. It works with any LLM provider (OpenRouter, Anthropic, OpenAI, DeepSeek, Gemini, or a local model), so you keep full control over your data and costs. Nanobot remembers context across conversations through its persistent memory system and can take actions using built-in tools like file operations, web search, shell commands, and a plugin skill system.
 
 <div align="center">
   <img src="nanobot_arch.png" alt="Architecture" width="800">
@@ -38,7 +38,7 @@ pip install nanobot-ai
 ### Option 3: From source
 
 ```bash
-git clone https://github.com/cgajagon/nanobot.git
+git clone https://github.com/HKUDS/nanobot.git
 cd nanobot
 make install
 ```
@@ -71,10 +71,15 @@ At minimum, you need an LLM provider. Here is an example using OpenRouter:
 
 ```json
 {
-  "llm": {
-    "provider": "openrouter",
-    "apiKey": "sk-or-v1-YOUR_API_KEY",
-    "model": "anthropic/claude-sonnet-4-20250514"
+  "providers": {
+    "openrouter": {
+      "apiKey": "sk-or-v1-..."
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "anthropic/claude-sonnet-4-20250514"
+    }
   }
 }
 ```
