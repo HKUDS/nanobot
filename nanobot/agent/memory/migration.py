@@ -1,4 +1,6 @@
 # nanobot/agent/memory/migration.py
+# NOTE: Not exported from __init__.py during transition.
+# Will be added to package exports in Task 10.
 """One-time migration from file-based storage to unified SQLite.
 
 Converts events.jsonl, profile.json, HISTORY.md, and MEMORY.md into
@@ -78,7 +80,11 @@ def migrate_to_sqlite(
     for name in ("events.jsonl", "profile.json", "HISTORY.md", "MEMORY.md"):
         src = memory_dir / name
         if src.exists():
-            src.rename(src.with_suffix(src.suffix + ".bak"))
+            dst = src.with_suffix(src.suffix + ".bak")
+            if dst.exists():
+                logger.warning("Backup {} already exists, skipping rename", dst.name)
+            else:
+                src.rename(dst)
 
     logger.info("Migration complete")
     return db
@@ -139,7 +145,11 @@ def _migrate_profile(db: UnifiedMemoryDB, profile_file: Path) -> None:
 
 def _migrate_history(db: UnifiedMemoryDB, history_file: Path) -> None:
     """Read HISTORY.md and insert each non-empty block as a history entry."""
-    text = history_file.read_text()
+    try:
+        text = history_file.read_text()
+    except OSError:
+        logger.warning("Failed to read {} — skipping", history_file.name)
+        return
     # Split on double newlines (each block is one entry)
     blocks = [b.strip() for b in text.split("\n\n") if b.strip()]
     for block in blocks:
@@ -148,7 +158,11 @@ def _migrate_history(db: UnifiedMemoryDB, history_file: Path) -> None:
 
 def _migrate_memory_md(db: UnifiedMemoryDB, memory_file: Path) -> None:
     """Read MEMORY.md, extract user-pinned section, store both in snapshots."""
-    text = memory_file.read_text()
+    try:
+        text = memory_file.read_text()
+    except OSError:
+        logger.warning("Failed to read {} — skipping", memory_file.name)
+        return
 
     # Extract user-pinned section if present
     pinned = ""
