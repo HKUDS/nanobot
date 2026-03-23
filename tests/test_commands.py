@@ -616,3 +616,9 @@ def test_gateway_cli_port_overrides_configured_port(monkeypatch, tmp_path: Path)
 
     assert isinstance(result.exception, _StopGatewayError)
     assert "port 18792" in result.stdout
+
+
+def test_channels_login_requires_channel_name() -> None:
+    result = runner.invoke(app, ["channels", "login"])
+
+    assert result.exit_code == 2
