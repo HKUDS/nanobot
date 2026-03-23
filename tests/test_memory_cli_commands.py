@@ -436,11 +436,11 @@ def test_status_and_provider_login_branches(
     unknown = runner.invoke(app, ["provider", "login", "unknown-provider"])
     assert unknown.exit_code == 1
 
-    monkeypatch.setattr("nanobot.cli.commands._LOGIN_HANDLERS", {})
+    monkeypatch.setattr("nanobot.cli.provider._LOGIN_HANDLERS", {})
     no_impl = runner.invoke(app, ["provider", "login", "openai-codex"])
     assert no_impl.exit_code == 1
 
-    monkeypatch.setattr("nanobot.cli.commands._LOGIN_HANDLERS", {"openai_codex": lambda: None})
+    monkeypatch.setattr("nanobot.cli.provider._LOGIN_HANDLERS", {"openai_codex": lambda: None})
     ok = runner.invoke(app, ["provider", "login", "openai-codex"])
     assert ok.exit_code == 0
 

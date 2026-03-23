@@ -46,7 +46,7 @@ def test_channels_login_success_and_failures(
 
     bridge_dir = tmp_path / "bridge"
     bridge_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr("nanobot.cli.commands._get_bridge_dir", lambda: bridge_dir)
+    monkeypatch.setattr("nanobot.cli.channels._get_bridge_dir", lambda: bridge_dir)
 
     calls = {"n": 0}
 

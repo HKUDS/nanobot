@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from prompt_toolkit.formatted_text import HTML
 
-from nanobot.cli import commands
+from nanobot.cli import agent as _agent_mod
 
 
 @pytest.fixture
@@ -12,8 +12,8 @@ def mock_prompt_session():
     mock_session = MagicMock()
     mock_session.prompt_async = AsyncMock()
     with (
-        patch("nanobot.cli.commands._PROMPT_SESSION", mock_session),
-        patch("nanobot.cli.commands.patch_stdout"),
+        patch("nanobot.cli.agent._PROMPT_SESSION", mock_session),
+        patch("nanobot.cli.agent.patch_stdout"),
     ):
         yield mock_session
 
@@ -22,7 +22,7 @@ async def test_read_interactive_input_async_returns_input(mock_prompt_session):
     """Test that _read_interactive_input_async returns the user input from prompt_session."""
     mock_prompt_session.prompt_async.return_value = "hello world"
 
-    result = await commands._read_interactive_input_async()
+    result = await _agent_mod._read_interactive_input_async()
 
     assert result == "hello world"
     mock_prompt_session.prompt_async.assert_called_once()
@@ -35,24 +35,24 @@ async def test_read_interactive_input_async_handles_eof(mock_prompt_session):
     mock_prompt_session.prompt_async.side_effect = EOFError()
 
     with pytest.raises(KeyboardInterrupt):
-        await commands._read_interactive_input_async()
+        await _agent_mod._read_interactive_input_async()
 
 
 def test_init_prompt_session_creates_session():
     """Test that _init_prompt_session initializes the global session."""
     # Ensure global is None before test
-    commands._PROMPT_SESSION = None
+    _agent_mod._PROMPT_SESSION = None
 
     with (
-        patch("nanobot.cli.commands.PromptSession") as mock_session,
-        patch("nanobot.cli.commands.FileHistory"),
+        patch("nanobot.cli.agent.PromptSession") as mock_session,
+        patch("nanobot.cli.agent.FileHistory"),
         patch("pathlib.Path.home") as mock_home,
     ):
         mock_home.return_value = MagicMock()
 
-        commands._init_prompt_session()
+        _agent_mod._init_prompt_session()
 
-        assert commands._PROMPT_SESSION is not None
+        assert _agent_mod._PROMPT_SESSION is not None
         mock_session.assert_called_once()
         _, kwargs = mock_session.call_args
         assert kwargs["multiline"] is False

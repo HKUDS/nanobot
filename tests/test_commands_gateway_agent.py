@@ -139,7 +139,7 @@ def test_gateway_runs_cron_and_heartbeat_callbacks(
 
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda: cfg)
     monkeypatch.setattr("nanobot.config.loader.get_data_dir", lambda: tmp_path)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _cfg: object())
+    monkeypatch.setattr("nanobot.cli.gateway._make_provider", lambda _cfg: object())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: bus)
     monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _AgentLoop)
     monkeypatch.setattr("nanobot.session.manager.SessionManager", _SessionManager)
@@ -168,7 +168,7 @@ def test_gateway_continues_when_health_port_is_busy_with_web_enabled(
 
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda: cfg)
     monkeypatch.setattr("nanobot.config.loader.get_data_dir", lambda: tmp_path)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _cfg: object())
+    monkeypatch.setattr("nanobot.cli.gateway._make_provider", lambda _cfg: object())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: bus)
     monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _AgentLoop)
     monkeypatch.setattr("nanobot.session.manager.SessionManager", _SessionManager)
@@ -223,7 +223,7 @@ def test_agent_single_message_and_interactive_exit(
 
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda: cfg)
     monkeypatch.setattr("nanobot.config.loader.get_data_dir", lambda: tmp_path)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _cfg: object())
+    monkeypatch.setattr("nanobot.cli.agent._make_provider", lambda _cfg: object())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", _Bus)
     monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _AgentLoop)
     monkeypatch.setattr("nanobot.cron.service.CronService", _CronService)
@@ -244,9 +244,9 @@ def test_agent_single_message_and_interactive_exit(
     assert single.exit_code == 0
     assert "nanobot" in single.stdout
 
-    monkeypatch.setattr("nanobot.cli.commands._init_prompt_session", lambda: None)
-    monkeypatch.setattr("nanobot.cli.commands._flush_pending_tty_input", lambda: None)
-    monkeypatch.setattr("nanobot.cli.commands._restore_terminal", lambda: None)
+    monkeypatch.setattr("nanobot.cli.agent._init_prompt_session", lambda: None)
+    monkeypatch.setattr("nanobot.cli.agent._flush_pending_tty_input", lambda: None)
+    monkeypatch.setattr("nanobot.cli.agent._restore_terminal", lambda: None)
 
     calls = {"n": 0}
 
@@ -254,7 +254,7 @@ def test_agent_single_message_and_interactive_exit(
         calls["n"] += 1
         return "exit"
 
-    monkeypatch.setattr("nanobot.cli.commands._read_interactive_input_async", _read_once)
+    monkeypatch.setattr("nanobot.cli.agent._read_interactive_input_async", _read_once)
 
     interactive = runner.invoke(app, ["agent", "--session", "cli:direct", "--timeout", "0"])
     assert interactive.exit_code == 0
