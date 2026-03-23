@@ -287,3 +287,37 @@ async def test_decide_prompt_includes_current_time(tmp_path) -> None:
     assert user_msg["role"] == "user"
     assert "Current Time:" in user_msg["content"]
 
+
+@pytest.mark.asyncio
+async def test_tick_and_trigger_now_do_not_overlap_execution(tmp_path, monkeypatch) -> None:
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] do thing", encoding="utf-8")
+
+    active = 0
+    peak_active = 0
+    calls = 0
+
+    async def _on_execute(_tasks: str) -> str:
+        nonlocal active, peak_active, calls
+        calls += 1
+        active += 1
+        peak_active = max(peak_active, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return ""
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=DummyProvider([]),
+        model="openai/gpt-4o-mini",
+        on_execute=_on_execute,
+    )
+
+    async def _always_run(_content: str) -> tuple[str, str]:
+        return "run", "check open tasks"
+
+    monkeypatch.setattr(service, "_decide", _always_run)
+
+    await asyncio.gather(service._tick(), service.trigger_now())
+
+    assert calls == 2
+    assert peak_active == 1

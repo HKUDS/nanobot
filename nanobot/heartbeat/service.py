@@ -69,6 +69,7 @@ class HeartbeatService:
         self.enabled = enabled
         self._running = False
         self._task: asyncio.Task | None = None
+        self._execute_lock = asyncio.Lock()
 
     @property
     def heartbeat_file(self) -> Path:
@@ -144,42 +145,44 @@ class HeartbeatService:
         """Execute a single heartbeat tick."""
         from nanobot.utils.evaluator import evaluate_response
 
-        content = self._read_heartbeat_file()
-        if not content:
-            logger.debug("Heartbeat: HEARTBEAT.md missing or empty")
-            return
-
-        logger.info("Heartbeat: checking for tasks...")
-
-        try:
-            action, tasks = await self._decide(content)
-
-            if action != "run":
-                logger.info("Heartbeat: OK (nothing to report)")
+        async with self._execute_lock:
+            content = self._read_heartbeat_file()
+            if not content:
+                logger.debug("Heartbeat: HEARTBEAT.md missing or empty")
                 return
 
-            logger.info("Heartbeat: tasks found, executing...")
-            if self.on_execute:
-                response = await self.on_execute(tasks)
+            logger.info("Heartbeat: checking for tasks...")
 
-                if response:
-                    should_notify = await evaluate_response(
-                        response, tasks, self.provider, self.model,
-                    )
-                    if should_notify and self.on_notify:
-                        logger.info("Heartbeat: completed, delivering response")
-                        await self.on_notify(response)
-                    else:
-                        logger.info("Heartbeat: silenced by post-run evaluation")
-        except Exception:
-            logger.exception("Heartbeat execution failed")
+            try:
+                action, tasks = await self._decide(content)
+
+                if action != "run":
+                    logger.info("Heartbeat: OK (nothing to report)")
+                    return
+
+                logger.info("Heartbeat: tasks found, executing...")
+                if self.on_execute:
+                    response = await self.on_execute(tasks)
+
+                    if response:
+                        should_notify = await evaluate_response(
+                            response, tasks, self.provider, self.model,
+                        )
+                        if should_notify and self.on_notify:
+                            logger.info("Heartbeat: completed, delivering response")
+                            await self.on_notify(response)
+                        else:
+                            logger.info("Heartbeat: silenced by post-run evaluation")
+            except Exception:
+                logger.exception("Heartbeat execution failed")
 
     async def trigger_now(self) -> str | None:
         """Manually trigger a heartbeat."""
-        content = self._read_heartbeat_file()
-        if not content:
-            return None
-        action, tasks = await self._decide(content)
-        if action != "run" or not self.on_execute:
-            return None
-        return await self.on_execute(tasks)
+        async with self._execute_lock:
+            content = self._read_heartbeat_file()
+            if not content:
+                return None
+            action, tasks = await self._decide(content)
+            if action != "run" or not self.on_execute:
+                return None
+            return await self.on_execute(tasks)

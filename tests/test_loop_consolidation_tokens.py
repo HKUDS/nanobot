@@ -1,3 +1,4 @@
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -194,3 +195,37 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
     assert "consolidate" in order
     assert "llm" in order
     assert order.index("consolidate") < order.index("llm")
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_direct_run_does_not_persist_session_or_consolidate(tmp_path) -> None:
+    loop = _make_loop(tmp_path, estimated_tokens=1000, context_window_tokens=200)
+    loop.memory_consolidator.maybe_consolidate_by_tokens = AsyncMock()  # type: ignore[method-assign]
+
+    await loop.process_direct("heartbeat run", session_key="heartbeat", ephemeral_session=True)
+
+    assert not loop.sessions._get_session_path("heartbeat").exists()
+    session = loop.sessions.get_or_create("heartbeat")
+    assert session.messages == []
+    loop.memory_consolidator.maybe_consolidate_by_tokens.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_direct_run_ignores_existing_session_history(tmp_path) -> None:
+    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
+    sentinel = "EPHEMERAL_SENTINEL_9aa0f4c4"
+
+    session = loop.sessions.get_or_create("heartbeat")
+    session.messages = [
+        {"role": "user", "content": sentinel, "timestamp": "2026-01-01T00:00:00"},
+        {"role": "assistant", "content": "old", "timestamp": "2026-01-01T00:00:01"},
+    ]
+    loop.sessions.save(session)
+
+    await loop.process_direct("new heartbeat tick", session_key="heartbeat", ephemeral_session=True)
+
+    sent_messages = loop.provider.chat_with_retry.await_args.kwargs["messages"]
+    assert sentinel not in json.dumps(sent_messages, ensure_ascii=False)
+
+    reloaded = loop.sessions.get_or_create("heartbeat")
+    assert [m["content"] for m in reloaded.messages] == [sentinel, "old"]

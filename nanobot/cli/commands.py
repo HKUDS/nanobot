@@ -620,6 +620,7 @@ def gateway(
             channel=channel,
             chat_id=chat_id,
             on_progress=_silent,
+            ephemeral_session=True,
         )
         
         # Clear the heartbeat session to prevent token overflow from accumulated tasks

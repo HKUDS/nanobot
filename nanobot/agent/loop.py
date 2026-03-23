@@ -515,6 +515,7 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        ephemeral_session: bool = False,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -544,11 +545,17 @@ class AgentLoop:
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         key = session_key or msg.session_key
-        session = self.sessions.get_or_create(key)
+        session: Session | None = None
+
+        if not ephemeral_session:
+            session = self.sessions.get_or_create(key)
 
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
+            if session is None:
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
+                                      content="New session started.")
             snapshot = session.messages[session.last_consolidated:]
             session.clear()
             self.sessions.save(session)
@@ -560,6 +567,8 @@ class AgentLoop:
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
         if cmd == "/status":
+            if session is None:
+                session = self.sessions.get_or_create(key)
             return self._status_response(msg, session)
         if cmd == "/help":
             lines = [
@@ -576,14 +585,16 @@ class AgentLoop:
                 content="\n".join(lines),
                 metadata={"render_as": "text"},
             )
-        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+
+        if session is not None:
+            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(max_messages=0)
+        history = session.get_history(max_messages=0) if session is not None else []
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
@@ -609,9 +620,10 @@ class AgentLoop:
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        self._save_turn(session, all_msgs, 1 + len(history))
-        self.sessions.save(session)
-        self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+        if session is not None:
+            self._save_turn(session, all_msgs, 1 + len(history))
+            self.sessions.save(session)
+            self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
@@ -715,11 +727,20 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        ephemeral_session: bool = False,
     ) -> OutboundMessage | None:
-        """Process a message directly and return the outbound payload."""
+        """Process a message directly and return the outbound payload.
+
+        When ``ephemeral_session`` is True, no session history is loaded or persisted.
+        """
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        return await self._process_message(
-            msg, session_key=session_key, on_progress=on_progress,
-            on_stream=on_stream, on_stream_end=on_stream_end,
-        )
+        async with self._processing_lock:
+            return await self._process_message(
+                msg,
+                session_key=session_key,
+                on_progress=on_progress,
+                on_stream=on_stream,
+                on_stream_end=on_stream_end,
+                ephemeral_session=ephemeral_session,
+            )
