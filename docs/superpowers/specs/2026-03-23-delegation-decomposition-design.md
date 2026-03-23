@@ -61,7 +61,7 @@ Contains contract assembly and the context helpers it depends on:
 
 | Symbol | Current location | Lines |
 |--------|-----------------|-------|
-| `build_delegation_contract(role, task, context, task_type)` | delegation.py:628-696 | ~68 |
+| `build_delegation_contract(role, task, context, task_type, workspace, ...)` | delegation.py:628-696 | ~68 |
 | `gather_recent_tool_results(active_messages, max_results, max_chars)` | delegation.py:378-414 | ~36 |
 | `extract_plan_text(active_messages)` | delegation.py:416-433 | ~17 |
 | `extract_user_request(active_messages)` | delegation.py:435-444 | ~9 |
@@ -79,6 +79,7 @@ Total: ~173 lines.
 **Consumers that need updating:**
 - `DelegationDispatcher.dispatch()` and `execute_delegated_agent()` — currently call `self.build_delegation_contract(...)`, `self.gather_recent_tool_results(...)`, etc. Will import from `delegation_contract` and pass `self.active_messages`, `self.workspace`, `self.scratchpad` as arguments
 - Tests: `test_delegation_dispatcher.py` imports `_SCRATCHPAD_INJECTION_LIMIT`, `_cap_scratchpad_for_injection`; update import paths
+- Tests: `test_token_reduction.py` (lines 69, 79) imports `_cap_scratchpad_for_injection` from `delegation`; update import path (or rely on backward-compat re-export)
 
 **Backward compatibility:** Add re-exports in `delegation.py` for `_SCRATCHPAD_INJECTION_LIMIT` and `_cap_scratchpad_for_injection` (used by tests).
 
@@ -112,6 +113,7 @@ Responsibilities: dispatch routing, cycle/depth detection, tool registry buildin
 **`mission.py`** — changes `from nanobot.agent.delegation import TASK_TYPES` to `from nanobot.agent.task_types import TASK_TYPES`
 **`turn_orchestrator.py`** — changes `DelegationDispatcher.has_parallel_structure(...)` to `has_parallel_structure(...)` imported from `task_types`
 **`delegation_advisor.py`** — same pattern as turn_orchestrator
+**`loop.py:96`** — re-exports `_delegation_ancestry` from `delegation.py` for backward compat. Since `_delegation_ancestry` stays in `delegation.py`, this re-export continues to work. Do not move `_delegation_ancestry` without updating this re-export.
 
 ### `__init__.py` exports
 
@@ -127,7 +129,7 @@ To maintain backward compatibility during the transition:
 class DelegationDispatcher:
     # Thin wrappers — delegate to module functions
     @staticmethod
-    def classify_task_type(role: AgentRoleConfig, task: str) -> str:
+    def classify_task_type(role: str, task: str) -> str:
         return classify_task_type(role, task)
 
     @staticmethod
@@ -135,7 +137,10 @@ class DelegationDispatcher:
         return has_parallel_structure(text)
 ```
 
-These wrappers can be removed once all callers are updated to use the module-level functions directly.
+These wrappers can be removed once all callers are updated to use the module-level functions directly. Known callers of the static methods that depend on the wrappers:
+- `tests/test_delegation_dispatcher.py` (lines 259-273) — calls `DelegationDispatcher.has_parallel_structure(...)`
+- `tests/test_multiagent_planning.py:123` — calls `DelegationDispatcher.has_parallel_structure(...)`
+- `turn_orchestrator.py:774` — calls `DelegationDispatcher.has_parallel_structure(...)` (updated to direct import as part of this phase)
 
 ## Constraints
 
