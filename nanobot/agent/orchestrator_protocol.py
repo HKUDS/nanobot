@@ -19,7 +19,10 @@ from typing import TYPE_CHECKING, Any, Protocol
 from nanobot.agent.failure import ToolCallTracker
 
 if TYPE_CHECKING:
+    from nanobot.agent.callbacks import ProgressCallback
+    from nanobot.agent.coordinator import ClassificationResult
     from nanobot.agent.delegation_advisor import DelegationAction
+    from nanobot.agent.turn_orchestrator import TurnResult
 
 
 @dataclass(slots=True)
@@ -49,9 +52,11 @@ class Orchestrator(Protocol):
     including ``TurnOrchestrator`` and test mocks.
     """
 
+    _last_classification_result: ClassificationResult | None
+
     async def run(
         self,
         state: TurnState,
-        on_progress: Any = None,
-    ) -> Any:
+        on_progress: ProgressCallback | None,
+    ) -> TurnResult:
         """Execute one full turn of the Plan-Act-Observe-Reflect loop."""  # Protocol stub
