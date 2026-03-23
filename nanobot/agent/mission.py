@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from nanobot.agent.delegation import TASK_TYPES, DelegationDispatcher
 from nanobot.agent.observability import (
     score_current_trace,
     update_current_span,
@@ -30,6 +29,7 @@ from nanobot.agent.observability import (
 from nanobot.agent.observability import (
     span as langfuse_span,
 )
+from nanobot.agent.task_types import TASK_TYPES, classify_task_type
 from nanobot.agent.tool_loop import run_tool_loop
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -227,7 +227,7 @@ class MissionManager:
                 role = await self._resolve_role(mission.task)
                 mission.role = role.name
 
-                task_type = DelegationDispatcher.classify_task_type(role.name, mission.task)
+                task_type = classify_task_type(role.name, mission.task)
                 logger.debug("Mission [{}] task_type={} role={}", mission.id, task_type, role.name)
 
                 tools = self._build_tool_registry(role)

@@ -37,6 +37,7 @@ from nanobot.agent.delegation import DelegationDispatcher
 from nanobot.agent.failure import FailureClass, ToolCallTracker, _build_failure_prompt
 from nanobot.agent.prompt_loader import PromptLoader
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
+from nanobot.agent.task_types import has_parallel_structure
 from nanobot.agent.tool_executor import ToolExecutor
 from nanobot.agent.tracing import bind_trace
 from nanobot.agent.verifier import AnswerVerifier
@@ -771,7 +772,7 @@ class TurnOrchestrator:
             had_delegations_this_batch=had_delegations,
             used_sequential_delegate=had_delegations
             and not any(tc.name == "delegate_parallel" for tc in response.tool_calls),
-            has_parallel_structure=DelegationDispatcher.has_parallel_structure(state.user_text),
+            has_parallel_structure=has_parallel_structure(state.user_text),
             any_ungrounded=any(
                 "grounded=False" in (m.get("content") or "")
                 for m in state.messages[-len(response.tool_calls) :]

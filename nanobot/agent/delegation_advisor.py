@@ -14,7 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from nanobot.agent.delegation import DelegationDispatcher, get_delegation_depth
+from nanobot.agent.delegation import get_delegation_depth
+from nanobot.agent.task_types import has_parallel_structure
 
 
 class DelegationAction(str, Enum):
@@ -95,7 +96,7 @@ class DelegationAdvisor:
             return _NONE_ADVICE
 
         if needs_orchestration or len(relevant_roles) >= 2:
-            if DelegationDispatcher.has_parallel_structure(user_text):
+            if has_parallel_structure(user_text):
                 return DelegationAdvice(
                     action=DelegationAction.SOFT_NUDGE,
                     reason="orchestration needed with parallel structure",
