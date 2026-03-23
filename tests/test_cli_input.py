@@ -5,6 +5,7 @@ import pytest
 from prompt_toolkit.formatted_text import HTML
 
 from nanobot.cli import commands
+from nanobot.cli import stream as stream_mod
 
 
 @pytest.fixture
@@ -62,12 +63,13 @@ def test_init_prompt_session_creates_session():
 def test_thinking_spinner_pause_stops_and_restarts():
     """Pause should stop the active spinner and restart it afterward."""
     spinner = MagicMock()
+    mock_console = MagicMock()
+    mock_console.status.return_value = spinner
 
-    with patch.object(commands.console, "status", return_value=spinner):
-        thinking = commands._ThinkingSpinner(enabled=True)
-        with thinking:
-            with thinking.pause():
-                pass
+    thinking = stream_mod.ThinkingSpinner(console=mock_console)
+    with thinking:
+        with thinking.pause():
+            pass
 
     assert spinner.method_calls == [
         call.start(),
@@ -83,10 +85,11 @@ def test_print_cli_progress_line_pauses_spinner_before_printing():
     spinner = MagicMock()
     spinner.start.side_effect = lambda: order.append("start")
     spinner.stop.side_effect = lambda: order.append("stop")
+    mock_console = MagicMock()
+    mock_console.status.return_value = spinner
 
-    with patch.object(commands.console, "status", return_value=spinner), \
-         patch.object(commands.console, "print", side_effect=lambda *_args, **_kwargs: order.append("print")):
-        thinking = commands._ThinkingSpinner(enabled=True)
+    with patch.object(commands.console, "print", side_effect=lambda *_args, **_kwargs: order.append("print")):
+        thinking = stream_mod.ThinkingSpinner(console=mock_console)
         with thinking:
             commands._print_cli_progress_line("tool running", thinking)
 
@@ -100,13 +103,14 @@ async def test_print_interactive_progress_line_pauses_spinner_before_printing():
     spinner = MagicMock()
     spinner.start.side_effect = lambda: order.append("start")
     spinner.stop.side_effect = lambda: order.append("stop")
+    mock_console = MagicMock()
+    mock_console.status.return_value = spinner
 
     async def fake_print(_text: str) -> None:
         order.append("print")
 
-    with patch.object(commands.console, "status", return_value=spinner), \
-         patch("nanobot.cli.commands._print_interactive_line", side_effect=fake_print):
-        thinking = commands._ThinkingSpinner(enabled=True)
+    with patch("nanobot.cli.commands._print_interactive_line", side_effect=fake_print):
+        thinking = stream_mod.ThinkingSpinner(console=mock_console)
         with thinking:
             await commands._print_interactive_progress_line("tool running", thinking)
 

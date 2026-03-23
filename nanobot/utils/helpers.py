@@ -11,6 +11,13 @@ from typing import Any
 import tiktoken
 
 
+def strip_think(text: str) -> str:
+    """Remove <think>…</think> blocks and any unclosed trailing <think> tag."""
+    text = re.sub(r"<think>[\s\S]*?</think>", "", text)
+    text = re.sub(r"<think>[\s\S]*$", "", text)
+    return text.strip()
+
+
 def detect_image_mime(data: bytes) -> str | None:
     """Detect image MIME type from magic bytes, ignoring file extension."""
     if data[:8] == b"\x89PNG\r\n\x1a\n":
