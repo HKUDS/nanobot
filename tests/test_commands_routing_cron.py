@@ -94,7 +94,7 @@ def test_cron_run_success_and_failure(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda: cfg)
     monkeypatch.setattr("nanobot.config.loader.get_data_dir", lambda: tmp_path)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _cfg: object())
+    monkeypatch.setattr("nanobot.cli.cron._make_provider", lambda _cfg: object())
 
     class _Bus:
         pass
