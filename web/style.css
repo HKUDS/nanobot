@@ -573,6 +573,20 @@ header {
   background: var(--bg-hover);
   color: var(--text-dim);
   word-break: break-all;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tool-header::after {
+  content: '▶';
+  margin-left: auto;
+  font-size: 9px;
+  color: var(--text-hint);
+  flex-shrink: 0;
+}
+
+.tool-block.expanded .tool-header::after {
+  content: '▼';
 }
 
 .tool-spinner {
@@ -599,6 +613,7 @@ header {
 }
 
 .tool-output {
+  display: none;
   padding: 8px 12px;
   color: var(--text);
   white-space: pre-wrap;
@@ -608,7 +623,9 @@ header {
   line-height: 1.5;
 }
 
-.tool-output:empty { display: none; }
+.tool-block.expanded .tool-output {
+  display: block;
+}
 
 .tool-filepath {
   color: var(--accent);
@@ -911,6 +928,6 @@ header {
   .message { margin-bottom: 14px; }
 
   /* Tool output max-height smaller on phone */
-  .tool-output { max-height: 200px; }
+  .tool-block.expanded .tool-output { max-height: 200px; }
   .tool-file-content { max-height: 260px; }
 }

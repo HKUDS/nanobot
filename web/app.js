@@ -743,6 +743,11 @@ async function sendMessage(text) {
               <div class="tool-output"></div>
             `;
           }
+          // Click header to toggle expand/collapse
+          const header = block.querySelector('.tool-header');
+          if (header) {
+            header.addEventListener('click', () => block.classList.toggle('expanded'));
+          }
           bubble.insertBefore(block, currentStreamEl);
           lastToolBlock = block;
           collectedHints.push({ toolName: data.tool, fullText: data.call_str || data.tool });
@@ -762,6 +767,7 @@ async function sendMessage(text) {
                 img.alt = 'tool output image';
                 outputEl.appendChild(img);
               } else {
+                // Replace streamed partial lines with the authoritative full result
                 outputEl.textContent = data.output;
                 if (data.truncated) {
                   const notice = document.createElement('div');
@@ -770,12 +776,14 @@ async function sendMessage(text) {
                   lastToolBlock.appendChild(notice);
                 }
               }
+              lastToolBlock.classList.add('expanded');
             }
           }
           scrollToBottom();
 
         } else if (type === 'tool_stream') {
           if (lastToolBlock) {
+            lastToolBlock.classList.add('expanded');
             const outputEl = lastToolBlock.querySelector('.tool-output');
             if (outputEl) {
               outputEl.textContent += data.text + '\n';

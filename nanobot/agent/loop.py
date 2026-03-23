@@ -199,6 +199,7 @@ class AgentLoop:
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        on_tool_result: Callable[[str, str], Awaitable[None]] | None = None,
         *,
         channel: str = "cli",
         chat_id: str = "direct",
@@ -304,6 +305,8 @@ class AgentLoop:
                 for tool_call, result in zip(response.tool_calls, results):
                     if isinstance(result, BaseException):
                         result = f"Error: {type(result).__name__}: {result}"
+                    if on_tool_result:
+                        await on_tool_result(tool_call.name, str(result))
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -435,6 +438,7 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        on_tool_result: Callable[[str, str], Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -506,6 +510,7 @@ class AgentLoop:
             on_progress=on_progress or _bus_progress,
             on_stream=on_stream,
             on_stream_end=on_stream_end,
+            on_tool_result=on_tool_result,
             channel=msg.channel, chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
         )
@@ -620,6 +625,7 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        on_tool_result: Callable[[str, str], Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
@@ -627,4 +633,5 @@ class AgentLoop:
         return await self._process_message(
             msg, session_key=session_key, on_progress=on_progress,
             on_stream=on_stream, on_stream_end=on_stream_end,
+            on_tool_result=on_tool_result,
         )

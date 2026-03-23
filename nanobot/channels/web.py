@@ -532,6 +532,10 @@ class WebChannel(BaseChannel):
             else:
                 await q.put(("progress", content, False))
 
+        async def on_tool_result(tool_name: str, output: str) -> None:
+            _tool_active[0] = False
+            await q.put(("tool_result", tool_name, output))
+
         session_key = f"web:{session_id}"
 
         async def run_agent() -> None:
@@ -546,6 +550,7 @@ class WebChannel(BaseChannel):
                     media=media_paths or None,
                     on_progress=on_progress,
                     on_stream=on_stream,
+                    on_tool_result=on_tool_result,
                 )
                 final = result.content if result else ""
                 await q.put(("done", final or ""))
@@ -596,6 +601,8 @@ class WebChannel(BaseChannel):
                     await response.write(_sse("tool_call", {"tool": item[1], "call_str": item[2]}))
                 elif kind == "tool_stream":
                     await response.write(_sse("tool_stream", {"text": item[1]}))
+                elif kind == "tool_result":
+                    await response.write(_sse("tool_result", {"tool": item[1], "output": item[2]}))
                 elif kind == "progress":
                     await response.write(_sse("progress", {"text": item[1], "tool_hint": item[2]}))
                 elif kind == "done":
