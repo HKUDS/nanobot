@@ -292,3 +292,381 @@ nanobot gateway
 ```
 
 </details>
+
+## Configuration
+
+All configuration lives in `~/.nanobot/config.json`.
+
+<details>
+<summary><b>Agent Capabilities</b></summary>
+
+Configure agent behavior via `agents.defaults` in your config:
+
+| Feature | Config Key | Default | Description |
+|---------|-----------|---------|-------------|
+| Planning | `planning_enabled` | `true` | Decomposes complex tasks into sub-steps before acting |
+| Self-critique | `verification_mode` | `"on_uncertainty"` | Verifies tool outputs for correctness (`on_uncertainty`/`always`/`off`) |
+| Summary compression | `summary_model` | `""` | LLM model for context window compression (empty = use main model) |
+| Memory cap | `memory_md_token_cap` | `1500` | Max tokens injected from MEMORY.md into system prompt |
+| Shell mode | `shell_mode` | `"denylist"` | Shell command security (`denylist` blocks destructive commands, `allowlist` for strict allowlisting) |
+
+**Rollout flags** (environment variables):
+
+| Variable | Values | Description |
+|----------|--------|-------------|
+| `NANOBOT_RERANKER_MODE` | `disabled`/`shadow`/`enabled` | Cross-encoder re-ranker for memory retrieval |
+| `NANOBOT_RERANKER_ALPHA` | `0.0`-`1.0` | Blend weight (1.0 = pure cross-encoder, 0.0 = pure heuristic) |
+| `NANOBOT_RERANKER_MODEL` | model name | Override re-ranker model (default: `ms-marco-MiniLM-L-6-v2`) |
+
+</details>
+
+<details>
+<summary><b>Providers</b></summary>
+
+> [!TIP]
+> - **Groq** provides free voice transcription via Whisper. Telegram voice messages are automatically transcribed.
+> - **Zhipu Coding Plan**: Set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
+> - **MiniMax (Mainland China)**: Set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
+> - **VolcEngine Coding Plan**: Set `"apiBase": "https://ark.cn-beijing.volces.com/api/coding/v3"` in your volcengine provider config.
+
+| Provider | Purpose | Get API Key |
+|----------|---------|-------------|
+| `custom` | Any OpenAI-compatible endpoint (direct, no LiteLLM) | — |
+| `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
+| `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
+| `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
+| `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
+| `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
+| `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
+| `minimax` | LLM (MiniMax direct) | [platform.minimaxi.com](https://platform.minimaxi.com) |
+| `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
+| `siliconflow` | LLM (SiliconFlow/硅基流动) | [siliconflow.cn](https://siliconflow.cn) |
+| `volcengine` | LLM (VolcEngine/火山引擎) | [volcengine.com](https://www.volcengine.com) |
+| `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
+| `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
+| `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
+| `vllm` | LLM (local, any OpenAI-compatible server) | — |
+| `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
+| `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
+
+<details>
+<summary>OpenAI Codex (OAuth)</summary>
+
+1. Log in:
+
+```bash
+nanobot provider login openai-codex
+```
+
+2. Set your model in `config.json`:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "openai-codex/gpt-5.1-codex"
+    }
+  }
+}
+```
+
+3. Chat:
+
+```bash
+nanobot agent -m "Hello!"
+```
+
+> [!NOTE]
+> When running inside Docker, use `docker run -it` for interactive OAuth login.
+
+</details>
+
+<details>
+<summary>GitHub Copilot (OAuth)</summary>
+
+1. Log in:
+
+```bash
+nanobot provider login github-copilot
+```
+
+2. Set your model in `config.json`:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "github-copilot/gpt-4o"
+    }
+  }
+}
+```
+
+3. Chat:
+
+```bash
+nanobot agent -m "Hello!"
+```
+
+> [!NOTE]
+> When running inside Docker, use `docker run -it` for interactive OAuth login.
+
+</details>
+
+<details>
+<summary>Custom Provider</summary>
+
+Use any OpenAI-compatible endpoint directly (LM Studio, llama.cpp, Together AI, etc.) without going through LiteLLM.
+
+```json
+{
+  "providers": {
+    "custom": {
+      "apiKey": "your-api-key",
+      "apiBase": "https://your-endpoint.com/v1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "your-model-name"
+    }
+  }
+}
+```
+
+> [!NOTE]
+> For local servers that don't require authentication, set `apiKey` to any non-empty string (e.g., `"dummy"`).
+
+</details>
+
+<details>
+<summary>vLLM</summary>
+
+1. Start a vLLM server:
+
+```bash
+vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
+```
+
+2. Configure nanobot:
+
+```json
+{
+  "providers": {
+    "vllm": {
+      "apiKey": "dummy",
+      "apiBase": "http://localhost:8000/v1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "meta-llama/Llama-3.1-8B-Instruct"
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary>Adding a New Provider (Developer Guide)</summary>
+
+Providers are defined in the Provider Registry (`nanobot/providers/registry.py`). Each provider is a `ProviderSpec`:
+
+1. **Add a `ProviderSpec`** to `PROVIDERS` in `registry.py`:
+
+```python
+ProviderSpec(
+    name="myprovider",
+    litellm_prefix="myprovider",
+    env_extras={"MYPROVIDER_API_KEY": "apiKey"},
+)
+```
+
+2. **Add a config field** to `ProvidersConfig` in `nanobot/config/schema.py`:
+
+```python
+myprovider: ProviderConfig = Field(default_factory=ProviderConfig)
+```
+
+`ProviderSpec` options:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `litellm_prefix` | `str` | Prefix added to model names for LiteLLM routing |
+| `skip_prefixes` | `list[str]` | Model prefixes that skip the litellm_prefix |
+| `env_extras` | `dict` | Extra environment variables to set from config |
+| `model_overrides` | `dict` | Rewrite model names before sending to LiteLLM |
+| `is_gateway` | `bool` | If true, acts as a gateway (no prefix added) |
+| `detect_by_key_prefix` | `str` | Auto-detect provider by API key prefix |
+| `detect_by_base_keyword` | `str` | Auto-detect provider by API base URL keyword |
+| `strip_model_prefix` | `bool` | Strip the provider prefix before sending to the API |
+
+</details>
+
+</details>
+
+<details>
+<summary><b>MCP (Model Context Protocol)</b></summary>
+
+> [!TIP]
+> The config format is compatible with Claude Desktop / Cursor. You can copy MCP server configs directly from any MCP server's README.
+
+nanobot supports [MCP](https://modelcontextprotocol.io/) — connect external tool servers and use them as native agent tools.
+
+Add MCP servers to your `config.json`:
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "filesystem": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
+      },
+      "my-remote-mcp": {
+        "url": "https://example.com/mcp/",
+        "headers": {
+          "Authorization": "Bearer xxxxx"
+        }
+      }
+    }
+  }
+}
+```
+
+Two transport modes:
+
+| Mode | Config | Example |
+|------|--------|---------|
+| **Stdio** | `command` + `args` | Local process via `npx` / `uvx` |
+| **HTTP** | `url` + `headers` (optional) | Remote endpoint |
+
+Use `toolTimeout` to override the default 30s per-call timeout:
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "my-slow-server": {
+        "url": "https://example.com/mcp/",
+        "toolTimeout": 120
+      }
+    }
+  }
+}
+```
+
+MCP tools are automatically discovered and registered on startup.
+
+</details>
+
+<details>
+<summary><b>Multi-Agent Routing</b></summary>
+
+A lightweight LLM classifier routes each message to a specialized agent role. Each role can have its own model, system prompt, temperature, and tool restrictions — while sharing conversation history and memory.
+
+Routing is **disabled by default**. Enable it in your config:
+
+```json
+{
+  "agents": {
+    "routing": {
+      "enabled": true,
+      "classifierModel": "gpt-4o-mini",
+      "defaultRole": "general",
+      "roles": [
+        {
+          "name": "code",
+          "description": "Code generation, debugging, refactoring",
+          "model": "claude-sonnet-4-20250514",
+          "deniedTools": ["message"]
+        },
+        {
+          "name": "research",
+          "description": "Web search, document analysis, fact-finding",
+          "deniedTools": ["write_file", "edit_file"]
+        }
+      ]
+    }
+  }
+}
+```
+
+Six built-in roles: **code**, **research**, **writing**, **system**, **pm**, and **general**. Custom roles extend or override these.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `bool` | `false` | Feature gate |
+| `classifierModel` | `string` | `null` | Cheap model for intent classification |
+| `defaultRole` | `string` | `"general"` | Fallback when classifier is uncertain |
+| `roles` | `array` | `[]` | Custom role definitions |
+
+Each role supports: `name`, `description`, `model`, `temperature`, `systemPrompt`, `allowedTools`, `deniedTools`, `skills`, `maxIterations`, `enabled`.
+
+</details>
+
+<details>
+<summary><b>Feature Flags</b></summary>
+
+Master switches in the `features` config block. These override per-agent settings.
+
+| Flag | Default | What it controls |
+|------|---------|-----------------|
+| `planning_enabled` | `true` | Task decomposition and planning |
+| `verification_enabled` | `true` | Answer verification (master switch — distinct from `verification_mode` in agent defaults) |
+| `delegation_enabled` | `true` | Multi-agent delegation |
+| `memory_enabled` | `true` | Persistent memory |
+| `skills_enabled` | `true` | Skill discovery and loading |
+| `streaming_enabled` | `true` | Streaming LLM responses |
+
+```json
+{
+  "features": {
+    "planning_enabled": false,
+    "delegation_enabled": false
+  }
+}
+```
+
+</details>
+
+<details>
+<summary><b>Observability (Langfuse)</b></summary>
+
+nanobot traces LLM calls, tool invocations, and agent turns to [Langfuse](https://langfuse.com/).
+
+```json
+{
+  "langfuse": {
+    "enabled": true,
+    "publicKey": "pk-...",
+    "secretKey": "sk-...",
+    "host": "https://cloud.langfuse.com"
+  }
+}
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `enabled` | `true` | Enable/disable tracing |
+| `publicKey` | `""` | Langfuse public key |
+| `secretKey` | `""` | Langfuse secret key |
+| `host` | `"https://cloud.langfuse.com"` | Langfuse server URL (self-hosted or cloud) |
+| `environment` | `"development"` | Environment tag |
+| `sampleRate` | `1.0` | Fraction of traces to send (0.0-1.0) |
+
+</details>
+
+<details>
+<summary><b>Security</b></summary>
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `tools.restrictToWorkspace` | `false` | Restricts all agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal. |
+| `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs per channel. Empty = allow everyone. |
+
+> [!TIP]
+> For production deployments, set `"restrictToWorkspace": true` to sandbox the agent.
+
+</details>
