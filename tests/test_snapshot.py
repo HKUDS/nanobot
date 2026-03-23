@@ -16,7 +16,7 @@ def _make_snapshot(
 ) -> MemorySnapshot:
     """Create a MemorySnapshot with mocked collaborators."""
     from nanobot.agent.memory.persistence import MemoryPersistence
-    from nanobot.agent.memory.profile import ProfileManager
+    from nanobot.agent.memory.profile_io import ProfileStore as ProfileManager
 
     persistence = MemoryPersistence(tmp_path)
 

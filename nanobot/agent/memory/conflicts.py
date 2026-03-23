@@ -14,7 +14,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from .helpers import _norm_text, _safe_float, _tokenize, _utc_now_iso
-from .profile import ProfileManager
+from .profile_io import ProfileStore as ProfileManager
 
 if TYPE_CHECKING:
     from .mem0_adapter import _Mem0Adapter

@@ -63,7 +63,8 @@ from .ontology import (
     validate_triple_types,
 )
 from .persistence import MemoryPersistence
-from .profile import ProfileManager
+from .profile_io import ProfileStore
+from .profile_io import ProfileStore as ProfileManager
 from .reranker import CompositeReranker, Reranker
 from .retrieval_planner import RetrievalPlan, RetrievalPlanner
 from .retriever import MemoryRetriever
@@ -88,6 +89,7 @@ __all__ = [
     "RetrievalPlanner",
     "RolloutConfig",
     "ProfileManager",
+    "ProfileStore",
     "MemoryExtractor",
     "MemoryPersistence",
     "CompositeReranker",

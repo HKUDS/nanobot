@@ -15,7 +15,7 @@ from loguru import logger
 
 from .helpers import _estimate_tokens, _norm_text, _safe_float, _to_str_list
 from .persistence import MemoryPersistence
-from .profile import ProfileManager
+from .profile_io import ProfileStore as ProfileManager
 from .retrieval_planner import RetrievalPlanner
 
 # Intents that benefit from scanning recent unresolved events.

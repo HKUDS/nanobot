@@ -123,15 +123,23 @@ class TestApplyProfileUpdates:
     def test_returns_tuple_of_three_ints(self, tmp_path):
         mgr, _ = self._make_mgr_with_store(tmp_path)
         profile = {
-            "preferences": [], "stable_facts": [], "active_projects": [],
-            "relationships": [], "constraints": [], "conflicts": [],
+            "preferences": [],
+            "stable_facts": [],
+            "active_projects": [],
+            "relationships": [],
+            "constraints": [],
+            "conflicts": [],
             "meta": {
-                "preferences": {}, "stable_facts": {}, "active_projects": {},
-                "relationships": {}, "constraints": {},
+                "preferences": {},
+                "stable_facts": {},
+                "active_projects": {},
+                "relationships": {},
+                "constraints": {},
             },
         }
         result = mgr._apply_profile_updates(
-            profile, {"preferences": ["likes hiking"]},
+            profile,
+            {"preferences": ["likes hiking"]},
             enable_contradiction_check=False,
         )
         assert isinstance(result, tuple) and len(result) == 3
@@ -143,15 +151,23 @@ class TestApplyProfileUpdates:
     def test_adds_new_preference(self, tmp_path):
         mgr, _ = self._make_mgr_with_store(tmp_path)
         profile = {
-            "preferences": [], "stable_facts": [], "active_projects": [],
-            "relationships": [], "constraints": [], "conflicts": [],
+            "preferences": [],
+            "stable_facts": [],
+            "active_projects": [],
+            "relationships": [],
+            "constraints": [],
+            "conflicts": [],
             "meta": {
-                "preferences": {}, "stable_facts": {}, "active_projects": {},
-                "relationships": {}, "constraints": {},
+                "preferences": {},
+                "stable_facts": {},
+                "active_projects": {},
+                "relationships": {},
+                "constraints": {},
             },
         }
         added, conflicts, touched = mgr._apply_profile_updates(
-            profile, {"preferences": ["likes coffee"]},
+            profile,
+            {"preferences": ["likes coffee"]},
             enable_contradiction_check=False,
         )
         assert added >= 1
@@ -160,15 +176,23 @@ class TestApplyProfileUpdates:
     def test_no_duplicate_added(self, tmp_path):
         mgr, _ = self._make_mgr_with_store(tmp_path)
         profile = {
-            "preferences": ["likes coffee"], "stable_facts": [], "active_projects": [],
-            "relationships": [], "constraints": [], "conflicts": [],
+            "preferences": ["likes coffee"],
+            "stable_facts": [],
+            "active_projects": [],
+            "relationships": [],
+            "constraints": [],
+            "conflicts": [],
             "meta": {
-                "preferences": {}, "stable_facts": {}, "active_projects": {},
-                "relationships": {}, "constraints": {},
+                "preferences": {},
+                "stable_facts": {},
+                "active_projects": {},
+                "relationships": {},
+                "constraints": {},
             },
         }
         added, conflicts, touched = mgr._apply_profile_updates(
-            profile, {"preferences": ["likes coffee"]},
+            profile,
+            {"preferences": ["likes coffee"]},
             enable_contradiction_check=False,
         )
         assert added == 0
@@ -177,16 +201,24 @@ class TestApplyProfileUpdates:
     def test_unknown_key_is_skipped(self, tmp_path):
         mgr, _ = self._make_mgr_with_store(tmp_path)
         profile = {
-            "preferences": [], "stable_facts": [], "active_projects": [],
-            "relationships": [], "constraints": [], "conflicts": [],
+            "preferences": [],
+            "stable_facts": [],
+            "active_projects": [],
+            "relationships": [],
+            "constraints": [],
+            "conflicts": [],
             "meta": {
-                "preferences": {}, "stable_facts": {}, "active_projects": {},
-                "relationships": {}, "constraints": {},
+                "preferences": {},
+                "stable_facts": {},
+                "active_projects": {},
+                "relationships": {},
+                "constraints": {},
             },
         }
         # "hobbies" is not a valid PROFILE_KEYS key — should be ignored
         added, conflicts, touched = mgr._apply_profile_updates(
-            profile, {"hobbies": ["hiking"]},
+            profile,
+            {"hobbies": ["hiking"]},
             enable_contradiction_check=False,
         )
         assert added == 0

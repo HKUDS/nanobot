@@ -255,10 +255,16 @@ class MemoryStore:
         )
 
         # Wire profile_mgr subsystem dependencies (must happen after all are built).
-        self.profile_mgr._extractor = self.extractor
-        self.profile_mgr._ingester = self.ingester
-        self.profile_mgr._conflict_mgr = self.conflict_mgr
-        self.profile_mgr._snapshot = self.snapshot
+        from .profile_correction import CorrectionOrchestrator as _CorrectionOrchestrator
+
+        self.profile_mgr._conflict_mgr = self.conflict_mgr  # keep — used by delegate wrappers
+        self.profile_mgr._corrector = _CorrectionOrchestrator(
+            profile_store=self.profile_mgr,
+            extractor=self.extractor,
+            ingester=self.ingester,
+            conflict_mgr=self.conflict_mgr,
+            snapshot=self.snapshot,
+        )
 
         # ConsolidationPipeline: full consolidate workflow (LAN-215).
         self._consolidation = ConsolidationPipeline(

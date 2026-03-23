@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from .extractor import MemoryExtractor
     from .graph import KnowledgeGraph
     from .mem0_adapter import _Mem0Adapter
-    from .profile import ProfileManager
+    from .profile_io import ProfileStore as ProfileManager
     from .reranker import Reranker
 
 

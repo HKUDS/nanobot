@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 from .helpers import _to_datetime, _to_str_list, _utc_now_iso
 from .persistence import MemoryPersistence
-from .profile import ProfileManager
+from .profile_io import ProfileStore as ProfileManager
 
 # Constants previously on MemoryStore — shared with snapshot logic.
 PROFILE_KEYS = (
