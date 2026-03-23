@@ -14,10 +14,11 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from .helpers import _norm_text, _safe_float, _tokenize, _utc_now_iso
-from .profile import ProfileManager
+from .profile_io import ProfileStore as ProfileManager
 
 if TYPE_CHECKING:
     from .mem0_adapter import _Mem0Adapter
+    from .profile_io import ProfileStore
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -48,14 +49,15 @@ class ConflictManager:
 
     def __init__(
         self,
-        profile_mgr: ProfileManager,
+        profile_store: ProfileStore | ProfileManager,
         mem0: _Mem0Adapter,
         *,
         sanitize_mem0_text_fn: Callable[..., str] | None = None,
         normalize_metadata_fn: Callable[..., tuple[dict, bool]] | None = None,
         sanitize_metadata_fn: Callable[[dict], dict] | None = None,
     ) -> None:
-        self.profile_mgr = profile_mgr
+        # Stored as profile_mgr for backward compat with resolve_conflict_details callers.
+        self.profile_mgr = profile_store
         self.mem0 = mem0
         self._sanitize_mem0_text = sanitize_mem0_text_fn
         self._normalize_metadata = normalize_metadata_fn
@@ -69,6 +71,169 @@ class ConflictManager:
     _safe_float = staticmethod(_safe_float)
     _tokenize = staticmethod(_tokenize)
     _utc_now_iso = staticmethod(_utc_now_iso)
+
+    # -- Methods moved from ProfileStore (LAN-Task2) -----------------------
+
+    def _conflict_pair(self, old_value: str, new_value: str) -> bool:
+        """Return True if old_value and new_value represent a genuine conflict.
+
+        A conflict is detected when one value contains a negation marker and
+        the other does not, and the two values share sufficient token overlap.
+        """
+        old_n = self._norm_text(old_value)
+        new_n = self._norm_text(new_value)
+        if not old_n or not new_n or old_n == new_n:
+            return False
+        old_has_not = " not " in f" {old_n} " or "n't" in old_n
+        new_has_not = " not " in f" {new_n} " or "n't" in new_n
+        if old_has_not == new_has_not:
+            return False
+        old_tokens = self._tokenize(old_n.replace("not", ""))
+        new_tokens = self._tokenize(new_n.replace("not", ""))
+        if not old_tokens or not new_tokens:
+            return False
+        overlap = len(old_tokens & new_tokens) / max(len(old_tokens | new_tokens), 1)
+        return overlap >= 0.55
+
+    def _apply_profile_updates(
+        self,
+        profile: dict[str, Any],
+        updates: dict[str, list[str]],
+        *,
+        enable_contradiction_check: bool,
+        source_event_ids: list[str] | None = None,
+    ) -> tuple[int, int, int]:
+        """Apply profile field updates, detecting contradictions.
+
+        Returns (added, conflicts, touched) counts.
+        """
+        added = 0
+        conflicts = 0
+        touched = 0
+        profile.setdefault("conflicts", [])
+        evidence_ids = [source_event_ids[0]] if source_event_ids else None
+
+        for key in self.profile_mgr.PROFILE_KEYS:
+            values = self.profile_mgr._to_str_list(profile.get(key))
+            seen = {self.profile_mgr._norm_text(v) for v in values}
+            for candidate in self.profile_mgr._to_str_list(updates.get(key)):
+                normalized = self.profile_mgr._norm_text(candidate)
+                if not normalized:
+                    continue
+
+                if normalized in seen:
+                    # Existing belief — bump confidence.
+                    entry = self.profile_mgr._meta_entry(profile, key, candidate)
+                    belief_id = entry.get("id", "")
+                    if belief_id:
+                        self.profile_mgr._update_belief_in_profile(
+                            profile,
+                            belief_id,
+                            confidence_delta=0.03,
+                            new_evidence_ids=evidence_ids,
+                            status=self.profile_mgr.PROFILE_STATUS_ACTIVE,
+                        )
+                    else:
+                        self.profile_mgr._touch_meta_entry(
+                            entry,
+                            confidence_delta=0.03,
+                            status=self.profile_mgr.PROFILE_STATUS_ACTIVE,
+                            evidence_event_id=evidence_ids[0] if evidence_ids else None,
+                        )
+                    touched += 1
+                    continue
+
+                # Check for contradictions against the existing values
+                # (before appending the candidate).
+                existing_values_snapshot = list(values)
+
+                # Use _add_belief_to_profile to create the entry and append
+                # to the profile list.
+                self.profile_mgr._add_belief_to_profile(
+                    profile,
+                    key,
+                    candidate,
+                    confidence=0.65,
+                    evidence_event_ids=evidence_ids,
+                    source="consolidation",
+                )
+                # Reconcile: _add_belief_to_profile appends to profile[key],
+                # keep local values/seen in sync.
+                values = self.profile_mgr._to_str_list(profile.get(key))
+                seen.add(normalized)
+
+                has_conflict = False
+                if enable_contradiction_check:
+                    for existing in existing_values_snapshot:
+                        if self._conflict_pair(existing, candidate):
+                            has_conflict = True
+                            old_entry = self.profile_mgr._meta_entry(profile, key, existing)
+                            self.profile_mgr._touch_meta_entry(
+                                old_entry,
+                                confidence_delta=-0.12,
+                                status=self.profile_mgr.PROFILE_STATUS_CONFLICTED,
+                            )
+                            new_entry = self.profile_mgr._meta_entry(profile, key, candidate)
+                            self.profile_mgr._touch_meta_entry(
+                                new_entry,
+                                confidence_delta=-0.2,
+                                min_confidence=0.35,
+                                status=self.profile_mgr.PROFILE_STATUS_CONFLICTED,
+                                evidence_event_id=evidence_ids[0] if evidence_ids else None,
+                            )
+                            # Include belief IDs in conflict record (LAN-198).
+                            profile["conflicts"].append(
+                                {
+                                    "timestamp": self._utc_now_iso(),
+                                    "field": key,
+                                    "old": existing,
+                                    "new": candidate,
+                                    "old_memory_id": self.profile_mgr._find_mem0_id_for_text(
+                                        existing
+                                    ),
+                                    "new_memory_id": self.profile_mgr._find_mem0_id_for_text(
+                                        candidate
+                                    ),
+                                    "belief_id_old": old_entry.get("id", ""),
+                                    "belief_id_new": new_entry.get("id", ""),
+                                    "status": self.profile_mgr.CONFLICT_STATUS_OPEN,
+                                    "old_confidence": old_entry.get("confidence"),
+                                    "new_confidence": new_entry.get("confidence"),
+                                    "old_last_seen_at": old_entry.get("last_seen_at", ""),
+                                    "new_last_seen_at": new_entry.get("last_seen_at", ""),
+                                }
+                            )
+                            conflicts += 1
+                            touched += 2
+                            break
+
+                if not has_conflict:
+                    # Boost confidence for non-conflicted new beliefs.
+                    entry = self.profile_mgr._meta_entry(profile, key, candidate)
+                    self.profile_mgr._touch_meta_entry(
+                        entry,
+                        confidence_delta=0.1,
+                        status=self.profile_mgr.PROFILE_STATUS_ACTIVE,
+                        evidence_event_id=evidence_ids[0] if evidence_ids else None,
+                    )
+                    touched += 1
+                added += 1
+
+            profile[key] = values
+
+        return added, conflicts, touched
+
+    def has_open_conflict(self, profile: dict[str, Any], key: str) -> bool:
+        """Return True if any open conflict exists for the given profile key."""
+        for c in profile.get("conflicts", []):
+            if not isinstance(c, dict):
+                continue
+            if str(c.get("field", "")) != key:
+                continue
+            status = str(c.get("status", "")).lower()
+            if status in {"open", "needs_user"}:
+                return True
+        return False
 
     # -- public API ---------------------------------------------------------
 

@@ -79,3 +79,25 @@ jobs:
         run: python -m pytest tests/ -x -q --cov=nanobot --cov-report=term-missing --cov-report=json --cov-fail-under=85
       - name: Check per-module coverage thresholds
         run: python scripts/check_module_coverage.py
+
+  llm-roundtrip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [test]
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+      - name: Run LLM round-trip tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "No API key — skipping LLM tests"
+            exit 0
+          fi
+          pytest tests/test_memory_roundtrip.py -v -m llm --timeout=120

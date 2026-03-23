@@ -46,12 +46,13 @@ from .ingester import EventIngester
 from .maintenance import MemoryMaintenance
 from .mem0_adapter import _Mem0Adapter
 from .persistence import MemoryPersistence
-from .profile import ProfileManager
+from .profile_io import ProfileStore
 from .reranker import CompositeReranker, Reranker
 from .retrieval_planner import RetrievalPlanner
 from .retriever import MemoryRetriever
 from .rollout import RolloutConfig
 from .snapshot import MemorySnapshot
+from .token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -120,10 +121,13 @@ class MemoryStore:
         # Profile manager (LAN-202) — delegates profile CRUD to ProfileManager.
         # Subsystem references (_extractor, _ingester, _conflict_mgr, _snapshot)
         # are wired after all subsystems are constructed (see below).
-        self.profile_mgr = ProfileManager(self.persistence, self.profile_file, self.mem0)
+        self.profile_mgr = ProfileStore(self.persistence, self.profile_file, self.mem0)
 
         # Retrieval planner (LAN-207) — intent classification + policy + routing.
         self._planner = RetrievalPlanner()
+
+        # TODO: pass config.memory_section_weights when MemoryStore receives config
+        self._budget_allocator = TokenBudgetAllocator(DEFAULT_SECTION_WEIGHTS)
 
         # Context assembler (LAN-210) — prompt rendering extracted from MemoryStore.
         self._assembler = ContextAssembler(
@@ -136,6 +140,7 @@ class MemoryStore:
             build_graph_context_lines_fn=lambda *a, **kw: self.retriever._build_graph_context_lines(
                 *a, **kw
             ),
+            budget_allocator=self._budget_allocator,
         )
 
         # MemoryMaintenance: reindex, seed, health checks, backend stats.
@@ -255,10 +260,16 @@ class MemoryStore:
         )
 
         # Wire profile_mgr subsystem dependencies (must happen after all are built).
-        self.profile_mgr._extractor = self.extractor
-        self.profile_mgr._ingester = self.ingester
-        self.profile_mgr._conflict_mgr = self.conflict_mgr
-        self.profile_mgr._snapshot = self.snapshot
+        from .profile_correction import CorrectionOrchestrator as _CorrectionOrchestrator
+
+        self.profile_mgr._conflict_mgr = self.conflict_mgr  # keep — used by delegate wrappers
+        self.profile_mgr._corrector = _CorrectionOrchestrator(
+            profile_store=self.profile_mgr,
+            extractor=self.extractor,
+            ingester=self.ingester,
+            conflict_mgr=self.conflict_mgr,
+            snapshot=self.snapshot,
+        )
 
         # ConsolidationPipeline: full consolidate workflow (LAN-215).
         self._consolidation = ConsolidationPipeline(
@@ -290,7 +301,7 @@ class MemoryStore:
 
     # Keep class-level constants as aliases so test code referencing
     # MemoryStore._SECTION_PRIORITY_WEIGHTS / ._SECTION_MIN_TOKENS still works.
-    _SECTION_PRIORITY_WEIGHTS = ContextAssembler._SECTION_PRIORITY_WEIGHTS
+    _SECTION_PRIORITY_WEIGHTS = DEFAULT_SECTION_WEIGHTS
     _SECTION_MIN_TOKENS = ContextAssembler._SECTION_MIN_TOKENS
     _MAX_EVIDENCE_REFS = 10  # Cap evidence_event_ids to avoid unbounded growth.
     _CORRECTION_MARKERS = ConflictManager._CORRECTION_MARKERS
@@ -327,6 +338,7 @@ class MemoryStore:
             build_graph_context_lines_fn=lambda *a, **kw: self.retriever._build_graph_context_lines(
                 *a, **kw
             ),
+            budget_allocator=getattr(self, "_budget_allocator", None),
         )
         return self._assembler
 

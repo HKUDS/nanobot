@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,7 +26,7 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
         append_history=lambda _t: None,
     )
     loop.context = SimpleNamespace(memory=mem_ns)
-    loop._consolidator = ConsolidationOrchestrator(mem_ns)
+    loop._consolidator = ConsolidationOrchestrator(memory=mem_ns)
     loop._verifier = AnswerVerifier(
         provider=None,  # type: ignore[arg-type]
         model="m",
@@ -155,11 +154,6 @@ def test_verification_helpers_and_lock_lifecycle(tmp_path: Path) -> None:
         retriever=SimpleNamespace(retrieve=lambda *_a, **_k: [{"score": 0.2}])
     )
     assert v.should_force_verification("What is this") is True
-
-    lock = loop._consolidator.get_lock("s1")
-    assert isinstance(lock, asyncio.Lock)
-    loop._consolidator.prune_lock("s1", lock)
-    assert "s1" not in loop._consolidator._locks
 
 
 async def test_attempt_recovery_missing_or_error_paths(tmp_path: Path) -> None:

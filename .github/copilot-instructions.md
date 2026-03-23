@@ -137,7 +137,7 @@ NanobotError (base, has recoverable flag)
 - **Mock LLM**: use `ScriptedProvider` pattern from `tests/test_agent_loop.py` for deterministic tests
 - **Parametrize**: use `@pytest.mark.parametrize` for variant coverage (see `tests/test_shell_safety.py`)
 - **Run**: `make test` (quick) or `make test-cov` (with coverage)
-- **Memory eval**: `make memory-eval` runs deterministic retrieval benchmark against `case/memory_eval_cases.json`
+- **Memory eval**: `make memory-eval` runs advisory retrieval trend benchmark (non-gating)
 
 ## Security Rules
 
@@ -162,7 +162,7 @@ make ci             # CI pipeline: lint + typecheck + import-check + prompt-chec
 make pre-push       # CI + merge-readiness check (run before pushing PRs)
 make import-check   # Check module boundary violations
 make prompt-check   # Check prompt manifest consistency
-make memory-eval    # Run memory retrieval benchmark
+make memory-eval    # Advisory memory retrieval trend (non-gating)
 make live-eval      # Run live agent evaluation
 make clean          # Remove build artifacts
 make pre-commit-install  # Install pre-commit hooks

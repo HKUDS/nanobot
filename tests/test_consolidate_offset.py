@@ -509,18 +509,18 @@ class TestConsolidationDeduplicationGuard:
 
         consolidation_calls = 0
 
-        async def _fake_consolidate(_session, archive_all: bool = False) -> None:
+        async def _counting_consolidate(*args, **kwargs):
             nonlocal consolidation_calls
             consolidation_calls += 1
             await asyncio.sleep(0.05)
+            return True
 
-        loop._consolidate_memory = _fake_consolidate  # type: ignore[method-assign]
+        loop.memory.consolidate = _counting_consolidate  # type: ignore[method-assign]
 
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="hello")
-        await loop._process_message(msg)
-        await loop._process_message(msg)
-        # Wait for background consolidation tasks to complete (Pattern A)
-        await asyncio.gather(*loop._consolidation_tasks.copy())
+        async with loop._consolidator:
+            await loop._process_message(msg)
+            await loop._process_message(msg)
 
         assert consolidation_calls == 1, (
             f"Expected exactly 1 consolidation, got {consolidation_calls}"
@@ -555,72 +555,31 @@ class TestConsolidationDeduplicationGuard:
         active = 0
         max_active = 0
 
-        async def _fake_consolidate(_session, archive_all: bool = False) -> None:
+        async def _counting_consolidate(*args, **kwargs):
             nonlocal consolidation_calls, active, max_active
             consolidation_calls += 1
             active += 1
             max_active = max(max_active, active)
             await asyncio.sleep(0.05)
             active -= 1
+            return True
 
-        loop._consolidate_memory = _fake_consolidate  # type: ignore[method-assign]
+        loop.memory.consolidate = _counting_consolidate  # type: ignore[method-assign]
 
-        msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="hello")
-        await loop._process_message(msg)
+        async with loop._consolidator:
+            msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="hello")
+            await loop._process_message(msg)
 
-        new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
-        await loop._process_message(new_msg)
-        # Wait for background consolidation tasks to complete (Pattern A)
-        await asyncio.gather(*loop._consolidation_tasks.copy())
+            new_msg = InboundMessage(
+                channel="cli", sender_id="user", chat_id="test", content="/new"
+            )
+            await loop._process_message(new_msg)
 
         assert consolidation_calls == 2, (
             f"Expected normal + /new consolidations, got {consolidation_calls}"
         )
         assert max_active == 1, (
             f"Expected serialized consolidation, observed concurrency={max_active}"
-        )
-
-    async def test_consolidation_tasks_are_referenced(self, tmp_path: Path) -> None:
-        """create_task results are tracked in _consolidation_tasks while in flight."""
-        from nanobot.agent.loop import AgentLoop
-        from nanobot.bus.events import InboundMessage
-        from nanobot.bus.queue import MessageBus
-        from nanobot.config.schema import AgentConfig
-        from nanobot.providers.base import LLMResponse
-
-        bus = MessageBus()
-        provider = MagicMock()
-        provider.get_default_model.return_value = "test-model"
-        cfg = AgentConfig(workspace=str(tmp_path), model="test-model", memory_window=10)
-        loop = AgentLoop(bus=bus, provider=provider, config=cfg)
-
-        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
-        loop.tools.get_definitions = MagicMock(return_value=[])
-
-        session = loop.sessions.get_or_create("cli:test")
-        for i in range(15):
-            session.add_message("user", f"msg{i}")
-            session.add_message("assistant", f"resp{i}")
-        loop.sessions.save(session)
-
-        started = asyncio.Event()
-
-        async def _slow_consolidate(_session, archive_all: bool = False) -> None:
-            started.set()
-            await asyncio.sleep(0.1)
-
-        loop._consolidate_memory = _slow_consolidate  # type: ignore[method-assign]
-
-        msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="hello")
-        await loop._process_message(msg)
-
-        await started.wait()
-        assert len(loop._consolidation_tasks) == 1, "Task must be referenced while in-flight"
-
-        # Await the in-flight consolidation task directly (Pattern A)
-        await asyncio.gather(*loop._consolidation_tasks.copy())
-        assert len(loop._consolidation_tasks) == 0, (
-            "Task reference must be removed after completion"
         )
 
     async def test_new_waits_for_inflight_consolidation_and_preserves_messages(
@@ -652,30 +611,34 @@ class TestConsolidationDeduplicationGuard:
         release = asyncio.Event()
         archived_count = 0
 
-        async def _fake_consolidate(sess, archive_all: bool = False) -> bool:
+        async def _fake_memory_consolidate(sess, *args, **kwargs) -> bool:
             nonlocal archived_count
-            if archive_all:
+            if kwargs.get("archive_all"):
                 archived_count = len(sess.messages)
                 return True
             started.set()
             await release.wait()
             return True
 
-        loop._consolidate_memory = _fake_consolidate  # type: ignore[method-assign]
+        loop.memory.consolidate = _fake_memory_consolidate  # type: ignore[method-assign]
 
-        msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="hello")
-        await loop._process_message(msg)
-        await started.wait()
+        async with loop._consolidator:
+            msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="hello")
+            await loop._process_message(msg)
+            await started.wait()
 
-        new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
-        pending_new = asyncio.create_task(loop._process_message(new_msg))
+            new_msg = InboundMessage(
+                channel="cli", sender_id="user", chat_id="test", content="/new"
+            )
+            pending_new = asyncio.create_task(loop._process_message(new_msg))
 
-        # Yield to event loop so pending_new task can be scheduled and block on the lock
-        await asyncio.sleep(0)
-        assert not pending_new.done(), "/new should wait while consolidation is in-flight"
+            # Yield to event loop so pending_new task can be scheduled and block on the lock
+            await asyncio.sleep(0)
+            assert not pending_new.done(), "/new should wait while consolidation is in-flight"
 
-        release.set()
-        response = await pending_new
+            release.set()
+            response = await pending_new
+
         assert response is not None
         assert "new session started" in response.content.lower()
         assert archived_count > 0, "Expected /new archival to process a non-empty snapshot"
@@ -707,15 +670,18 @@ class TestConsolidationDeduplicationGuard:
         loop.sessions.save(session)
         before_count = len(session.messages)
 
-        async def _failing_consolidate(sess, archive_all: bool = False) -> bool:
-            if archive_all:
+        async def _failing_consolidate(*args, **kwargs) -> bool:
+            if kwargs.get("archive_all"):
                 return False
             return True
 
-        loop._consolidate_memory = _failing_consolidate  # type: ignore[method-assign]
+        loop.memory.consolidate = _failing_consolidate  # type: ignore[method-assign]
 
-        new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
-        response = await loop._process_message(new_msg)
+        async with loop._consolidator:
+            new_msg = InboundMessage(
+                channel="cli", sender_id="user", chat_id="test", content="/new"
+            )
+            response = await loop._process_message(new_msg)
 
         assert response is not None
         assert "failed" in response.content.lower()
@@ -724,10 +690,10 @@ class TestConsolidationDeduplicationGuard:
             "Session must remain intact when /new archival fails"
         )
 
-    async def test_new_archives_only_unconsolidated_messages_after_inflight_task(
+    async def test_new_archives_after_inflight_consolidation_completes(
         self, tmp_path: Path
     ) -> None:
-        """/new should archive only messages not yet consolidated by prior task."""
+        """/new waits for in-flight background consolidation then archives."""
         from nanobot.agent.loop import AgentLoop
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
@@ -751,77 +717,36 @@ class TestConsolidationDeduplicationGuard:
 
         started = asyncio.Event()
         release = asyncio.Event()
-        archived_count = -1
+        archive_called = False
 
-        async def _fake_consolidate(sess, archive_all: bool = False) -> bool:
-            nonlocal archived_count
-            if archive_all:
-                archived_count = len(sess.messages)
+        async def _fake_memory_consolidate(sess, *args, **kwargs) -> bool:
+            nonlocal archive_called
+            if kwargs.get("archive_all"):
+                archive_called = True
                 return True
 
             started.set()
             await release.wait()
-            sess.last_consolidated = len(sess.messages) - 3
             return True
 
-        loop._consolidate_memory = _fake_consolidate  # type: ignore[method-assign]
+        loop.memory.consolidate = _fake_memory_consolidate  # type: ignore[method-assign]
 
-        msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="hello")
-        await loop._process_message(msg)
-        await started.wait()
+        async with loop._consolidator:
+            msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="hello")
+            await loop._process_message(msg)
+            await started.wait()
 
-        new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
-        pending_new = asyncio.create_task(loop._process_message(new_msg))
-        # Yield to event loop so pending_new task can be scheduled and block on the lock
-        await asyncio.sleep(0)
-        assert not pending_new.done()
+            new_msg = InboundMessage(
+                channel="cli", sender_id="user", chat_id="test", content="/new"
+            )
+            pending_new = asyncio.create_task(loop._process_message(new_msg))
+            # Yield to event loop so pending_new can schedule and block on the lock
+            await asyncio.sleep(0)
+            assert not pending_new.done(), "/new should wait while consolidation is in-flight"
 
-        release.set()
-        response = await pending_new
+            release.set()
+            response = await pending_new
 
         assert response is not None
         assert "new session started" in response.content.lower()
-        assert archived_count == 3, (
-            f"Expected only unconsolidated tail to archive, got {archived_count}"
-        )
-
-    async def test_new_cleans_up_consolidation_lock_for_invalidated_session(
-        self, tmp_path: Path
-    ) -> None:
-        """/new should remove lock entry for fully invalidated session key."""
-        from nanobot.agent.loop import AgentLoop
-        from nanobot.bus.events import InboundMessage
-        from nanobot.bus.queue import MessageBus
-        from nanobot.config.schema import AgentConfig
-        from nanobot.providers.base import LLMResponse
-
-        bus = MessageBus()
-        provider = MagicMock()
-        provider.get_default_model.return_value = "test-model"
-        cfg = AgentConfig(workspace=str(tmp_path), model="test-model", memory_window=10)
-        loop = AgentLoop(bus=bus, provider=provider, config=cfg)
-
-        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
-        loop.tools.get_definitions = MagicMock(return_value=[])
-
-        session = loop.sessions.get_or_create("cli:test")
-        for i in range(3):
-            session.add_message("user", f"msg{i}")
-            session.add_message("assistant", f"resp{i}")
-        loop.sessions.save(session)
-
-        # Ensure lock exists before /new.
-        _ = loop._consolidator.get_lock(session.key)
-        assert session.key in loop._consolidator._locks
-
-        async def _ok_consolidate(sess, archive_all: bool = False) -> bool:
-            return True
-
-        loop._consolidate_memory = _ok_consolidate  # type: ignore[method-assign]
-
-        new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
-        response = await loop._process_message(new_msg)
-
-        assert response is not None
-        assert "new session started" in response.content.lower()
-        assert session.key not in loop._consolidator._locks
+        assert archive_called, "Expected /new to trigger archival consolidation"

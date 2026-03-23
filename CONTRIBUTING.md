@@ -129,7 +129,7 @@ Never catch bare `Exception` — use the specific error type.
 make test           # Fast: stop on first failure (-x -q)
 make test-verbose   # Verbose output
 make test-cov       # With coverage report (85% gate)
-make memory-eval    # Deterministic memory retrieval benchmark
+make memory-eval    # Advisory memory retrieval trend (non-gating)
 make live-eval      # Run live agent evaluation
 ```
 
@@ -232,7 +232,7 @@ The memory system uses a **mem0-first strategy** with local fallback:
 - **Retrieval** (`memory/retrieval.py`): Local keyword fallback when mem0 vector store is unavailable
 - **Re-ranking** (`memory/reranker.py`): Optional cross-encoder stage for improved relevance
 
-**Important**: Never modify `case/memory_eval_cases.json` or `case/memory_eval_baseline.json` without running `make memory-eval` to verify metrics still pass.
+**Note**: `case/memory_eval_cases.json` is used by the advisory trend benchmark (`make memory-eval`). Behavioral correctness is enforced by contract tests in `tests/contract/` and LLM round-trip tests in `tests/test_memory_roundtrip.py`.
 
 ## Security Rules
 

@@ -126,6 +126,7 @@ timeout = 60
 markers = [
     "golden: golden regression tests (frozen behavior baselines)",
     "contract: contract tests for core abstractions",
+    "llm: tests requiring a real LLM API key (skipped when unavailable)",
 ]
 
 [tool.mypy]
