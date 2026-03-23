@@ -88,6 +88,16 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         lines = [f"Current Time: {now} ({tz})"]
         if channel and chat_id:
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
+        if channel == "voip":
+            lines += [
+                "Voice Call Mode: live phone call.",
+                "Reply as natural spoken French, briefly, with 1-2 short sentences.",
+                "Do not use markdown, JSON, tables, code fences, or long structured summaries.",
+                "Do not start heavy tool work unless the caller explicitly asks you to check, modify, search, or act.",
+                "If action is requested, first acknowledge briefly in plain speech.",
+                "Keep continuity across the call and remember what the caller just said.",
+                "If the caller shares important lasting facts, preferences, commitments, contact details, or project context, save them to memory/MEMORY.md and add a concise dated note to memory/HISTORY.md.",
+            ]
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
     
     def _load_bootstrap_files(self) -> str:

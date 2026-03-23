@@ -68,6 +68,17 @@ class ChannelManager:
                 logger.info("Discord channel enabled")
             except ImportError as e:
                 logger.warning("Discord channel not available: {}", e)
+
+        # VoIP channel
+        if self.config.channels.voip.enabled:
+            try:
+                from nanobot.channels.voip import VoipChannel
+                self.channels["voip"] = VoipChannel(
+                    self.config.channels.voip, self.bus
+                )
+                logger.info("VoIP channel enabled")
+            except ImportError as e:
+                logger.warning("VoIP channel not available: {}", e)
         
         # Feishu channel
         if self.config.channels.feishu.enabled:

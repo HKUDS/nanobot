@@ -64,6 +64,16 @@ class DiscordConfig(Base):
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
 
 
+class VoipConfig(Base):
+    """Local VoIP channel configuration."""
+
+    enabled: bool = False
+    api_url: str = "http://127.0.0.1:8787"
+    poll_timeout_seconds: int = 25
+    greeting: str = "Bonjour, je suis Oswald."
+    allow_from: list[str] = Field(default_factory=list)
+
+
 class MatrixConfig(Base):
     """Matrix (Element) channel configuration."""
 
@@ -207,6 +217,7 @@ class ChannelsConfig(Base):
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
+    voip: VoipConfig = Field(default_factory=VoipConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
     mochat: MochatConfig = Field(default_factory=MochatConfig)
     dingtalk: DingTalkConfig = Field(default_factory=DingTalkConfig)
