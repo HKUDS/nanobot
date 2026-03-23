@@ -67,6 +67,10 @@ class CronTool(Tool):
                     "description": "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00')",
                 },
                 "job_id": {"type": "string", "description": "Job ID (for remove)"},
+                "description": {
+                    "type": "string",
+                    "description": "Human-readable description of what this job monitors or does",
+                },
             },
             "required": ["action"],
         }
@@ -80,12 +84,13 @@ class CronTool(Tool):
         tz: str | None = None,
         at: str | None = None,
         job_id: str | None = None,
+        description: str = "",
         **kwargs: Any,
     ) -> str:
         if action == "add":
             if self._in_cron_context.get():
                 return "Error: cannot schedule new jobs from within a cron job execution"
-            return self._add_job(message, every_seconds, cron_expr, tz, at)
+            return self._add_job(message, every_seconds, cron_expr, tz, at, description=description)
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
@@ -99,6 +104,7 @@ class CronTool(Tool):
         cron_expr: str | None,
         tz: str | None,
         at: str | None,
+        description: str = "",
     ) -> str:
         if not message:
             return "Error: message is required for add"
@@ -141,6 +147,7 @@ class CronTool(Tool):
             channel=self._channel,
             to=self._chat_id,
             delete_after_run=delete_after,
+            description=description,
         )
         return f"Created job '{job.name}' (id: {job.id})"
 
@@ -187,6 +194,8 @@ class CronTool(Tool):
         for j in jobs:
             timing = self._format_timing(j.schedule)
             parts = [f"- {j.name} (id: {j.id}, {timing})"]
+            if j.payload.description:
+                parts.append(f"  Description: {j.payload.description}")
             parts.extend(self._format_state(j.state))
             lines.append("\n".join(parts))
         return "Scheduled jobs:\n" + "\n".join(lines)

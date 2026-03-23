@@ -13,6 +13,13 @@ class Base(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
+class StreamingConfig(Base):
+    """Streaming behavior configuration."""
+    humanize: bool = False            # Enable thinking pauses at paragraph breaks
+    paragraph_pause_s: float = 1.0    # Seconds to pause at paragraph breaks (\n\n)
+    sentence_pause_s: float = 0.5     # Seconds to pause at sentence transitions
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels.
 
@@ -24,6 +31,7 @@ class ChannelsConfig(Base):
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
+    streaming: StreamingConfig = Field(default_factory=StreamingConfig)
 
 
 class AgentDefaults(Base):
@@ -51,11 +59,21 @@ class NamedAgentConfig(Base):
     tools: list[str] | None = None  # Tool whitelist; None = default set (no spawn/delegate)
 
 
+class FollowUpConfig(Base):
+    """Post-response follow-up configuration."""
+    enabled: bool = False             # Enable automatic follow-up questions
+    delay_s: float = 3.0             # Seconds to wait before sending follow-up
+    max_frequency: float = 0.3       # Probability cap (0.0-1.0) for triggering follow-up
+    cooldown_s: int = 300            # Minimum seconds between follow-ups per session
+    model: str | None = None         # Optional lighter model for evaluation
+
+
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
     named: dict[str, NamedAgentConfig] = Field(default_factory=dict)
+    follow_up: FollowUpConfig = Field(default_factory=FollowUpConfig)
 
 
 class ModelConfig(Base):
@@ -114,6 +132,17 @@ class HeartbeatConfig(Base):
     interval_s: int = 30 * 60  # 30 minutes
 
 
+class ProactiveConfig(Base):
+    """Proactive messaging configuration."""
+
+    enabled: bool = False            # Enable proactive messaging (bot initiates conversations)
+    interval_s: int = 3600           # How often to evaluate targets (seconds)
+    max_per_day: int = 3             # Max proactive messages per conversation per day
+    quiet_hours_start: int = 22      # Don't disturb after this hour (0-23)
+    quiet_hours_end: int = 8         # Don't disturb before this hour (0-23)
+    model: str | None = None         # Optional lighter model for evaluation
+
+
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
@@ -121,6 +150,7 @@ class GatewayConfig(Base):
     port: int = 18790
     dashboard: bool = True  # Enable the web dashboard on host:port
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    proactive: ProactiveConfig = Field(default_factory=ProactiveConfig)
 
 
 class WebSearchConfig(Base):

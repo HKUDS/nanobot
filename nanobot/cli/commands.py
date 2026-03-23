@@ -540,6 +540,8 @@ def gateway(
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
+    from nanobot.proactive.registry import ConversationRegistry
+    from nanobot.proactive.service import ProactiveService
     from nanobot.session.manager import SessionManager
 
     if verbose:
@@ -680,6 +682,49 @@ def gateway(
         enabled=hb_cfg.enabled,
     )
 
+    # Create proactive messaging service
+    conv_registry = ConversationRegistry(config.workspace_path)
+    conv_registry.load()
+    agent.conversation_registry = conv_registry
+
+    pro_cfg = config.gateway.proactive
+
+    async def on_proactive_execute(message: str, channel: str, chat_id: str) -> str | None:
+        """Execute a proactive message through the agent loop."""
+        async def _silent(*_args, **_kwargs):
+            pass
+
+        return await agent.process_direct(
+            message,
+            session_key=f"proactive:{channel}:{chat_id}",
+            channel=channel,
+            chat_id=chat_id,
+            on_progress=_silent,
+        )
+
+    async def on_proactive_notify(response: str, channel: str, chat_id: str) -> None:
+        """Deliver a proactive message to the user's channel."""
+        from nanobot.bus.events import OutboundMessage
+        if channel == "cli":
+            return
+        await bus.publish_outbound(OutboundMessage(
+            channel=channel, chat_id=chat_id, content=response,
+        ))
+
+    proactive = ProactiveService(
+        workspace=config.workspace_path,
+        provider=provider,
+        model=pro_cfg.model or agent.model,
+        registry=conv_registry,
+        on_execute=on_proactive_execute,
+        on_notify=on_proactive_notify,
+        interval_s=pro_cfg.interval_s,
+        enabled=pro_cfg.enabled,
+        max_per_day=pro_cfg.max_per_day,
+        quiet_hours_start=pro_cfg.quiet_hours_start,
+        quiet_hours_end=pro_cfg.quiet_hours_end,
+    )
+
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
@@ -690,6 +735,8 @@ def gateway(
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
 
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
+    if pro_cfg.enabled:
+        console.print(f"[green]✓[/green] Proactive: every {pro_cfg.interval_s}s, max {pro_cfg.max_per_day}/day")
 
     # Dashboard server setup
     dashboard_server = None
@@ -714,6 +761,7 @@ def gateway(
         try:
             await cron.start()
             await heartbeat.start()
+            await proactive.start()
             tasks = [agent.run(), channels.start_all()]
             if dashboard_server:
                 tasks.append(dashboard_server.serve())
@@ -726,6 +774,7 @@ def gateway(
             console.print(traceback.format_exc())
         finally:
             await agent.close_mcp()
+            proactive.stop()
             heartbeat.stop()
             cron.stop()
             agent.stop()

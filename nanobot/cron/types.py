@@ -28,6 +28,7 @@ class CronPayload:
     channel: str | None = None  # e.g. "whatsapp"
     to: str | None = None  # e.g. phone number
     notify_mode: Literal["auto", "force"] = "auto"
+    description: str = ""  # Human-readable description of what this job monitors
 
 
 @dataclass

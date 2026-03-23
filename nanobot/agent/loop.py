@@ -46,25 +46,38 @@ class _ChunkDebouncer:
     accumulated or *min_interval* seconds have elapsed since the last flush.
     ``<think>…</think>`` blocks are silently stripped so that model reasoning
     is never pushed to the channel.
+
+    When *humanize* is ``True``, the debouncer inserts natural pauses at
+    paragraph breaks (``\\n\\n``) to make streaming feel more organic.
     """
 
     _THINK_FULL = re.compile(r"<think>[\s\S]*?</think>")
     _THINK_OPEN = re.compile(r"<think>[\s\S]*$")  # unclosed at end
+    _CODE_FENCE = re.compile(r"```")
 
     def __init__(
         self,
         callback: Callable[[str], Awaitable[None]],
         min_chars: int = 200,
         min_interval: float = 2.0,
+        humanize: bool = False,
+        paragraph_pause: float = 1.0,
+        sentence_pause: float = 0.5,
     ):
         self._callback = callback
         self._min_chars = min_chars
         self._min_interval = min_interval
+        self._humanize = humanize
+        self._paragraph_pause = paragraph_pause
+        self._sentence_pause = sentence_pause
         self._raw: list[str] = []  # raw accumulated text (not yet cleaned)
         self._raw_len = 0
         self._last_flush = 0.0
         self._flushed_total = 0
         self._sent_len = 0  # how many chars of cleaned text we already sent
+        self._pause_until = 0.0  # monotonic time until which flushes are suppressed
+        self._total_pause_s = 0.0  # total pause time accumulated (capped)
+        self._MAX_TOTAL_PAUSE = 8.0  # never pause more than 8s total per response
 
     async def push(self, text: str) -> None:
         """Add a text delta.  Flushes when the threshold is met."""
@@ -72,6 +85,10 @@ class _ChunkDebouncer:
         self._raw_len += len(text)
 
         now = _time.monotonic()
+        # If in a humanize pause, only flush if pause has elapsed
+        if self._humanize and self._pause_until > 0 and now < self._pause_until:
+            return
+
         elapsed = now - self._last_flush
         if self._raw_len >= self._min_chars or elapsed >= self._min_interval:
             await self._maybe_flush()
@@ -80,33 +97,69 @@ class _ChunkDebouncer:
         """Flush any buffered text to the callback."""
         await self._maybe_flush(force=True)
 
+    def _find_paragraph_break(self, text: str) -> int | None:
+        """Find the last paragraph break (\\n\\n) in text, avoiding code blocks.
+        Returns the index right after the break, or None if not found.
+        """
+        # Count code fences to track if we're inside a code block
+        fence_count = 0
+        last_break = None
+        i = 0
+        while i < len(text):
+            if text[i:i+3] == '```':
+                fence_count += 1
+                i += 3
+                continue
+            if fence_count % 2 == 0 and text[i:i+2] == '\n\n':
+                last_break = i + 2
+                i += 2
+                continue
+            i += 1
+        return last_break
+
     async def _maybe_flush(self, force: bool = False) -> None:
         if not self._raw:
             return
 
         combined = "".join(self._raw)
-        # Strip fully closed <think> blocks
         cleaned = self._THINK_FULL.sub("", combined)
 
         # Check for an unclosed <think> at the end
         m = self._THINK_OPEN.search(cleaned)
         if m:
             if force:
-                # On final flush, drop the unclosed think block entirely
                 cleaned = cleaned[: m.start()]
             else:
-                # Not forced — only emit text before the unclosed tag;
-                # keep raw buffer intact to accumulate the closing tag.
                 cleaned = cleaned[: m.start()]
-                if not cleaned[self._sent_len :]:
-                    return  # nothing new to send yet
+                if not cleaned[self._sent_len:]:
+                    return
 
-        new_text = cleaned[self._sent_len :]
-        if new_text:
-            self._flushed_total += len(new_text)
-            self._sent_len += len(new_text)
-            self._last_flush = _time.monotonic()
-            await self._callback(new_text)
+        new_text = cleaned[self._sent_len:]
+        if not new_text:
+            return
+
+        if self._humanize and not force and self._total_pause_s < self._MAX_TOTAL_PAUSE:
+            # Find a paragraph break to split at
+            break_pos = self._find_paragraph_break(new_text)
+            if break_pos and break_pos < len(new_text):
+                # Flush only up to the paragraph break
+                flush_text = new_text[:break_pos]
+                self._flushed_total += len(flush_text)
+                self._sent_len += len(flush_text)
+                self._last_flush = _time.monotonic()
+                await self._callback(flush_text)
+
+                # Set pause
+                pause = self._paragraph_pause
+                self._pause_until = _time.monotonic() + pause
+                self._total_pause_s += pause
+                return
+
+        # Default: flush everything
+        self._flushed_total += len(new_text)
+        self._sent_len += len(new_text)
+        self._last_flush = _time.monotonic()
+        await self._callback(new_text)
 
         if force:
             self._raw.clear()
@@ -193,6 +246,8 @@ class AgentLoop:
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._sticky_agents: dict[str, str] = {}  # chat_key -> agent_name
         self._background_tasks: list[asyncio.Task] = []
+        self._follow_up_cooldowns: dict[str, float] = {}  # session_key -> last follow-up time
+        self.conversation_registry = None  # Set by gateway for proactive messaging
         # Per-agent locks: different agents process concurrently,
         # same agent serializes to preserve conversation order.
         self._agent_locks: dict[str, asyncio.Lock] = {}
@@ -462,7 +517,17 @@ class AgentLoop:
             # deltas are pushed to the channel progressively.
             streamed_text = False
             if on_progress:
-                debouncer = _ChunkDebouncer(on_progress)
+                streaming_cfg = (
+                    self.channels_config.streaming
+                    if self.channels_config
+                    else None
+                )
+                debouncer = _ChunkDebouncer(
+                    on_progress,
+                    humanize=streaming_cfg.humanize if streaming_cfg else False,
+                    paragraph_pause=streaming_cfg.paragraph_pause_s if streaming_cfg else 1.0,
+                    sentence_pause=streaming_cfg.sentence_pause_s if streaming_cfg else 0.5,
+                )
 
                 async def _on_chunk(text: str) -> None:
                     await debouncer.push(text)
@@ -830,6 +895,23 @@ class AgentLoop:
         self.sessions.save(session)
         self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
 
+        # Record activity for proactive messaging
+        if self.conversation_registry and msg.channel not in {"cli", "system"}:
+            self.conversation_registry.record_activity(msg.channel, msg.chat_id)
+
+        # Schedule follow-up question (non-blocking)
+        if (
+            self._config
+            and self._config.agents.follow_up.enabled
+            and final_content
+            and msg.channel not in {"cli", "system"}
+        ):
+            self._schedule_background(
+                self._maybe_send_follow_up(
+                    msg.channel, msg.chat_id, final_content, session,
+                )
+            )
+
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
 
@@ -844,6 +926,51 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=msg.metadata or {},
         )
+
+    async def _maybe_send_follow_up(
+        self,
+        channel: str,
+        chat_id: str,
+        last_response: str,
+        session: Session,
+    ) -> None:
+        """Evaluate and optionally send a follow-up question after responding."""
+        import random
+
+        cfg = self._config.agents.follow_up
+
+        # Cooldown check
+        key = f"{channel}:{chat_id}"
+        last_time = self._follow_up_cooldowns.get(key, 0)
+        if _time.monotonic() - last_time < cfg.cooldown_s:
+            return
+
+        # Frequency limiter
+        if random.random() > cfg.max_frequency:
+            return
+
+        await asyncio.sleep(cfg.delay_s)
+
+        # Build conversation summary from recent messages
+        history = session.get_history(max_messages=6)
+        tail = "\n".join(
+            f"{m['role']}: {str(m.get('content', ''))[:200]}"
+            for m in history[-6:]
+            if isinstance(m.get("content"), str)
+        )
+
+        from nanobot.agent.follow_up import evaluate_follow_up
+
+        model = cfg.model or self.model
+        should_ask, question = await evaluate_follow_up(
+            tail, last_response, self.provider, model,
+        )
+
+        if should_ask and question:
+            self._follow_up_cooldowns[key] = _time.monotonic()
+            await self.bus.publish_outbound(OutboundMessage(
+                channel=channel, chat_id=chat_id, content=question,
+            ))
 
     def _get_provider_for_model(self, model: str) -> LLMProvider:
         """Get the appropriate provider for a model, creating a new one if needed."""
