@@ -406,3 +406,100 @@ class TestLooksBlobLikeSummary:
 
     def test_multiline_blob(self) -> None:
         assert EventIngester._looks_blob_like_summary("a\nb\nc\nd\ne") is True
+
+
+class TestIngesterWithUnifiedDB:
+    """Tests for ingester writing to UnifiedMemoryDB."""
+
+    def _make_ingester_with_db(self, tmp_path: Path) -> tuple[EventIngester, Any, MagicMock]:
+        from nanobot.agent.memory.unified_db import UnifiedMemoryDB
+
+        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
+        persistence = MagicMock()
+        mem0 = MagicMock()
+        mem0.enabled = False
+        graph = MagicMock()
+        graph.enabled = False
+
+        ingester = EventIngester(
+            persistence=persistence,
+            mem0=mem0,
+            graph=graph,
+            rollout={},
+            conflict_pair_fn=lambda old, new: False,
+            db=db,
+            embedder=None,
+        )
+        return ingester, db, persistence
+
+    def test_events_written_to_db_not_persistence(self, tmp_path: Path) -> None:
+        ingester, db, persistence = self._make_ingester_with_db(tmp_path)
+        ingester.append_events(
+            [
+                {
+                    "id": "test-001",
+                    "type": "fact",
+                    "summary": "User likes coffee",
+                    "timestamp": "2026-01-01T00:00:00Z",
+                }
+            ]
+        )
+        events = db.read_events(limit=10)
+        assert len(events) >= 1
+        assert any("coffee" in e["summary"] for e in events)
+        # persistence.write_jsonl should NOT have been called
+        persistence.write_jsonl.assert_not_called()
+        db.close()
+
+    def test_read_events_from_db(self, tmp_path: Path) -> None:
+        ingester, db, persistence = self._make_ingester_with_db(tmp_path)
+        ingester.append_events(
+            [
+                {
+                    "id": "test-002",
+                    "type": "fact",
+                    "summary": "Test event",
+                    "timestamp": "2026-01-01T00:00:00Z",
+                }
+            ]
+        )
+        events = ingester.read_events(limit=10)
+        assert len(events) >= 1
+        db.close()
+
+    def test_sync_events_to_mem0_noop_with_db(self, tmp_path: Path) -> None:
+        ingester, db, _persistence = self._make_ingester_with_db(tmp_path)
+        result = ingester._sync_events_to_mem0([{"type": "fact", "summary": "ignored", "id": "x"}])
+        assert result == 0
+        db.close()
+
+    def test_old_path_used_when_db_is_none(self, tmp_path: Path) -> None:
+        """When db is None, persistence.write_jsonl IS called."""
+        persistence = MagicMock(spec=MemoryPersistence)
+        persistence.events_file = tmp_path / "events.jsonl"
+        persistence.read_jsonl.return_value = []
+        mem0 = MagicMock()
+        mem0.enabled = False
+        graph = MagicMock()
+        graph.enabled = False
+
+        ingester = EventIngester(
+            persistence=persistence,
+            mem0=mem0,
+            graph=graph,
+            rollout={},
+            conflict_pair_fn=lambda old, new: False,
+            db=None,
+            embedder=None,
+        )
+        ingester.append_events(
+            [
+                {
+                    "id": "test-003",
+                    "type": "fact",
+                    "summary": "Old path event",
+                    "timestamp": "2026-01-01T00:00:00Z",
+                }
+            ]
+        )
+        persistence.write_jsonl.assert_called_once()

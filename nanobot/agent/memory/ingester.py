@@ -36,9 +36,11 @@ from .helpers import (
 from .retrieval_planner import RetrievalPlanner
 
 if TYPE_CHECKING:
+    from .embedder import Embedder
     from .graph import KnowledgeGraph
     from .mem0_adapter import _Mem0Adapter
     from .persistence import MemoryPersistence
+    from .unified_db import UnifiedMemoryDB
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -69,12 +71,16 @@ class EventIngester:
         rollout: dict[str, Any],
         *,
         conflict_pair_fn: Callable[[str, str], bool] | None = None,
+        db: UnifiedMemoryDB | None = None,
+        embedder: Embedder | None = None,
     ) -> None:
         self._persistence = persistence
         self._mem0 = mem0
         self._graph = graph
         self._rollout = rollout
         self._conflict_pair_fn = conflict_pair_fn
+        self._db = db
+        self._embedder = embedder
 
         # mtime-based cache for events.jsonl (P-01/P-02).
         self._events_cache: list[dict[str, Any]] | None = None
@@ -447,6 +453,9 @@ class EventIngester:
 
     def read_events(self, limit: int | None = None) -> list[dict[str, Any]]:
         """Read events from persistence with mtime-based caching."""
+        if self._db is not None:
+            return self._db.read_events(limit=limit or 100)
+
         events_file = self._persistence.events_file
         try:
             current_mtime = events_file.stat().st_mtime if events_file.exists() else -1.0
@@ -814,21 +823,42 @@ class EventIngester:
         if written <= 0 and merged <= 0:
             return 0
 
-        events_file = self._persistence.events_file
-        self._persistence.write_jsonl(events_file, existing_events)
+        # New path: write to UnifiedMemoryDB
+        if self._db is not None:
+            import json as _json
 
-        if written > 0 and self._mem0.enabled:
-            for event in appended_events:
-                plan = self._event_mem0_write_plan(event)
-                for text, metadata in plan:
-                    clean_text = self._sanitize_mem0_text(
-                        text,
-                        allow_archival=bool(metadata.get("archival")),
-                    )
-                    if not clean_text:
-                        continue
-                    clean_metadata = self._sanitize_mem0_metadata(metadata)
-                    self._mem0.add_text(clean_text, metadata=clean_metadata)
+            for event in existing_events:
+                embedding = None
+                if self._embedder is not None:
+                    try:
+                        import asyncio
+
+                        embedding = asyncio.run(self._embedder.embed(event.get("summary", "")))
+                    except Exception:  # crash-barrier: embedding failure non-fatal
+                        bind_trace().warning("Failed to embed event {}", event.get("id", "?"))
+                # Serialize metadata if dict
+                evt_copy = dict(event)
+                if isinstance(evt_copy.get("metadata"), dict):
+                    evt_copy["metadata"] = _json.dumps(evt_copy["metadata"])
+                evt_copy.setdefault("created_at", evt_copy.get("timestamp", _utc_now_iso()))
+                self._db.insert_event(evt_copy, embedding=embedding)
+        else:
+            # Old path: write to persistence + sync to mem0
+            events_file = self._persistence.events_file
+            self._persistence.write_jsonl(events_file, existing_events)
+
+            if written > 0 and self._mem0.enabled:
+                for event in appended_events:
+                    plan = self._event_mem0_write_plan(event)
+                    for text, metadata in plan:
+                        clean_text = self._sanitize_mem0_text(
+                            text,
+                            allow_archival=bool(metadata.get("archival")),
+                        )
+                        if not clean_text:
+                            continue
+                        clean_metadata = self._sanitize_mem0_metadata(metadata)
+                        self._mem0.add_text(clean_text, metadata=clean_metadata)
         bind_trace().debug(
             "memory_append | written={} | merged={} | superseded={} | {:.0f}ms",
             written,
@@ -879,6 +909,8 @@ class EventIngester:
 
         Returns the number of entries successfully written.
         """
+        if self._db is not None:
+            return 0  # events already in SQLite with vectors
         written = 0
         for event in events:
             for text, raw_metadata in self._event_mem0_write_plan(event):
