@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from nanobot.agent.bus_progress import make_bus_progress
 from nanobot.agent.callbacks import (
     DelegateEndEvent,
     DelegateStartEvent,
@@ -56,5 +57,6 @@ __all__ = [
     "ToolExecutor",
     "ToolResultEvent",
     "init_langfuse",
+    "make_bus_progress",
     "shutdown_langfuse",
 ]
