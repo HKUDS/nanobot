@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.coordinator import ClassificationResult
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
@@ -46,7 +47,7 @@ def _make_loop(tmp_path: Path, provider: LLMProvider, verification_mode: str) ->
         planning_enabled=False,
         verification_mode=verification_mode,
     )
-    return AgentLoop(MessageBus(), provider, cfg)
+    return build_agent(bus=MessageBus(), provider=provider, config=cfg)
 
 
 async def test_verify_answer_revise_and_parse_fallback(tmp_path: Path) -> None:
@@ -95,7 +96,7 @@ async def test_run_timeout_and_none_response_paths(tmp_path: Path) -> None:
         verification_mode="off",
         message_timeout=1,
     )
-    loop = AgentLoop(bus, provider, cfg)
+    loop = build_agent(bus=bus, provider=provider, config=cfg)
     loop._connect_mcp = lambda: asyncio.sleep(0)  # type: ignore[method-assign]
 
     async def _slow(_msg):
@@ -126,7 +127,7 @@ async def test_run_exception_path_publishes_user_friendly_error(tmp_path: Path) 
         planning_enabled=False,
         verification_mode="off",
     )
-    loop = AgentLoop(bus, provider, cfg)
+    loop = build_agent(bus=bus, provider=provider, config=cfg)
     loop._connect_mcp = lambda: asyncio.sleep(0)  # type: ignore[method-assign]
 
     async def _explode(_msg):
@@ -155,7 +156,7 @@ async def test_run_with_routing_low_confidence_and_none_response(tmp_path: Path)
         planning_enabled=False,
         verification_mode="off",
     )
-    loop = AgentLoop(bus, provider, cfg)
+    loop = build_agent(bus=bus, provider=provider, config=cfg)
     loop._connect_mcp = lambda: asyncio.sleep(0)  # type: ignore[method-assign]
 
     default_role = AgentRoleConfig(name="general", description="general")

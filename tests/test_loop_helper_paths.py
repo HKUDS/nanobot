@@ -199,7 +199,9 @@ def _make_loop_via_init(
     kwargs: dict[str, object] = {}
     if tool_registry is not None:
         kwargs["tool_registry"] = tool_registry
-    return AgentLoop(bus, provider, config, **kwargs)  # type: ignore[arg-type]
+    from nanobot.agent.agent_factory import build_agent
+
+    return build_agent(bus=bus, provider=provider, config=config, **kwargs)  # type: ignore[arg-type]
 
 
 class _StubProvider:

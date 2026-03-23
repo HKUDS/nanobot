@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.capability import CapabilityRegistry
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.base import Tool, ToolResult
@@ -67,7 +68,7 @@ def _make_loop(tmp_path: Path, **config_kw: Any) -> AgentLoop:
     }
     defaults.update(config_kw)
     config = AgentConfig(**defaults)
-    return AgentLoop(bus, _StubProvider(), config)
+    return build_agent(bus=bus, provider=_StubProvider(), config=config)
 
 
 # ---------------------------------------------------------------------------

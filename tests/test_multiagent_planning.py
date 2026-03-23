@@ -21,6 +21,7 @@ from typing import Any
 
 import pytest
 
+from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.coordinator import Coordinator, build_default_registry
 from nanobot.agent.delegation import DelegationDispatcher
 from nanobot.agent.loop import AgentLoop
@@ -51,7 +52,7 @@ def _cfg(tmp_path: Path, **overrides: Any) -> AgentConfig:
 def _loop(tmp_path: Path, provider: LLMProvider, **kw: Any) -> AgentLoop:
     bus = MessageBus()
     config = _cfg(tmp_path, **kw)
-    loop = AgentLoop(bus, provider, config)
+    loop = build_agent(bus=bus, provider=provider, config=config)
     # Wire up coordinator with default roles so delegation is available.
     registry = build_default_registry("general")
     loop._coordinator = Coordinator(provider=provider, registry=registry, default_role="general")

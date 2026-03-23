@@ -39,12 +39,12 @@ def _make_agent_config(tmp_path: Path, **overrides: Any) -> AgentConfig:
 
 def _make_loop(tmp_path: Path, provider: LLMProvider | None = None):
     """Create an AgentLoop with coordinator wired up."""
-    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.agent_factory import build_agent
     from nanobot.bus.queue import MessageBus
 
     prov = provider or FakeProvider(["result"] * 20)
     bus = MessageBus()
-    loop = AgentLoop(bus, prov, _make_agent_config(tmp_path))
+    loop = build_agent(bus=bus, provider=prov, config=_make_agent_config(tmp_path))
 
     registry = build_default_registry("general")
     loop._coordinator = Coordinator(provider=prov, registry=registry, default_role="general")

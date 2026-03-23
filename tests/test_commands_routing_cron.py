@@ -127,7 +127,7 @@ def test_cron_run_success_and_failure(monkeypatch: pytest.MonkeyPatch, tmp_path:
             return self.should_run
 
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", _Bus)
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _AgentLoop)
+    monkeypatch.setattr("nanobot.agent.agent_factory.build_agent", lambda **kw: _AgentLoop())
     monkeypatch.setattr("nanobot.cron.service.CronService", _CronService)
 
     ok = runner.invoke(app, ["cron", "run", "job-1", "--force"])
