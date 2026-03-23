@@ -1,11 +1,13 @@
-"""Memory consolidation orchestration (rewritten with asyncio.TaskGroup).
+"""Memory consolidation orchestration with structured concurrency.
 
 ``ConsolidationOrchestrator`` manages the lifecycle of memory consolidation:
 
 - **Lifecycle** -- async context-manager; ``async with orchestrator:`` enters it.
-- **Background** -- ``submit()`` schedules fire-and-forget tasks via ``asyncio.TaskGroup``.
+- **Background** -- ``submit()`` schedules fire-and-forget tasks.
 - **Blocking** -- ``consolidate_and_wait()`` runs consolidation inline (used by /new).
 - **Archival** -- ``archive_fn`` closure called on failure; decoupled from MemoryPersistence.
+
+Compatible with Python 3.10+ (does not use asyncio.TaskGroup which requires 3.11).
 """
 
 from __future__ import annotations
@@ -41,17 +43,21 @@ class ConsolidationOrchestrator:
         self._locks: dict[str, asyncio.Lock] = {}
         self._in_progress: set[str] = set()
         self._sem: asyncio.Semaphore | None = None
-        self._tg: Any = None  # asyncio.TaskGroup (typed as Any for mypy compat)
+        self._tasks: set[asyncio.Task[None]] = set()
+        self._active = False
 
     async def __aenter__(self) -> ConsolidationOrchestrator:
         self._sem = asyncio.Semaphore(self._max_concurrent)
-        self._tg = asyncio.TaskGroup()  # type: ignore[attr-defined]
-        await self._tg.__aenter__()
+        self._tasks = set()
+        self._active = True
         return self
 
     async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
-        if self._tg is not None:
-            await self._tg.__aexit__(None, None, None)
+        self._active = False
+        # Drain all pending background tasks before exiting.
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+        self._tasks.clear()
 
     # ------------------------------------------------------------------
     # New public API
@@ -69,13 +75,15 @@ class ConsolidationOrchestrator:
         Silently skips if a consolidation for this session is already
         in progress (preserves the deduplication from _consolidating guard).
         """
-        if self._tg is None:
+        if not self._active:
             logger.warning("submit() called before entering context manager; skipping")
             return
         if session_key in self._in_progress:
             return
         self._in_progress.add(session_key)
-        self._tg.create_task(self._run(session_key, session, provider, model))
+        task = asyncio.create_task(self._run(session_key, session, provider, model))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     async def consolidate_and_wait(
         self,
