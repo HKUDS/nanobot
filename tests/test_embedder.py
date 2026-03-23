@@ -1,4 +1,5 @@
 """Tests for Embedder protocol and LocalEmbedder implementation."""
+
 from __future__ import annotations
 
 from nanobot.agent.memory.embedder import LocalEmbedder
@@ -30,6 +31,11 @@ class TestLocalEmbedder:
         e = LocalEmbedder()
         result = await e.embed("")
         assert len(result) == 384
+
+    async def test_embed_batch_empty_list(self):
+        e = LocalEmbedder()
+        results = await e.embed_batch([])
+        assert results == []
 
     async def test_similar_texts_have_higher_cosine(self):
         e = LocalEmbedder()

@@ -4,9 +4,11 @@ Callers depend on the ``Embedder`` protocol, not concrete classes.
 ``OpenAIEmbedder`` is the production default; ``LocalEmbedder`` is used
 in all tests (no API key needed, 384-dim ONNX model).
 """
+
 from __future__ import annotations
 
 import asyncio
+import threading
 from typing import Any, Protocol, runtime_checkable
 
 from loguru import logger
@@ -56,18 +58,14 @@ class OpenAIEmbedder:
     async def embed(self, text: str) -> list[float]:
         if self._client is None:
             raise RuntimeError("OpenAI client not available — check OPENAI_API_KEY")
-        response = await self._client.embeddings.create(
-            model=self._model, input=text
-        )
+        response = await self._client.embeddings.create(model=self._model, input=text)
         result: list[float] = response.data[0].embedding
         return result
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         if self._client is None:
             raise RuntimeError("OpenAI client not available — check OPENAI_API_KEY")
-        response = await self._client.embeddings.create(
-            model=self._model, input=texts
-        )
+        response = await self._client.embeddings.create(model=self._model, input=texts)
         result: list[list[float]] = [item.embedding for item in response.data]
         return result
 
@@ -85,32 +83,36 @@ class LocalEmbedder:
         self._tokenizer: Any = None
         self._session: Any = None
         self._initialized = False
+        self._lock = threading.Lock()
 
     def _ensure_initialized(self) -> None:
         """Lazy-load the ONNX model on first use."""
         if self._initialized:
             return
-        try:
-            import onnxruntime as ort
-            from huggingface_hub import hf_hub_download
-            from tokenizers import Tokenizer
+        with self._lock:
+            if self._initialized:
+                return
+            try:
+                import onnxruntime as ort
+                from huggingface_hub import hf_hub_download
+                from tokenizers import Tokenizer
 
-            model_path = hf_hub_download(
-                repo_id=f"sentence-transformers/{self._model_name}",
-                filename="onnx/model.onnx",
-            )
-            tokenizer_path = hf_hub_download(
-                repo_id=f"sentence-transformers/{self._model_name}",
-                filename="tokenizer.json",
-            )
-            self._session = ort.InferenceSession(model_path)
-            self._tokenizer = Tokenizer.from_file(tokenizer_path)
-            self._tokenizer.enable_padding(length=128)
-            self._tokenizer.enable_truncation(max_length=128)
-            self._initialized = True
-        except Exception:
-            logger.exception("Failed to load local ONNX embedder")
-            raise
+                model_path = hf_hub_download(
+                    repo_id=f"sentence-transformers/{self._model_name}",
+                    filename="onnx/model.onnx",
+                )
+                tokenizer_path = hf_hub_download(
+                    repo_id=f"sentence-transformers/{self._model_name}",
+                    filename="tokenizer.json",
+                )
+                self._session = ort.InferenceSession(model_path)
+                self._tokenizer = Tokenizer.from_file(tokenizer_path)
+                self._tokenizer.enable_padding(length=128)
+                self._tokenizer.enable_truncation(max_length=128)
+                self._initialized = True
+            except Exception:
+                logger.exception("Failed to load local ONNX embedder")
+                raise
 
     @property
     def dims(self) -> int:
@@ -121,22 +123,23 @@ class LocalEmbedder:
         try:
             self._ensure_initialized()
             return True
-        except Exception:
+        except Exception:  # crash-barrier: model load failure disables local embedder
+            logger.warning("LocalEmbedder not available — model load failed")
             return False
 
     async def embed(self, text: str) -> list[float]:
         return (await self.embed_batch([text]))[0]
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
         self._ensure_initialized()
         import numpy as np
 
         def _run() -> list[list[float]]:
             encoded = self._tokenizer.encode_batch(texts)
             input_ids = np.array([e.ids for e in encoded], dtype=np.int64)
-            attention_mask = np.array(
-                [e.attention_mask for e in encoded], dtype=np.int64
-            )
+            attention_mask = np.array([e.attention_mask for e in encoded], dtype=np.int64)
             token_type_ids = np.zeros_like(input_ids)
             outputs = self._session.run(
                 None,
