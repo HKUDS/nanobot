@@ -394,23 +394,13 @@ class DiscordChannel(BaseChannel):
         async def typing_loop() -> None:
             while self._running:
                 try:
-                    trigger_typing = getattr(channel, "trigger_typing", None)
-                    if callable(trigger_typing):
-                        await trigger_typing()
-                    else:
-                        typing_factory = getattr(channel, "typing", None)
-                        if not callable(typing_factory):
-                            raise AttributeError(
-                                f"Channel {getattr(channel, 'id', '?')} does not support typing indicator"
-                            )
-                        async with typing_factory():
-                            pass
+                    async with channel.typing():
+                        await asyncio.sleep(self.config.typing_interval_s)
                 except asyncio.CancelledError:
                     return
                 except Exception as e:
                     logger.debug("Discord typing indicator failed for {}: {}", channel_id, e)
                     return
-                await asyncio.sleep(self.config.typing_interval_s)
 
         self._typing_tasks[channel_id] = asyncio.create_task(typing_loop())
 

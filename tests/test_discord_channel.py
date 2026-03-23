@@ -76,6 +76,7 @@ class _FakeChannel:
         self.id = channel_id
         self.sent_payloads: list[dict] = []
         self.trigger_typing_calls = 0
+        self.typing_enter_hook = None
 
     async def send(self, **kwargs) -> None:
         payload = dict(kwargs)
@@ -87,8 +88,19 @@ class _FakeChannel:
     def get_partial_message(self, message_id: int) -> _FakePartialMessage:
         return _FakePartialMessage(message_id)
 
-    async def trigger_typing(self) -> None:
-        self.trigger_typing_calls += 1
+    def typing(self):
+        channel = self
+
+        class _TypingContext:
+            async def __aenter__(self):
+                channel.trigger_typing_calls += 1
+                if channel.typing_enter_hook is not None:
+                    await channel.typing_enter_hook()
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        return _TypingContext()
 
 
 class _FakeInteractionResponse:
@@ -370,10 +382,34 @@ async def test_send_skips_when_channel_not_cached() -> None:
     # Outbound sends should be skipped when the destination channel is not resolvable.
     owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     client = DiscordBotClient(owner, intents=discord.Intents.none())
+    fetch_calls: list[int] = []
+
+    async def fetch_channel(channel_id: int):
+        fetch_calls.append(channel_id)
+        raise RuntimeError("not found")
+
+    client.fetch_channel = fetch_channel  # type: ignore[method-assign]
 
     await client.send_outbound(OutboundMessage(channel="discord", chat_id="123", content="hello"))
 
     assert client.get_channel(123) is None
+    assert fetch_calls == [123]
+
+
+@pytest.mark.asyncio
+async def test_send_fetches_channel_when_not_cached() -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+
+    async def fetch_channel(channel_id: int):
+        return target if channel_id == 123 else None
+
+    client.fetch_channel = fetch_channel  # type: ignore[method-assign]
+
+    await client.send_outbound(OutboundMessage(channel="discord", chat_id="123", content="hello"))
+
+    assert target.sent_payloads == [{"content": "hello"}]
 
 
 @pytest.mark.asyncio
@@ -509,7 +545,7 @@ async def test_send_stops_typing_after_send() -> None:
         await release.wait()
 
     typing_channel = _FakeChannel(channel_id=123)
-    typing_channel.trigger_typing = slow_typing
+    typing_channel.typing_enter_hook = slow_typing
 
     await channel._start_typing(typing_channel)
     await start.wait()
@@ -529,7 +565,7 @@ async def test_send_stops_typing_after_send() -> None:
         await release.wait()
 
     typing_channel = _FakeChannel(channel_id=123)
-    typing_channel.trigger_typing = slow_typing_progress
+    typing_channel.typing_enter_hook = slow_typing_progress
 
     await channel._start_typing(typing_channel)
     await start.wait()
@@ -546,6 +582,48 @@ async def test_send_stops_typing_after_send() -> None:
     assert "123" in channel._typing_tasks
 
     await channel.send(OutboundMessage(channel="discord", chat_id="123", content="final"))
+    release.set()
+    await asyncio.sleep(0)
+
+    assert channel._typing_tasks == {}
+
+
+@pytest.mark.asyncio
+async def test_start_typing_uses_typing_context_when_trigger_typing_missing() -> None:
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    channel._running = True
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class _TypingCtx:
+        async def __aenter__(self):
+            entered.set()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _NoTriggerChannel:
+        def __init__(self, channel_id: int = 123) -> None:
+            self.id = channel_id
+
+        def typing(self):
+            async def _waiter():
+                await release.wait()
+            # Hold the loop so task remains active until explicitly stopped.
+            class _Ctx(_TypingCtx):
+                async def __aenter__(self):
+                    await super().__aenter__()
+                    await _waiter()
+            return _Ctx()
+
+    typing_channel = _NoTriggerChannel(channel_id=123)
+    await channel._start_typing(typing_channel)  # type: ignore[arg-type]
+    await entered.wait()
+
+    assert "123" in channel._typing_tasks
+
+    await channel._stop_typing("123")
     release.set()
     await asyncio.sleep(0)
 
