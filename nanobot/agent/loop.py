@@ -63,7 +63,7 @@ from nanobot.config.schema import AgentRoleConfig
 from nanobot.session.manager import Session
 
 if TYPE_CHECKING:
-    from nanobot.agent.agent_factory import _AgentComponents  # noqa: TC004
+    from nanobot.agent.agent_components import _AgentComponents
     from nanobot.agent.coordinator import ClassificationResult, Coordinator
 
 
