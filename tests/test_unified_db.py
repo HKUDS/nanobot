@@ -265,6 +265,125 @@ class TestHistoryAndSnapshots:
         db.close()
 
 
+class TestGraphTables:
+    def test_entities_table_exists(self, tmp_path: Path):
+        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
+        tables = {
+            row[0]
+            for row in db._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "entities" in tables
+        assert "edges" in tables
+        db.close()
+
+    def test_upsert_and_read_entity(self, tmp_path: Path):
+        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
+        db.upsert_entity(
+            "alice",
+            type="person",
+            aliases="ali",
+            properties='{"dept": "eng"}',
+            first_seen="2026-01-01",
+            last_seen="2026-03-01",
+        )
+        entity = db.get_entity("alice")
+        assert entity is not None
+        assert entity["type"] == "person"
+        assert entity["aliases"] == "ali"
+        db.close()
+
+    def test_get_entity_returns_none_for_missing(self, tmp_path: Path):
+        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
+        assert db.get_entity("nonexistent") is None
+        db.close()
+
+    def test_upsert_entity_updates_existing(self, tmp_path: Path):
+        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
+        db.upsert_entity(
+            "alice", type="person", aliases="", first_seen="2026-01-01", last_seen="2026-01-01"
+        )
+        db.upsert_entity(
+            "alice", type="person", aliases="ali", first_seen="2026-01-01", last_seen="2026-03-01"
+        )
+        entity = db.get_entity("alice")
+        assert entity["aliases"] == "ali"
+        assert entity["last_seen"] == "2026-03-01"
+        db.close()
+
+    def test_add_and_read_edge(self, tmp_path: Path):
+        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
+        db.upsert_entity("alice", type="person")
+        db.upsert_entity("project_x", type="project")
+        db.add_edge(
+            "alice",
+            "project_x",
+            relation="WORKS_ON",
+            confidence=0.9,
+            event_id="e1",
+            timestamp="2026-01-01",
+        )
+        edges = db.get_edges_from("alice")
+        assert len(edges) == 1
+        assert edges[0]["target"] == "project_x"
+        assert edges[0]["relation"] == "WORKS_ON"
+        db.close()
+
+    def test_get_edges_to(self, tmp_path: Path):
+        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
+        db.upsert_entity("alice", type="person")
+        db.upsert_entity("project_x", type="project")
+        db.add_edge("alice", "project_x", relation="WORKS_ON")
+        edges = db.get_edges_to("project_x")
+        assert len(edges) == 1
+        assert edges[0]["source"] == "alice"
+        db.close()
+
+    def test_get_neighbors(self, tmp_path: Path):
+        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
+        db.upsert_entity("alice", type="person")
+        db.upsert_entity("bob", type="person")
+        db.upsert_entity("project_x", type="project")
+        db.add_edge("alice", "project_x", relation="WORKS_ON")
+        db.add_edge("bob", "project_x", relation="WORKS_ON")
+        neighbors = db.get_neighbors("project_x", depth=1)
+        names = {n["name"] for n in neighbors}
+        assert "alice" in names
+        assert "bob" in names
+        db.close()
+
+    def test_get_neighbors_depth_2(self, tmp_path: Path):
+        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
+        db.upsert_entity("alice", type="person")
+        db.upsert_entity("project_x", type="project")
+        db.upsert_entity("python", type="technology")
+        db.add_edge("alice", "project_x", relation="WORKS_ON")
+        db.add_edge("project_x", "python", relation="USES")
+        # From alice, depth=2 should reach python
+        neighbors = db.get_neighbors("alice", depth=2)
+        names = {n["name"] for n in neighbors}
+        assert "project_x" in names
+        assert "python" in names
+        db.close()
+
+    def test_search_entities(self, tmp_path: Path):
+        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
+        db.upsert_entity("alice_smith", type="person", aliases="ali")
+        db.upsert_entity("bob_jones", type="person")
+        results = db.search_entities("alice", limit=5)
+        assert len(results) >= 1
+        assert results[0]["name"] == "alice_smith"
+        db.close()
+
+    def test_search_entities_by_alias(self, tmp_path: Path):
+        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
+        db.upsert_entity("alice_smith", type="person", aliases="ali, smithy")
+        results = db.search_entities("ali", limit=5)
+        assert len(results) >= 1
+        db.close()
+
+
 class TestMetadataSearch:
     def test_search_by_metadata_filters_by_type(self, tmp_path: Path):
         db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
