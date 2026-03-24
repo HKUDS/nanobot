@@ -248,20 +248,22 @@ observability.py (477 LOC), tracing.py (144 LOC), metrics.py (25 LOC), callbacks
 
 At 1,025 lines, `AgentLoop.__init__` constructs and wires together everything: memory, tools, delegation, missions, skills, cron, observability, verification, consolidation. It's a service locator disguised as a constructor. **NOTE: This is being addressed by the ongoing loop.py decomposition refactor.**
 
-### Problem 8: No dependency inversion at package boundaries (ARCHITECTURE)
+### Problem 8: No dependency inversion at package boundaries (ARCHITECTURE) — RESOLVED
 
-Most modules depend directly on concrete implementations:
-- `delegation.py` imports specific tool classes (ReadFileTool, ExecTool, WebFetchTool)
-- `mission.py` imports DelegationDispatcher directly
-- `tool_setup.py` hardcodes which tools get registered
+Concrete tool imports removed from coordination/delegation.py and coordination/mission.py.
+Tool construction moved to build_delegation_tools() factory in tools/setup.py, injected
+via composition root. Runtime import rules added to check_imports.py and enforced in
+pre-commit hooks.
 
 ### Problem 9: The consolidation split is awkward (ARCHITECTURE) — RESOLVED
 
 `consolidation.py` (orchestrator, 148 LOC) lives in `agent/`, while `consolidation_pipeline.py` (actual logic, 309 LOC) lives in `memory/`. After the restructuring, this split is actually correct: agent/ owns scheduling/concurrency (when and how to consolidate), memory/ owns domain logic (what consolidation does). The orchestrator calls `memory.consolidate()` — clean separation.
 
-### Problem 10: `capability.py` has an identity crisis (ARCHITECTURE)
+### Problem 10: `capability.py` has an identity crisis (ARCHITECTURE) — RESOLVED
 
-`CapabilityRegistry` (ADR-009) composes ToolRegistry, SkillsLoader, and AgentRegistry — three things from three different domains. It's a cross-cutting facade that doesn't clearly belong to any one package.
+Placement in tools/ is correct — 75% of its API is tool-centric. Cross-package
+AgentRegistry instantiation removed; now injected from composition root.
+TYPE_CHECKING guard added for coordination.registry import.
 
 ### Problem 11: `memory/` internal architecture is flat (ARCHITECTURE)
 
