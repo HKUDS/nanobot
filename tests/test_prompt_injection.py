@@ -302,3 +302,195 @@ def test_json_hook_empty_stdout_no_injection():
             {"type": "prompt_injection", "channel": "", "chat_id": ""},
         )
         assert result.modified_data is None
+
+
+# ---- E2E: topic-memory scenario ----
+# Simulates flobo3's use case: a shell hook reads a per-chat_id .md file
+# and injects its content into the system prompt via the full pipeline:
+# shell script → JsonConfigHook → HookRegistry → ContextBuilder → system prompt
+
+def _write_topic_memory_script(script_path: Path, topics_dir: Path) -> None:
+    """Write a topic-memory.sh that reads $TOPICS_DIR/$CHAT_ID.md."""
+    script_path.write_text(
+        '#!/bin/bash\n'
+        '[ "$CONTEXT_TYPE" != "prompt_injection" ] && exit 0\n'
+        'TOPIC_FILE="${TOPICS_DIR}/${CHAT_ID}.md"\n'
+        '[ -f "$TOPIC_FILE" ] && cat "$TOPIC_FILE"\n'
+        'exit 0\n'
+    )
+    script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
+
+
+def test_e2e_topic_memory_injects_matching_file():
+    """Full pipeline: chat_id → shell reads .md → content appears in system prompt."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        base = Path(tmpdir)
+
+        # Setup topic files
+        topics_dir = base / "topics"
+        topics_dir.mkdir()
+        (topics_dir / "project-alpha.md").write_text(
+            "# Project Alpha Notes\n\n- Deadline is Friday\n- Use PostgreSQL"
+        )
+        (topics_dir / "project-beta.md").write_text(
+            "# Project Beta Notes\n\n- Use Redis for caching"
+        )
+
+        # Setup hook script
+        script = base / "topic-memory.sh"
+        _write_topic_memory_script(script, topics_dir)
+
+        # Wire up: JsonConfigHook → ContextBuilder
+        hook = JsonConfigHook({
+            "name": "topic-memory",
+            "event": "PreBuildContext",
+            "command": str(script),
+            "priority": 50,
+        })
+        # Inject TOPICS_DIR so the script can find the files
+        os.environ["TOPICS_DIR"] = str(topics_dir)
+        try:
+            builder = _make_builder(tmpdir)
+            builder.hooks.register(hook)
+
+            # Request with chat_id=project-alpha
+            prompt_alpha = builder.build_system_prompt(
+                channel="telegram", chat_id="project-alpha",
+            )
+            assert "<dynamic_context>" in prompt_alpha
+            assert "Project Alpha Notes" in prompt_alpha
+            assert "Deadline is Friday" in prompt_alpha
+            assert "Use PostgreSQL" in prompt_alpha
+            # Should NOT contain beta content
+            assert "Project Beta" not in prompt_alpha
+
+            # Request with chat_id=project-beta
+            prompt_beta = builder.build_system_prompt(
+                channel="telegram", chat_id="project-beta",
+            )
+            assert "Project Beta Notes" in prompt_beta
+            assert "Use Redis for caching" in prompt_beta
+            assert "Project Alpha" not in prompt_beta
+        finally:
+            os.environ.pop("TOPICS_DIR", None)
+
+
+def test_e2e_topic_memory_no_file_no_injection():
+    """When no .md file exists for the chat_id, nothing is injected."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        base = Path(tmpdir)
+        topics_dir = base / "topics"
+        topics_dir.mkdir()
+
+        script = base / "topic-memory.sh"
+        _write_topic_memory_script(script, topics_dir)
+
+        hook = JsonConfigHook({
+            "name": "topic-memory",
+            "event": "PreBuildContext",
+            "command": str(script),
+        })
+        os.environ["TOPICS_DIR"] = str(topics_dir)
+        try:
+            builder = _make_builder(tmpdir)
+            builder.hooks.register(hook)
+
+            prompt = builder.build_system_prompt(
+                channel="whatsapp", chat_id="nonexistent-topic",
+            )
+            assert "<dynamic_context>" not in prompt
+        finally:
+            os.environ.pop("TOPICS_DIR", None)
+
+
+def test_e2e_topic_memory_via_build_messages():
+    """Verify topic memory flows through build_messages (the real entry point)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        base = Path(tmpdir)
+        topics_dir = base / "topics"
+        topics_dir.mkdir()
+        (topics_dir / "chat-123.md").write_text("Remember: user prefers dark mode")
+
+        script = base / "topic-memory.sh"
+        _write_topic_memory_script(script, topics_dir)
+
+        hook = JsonConfigHook({
+            "name": "topic-memory",
+            "event": "PreBuildContext",
+            "command": str(script),
+        })
+        os.environ["TOPICS_DIR"] = str(topics_dir)
+        try:
+            builder = _make_builder(tmpdir)
+            builder.hooks.register(hook)
+
+            messages = builder.build_messages(
+                history=[], current_message="hello",
+                channel="discord", chat_id="chat-123",
+            )
+            system_content = messages[0]["content"]
+            assert "<dynamic_context>" in system_content
+            assert "user prefers dark mode" in system_content
+        finally:
+            os.environ.pop("TOPICS_DIR", None)
+
+
+def test_e2e_topic_memory_large_file_truncated():
+    """A large topic file should be truncated at the 4000-char limit."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        base = Path(tmpdir)
+        topics_dir = base / "topics"
+        topics_dir.mkdir()
+        (topics_dir / "big-topic.md").write_text("x" * 6000)
+
+        script = base / "topic-memory.sh"
+        _write_topic_memory_script(script, topics_dir)
+
+        hook = JsonConfigHook({
+            "name": "topic-memory",
+            "event": "PreBuildContext",
+            "command": str(script),
+        })
+        os.environ["TOPICS_DIR"] = str(topics_dir)
+        try:
+            builder = _make_builder(tmpdir)
+            builder.hooks.register(hook)
+
+            prompt = builder.build_system_prompt(
+                channel="telegram", chat_id="big-topic",
+            )
+            assert "<dynamic_context>" in prompt
+            assert "... (truncated)" in prompt
+        finally:
+            os.environ.pop("TOPICS_DIR", None)
+
+
+def test_e2e_topic_memory_coexists_with_skills_filter():
+    """Topic memory hook and SkillsEnabledFilter should not interfere."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        base = Path(tmpdir)
+        topics_dir = base / "topics"
+        topics_dir.mkdir()
+        (topics_dir / "t1.md").write_text("topic notes here")
+
+        script = base / "topic-memory.sh"
+        _write_topic_memory_script(script, topics_dir)
+
+        hook = JsonConfigHook({
+            "name": "topic-memory",
+            "event": "PreBuildContext",
+            "command": str(script),
+        })
+        os.environ["TOPICS_DIR"] = str(topics_dir)
+        try:
+            builder = _make_builder(tmpdir)
+            # SkillsEnabledFilter is already registered by _init_hooks
+            builder.hooks.register(hook)
+
+            prompt = builder.build_system_prompt(
+                channel="telegram", chat_id="t1",
+            )
+            assert "topic notes here" in prompt
+            assert "<dynamic_context>" in prompt
+        finally:
+            os.environ.pop("TOPICS_DIR", None)
