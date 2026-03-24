@@ -29,9 +29,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Pre-install litellm from source (PyPI unavailable)
-        run: pip install "litellm @ git+https://github.com/BerriAI/litellm.git@v1.76.2"
-
       - name: Install dependencies
         run: pip install -e ".[dev]"
 

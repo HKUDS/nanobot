@@ -19,10 +19,7 @@ classifiers = [
 
 dependencies = [
     "typer>=0.20.0,<1.0.0",
-    # SECURITY: litellm 1.82.7/1.82.8 were compromised (supply chain attack).
-    # PyPI pulled ALL versions. CI pre-installs from GitHub source (v1.76.2).
-    # Update this pin once maintainers publish verified releases to PyPI.
-    "litellm>=1.76.0",
+    "litellm>=1.81.5,<2.0.0",
     "pydantic>=2.12.0,<3.0.0",
     "pydantic-settings>=2.12.0,<3.0.0",
     "websockets>=16.0,<17.0",
