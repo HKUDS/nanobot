@@ -421,10 +421,20 @@ def _make_provider(config: Config):
         from nanobot.providers.litellm_provider import LiteLLMProvider
         from nanobot.providers.registry import find_by_name
         spec = find_by_name(provider_name)
-        if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and (spec.is_oauth or spec.is_local)):
+        if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and (spec.is_oauth or spec.is_local or spec.no_api_key_ok)):
             console.print("[red]Error: No API key configured.[/red]")
             console.print("Set one in ~/.nanobot/config.json under providers section")
             raise typer.Exit(1)
+
+        # Vertex AI: set project/location env vars for LiteLLM ADC auth
+        if provider_name == "vertex_ai" and p:
+            from nanobot.config.schema import VertexAIProviderConfig
+            if isinstance(p, VertexAIProviderConfig):
+                if p.project:
+                    os.environ.setdefault("VERTEXAI_PROJECT", p.project)
+                if p.location:
+                    os.environ.setdefault("VERTEXAI_LOCATION", p.location)
+
         provider = LiteLLMProvider(
             api_key=p.api_key if p else None,
             api_base=config.get_api_base(model),
@@ -1124,9 +1134,16 @@ def status():
             if spec.is_oauth:
                 console.print(f"{spec.label}: [green]✓ (OAuth)[/green]")
             elif spec.is_local:
-                # Local deployments show api_base instead of api_key
                 if p.api_base:
                     console.print(f"{spec.label}: [green]✓ {p.api_base}[/green]")
+                else:
+                    console.print(f"{spec.label}: [dim]not set[/dim]")
+            elif spec.no_api_key_ok:
+                from nanobot.config.schema import VertexAIProviderConfig
+                if isinstance(p, VertexAIProviderConfig) and p.project:
+                    console.print(f"{spec.label}: [green]✓ {p.project}/{p.location} (cloud auth)[/green]")
+                elif p.api_key:
+                    console.print(f"{spec.label}: [green]✓[/green]")
                 else:
                     console.print(f"{spec.label}: [dim]not set[/dim]")
             else:

@@ -51,6 +51,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+vertex = [
+    "google-cloud-aiplatform>=1.38.0",
+]
 wecom = [
     "wecom-aibot-sdk-python>=0.1.5",
 ]

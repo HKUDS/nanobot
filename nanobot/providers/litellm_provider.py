@@ -45,6 +45,7 @@ class LiteLLMProvider(LLMProvider):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self._provider_name = provider_name
 
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
@@ -91,6 +92,8 @@ class LiteLLMProvider(LLMProvider):
 
     def _resolve_model(self, model: str) -> str:
         """Resolve model name by applying provider/gateway prefixes."""
+        from nanobot.providers.registry import find_by_name
+
         if self._gateway:
             prefix = self._gateway.litellm_prefix
             if self._gateway.strip_model_prefix:
@@ -99,8 +102,10 @@ class LiteLLMProvider(LLMProvider):
                 model = f"{prefix}/{model}"
             return model
 
-        # Standard mode: auto-prefix for known providers
-        spec = find_by_model(model)
+        # Explicit provider_name takes priority over keyword matching.
+        # This ensures e.g. provider="vertex_ai" with model="gemini-2.5-pro"
+        # resolves to "vertex_ai/gemini-2.5-pro" instead of "gemini/gemini-2.5-pro".
+        spec = (find_by_name(self._provider_name) if self._provider_name else None) or find_by_model(model)
         if spec and spec.litellm_prefix:
             model = self._canonicalize_explicit_prefix(model, spec.name, spec.litellm_prefix)
             if not any(model.startswith(s) for s in spec.skip_prefixes):

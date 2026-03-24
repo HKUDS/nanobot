@@ -56,6 +56,13 @@ class ProviderConfig(Base):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
 
 
+class VertexAIProviderConfig(ProviderConfig):
+    """Vertex AI provider — uses Google Cloud ADC instead of API keys."""
+
+    project: str = ""  # GCP project ID (e.g. "my-project-123")
+    location: str = "us-central1"  # GCP region
+
+
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
@@ -72,6 +79,7 @@ class ProvidersConfig(Base):
     ollama: ProviderConfig = Field(default_factory=ProviderConfig)  # Ollama local models
     ovms: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenVINO Model Server (OVMS)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
+    vertex_ai: VertexAIProviderConfig = Field(default_factory=VertexAIProviderConfig)  # Google Cloud Vertex AI (ADC auth)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     mistral: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -188,14 +196,14 @@ class Config(BaseSettings):
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
             if p and model_prefix and normalized_prefix == spec.name:
-                if spec.is_oauth or spec.is_local or p.api_key:
+                if spec.is_oauth or spec.is_local or spec.no_api_key_ok or p.api_key:
                     return p, spec.name
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
-                if spec.is_oauth or spec.is_local or p.api_key:
+                if spec.is_oauth or spec.is_local or spec.no_api_key_ok or p.api_key:
                     return p, spec.name
 
         # Fallback: configured local providers can route models without
