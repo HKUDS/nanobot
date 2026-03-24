@@ -4,18 +4,31 @@ import asyncio
 import logging
 import mimetypes
 from pathlib import Path
-from typing import Any, TypeAlias
+from typing import Any, Literal, TypeAlias
 
 from loguru import logger
+from pydantic import Field
 
 try:
     import nh3
     from mistune import create_markdown
     from nio import (
-        AsyncClient, AsyncClientConfig, ContentRepositoryConfigError,
-        DownloadError, InviteEvent, JoinError, MatrixRoom, MemoryDownloadResponse,
-        RoomEncryptedMedia, RoomMessage, RoomMessageMedia, RoomMessageText,
-        RoomSendError, RoomTypingError, SyncError, UploadError,
+        AsyncClient,
+        AsyncClientConfig,
+        ContentRepositoryConfigError,
+        DownloadError,
+        InviteEvent,
+        JoinError,
+        MatrixRoom,
+        MemoryDownloadResponse,
+        RoomEncryptedMedia,
+        RoomMessage,
+        RoomMessageMedia,
+        RoomMessageText,
+        RoomSendError,
+        RoomTypingError,
+        SyncError,
+        UploadError,
     )
     from nio.crypto.attachments import decrypt_attachment
     from nio.exceptions import EncryptionError
@@ -25,8 +38,10 @@ except ImportError as e:
     ) from e
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.loader import get_data_dir
+from nanobot.config.paths import get_data_dir, get_media_dir
+from nanobot.config.schema import Base
 from nanobot.utils.helpers import safe_filename
 
 TYPING_NOTICE_TIMEOUT_MS = 30_000
@@ -130,19 +145,51 @@ def _configure_nio_logging_bridge() -> None:
         nio_logger.propagate = False
 
 
+class MatrixConfig(Base):
+    """Matrix (Element) channel configuration."""
+
+    enabled: bool = False
+    homeserver: str = "https://matrix.org"
+    access_token: str = ""
+    user_id: str = ""
+    device_id: str = ""
+    e2ee_enabled: bool = True
+    sync_stop_grace_seconds: int = 2
+    max_media_bytes: int = 20 * 1024 * 1024
+    allow_from: list[str] = Field(default_factory=list)
+    group_policy: Literal["open", "mention", "allowlist"] = "open"
+    group_allow_from: list[str] = Field(default_factory=list)
+    allow_room_mentions: bool = False
+
+
 class MatrixChannel(BaseChannel):
     """Matrix (Element) channel using long-polling sync."""
 
     name = "matrix"
+    display_name = "Matrix"
 
-    def __init__(self, config: Any, bus, *, restrict_to_workspace: bool = False,
-                 workspace: Path | None = None):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return MatrixConfig().model_dump(by_alias=True)
+
+    def __init__(
+        self,
+        config: Any,
+        bus: MessageBus,
+        *,
+        restrict_to_workspace: bool = False,
+        workspace: str | Path | None = None,
+    ):
+        if isinstance(config, dict):
+            config = MatrixConfig.model_validate(config)
         super().__init__(config, bus)
         self.client: AsyncClient | None = None
         self._sync_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
-        self._restrict_to_workspace = restrict_to_workspace
-        self._workspace = workspace.expanduser().resolve() if workspace else None
+        self._restrict_to_workspace = bool(restrict_to_workspace)
+        self._workspace = (
+            Path(workspace).expanduser().resolve(strict=False) if workspace is not None else None
+        )
         self._server_upload_limit_bytes: int | None = None
         self._server_upload_limit_checked = False
 
@@ -350,7 +397,11 @@ class MatrixChannel(BaseChannel):
                 limit_bytes = await self._effective_media_limit_bytes()
                 for path in candidates:
                     if fail := await self._upload_and_send_attachment(
-                        msg.chat_id, path, limit_bytes, relates_to):
+                        room_id=msg.chat_id,
+                        path=path,
+                        limit_bytes=limit_bytes,
+                        relates_to=relates_to,
+                    ):
                         failures.append(fail)
             if failures:
                 text = f"{text.rstrip()}\n{chr(10).join(failures)}" if text.strip() else "\n".join(failures)
@@ -438,8 +489,7 @@ class MatrixChannel(BaseChannel):
                 await asyncio.sleep(2)
 
     async def _on_room_invite(self, room: MatrixRoom, event: InviteEvent) -> None:
-        allow_from = self.config.allow_from or []
-        if not allow_from or event.sender in allow_from:
+        if self.is_allowed(event.sender):
             await self.client.join(room.room_id)
 
     def _is_direct_room(self, room: MatrixRoom) -> bool:
@@ -475,9 +525,7 @@ class MatrixChannel(BaseChannel):
         return False
 
     def _media_dir(self) -> Path:
-        d = get_data_dir() / "media" / "matrix"
-        d.mkdir(parents=True, exist_ok=True)
-        return d
+        return get_media_dir("matrix")
 
     @staticmethod
     def _event_source_content(event: RoomMessage) -> dict[str, Any]:
@@ -664,11 +712,20 @@ class MatrixChannel(BaseChannel):
         parts: list[str] = []
         if isinstance(body := getattr(event, "body", None), str) and body.strip():
             parts.append(body.strip())
-        parts.append(marker)
+
+        if attachment and attachment.get("type") == "audio":
+            transcription = await self.transcribe_audio(attachment["path"])
+            if transcription:
+                parts.append(f"[transcription: {transcription}]")
+            else:
+                parts.append(marker)
+        elif marker:
+            parts.append(marker)
 
         await self._start_typing_keepalive(room.room_id)
         try:
             meta = self._base_metadata(room, event)
+            meta["attachments"] = []
             if attachment:
                 meta["attachments"] = [attachment]
             await self._handle_message(

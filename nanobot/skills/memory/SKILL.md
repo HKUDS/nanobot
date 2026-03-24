@@ -9,15 +9,21 @@ always: true
 ## Structure
 
 - `memory/MEMORY.md` — Long-term facts (preferences, project context, relationships). Always loaded into your context.
-- `memory/HISTORY.md` — Append-only event log. NOT loaded into context. Search it with grep. Each entry starts with [YYYY-MM-DD HH:MM].
+- `memory/HISTORY.md` — Append-only event log. NOT loaded into context. Search it with grep-style tools or in-memory filters. Each entry starts with [YYYY-MM-DD HH:MM].
 
 ## Search Past Events
 
-```bash
-grep -i "keyword" memory/HISTORY.md
-```
+Choose the search method based on file size:
 
-Use the `exec` tool to run grep. Combine patterns: `grep -iE "meeting|deadline" memory/HISTORY.md`
+- Small `memory/HISTORY.md`: use `read_file`, then search in-memory
+- Large or long-lived `memory/HISTORY.md`: use the `exec` tool for targeted search
+
+Examples:
+- **Linux/macOS:** `grep -i "keyword" memory/HISTORY.md`
+- **Windows:** `findstr /i "keyword" memory\HISTORY.md`
+- **Cross-platform Python:** `python -c "from pathlib import Path; text = Path('memory/HISTORY.md').read_text(encoding='utf-8'); print('\n'.join([l for l in text.splitlines() if 'keyword' in l.lower()][-20:]))"`
+
+Prefer targeted command-line search for large history files.
 
 ## When to Update MEMORY.md
 

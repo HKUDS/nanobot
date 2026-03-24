@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from collections.abc import Awaitable, Callable
 from typing import Any, AsyncGenerator
 
 import httpx
 from loguru import logger
-
 from oauth_cli_kit import get_token as get_codex_token
+
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
@@ -24,14 +25,16 @@ class OpenAICodexProvider(LLMProvider):
         super().__init__(api_key=None, api_base=None)
         self.default_model = default_model
 
-    async def chat(
+    async def _call_codex(
         self,
         messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        model: str | None = None,
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
+        tools: list[dict[str, Any]] | None,
+        model: str | None,
+        reasoning_effort: str | None,
+        tool_choice: str | dict[str, Any] | None,
+        on_content_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
+        """Shared request logic for both chat() and chat_stream()."""
         model = model or self.default_model
         system_prompt, input_items = _convert_messages(messages)
 
@@ -47,33 +50,48 @@ class OpenAICodexProvider(LLMProvider):
             "text": {"verbosity": "medium"},
             "include": ["reasoning.encrypted_content"],
             "prompt_cache_key": _prompt_cache_key(messages),
-            "tool_choice": "auto",
+            "tool_choice": tool_choice or "auto",
             "parallel_tool_calls": True,
         }
-
+        if reasoning_effort:
+            body["reasoning"] = {"effort": reasoning_effort}
         if tools:
             body["tools"] = _convert_tools(tools)
 
-        url = DEFAULT_CODEX_URL
-
         try:
             try:
-                content, tool_calls, finish_reason = await _request_codex(url, headers, body, verify=True)
+                content, tool_calls, finish_reason = await _request_codex(
+                    DEFAULT_CODEX_URL, headers, body, verify=True,
+                    on_content_delta=on_content_delta,
+                )
             except Exception as e:
                 if "CERTIFICATE_VERIFY_FAILED" not in str(e):
                     raise
-                logger.warning("SSL certificate verification failed for Codex API; retrying with verify=False")
-                content, tool_calls, finish_reason = await _request_codex(url, headers, body, verify=False)
-            return LLMResponse(
-                content=content,
-                tool_calls=tool_calls,
-                finish_reason=finish_reason,
-            )
+                logger.warning("SSL verification failed for Codex API; retrying with verify=False")
+                content, tool_calls, finish_reason = await _request_codex(
+                    DEFAULT_CODEX_URL, headers, body, verify=False,
+                    on_content_delta=on_content_delta,
+                )
+            return LLMResponse(content=content, tool_calls=tool_calls, finish_reason=finish_reason)
         except Exception as e:
-            return LLMResponse(
-                content=f"Error calling Codex: {str(e)}",
-                finish_reason="error",
-            )
+            return LLMResponse(content=f"Error calling Codex: {e}", finish_reason="error")
+
+    async def chat(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
+        model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
+        reasoning_effort: str | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+    ) -> LLMResponse:
+        return await self._call_codex(messages, tools, model, reasoning_effort, tool_choice)
+
+    async def chat_stream(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
+        model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
+        reasoning_effort: str | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        return await self._call_codex(messages, tools, model, reasoning_effort, tool_choice, on_content_delta)
 
     def get_default_model(self) -> str:
         return self.default_model
@@ -102,13 +120,14 @@ async def _request_codex(
     headers: dict[str, str],
     body: dict[str, Any],
     verify: bool,
+    on_content_delta: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[str, list[ToolCallRequest], str]:
     async with httpx.AsyncClient(timeout=60.0, verify=verify) as client:
         async with client.stream("POST", url, headers=headers, json=body) as response:
             if response.status_code != 200:
                 text = await response.aread()
                 raise RuntimeError(_friendly_error(response.status_code, text.decode("utf-8", "ignore")))
-            return await _consume_sse(response)
+            return await _consume_sse(response, on_content_delta)
 
 
 def _convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -146,45 +165,28 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[st
             continue
 
         if role == "assistant":
-            # Handle text first.
             if isinstance(content, str) and content:
-                input_items.append(
-                    {
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [{"type": "output_text", "text": content}],
-                        "status": "completed",
-                        "id": f"msg_{idx}",
-                    }
-                )
-            # Then handle tool calls.
+                input_items.append({
+                    "type": "message", "role": "assistant",
+                    "content": [{"type": "output_text", "text": content}],
+                    "status": "completed", "id": f"msg_{idx}",
+                })
             for tool_call in msg.get("tool_calls", []) or []:
                 fn = tool_call.get("function") or {}
                 call_id, item_id = _split_tool_call_id(tool_call.get("id"))
-                call_id = call_id or f"call_{idx}"
-                item_id = item_id or f"fc_{idx}"
-                input_items.append(
-                    {
-                        "type": "function_call",
-                        "id": item_id,
-                        "call_id": call_id,
-                        "name": fn.get("name"),
-                        "arguments": fn.get("arguments") or "{}",
-                    }
-                )
+                input_items.append({
+                    "type": "function_call",
+                    "id": item_id or f"fc_{idx}",
+                    "call_id": call_id or f"call_{idx}",
+                    "name": fn.get("name"),
+                    "arguments": fn.get("arguments") or "{}",
+                })
             continue
 
         if role == "tool":
             call_id, _ = _split_tool_call_id(msg.get("tool_call_id"))
             output_text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
-            input_items.append(
-                {
-                    "type": "function_call_output",
-                    "call_id": call_id,
-                    "output": output_text,
-                }
-            )
-            continue
+            input_items.append({"type": "function_call_output", "call_id": call_id, "output": output_text})
 
     return system_prompt, input_items
 
@@ -242,7 +244,10 @@ async def _iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], 
         buffer.append(line)
 
 
-async def _consume_sse(response: httpx.Response) -> tuple[str, list[ToolCallRequest], str]:
+async def _consume_sse(
+    response: httpx.Response,
+    on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+) -> tuple[str, list[ToolCallRequest], str]:
     content = ""
     tool_calls: list[ToolCallRequest] = []
     tool_call_buffers: dict[str, dict[str, Any]] = {}
@@ -262,7 +267,10 @@ async def _consume_sse(response: httpx.Response) -> tuple[str, list[ToolCallRequ
                     "arguments": item.get("arguments") or "",
                 }
         elif event_type == "response.output_text.delta":
-            content += event.get("delta") or ""
+            delta_text = event.get("delta") or ""
+            content += delta_text
+            if on_content_delta and delta_text:
+                await on_content_delta(delta_text)
         elif event_type == "response.function_call_arguments.delta":
             call_id = event.get("call_id")
             if call_id and call_id in tool_call_buffers:

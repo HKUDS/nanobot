@@ -10,19 +10,37 @@ from typing import Any
 
 import httpx
 from loguru import logger
+from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import VoipConfig
+from nanobot.config.schema import Base
+
+
+class VoipConfig(Base):
+    """Local VoIP channel configuration."""
+
+    enabled: bool = False
+    api_url: str = "http://127.0.0.1:8787"
+    poll_timeout_seconds: int = 25
+    greeting: str = "Bonjour, je suis Oswald."
+    allow_from: list[str] = Field(default_factory=list)
 
 
 class VoipChannel(BaseChannel):
     """VoIP channel that exchanges events with the local telephony backend."""
 
     name = "voip"
+    display_name = "VoIP"
 
-    def __init__(self, config: VoipConfig, bus: MessageBus):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return VoipConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = VoipConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: VoipConfig = config
         self._http: httpx.AsyncClient | None = None
