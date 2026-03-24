@@ -25,10 +25,6 @@ if TYPE_CHECKING:
     from nanobot.agent.role_switching import TurnRoleManager
     from nanobot.agent.streaming import StreamingLLMCaller
     from nanobot.agent.tool_executor import ToolExecutor
-    from nanobot.agent.tools.cron import CronTool
-    from nanobot.agent.tools.feedback import FeedbackTool
-    from nanobot.agent.tools.message import MessageTool
-    from nanobot.agent.tools.mission import MissionStartTool
     from nanobot.agent.tools.registry import ToolRegistry
     from nanobot.agent.tools.result_cache import ToolResultCache
     from nanobot.agent.turn_orchestrator import TurnOrchestrator
@@ -47,36 +43,34 @@ if TYPE_CHECKING:
 
 
 @dataclass(slots=True)
-class _AgentComponents:
-    """All subsystem references needed by ``AgentLoop``.
+class _CoreConfig:
+    """Model, workspace, and role identity."""
 
-    This is a pure data container — no logic.  ``build_agent()`` populates it
-    and passes it to ``AgentLoop(components=...)``.
-    """
-
-    # --- core refs ---
-    bus: MessageBus
-    provider: LLMProvider
-    config: AgentConfig
-    workspace: Path
     model: str
     temperature: float
     max_iterations: int
-
-    # --- role / routing ---
+    workspace: Path
     role_config: AgentRoleConfig | None
     role_name: str
+
+
+@dataclass(slots=True)
+class _InfraConfig:
+    """External infrastructure: routing, channels, MCP, exec policy."""
+
     routing_config: RoutingConfig | None
     channels_config: ChannelsConfig | None
-
-    # --- external config ---
     mcp_servers: dict
     brave_api_key: str | None
     exec_config: ExecToolConfig
     cron_service: CronService | None
     memory_rollout_overrides: dict
 
-    # --- subsystems ---
+
+@dataclass(slots=True)
+class _Subsystems:
+    """All constructed subsystem instances."""
+
     memory: MemoryStore
     context: ContextBuilder
     sessions: SessionManager
@@ -93,11 +87,24 @@ class _AgentComponents:
     orchestrator: TurnOrchestrator
     processor: MessageProcessor
 
-    # --- wired post-construction ---
-    role_manager: TurnRoleManager | None = None
 
-    # --- cached tool refs (O(1) context updates) ---
-    ctx_message_tool: MessageTool | None = None
-    ctx_feedback_tool: FeedbackTool | None = None
-    ctx_mission_tool: MissionStartTool | None = None
-    ctx_cron_tool: CronTool | None = None
+@dataclass(slots=True)
+class _AgentComponents:
+    """All subsystem references needed by ``AgentLoop``.
+
+    This is a pure data container — no logic.  ``build_agent()`` populates it
+    and passes it to ``AgentLoop(components=...)``.
+
+    Fields are grouped into nested dataclasses for clarity:
+    - ``core``: model, workspace, role identity
+    - ``infra``: external infrastructure config
+    - ``subsystems``: all constructed subsystem instances
+    """
+
+    bus: MessageBus
+    provider: LLMProvider
+    config: AgentConfig
+    core: _CoreConfig
+    infra: _InfraConfig
+    subsystems: _Subsystems
+    role_manager: TurnRoleManager | None = None

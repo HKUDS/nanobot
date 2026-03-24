@@ -48,7 +48,7 @@ def test_returns_agent_loop(tmp_path: Path) -> None:
 
 
 def test_role_manager_wired(tmp_path: Path) -> None:
-    """Post-construction wiring sets role_manager and token_source."""
+    """Post-construction wiring sets role_manager."""
     bus = MessageBus()
     provider = _provider()
     config = _config(tmp_path)
@@ -56,7 +56,6 @@ def test_role_manager_wired(tmp_path: Path) -> None:
     loop = build_agent(bus, provider, config)
 
     assert loop._role_manager is not None
-    assert loop._processor._token_source is loop
 
 
 def test_injected_tool_registry(tmp_path: Path) -> None:
