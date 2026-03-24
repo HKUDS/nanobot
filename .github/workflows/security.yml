@@ -9,6 +9,10 @@ on:
     # Weekly scan on Monday at 06:00 UTC
     - cron: '0 6 * * 1'
 
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   security-events: write
