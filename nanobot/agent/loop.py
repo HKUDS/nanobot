@@ -522,6 +522,7 @@ class AgentLoop:
         for role_cfg in self._routing_config.roles:
             self._capabilities.merge_register_role(role_cfg)
         registry = self._capabilities.agent_registry
+        assert registry is not None, "agent_registry must be set before enabling routing"
         registry._default_role = self._routing_config.default_role
         self._coordinator = Coordinator(
             provider=self.provider,

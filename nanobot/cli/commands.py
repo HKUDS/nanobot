@@ -38,8 +38,8 @@ app = typer.Typer(
 # UTF-8 so Rich can write them without a UnicodeEncodeError.
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     except Exception:  # crash-barrier: non-standard stdout (e.g. pytest capture)
         pass
 

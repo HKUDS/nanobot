@@ -53,7 +53,7 @@ def _flush_pending_tty_input() -> None:
     try:
         import termios
 
-        termios.tcflush(fd, termios.TCIFLUSH)
+        termios.tcflush(fd, termios.TCIFLUSH)  # type: ignore[attr-defined]
         return
     except (OSError, ImportError, AttributeError):
         pass
@@ -89,7 +89,7 @@ def _init_prompt_session() -> None:
     try:
         import termios
 
-        _SAVED_TERM_ATTRS = termios.tcgetattr(sys.stdin.fileno())
+        _SAVED_TERM_ATTRS = termios.tcgetattr(sys.stdin.fileno())  # type: ignore[attr-defined]
     except (OSError, ImportError, AttributeError):
         pass  # terminal state save is best-effort; ignore if unavailable
 
