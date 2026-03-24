@@ -5,6 +5,15 @@ import pytest
 from nanobot.heartbeat.service import HeartbeatService
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
+HEARTBEAT_TEMPLATE = """# Heartbeat Tasks
+
+## Active Tasks
+
+{tasks}
+
+## Completed
+"""
+
 
 class DummyProvider(LLMProvider):
     def __init__(self, responses: list[LLMResponse]):
@@ -121,6 +130,61 @@ async def test_trigger_now_returns_none_when_decision_is_skip(tmp_path) -> None:
     )
 
     assert await service.trigger_now() is None
+
+
+@pytest.mark.asyncio
+async def test_trigger_now_skips_llm_when_active_tasks_section_is_empty(tmp_path) -> None:
+    (tmp_path / "HEARTBEAT.md").write_text(
+        HEARTBEAT_TEMPLATE.format(tasks="<!-- Add your periodic tasks below this line -->"),
+        encoding="utf-8",
+    )
+
+    provider = DummyProvider([])
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+    )
+
+    assert await service.trigger_now() is None
+    assert provider.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_trigger_now_falls_back_to_legacy_heartbeat_content(tmp_path) -> None:
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] do thing", encoding="utf-8")
+
+    provider = DummyProvider([
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="hb_1",
+                    name="heartbeat",
+                    arguments={"action": "run", "tasks": "check open tasks"},
+                )
+            ],
+        )
+    ])
+
+    called_with: list[str] = []
+
+    async def _on_execute(tasks: str) -> str:
+        called_with.append(tasks)
+        return "done"
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        on_execute=_on_execute,
+    )
+
+    result = await service.trigger_now()
+
+    assert result == "done"
+    assert called_with == ["check open tasks"]
+    assert provider.calls == 1
 
 
 @pytest.mark.asyncio
@@ -286,4 +350,42 @@ async def test_decide_prompt_includes_current_time(tmp_path) -> None:
     user_msg = captured_messages[1]
     assert user_msg["role"] == "user"
     assert "Current Time:" in user_msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_tick_and_trigger_now_do_not_overlap_execution(tmp_path, monkeypatch) -> None:
+    (tmp_path / "HEARTBEAT.md").write_text(
+        HEARTBEAT_TEMPLATE.format(tasks="- [ ] do thing"),
+        encoding="utf-8",
+    )
+
+    active = 0
+    peak_active = 0
+    calls = 0
+
+    async def _on_execute(_tasks: str) -> str:
+        nonlocal active, peak_active, calls
+        calls += 1
+        active += 1
+        peak_active = max(peak_active, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return ""
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=DummyProvider([]),
+        model="openai/gpt-4o-mini",
+        on_execute=_on_execute,
+    )
+
+    async def _always_run(_content: str) -> tuple[str, str]:
+        return "run", "check open tasks"
+
+    monkeypatch.setattr(service, "_decide", _always_run)
+
+    await asyncio.gather(service._tick(), service.trigger_now())
+
+    assert calls == 2
+    assert peak_active == 1
 

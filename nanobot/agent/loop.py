@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import os
 import time
 from contextlib import AsyncExitStack, nullcontext
@@ -15,9 +14,9 @@ from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryConsolidator
+from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -25,14 +24,19 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.utils.helpers import build_status_content, trim_history_for_budget
-from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.bus.queue import MessageBus
+from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
+from nanobot.utils.helpers import trim_history_for_budget
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, InputLimitsConfig, WebSearchConfig
+    from nanobot.config.schema import (
+        ChannelsConfig,
+        ExecToolConfig,
+        InputLimitsConfig,
+        WebSearchConfig,
+    )
     from nanobot.cron.service import CronService
 
 
@@ -190,10 +194,10 @@ class AgentLoop:
     def _tool_hint(self, tool_calls: list) -> str:
         """Format tool calls as concise hint, e.g. 'web_search("query")'."""
         workspace_str = str(self.workspace)
-        
+
         def _fmt(tc):
             args = (tc.arguments[0] if isinstance(tc.arguments, list) else tc.arguments) or {}
-            
+
             val = None
             if isinstance(args, dict):
                 # Iterate through all string values to find the first meaningful one
@@ -201,21 +205,22 @@ class AgentLoop:
                     if isinstance(v, str):
                         val = v
                         break
-                            
+
             if not isinstance(val, str):
                 return tc.name
-                
+
             if self.restrict_to_workspace:
                 import os
+
                 # If it looks like an absolute path, normalize it to resolve '..' and '.'
                 if os.path.isabs(val):
                     val = os.path.normpath(val)
                 # Replace workspace path with empty string to hide it
                 if workspace_str in val:
                     val = val.replace(workspace_str, "").lstrip("\\/")
-                
+
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
-            
+
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
     def _trim_history_for_budget(
@@ -477,6 +482,8 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        *,
+        ephemeral_session: bool = False,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -509,7 +516,9 @@ class AgentLoop:
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         key = session_key or msg.session_key
-        session = self.sessions.get_or_create(key)
+        session: Session | None = None
+        if not ephemeral_session:
+            session = self.sessions.get_or_create(key)
 
         # Slash commands
         raw = msg.content.strip()
@@ -517,14 +526,15 @@ class AgentLoop:
         if result := await self.commands.dispatch(ctx):
             return result
 
-        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+        if session is not None:
+            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(max_messages=0)
+        history = session.get_history(max_messages=0) if session is not None else []
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
@@ -552,9 +562,10 @@ class AgentLoop:
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        self._save_turn(session, all_msgs, 1 + len(history))
-        self.sessions.save(session)
-        self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+        if session is not None:
+            self._save_turn(session, all_msgs, 1 + len(history))
+            self.sessions.save(session)
+            self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
@@ -658,6 +669,8 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        *,
+        ephemeral_session: bool = False,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
@@ -665,4 +678,5 @@ class AgentLoop:
         return await self._process_message(
             msg, session_key=session_key, on_progress=on_progress,
             on_stream=on_stream, on_stream_end=on_stream_end,
+            ephemeral_session=ephemeral_session,
         )

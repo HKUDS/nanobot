@@ -1,6 +1,8 @@
 import json
 import re
+import shutil
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -18,11 +20,6 @@ runner = CliRunner()
 
 class _StopGatewayError(RuntimeError):
     pass
-
-
-import shutil
-
-import pytest
 
 
 @pytest.fixture
@@ -643,10 +640,139 @@ def test_agent_hints_about_deprecated_memory_window(mock_agent_runtime, tmp_path
     assert "no longer used" in result.stdout
 
 
-def test_heartbeat_retains_recent_messages_by_default():
+def test_heartbeat_is_stateless_by_default():
     config = Config()
 
-    assert config.gateway.heartbeat.keep_recent_messages == 8
+    assert config.gateway.heartbeat.keep_recent_messages == 0
+
+
+def _exercise_gateway_heartbeat(monkeypatch, tmp_path: Path, *, keep_recent_messages: int) -> dict[str, Any]:
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "gateway-workspace")
+    config.gateway.heartbeat.keep_recent_messages = keep_recent_messages
+
+    seen: dict[str, Any] = {
+        "process_calls": [],
+        "retain_calls": [],
+        "save_calls": 0,
+        "session_keys": [],
+    }
+
+    class _FakeSession:
+        def retain_recent_legal_suffix(self, max_messages: int) -> None:
+            seen["retain_calls"].append(max_messages)
+
+    class _FakeSessions:
+        def __init__(self) -> None:
+            self._session = _FakeSession()
+
+        def get_or_create(self, key: str):
+            seen["session_keys"].append(key)
+            return self._session
+
+        def save(self, _session) -> None:
+            seen["save_calls"] += 1
+
+    fake_sessions = _FakeSessions()
+
+    class _FakeAgentLoop:
+        def __init__(self, *args, **kwargs) -> None:
+            self.sessions = fake_sessions
+            self.model = "test-model"
+
+        async def process_direct(self, *_args, **_kwargs):
+            seen["process_calls"].append(_kwargs)
+            return OutboundMessage(channel="cli", chat_id="direct", content="ok")
+
+        async def run(self) -> None:
+            return None
+
+        async def close_mcp(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeSessionManager:
+        def __init__(self, _workspace: Path) -> None:
+            pass
+
+        def list_sessions(self) -> list[dict[str, str]]:
+            return []
+
+    class _FakeCron:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+
+        async def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+        def status(self) -> dict[str, int]:
+            return {"jobs": 0}
+
+    class _FakeChannels:
+        def __init__(self, _config, _bus) -> None:
+            self.enabled_channels: list[str] = []
+
+        async def start_all(self) -> None:
+            return None
+
+        async def stop_all(self) -> None:
+            return None
+
+    class _FakeHeartbeatService:
+        def __init__(self, *args, on_execute=None, **kwargs) -> None:
+            self._on_execute = on_execute
+
+        async def start(self) -> None:
+            if self._on_execute is not None:
+                await self._on_execute("heartbeat tasks")
+
+        def stop(self) -> None:
+            return None
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
+    monkeypatch.setattr("nanobot.session.manager.SessionManager", _FakeSessionManager)
+    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
+    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannels)
+    monkeypatch.setattr("nanobot.heartbeat.service.HeartbeatService", _FakeHeartbeatService)
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    return seen
+
+
+def test_gateway_heartbeat_runs_stateless_by_default(monkeypatch, tmp_path: Path) -> None:
+    seen = _exercise_gateway_heartbeat(monkeypatch, tmp_path, keep_recent_messages=0)
+
+    assert seen["process_calls"][0]["ephemeral_session"] is True
+    assert seen["process_calls"][0]["session_key"] == "heartbeat"
+    assert seen["process_calls"][0]["channel"] == "cli"
+    assert seen["process_calls"][0]["chat_id"] == "direct"
+    assert seen["retain_calls"] == []
+    assert seen["save_calls"] == 0
+
+
+def test_gateway_heartbeat_can_opt_into_bounded_context(monkeypatch, tmp_path: Path) -> None:
+    seen = _exercise_gateway_heartbeat(monkeypatch, tmp_path, keep_recent_messages=3)
+
+    assert seen["process_calls"][0]["ephemeral_session"] is False
+    assert seen["retain_calls"] == [3, 3]
+    assert seen["save_calls"] == 2
+    assert seen["session_keys"] == ["heartbeat", "heartbeat"]
 
 
 def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Path) -> None:

@@ -1,12 +1,11 @@
 """CLI commands for nanobot."""
 
 import asyncio
-from contextlib import contextmanager, nullcontext
-
 import os
 import select
 import signal
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -465,6 +464,7 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
 def _warn_deprecated_config_keys(config_path: Path | None) -> None:
     """Hint users to remove obsolete keys from their config file."""
     import json
+
     from nanobot.config.loader import get_config_path
 
     path = config_path or get_config_path()
@@ -620,13 +620,21 @@ def gateway(
         # Fallback keeps prior behavior but remains explicit.
         return "cli", "direct"
 
+    hb_cfg = config.gateway.heartbeat
+
     # Create heartbeat service
     async def on_heartbeat_execute(tasks: str) -> str:
         """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
+        ephemeral_session = hb_cfg.keep_recent_messages <= 0
 
         async def _silent(*_args, **_kwargs):
             pass
+
+        if not ephemeral_session:
+            session = agent.sessions.get_or_create("heartbeat")
+            session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+            agent.sessions.save(session)
 
         resp = await agent.process_direct(
             tasks,
@@ -634,13 +642,14 @@ def gateway(
             channel=channel,
             chat_id=chat_id,
             on_progress=_silent,
+            ephemeral_session=ephemeral_session,
         )
 
-        # Keep a small tail of heartbeat history so the loop stays bounded
-        # without losing all short-term context between runs.
-        session = agent.sessions.get_or_create("heartbeat")
-        session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
-        agent.sessions.save(session)
+        if not ephemeral_session:
+            # Keep an explicit bounded heartbeat session only when the user opts in.
+            session = agent.sessions.get_or_create("heartbeat")
+            session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+            agent.sessions.save(session)
 
         return resp.content if resp else ""
 
@@ -652,7 +661,6 @@ def gateway(
             return  # No external channel available to deliver to
         await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
 
-    hb_cfg = config.gateway.heartbeat
     heartbeat = HeartbeatService(
         workspace=config.workspace_path,
         provider=provider,
