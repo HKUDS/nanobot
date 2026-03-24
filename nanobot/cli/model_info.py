@@ -8,13 +8,18 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any
 
-import litellm
+
+def _litellm():
+    """Lazy accessor for litellm (heavy import deferred until actually needed)."""
+    import litellm as _ll
+
+    return _ll
 
 
 @lru_cache(maxsize=1)
 def _get_model_cost_map() -> dict[str, Any]:
     """Get litellm's model cost map (cached)."""
-    return getattr(litellm, "model_cost", {})
+    return getattr(_litellm(), "model_cost", {})
 
 
 @lru_cache(maxsize=1)
@@ -30,7 +35,7 @@ def get_all_models() -> list[str]:
             models.add(k)
 
     # From models_by_provider (more complete provider coverage)
-    for provider_models in getattr(litellm, "models_by_provider", {}).values():
+    for provider_models in getattr(_litellm(), "models_by_provider", {}).values():
         if isinstance(provider_models, (set, list)):
             models.update(provider_models)
 
@@ -126,7 +131,7 @@ def get_model_context_limit(model: str, provider: str = "auto") -> int | None:
 
     # Fall back to litellm's get_max_tokens (returns max_output_tokens typically)
     try:
-        result = litellm.get_max_tokens(model)
+        result = _litellm().get_max_tokens(model)
         if result and result > 0:
             return result
     except (KeyError, ValueError, AttributeError):

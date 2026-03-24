@@ -14,6 +14,7 @@ import httpx
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool
+from nanobot.utils.helpers import build_image_content_blocks
 
 if TYPE_CHECKING:
     from nanobot.config.schema import WebSearchConfig
@@ -196,6 +197,8 @@ class WebSearchTool(Tool):
 
     async def _search_duckduckgo(self, query: str, n: int) -> str:
         try:
+            # Note: duckduckgo_search is synchronous and does its own requests
+            # We run it in a thread to avoid blocking the loop
             from ddgs import DDGS
 
             ddgs = DDGS(timeout=10)
@@ -231,11 +234,29 @@ class WebFetchTool(Tool):
         self.max_chars = max_chars
         self.proxy = proxy
 
-    async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
+    async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> Any:
         max_chars = maxChars or self.max_chars
         is_valid, error_msg = _validate_url_safe(url)
         if not is_valid:
             return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False)
+
+        # Detect and fetch images directly to avoid Jina's textual image captioning
+        try:
+            async with httpx.AsyncClient(proxy=self.proxy, follow_redirects=True, max_redirects=MAX_REDIRECTS, timeout=15.0) as client:
+                async with client.stream("GET", url, headers={"User-Agent": USER_AGENT}) as r:
+                    from nanobot.security.network import validate_resolved_url
+
+                    redir_ok, redir_err = validate_resolved_url(str(r.url))
+                    if not redir_ok:
+                        return json.dumps({"error": f"Redirect blocked: {redir_err}", "url": url}, ensure_ascii=False)
+
+                    ctype = r.headers.get("content-type", "")
+                    if ctype.startswith("image/"):
+                        r.raise_for_status()
+                        raw = await r.aread()
+                        return build_image_content_blocks(raw, ctype, url, f"(Image fetched from: {url})")
+        except Exception as e:
+            logger.debug("Pre-fetch image detection failed for {}: {}", url, e)
 
         result = await self._fetch_jina(url, max_chars)
         if result is None:
@@ -278,7 +299,7 @@ class WebFetchTool(Tool):
             logger.debug("Jina Reader failed for {}, falling back to readability: {}", url, e)
             return None
 
-    async def _fetch_readability(self, url: str, extract_mode: str, max_chars: int) -> str:
+    async def _fetch_readability(self, url: str, extract_mode: str, max_chars: int) -> Any:
         """Local fallback using readability-lxml."""
         from readability import Document
 
@@ -298,6 +319,8 @@ class WebFetchTool(Tool):
                 return json.dumps({"error": f"Redirect blocked: {redir_err}", "url": url}, ensure_ascii=False)
 
             ctype = r.headers.get("content-type", "")
+            if ctype.startswith("image/"):
+                return build_image_content_blocks(r.content, ctype, url, f"(Image fetched from: {url})")
 
             if "application/json" in ctype:
                 text, extractor = json.dumps(r.json(), indent=2, ensure_ascii=False), "json"
