@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from nanobot.agent.memory.unified_db import UnifiedMemoryDB
+from nanobot.memory.unified_db import UnifiedMemoryDB
 
 
 class TestSchemaCreation:

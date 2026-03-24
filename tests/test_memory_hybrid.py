@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from nanobot.agent.memory import MemoryStore
+from nanobot.memory import MemoryStore
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 

@@ -6,6 +6,8 @@ the allowlist mode and workspace restriction.
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from nanobot.agent.tools.shell import ExecTool
@@ -283,7 +285,7 @@ class TestShellExecution:
 
     async def test_timeout(self, tmp_path):
         tool = ExecTool(working_dir=str(tmp_path), timeout=1)
-        result = await tool.execute(command='python3 -c "import time; time.sleep(30)"')
+        result = await tool.execute(command=f'{sys.executable} -c "import time; time.sleep(30)"')
         # The timeout error is caught and returned as a failed ToolResult
         assert not result.success
         assert "timeout" in result.output.lower() or "timed out" in result.output.lower()

@@ -8,7 +8,7 @@ tool call response, it should serialize them to JSON instead of raising TypeErro
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from nanobot.agent.memory import MemoryStore
+from nanobot.memory import MemoryStore
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 

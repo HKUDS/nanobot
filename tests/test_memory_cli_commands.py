@@ -222,7 +222,7 @@ def _patched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Config:
     cfg = Config()
     cfg.agents.defaults.workspace = str(tmp_path)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda: cfg)
-    monkeypatch.setattr("nanobot.agent.memory.MemoryStore", _FakeStore)
+    monkeypatch.setattr("nanobot.memory.MemoryStore", _FakeStore)
     return cfg
 
 

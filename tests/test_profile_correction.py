@@ -5,12 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from nanobot.agent.memory.profile_correction import CorrectionOrchestrator
-from nanobot.agent.memory.profile_io import ProfileStore
+from nanobot.memory.profile_correction import CorrectionOrchestrator
+from nanobot.memory.profile_io import ProfileStore
 
 
 def _make_profile_store(tmp_path: Path) -> ProfileStore:
-    from nanobot.agent.memory.unified_db import UnifiedMemoryDB
+    from nanobot.memory.unified_db import UnifiedMemoryDB
 
     mem_dir = tmp_path / "memory"
     mem_dir.mkdir(exist_ok=True)

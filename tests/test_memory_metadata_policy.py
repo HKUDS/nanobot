@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from nanobot.agent.memory import MemoryStore
-from nanobot.agent.memory.retrieval_planner import RetrievalPlanner
+from nanobot.memory import MemoryStore
+from nanobot.memory.retrieval_planner import RetrievalPlanner
 
 
 def test_coerce_event_adds_normalized_metadata(tmp_path: Path) -> None:
@@ -343,7 +343,7 @@ def test_evaluate_retrieval_cases_balanced_mode_supports_structural_hits(tmp_pat
 
 def test_allocate_section_budgets_proportional(tmp_path: Path) -> None:
     """Sections receive budget proportional to their priority weight."""
-    from nanobot.agent.memory.token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
+    from nanobot.memory.token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
 
     allocator = TokenBudgetAllocator(DEFAULT_SECTION_WEIGHTS)
     alloc = allocator.allocate(900, "fact_lookup")
@@ -369,7 +369,7 @@ def test_allocate_section_budgets_proportional(tmp_path: Path) -> None:
 
 
 def test_allocate_proportional_respects_zero_weight() -> None:
-    from nanobot.agent.memory.token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
+    from nanobot.memory.token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
 
     allocator = TokenBudgetAllocator(DEFAULT_SECTION_WEIGHTS)
     result = allocator.allocate(900, "fact_lookup")

@@ -286,7 +286,7 @@ The following boundaries were established during the memory subsystem completion
 
 - **`profile_io.py`** owns profile CRUD and caching (`ProfileStore`, `ProfileCache`). Never imports from `channels/`, `bus/`, `session/`, or `agent/loop`.
 - **`profile_correction.py`** owns live user correction (`CorrectionOrchestrator`). Never imports from `channels/` or `bus/`.
-- **`token_budget.py`** is pure logic (`TokenBudgetAllocator`, `SectionBudget`). Never imports from any `nanobot.agent.memory.*` or `nanobot.config.*` module.
+- **`token_budget.py`** is pure logic (`TokenBudgetAllocator`, `SectionBudget`). Never imports from any `nanobot.memory.*` or `nanobot.config.*` module.
 - **`consolidation.py`** owns structured concurrency for consolidation (`ConsolidationOrchestrator`). Never imports from `channels/` or `agent/loop`. Must be used as an async context manager.
 - **`ProfileCache`** is internal to `ProfileStore`; not exported from `nanobot/agent/memory/__init__.py`.
 

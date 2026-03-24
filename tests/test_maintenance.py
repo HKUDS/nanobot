@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.memory.maintenance import MemoryMaintenance
+from nanobot.memory.maintenance import MemoryMaintenance
 
 
 def _make_maintenance(tmp_path: Path) -> MemoryMaintenance:

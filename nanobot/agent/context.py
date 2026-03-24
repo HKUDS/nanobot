@@ -22,11 +22,10 @@ import platform
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
-from nanobot.agent.memory import MemoryStore
 from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools.feedback import feedback_summary
@@ -37,6 +36,9 @@ from nanobot.errors import (
 from nanobot.errors import (
     MemorySubsystemError as NanobotMemoryError,
 )
+
+if TYPE_CHECKING:
+    from nanobot.memory.store import MemoryStore
 
 # ---------------------------------------------------------------------------
 # Module-level platform info cache — avoid repeated syscalls on every LLM
@@ -69,11 +71,12 @@ class ContextBuilder:
         role_system_prompt: str = "",
     ):
         self.workspace = workspace
-        self.memory = (
-            memory
-            if memory is not None
-            else MemoryStore(workspace, rollout_overrides=memory_rollout_overrides)
-        )
+        if memory is not None:
+            self.memory = memory
+        else:
+            from nanobot.memory.store import MemoryStore as _MemoryStore
+
+            self.memory = _MemoryStore(workspace, rollout_overrides=memory_rollout_overrides)
         self.skills = SkillsLoader(workspace)
         self.memory_retrieval_k = memory_retrieval_k
         self.memory_token_budget = memory_token_budget

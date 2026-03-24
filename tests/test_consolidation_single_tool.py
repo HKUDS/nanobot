@@ -17,8 +17,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.agent.memory.consolidation_pipeline import ConsolidationPipeline
-from nanobot.agent.memory.constants import (
+from nanobot.memory.consolidation_pipeline import ConsolidationPipeline
+from nanobot.memory.constants import (
     _CONSOLIDATE_MEMORY_TOOL,
     _SAVE_EVENTS_TOOL,
 )
@@ -168,7 +168,7 @@ class TestConsolidationRouting:
         pipeline._profile_mgr.read_profile.return_value = {}
         pipeline._profile_mgr._apply_profile_updates.return_value = (0, 0, 0)
 
-        with patch("nanobot.agent.memory.consolidation_pipeline.prompts") as mock_prompts:
+        with patch("nanobot.memory.consolidation_pipeline.prompts") as mock_prompts:
             mock_prompts.get.return_value = "system prompt"
             result = await pipeline.consolidate(session, provider, "gpt-4")
 
@@ -214,7 +214,7 @@ class TestConsolidationRouting:
         pipeline._profile_mgr.read_profile.return_value = {}
         pipeline._profile_mgr._apply_profile_updates.return_value = (0, 0, 0)
 
-        with patch("nanobot.agent.memory.consolidation_pipeline.prompts") as mock_prompts:
+        with patch("nanobot.memory.consolidation_pipeline.prompts") as mock_prompts:
             mock_prompts.get.return_value = "system prompt"
             result = await pipeline.consolidate(session, provider, "gpt-4")
 
@@ -261,7 +261,7 @@ class TestSingleToolFallbacks:
         pipeline._profile_mgr.read_profile.return_value = {}
         pipeline._profile_mgr._apply_profile_updates.return_value = (0, 0, 0)
 
-        with patch("nanobot.agent.memory.consolidation_pipeline.prompts") as mock_prompts:
+        with patch("nanobot.memory.consolidation_pipeline.prompts") as mock_prompts:
             mock_prompts.get.return_value = "system prompt"
             result = await pipeline.consolidate(session, provider, "gpt-4")
 
@@ -299,7 +299,7 @@ class TestSingleToolFallbacks:
         pipeline._profile_mgr.read_profile.return_value = {}
         pipeline._profile_mgr._apply_profile_updates.return_value = (0, 0, 0)
 
-        with patch("nanobot.agent.memory.consolidation_pipeline.prompts") as mock_prompts:
+        with patch("nanobot.memory.consolidation_pipeline.prompts") as mock_prompts:
             mock_prompts.get.return_value = "system prompt"
             result = await pipeline.consolidate(session, provider, "gpt-4")
 
@@ -337,7 +337,7 @@ class TestSingleToolFallbacks:
         pipeline._profile_mgr.read_profile.return_value = {}
         pipeline._profile_mgr._apply_profile_updates.return_value = (0, 0, 0)
 
-        with patch("nanobot.agent.memory.consolidation_pipeline.prompts") as mock_prompts:
+        with patch("nanobot.memory.consolidation_pipeline.prompts") as mock_prompts:
             mock_prompts.get.return_value = "system prompt"
             result = await pipeline.consolidate(session, provider, "gpt-4")
 
@@ -382,7 +382,7 @@ class TestHistoryEntryExtraction:
         pipeline._profile_mgr.read_profile.return_value = {}
         pipeline._profile_mgr._apply_profile_updates.return_value = (0, 0, 0)
 
-        with patch("nanobot.agent.memory.consolidation_pipeline.prompts") as mock_prompts:
+        with patch("nanobot.memory.consolidation_pipeline.prompts") as mock_prompts:
             mock_prompts.get.return_value = "system prompt"
             await pipeline.consolidate(session, provider, "gpt-4")
 
@@ -421,7 +421,7 @@ class TestHistoryEntryExtraction:
         pipeline._profile_mgr.read_profile.return_value = {}
         pipeline._profile_mgr._apply_profile_updates.return_value = (0, 0, 0)
 
-        with patch("nanobot.agent.memory.consolidation_pipeline.prompts") as mock_prompts:
+        with patch("nanobot.memory.consolidation_pipeline.prompts") as mock_prompts:
             mock_prompts.get.return_value = "system prompt"
             await pipeline.consolidate(session, provider, "gpt-4")
 
@@ -464,7 +464,7 @@ class TestHistoryEntryExtraction:
         pipeline._profile_mgr.read_profile.return_value = {}
         pipeline._profile_mgr._apply_profile_updates.return_value = (0, 0, 0)
 
-        with patch("nanobot.agent.memory.consolidation_pipeline.prompts") as mock_prompts:
+        with patch("nanobot.memory.consolidation_pipeline.prompts") as mock_prompts:
             mock_prompts.get.return_value = "system prompt"
             result = await pipeline.consolidate(session, provider, "gpt-4")
 

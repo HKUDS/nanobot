@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.memory import MemoryStore
-from nanobot.agent.memory.ingester import EventIngester
+from nanobot.memory import MemoryStore
+from nanobot.memory.ingester import EventIngester
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 

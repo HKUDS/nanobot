@@ -1,4 +1,4 @@
-"""Tests for nanobot.agent.memory.ingester — EventIngester."""
+"""Tests for nanobot.memory.ingester — EventIngester."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
-from nanobot.agent.memory.ingester import EventIngester
-from nanobot.agent.memory.unified_db import UnifiedMemoryDB
+from nanobot.memory.ingester import EventIngester
+from nanobot.memory.unified_db import UnifiedMemoryDB
 
 
 def _make_ingester(

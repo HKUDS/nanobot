@@ -152,7 +152,7 @@ class ProfileStore:
 
 `ProfileStore` is **not** exported from `nanobot/agent/__init__.py` — it is an internal
 subsystem detail. `MemoryStore` and test files import it directly from
-`nanobot.agent.memory.profile_io`.
+`nanobot.memory.profile_io`.
 
 `profile.py` is deleted. `nanobot/agent/memory/__init__.py` updates its re-exports.
 
@@ -305,7 +305,7 @@ class TokenBudgetAllocator:
         ...
 ```
 
-`TokenBudgetAllocator` is exported from `nanobot.agent.memory` for test access.
+`TokenBudgetAllocator` is exported from `nanobot.memory` for test access.
 
 ### Config schema
 

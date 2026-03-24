@@ -43,8 +43,8 @@ def memory_inspect(
     top_k: int = typer.Option(6, "--top-k", "-k", help="Top-k memories to display"),
 ) -> None:
     """Inspect memory backend health, profile, and retrieval results."""
-    from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
+    from nanobot.memory import MemoryStore
 
     config = load_config()
     store = MemoryStore(
@@ -116,8 +116,8 @@ def memory_metrics(
     baseline_file: str = typer.Option("", "--baseline-file", help="(deprecated)"),
 ) -> None:
     """Show memory backend health. Per-counter metrics now live in Langfuse."""
-    from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
+    from nanobot.memory import MemoryStore
 
     config = load_config()
     store = MemoryStore(
@@ -153,8 +153,8 @@ def memory_rebuild(
     ),
 ) -> None:
     """Rebuild memory/MEMORY.md from structured memory profile and events."""
-    from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
+    from nanobot.memory import MemoryStore
 
     config = load_config()
     store = MemoryStore(
@@ -178,8 +178,8 @@ def memory_reindex(
     ),
 ) -> None:
     """Reindex mem0 vectors from structured profile/events only."""
-    from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
+    from nanobot.memory import MemoryStore
 
     config = load_config()
     store = MemoryStore(
@@ -225,8 +225,8 @@ def memory_compact(
     ),
 ) -> None:
     """Compact backend memory (dedup/drop superseded) and rebuild mem0 from structured sources."""
-    from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
+    from nanobot.memory import MemoryStore
 
     config = load_config()
     store = MemoryStore(
@@ -271,8 +271,8 @@ def memory_verify(
     ),
 ) -> None:
     """Verify memory consistency and freshness."""
-    from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
+    from nanobot.memory import MemoryStore
 
     config = load_config()
     store = MemoryStore(
@@ -322,8 +322,8 @@ def memory_eval(
     """Evaluate memory retrieval quality (Recall@k, Precision@k) plus runtime KPIs."""
     import json
 
-    from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
+    from nanobot.memory import MemoryStore
 
     config = load_config()
     store = MemoryStore(
@@ -474,8 +474,8 @@ def memory_conflicts(
     all: bool = typer.Option(False, "--all", help="Include resolved conflicts"),
 ) -> None:
     """List memory conflicts for manual review."""
-    from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
+    from nanobot.memory import MemoryStore
 
     config = load_config()
     store = MemoryStore(
@@ -516,8 +516,8 @@ def memory_resolve(
     action: str = typer.Option(..., "--action", help="Resolution: keep_old | keep_new | dismiss"),
 ) -> None:
     """Resolve a single memory conflict."""
-    from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
+    from nanobot.memory import MemoryStore
 
     config = load_config()
     store = MemoryStore(
@@ -552,8 +552,8 @@ def memory_pin(
     text: str = typer.Option(..., "--text", help="Memory text to pin"),
 ) -> None:
     """Pin a memory item so it is prioritized in snapshots and context."""
-    from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
+    from nanobot.memory import MemoryStore
 
     config = load_config()
     store = MemoryStore(
@@ -576,8 +576,8 @@ def memory_unpin(
     text: str = typer.Option(..., "--text", help="Memory text to unpin"),
 ) -> None:
     """Unpin a memory item."""
-    from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
+    from nanobot.memory import MemoryStore
 
     config = load_config()
     store = MemoryStore(
@@ -600,8 +600,8 @@ def memory_outdated(
     text: str = typer.Option(..., "--text", help="Memory text to mark outdated"),
 ) -> None:
     """Mark a memory item as outdated (stale)."""
-    from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
+    from nanobot.memory import MemoryStore
 
     config = load_config()
     store = MemoryStore(
@@ -665,7 +665,7 @@ def migrate_graph(
             driver.close()
 
     # Import graph into SQLite database
-    from nanobot.agent.memory.migration import migrate_to_sqlite
+    from nanobot.memory.migration import migrate_to_sqlite
 
     db = migrate_to_sqlite(workspace / "memory", dims=384, embedder=None)
 

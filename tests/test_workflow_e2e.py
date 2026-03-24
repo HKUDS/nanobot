@@ -231,7 +231,7 @@ class TestWorkflowMemoryRoundtrip:
     """Events stored via MemoryStore must be retrievable in the same session."""
 
     def test_memory_store_roundtrip(self, tmp_path: Path):
-        from nanobot.agent.memory import MemoryStore
+        from nanobot.memory import MemoryStore
 
         store = MemoryStore(tmp_path, embedding_provider="hash")
 

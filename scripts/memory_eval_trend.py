@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.memory import MemoryStore
+from nanobot.memory import MemoryStore
 
 
 def _load_seed_events(seed_path: Path) -> list[dict[str, Any]]:

@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.memory import MemoryStore
-from nanobot.agent.memory.ingester import EventIngester
-from nanobot.agent.memory.maintenance import MemoryMaintenance
-from nanobot.agent.memory.retrieval_planner import RetrievalPlanner
+from nanobot.memory import MemoryStore
+from nanobot.memory.ingester import EventIngester
+from nanobot.memory.maintenance import MemoryMaintenance
+from nanobot.memory.retrieval_planner import RetrievalPlanner
 
 
 def _store(tmp_path: Path, **overrides: object) -> MemoryStore:
@@ -167,7 +167,7 @@ class TestMemoryStoreExtraProfileAndConflicts:
         store.profile_mgr.write_profile(profile)
 
         assert store.profile_mgr._conflict_pair("Use dark mode", "Do not use dark mode") is True
-        from nanobot.agent.memory.conflicts import ConflictManager
+        from nanobot.memory.conflicts import ConflictManager
 
         assert ConflictManager._parse_conflict_user_action("keep new") == "keep_new"
         # ask_user_for_conflict sets asked_at; get_next_user_conflict only returns
@@ -256,7 +256,7 @@ class TestMemoryStoreExtraRetrievalAndContext:
 
     def test_split_and_cap_long_term_text(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
-        from nanobot.agent.memory.context_assembler import ContextAssembler
+        from nanobot.memory.context_assembler import ContextAssembler
 
         sections = ContextAssembler._split_md_sections("## A\nOne\n## B\nTwo")
         assert len(sections) >= 1

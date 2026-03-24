@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nanobot.agent.memory.retriever import MemoryRetriever
+from nanobot.memory.retriever import MemoryRetriever
 
 
 def _make_retriever(
@@ -128,7 +128,7 @@ class TestBuildGraphContextLines:
                 ],
             }
         ]
-        with patch("nanobot.agent.memory.entity_classifier.classify_entity_type") as mock_classify:
+        with patch("nanobot.memory.entity_classifier.classify_entity_type") as mock_classify:
             mock_type = MagicMock()
             mock_type.value = "unknown"
             mock_classify.return_value = mock_type
@@ -654,7 +654,7 @@ class TestGraphEntityCache:
     def _make_retriever_with_graph(self):
         from unittest.mock import MagicMock
 
-        from nanobot.agent.memory.retriever import MemoryRetriever
+        from nanobot.memory.retriever import MemoryRetriever
 
         graph = MagicMock()
         graph.enabled = True

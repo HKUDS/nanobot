@@ -6,15 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.memory.graph import KnowledgeGraph
-from nanobot.agent.memory.ontology_types import (
+from nanobot.memory.graph import KnowledgeGraph
+from nanobot.memory.ontology_types import (
     Entity,
     EntityType,
     Relationship,
     RelationType,
     Triple,
 )
-from nanobot.agent.memory.unified_db import UnifiedMemoryDB
+from nanobot.memory.unified_db import UnifiedMemoryDB
 
 
 def _make_graph(tmp_path: Path) -> tuple[KnowledgeGraph, UnifiedMemoryDB]:
@@ -488,7 +488,7 @@ class TestPersistenceRoundTrip:
 
 class TestHeuristicTripleExtraction:
     def test_works_on_pattern(self) -> None:
-        from nanobot.agent.memory.extractor import MemoryExtractor
+        from nanobot.memory.extractor import MemoryExtractor
 
         triples = MemoryExtractor._extract_triples_heuristic(
             "Carlos works on the deployment pipeline",
@@ -499,7 +499,7 @@ class TestHeuristicTripleExtraction:
         assert any("Carlos" in s for s in subjects)
 
     def test_uses_pattern(self) -> None:
-        from nanobot.agent.memory.extractor import MemoryExtractor
+        from nanobot.memory.extractor import MemoryExtractor
 
         triples = MemoryExtractor._extract_triples_heuristic(
             "The team uses Python for backend development",
@@ -510,7 +510,7 @@ class TestHeuristicTripleExtraction:
         assert "USES" in predicates
 
     def test_relationship_event_infers_works_with(self) -> None:
-        from nanobot.agent.memory.extractor import MemoryExtractor
+        from nanobot.memory.extractor import MemoryExtractor
 
         triples = MemoryExtractor._extract_triples_heuristic(
             "Alice is great",
@@ -521,7 +521,7 @@ class TestHeuristicTripleExtraction:
         assert "WORKS_WITH" in predicates
 
     def test_empty_text_returns_empty(self) -> None:
-        from nanobot.agent.memory.extractor import MemoryExtractor
+        from nanobot.memory.extractor import MemoryExtractor
 
         triples = MemoryExtractor._extract_triples_heuristic(
             "",
@@ -531,7 +531,7 @@ class TestHeuristicTripleExtraction:
         assert triples == []
 
     def test_max_10_triples(self) -> None:
-        from nanobot.agent.memory.extractor import MemoryExtractor
+        from nanobot.memory.extractor import MemoryExtractor
 
         text = ". ".join(f"Person{i} works on Project{i}" for i in range(20))
         triples = MemoryExtractor._extract_triples_heuristic(
@@ -549,7 +549,7 @@ class TestHeuristicTripleExtraction:
 
 class TestGraphContextBuilder:
     def test_builds_lines_from_event_triples(self, tmp_path: Path) -> None:
-        from nanobot.agent.memory.store import MemoryStore
+        from nanobot.memory.store import MemoryStore
 
         workspace = tmp_path
         store = MemoryStore(workspace)
@@ -585,7 +585,7 @@ class TestGraphContextBuilder:
         assert "WORKS_WITH" in lines[0]
 
     def test_no_lines_when_no_matching_entities(self, tmp_path: Path) -> None:
-        from nanobot.agent.memory.store import MemoryStore
+        from nanobot.memory.store import MemoryStore
 
         workspace = tmp_path
         store = MemoryStore(workspace)

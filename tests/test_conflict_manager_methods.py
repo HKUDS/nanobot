@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from nanobot.agent.memory.conflicts import ConflictManager
+from nanobot.memory.conflicts import ConflictManager
 
 
 def _make_mgr(profile_store=None):
@@ -87,7 +87,7 @@ class TestHasOpenConflict:
 
 def _make_real_store(tmp_path):
     """Build a minimal ProfileStore for delegation tests."""
-    from nanobot.agent.memory.profile_io import ProfileStore
+    from nanobot.memory.profile_io import ProfileStore
 
     store = ProfileStore()
     return store
@@ -95,7 +95,7 @@ def _make_real_store(tmp_path):
 
 class TestApplyProfileUpdates:
     def _make_mgr_with_store(self, tmp_path):
-        from nanobot.agent.memory.conflicts import ConflictManager
+        from nanobot.memory.conflicts import ConflictManager
 
         store = _make_real_store(tmp_path)
         mgr = ConflictManager(

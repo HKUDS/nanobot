@@ -74,7 +74,7 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.memory.unified_db import UnifiedMemoryDB
+from nanobot.memory.unified_db import UnifiedMemoryDB
 
 
 class TestSchemaCreation:
@@ -707,7 +707,7 @@ from __future__ import annotations
 
 import pytest
 
-from nanobot.agent.memory.embedder import LocalEmbedder
+from nanobot.memory.embedder import LocalEmbedder
 
 
 class TestLocalEmbedder:
@@ -972,8 +972,8 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.memory.migration import migrate_to_sqlite
-from nanobot.agent.memory.unified_db import UnifiedMemoryDB
+from nanobot.memory.migration import migrate_to_sqlite
+from nanobot.memory.unified_db import UnifiedMemoryDB
 
 
 def _setup_old_files(memory_dir: Path) -> None:
@@ -1528,7 +1528,7 @@ first access. Old persistence/mem0 paths still available as fallback.
 >    - Replace `MagicMock()` for `MemoryPersistence` with the DB
 >    - Use `LocalEmbedder()` where embedder is needed
 >    - Ensure all tests use real vector search, not hash fallback
-> 8. For `test_memory_helper_wave5.py`: replace `from nanobot.agent.memory.retrieval import ...` with equivalent DB-based assertions
+> 8. For `test_memory_helper_wave5.py`: replace `from nanobot.memory.retrieval import ...` with equivalent DB-based assertions
 >
 > **Part C — Verify:**
 > 9. Run `grep -r "mem0_adapter\|from .persistence\|from .retrieval import" nanobot/ tests/` — expected: no output
@@ -1580,7 +1580,7 @@ Expected: no output.
 
 ```bash
 python -c "
-from nanobot.agent.memory.unified_db import UnifiedMemoryDB
+from nanobot.memory.unified_db import UnifiedMemoryDB
 from pathlib import Path
 import tempfile
 with tempfile.TemporaryDirectory() as d:

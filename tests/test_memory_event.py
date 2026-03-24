@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from nanobot.agent.memory.event import KnowledgeTriple, MemoryEvent
+from nanobot.memory.event import KnowledgeTriple, MemoryEvent
 
 
 class TestMemoryEvent:

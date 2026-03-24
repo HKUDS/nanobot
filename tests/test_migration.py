@@ -6,8 +6,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from nanobot.agent.memory.migration import migrate_to_sqlite
-from nanobot.agent.memory.unified_db import UnifiedMemoryDB
+from nanobot.memory.migration import migrate_to_sqlite
+from nanobot.memory.unified_db import UnifiedMemoryDB
 
 
 def _setup_old_files(memory_dir: Path) -> None:

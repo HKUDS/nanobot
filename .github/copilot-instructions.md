@@ -193,7 +193,7 @@ changes. The module ownership map and import rules are in `docs/architecture.md`
 
 Each top-level package has explicit import rules. Key forbidden imports:
 
-- `channels/` must **never** import from `agent/loop`, `agent/tools/`, or `agent/memory/`
+- `channels/` must **never** import from `agent/loop`, `agent/tools/`, or `memory/`
 - `providers/` must **never** import from `agent/` or `channels/`
 - `config/` must **never** import from `agent/`, `channels/`, or `providers/`
 - `bus/` must **never** import from `agent/`, `channels/`, or `providers/`

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from loguru import logger
 
 if TYPE_CHECKING:
-    from nanobot.agent.memory.store import MemoryStore
+    from nanobot.memory.store import MemoryStore
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session
 

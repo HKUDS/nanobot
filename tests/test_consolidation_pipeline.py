@@ -1,4 +1,4 @@
-"""Tests for nanobot.agent.memory.consolidation_pipeline.ConsolidationPipeline."""
+"""Tests for nanobot.memory.consolidation_pipeline.ConsolidationPipeline."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.agent.memory.consolidation_pipeline import ConsolidationPipeline
+from nanobot.memory.consolidation_pipeline import ConsolidationPipeline
 
 
 def _make_pipeline(tmp_path: Path | None = None, **overrides: object) -> ConsolidationPipeline:
@@ -190,7 +190,7 @@ class TestConsolidate:
         provider = MagicMock()
         provider.chat = AsyncMock(return_value=response)
 
-        with patch("nanobot.agent.memory.consolidation_pipeline.prompts") as mock_prompts:
+        with patch("nanobot.memory.consolidation_pipeline.prompts") as mock_prompts:
             mock_prompts.get.return_value = "system prompt"
             result = await pipeline.consolidate(session, provider, "gpt-4")
 
@@ -235,7 +235,7 @@ class TestConsolidate:
         pipeline._profile_mgr.read_profile.return_value = {}
         pipeline._profile_mgr._apply_profile_updates.return_value = (0, 0, 0)
 
-        with patch("nanobot.agent.memory.consolidation_pipeline.prompts") as mock_prompts:
+        with patch("nanobot.memory.consolidation_pipeline.prompts") as mock_prompts:
             mock_prompts.get.return_value = "system prompt"
             result = await pipeline.consolidate(session, provider, "gpt-4")
 
@@ -254,7 +254,7 @@ class TestConsolidate:
         provider = MagicMock()
         provider.chat = AsyncMock(side_effect=RuntimeError("provider crash"))
 
-        with patch("nanobot.agent.memory.consolidation_pipeline.prompts") as mock_prompts:
+        with patch("nanobot.memory.consolidation_pipeline.prompts") as mock_prompts:
             mock_prompts.get.return_value = "system prompt"
             result = await pipeline.consolidate(session, provider, "gpt-4")
 
