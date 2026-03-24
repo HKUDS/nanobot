@@ -122,8 +122,27 @@ class ChannelManager:
                 )
 
                 if msg.metadata.get("_progress"):
-                    if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
-                        continue
+                    # Tool hint filtering: check if sender_id or chat_id is in allowed list
+                    if msg.metadata.get("_tool_hint"):
+                        allowed = self.config.channels.tool_hint_channels.get(msg.channel, [])
+                        # Empty list = disabled for this channel
+                        if not allowed:
+                            continue
+                        sender_id = msg.metadata.get("_sender_id", "")
+                        chat_id = msg.chat_id
+
+                        # Detect group mode from metadata.chat_type (only support feishu for now)
+                        chat_type = msg.metadata.get("chat_type", "")
+
+                        if not "*" in allowed:
+                            if chat_type == "group" or sender_id != chat_id:
+                                # Group mode has higher priority: require both sender AND group to be allowed
+                                if not (sender_id in allowed and chat_id in allowed):
+                                    continue
+                            else:
+                                # Private chat: only check sender_id
+                                if sender_id not in allowed:
+                                    continue
                     if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
                         continue
 

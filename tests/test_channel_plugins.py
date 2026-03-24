@@ -79,7 +79,7 @@ def test_channels_config_builtin_fields_removed():
     cfg = ChannelsConfig()
     assert not hasattr(cfg, "telegram")
     assert cfg.send_progress is True
-    assert cfg.send_tool_hints is False
+    assert cfg.tool_hint_channels == {}
 
 
 # ---------------------------------------------------------------------------
