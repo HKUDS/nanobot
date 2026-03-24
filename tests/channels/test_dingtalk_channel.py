@@ -3,6 +3,16 @@ from types import SimpleNamespace
 
 import pytest
 
+# Check optional dingtalk dependencies before running tests
+try:
+    from nanobot.channels import dingtalk
+    DINGTALK_AVAILABLE = getattr(dingtalk, "DINGTALK_AVAILABLE", False)
+except ImportError:
+    DINGTALK_AVAILABLE = False
+
+if not DINGTALK_AVAILABLE:
+    pytest.skip("DingTalk dependencies not installed (dingtalk-stream)", allow_module_level=True)
+
 from nanobot.bus.queue import MessageBus
 import nanobot.channels.dingtalk as dingtalk_module
 from nanobot.channels.dingtalk import DingTalkChannel, NanobotDingTalkHandler

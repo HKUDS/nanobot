@@ -1,11 +1,22 @@
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+# Check optional QQ dependencies before running tests
+try:
+    from nanobot.channels import qq
+    QQ_AVAILABLE = getattr(qq, "QQ_AVAILABLE", False)
+except ImportError:
+    QQ_AVAILABLE = False
+
+if not QQ_AVAILABLE:
+    pytest.skip("QQ dependencies not installed (qq-botpy)", allow_module_level=True)
+
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.qq import QQChannel
-from nanobot.channels.qq import QQConfig
+from nanobot.channels.qq import QQChannel, QQConfig
 
 
 class _FakeApi:
@@ -34,6 +45,7 @@ async def test_on_group_message_routes_to_group_chat_id() -> None:
         content="hello",
         group_openid="group123",
         author=SimpleNamespace(member_openid="user1"),
+        attachments=[],
     )
 
     await channel._on_message(data, is_group=True)
@@ -123,3 +135,38 @@ async def test_send_group_message_uses_markdown_when_configured() -> None:
         "msg_id": "msg1",
         "msg_seq": 2,
     }
+
+
+@pytest.mark.asyncio
+async def test_read_media_bytes_local_path() -> None:
+    channel = QQChannel(QQConfig(app_id="app", secret="secret"), MessageBus())
+
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        f.write(b"\x89PNG\r\n")
+        tmp_path = f.name
+
+    data, filename = await channel._read_media_bytes(tmp_path)
+    assert data == b"\x89PNG\r\n"
+    assert filename == Path(tmp_path).name
+
+
+@pytest.mark.asyncio
+async def test_read_media_bytes_file_uri() -> None:
+    channel = QQChannel(QQConfig(app_id="app", secret="secret"), MessageBus())
+
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+        f.write(b"JFIF")
+        tmp_path = f.name
+
+    data, filename = await channel._read_media_bytes(f"file://{tmp_path}")
+    assert data == b"JFIF"
+    assert filename == Path(tmp_path).name
+
+
+@pytest.mark.asyncio
+async def test_read_media_bytes_missing_file() -> None:
+    channel = QQChannel(QQConfig(app_id="app", secret="secret"), MessageBus())
+
+    data, filename = await channel._read_media_bytes("/nonexistent/path/image.png")
+    assert data is None
+    assert filename is None

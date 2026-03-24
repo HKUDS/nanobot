@@ -15,6 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic.alias_generators import to_snake
+
 
 @dataclass(frozen=True)
 class ProviderSpec:
@@ -545,7 +547,8 @@ def find_gateway(
 
 def find_by_name(name: str) -> ProviderSpec | None:
     """Find a provider spec by config field name, e.g. "dashscope"."""
+    normalized = to_snake(name.replace("-", "_"))
     for spec in PROVIDERS:
-        if spec.name == name:
+        if spec.name == normalized:
             return spec
     return None
