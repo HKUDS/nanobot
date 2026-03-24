@@ -1,4 +1,5 @@
 .assets
+.claude/
 .env
 .full-review/
 deploy/production/.env
