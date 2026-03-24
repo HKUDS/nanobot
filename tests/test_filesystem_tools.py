@@ -92,6 +92,29 @@ class TestReadFileTool:
         assert len(result) <= ReadFileTool._MAX_CHARS + 500  # small margin for footer
         assert "Use offset=" in result
 
+    @pytest.mark.asyncio
+    async def test_text_file_does_not_read_all_bytes(self, tool, tmp_path, monkeypatch):
+        """Guard against OOM: text reads should stream instead of Path.read_bytes()."""
+        f = tmp_path / "huge.txt"
+        f.write_text("\n".join(f"line {i}" for i in range(1, 1000)), encoding="utf-8")
+
+        def _boom(self):
+            raise AssertionError("read_bytes() should not be called for text files")
+
+        monkeypatch.setattr(type(f), "read_bytes", _boom, raising=True)
+        result = await tool.execute(path=str(f), offset=10, limit=5)
+
+        for i in range(10, 15):
+            assert f"{i}| line {i}" in result
+
+    @pytest.mark.asyncio
+    async def test_non_utf8_text_returns_clear_error(self, tool, tmp_path):
+        f = tmp_path / "gbk.txt"
+        f.write_bytes("你好\n".encode("gbk"))
+        result = await tool.execute(path=str(f))
+        assert "Error" in result
+        assert "UTF-8" in result
+
 
 # ---------------------------------------------------------------------------
 # _find_match  (unit tests for the helper)
