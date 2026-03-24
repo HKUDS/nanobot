@@ -8,6 +8,7 @@ Usage:
     python scripts/check_prompt_manifest.py          # verify (CI mode)
     python scripts/check_prompt_manifest.py --update  # regenerate manifest
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -21,7 +22,9 @@ MANIFEST_FILE = ROOT / "prompts_manifest.json"
 
 
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    # Normalize CRLF → LF so hashes match across Windows and Linux.
+    content = path.read_bytes().replace(b"\r\n", b"\n")
+    return hashlib.sha256(content).hexdigest()
 
 
 def _scan_prompts() -> dict[str, str]:
