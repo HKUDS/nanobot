@@ -32,7 +32,7 @@
 - **MINOR:** `test_load_non_dict_metadata_defaults_to_empty` — `last_consolidated` Assertion hinzugefügt
 - **MINOR:** `test_load_corrupt_metadata_json_with_valid_messages` — `metadata == {}` Assertion hinzugefügt
 - **MINOR:** Neuer Test `test_load_last_consolidated_exceeds_message_count` — verifiziert dass Upper-Clamp fehlt (lc=10, 5 Messages → lc bleibt 10)
-- **MINOR:** Plan-Header Findings-Count korrigiert auf 69 (kumulativ über alle 7 Runden)
+- **MINOR:** Plan-Header Findings-Count korrigiert (kumulativ über 6 Runden)
 - **MINOR:** Empty-File Verhaltensänderung im PR-Body dokumentiert
 - **NITPICK:** `test_load_messages_only_no_metadata` — `metadata == {}` Assertion hinzugefügt
 - **NITPICK:** `test_load_corrupt_metadata_created_at` — `isinstance(created_at, datetime)` statt `is not None`
@@ -43,7 +43,7 @@
 ### v8 → v9 Änderungen (11 Findings adressiert)
 - **MAJOR:** `and messages` Guard aus Fallback-Condition entfernt — bei validem Metadata mit hohem lc + corrupten Messages wurde der Fallback nicht getriggert → Regression (neue User-Nachrichten unsichtbar). `len([]) = 0` ist korrekt.
 - **MINOR:** Plan-Header "v7" → "v9" (Version aktualisiert)
-- **MINOR:** Plan-Header Summe korrigiert auf 93 kumulativ (81 über 7 Runden + 12 Runde 8)
+- **MINOR:** Plan-Header Summe korrigiert auf 92 kumulativ (81 über 7 Runden + 11 Runde 8)
 - **MINOR:** Test #18 (`test_load_non_dict_line_before_boundary_no_over_consolidation`) verschoben von `TestLastConsolidatedNoUpperClamp` nach `TestIndexShiftProtection`
 - **MINOR:** Design-Doc Changelog "69" → korrekter kumulativer Wert
 - **MINOR:** Theoretischer dict→non-dict Korruptions-Gap im Design-Doc dokumentiert (extrem selten, konservative Failure-Mode)

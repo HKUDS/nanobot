@@ -13,7 +13,7 @@
 **Branch:** `fix/resilient-session-load` (from `main`)
 **Target:** `main` (Bug Fix, no behavior changes for valid files)
 
-**Review findings addressed:** 93 cumulative across 8 review rounds (12 + 11 + 13 + 12 + 7 + 14 + 12 + 11 dedup)
+**Review findings addressed:** 92 cumulative across 8 review rounds (12 + 11 + 13 + 12 + 7 + 14 + 12 + 11 dedup)
 
 **Execution policy:** Tasks 1–4 may be executed autonomously. Task 5 (push) is autonomous. Task 6 (PR) requires **explicit user approval** before execution. The user may also choose to create the PR themselves.
 
@@ -469,12 +469,8 @@ class TestFallbackWithEmptyMessages:
 
         assert session is not None
         assert session.messages == []
-        # No corrupt skip before boundary (msg_index never reached lc=100),
-        # but this is a metadata-only recovery with corrupt messages.
-        # With `and messages` guard removed: lc = len([]) = 0.
-        # NOTE: The actual trigger here is that ALL lines after metadata are corrupt.
-        # skipped_count > 0, but since the corrupt lines are non-dict-parseable,
-        # msg_index stays at 0 which is < lc=100 → skipped_before_boundary=True.
+        # Both corrupt lines parse-fail at msg_index=0 < lc=100 → skipped_before_boundary=True.
+        # With `and messages` guard removed: fallback sets lc = len([]) = 0.
         assert session.last_consolidated == 0
 
 
