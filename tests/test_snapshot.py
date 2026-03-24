@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.memory.profile_io import ProfileStore as ProfileManager
-from nanobot.agent.memory.snapshot import MemorySnapshot
+from nanobot.memory.profile_io import ProfileStore as ProfileManager
+from nanobot.memory.snapshot import MemorySnapshot
 
 
 def _make_snapshot(

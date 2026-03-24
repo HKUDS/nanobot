@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from nanobot.agent.memory.onnx_reranker import OnnxCrossEncoderReranker
-from nanobot.agent.memory.reranker import CompositeReranker, Reranker
+from nanobot.memory.onnx_reranker import OnnxCrossEncoderReranker
+from nanobot.memory.reranker import CompositeReranker, Reranker
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -37,7 +37,7 @@ class TestBackwardCompatAlias:
     """CrossEncoderReranker is aliased to OnnxCrossEncoderReranker in __init__.py."""
 
     def test_alias_importable(self) -> None:
-        from nanobot.agent.memory import CrossEncoderReranker
+        from nanobot.memory import CrossEncoderReranker
 
         assert CrossEncoderReranker is OnnxCrossEncoderReranker
 
@@ -76,7 +76,7 @@ class TestRerankerRolloutGating:
     """Verify the rollout gating logic in MemoryStore.retrieve."""
 
     def _make_store(self, tmp_path, reranker_mode: str = "disabled"):
-        from nanobot.agent.memory.store import MemoryStore
+        from nanobot.memory.store import MemoryStore
 
         store = MemoryStore(
             tmp_path,
@@ -104,25 +104,25 @@ class TestRerankerRolloutGating:
         assert isinstance(store._reranker, OnnxCrossEncoderReranker)
 
     def test_env_override_reranker_mode(self, tmp_path, monkeypatch) -> None:
-        from nanobot.agent.memory.store import MemoryStore
+        from nanobot.memory.store import MemoryStore
 
         store = MemoryStore(tmp_path, rollout_overrides={"reranker_mode": "shadow"})
         assert store.rollout["reranker_mode"] == "shadow"
 
     def test_env_override_reranker_alpha(self, tmp_path, monkeypatch) -> None:
-        from nanobot.agent.memory.store import MemoryStore
+        from nanobot.memory.store import MemoryStore
 
         store = MemoryStore(tmp_path, rollout_overrides={"reranker_alpha": 0.8})
         assert store.rollout["reranker_alpha"] == 0.8
 
     def test_env_override_reranker_model(self, tmp_path, monkeypatch) -> None:
-        from nanobot.agent.memory.store import MemoryStore
+        from nanobot.memory.store import MemoryStore
 
         store = MemoryStore(tmp_path, rollout_overrides={"reranker_model": "custom/model"})
         assert store.rollout["reranker_model"] == "custom/model"
 
     def test_composite_reranker_for_non_onnx_model(self, tmp_path) -> None:
-        from nanobot.agent.memory.store import MemoryStore
+        from nanobot.memory.store import MemoryStore
 
         store = MemoryStore(
             tmp_path,

@@ -62,7 +62,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nanobot.agent.memory.profile_io import ProfileCache, ProfileStore
+from nanobot.memory.profile_io import ProfileCache, ProfileStore
 
 
 class TestProfileCache:
@@ -172,7 +172,7 @@ class TestProfileStoreReadWrite:
 ```bash
 pytest tests/test_profile_store.py -v
 ```
-Expected: `ImportError: cannot import name 'ProfileCache' from 'nanobot.agent.memory.profile_io'`
+Expected: `ImportError: cannot import name 'ProfileCache' from 'nanobot.memory.profile_io'`
 
 - [ ] **Step 3: Create `nanobot/agent/memory/profile_io.py`**
 
@@ -393,8 +393,8 @@ class TestConflictDetectionInConflictManager:
 
     def _make_conflict_mgr(self, tmp_path):
         from unittest.mock import MagicMock
-        from nanobot.agent.memory.conflicts import ConflictManager
-        from nanobot.agent.memory.profile_io import ProfileStore
+        from nanobot.memory.conflicts import ConflictManager
+        from nanobot.memory.profile_io import ProfileStore
 
         persistence = MagicMock()
         mem0 = MagicMock()
@@ -596,8 +596,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from nanobot.agent.memory.profile_correction import CorrectionOrchestrator
-from nanobot.agent.memory.profile_io import ProfileStore
+from nanobot.memory.profile_correction import CorrectionOrchestrator
+from nanobot.memory.profile_io import ProfileStore
 
 
 def _make_profile_store(tmp_path: Path) -> ProfileStore:
@@ -661,7 +661,7 @@ class TestCorrectionOrchestrator:
 ```bash
 pytest tests/test_profile_correction.py -v
 ```
-Expected: `ImportError: cannot import name 'CorrectionOrchestrator' from 'nanobot.agent.memory.profile_correction'`
+Expected: `ImportError: cannot import name 'CorrectionOrchestrator' from 'nanobot.memory.profile_correction'`
 
 - [ ] **Step 3: Create `profile_correction.py`**
 
@@ -827,7 +827,7 @@ git rm nanobot/agent/memory/profile.py
 
 Verify no remaining import of `profile.py` (should be zero after the shim was updated in Step 6):
 ```bash
-grep -r "from .profile import\|from nanobot.agent.memory.profile import" nanobot/ tests/
+grep -r "from .profile import\|from nanobot.memory.profile import" nanobot/ tests/
 ```
 Expected: no output (all imports now come from `profile_io`).
 
@@ -881,7 +881,7 @@ from __future__ import annotations
 
 import pytest
 
-from nanobot.agent.memory.token_budget import (
+from nanobot.memory.token_budget import (
     DEFAULT_SECTION_WEIGHTS,
     SectionBudget,
     TokenBudgetAllocator,
@@ -950,7 +950,7 @@ class TestTokenBudgetAllocator:
 ```bash
 pytest tests/test_token_budget.py -v
 ```
-Expected: `ImportError: cannot import name 'TokenBudgetAllocator' from 'nanobot.agent.memory.token_budget'`
+Expected: `ImportError: cannot import name 'TokenBudgetAllocator' from 'nanobot.memory.token_budget'`
 
 - [ ] **Step 3: Create `token_budget.py`**
 
@@ -1144,7 +1144,7 @@ Find lines 584, 609, 627 which call `ContextAssembler._allocate_section_budgets(
 ```python
 # Replace cap test with proportional test
 def test_allocate_proportional_respects_zero_weight(self):
-    from nanobot.agent.memory.token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
+    from nanobot.memory.token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
     allocator = TokenBudgetAllocator(DEFAULT_SECTION_WEIGHTS)
     result = allocator.allocate(900, "fact_lookup")
     # reflection weight is 0.0 for fact_lookup
@@ -1198,7 +1198,7 @@ class TestGraphEntityCache:
 
     def _make_retriever_with_graph(self):
         from unittest.mock import MagicMock, patch
-        from nanobot.agent.memory.retriever import MemoryRetriever
+        from nanobot.memory.retriever import MemoryRetriever
 
         mem0 = MagicMock()
         graph = MagicMock()
@@ -1551,7 +1551,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 if TYPE_CHECKING:
-    from nanobot.agent.memory.store import MemoryStore
+    from nanobot.memory.store import MemoryStore
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session
 

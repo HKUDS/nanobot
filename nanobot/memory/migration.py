@@ -1,4 +1,4 @@
-# nanobot/agent/memory/migration.py
+# nanobot/memory/migration.py
 # NOTE: Not exported from __init__.py during transition.
 # Will be added to package exports in Task 10.
 """One-time migration from file-based storage to unified SQLite.

@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     from nanobot.agent.context import ContextBuilder
     from nanobot.agent.delegation import DelegationDispatcher
     from nanobot.agent.delegation_advisor import DelegationAdvisor
-    from nanobot.agent.memory import MemoryStore
     from nanobot.agent.message_processor import MessageProcessor
     from nanobot.agent.mission import MissionManager
     from nanobot.agent.role_switching import TurnRoleManager
@@ -38,6 +37,7 @@ if TYPE_CHECKING:
         RoutingConfig,
     )
     from nanobot.cron.service import CronService
+    from nanobot.memory import MemoryStore
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import SessionManager
 

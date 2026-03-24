@@ -9,7 +9,7 @@ from nanobot.agent.tools.result_cache import _heuristic_summary
 
 def make_store(tmp_path: Path):
     """Minimal MemoryStore with proper construction."""
-    from nanobot.agent.memory.store import MemoryStore
+    from nanobot.memory.store import MemoryStore
 
     store = MemoryStore(tmp_path, embedding_provider="hash")
     return store

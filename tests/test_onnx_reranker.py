@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 
-from nanobot.agent.memory.onnx_reranker import OnnxCrossEncoderReranker
+from nanobot.memory.onnx_reranker import OnnxCrossEncoderReranker
 
 # ---------------------------------------------------------------------------
 # Helpers

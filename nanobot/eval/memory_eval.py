@@ -14,11 +14,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from nanobot.agent.memory.helpers import _safe_float, _utc_now_iso
+from nanobot.memory.helpers import _safe_float, _utc_now_iso
 from nanobot.utils.helpers import ensure_dir
 
 if TYPE_CHECKING:
-    from nanobot.agent.memory.unified_db import UnifiedMemoryDB
+    from nanobot.memory.unified_db import UnifiedMemoryDB
 
 
 class EvalRunner:

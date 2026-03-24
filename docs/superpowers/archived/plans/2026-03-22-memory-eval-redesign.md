@@ -336,7 +336,7 @@ from typing import Any
 
 import pytest
 
-from nanobot.agent.memory import MemoryStore
+from nanobot.memory import MemoryStore
 
 pytestmark = pytest.mark.llm
 

@@ -20,7 +20,7 @@ RULES: list[tuple[str, list[str]]] = [
         "nanobot.agent.tool_executor",
         "nanobot.agent.delegation",
         "nanobot.agent.tools",
-        "nanobot.agent.memory",
+        "nanobot.memory",
     ]),
     ("nanobot/providers/**/*.py", [
         "nanobot.agent",
@@ -39,7 +39,7 @@ RULES: list[tuple[str, list[str]]] = [
     ("nanobot/agent/tools/**/*.py", [
         "nanobot.channels",
     ]),
-    ("nanobot/agent/memory/**/*.py", [
+    ("nanobot/memory/**/*.py", [
         "nanobot.channels",
         "nanobot.agent.tools",
     ]),

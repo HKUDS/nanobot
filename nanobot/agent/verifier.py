@@ -29,7 +29,7 @@ from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.streaming import strip_think
 
 if TYPE_CHECKING:
-    from nanobot.agent.memory.store import MemoryStore
+    from nanobot.memory.store import MemoryStore
     from nanobot.providers.base import LLMProvider
 
 

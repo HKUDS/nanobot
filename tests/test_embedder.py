@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from nanobot.agent.memory.embedder import HashEmbedder, LocalEmbedder
+from nanobot.memory.embedder import HashEmbedder, LocalEmbedder
 
 
 def _onnx_available() -> bool:
@@ -115,7 +115,7 @@ class TestHashEmbedder:
 
     async def test_works_with_sqlite_vec(self, tmp_path):
         """HashEmbedder vectors work with UnifiedMemoryDB KNN search."""
-        from nanobot.agent.memory.unified_db import UnifiedMemoryDB
+        from nanobot.memory.unified_db import UnifiedMemoryDB
 
         e = HashEmbedder(dims=4)
         db = UnifiedMemoryDB(tmp_path / "test.db", dims=4)

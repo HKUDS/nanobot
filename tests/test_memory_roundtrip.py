@@ -28,7 +28,7 @@ if not _has_api_key:
         "No LLM API key available (OPENAI_API_KEY / LITELLM_API_KEY)", allow_module_level=True
     )
 
-from nanobot.agent.memory.store import MemoryStore  # noqa: E402
+from nanobot.memory.store import MemoryStore  # noqa: E402
 from nanobot.providers.litellm_provider import LiteLLMProvider  # noqa: E402
 
 pytestmark = pytest.mark.llm

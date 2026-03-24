@@ -253,7 +253,6 @@ def build_agent(
     from nanobot.agent.delegation import DelegationConfig, DelegationDispatcher
     from nanobot.agent.delegation_advisor import DelegationAdvisor
     from nanobot.agent.loop import AgentLoop
-    from nanobot.agent.memory import MemoryStore
     from nanobot.agent.message_processor import MessageProcessor
     from nanobot.agent.prompt_loader import prompts
     from nanobot.agent.role_switching import TurnRoleManager
@@ -261,6 +260,7 @@ def build_agent(
     from nanobot.agent.turn_orchestrator import TurnOrchestrator
     from nanobot.agent.verifier import AnswerVerifier
     from nanobot.config.schema import ExecToolConfig as _ExecToolConfig
+    from nanobot.memory import MemoryStore
     from nanobot.session.manager import SessionManager as _SessionManager
 
     # 1. Resolve model / temperature / max_iterations

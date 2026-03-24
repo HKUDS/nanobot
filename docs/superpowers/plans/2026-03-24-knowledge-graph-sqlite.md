@@ -260,7 +260,7 @@ Key test constructor change:
 graph = KnowledgeGraph(workspace=tmp_path)
 
 # New:
-from nanobot.agent.memory.unified_db import UnifiedMemoryDB
+from nanobot.memory.unified_db import UnifiedMemoryDB
 db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
 graph = KnowledgeGraph(db=db)
 ```
@@ -440,7 +440,7 @@ Expected: no output.
 python -c "
 from pathlib import Path
 import tempfile
-from nanobot.agent.memory.unified_db import UnifiedMemoryDB
+from nanobot.memory.unified_db import UnifiedMemoryDB
 with tempfile.TemporaryDirectory() as d:
     db = UnifiedMemoryDB(Path(d) / 'test.db', dims=4)
     db.upsert_entity('alice', type='person')

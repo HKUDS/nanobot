@@ -1,10 +1,10 @@
-"""Tests for nanobot.agent.memory.helpers — shared memory utilities."""
+"""Tests for nanobot.memory.helpers — shared memory utilities."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from nanobot.agent.memory.helpers import (
+from nanobot.memory.helpers import (
     _contains_any,
     _estimate_tokens,
     _extract_query_keywords,

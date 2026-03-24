@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nanobot.agent.memory.profile_io import ProfileCache, ProfileStore
-from nanobot.agent.memory.unified_db import UnifiedMemoryDB
+from nanobot.memory.profile_io import ProfileCache, ProfileStore
+from nanobot.memory.unified_db import UnifiedMemoryDB
 
 
 class TestProfileCache:

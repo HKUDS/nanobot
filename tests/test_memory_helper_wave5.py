@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from nanobot.agent.memory import extractor as extractor_mod
-from nanobot.agent.memory.entity_linker import register_alias, resolve_alias
-from nanobot.agent.memory.onnx_reranker import OnnxCrossEncoderReranker
+from nanobot.memory import extractor as extractor_mod
+from nanobot.memory.entity_linker import register_alias, resolve_alias
+from nanobot.memory.onnx_reranker import OnnxCrossEncoderReranker
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 

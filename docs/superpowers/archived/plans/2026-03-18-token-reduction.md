@@ -80,7 +80,7 @@ from unittest.mock import MagicMock, patch
 
 def make_store():
     """Minimal MemoryStore with mocked I/O for unit tests."""
-    from nanobot.agent.memory.store import MemoryStore
+    from nanobot.memory.store import MemoryStore
 
     store = MemoryStore.__new__(MemoryStore)
     store.workspace = MagicMock()

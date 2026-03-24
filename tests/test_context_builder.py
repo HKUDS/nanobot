@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from nanobot.agent.context import ContextBuilder
-from nanobot.agent.memory.store import MemoryStore
+from nanobot.memory.store import MemoryStore
 
 
 def _workspace(tmp_path: Path) -> Path:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from nanobot.agent.memory.token_budget import (
+from nanobot.memory.token_budget import (
     DEFAULT_SECTION_WEIGHTS,
     SectionBudget,
     TokenBudgetAllocator,

@@ -81,7 +81,7 @@ nanobot/
 
 ### Memory System
 - mem0-first strategy with local JSONL fallback
-- `MemoryStore` in `nanobot/agent/memory/store.py` is the primary API
+- `MemoryStore` in `nanobot/memory/store.py` is the primary API
 - `events.jsonl` (append-only), `profile.json`, `MEMORY.md` (snapshot)
 - `case/memory_eval_cases.json` is used by the advisory trend benchmark (`make memory-eval`); behavioral correctness is enforced by contract tests and LLM round-trip tests
 

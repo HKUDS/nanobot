@@ -26,7 +26,6 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from nanobot.agent.memory import MemoryStore
 from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools.feedback import feedback_summary
@@ -37,6 +36,7 @@ from nanobot.errors import (
 from nanobot.errors import (
     MemorySubsystemError as NanobotMemoryError,
 )
+from nanobot.memory import MemoryStore
 
 # ---------------------------------------------------------------------------
 # Module-level platform info cache — avoid repeated syscalls on every LLM

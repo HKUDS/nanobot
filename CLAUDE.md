@@ -56,19 +56,6 @@ nanobot/
 │   ├── tool_loop.py     # Shared lightweight think→act→observe loop
 │   ├── observability.py # Langfuse OTEL tracing: init, shutdown, spans, scoring
 │   ├── tracing.py       # Correlation IDs via contextvars, structured log binding
-│   ├── memory/          # Memory subsystem
-│   │   ├── store.py     # MemoryStore — primary public API (mem0-first with local fallback)
-│   │   ├── event.py     # MemoryEvent Pydantic model + KnowledgeTriple
-│   │   ├── retrieval.py # Local keyword retrieval (fallback when mem0 unavailable)
-│   │   ├── extractor.py # LLM + heuristic event extraction
-│   │   ├── persistence.py # JSONL events + profile.json + MEMORY.md file I/O
-│   │   ├── mem0_adapter.py # mem0 vector store adapter with health checks
-│   │   ├── reranker.py  # Cross-encoder re-ranking via ONNX Runtime
-│   │   ├── constants.py # Shared constants and tool schemas
-│   │   ├── graph.py     # Knowledge graph support via networkx
-│   │   ├── ontology.py  # Ontology management (re-exports classifier, linker)
-│   │   ├── entity_classifier.py # Entity type classification
-│   │   └── entity_linker.py    # Entity linking and resolution
 │   └── tools/           # Tool implementations
 │       ├── base.py      # Tool ABC + ToolResult dataclass
 │       ├── registry.py  # ToolRegistry — dynamic registration + parallel/sequential execution
@@ -85,6 +72,18 @@ nanobot/
 │       ├── message.py   # Outbound message tool
 │       ├── mission.py   # Background mission launch, status, list, cancel tools
 │       └── scratchpad.py # Scratchpad read/write tools
+├── memory/              # Memory subsystem (top-level bounded context)
+│   ├── store.py         # MemoryStore — primary public API
+│   ├── unified_db.py    # SQLite + FTS5 + sqlite-vec storage backend
+│   ├── embedder.py      # Embedder protocol (OpenAI, local ONNX, hash)
+│   ├── event.py         # MemoryEvent Pydantic model + KnowledgeTriple
+│   ├── ingester.py      # Event write path (classify, deduplicate, store)
+│   ├── retriever.py     # Retrieval orchestrator (vector + FTS + reranking)
+│   ├── extractor.py     # LLM + heuristic event extraction
+│   ├── reranker.py      # Cross-encoder re-ranking via ONNX Runtime
+│   ├── graph.py         # Knowledge graph (SQLite-backed)
+│   ├── entity_classifier.py # Entity type classification
+│   └── entity_linker.py # Entity linking and resolution
 ├── config/              # Pydantic config models + loader with migration
 ├── channels/            # Chat platforms (Telegram, Discord, Slack, WhatsApp, ...)
 │   ├── base.py          # BaseChannel ABC + ChannelHealth
@@ -126,12 +125,12 @@ nanobot/
 
 ## Memory System Architecture
 
-The memory subsystem (`nanobot/agent/memory/`) uses a **mem0-first strategy**:
+The memory subsystem (`nanobot/memory/`) uses a **unified SQLite storage** strategy:
 
-1. **Write path**: Events extracted by `MemoryExtractor` (LLM-based) → stored in mem0 vector store + appended to `events.jsonl` (local backup)
-2. **Read path**: Query mem0 first → fallback to local keyword search (`retrieval.py`) → cross-encoder re-ranking via ONNX Runtime (`reranker.py`, `onnx_reranker.py`)
-3. **Persistence**: `MemoryPersistence` manages `events.jsonl` (append-only JSONL), `profile.json` (user profile state), `MEMORY.md` (active knowledge snapshot), `HISTORY.md` (event log)
-4. **Consolidation**: Periodic pass merges events, updates profile, compacts MEMORY.md
+1. **Write path**: Events extracted by `MemoryExtractor` (LLM-based) → stored in `UnifiedMemoryDB` (SQLite + FTS5 + sqlite-vec)
+2. **Read path**: Vector search (sqlite-vec) + full-text search (FTS5) → RRF fusion → cross-encoder re-ranking via ONNX Runtime (`reranker.py`, `onnx_reranker.py`)
+3. **Persistence**: `UnifiedMemoryDB` manages all storage in a single SQLite database (events, profile, embeddings, knowledge graph)
+4. **Consolidation**: Periodic pass merges events, updates profile, compacts snapshots
 
 **Note**: `case/memory_eval_cases.json` is used by the advisory trend benchmark (`make memory-eval`). Behavioral correctness is enforced by contract tests in `tests/contract/` and LLM round-trip tests in `tests/test_memory_roundtrip.py`.
 
@@ -234,7 +233,7 @@ Use worktrees to isolate experimental or parallel work from the main checkout.
 
 ### Module Boundaries
 
-- `channels/` must **never** import from `agent/loop`, `agent/tools/`, or `agent/memory/`
+- `channels/` must **never** import from `agent/loop`, `agent/tools/`, or `memory/`
 - `providers/` must **never** import from `agent/` or `channels/`
 - `config/` must **never** import from `agent/`, `channels/`, or `providers/`
 - `bus/` must **never** import from `agent/`, `channels/`, or `providers/`

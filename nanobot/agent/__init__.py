@@ -19,7 +19,6 @@ from nanobot.agent.coordinator import ClassificationResult, Coordinator
 from nanobot.agent.delegation import DelegationDispatcher
 from nanobot.agent.delegation_advisor import DelegationAdvisor
 from nanobot.agent.loop import AgentLoop
-from nanobot.agent.memory import MemoryStore
 from nanobot.agent.message_processor import MessageProcessor
 from nanobot.agent.mission import MissionManager
 from nanobot.agent.observability import init_langfuse
@@ -45,7 +44,6 @@ __all__ = [
     "DelegateStartEvent",
     "DelegationAdvisor",
     "DelegationDispatcher",
-    "MemoryStore",
     "MessageProcessor",
     "MissionManager",
     "ProgressCallback",

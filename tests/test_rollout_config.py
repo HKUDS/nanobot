@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nanobot.agent.memory.rollout import RolloutConfig
+from nanobot.memory.rollout import RolloutConfig
 
 
 class TestRolloutConfigDefaults:

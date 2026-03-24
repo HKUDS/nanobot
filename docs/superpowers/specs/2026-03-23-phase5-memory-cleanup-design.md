@@ -35,13 +35,13 @@ The memory subsystem has grown organically from ~6 files to 30 files. Most bound
 
 **Production consumer:** `retriever.py:27` imports from `retrieval.py`.
 
-**Test consumer:** `tests/test_memory_helper_wave5.py:13-18` imports all five symbols directly from `nanobot.agent.memory.retrieval`.
+**Test consumer:** `tests/test_memory_helper_wave5.py:13-18` imports all five symbols directly from `nanobot.memory.retrieval`.
 
 **Action:** Rename `retrieval.py` to `keyword_search.py`. This preserves the smaller file while eliminating the naming confusion with `retriever.py`.
 
 **Required updates:**
 - `retriever.py` — change `from .retrieval import ...` to `from .keyword_search import ...`
-- `tests/test_memory_helper_wave5.py:13-18` — change import path from `nanobot.agent.memory.retrieval` to `nanobot.agent.memory.keyword_search`
+- `tests/test_memory_helper_wave5.py:13-18` — change import path from `nanobot.memory.retrieval` to `nanobot.memory.keyword_search`
 
 ### Change 2: Flatten the ontology re-export
 
@@ -59,7 +59,7 @@ from .ontology_types import ...
 - `memory/ingester.py:849` — `from .ontology import Triple`
 - `memory/retriever.py:1085` — `from .ontology import classify_entity_type`
 
-**Test consumers (import via `nanobot.agent.memory.ontology`):**
+**Test consumers (import via `nanobot.memory.ontology`):**
 - `tests/test_graph_driver_paths.py` (lines 12, 42, 114)
 - `tests/test_knowledge_graph.py:10`
 - `tests/test_ontology.py:5`
@@ -68,7 +68,7 @@ from .ontology_types import ...
 
 - `__init__.py` — import directly from `ontology_types.py`, `ontology_rules.py`, `entity_classifier.py`, `entity_linker.py`
 - `graph.py`, `ingester.py`, `retriever.py` — change `from .ontology import ...` to import from the specific source module
-- 3 test files — change `from nanobot.agent.memory.ontology import ...` to import from the specific source module (e.g., `from nanobot.agent.memory.entity_classifier import classify_entity_type`)
+- 3 test files — change `from nanobot.memory.ontology import ...` to import from the specific source module (e.g., `from nanobot.memory.entity_classifier import classify_entity_type`)
 
 ### Change 3: Move `eval.py` to a separate location
 
