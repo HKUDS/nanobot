@@ -42,6 +42,8 @@ from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
     from nanobot.agent.coordinator import ClassificationResult
+    from nanobot.agent.delegation import DelegationDispatcher
+    from nanobot.agent.mission import MissionManager
     from nanobot.agent.scratchpad import Scratchpad
     from nanobot.agent.tool_executor import ToolExecutor
     from nanobot.providers.base import LLMProvider
@@ -63,20 +65,24 @@ class MessageProcessor:
         self,
         *,
         orchestrator: Orchestrator,
-        context: ContextBuilder | Any,
-        sessions: SessionManager | Any,
-        tools: ToolExecutor | Any,
-        consolidator: ConsolidationOrchestrator | Any,
-        verifier: AnswerVerifier | Any,
-        bus: MessageBus | Any,
-        config: AgentConfig | Any,
+        dispatcher: DelegationDispatcher,
+        missions: MissionManager,
+        context: ContextBuilder,
+        sessions: SessionManager,
+        tools: ToolExecutor,
+        consolidator: ConsolidationOrchestrator,
+        verifier: AnswerVerifier,
+        bus: MessageBus,
+        config: AgentConfig,
         workspace: Path,
         role_name: str,
-        role_manager: TurnRoleManager | Any,
-        provider: LLMProvider | Any,
+        role_manager: TurnRoleManager,
+        provider: LLMProvider,
         model: str,
     ) -> None:
         self.orchestrator = orchestrator
+        self._dispatcher = dispatcher
+        self._missions = missions
         self.context = context
         self.sessions = sessions
         self.tools = tools
@@ -323,18 +329,10 @@ class MessageProcessor:
                 )
             )
 
-        # Wire the per-turn progress callback into the delegation dispatcher
-        if hasattr(self.orchestrator, "_dispatcher"):
-            self.orchestrator._dispatcher.on_progress = _bus_progress
-
         final_content, tools_used, all_msgs = await self._run_orchestrator(
             initial_messages,
             on_progress=(on_progress or _bus_progress) if self.config.streaming_enabled else None,
         )
-
-        # Clear per-turn callback to prevent cross-turn leakage
-        if hasattr(self.orchestrator, "_dispatcher"):
-            self.orchestrator._dispatcher.on_progress = None
 
         if final_content is None:
             _recovered = await self.verifier.attempt_recovery(
@@ -612,10 +610,10 @@ class MessageProcessor:
         session_dir.mkdir(parents=True, exist_ok=True)
         self._scratchpad = Scratchpad(session_dir)
 
-        # Update scratchpad in delegation dispatcher if accessible
-        if hasattr(self.orchestrator, "_dispatcher"):
-            self.orchestrator._dispatcher.scratchpad = self._scratchpad
-            self.orchestrator._dispatcher._trace_path = session_dir / "routing_trace.jsonl"
+        # Update scratchpad in delegation dispatcher and mission manager
+        self._dispatcher.scratchpad = self._scratchpad
+        self._dispatcher._trace_path = session_dir / "routing_trace.jsonl"
+        self._missions.scratchpad = self._scratchpad
 
         # Update scratchpad tool references
         write_tool = self.tools.get("write_scratchpad")

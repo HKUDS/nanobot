@@ -401,6 +401,8 @@ def build_agent(
     # 13. Construct MessageProcessor (role_manager=None placeholder)
     processor = MessageProcessor(
         orchestrator=orchestrator,
+        dispatcher=dispatcher,
+        missions=missions,
         context=context,
         sessions=sessions,
         tools=tools,

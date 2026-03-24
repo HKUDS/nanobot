@@ -237,6 +237,7 @@ class TurnOrchestrator:
         Returns a ``TurnResult`` with the final content, tool names used,
         and the conversation message list after the turn.
         """
+        self._dispatcher.on_progress = on_progress
         self._dispatcher.active_messages = state.messages
         self._dispatcher.delegation_count = 0
         final_content: str | None = None
@@ -506,6 +507,9 @@ class TurnOrchestrator:
                 final_content,
                 state.messages,
             )
+
+        # Clear per-turn progress callback to prevent cross-turn leakage
+        self._dispatcher.on_progress = None
 
         return TurnResult(
             content=final_content or "",
