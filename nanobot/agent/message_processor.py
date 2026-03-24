@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from nanobot.agent.agent_components import _ProcessorServices
 from nanobot.agent.callbacks import ProgressCallback
 from nanobot.agent.turn_types import TurnState
 from nanobot.agent.verifier import AnswerVerifier
@@ -31,6 +30,7 @@ from nanobot.session.manager import Session
 from nanobot.tools.builtin.message import MessageTool
 
 if TYPE_CHECKING:
+    from nanobot.agent.agent_components import _ProcessorServices
     from nanobot.coordination.coordinator import ClassificationResult
     from nanobot.providers.base import LLMProvider
 
