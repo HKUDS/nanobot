@@ -4,10 +4,12 @@ These tests focus on the business logic behind the onboard wizard,
 without testing the interactive UI components.
 """
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
 from pydantic import BaseModel, Field
 
 from nanobot.cli import onboard_wizard
@@ -24,18 +26,6 @@ from nanobot.cli.onboard_wizard import (
 )
 from nanobot.config.schema import Config
 from nanobot.utils.helpers import sync_workspace_templates
-
-
-class _SimpleDraftModel(BaseModel):
-    api_key: str = ""
-
-
-class _NestedDraftModel(BaseModel):
-    api_key: str = ""
-
-
-class _OuterDraftModel(BaseModel):
-    nested: _NestedDraftModel = Field(default_factory=_NestedDraftModel)
 
 
 class TestMergeMissingDefaults:
@@ -208,7 +198,6 @@ class TestGetFieldTypeInfo:
 
     def test_handles_none_annotation(self):
         """Field with None annotation defaults to str."""
-
         class Model(BaseModel):
             field: Any = None
 
@@ -370,6 +359,8 @@ class TestProviderChannelInfo:
         assert len(names) > 0
         # Should include common providers
         assert "openai" in names or "anthropic" in names
+        assert "openai_codex" not in names
+        assert "github_copilot" not in names
 
     def test_get_channel_names_returns_dict(self):
         from nanobot.cli.onboard_wizard import _get_channel_names
@@ -390,6 +381,18 @@ class TestProviderChannelInfo:
             assert len(value) == 4  # (display_name, needs_api_key, needs_api_base, env_var)
 
 
+class _SimpleDraftModel(BaseModel):
+    api_key: str = ""
+
+
+class _NestedDraftModel(BaseModel):
+    api_key: str = ""
+
+
+class _OuterDraftModel(BaseModel):
+    nested: _NestedDraftModel = Field(default_factory=_NestedDraftModel)
+
+
 class TestConfigurePydanticModelDrafts:
     @staticmethod
     def _patch_prompt_helpers(monkeypatch, tokens, text_value="secret"):
@@ -400,7 +403,7 @@ class TestConfigurePydanticModelDrafts:
             if token == "first":
                 return choices[0]
             if token == "done":
-                return "✓ Done"
+                return "[Done]"
             if token == "back":
                 return _BACK_PRESSED
             return token
@@ -460,9 +463,9 @@ class TestRunOnboardExitBehavior:
 
         responses = iter(
             [
-                "🤖 Configure Agent Settings",
+                "[A] Agent Settings",
                 KeyboardInterrupt(),
-                "🗑️ Exit Without Saving",
+                "[X] Exit Without Saving",
             ]
         )
 
@@ -478,12 +481,13 @@ class TestRunOnboardExitBehavior:
         def fake_select(*_args, **_kwargs):
             return FakePrompt(next(responses))
 
-        def fake_configure_agents(config):
-            config.agents.defaults.model = "test/provider-model"
+        def fake_configure_general_settings(config, section):
+            if section == "Agent Settings":
+                config.agents.defaults.model = "test/provider-model"
 
         monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
-        monkeypatch.setattr(onboard_wizard.questionary, "select", fake_select)
-        monkeypatch.setattr(onboard_wizard, "_configure_agents", fake_configure_agents)
+        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
+        monkeypatch.setattr(onboard_wizard, "_configure_general_settings", fake_configure_general_settings)
 
         result = run_onboard(initial_config=initial_config)
 

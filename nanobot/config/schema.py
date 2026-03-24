@@ -18,6 +18,7 @@ class ChannelsConfig(Base):
 
     Built-in and plugin channel configs are stored as extra fields (dicts).
     Each channel parses its own config in __init__.
+    Per-channel "streaming": true enables streaming output (requires send_delta impl).
     """
 
     model_config = ConfigDict(extra="allow")
@@ -38,14 +39,8 @@ class AgentDefaults(Base):
     context_window_tokens: int = 65_536
     temperature: float = 0.1
     max_tool_iterations: int = 40
-    # Deprecated compatibility field: accepted from old configs but ignored at runtime.
-    memory_window: int | None = Field(default=None, exclude=True)
+    context_budget_tokens: int = 0  # Max old-history tokens during tool iterations (0 = no trim)
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
-
-    @property
-    def should_warn_deprecated_memory_window(self) -> bool:
-        """Return True when old memoryWindow is present without contextWindowTokens."""
-        return self.memory_window is not None and "context_window_tokens" not in self.model_fields_set
 
 
 class AgentsConfig(Base):
@@ -87,8 +82,8 @@ class ProvidersConfig(Base):
     volcengine_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine Coding Plan
     byteplus: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus (VolcEngine international)
     byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
-    openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
-    github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
+    openai_codex: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # OpenAI Codex (OAuth)
+    github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
 
 
 class HeartbeatConfig(Base):
@@ -127,6 +122,7 @@ class WebToolsConfig(Base):
 class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
+    enable: bool = True
     timeout: int = 60
     path_append: str = ""
 

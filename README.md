@@ -191,9 +191,11 @@ nanobot channels login
 nanobot onboard
 ```
 
+Use `nanobot onboard --wizard` if you want the interactive setup wizard.
+
 **2. Configure** (`~/.nanobot/config.json`)
 
-Add or merge these **two parts** into your config (other options have defaults).
+Configure these **two parts** in your config (other options have defaults).
 
 *Set your API key* (e.g. OpenRouter, recommended for global users):
 ```json
@@ -244,6 +246,7 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
 | **Email** | IMAP/SMTP credentials |
 | **QQ** | App ID + App Secret |
 | **Wecom** | Bot ID + Bot Secret |
+| **Wecom App** | Corp ID + Agent ID + Secret + Token + AES Key |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -261,7 +264,8 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
     "telegram": {
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
+      "allowFrom": ["YOUR_USER_ID"],
+      "silentToolHints": false
     }
   }
 }
@@ -757,6 +761,77 @@ nanobot gateway
 
 </details>
 
+<details>
+<summary><b>Wecom App (企业微信应用)</b></summary>
+
+> Uses **webhook callback** mode — requires a publicly accessible server or port forwarding.
+>
+> Different from WeCom (WebSocket mode). Choose based on your network environment.
+
+**1. Install the optional dependency**
+
+```bash
+pip install wecom-app-svr
+```
+
+**2. Create a WeCom AI Bot**
+
+Go to the WeCom admin console → My Apps → Create App → Enable **API** mode. Copy the following credentials:
+- **Corp ID** (from the admin console)
+- **Agent ID** (from the app)
+- **Secret** (from the app)
+- **Token** (you set this when configuring the webhook)
+- **AES Key** (you set this when configuring the webhook)
+
+**3. Configure the callback URL**
+
+In the WeCom app configuration:
+- Set callback URL to: `http://<your-server>:<port>/wecom_app`
+- Set the Token and AES Key to match your config
+
+**4. Configure**
+
+```json
+{
+  "channels": {
+    "wecom_app": {
+      "enabled": true,
+      "token": "your_token",
+      "corpId": "your_corp_id",
+      "secret": "your_secret",
+      "agentid": "your_agent_id",
+      "aesKey": "your_aes_key",
+      "host": "0.0.0.0",
+      "port": 18791,
+      "path": "/wecom_app",
+      "allowFrom": ["your_user_id"]
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `host` | `0.0.0.0` | Server bind address |
+| `port` | `18791` | Server listen port (must match WeCom callback URL) |
+| `path` | `/wecom_app` | Callback path |
+| `token` | - | Verification token from WeCom admin |
+| `aesKey` | - | AES key from WeCom admin |
+| `corpId` | - | Your WeCom Corp ID |
+| `agentid` | - | Your WeCom App Agent ID |
+| `secret` | - | Your WeCom App Secret |
+| `welcome_message` | - | Message sent when user enters the chat |
+
+**5. Run**
+
+```bash
+nanobot gateway
+```
+
+> **Note**: Wecom App requires the callback URL to be accessible from WeCom servers. If you're running locally, use port forwarding (e.g., ngrok, cloudflare tunnel) or deploy on a public server.
+
+</details>
+
 ## 🌐 Agent Social Network
 
 🐈 nanobot is capable of linking to the agent social network (agent community). **Just send one message and your nanobot joins automatically!**
@@ -811,6 +886,7 @@ Config file: `~/.nanobot/config.json`
 <summary><b>OpenAI Codex (OAuth)</b></summary>
 
 Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account.
+No `providers.openaiCodex` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
 
 **1. Login:**
 ```bash
@@ -823,6 +899,44 @@ nanobot provider login openai-codex
   "agents": {
     "defaults": {
       "model": "openai-codex/gpt-5.1-codex"
+    }
+  }
+}
+```
+
+**3. Chat:**
+```bash
+nanobot agent -m "Hello!"
+
+# Target a specific workspace/config locally
+nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello!"
+
+# One-off workspace override on top of that config
+nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -m "Hello!"
+```
+
+> Docker users: use `docker run -it` for interactive OAuth login.
+
+</details>
+
+
+<details>
+<summary><b>GitHub Copilot (OAuth)</b></summary>
+
+GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured.
+No `providers.githubCopilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
+
+**1. Login:**
+```bash
+nanobot provider login github-copilot
+```
+
+**2. Set model** (merge into `~/.nanobot/config.json`):
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "github-copilot/gpt-4.1"
     }
   }
 }
@@ -1238,6 +1352,7 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | Option | Default | Description |
 |--------|---------|-------------|
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
+| `tools.exec.enable` | `true` | When `false`, the shell `exec` tool is not registered at all. Use this to completely disable shell command execution. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
 | `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
 
@@ -1365,6 +1480,7 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 | Command | Description |
 |---------|-------------|
 | `nanobot onboard` | Initialize config & workspace at `~/.nanobot/` |
+| `nanobot onboard --wizard` | Launch the interactive onboarding wizard |
 | `nanobot onboard -c <config> -w <workspace>` | Initialize or refresh a specific instance config and workspace |
 | `nanobot agent -m "..."` | Chat with the agent |
 | `nanobot agent -w <workspace>` | Chat against a specific workspace |
