@@ -632,28 +632,19 @@ class TestUnifiedRetrievePath:
         assert len(results) >= 1
 
     def test_unified_path_skipped_when_db_is_none(self) -> None:
-        """Without db, falls through to mem0/BM25 path."""
+        """Without db, returns empty list."""
         retriever = _make_retriever()
         retriever._db = None
         retriever._embedder = MagicMock()
-        # Should fall through to BM25 path (mem0 disabled by default)
-        with patch(
-            "nanobot.agent.memory.retriever._local_retrieve",
-            return_value=[],
-        ):
-            results = retriever.retrieve("test", top_k=3)
+        results = retriever.retrieve("test", top_k=3)
         assert results == []
 
     def test_unified_path_skipped_when_embedder_is_none(self) -> None:
-        """Without embedder, falls through to mem0/BM25 path."""
+        """Without embedder, returns empty list."""
         retriever = _make_retriever()
         retriever._db = MagicMock()
         retriever._embedder = None
-        with patch(
-            "nanobot.agent.memory.retriever._local_retrieve",
-            return_value=[],
-        ):
-            results = retriever.retrieve("test", top_k=3)
+        results = retriever.retrieve("test", top_k=3)
         assert results == []
 
 

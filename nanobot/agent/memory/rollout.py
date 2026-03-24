@@ -42,7 +42,6 @@ class RolloutConfig:
             "reranker_mode": "enabled",
             "reranker_alpha": 0.5,
             "reranker_model": "onnx:ms-marco-MiniLM-L-6-v2",
-            "consolidation_single_tool": True,
         }
         rollout = dict(defaults)
 
@@ -118,10 +117,6 @@ class RolloutConfig:
                 pass  # keep default on bad input
         if "reranker_model" in overrides:
             self.rollout["reranker_model"] = str(overrides["reranker_model"]).strip()
-        # Boolean flag overrides
-        for bk in ("consolidation_single_tool",):
-            if bk in overrides:
-                self.rollout[bk] = bool(overrides[bk])
 
     # ── query ───────────────────────────────────────────────────────────
 

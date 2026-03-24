@@ -182,51 +182,19 @@ class TestConsolidationRouting:
         )
 
     @pytest.mark.asyncio
-    async def test_two_call_path_when_flag_false(self, tmp_path: Path) -> None:
-        """When consolidation_single_tool is False, legacy two-call path is used."""
-        pipeline = _make_pipeline(tmp_path, rollout={"consolidation_single_tool": False})
-        session = _make_session(messages=_enough_messages())
-
-        # First call: save_memory tool
-        tool_call = MagicMock()
-        tool_call.arguments = '{"history_entry": "summary"}'
-        response = MagicMock()
-        response.has_tool_calls = True
-        response.tool_calls = [tool_call]
-
-        provider = MagicMock()
-        provider.chat = AsyncMock(return_value=response)
-
-        pipeline._extractor.parse_tool_args.return_value = {"history_entry": "summary"}
-        pipeline._extractor.extract_structured_memory = AsyncMock(return_value=([], {}))
-        pipeline._ingester.append_events.return_value = 0
-        pipeline._ingester._ingest_graph_triples = AsyncMock()
-        pipeline._profile_mgr.read_profile.return_value = {}
-        pipeline._profile_mgr._apply_profile_updates.return_value = (0, 0, 0)
-
-        with patch("nanobot.agent.memory.consolidation_pipeline.prompts") as mock_prompts:
-            mock_prompts.get.return_value = "system prompt"
-            result = await pipeline.consolidate(session, provider, "gpt-4")
-
-        assert result is True
-        # Two-call path: provider.chat called once for save_memory, then
-        # extract_structured_memory calls it again internally.
-        assert provider.chat.call_count == 1
-        # extract_structured_memory should have been called (second LLM call)
-        pipeline._extractor.extract_structured_memory.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_empty_rollout_defaults_to_two_call_path(self, tmp_path: Path) -> None:
-        """When rollout dict is empty (no explicit flag), defaults to legacy two-call path.
-
-        RolloutConfig._load_defaults() sets consolidation_single_tool=True explicitly.
-        Without it, the pipeline preserves backward compat by defaulting to False.
-        """
+    async def test_single_tool_path_used_with_empty_rollout(self, tmp_path: Path) -> None:
+        """Single-tool path is always used, even with an empty rollout dict."""
         pipeline = _make_pipeline(tmp_path, rollout={})
         session = _make_session(messages=_enough_messages())
 
         tool_call = MagicMock()
-        tool_call.arguments = '{"history_entry": "summary"}'
+        tool_call.arguments = json.dumps(
+            {
+                "history_entry": "summary",
+                "events": [],
+                "profile_updates": {},
+            }
+        )
         response = MagicMock()
         response.has_tool_calls = True
         response.tool_calls = [tool_call]
@@ -234,8 +202,13 @@ class TestConsolidationRouting:
         provider = MagicMock()
         provider.chat = AsyncMock(return_value=response)
 
-        pipeline._extractor.parse_tool_args.return_value = {"history_entry": "summary"}
-        pipeline._extractor.extract_structured_memory = AsyncMock(return_value=([], {}))
+        pipeline._extractor.parse_tool_args.return_value = {
+            "history_entry": "summary",
+            "events": [],
+            "profile_updates": {},
+        }
+        pipeline._extractor.default_profile_updates.return_value = {}
+        pipeline._extractor.heuristic_extract_events.return_value = ([], {})
         pipeline._ingester.append_events.return_value = 0
         pipeline._ingester._ingest_graph_triples = AsyncMock()
         pipeline._profile_mgr.read_profile.return_value = {}
@@ -246,8 +219,8 @@ class TestConsolidationRouting:
             result = await pipeline.consolidate(session, provider, "gpt-4")
 
         assert result is True
-        # Two-call path: extract_structured_memory should be called.
-        pipeline._extractor.extract_structured_memory.assert_awaited_once()
+        # Single-tool path: provider.chat called exactly once with consolidate_memory tool.
+        assert provider.chat.call_count == 1
 
 
 # ---------------------------------------------------------------------------

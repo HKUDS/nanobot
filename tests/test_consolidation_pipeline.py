@@ -139,20 +139,6 @@ class TestFormatConversationLines:
 # ---------------------------------------------------------------------------
 
 
-class TestBuildConsolidationPrompt:
-    def test_includes_memory_and_conversation(self) -> None:
-        prompt = ConsolidationPipeline._build_consolidation_prompt(
-            "existing memory", ["[ts] USER: Hello"]
-        )
-        assert "existing memory" in prompt
-        assert "[ts] USER: Hello" in prompt
-        assert "save_memory" in prompt
-
-    def test_empty_memory(self) -> None:
-        prompt = ConsolidationPipeline._build_consolidation_prompt("", ["line1"])
-        assert "(empty)" in prompt
-
-
 # ---------------------------------------------------------------------------
 # _finalize_consolidation
 # ---------------------------------------------------------------------------

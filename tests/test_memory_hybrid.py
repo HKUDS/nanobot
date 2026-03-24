@@ -28,50 +28,37 @@ class TestHybridMemoryStore:
 
         provider = AsyncMock()
         provider.chat = AsyncMock(
-            side_effect=[
-                LLMResponse(
-                    content=None,
-                    tool_calls=[
-                        ToolCallRequest(
-                            id="save_1",
-                            name="save_memory",
-                            arguments={
-                                "history_entry": "[2026-02-20 10:00] User set response preferences.",
-                                "memory_update": "# Memory\nUser prefers concise responses.",
+            return_value=LLMResponse(
+                content=None,
+                tool_calls=[
+                    ToolCallRequest(
+                        id="consolidate_1",
+                        name="consolidate_memory",
+                        arguments={
+                            "history_entry": "[2026-02-20 10:00] User set response preferences.",
+                            "events": [
+                                {
+                                    "timestamp": "2026-02-20T10:00:00+00:00",
+                                    "type": "preference",
+                                    "summary": "User prefers concise responses.",
+                                    "entities": ["user", "response style"],
+                                    "salience": 0.9,
+                                    "confidence": 0.95,
+                                    "ttl_days": 365,
+                                    "source_span": [0, 34],
+                                }
+                            ],
+                            "profile_updates": {
+                                "preferences": ["User prefers concise responses."],
+                                "stable_facts": [],
+                                "active_projects": [],
+                                "relationships": [],
+                                "constraints": ["Never use dark mode."],
                             },
-                        )
-                    ],
-                ),
-                LLMResponse(
-                    content=None,
-                    tool_calls=[
-                        ToolCallRequest(
-                            id="events_1",
-                            name="save_events",
-                            arguments={
-                                "events": [
-                                    {
-                                        "timestamp": "2026-02-20T10:00:00+00:00",
-                                        "type": "preference",
-                                        "summary": "User prefers concise responses.",
-                                        "entities": ["user", "response style"],
-                                        "salience": 0.9,
-                                        "confidence": 0.95,
-                                        "ttl_days": 365,
-                                    }
-                                ],
-                                "profile_updates": {
-                                    "preferences": ["User prefers concise responses."],
-                                    "stable_facts": [],
-                                    "active_projects": [],
-                                    "relationships": [],
-                                    "constraints": ["Never use dark mode."],
-                                },
-                            },
-                        )
-                    ],
-                ),
-            ]
+                        },
+                    )
+                ],
+            ),
         )
 
         ok = await store.consolidate(

@@ -126,20 +126,6 @@ class TestPinnedSectionProtection:
         assert "Old." not in result
         assert "Other." in result
 
-    def test_apply_save_memory_ignores_memory_update(self, tmp_path: Path) -> None:
-        """LAN-206: _apply_save_memory_tool_result no longer writes MEMORY.md."""
-        store = MemoryStore(tmp_path)
-        current = (
-            "# Memory\n<!-- user-pinned -->\nDO NOT DELETE\n<!-- end-user-pinned -->\nOld summary."
-        )
-        store._consolidation._apply_save_memory_tool_result(
-            args={"memory_update": "# Memory\nNew summary from LLM."},
-            current_memory=current,
-        )
-        # memory_update should be ignored — snapshot is not written
-        written = store.db.read_snapshot("current") if store.db else ""
-        assert written == ""
-
     def test_rebuild_memory_snapshot_preserves_pinned(self, tmp_path: Path) -> None:
         """LAN-206: rebuild_memory_snapshot preserves user-pinned sections."""
         store = MemoryStore(tmp_path)

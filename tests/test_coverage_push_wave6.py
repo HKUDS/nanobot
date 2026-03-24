@@ -60,7 +60,7 @@ async def test_loop_process_message_system_help_new_and_conflict_paths(
     async def _no_archive(_session, archive_all: bool = False):
         return False
 
-    monkeypatch.setattr(loop, "_consolidate_memory", _no_archive)
+    monkeypatch.setattr(loop._processor, "_consolidate_memory", _no_archive)
     new_out = await loop._process_message(
         InboundMessage(channel="cli", chat_id="room1", sender_id="u", content="/new")
     )
@@ -82,7 +82,7 @@ async def test_loop_new_exception_and_fallback_archive(
     async def _boom(_session, archive_all: bool = False):
         raise RuntimeError("archive exploded")
 
-    monkeypatch.setattr(loop, "_consolidate_memory", _boom)
+    monkeypatch.setattr(loop._processor, "_consolidate_memory", _boom)
 
     out = await loop._process_message(
         InboundMessage(channel="cli", chat_id="room2", sender_id="u", content="/new")

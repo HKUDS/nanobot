@@ -34,10 +34,6 @@ class TestRolloutConfigDefaults:
         assert cfg.rollout["reranker_alpha"] == 0.5
         assert cfg.rollout["reranker_model"] == "onnx:ms-marco-MiniLM-L-6-v2"
 
-    def test_default_consolidation_single_tool(self) -> None:
-        cfg = RolloutConfig()
-        assert cfg.rollout["consolidation_single_tool"] is True
-
 
 class TestRolloutConfigOverrides:
     """Overrides merge properly."""
@@ -103,7 +99,6 @@ class TestGetStatus:
             "reranker_mode",
             "reranker_alpha",
             "reranker_model",
-            "consolidation_single_tool",
         }
         assert expected_keys.issubset(set(status.keys()))
 

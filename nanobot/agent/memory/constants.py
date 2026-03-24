@@ -4,33 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-_SAVE_MEMORY_TOOL: list[dict[str, Any]] = [
-    {
-        "type": "function",
-        "function": {
-            "name": "save_memory",
-            "description": "Save the memory consolidation result to persistent storage.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "history_entry": {
-                        "type": "string",
-                        "description": "A paragraph (2-5 sentences) summarizing key events/decisions/topics. "
-                        "Start with [YYYY-MM-DD HH:MM]. Include detail useful for grep search.",
-                    },
-                    "memory_update": {
-                        "type": "string",
-                        "description": "(Deprecated — ignored.) Kept for backward compatibility "
-                        "with cached tool calls.",
-                    },
-                },
-                "required": ["history_entry"],
-            },
-        },
-    }
-]
-
-
 _SAVE_EVENTS_TOOL: list[dict[str, Any]] = [
     {
         "type": "function",

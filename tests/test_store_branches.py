@@ -130,7 +130,7 @@ class TestConsolidationHelpers:
         )
         assert selected_all is not None
 
-    def test_format_prompt_and_save_tool_result(self, tmp_path: Path) -> None:
+    def test_format_conversation_lines(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         pipeline = store._consolidation
         lines = pipeline._format_conversation_lines(
@@ -145,15 +145,12 @@ class TestConsolidationHelpers:
             ]
         )
         assert len(lines) == 2
-        prompt = pipeline._build_consolidation_prompt("# Memory", lines)
+        # Single-tool prompt includes the conversation lines
+        prompt = pipeline._build_single_tool_prompt("# Memory", lines)
         assert "Current Long-term Memory" in prompt
 
-        pipeline._apply_save_memory_tool_result(
-            args={"history_entry": {"x": 1}, "memory_update": {"y": 2}}, current_memory=""
-        )
-        assert store.history_file.exists()
-
-    async def test_consolidate_no_tool_call(self, tmp_path: Path) -> None:
+    async def test_consolidate_no_tool_call_uses_fallback(self, tmp_path: Path) -> None:
+        """When LLM returns no tool call, single-tool path uses heuristic fallback."""
         store = _store(tmp_path)
         session = SimpleNamespace(
             key="k1",
@@ -166,9 +163,11 @@ class TestConsolidationHelpers:
         provider.chat = AsyncMock(return_value=LLMResponse(content="plain text"))
 
         ok = await store.consolidate(session, provider, model="m", memory_window=10)
-        assert ok is False
+        # Single-tool path uses heuristic fallback, so it succeeds.
+        assert ok is True
 
-    async def test_consolidate_parsing_failure(self, tmp_path: Path) -> None:
+    async def test_consolidate_parsing_failure_uses_fallback(self, tmp_path: Path) -> None:
+        """When parse_tool_args returns None, single-tool path uses heuristic fallback."""
         store = _store(tmp_path)
         session = SimpleNamespace(
             key="k2",
@@ -183,14 +182,15 @@ class TestConsolidationHelpers:
             return_value=LLMResponse(
                 content=None,
                 tool_calls=[
-                    ToolCallRequest(id="x", name="save_memory", arguments={"bad": object()})
+                    ToolCallRequest(id="x", name="consolidate_memory", arguments={"bad": object()})
                 ],
             )
         )
         store.extractor.parse_tool_args = MagicMock(return_value=None)
 
         ok = await store.consolidate(session, provider, model="m", memory_window=10)
-        assert ok is False
+        # Single-tool path uses heuristic fallback when parsing fails.
+        assert ok is True
 
     async def test_consolidate_exception_path(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
