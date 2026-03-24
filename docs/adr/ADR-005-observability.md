@@ -3,7 +3,7 @@
 ## Status
 
 Accepted — Phase 2 superseded: Langfuse v4 provides OTEL-based tracing
-(see `nanobot/agent/observability.py`).
+(see `nanobot/observability/langfuse.py`).
 
 ## Date
 
@@ -50,7 +50,7 @@ deferred to avoid premature complexity.~~
 **Implemented (2026-03-14)**: Langfuse v4 SDK creates an OTEL `TracerProvider` that
 auto-captures litellm LLM calls as GENERATION observations. Custom spans wrap
 request processing, tool execution, context assembly, verification, and delegation.
-See `nanobot/agent/observability.py` for the full integration.
+See `nanobot/observability/langfuse.py` for the full integration.
 
 ### MetricsCollector — Removed
 

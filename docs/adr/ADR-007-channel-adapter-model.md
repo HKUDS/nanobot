@@ -28,8 +28,8 @@ developed and tested independently.
    - Channels publish inbound messages via `MessageBus.publish_inbound()`.
 
 2. **Module boundaries** (enforced by `scripts/check_imports.py`):
-   - `channels/*` must **never** import from `agent/loop`, `agent/tools/*`,
-     or `agent/memory/*`.
+   - `channels/*` must **never** import from `agent/`, `tools/`,
+     or `memory/`.
    - `channels/*` must **never** import from `providers/*`.
    - Communication is exclusively via `bus/events.py` message types.
 

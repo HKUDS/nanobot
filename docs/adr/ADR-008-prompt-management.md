@@ -29,7 +29,7 @@ multi-line prompt strings.
    | `delegation.md` | Delegation contract for sub-agents |
    | `tool_error.md` | Tool execution failure summary |
 
-2. **`PromptLoader`** (`nanobot/agent/prompt_loader.py`) loads all `.md` files
+2. **`PromptLoader`** (`nanobot/context/prompt_loader.py`) loads all `.md` files
    from the templates directory at import time.  A module-level `prompts`
    dict provides dict-like access: `prompts["plan"]`, `prompts.get("verify")`.
 

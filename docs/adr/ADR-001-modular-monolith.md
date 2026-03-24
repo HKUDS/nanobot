@@ -37,7 +37,7 @@ We adopt a **modular monolith** architecture with the following rules:
    `docs/architecture.md` for the module ownership map.
 
 3. **Enforce import rules.** CI checks prevent cross-boundary violations (e.g.,
-   `channels/` must never import from `agent/loop`, `agent/tools/` must never import from
+   `channels/` must never import from `agent/loop`, `tools/` must never import from
    `channels/`).
 
 4. **Refactor by seams, not by folders.** Extract internal sub-services (e.g.,

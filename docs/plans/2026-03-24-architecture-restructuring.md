@@ -1,7 +1,7 @@
 # Architecture Restructuring Plan
 
 > Date: 2026-03-24
-> Status: Approved — ready for implementation
+> Status: Complete — all 7 PRs merged (PRs #44-#49, #50)
 > Companion: [Architecture Review](../architecture-review-2026-03.md)
 
 ---

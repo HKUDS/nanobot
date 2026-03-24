@@ -10,7 +10,7 @@ Accepted — MemoryEvent model implemented (2026-03-12)
 
 ## Context
 
-The memory subsystem (`nanobot/agent/memory/`) has evolved through several iterations:
+The memory subsystem (`nanobot/memory/`) has evolved through several iterations:
 
 1. **V1** — Simple `MEMORY.md` + `HISTORY.md` text files with grep-based retrieval.
 2. **V2 (current)** — Hybrid approach: structured events in `events.jsonl`, user profile in
@@ -29,7 +29,7 @@ making it easy to introduce inconsistencies.
    semantic retrieval when available, with deterministic keyword fallback otherwise.
 
 2. **Introduce typed `MemoryEvent` model.** Replace raw dicts with a Pydantic model
-   (`nanobot/agent/memory/event.py`):
+   (`nanobot/memory/event.py`):
 
    ```python
    class MemoryEvent(BaseModel):
@@ -118,7 +118,7 @@ file (which would create another source of truth):
 3. **Supersession chains** — `supersedes_id` / `superseded_by_id` on profile metadata
    create an auditable trail when conflicts are resolved.
 
-4. **BeliefRecord model** — a Pydantic model (`nanobot/agent/memory/event.py`) providing
+4. **BeliefRecord model** — a Pydantic model (`nanobot/memory/event.py`) providing
    type-safe access to profile metadata with all belief fields.
 
 5. **Explicit mutation API** — `ProfileManager.add_belief()`, `update_belief()`,

@@ -35,9 +35,9 @@ and modify safely.
 2. **Extract internal sub-services** from AgentLoop:
 
    - **`ToolExecutor`** — owns parallel/sequential tool batching, timeout enforcement,
-     result shaping. Lives in `nanobot/agent/tool_executor.py`.
+     result shaping. Lives in `nanobot/tools/executor.py`.
    - **`DelegationDispatcher`** — owns coordinator routing, sub-loop execution,
-     scratchpad I/O, cycle detection. Lives in `nanobot/agent/delegation.py`.
+     scratchpad I/O, cycle detection. Lives in `nanobot/coordination/delegation.py`.
    - **Prompt loading** — system prompts loaded from `nanobot/templates/prompts/` files
      instead of Python string constants.
 
