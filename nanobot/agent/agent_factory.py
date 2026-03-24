@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from nanobot.agent.context import ContextBuilder
     from nanobot.agent.delegation import DelegationDispatcher
     from nanobot.agent.delegation_advisor import DelegationAdvisor
-    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.loop import AgentLoop  # noqa: TC004 — safe under TYPE_CHECKING
     from nanobot.agent.memory import MemoryStore
     from nanobot.agent.message_processor import MessageProcessor
     from nanobot.agent.mission import MissionManager

@@ -10,6 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
+
 from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.task_types import TASK_TYPES
 
@@ -126,8 +128,8 @@ def build_execution_context(workspace: Path, task_type: str) -> str:
             tree_lines.append(f"  {entry.name}{suffix}")
         if tree_lines:
             parts.append("Directory layout:\n" + "\n".join(tree_lines))
-    except OSError:
-        pass  # crash-barrier: directory listing may fail on restricted paths
+    except OSError as exc:
+        logger.debug("Directory listing failed for {}: {}", workspace, exc)
     if task_type in ("local_code_analysis", "repo_architecture", "bug_investigation", "hybrid"):
         for name in ("AGENTS.md", "README.md", "SOUL.md"):
             path = workspace / name
@@ -136,8 +138,8 @@ def build_execution_context(workspace: Path, task_type: str) -> str:
                     text = path.read_text(encoding="utf-8", errors="replace")[:1500]
                     if text.strip():
                         parts.append(f"--- {name} (excerpt) ---\n{text.strip()}")
-            except OSError:
-                pass  # crash-barrier: file read may fail on restricted paths
+            except OSError as exc:
+                logger.debug("Failed to read {}: {}", path, exc)
     return "\n\n".join(parts)
 
 
