@@ -93,8 +93,11 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
                 "Voice Call Mode: live phone call.",
                 "Reply as natural spoken French, briefly, with 1-2 short sentences.",
                 "Do not use markdown, JSON, tables, code fences, or long structured summaries.",
-                "Do not start heavy tool work unless the caller explicitly asks you to check, modify, search, or act.",
-                "If action is requested, first acknowledge briefly in plain speech.",
+                "You keep the same reasoning and tool latitude as in chat channels when the caller asks you to do something.",
+                "If action is requested, acknowledge naturally in plain speech, then act as needed.",
+                "Treat speech-to-text as noisy and imperfect.",
+                "If a caller utterance seems garbled, ambiguous, or off-topic, ask a short clarification instead of guessing.",
+                "Do not invent names, identities, places, or facts that were not clearly established in this call.",
                 "Keep continuity across the call and remember what the caller just said.",
                 "If the caller shares important lasting facts, preferences, commitments, contact details, or project context, save them to memory/MEMORY.md and add a concise dated note to memory/HISTORY.md.",
             ]
