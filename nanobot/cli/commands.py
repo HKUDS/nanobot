@@ -35,13 +35,13 @@ from rich.text import Text
 from nanobot import __logo__, __version__
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.config.paths import get_workspace_path, is_default_workspace
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, WebConfig
 from nanobot.utils.helpers import sync_workspace_templates
 
 app = typer.Typer(
     name="nanobot",
     context_settings={"help_option_names": ["-h", "--help"]},
-    help=f"{__logo__} nanobot - Personal AI Assistant",
+    help=f"Personal AI Assistant",
     no_args_is_help=True,
 )
 
@@ -401,7 +401,7 @@ def _make_provider(config: Config):
     elif provider_name == "azure_openai":
         if not p or not p.api_key or not p.api_base:
             console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
-            console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
+            console.print("Set them in ~/.hiperone/config.json under providers.azure_openai section")
             console.print("Use the model field to specify the deployment name.")
             raise typer.Exit(1)
         provider = AzureOpenAIProvider(
@@ -423,7 +423,7 @@ def _make_provider(config: Config):
         spec = find_by_name(provider_name)
         if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and (spec.is_oauth or spec.is_local)):
             console.print("[red]Error: No API key configured.[/red]")
-            console.print("Set one in ~/.nanobot/config.json under providers section")
+            console.print("Set one in ~/.hiperone/config.json under providers section")
             raise typer.Exit(1)
         provider = LiteLLMProvider(
             api_key=p.api_key if p else None,
@@ -549,6 +549,7 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        openviking_config=config.openviking,
     )
 
     # Set cron callback (needs agent)
@@ -1091,6 +1092,213 @@ def plugins_list():
 
     console.print(table)
 
+@app.command()
+def web(
+    port: int = typer.Option(18080, "--port", "-p", help="Web server port"),
+    host: str = typer.Option("0.0.0.0", "--host", help="Web server host"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Start the web interface with full gateway stack.
+
+    Runs the agent loop, all enabled channels (including web), cron, and
+    heartbeat services.  The web channel is force-enabled so the browser
+    can communicate via WebSocket.
+    """
+    from nanobot.bus.queue import MessageBus
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.channels.manager import ChannelManager
+    from nanobot.session.manager import SessionManager
+    from nanobot.cron.service import CronService
+    from nanobot.cron.types import CronJob
+    from nanobot.heartbeat.service import HeartbeatService
+
+    if verbose:
+        import logging
+        logging.basicConfig(level=logging.DEBUG)
+
+    config = _load_runtime_config(config, workspace)
+
+    web_cfg = getattr(config.channels, "web", None)
+    base = web_cfg if isinstance(web_cfg, dict) else (web_cfg.model_dump() if web_cfg else {})
+    web_cfg = WebConfig(**{**base, "enabled": True, "host": host, "port": port or base.get("port", 18080)})
+    config.channels.web = web_cfg
+    port = web_cfg.port
+
+    console.print(f"{__logo__} Starting nanobot web on {host}:{port}...")
+    sync_workspace_templates(config.workspace_path)
+
+    bus = MessageBus()
+    provider = _make_provider(config)
+    session_manager = SessionManager(config.workspace_path)
+
+    if is_default_workspace(config.workspace_path):
+        _migrate_cron_store(config)
+
+    cron_store_path = config.workspace_path / "cron" / "jobs.json"
+    cron = CronService(cron_store_path)
+
+    agent = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=config.workspace_path,
+        model=config.agents.defaults.model,
+        max_iterations=config.agents.defaults.max_tool_iterations,
+        context_window_tokens=config.agents.defaults.context_window_tokens,
+        web_search_config=config.tools.web.search,
+        web_proxy=config.tools.web.proxy or None,
+        exec_config=config.tools.exec,
+        cron_service=cron,
+        restrict_to_workspace=config.tools.restrict_to_workspace,
+        session_manager=session_manager,
+        mcp_servers=config.tools.mcp_servers,
+        channels_config=config.channels,
+        openviking_config=config.openviking,
+    )
+
+    # Set cron callback (needs agent + heartbeat)
+    async def on_cron_job(job: CronJob) -> str | None:
+        """Execute a cron job through the agent (isolated or main session)."""
+        from nanobot.agent.tools.cron import CronTool
+        from nanobot.agent.tools.message import MessageTool
+        from nanobot.utils.evaluator import evaluate_response
+
+        reminder_note = (
+            "[Scheduled Task] Timer finished.\n\n"
+            f"Task '{job.name}' has been triggered.\n"
+            f"Scheduled instruction: {job.payload.message}"
+        )
+
+        cron_tool = agent.tools.get("cron")
+        cron_token = None
+        if isinstance(cron_tool, CronTool):
+            cron_token = cron_tool.set_cron_context(True)
+
+        try:
+            resp = await agent.process_direct(
+                reminder_note,
+                session_key=f"cron:{job.id}",
+                channel=job.payload.channel or "cli",
+                chat_id=job.payload.to or "direct",
+            )
+        finally:
+            if isinstance(cron_tool, CronTool) and cron_token is not None:
+                cron_tool.reset_cron_context(cron_token)
+
+        response = resp.content if resp else ""
+
+        message_tool = agent.tools.get("message")
+        if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+            return response
+
+        if job.payload.deliver and job.payload.to and response:
+            should_notify = await evaluate_response(
+                response, job.payload.message, provider, agent.model,
+            )
+            if should_notify:
+                from nanobot.bus.events import OutboundMessage
+                await bus.publish_outbound(OutboundMessage(
+                    channel=job.payload.channel or "cli",
+                    chat_id=job.payload.to,
+                    content=response,
+                ))
+        return response
+
+    cron.on_job = on_cron_job
+
+    # Channel manager (web channel will be created here since we set enabled=True)
+    channels = ChannelManager(config, bus, session_manager=session_manager, cron_service=cron)
+
+    def _pick_heartbeat_target() -> tuple[str, str]:
+        """Pick a routable channel/chat target for heartbeat-triggered messages."""
+        enabled = set(channels.enabled_channels)
+        for item in session_manager.list_sessions():
+            key = item.get("key") or ""
+            if ":" not in key:
+                continue
+            ch, cid = key.split(":", 1)
+            if ch in {"cli", "system"}:
+                continue
+            if ch in enabled and cid:
+                return ch, cid
+        return "cli", "direct"
+
+    # Create heartbeat service
+    hb_cfg = config.gateway.heartbeat
+
+    async def on_heartbeat_execute(tasks: str) -> str:
+        """Phase 2: execute heartbeat tasks through the full agent loop."""
+        channel, chat_id = _pick_heartbeat_target()
+
+        async def _silent(*_args, **_kwargs):
+            pass
+
+        resp = await agent.process_direct(
+            tasks,
+            session_key="heartbeat",
+            channel=channel,
+            chat_id=chat_id,
+            on_progress=_silent,
+        )
+
+        session = agent.sessions.get_or_create("heartbeat")
+        session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+        agent.sessions.save(session)
+
+        return resp.content if resp else ""
+
+    async def on_heartbeat_notify(response: str) -> None:
+        """Deliver a heartbeat response to the user's channel."""
+        from nanobot.bus.events import OutboundMessage
+        channel, chat_id = _pick_heartbeat_target()
+        if channel == "cli":
+            return  # No external channel available to deliver to
+        await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
+
+    heartbeat = HeartbeatService(
+        workspace=config.workspace_path,
+        provider=provider,
+        model=agent.model,
+        on_execute=on_heartbeat_execute,
+        on_notify=on_heartbeat_notify,
+        interval_s=hb_cfg.interval_s,
+        enabled=hb_cfg.enabled,
+    )
+
+    if channels.enabled_channels:
+        console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
+    else:
+        console.print("[yellow]Warning: No channels enabled[/yellow]")
+
+    cron_status = cron.status()
+    if cron_status["jobs"] > 0:
+        console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
+
+    console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
+
+    async def run():
+        try:
+            await cron.start()
+            await heartbeat.start()
+            await asyncio.gather(
+                agent.run(),
+                channels.start_all(),
+            )
+        except KeyboardInterrupt:
+            console.print("\nShutting down...")
+        except Exception:
+            import traceback
+            console.print("\n[red]Error: Web server crashed unexpectedly[/red]")
+            console.print(traceback.format_exc())
+        finally:
+            await agent.close_mcp()
+            heartbeat.stop()
+            cron.stop()
+            agent.stop()
+            await channels.stop_all()
+
+    asyncio.run(run())
 
 # ============================================================================
 # Status Commands

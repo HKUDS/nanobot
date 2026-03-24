@@ -351,6 +351,39 @@ class CronService:
         logger.info("Cron: added job '{}' ({})", name, job.id)
         return job
 
+    def update_job(self, job_id: str, **patch: Any) -> CronJob | None:
+        """Update fields on an existing job."""
+        store = self._load_store()
+        for job in store.jobs:
+            if job.id != job_id:
+                continue
+
+            if "name" in patch:
+                job.name = patch["name"]
+            if "message" in patch:
+                job.payload.message = patch["message"]
+            if "deliver" in patch:
+                job.payload.deliver = patch["deliver"]
+            if "channel" in patch:
+                job.payload.channel = patch["channel"]
+            if "to" in patch:
+                job.payload.to = patch["to"]
+            if "enabled" in patch:
+                job.enabled = patch["enabled"]
+            if "delete_after_run" in patch:
+                job.delete_after_run = patch["delete_after_run"]
+            if "schedule" in patch and isinstance(patch["schedule"], CronSchedule):
+                _validate_schedule_for_add(patch["schedule"])
+                job.schedule = patch["schedule"]
+
+            job.updated_at_ms = _now_ms()
+            if job.enabled:
+                job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
+            self._save_store()
+            self._arm_timer()
+            return job
+        return None
+
     def remove_job(self, job_id: str) -> bool:
         """Remove a job by ID."""
         store = self._load_store()

@@ -142,7 +142,8 @@ def _extract_element_content(element: dict) -> list[str]:
 
     elif tag == "img":
         alt = element.get("alt", {})
-        parts.append(alt.get("content", "[image]") if isinstance(alt, dict) else "[image]")
+        alt_text = alt.get("content", "") if isinstance(alt, dict) else ""
+        parts.append(alt_text or "[icon]")
 
     elif tag == "note":
         for ne in element.get("elements", []):
@@ -279,6 +280,8 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._user_name_cache: dict[str, str] = {}
+        self._bot_open_id: str = ""
 
     @staticmethod
     def _register_optional_event(builder: Any, method_name: str, handler: Any) -> Any:
@@ -306,6 +309,13 @@ class FeishuChannel(BaseChannel):
             .app_secret(self.config.app_secret) \
             .log_level(lark.LogLevel.INFO) \
             .build()
+
+        self._bot_open_id = self._fetch_bot_open_id()
+        if self._bot_open_id:
+            logger.info("Feishu bot open_id: {}", self._bot_open_id)
+        else:
+            logger.warning("Could not fetch bot open_id; @mention detection may be unreliable")
+
         builder = lark.EventDispatcherHandler.builder(
             self.config.encrypt_key or "",
             self.config.verification_token or "",
@@ -377,6 +387,25 @@ class FeishuChannel(BaseChannel):
         self._running = False
         logger.info("Feishu bot stopped")
 
+    def _fetch_bot_open_id(self) -> str:
+        """Fetch the bot's own open_id via the bot/v3/info API."""
+        try:
+            import lark_oapi as lark
+            req = lark.BaseRequest()
+            req.http_method = lark.HttpMethod.GET
+            req.uri = "/open-apis/bot/v3/info/"
+            req.token_types = {lark.AccessTokenType.TENANT}
+
+            resp = self._client.request(req)
+            if resp.code == 0 and resp.raw:
+                body = json.loads(resp.raw.content)
+                return body.get("bot", {}).get("open_id", "")
+            else:
+                logger.warning("Failed to fetch bot info: code={}, msg={}", resp.code, resp.msg)
+        except Exception as e:
+            logger.warning("Error fetching bot open_id: {}", e)
+        return ""
+
     def _is_bot_mentioned(self, message: Any) -> bool:
         """Check if the bot is @mentioned in the message."""
         raw_content = message.content or ""
@@ -385,11 +414,12 @@ class FeishuChannel(BaseChannel):
 
         for mention in getattr(message, "mentions", None) or []:
             mid = getattr(mention, "id", None)
-            if not mid:
+            if mid is None:
                 continue
-            # Bot mentions have no user_id (None or "") but a valid open_id
-            if not getattr(mid, "user_id", None) and (getattr(mid, "open_id", None) or "").startswith("ou_"):
+            mention_open_id = getattr(mid, "open_id", "") or ""
+            if self._bot_open_id and mention_open_id == self._bot_open_id:
                 return True
+
         return False
 
     def _is_group_message_for_bot(self, message: Any) -> bool:
@@ -483,14 +513,21 @@ class FeishuChannel(BaseChannel):
             "rows": [{f"c{i}": r[i] if i < len(r) else "" for i in range(len(headers))} for r in rows],
         }
 
+    _MAX_CARD_TABLES = 4
+
     def _build_card_elements(self, content: str) -> list[dict]:
         """Split content into div/markdown + table elements for Feishu card."""
-        elements, last_end = [], 0
+        elements, last_end, table_count = [], 0, 0
         for m in self._TABLE_RE.finditer(content):
             before = content[last_end:m.start()]
             if before.strip():
                 elements.extend(self._split_headings(before))
-            elements.append(self._parse_md_table(m.group(1)) or {"tag": "markdown", "content": m.group(1)})
+            parsed = self._parse_md_table(m.group(1)) if table_count < self._MAX_CARD_TABLES else None
+            if parsed:
+                table_count += 1
+                elements.append(parsed)
+            else:
+                elements.append({"tag": "markdown", "content": m.group(1)})
             last_end = m.end()
         remaining = content[last_end:]
         if remaining.strip():
@@ -835,6 +872,69 @@ class FeishuChannel(BaseChannel):
 
         return None, f"[{msg_type}: download failed]"
 
+
+    def _get_user_name_sync(self, open_id: str) -> str:
+        """Look up a user's display name by open_id via Contact API, with in-memory cache."""
+        if open_id in self._user_name_cache:
+            return self._user_name_cache[open_id]
+        try:
+            from lark_oapi.api.contact.v3 import GetUserRequest as ContactGetUserRequest
+            request = ContactGetUserRequest.builder() \
+                .user_id(open_id) \
+                .user_id_type("open_id") \
+                .build()
+            response = self._client.contact.v3.user.get(request)
+            if response.success() and response.data and response.data.user:
+                name = response.data.user.name or ""
+                self._user_name_cache[open_id] = name
+                return name
+        except Exception as e:
+            logger.debug("Failed to fetch user name for {}: {}", open_id, e)
+        self._user_name_cache[open_id] = ""
+        return ""
+
+    def _get_message_sync(self, message_id: str) -> dict | None:
+        """Fetch a message by ID and return its msg_type, body content, and mentions."""
+        from lark_oapi.api.im.v1 import GetMessageRequest
+        try:
+            request = GetMessageRequest.builder() \
+                .message_id(message_id) \
+                .build()
+            response = self._client.im.v1.message.get(request)
+            if response.success() and response.data and response.data.items:
+                msg = response.data.items[0]
+                body_content = msg.body.content if msg.body else None
+                if body_content:
+                    result: dict[str, Any] = {
+                        "msg_type": msg.msg_type,
+                        "content": body_content,
+                    }
+                    mentions = getattr(msg, "mentions", None) or []
+                    if mentions:
+                        result["mentions"] = list(mentions)
+                    return result
+        except Exception as e:
+            logger.warning("Failed to fetch message {}: {}", message_id, e)
+        return None
+
+    @staticmethod
+    def _extract_message_text(msg_type: str, content_str: str) -> str:
+        """Extract plain text from a fetched message's body content."""
+        try:
+            content_json = json.loads(content_str)
+        except (json.JSONDecodeError, TypeError):
+            return content_str or ""
+        if msg_type == "text":
+            return content_json.get("text", "")
+        elif msg_type == "post":
+            return _extract_post_text(content_json)
+        elif msg_type == "interactive":
+            parts = _extract_interactive_content(content_json)
+            return "\n".join(parts)
+        elif msg_type in ("image", "audio", "file", "sticker"):
+            return MSG_TYPE_MAP.get(msg_type, f"[{msg_type}]")
+        return f"[{msg_type}]"
+
     _REPLY_CONTEXT_MAX_LEN = 200
 
     def _get_message_content_sync(self, message_id: str) -> str | None:
@@ -1066,12 +1166,77 @@ class FeishuChannel(BaseChannel):
             chat_type = message.chat_type
             msg_type = message.message_type
 
+            loop = asyncio.get_running_loop()
+            sender_name = await loop.run_in_executor(
+                None, self._get_user_name_sync, sender_id,
+            ) if sender_id != "unknown" else ""
+
             if chat_type == "group" and not self._is_group_message_for_bot(message):
                 logger.debug("Feishu: skipping group message (not mentioned)")
                 return
 
             # Add reaction
             await self._add_reaction(message_id, self.config.react_emoji)
+
+            # Build mention key-to-name map (e.g. "@_user_1" -> "@张三")
+            mention_map: dict[str, str] = {}
+            if message.mentions:
+                for m in message.mentions:
+                    if m.key and m.name:
+                        mention_map[m.key] = f"@{m.name}"
+
+            # Fetch quoted message content when replying/quoting
+            quote_text = ""
+            quote_media: list[str] = []
+            if message.parent_id:
+                loop = asyncio.get_running_loop()
+                parent_data = await loop.run_in_executor(
+                    None, self._get_message_sync, message.parent_id
+                )
+                if parent_data:
+                    p_type = parent_data["msg_type"]
+                    p_content_str = parent_data["content"]
+
+                    # Build mention map for the parent message
+                    parent_mention_map: dict[str, str] = {}
+                    for m in parent_data.get("mentions", []):
+                        if m.key and m.name:
+                            parent_mention_map[m.key] = f"@{m.name}"
+
+                    try:
+                        p_json = json.loads(p_content_str)
+                    except (json.JSONDecodeError, TypeError):
+                        p_json = {}
+
+                    if p_type == "image":
+                        fp, _ = await self._download_and_save_media(
+                            "image", p_json, message.parent_id
+                        )
+                        if fp:
+                            quote_media.append(fp)
+                        quote_text = "[Reply to: [quoted image]]\n"
+                    elif p_type == "sticker":
+                        quote_text = "[Reply to: [quoted sticker/emoji]]\n"
+                    elif p_type == "post":
+                        text, img_keys = _extract_post_content(p_json)
+                        for img_key in img_keys:
+                            fp, _ = await self._download_and_save_media(
+                                "image", {"image_key": img_key}, message.parent_id
+                            )
+                            if fp:
+                                quote_media.append(fp)
+                        raw = text or ""
+                        if raw:
+                            quote_text = f"[Reply to: {raw.strip()}]\n"
+                    else:
+                        raw = self._extract_message_text(p_type, p_content_str)
+                        if raw:
+                            quote_text = f"[Reply to: {raw.strip()}]\n"
+
+                    # Replace mention placeholders in quoted text
+                    if parent_mention_map and quote_text:
+                        for key, display in parent_mention_map.items():
+                            quote_text = quote_text.replace(key, display)
 
             # Parse content
             content_parts = []
@@ -1126,16 +1291,18 @@ class FeishuChannel(BaseChannel):
             root_id = getattr(message, "root_id", None) or None
             thread_id = getattr(message, "thread_id", None) or None
 
-            # Prepend quoted message text when the user replied to another message
-            if parent_id and self._client:
-                loop = asyncio.get_running_loop()
-                reply_ctx = await loop.run_in_executor(
-                    None, self._get_message_content_sync, parent_id
-                )
-                if reply_ctx:
-                    content_parts.insert(0, reply_ctx)
-
             content = "\n".join(content_parts) if content_parts else ""
+
+            # Replace mention placeholders with display names
+            if mention_map:
+                for key, display in mention_map.items():
+                    content = content.replace(key, display)
+
+            # Prepend quoted message and merge quoted media
+            if quote_text:
+                content = quote_text + content
+            if quote_media:
+                media_paths = quote_media + media_paths
 
             if not content and not media_paths:
                 return
@@ -1151,6 +1318,8 @@ class FeishuChannel(BaseChannel):
                     "message_id": message_id,
                     "chat_type": chat_type,
                     "msg_type": msg_type,
+                    "sender_name": sender_name,
+                    "sender_open_id": sender_id,
                     "parent_id": parent_id,
                     "root_id": root_id,
                     "thread_id": thread_id,
