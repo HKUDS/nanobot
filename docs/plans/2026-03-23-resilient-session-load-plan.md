@@ -1,10 +1,10 @@
-# Resilient Session Load Implementation Plan (v3)
+# Resilient Session Load Implementation Plan (v4)
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Make `SessionManager._load()` recover partial session data from corrupt JSONL files instead of discarding the entire session.
 
-**Architecture:** Refactor `_load()` to parse metadata and message lines individually with per-line error handling. Use `last_consolidated = len(messages)` fallback when `last_consolidated` is untrustworthy — no sentinel field, no cross-module changes.
+**Architecture:** Refactor `_load()` to parse metadata and message lines individually with per-line error handling. Use `last_consolidated = len(messages)` fallback when `last_consolidated` is untrustworthy — no sentinel field, no cross-module changes. Clamp `last_consolidated` to `[0, len(messages)]` for trusted-but-out-of-range values.
 
 **Tech Stack:** Python 3.11+, pytest, loguru, json
 
@@ -13,7 +13,7 @@
 **Branch:** `fix/resilient-session-load` (from `main`)
 **Target:** `main` (Bug Fix, no behavior changes for valid files)
 
-**Review findings addressed:** 11/11 (v2 deduplizierte Findings aus Runde 2)
+**Review findings addressed:** 13/13 (v3 deduplizierte Findings aus Runde 3)
 
 **Execution policy:** Tasks 1–6 may be executed autonomously. Task 7 (push) is autonomous. Task 8 (PR) requires **explicit user approval** before execution. The user may also choose to create the PR themselves.
 
@@ -70,6 +70,12 @@ def _write_session_file(path: Path, lines: list[str]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _write_session_file_bytes(path: Path, data: bytes) -> None:
+    """Helper: write raw bytes to a session JSONL file (for encoding tests)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+
+
 def _make_metadata_line(**overrides) -> str:
     """Helper: build a metadata JSONL line."""
     data = {
@@ -91,7 +97,7 @@ def _make_message_line(role: str, content: str, **kwargs) -> str:
 
 
 class TestCorruptMessageLines:
-    def test_load_truncated_last_line(self, tmp_session_manager: SessionManager, tmp_path: Path):
+    def test_load_truncated_last_line(self, tmp_session_manager: SessionManager):
         """Truncated JSON on last line: all previous messages should load."""
         path = tmp_session_manager._get_session_path("telegram:12345")
         lines = [
@@ -109,7 +115,7 @@ class TestCorruptMessageLines:
         assert session.messages[0]["content"] == "hello"
         assert session.messages[1]["content"] == "hi there"
 
-    def test_load_corrupt_middle_line(self, tmp_session_manager: SessionManager, tmp_path: Path):
+    def test_load_corrupt_middle_line(self, tmp_session_manager: SessionManager):
         """Invalid JSON in middle: that line skipped, before and after load."""
         path = tmp_session_manager._get_session_path("telegram:12345")
         lines = [
@@ -129,7 +135,7 @@ class TestCorruptMessageLines:
         assert session.messages[1]["content"] == "after"
         assert session.messages[2]["content"] == "response"
 
-    def test_load_all_lines_corrupt_returns_none(self, tmp_session_manager: SessionManager, tmp_path: Path):
+    def test_load_all_lines_corrupt_returns_none(self, tmp_session_manager: SessionManager):
         """All lines invalid: returns None (fresh session)."""
         path = tmp_session_manager._get_session_path("telegram:12345")
         lines = ["NOT JSON", "ALSO NOT {{{", "STILL BAD"]
@@ -139,7 +145,7 @@ class TestCorruptMessageLines:
 
         assert session is None
 
-    def test_load_completely_empty_file_returns_none(self, tmp_session_manager: SessionManager, tmp_path: Path):
+    def test_load_completely_empty_file_returns_none(self, tmp_session_manager: SessionManager):
         """Empty file: returns None."""
         path = tmp_session_manager._get_session_path("telegram:12345")
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -149,7 +155,7 @@ class TestCorruptMessageLines:
 
         assert session is None
 
-    def test_load_non_dict_line_skipped(self, tmp_session_manager: SessionManager, tmp_path: Path):
+    def test_load_non_dict_line_skipped(self, tmp_session_manager: SessionManager):
         """Non-dict JSON value (e.g. a string) is skipped."""
         path = tmp_session_manager._get_session_path("telegram:12345")
         lines = [
@@ -167,7 +173,7 @@ class TestCorruptMessageLines:
         assert session.messages[0]["content"] == "before"
         assert session.messages[1]["content"] == "after"
 
-    def test_load_bom_file(self, tmp_session_manager: SessionManager, tmp_path: Path):
+    def test_load_bom_file(self, tmp_session_manager: SessionManager):
         """File with UTF-8 BOM is parsed correctly."""
         path = tmp_session_manager._get_session_path("telegram:12345")
         content = "\ufeff" + "\n".join([
@@ -183,7 +189,7 @@ class TestCorruptMessageLines:
         assert len(session.messages) == 1
         assert session.messages[0]["content"] == "hello"
 
-    def test_load_recursion_error_line_skipped(self, tmp_session_manager: SessionManager, tmp_path: Path):
+    def test_load_recursion_error_line_skipped(self, tmp_session_manager: SessionManager):
         """Deeply nested JSON triggers RecursionError — line is skipped."""
         path = tmp_session_manager._get_session_path("telegram:12345")
         deep_json = '{"a":' * 50000 + '"b"' + '}' * 50000
@@ -201,6 +207,21 @@ class TestCorruptMessageLines:
         assert len(session.messages) == 2
         assert session.messages[0]["content"] == "before"
         assert session.messages[1]["content"] == "after"
+
+    def test_load_unicode_decode_error_returns_none(self, tmp_session_manager: SessionManager):
+        """Truncation mid-multi-byte UTF-8 → UnicodeDecodeError caught → None."""
+        path = tmp_session_manager._get_session_path("telegram:12345")
+        # Write bytes: valid metadata line + truncated line mid-é (0xc3 without 0xa9)
+        data = (
+            _make_metadata_line().encode("utf-8")
+            + b"\n"
+            + b'{"role":"user","content":"caf\xc3'
+        )
+        _write_session_file_bytes(path, data)
+
+        session = tmp_session_manager._load("telegram:12345")
+
+        assert session is None
 ```
 
 **Step 2: Run tests to verify they fail**
@@ -209,7 +230,7 @@ class TestCorruptMessageLines:
 cd /root/.nanobot/workspace/forks/nanobot
 python -m pytest tests/test_session_resilient_load.py -v
 ```
-Expected: FAIL — `_load()` returns `None` for truncated/corrupt files (current behavior)
+Expected: FAIL — `_load()` returns `None` for truncated/corrupt files (current behavior), but UnicodeDecodeError test may crash (current `except Exception` catches it)
 
 **Step 3: Commit test file**
 
@@ -220,18 +241,18 @@ git commit -m "test: add failing tests for corrupt message line handling"
 
 ---
 
-### Task 3: Write failing tests — corrupt metadata
+### Task 3: Write failing tests — corrupt metadata and edge cases
 
 **Files:**
 - Modify: `tests/test_session_resilient_load.py`
 
-**Step 1: Add tests for corrupt metadata and metadata-only sessions**
+**Step 1: Add tests for corrupt metadata, metadata-only sessions, and edge cases**
 
 Append to `tests/test_session_resilient_load.py`:
 
 ```python
 class TestCorruptMetadata:
-    def test_load_metadata_only_returns_session(self, tmp_session_manager: SessionManager, tmp_path: Path):
+    def test_load_metadata_only_returns_session(self, tmp_session_manager: SessionManager):
         """Metadata-only file with empty metadata dict: returns Session (not None)."""
         path = tmp_session_manager._get_session_path("telegram:12345")
         lines = [_make_metadata_line()]
@@ -244,7 +265,7 @@ class TestCorruptMetadata:
         assert session.metadata == {}
         assert session.last_consolidated == 5
 
-    def test_load_corrupt_metadata_created_at(self, tmp_session_manager: SessionManager, tmp_path: Path):
+    def test_load_corrupt_metadata_created_at(self, tmp_session_manager: SessionManager):
         """Invalid created_at in metadata: defaults to None, messages still load."""
         path = tmp_session_manager._get_session_path("telegram:12345")
         lines = [
@@ -259,7 +280,7 @@ class TestCorruptMetadata:
         assert len(session.messages) == 1
         assert session.created_at is not None  # falls back to datetime.now()
 
-    def test_load_corrupt_metadata_last_consolidated(self, tmp_session_manager: SessionManager, tmp_path: Path):
+    def test_load_corrupt_metadata_last_consolidated(self, tmp_session_manager: SessionManager):
         """Invalid last_consolidated: falls back to len(messages) to prevent re-consolidation."""
         path = tmp_session_manager._get_session_path("telegram:12345")
         lines = [
@@ -271,10 +292,10 @@ class TestCorruptMetadata:
         session = tmp_session_manager._load("telegram:12345")
 
         assert session is not None
-        assert session.last_consolidated == 1  # len(messages) — assume all loaded are consolidated
+        assert session.last_consolidated == 1  # len(messages)
         assert len(session.messages) == 1
 
-    def test_load_metadata_missing_fields(self, tmp_session_manager: SessionManager, tmp_path: Path):
+    def test_load_metadata_missing_fields(self, tmp_session_manager: SessionManager):
         """Metadata line with only _type: all fields get defaults, last_consolidated = len(messages)."""
         path = tmp_session_manager._get_session_path("telegram:12345")
         lines = [
@@ -287,11 +308,11 @@ class TestCorruptMetadata:
 
         assert session is not None
         assert session.metadata == {}
-        assert session.last_consolidated == 1  # len(messages) — missing field is untrustworthy
+        assert session.last_consolidated == 1  # len(messages)
         assert len(session.messages) == 1
 
-    def test_load_corrupt_metadata_json_with_valid_messages(self, tmp_session_manager: SessionManager, tmp_path: Path):
-        """Entire metadata line is invalid JSON, but message lines are valid — recovered with guard."""
+    def test_load_corrupt_metadata_json_with_valid_messages(self, tmp_session_manager: SessionManager):
+        """Entire metadata line is invalid JSON, but message lines are valid — recovered."""
         path = tmp_session_manager._get_session_path("telegram:12345")
         lines = [
             "{_type: metadata BROKEN JSON {{{",
@@ -304,7 +325,39 @@ class TestCorruptMetadata:
 
         assert session is not None
         assert len(session.messages) == 2
-        assert session.last_consolidated == 2  # len(messages) — no metadata parsed, untrustworthy
+        assert session.last_consolidated == 2  # len(messages) — no metadata parsed
+
+
+class TestLastConsolidatedBounds:
+    def test_load_negative_last_consolidated_clamped(self, tmp_session_manager: SessionManager):
+        """Negative last_consolidated is clamped to 0."""
+        path = tmp_session_manager._get_session_path("telegram:12345")
+        lines = [
+            _make_metadata_line(last_consolidated=-1),
+            _make_message_line("user", "hello"),
+        ]
+        _write_session_file(path, lines)
+
+        session = tmp_session_manager._load("telegram:12345")
+
+        assert session is not None
+        assert session.last_consolidated == 0
+        assert len(session.messages) == 1
+
+    def test_load_overflow_last_consolidated_clamped(self, tmp_session_manager: SessionManager):
+        """OverflowError on int(last_consolidated) triggers fallback to len(messages)."""
+        path = tmp_session_manager._get_session_path("telegram:12345")
+        lines = [
+            _make_metadata_line(last_consolidated=10**1000),
+            _make_message_line("user", "hello"),
+        ]
+        _write_session_file(path, lines)
+
+        session = tmp_session_manager._load("telegram:12345")
+
+        assert session is not None
+        assert session.last_consolidated == 1  # len(messages)
+        assert len(session.messages) == 1
 ```
 
 **Step 2: Run tests**
@@ -312,13 +365,13 @@ class TestCorruptMetadata:
 ```bash
 python -m pytest tests/test_session_resilient_load.py -v
 ```
-Expected: FAIL — current `_load()` returns None for all corrupt cases
+Expected: FAIL — current `_load()` returns None for corrupt cases, may crash on overflow
 
 **Step 3: Commit**
 
 ```bash
 git add tests/test_session_resilient_load.py
-git commit -m "test: add corrupt metadata and metadata-only session tests"
+git commit -m "test: add corrupt metadata, bounds, and encoding edge case tests"
 ```
 
 ---
@@ -421,20 +474,36 @@ Replace the entire `_load()` method with:
             if not recovered:
                 return None
 
-            # If last_consolidated is untrustworthy (corrupt/missing metadata),
-            # assume all loaded messages are already consolidated to prevent
-            # re-consolidation and duplicate MEMORY.md/HISTORY.md entries.
-            if last_consolidated_untrustworthy and messages:
+            # Consolidation safety: when last_consolidated is untrustworthy
+            # (corrupt/missing field, or metadata line entirely missing),
+            # assume all loaded messages are already consolidated.
+            if (last_consolidated_untrustworthy or not metadata_parsed) and messages:
                 last_consolidated = len(messages)
                 logger.warning(
-                    "Untrusted last_consolidated in session {} — assuming all {} loaded messages are consolidated",
+                    "Untrusted last_consolidated in session {} — assuming all {} loaded messages "
+                    "are consolidated (some may not have been summarized)",
                     key, len(messages),
                 )
+
+            # Bounds-clamping for trusted-but-out-of-range values.
+            # Covers negative values and index-shift from skipped lines.
+            if last_consolidated < 0:
+                logger.warning(
+                    "Negative last_consolidated ({}) in session {} — clamping to 0",
+                    last_consolidated, key,
+                )
+                last_consolidated = 0
+            elif last_consolidated > len(messages):
+                logger.warning(
+                    "last_consolidated ({}) exceeds loaded messages ({}) in session {} — clamping",
+                    last_consolidated, len(messages), key,
+                )
+                last_consolidated = len(messages)
 
             if skipped_count > 0:
                 logger.info(
                     "Session {} partially recovered: {}/{} lines loaded, {} skipped",
-                    key, total_lines - skipped_count, total_lines, skipped_count,
+                    key, len(messages) + (1 if metadata_parsed else 0), total_lines, skipped_count,
                 )
 
             return Session(
@@ -444,7 +513,7 @@ Replace the entire `_load()` method with:
                 metadata=metadata,
                 last_consolidated=last_consolidated,
             )
-        except OSError as e:
+        except (OSError, UnicodeDecodeError) as e:
             logger.warning("Failed to load session {} at {}: {}", key, path, e)
             return None
 ```
@@ -508,7 +577,7 @@ git commit -m "style: lint/format fixes" || true
 
 ---
 
-### Task 6: Verify all test scenarios manually
+### Task 6: Verify all test scenarios
 
 **Files:**
 - None (verification only)
@@ -518,19 +587,14 @@ git commit -m "style: lint/format fixes" || true
 ```bash
 python -m pytest tests/test_session_resilient_load.py -v --tb=short
 ```
-Expected: 12 tests, all PASS
+Expected: 15 tests, all PASS
 
 **Step 2: Verify specific edge cases**
 
 ```bash
-# Verify corrupt metadata + messages scenario
 python -m pytest tests/test_session_resilient_load.py::TestCorruptMetadata::test_load_corrupt_metadata_json_with_valid_messages -v
-
-# Verify missing fields scenario
-python -m pytest tests/test_session_resilient_load.py::TestCorruptMetadata::test_load_metadata_missing_fields -v
-
-# Verify RecursionError handling
-python -m pytest tests/test_session_resilient_load.py::TestCorruptMessageLines::test_load_recursion_error_line_skipped -v
+python -m pytest tests/test_session_resilient_load.py::TestCorruptMessageLines::test_load_unicode_decode_error_returns_none -v
+python -m pytest tests/test_session_resilient_load.py::TestLastConsolidatedBounds -v
 ```
 Expected: All PASS
 
@@ -543,7 +607,7 @@ Expected: All PASS
 
 ---
 
-### Task 7: Push to fork ⛔ GATE (autonomous)
+### Task 7: Push to fork (autonomous)
 
 **Step 1: Push feature branch to origin (fork)**
 
@@ -576,8 +640,9 @@ This PR makes session loading resilient:
 
 - **Per-line parsing**: Each JSONL line is parsed independently. A corrupt line is logged and skipped instead of failing the entire load.
 - **Robust metadata**: Each metadata field (`created_at`, `last_consolidated`, `metadata`) is parsed individually with safe defaults on failure.
-- **Consolidation safety**: When `last_consolidated` is corrupt or missing, it defaults to `len(messages)` (assume all loaded messages are already consolidated), preventing re-consolidation and duplicate MEMORY.md/HISTORY.md entries.
-- **Encoding resilience**: Uses `utf-8-sig` encoding (BOM-tolerant).
+- **Consolidation safety**: When `last_consolidated` is corrupt, missing, or the metadata line itself is invalid JSON, it defaults to `len(messages)` (assume all loaded messages are already consolidated), preventing re-consolidation and duplicate MEMORY.md/HISTORY.md entries.
+- **Bounds clamping**: Trusted `last_consolidated` values that fall outside `[0, len(messages)]` are clamped, covering negative values and index-shift from skipped lines.
+- **Encoding resilience**: Uses `utf-8-sig` encoding (BOM-tolerant). `UnicodeDecodeError` from mid-multi-byte truncation is caught gracefully.
 - **Defensive guards**: Non-dict JSON values are skipped. `RecursionError` and `OverflowError` are caught.
 - **Recovery logging**: Summary log after partial recovery (lines loaded vs skipped).
 
@@ -596,11 +661,14 @@ Process restart during `save()` (which uses `open("w")`) truncates the file befo
 - [x] Non-dict JSON line → skipped
 - [x] UTF-8 BOM file → parsed correctly
 - [x] RecursionError on deeply nested JSON → skipped
+- [x] Mid-multi-byte UTF-8 truncation → returns None (no crash)
 - [x] Metadata-only file (empty metadata dict) → returns Session (not None)
 - [x] Invalid created_at → safe defaults
 - [x] Invalid last_consolidated → fallback to len(messages)
 - [x] Missing metadata fields → safe defaults + len(messages) fallback
 - [x] Corrupt metadata JSON + valid messages → recovered with len(messages) fallback
+- [x] Negative last_consolidated → clamped to 0
+- [x] Overflow last_consolidated → fallback to len(messages)
 - [x] Existing session tests pass (no regression)' \
   --base main \
   --head data219:fix/resilient-session-load

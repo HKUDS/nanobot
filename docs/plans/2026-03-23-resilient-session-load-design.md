@@ -1,9 +1,9 @@
 # Design: Resilient Session Load
 
-**Datum:** 2026-03-23 (v3 — Plan-Review Runde 2 konsolidiert)
+**Datum:** 2026-03-23 (v4 — Plan-Review Runde 3 konsolidiert)
 **Repo:** HKUDS/nanobot
 **Branch:** `fix/resilient-session-load`
-**Target:** `main` (Bug Fix, keine Verhaltensänderung)
+**Target:** `main` (Bug Fix, keine Verhaltensänderung für valide Dateien)
 
 ## Problem
 
@@ -17,7 +17,8 @@
 |-------|----------|----------|----------|
 | v1 | 5× (code-review-master, skeptic-coding, skeptic-architecture, skeptic-complexity, code-review-excellence) | 12 (3B, 5M, 4m) | BLOCK |
 | v2 | 5× (gleicher Pool) | 20 → 11 dedupliziert (4B, 2M, 5m) | BLOCK |
-| v3 | — | — | PROCEED |
+| v3 | 5× (gleicher Pool) | 18 → 13 dedupliziert (2B, 2M, 9m) | → v4 |
+| v4 | — | — | PROCEED |
 
 ### v1 → v2 Änderungen
 - Backup gestrichen (löste 5 Findings)
@@ -27,25 +28,26 @@
 - `except OSError` statt `Exception`
 - `isinstance(data, dict)` + `_MAX_LINE_BYTES` Guards
 
-### v2 → v3 Änderungen (11 deduplizierte Findings adressiert)
+### v2 → v3 Änderungen (11 Findings adressiert)
+- Consolidation-Guard ersetzt durch `last_consolidated = len(messages)` Fallback
+- `_MAX_LINE_BYTES` gestrichen
+- `errors='replace'` gestrichen
+- `RecursionError` + `OverflowError` in except-Blöcke
+- `metadata_parsed` Tracking
+- metadata `isinstance` Check
+- Summary-Log
 
-**Consolidation-Guard komplett ersetzt** — der Sentinel-Ansatz war fundamentally flawed:
-- Nicht persistiert → save+restart killt den Flag (#1)
-- Nie zurückgesetzt → Consolidation permanent deaktiviert (#2)
-- Korrupte Metadata-Zeile → Guard nie gesetzt (#3)
-- Test/Code-Mismatch bei fehlendem Feld (#4)
-- Overengineered für das Problem (#6)
-
-**Neuer Ansatz:** `last_consolidated = len(messages)` als Fallback. Bedeutet "alle geladenen Messages gelten als konsolidiert." Schlimmster Fall: ein paar Messages werden nicht konsolidiert, korrigiert sich beim nächsten Budget-Trigger. Kein neues Session-Feld, keine memory.py-Änderung, kein Persistenzproblem.
-
-**Weitere Änderungen:**
-- `_MAX_LINE_BYTES` gestrichen (chars≠bytes, unrealistisches Szenario, valides JSON würde fälschlich gedroppt)
-- `errors="replace"` gestrichen (silent corruption ist schlimmer als klarer Fehler)
-- `RecursionError` zum inneren except hinzugefügt (#5)
-- `OverflowError` zum `int()` except hinzugefügt (#8)
-- metadata-Feld type-validiert (#7)
-- Summary-Log nach partieller Recovery (#10)
-- Consolidation-Warnung mit Remediation-Hinweis (#11)
+### v3 → v4 Änderungen (13 Findings adressiert)
+- **BLOCKER 1:** `metadata_parsed` wird jetzt im Fallback-Condition genutzt: `(last_consolidated_untrustworthy or not metadata_parsed) and messages`
+- **BLOCKER 2:** `except (OSError, UnicodeDecodeError)` — fängt auch Truncation mid-Multi-Byte
+- **MAJOR 1:** Negative `last_consolidated` wird auf 0 geclampt
+- **MAJOR 2:** `last_consolidated > len(messages)` wird auf `len(messages)` geclampt (deckt auch Index-Shift-Szenario)
+- **MINOR:** Summary-Log Formel und Condition synchronisiert
+- **MINOR:** `utf-8-sig` als defensive Maßnahme dokumentiert (kein evidenz-basierter Fix)
+- **MINOR:** `isinstance(raw_meta, dict)` als opportunistische Härtung dokumentiert
+- **MINOR:** Under-Consolidation Warning erweitert: "(some may not have been summarized)"
+- **MINOR:** Self-Correction Claim präzisiert: "self-corrects on next consolidation run if budget is exceeded"
+- **MINOR:** OverflowError + UnicodeDecodeError Tests hinzugefügt
 
 ## Lösung
 
@@ -55,7 +57,7 @@ Jedes Feld der metadata-line wird einzeln mit `try/except` umhüllt:
 
 - `created_at`: `datetime.fromisoformat()` — bei Fehler → `None`
 - `last_consolidated`: Explizite `"last_consolidated" not in data` Prüfung, dann `int()` — bei Fehler oder fehlend → `last_consolidated_untrustworthy = True`
-- `metadata`: `isinstance(raw_meta, dict)` Check — non-dict → `{}` + Warning
+- `metadata`: `isinstance(raw_meta, dict)` Check — non-dict → `{}` + Warning (opportunistische Härtung, nicht Teil des Truncation-Fix)
 
 ### 2. Message-Zeilen einzeln parsen
 
@@ -66,44 +68,50 @@ Jede JSONL-Zeile wird separat geparst:
 - Bad line → `logger.warning()` mit Zeilennummer, Session-Key UND Dateipfad
 - Zeile wird übersprungen, Rest wird normal geladen
 - Leere Zeilen und Whitespace werden weiterhin ignoriert
-- Encoding: `open(path, encoding="utf-8-sig")` — BOM-tolerant (strict error handling, kein `errors="replace"`)
+- Encoding: `open(path, encoding="utf-8-sig")` — BOM-tolerant (defensive Maßnahme für Windows-edited Files; `save()` schreibt nie BOM)
 
-### 3. Consolidation-Sicherheit ohne Sentinel
+### 3. Consolidation-Sicherheit
 
-**Problem (v2):** `_last_consolidated_recovered` Flag war nicht persistiert, nie zurückgesetzt, und bei komplett korrupter Metadata-Zeile nie gesetzt.
-
-**Lösung (v3):** Nach dem Parse-Loop, wenn `last_consolidated_untrustworthy` und Messages geladen wurden:
+**Fallback:** Wenn `last_consolidated` nicht vertrauenswürdig (korrupt, fehlend, oder Metadata-Zeile komplett kaputt):
 
 ```python
-if last_consolidated_untrustworthy and messages:
+if (last_consolidated_untrustworthy or not metadata_parsed) and messages:
     last_consolidated = len(messages)
-    logger.warning(
-        "Untrusted last_consolidated in session {} — assuming all {} loaded messages are consolidated",
-        key, len(messages),
-    )
 ```
 
-Das bedeutet: "Alle geladenen Messages gelten als bereits konsolidiert." Das ist konservativ und korrekt weil:
-- Bei korruptem/fehlendem `last_consolidated` wissen wir nicht wo die Consolidation-Grenze liegt
-- `len(messages)` ist der sicherste Annahme (keine Messages werden re-konsolidiert)
-- Beim nächsten echten Consolidation-Durchlauf wird `last_consolidated` auf den korrekten Wert gesetzt
-- Kein neues Session-Feld, keine memory.py-Änderung, kein Persistenzproblem
+Bedeutet: "Alle geladenen Messages gelten als bereits konsolidiert." Konservative Annahme die Duplikate in MEMORY.md/HISTORY.md verhindert. Trade-off: einige Messages die eigentlich noch nicht konsolidiert waren werden übersprungen — diese sind aber weiterhin in der JSONL-Datei und im LLM-Context.
+
+**Bounds-Clamping:** Für den Fall dass Metadata geparst wurde aber Werte außerhalb des gültigen Bereichs liegen:
+
+```python
+if last_consolidated < 0:
+    last_consolidated = 0
+elif last_consolidated > len(messages):
+    last_consolidated = len(messages)
+```
+
+Dies deckt auch das Index-Shift-Szenario ab (corrupte Lines vor der Consolidation-Grenze verschieben die Indizes). Schlimmster Fall: eine Nachricht die eigentlich unconsolidated war wird als consolidated behandelt — aber die History ist nie leer.
 
 ### 4. Summary-Log
 
-Nach dem Parse-Loop, wenn `recovered` und `skipped_count > 0`:
+Nach dem Parse-Loop, wenn `skipped_count > 0`:
 
 ```python
-if recovered and skipped_count > 0:
-    logger.info(
-        "Session {} partially recovered: {}/{} lines loaded, {} skipped",
-        key, len(messages) + (1 if metadata_parsed else 0), total_lines, skipped_count,
-    )
+logger.info(
+    "Session {} partially recovered: {}/{} lines loaded, {} skipped",
+    key, len(messages) + (1 if metadata_parsed else 0), total_lines, skipped_count,
+)
 ```
 
-### 5. Rückgabe-Logik
+### 5. Error-Handling
 
-`recovered` Flag wird in BEIDEN Branches gesetzt (metadata UND messages):
+- Inner per-line: `json.JSONDecodeError, RecursionError` → skip + Warning
+- Inner per-field: `ValueError, TypeError, OverflowError` → default + Warning
+- Outer: `except (OSError, UnicodeDecodeError)` — I/O-Fehler und Encoding-Fehler abfangen, aber keine programmatischen Fehler verschlucken
+- Non-dict JSON Werte: `isinstance(data, dict)` Check → skip
+- Non-dict metadata: `isinstance(raw_meta, dict)` Check → default `{}`
+
+### 6. Rückgabe-Logik
 
 | Zustand | Rückgabe |
 |---------|----------|
@@ -113,19 +121,11 @@ if recovered and skipped_count > 0:
 | Alles kaputt (nur Errors) | `None` (frische Session, aktuelles Verhalten) |
 | Datei existiert nicht | `None` (aktuelles Verhalten) |
 
-### 6. Error-Handling
-
-- Inner per-line: `json.JSONDecodeError, RecursionError` → skip + Warning
-- Inner per-field: `ValueError, TypeError, OverflowError` → default + Warning
-- Outer: `except OSError` — I/O-Fehler abfangen
-- Non-dict JSON Werte: `isinstance(data, dict)` Check → skip
-- Non-dict metadata: `isinstance(raw_meta, dict)` Check → default `{}`
-
 ## Files
 
 | File | Änderung |
 |------|----------|
-| `nanobot/session/manager.py` | `_load()` refactor (per-line, encoding, guards, summary log) |
+| `nanobot/session/manager.py` | `_load()` refactor (per-line, encoding, guards, clamping, summary log) |
 | `tests/test_session_resilient_load.py` | Neue Testdatei |
 
 **Keine Änderung an `memory.py`** — keine Cross-Module-Kopplung.
@@ -140,12 +140,15 @@ if recovered and skipped_count > 0:
 | `test_load_completely_empty_file_returns_none` | Leere Datei → `None` |
 | `test_load_non_dict_line_skipped` | JSON-Zeile ist String statt Dict → übersprungen |
 | `test_load_bom_file` | UTF-8 BOM in Datei → korrekt geladen |
+| `test_load_recursion_error_line_skipped` | Deep-nested JSON → `RecursionError` gefangen, übersprungen |
+| `test_load_unicode_decode_error_returns_none` | Mid-Multi-Byte Truncation → `None` statt Crash |
 | `test_load_metadata_only_returns_session` | Nur metadata-line, `metadata={}` → Session (nicht None!) |
 | `test_load_corrupt_metadata_created_at` | Invalid created_at → Default, Messages geladen |
 | `test_load_corrupt_metadata_last_consolidated` | Invalid last_consolidated → `len(messages)` |
 | `test_load_metadata_missing_fields` | Nur `_type` → Defaults, `last_consolidated=len(messages)` |
-| `test_load_corrupt_metadata_json_with_valid_messages` | Metadata-Zeile invalid JSON + Messages → geladen, `last_consolidated=len(messages)` |
-| `test_load_recursion_error_line_skipped` | Deep-nested JSON → `RecursionError` gefangen, übersprungen |
+| `test_load_corrupt_metadata_json_with_valid_messages` | Metadata-Zeile invalid JSON + Messages → `last_consolidated=len(messages)` |
+| `test_load_negative_last_consolidated_clamped` | `last_consolidated=-1` → geclampt auf 0 |
+| `test_load_overflow_last_consolidated_clamped` | `last_consolidated=1e999` → OverflowError → `len(messages)` |
 
 ## Ausgespart (Folge-PRs)
 
