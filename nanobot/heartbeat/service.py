@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
@@ -82,6 +83,11 @@ class HeartbeatService:
                 return None
         return None
 
+    def _has_active_tasks(self, content: str) -> bool:
+        """Lightweight pre-check for active tasks."""
+        # Check for open markdown checkboxes: - [ ] or * [ ]
+        return bool(re.search(r"^[*-]\s*\[\s\]", content, re.MULTILINE))
+
     async def _decide(self, content: str) -> tuple[str, str]:
         """Phase 1: ask LLM to decide skip/run via virtual tool call.
 
@@ -147,6 +153,11 @@ class HeartbeatService:
         content = self._read_heartbeat_file()
         if not content:
             logger.debug("Heartbeat: HEARTBEAT.md missing or empty")
+            return
+
+        # Skip LLM call if there are no active tasks (open checkboxes).
+        if not self._has_active_tasks(content):
+            logger.debug("Heartbeat: no active tasks found in HEARTBEAT.md (skipping LLM call)")
             return
 
         logger.info("Heartbeat: checking for tasks...")
