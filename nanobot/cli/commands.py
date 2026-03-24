@@ -993,10 +993,18 @@ def web(
         openviking_config=config.openviking,
     )
 
-    # Cron callback (with cron context protection)
+    # Set cron callback (needs agent + heartbeat)
     async def on_cron_job(job: CronJob) -> str | None:
+        """Execute a cron job through the agent (isolated or main session)."""
         from nanobot.agent.tools.cron import CronTool
         from nanobot.agent.tools.message import MessageTool
+        from nanobot.utils.evaluator import evaluate_response
+
+        reminder_note = (
+            "[Scheduled Task] Timer finished.\n\n"
+            f"Task '{job.name}' has been triggered.\n"
+            f"Scheduled instruction: {job.payload.message}"
+        )
 
         cron_tool = agent.tools.get("cron")
         cron_token = None
@@ -1004,42 +1012,35 @@ def web(
             cron_token = cron_tool.set_cron_context(True)
 
         try:
-            if job.session_target == "main":
-                event_text = f"[Scheduled Event: {job.name}]\n{job.payload.message}"
-                if job.wake_mode == "now":
-                    return await on_heartbeat_execute(event_text)
-                return event_text
-
-            # Isolated execution
-            reminder_note = f"[cron: {job.name}]\n\nScheduled instruction: {job.payload.message}"
-            d = job.delivery
-            ch = d.channel or job.payload.channel or "cli"
-            target = d.to or job.payload.to or "direct"
-
-            response = await agent.process_direct(
+            resp = await agent.process_direct(
                 reminder_note,
                 session_key=f"cron:{job.id}",
-                channel=ch,
-                chat_id=target,
+                channel=job.payload.channel or "cli",
+                chat_id=job.payload.to or "direct",
             )
+        finally:
+            if isinstance(cron_tool, CronTool) and cron_token is not None:
+                cron_tool.reset_cron_context(cron_token)
 
-            message_tool = agent.tools.get("message")
-            already_sent = isinstance(message_tool, MessageTool) and message_tool._sent_in_turn
+        response = resp.content if resp else ""
 
-            if not already_sent and d.mode == "announce" and target and response:
-                from nanobot.bus.events import OutboundMessage
-                await bus.publish_outbound(OutboundMessage(channel=ch, chat_id=target, content=response))
-            elif not already_sent and job.payload.deliver and job.payload.to and response:
+        message_tool = agent.tools.get("message")
+        if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+            return response
+
+        if job.payload.deliver and job.payload.to and response:
+            should_notify = await evaluate_response(
+                response, job.payload.message, provider, agent.model,
+            )
+            if should_notify:
                 from nanobot.bus.events import OutboundMessage
                 await bus.publish_outbound(OutboundMessage(
                     channel=job.payload.channel or "cli",
                     chat_id=job.payload.to,
-                    content=response or "",
+                    content=response,
                 ))
-            return response
-        finally:
-            if isinstance(cron_tool, CronTool) and cron_token is not None:
-                cron_tool.reset_cron_context(cron_token)
+        return response
+
     cron.on_job = on_cron_job
 
     # Channel manager (web channel will be created here since we set enabled=True)
