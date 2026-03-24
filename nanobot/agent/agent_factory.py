@@ -27,7 +27,6 @@ if TYPE_CHECKING:
     from nanobot.agent.consolidation import ConsolidationOrchestrator
     from nanobot.agent.context import ContextBuilder
     from nanobot.agent.loop import AgentLoop
-    from nanobot.agent.mission import MissionManager
     from nanobot.bus.queue import MessageBus
     from nanobot.config.schema import (
         AgentConfig,
@@ -36,6 +35,7 @@ if TYPE_CHECKING:
         ExecToolConfig,
         RoutingConfig,
     )
+    from nanobot.coordination.mission import MissionManager
     from nanobot.cron.service import CronService
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import SessionManager
@@ -115,7 +115,7 @@ def _build_tools(
 
     Returns a ``_ToolBuildResult`` with the constructed subsystems.
     """
-    from nanobot.agent.mission import MissionManager
+    from nanobot.coordination.mission import MissionManager
     from nanobot.tools.capability import CapabilityRegistry
     from nanobot.tools.executor import ToolExecutor
     from nanobot.tools.registry import ToolRegistry as _ToolRegistry
@@ -250,16 +250,16 @@ def build_agent(
     and test helpers should use this instead of ``AgentLoop()`` directly.
     """
     from nanobot.agent.context import ContextBuilder
-    from nanobot.agent.delegation import DelegationConfig, DelegationDispatcher
-    from nanobot.agent.delegation_advisor import DelegationAdvisor
     from nanobot.agent.loop import AgentLoop
     from nanobot.agent.message_processor import MessageProcessor
     from nanobot.agent.prompt_loader import prompts
-    from nanobot.agent.role_switching import TurnRoleManager
     from nanobot.agent.streaming import StreamingLLMCaller
     from nanobot.agent.turn_orchestrator import TurnOrchestrator
     from nanobot.agent.verifier import AnswerVerifier
     from nanobot.config.schema import ExecToolConfig as _ExecToolConfig
+    from nanobot.coordination.delegation import DelegationConfig, DelegationDispatcher
+    from nanobot.coordination.delegation_advisor import DelegationAdvisor
+    from nanobot.coordination.role_switching import TurnRoleManager
     from nanobot.memory import MemoryStore
     from nanobot.session.manager import SessionManager as _SessionManager
 

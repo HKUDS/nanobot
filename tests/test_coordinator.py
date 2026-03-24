@@ -15,14 +15,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.coordinator import (
+from nanobot.config.schema import AgentConfig, AgentRoleConfig, RoutingConfig
+from nanobot.coordination.coordinator import (
     DEFAULT_ROLES,
     ClassificationResult,
     Coordinator,
     build_default_registry,
 )
-from nanobot.agent.registry import AgentRegistry
-from nanobot.config.schema import AgentConfig, AgentRoleConfig, RoutingConfig
+from nanobot.coordination.registry import AgentRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse
 from tests.helpers import ScriptedProvider
 
@@ -427,8 +427,8 @@ class TestOrchestrationOverrideEdgeCases:
 
     async def test_override_skipped_when_pm_not_registered(self) -> None:
         """When pm role is absent from the registry, override must not fire."""
-        from nanobot.agent.registry import AgentRegistry
         from nanobot.config.schema import AgentRoleConfig
+        from nanobot.coordination.registry import AgentRegistry
 
         provider = FakeProvider(
             '{"role": "code", "confidence": 0.9, '

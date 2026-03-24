@@ -14,8 +14,8 @@ from typing import Any
 import pytest
 from conftest import FakeProvider
 
-from nanobot.agent.coordinator import Coordinator, build_default_registry
 from nanobot.config.schema import AgentConfig
+from nanobot.coordination.coordinator import Coordinator, build_default_registry
 from nanobot.providers.base import LLMProvider
 from nanobot.tools.builtin.delegate import _CycleError
 
@@ -158,7 +158,7 @@ class TestDispatchRecordsTrace:
 
     async def test_cycle_block_records_trace(self, tmp_path: Path) -> None:
         """Cycle detection records delegate_cycle_blocked in trace."""
-        from nanobot.agent.delegation import _delegation_ancestry
+        from nanobot.coordination.delegation import _delegation_ancestry
 
         loop = _make_loop(tmp_path)
 

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from nanobot.agent.registry import AgentRegistry
 from nanobot.config.schema import AgentRoleConfig
+from nanobot.coordination.registry import AgentRegistry
 
 
 def _role(name: str, *, enabled: bool = True, description: str = "") -> AgentRoleConfig:

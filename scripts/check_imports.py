@@ -16,11 +16,10 @@ from pathlib import Path
 # dotted path starts with one of the forbidden prefixes.
 RULES: list[tuple[str, list[str]]] = [
     ("nanobot/channels/**/*.py", [
-        "nanobot.agent.loop",
-        "nanobot.tools.executor",
-        "nanobot.agent.delegation",
+        "nanobot.agent",
         "nanobot.tools",
         "nanobot.memory",
+        "nanobot.coordination",
     ]),
     ("nanobot/providers/**/*.py", [
         "nanobot.agent",

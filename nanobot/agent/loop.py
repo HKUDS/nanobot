@@ -48,12 +48,12 @@ from nanobot.agent.observability import (
     update_current_span,
 )
 from nanobot.agent.reaction import classify_reaction
-from nanobot.agent.role_switching import TurnContext
 from nanobot.agent.tracing import TraceContext
 from nanobot.agent.turn_types import TurnState
 from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import DeliveryResult, InboundMessage, OutboundMessage, ReactionEvent
 from nanobot.config.schema import AgentRoleConfig
+from nanobot.coordination.role_switching import TurnContext
 from nanobot.session.manager import Session
 from nanobot.tools.builtin.email import CheckEmailTool
 from nanobot.tools.builtin.feedback import FeedbackTool
@@ -61,7 +61,7 @@ from nanobot.tools.builtin.message import MessageTool
 
 if TYPE_CHECKING:
     from nanobot.agent.agent_components import _AgentComponents
-    from nanobot.agent.coordinator import ClassificationResult, Coordinator
+    from nanobot.coordination.coordinator import ClassificationResult, Coordinator
 
 
 _DEFAULT_CONFIDENCE_THRESHOLD: float = (
@@ -515,7 +515,7 @@ class AgentLoop:
         if self._coordinator is not None:
             return
 
-        from nanobot.agent.coordinator import DEFAULT_ROLES, Coordinator
+        from nanobot.coordination.coordinator import DEFAULT_ROLES, Coordinator
 
         for role in DEFAULT_ROLES:
             self._capabilities.register_role(role)

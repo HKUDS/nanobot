@@ -38,24 +38,27 @@ Before committing, also review documentation: check that READMEs, CHANGELOG, ADR
 
 ```
 nanobot/
-├── agent/                # Core agent engine
+├── agent/                # Core agent engine (orchestration only)
 │   ├── loop.py          # Plan-Act-Observe-Reflect main loop
+│   ├── turn_orchestrator.py # PAOR state machine
+│   ├── message_processor.py # Per-message pipeline
 │   ├── streaming.py     # Streaming LLM call with think-tag stripping
 │   ├── verifier.py      # Answer verification via LLM + grounding confidence
-│   ├── consolidation.py # Memory consolidation orchestration + fallback archival
+│   ├── failure.py       # Failure classification + tool-call loop detection
 │   ├── context.py       # Prompt assembly + token budgeting
-│   ├── coordinator.py   # Multi-agent intent routing, role classification
-│   ├── delegation.py    # Delegation routing, cycle detection, contract construction
-│   ├── tool_executor.py # Tool batching (parallel readonly / sequential write)
-│   ├── registry.py      # AgentRegistry: maps role names to AgentRoleConfig
-│   ├── scratchpad.py    # Session-scoped JSONL artifact sharing (multi-agent)
-│   ├── skills.py        # Skill discovery and loading
-│   ├── mission.py       # Background mission manager (async delegated tasks)
-│   ├── capability.py    # Unified capability registry (ADR-009): ToolRegistry + SkillsLoader + AgentRegistry
-│   ├── failure.py       # Failure classification + tool-call loop detection (FailureClass, ToolCallTracker)
-│   ├── tool_loop.py     # Shared lightweight think→act→observe loop
+│   ├── consolidation.py # Memory consolidation orchestration
 │   ├── observability.py # Langfuse OTEL tracing: init, shutdown, spans, scoring
 │   ├── tracing.py       # Correlation IDs via contextvars, structured log binding
+│   ├── agent_factory.py # Composition root: build_agent()
+│   └── skills.py        # Skill discovery and loading
+├── coordination/         # Multi-agent routing and delegation
+│   ├── coordinator.py   # Intent routing, role classification
+│   ├── delegation.py    # Delegation routing, cycle detection, contracts
+│   ├── delegation_advisor.py # Delegation heuristics
+│   ├── registry.py      # AgentRegistry: maps role names to AgentRoleConfig
+│   ├── mission.py       # Background mission manager (async delegated tasks)
+│   ├── scratchpad.py    # Session-scoped JSONL artifact sharing
+│   └── role_switching.py # Turn-scoped role management
 ├── tools/               # Tool system (top-level bounded context)
 │   ├── base.py          # Tool ABC + ToolResult dataclass
 │   ├── registry.py      # ToolRegistry — dynamic registration + parallel/sequential execution
@@ -239,7 +242,7 @@ Use worktrees to isolate experimental or parallel work from the main checkout.
 
 ### Module Boundaries
 
-- `channels/` must **never** import from `agent/`, `tools/`, or `memory/`
+- `channels/` must **never** import from `agent/`, `tools/`, `memory/`, or `coordination/`
 - `providers/` must **never** import from `agent/` or `channels/`
 - `config/` must **never** import from `agent/`, `channels/`, or `providers/`
 - `bus/` must **never** import from `agent/`, `channels/`, or `providers/`

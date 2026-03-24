@@ -686,13 +686,13 @@ class TestDelegationDepthLimit:
         import asyncio
         from unittest.mock import MagicMock
 
-        from nanobot.agent.delegation import (
+        from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
+        from nanobot.coordination.delegation import (
             MAX_DELEGATION_DEPTH,
             DelegationConfig,
             DelegationDispatcher,
             _delegation_ancestry,
         )
-        from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
         from nanobot.tools.builtin.delegate import _CycleError
 
         provider = ScriptedProvider([])
@@ -729,7 +729,7 @@ class TestDelegationDepthLimit:
 
     def test_depth_below_limit_passes(self, tmp_path: Path):
         """dispatch() does not raise when ancestry depth < MAX_DELEGATION_DEPTH."""
-        from nanobot.agent.delegation import (
+        from nanobot.coordination.delegation import (
             MAX_DELEGATION_DEPTH,
             _delegation_ancestry,
         )
@@ -741,7 +741,7 @@ class TestDelegationDepthLimit:
             # Just check no CycleError for depth check; dispatch may still fail
             # for other reasons (no scripted response), so we only check the
             # error type.
-            from nanobot.agent.delegation import MAX_DELEGATION_DEPTH as MDD
+            from nanobot.coordination.delegation import MAX_DELEGATION_DEPTH as MDD
 
             assert len(ancestry) < MDD  # sanity
         finally:

@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from nanobot.agent.role_switching import TurnRoleManager
 from nanobot.config.schema import AgentRoleConfig
+from nanobot.coordination.role_switching import TurnRoleManager
 
 # -- Fakes satisfying _LoopLike Protocol ----------------------------------
 

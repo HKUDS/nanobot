@@ -13,10 +13,10 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from nanobot.agent.prompt_loader import prompts
-from nanobot.agent.task_types import TASK_TYPES
+from nanobot.coordination.task_types import TASK_TYPES
 
 if TYPE_CHECKING:
-    from nanobot.agent.scratchpad import Scratchpad
+    from nanobot.coordination.scratchpad import Scratchpad
 
 __all__ = [
     "_SCRATCHPAD_INJECTION_LIMIT",

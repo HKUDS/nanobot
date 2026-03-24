@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from nanobot.tools.base import Tool, ToolResult
 
 if TYPE_CHECKING:
-    from nanobot.agent.scratchpad import Scratchpad
+    from nanobot.coordination.scratchpad import Scratchpad
 
 
 class ScratchpadWriteTool(Tool):

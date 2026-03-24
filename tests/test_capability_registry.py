@@ -384,7 +384,7 @@ class TestIntrospection:
         assert len(all_caps) == 3
 
     def test_property_accessors(self) -> None:
-        from nanobot.agent.registry import AgentRegistry
+        from nanobot.coordination.registry import AgentRegistry
 
         tr = ToolRegistry()
         reg = CapabilityRegistry(tool_registry=tr)

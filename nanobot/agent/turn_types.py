@@ -20,8 +20,8 @@ from nanobot.agent.failure import ToolCallTracker
 
 if TYPE_CHECKING:
     from nanobot.agent.callbacks import ProgressCallback
-    from nanobot.agent.coordinator import ClassificationResult
-    from nanobot.agent.delegation_advisor import DelegationAction
+    from nanobot.coordination.coordinator import ClassificationResult
+    from nanobot.coordination.delegation_advisor import DelegationAction
 
 
 @dataclass(slots=True)

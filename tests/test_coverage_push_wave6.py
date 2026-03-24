@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.delegation import _delegation_ancestry
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage, ReactionEvent
+from nanobot.coordination.delegation import _delegation_ancestry
 from nanobot.memory.extractor import MemoryExtractor
 from nanobot.memory.graph import KnowledgeGraph
 from nanobot.memory.retrieval_planner import RetrievalPlanner
@@ -364,7 +364,7 @@ async def test_loop_run_agent_nudge_and_reaction_and_close_paths(
 
 
 async def test_loop_dispatch_delegation_route_and_exception_paths(tmp_path: Path) -> None:
-    from nanobot.agent.delegation import DelegationDispatcher
+    from nanobot.coordination.delegation import DelegationDispatcher
 
     loop = object.__new__(AgentLoop)
     loop.role_name = "general"

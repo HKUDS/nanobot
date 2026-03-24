@@ -96,7 +96,7 @@ class TestCapabilityRegistryWiring:
 
     def test_agent_registry_always_present(self, tmp_path: Path) -> None:
         """agent_registry is always set (never None) — LAN-150."""
-        from nanobot.agent.registry import AgentRegistry
+        from nanobot.coordination.registry import AgentRegistry
 
         loop = _make_loop(tmp_path)
         assert isinstance(loop._capabilities.agent_registry, AgentRegistry)
@@ -227,7 +227,7 @@ class TestCoordinatorRoleWiring:
 
     def test_no_routing_config_leaves_agent_registry_empty(self, tmp_path: Path) -> None:
         """Without routing, agent_registry exists but has no roles — LAN-150."""
-        from nanobot.agent.registry import AgentRegistry
+        from nanobot.coordination.registry import AgentRegistry
 
         loop = _make_loop(tmp_path)
         loop._routing_config = None

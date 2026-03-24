@@ -30,20 +30,20 @@ from nanobot.agent.callbacks import (
 )
 from nanobot.agent.compression import estimate_messages_tokens, summarize_and_compress
 from nanobot.agent.context import ContextBuilder
-from nanobot.agent.delegation import DelegationDispatcher
 from nanobot.agent.failure import FailureClass, ToolCallTracker, _build_failure_prompt
 from nanobot.agent.prompt_loader import PromptLoader
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
-from nanobot.agent.task_types import has_parallel_structure
 from nanobot.agent.tracing import bind_trace
 from nanobot.agent.turn_types import TurnResult as TurnResult  # re-export
 from nanobot.agent.turn_types import TurnState as TurnState  # re-export
 from nanobot.agent.verifier import AnswerVerifier
+from nanobot.coordination.delegation import DelegationDispatcher
+from nanobot.coordination.task_types import has_parallel_structure
 from nanobot.tools.executor import ToolExecutor
 
 if TYPE_CHECKING:
-    from nanobot.agent.delegation_advisor import DelegationAdvisor
     from nanobot.config.schema import AgentConfig
+    from nanobot.coordination.delegation_advisor import DelegationAdvisor
     from nanobot.providers.base import LLMProvider, LLMResponse
 
 # Tools whose arguments may contain sensitive data (file contents, credentials,
@@ -254,7 +254,7 @@ class TurnOrchestrator:
         context_budget = int(context_window * _CONTEXT_RESERVE_RATIO) if context_window else 0
 
         # --- PLAN phase: inject planning prompt for complex tasks ----------
-        from nanobot.agent.delegation_advisor import DelegationAction
+        from nanobot.coordination.delegation_advisor import DelegationAction
 
         _raw_pe = getattr(self._config, "planning_enabled", False)
         planning_enabled = _raw_pe if isinstance(_raw_pe, bool) else False
@@ -733,7 +733,7 @@ class TurnOrchestrator:
         Mutates ``state`` in-place: updates ``last_delegation_advice`` and may
         filter ``tools_def_cache`` when delegate tools are removed.
         """
-        from nanobot.agent.delegation_advisor import DelegationAction
+        from nanobot.coordination.delegation_advisor import DelegationAction
 
         had_delegations = any(tc.name in _DELEGATION_TOOL_NAMES for tc in response.tool_calls)
 

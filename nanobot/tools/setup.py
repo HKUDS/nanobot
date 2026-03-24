@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-from nanobot.agent.scratchpad import Scratchpad
+from nanobot.coordination.scratchpad import Scratchpad
 from nanobot.tools.builtin.cron import CronTool
 from nanobot.tools.builtin.delegate import DelegateParallelTool, DelegateTool
 from nanobot.tools.builtin.email import CheckEmailTool
@@ -37,9 +37,9 @@ from nanobot.tools.builtin.web import WebFetchTool, WebSearchTool
 from nanobot.tools.result_cache import CacheGetSliceTool, ToolResultCache
 
 if TYPE_CHECKING:
-    from nanobot.agent.mission import MissionManager
     from nanobot.agent.skills import SkillsLoader
     from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
+    from nanobot.coordination.mission import MissionManager
     from nanobot.cron.service import CronService
     from nanobot.tools.capability import CapabilityRegistry
 

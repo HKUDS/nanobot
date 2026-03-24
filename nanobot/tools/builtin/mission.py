@@ -10,7 +10,7 @@ from nanobot.errors import ToolExecutionError
 from nanobot.tools.base import Tool, ToolResult
 
 if TYPE_CHECKING:
-    from nanobot.agent.mission import MissionManager
+    from nanobot.coordination.mission import MissionManager
 
 
 class MissionStartTool(Tool):
@@ -170,7 +170,7 @@ class MissionListTool(Tool):
 
     async def execute(self, status_filter: str = "all", **kwargs: Any) -> ToolResult:  # type: ignore[override]
         """Return a formatted list of missions."""
-        from nanobot.agent.mission import MissionStatus
+        from nanobot.coordination.mission import MissionStatus
 
         missions = self._manager.list_all()
         if not missions:

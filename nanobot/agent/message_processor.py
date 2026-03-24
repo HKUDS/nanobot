@@ -28,7 +28,6 @@ from nanobot.agent.callbacks import ProgressCallback
 from nanobot.agent.consolidation import ConsolidationOrchestrator
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.observability import update_current_span
-from nanobot.agent.role_switching import TurnRoleManager
 from nanobot.agent.tracing import TraceContext, bind_trace
 from nanobot.agent.turn_types import Orchestrator, TurnState
 from nanobot.agent.verifier import AnswerVerifier
@@ -36,15 +35,16 @@ from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig
+from nanobot.coordination.role_switching import TurnRoleManager
 from nanobot.session.manager import Session, SessionManager
 from nanobot.tools.builtin.message import MessageTool
 from nanobot.tools.builtin.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
 
 if TYPE_CHECKING:
-    from nanobot.agent.coordinator import ClassificationResult
-    from nanobot.agent.delegation import DelegationDispatcher
-    from nanobot.agent.mission import MissionManager
-    from nanobot.agent.scratchpad import Scratchpad
+    from nanobot.coordination.coordinator import ClassificationResult
+    from nanobot.coordination.delegation import DelegationDispatcher
+    from nanobot.coordination.mission import MissionManager
+    from nanobot.coordination.scratchpad import Scratchpad
     from nanobot.providers.base import LLMProvider
     from nanobot.tools.executor import ToolExecutor
 
@@ -607,7 +607,7 @@ class MessageProcessor:
 
     def _ensure_scratchpad(self, session_key: str) -> None:
         """Initialise (or swap) the per-session scratchpad and update tools."""
-        from nanobot.agent.scratchpad import Scratchpad
+        from nanobot.coordination.scratchpad import Scratchpad
         from nanobot.utils.helpers import safe_filename
 
         safe_key = safe_filename(session_key.replace(":", "_"))
