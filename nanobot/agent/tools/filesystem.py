@@ -96,7 +96,7 @@ class ReadFileTool(_FsTool):
     async def execute(self, path: str | None = None, offset: int = 1, limit: int | None = None, **kwargs: Any) -> Any:
         try:
             if not path:
-                return f"Error: File not found: {path}"
+                return "Error reading file: Unknown path"
             fp = self._resolve(path)
             if not fp.exists():
                 return f"Error: File not found: {path}"
@@ -264,7 +264,7 @@ class EditFileTool(_FsTool):
             if old_text is None:
                 raise ValueError("Unknown old_text")
             if new_text is None:
-                raise ValueError("Unknown next_text")
+                raise ValueError("Unknown new_text")
 
             fp = self._resolve(path)
             if not fp.exists():
