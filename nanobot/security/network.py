@@ -94,11 +94,29 @@ def validate_resolved_url(url: str) -> tuple[bool, str]:
     return True, ""
 
 
-def contains_internal_url(command: str) -> bool:
-    """Return True if the command string contains a URL targeting an internal/private address."""
+def contains_internal_url(command: str, allowed_hosts: list[str] | None = None) -> bool:
+    """Return True if the command string contains a URL targeting an internal/private address.
+
+    Args:
+        command: The command string to check
+        allowed_hosts: Optional list of allowed hostnames/IPs to bypass the check
+
+    Returns:
+        True if the command contains a blocked internal URL, False otherwise
+    """
+    allowed_hosts = allowed_hosts or []
     for m in _URL_RE.finditer(command):
         url = m.group(0)
-        ok, _ = validate_url_target(url)
+        ok, error_msg = validate_url_target(url)
         if not ok:
+            # Check if this URL is in the allowed hosts list
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                hostname = parsed.hostname
+                if hostname and hostname in allowed_hosts:
+                    continue  # Allow this URL
+            except Exception:
+                pass
             return True
     return False
