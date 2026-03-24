@@ -11,11 +11,17 @@ helper invoked by ``_build_tools()``.
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from nanobot.agent.agent_components import _AgentComponents
+from nanobot.agent.agent_components import (
+    _AgentComponents,
+    _CoreConfig,
+    _InfraConfig,
+    _Subsystems,
+)
 
 if TYPE_CHECKING:
     from nanobot.agent.capability import CapabilityRegistry
@@ -24,10 +30,6 @@ if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
     from nanobot.agent.mission import MissionManager
     from nanobot.agent.tool_executor import ToolExecutor
-    from nanobot.agent.tools.cron import CronTool
-    from nanobot.agent.tools.feedback import FeedbackTool
-    from nanobot.agent.tools.message import MessageTool
-    from nanobot.agent.tools.mission import MissionStartTool
     from nanobot.agent.tools.registry import ToolRegistry
     from nanobot.agent.tools.result_cache import ToolResultCache
     from nanobot.bus.queue import MessageBus
@@ -46,6 +48,17 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class _ToolBuildResult:
+    """Named result struct for ``_build_tools()``."""
+
+    tools: ToolExecutor
+    tool_registry: ToolRegistry
+    capabilities: CapabilityRegistry
+    result_cache: ToolResultCache
+    missions: MissionManager
 
 
 def _build_rollout_overrides(config: AgentConfig) -> dict:
@@ -97,29 +110,15 @@ def _build_tools(
     exec_config: ExecToolConfig,
     role_config: AgentRoleConfig | None,
     cron_service: CronService | None,
-) -> tuple[
-    ToolExecutor,
-    CapabilityRegistry,
-    ToolResultCache,
-    MissionManager,
-    MessageTool | None,
-    FeedbackTool | None,
-    MissionStartTool | None,
-    CronTool | None,
-]:
+) -> _ToolBuildResult:
     """Construct and wire the tool / capability layer.
 
-    Returns a tuple of ``(tools, capabilities, result_cache, missions,
-    ctx_message_tool, ctx_feedback_tool, ctx_mission_tool, ctx_cron_tool)``.
+    Returns a ``_ToolBuildResult`` with the constructed subsystems.
     """
     from nanobot.agent.capability import CapabilityRegistry
     from nanobot.agent.mission import MissionManager
     from nanobot.agent.tool_executor import ToolExecutor
     from nanobot.agent.tool_setup import register_default_tools
-    from nanobot.agent.tools.cron import CronTool
-    from nanobot.agent.tools.feedback import FeedbackTool
-    from nanobot.agent.tools.message import MessageTool
-    from nanobot.agent.tools.mission import MissionStartTool
     from nanobot.agent.tools.registry import ToolRegistry as _ToolRegistry
     from nanobot.agent.tools.result_cache import ToolResultCache
 
@@ -173,27 +172,12 @@ def _build_tools(
             skills_loader=context.skills,
         )
 
-    # Cache typed tool references for O(1) context updates in _set_tool_context.
-    _msg_t = tools.get("message")
-    ctx_message_tool: MessageTool | None = _msg_t if isinstance(_msg_t, MessageTool) else None
-    _fb_t = tools.get("feedback")
-    ctx_feedback_tool: FeedbackTool | None = _fb_t if isinstance(_fb_t, FeedbackTool) else None
-    _ms_t = tools.get("mission_start")
-    ctx_mission_tool: MissionStartTool | None = (
-        _ms_t if isinstance(_ms_t, MissionStartTool) else None
-    )
-    _cr_t = tools.get("cron")
-    ctx_cron_tool: CronTool | None = _cr_t if isinstance(_cr_t, CronTool) else None
-
-    return (
-        tools,
-        capabilities,
-        result_cache,
-        missions,
-        ctx_message_tool,
-        ctx_feedback_tool,
-        ctx_mission_tool,
-        ctx_cron_tool,
+    return _ToolBuildResult(
+        tools=tools,
+        tool_registry=capabilities.tool_registry,
+        capabilities=capabilities,
+        result_cache=result_cache,
+        missions=missions,
     )
 
 
@@ -317,16 +301,7 @@ def build_agent(
     sessions = session_manager or _SessionManager(config.workspace_path)
 
     # 6. Build tools
-    (
-        tools,
-        capabilities,
-        result_cache,
-        missions,
-        ctx_message_tool,
-        ctx_feedback_tool,
-        ctx_mission_tool,
-        ctx_cron_tool,
-    ) = _build_tools(
+    _tool_build = _build_tools(
         tool_registry=tool_registry,
         context=context,
         provider=provider,
@@ -344,7 +319,7 @@ def build_agent(
     # 7. Wire memory
     consolidator = _wire_memory(context=context, config=config)
 
-    # 8. Construct DelegationDispatcher
+    # 8. Construct DelegationDispatcher (tools wired at construction)
     dispatcher = DelegationDispatcher(
         config=DelegationConfig(
             workspace=config.workspace_path,
@@ -358,6 +333,7 @@ def build_agent(
             role_name=role_config.name if role_config else "",
         ),
         provider=provider,
+        tools=_tool_build.tools,
         max_delegation_depth=config.max_delegation_depth,
     )
 
@@ -386,7 +362,7 @@ def build_agent(
     # 12. Construct TurnOrchestrator
     orchestrator = TurnOrchestrator(
         llm_caller=llm_caller,
-        tool_executor=tools,
+        tool_executor=_tool_build.tools,
         verifier=verifier,
         dispatcher=dispatcher,
         delegation_advisor=delegation_advisor,
@@ -398,14 +374,15 @@ def build_agent(
         role_name=role_config.name if role_config else "",
     )
 
-    # 13. Construct MessageProcessor (role_manager=None placeholder)
+    # 13. Construct MessageProcessor (role_manager wired post-construction
+    #     via set_role_manager; span_module passed at construction time)
     processor = MessageProcessor(
         orchestrator=orchestrator,
         dispatcher=dispatcher,
-        missions=missions,
+        missions=_tool_build.missions,
         context=context,
         sessions=sessions,
-        tools=tools,
+        tools=_tool_build.tools,
         consolidator=consolidator,
         verifier=verifier,
         bus=bus,
@@ -415,19 +392,19 @@ def build_agent(
         role_manager=None,
         provider=provider,
         model=model,
+        span_module=sys.modules["nanobot.agent.loop"],
     )
 
-    # 14. Pack _AgentComponents
-    components = _AgentComponents(
-        bus=bus,
-        provider=provider,
-        config=config,
-        workspace=config.workspace_path,
+    # 14. Pack _AgentComponents (nested groups)
+    _core = _CoreConfig(
         model=model,
         temperature=temperature,
         max_iterations=max_iterations,
+        workspace=config.workspace_path,
         role_config=role_config,
         role_name=role_config.name if role_config else "",
+    )
+    _infra = _InfraConfig(
         routing_config=routing_config,
         channels_config=channels_config,
         mcp_servers=mcp_servers or {},
@@ -435,14 +412,16 @@ def build_agent(
         exec_config=resolved_exec_config,
         cron_service=cron_service,
         memory_rollout_overrides=memory_rollout_overrides,
+    )
+    _subs = _Subsystems(
         memory=memory,
         context=context,
         sessions=sessions,
-        tools=tools,
-        tool_registry=capabilities.tool_registry,
-        capabilities=capabilities,
-        result_cache=result_cache,
-        missions=missions,
+        tools=_tool_build.tools,
+        tool_registry=_tool_build.tool_registry,
+        capabilities=_tool_build.capabilities,
+        result_cache=_tool_build.result_cache,
+        missions=_tool_build.missions,
         consolidator=consolidator,
         dispatcher=dispatcher,
         delegation_advisor=delegation_advisor,
@@ -450,11 +429,15 @@ def build_agent(
         verifier=verifier,
         orchestrator=orchestrator,
         processor=processor,
+    )
+    components = _AgentComponents(
+        bus=bus,
+        provider=provider,
+        config=config,
+        core=_core,
+        infra=_infra,
+        subsystems=_subs,
         role_manager=None,
-        ctx_message_tool=ctx_message_tool,
-        ctx_feedback_tool=ctx_feedback_tool,
-        ctx_mission_tool=ctx_mission_tool,
-        ctx_cron_tool=ctx_cron_tool,
     )
 
     # 15. Construct AgentLoop
@@ -463,11 +446,7 @@ def build_agent(
     # 16. Post-construction wiring
     role_manager = TurnRoleManager(loop)
     loop._role_manager = role_manager
-    loop._processor._role_manager = role_manager
-    loop._processor._span_module = sys.modules["nanobot.agent.loop"]
+    loop._processor.set_role_manager(role_manager)  # public method
 
-    # 17. Wire dispatcher tools reference
-    loop._dispatcher.tools = loop.tools
-
-    # 18. Return loop
+    # 17. Return loop
     return loop

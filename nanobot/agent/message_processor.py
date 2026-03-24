@@ -28,11 +28,11 @@ from nanobot.agent.callbacks import ProgressCallback
 from nanobot.agent.consolidation import ConsolidationOrchestrator
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.observability import update_current_span
-from nanobot.agent.orchestrator_protocol import Orchestrator, TurnState
 from nanobot.agent.role_switching import TurnRoleManager
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
 from nanobot.agent.tracing import TraceContext, bind_trace
+from nanobot.agent.turn_types import Orchestrator, TurnState
 from nanobot.agent.verifier import AnswerVerifier
 from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -76,9 +76,10 @@ class MessageProcessor:
         config: AgentConfig,
         workspace: Path,
         role_name: str,
-        role_manager: TurnRoleManager,
+        role_manager: TurnRoleManager | None,
         provider: LLMProvider,
         model: str,
+        span_module: Any = None,
     ) -> None:
         self.orchestrator = orchestrator
         self._dispatcher = dispatcher
@@ -110,11 +111,11 @@ class MessageProcessor:
         self._last_turn_result: Any | None = None
 
         # Observability hook: reference to the module whose
-        # ``update_current_span`` should be called.  AgentLoop sets this
-        # to the ``nanobot.agent.loop`` module so that tests patching
-        # ``nanobot.agent.loop.update_current_span`` see their patches
-        # take effect at call time (the attribute is resolved late).
-        self._span_module: Any | None = None
+        # ``update_current_span`` should be called.  Passed at construction
+        # time (typically ``sys.modules["nanobot.agent.loop"]``) so that
+        # tests patching ``nanobot.agent.loop.update_current_span`` see
+        # their patches take effect at call time (the attribute is resolved late).
+        self._span_module: Any | None = span_module
 
         # Contacts provider callback (forwarded from AgentLoop.set_contacts_provider)
         self._contacts_provider: Callable[[], list[str]] | None = None
@@ -125,6 +126,10 @@ class MessageProcessor:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def set_role_manager(self, role_manager: TurnRoleManager) -> None:
+        """Set the role manager (called by the factory after construction)."""
+        self._role_manager = role_manager
 
     def set_classification_result(self, result: ClassificationResult | None) -> None:
         """Forward a coordinator classification result for the next turn.
