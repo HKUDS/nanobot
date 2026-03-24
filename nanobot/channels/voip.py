@@ -78,20 +78,22 @@ class VoipChannel(BaseChannel):
         return event if isinstance(event, dict) else None
 
     async def _handle_event(self, event: dict[str, Any]) -> None:
-        event_type = str(event.get("event", "")).strip()
-        chat_id = str(event.get("chat_id", "")).strip()
-        session_key = str(event.get("session_key", "")).strip() or f"voip:{chat_id or 'call'}"
+        event_type = self._coerce_text(event.get("event"))
+        chat_id = self._coerce_text(event.get("chat_id"))
+        session_key = self._coerce_text(event.get("session_key")) or f"voip:{chat_id or 'call'}"
         call_key = chat_id or session_key
 
         if event_type == "call_started":
-            direction = str(event.get("direction", "")).strip() or "incoming"
-            opening_text = str(event.get("opening_text", "")).strip()
+            direction = self._coerce_text(event.get("direction")) or "incoming"
+            opening_text = self._coerce_text(event.get("opening_text"))
             self._call_contexts[call_key] = {
                 "direction": direction,
                 "goal_text": opening_text,
                 "waiting_for_real_turn": bool(direction == "outgoing" and opening_text),
             }
-            greeting = opening_text or (self.config.greeting or "").strip()
+            greeting = opening_text
+            if direction != "outgoing":
+                greeting = greeting or (self.config.greeting or "").strip()
             if greeting:
                 await self._post(
                     "/channel/say",
@@ -100,11 +102,11 @@ class VoipChannel(BaseChannel):
             return
 
         if event_type == "heard":
-            text = str(event.get("text", "")).strip()
+            text = self._coerce_text(event.get("text"))
             if not text:
                 return
-            alt_text = str(event.get("alt_text", "")).strip()
-            stt_source = str(event.get("stt_source", "")).strip()
+            alt_text = self._coerce_text(event.get("alt_text"))
+            stt_source = self._coerce_text(event.get("stt_source"))
             stt_similarity = event.get("stt_similarity")
             call_ctx = self._call_contexts.get(call_key, {})
             normalized = self._normalize_text(text)
@@ -121,7 +123,7 @@ class VoipChannel(BaseChannel):
             if call_ctx.get("waiting_for_real_turn"):
                 call_ctx["waiting_for_real_turn"] = False
             await self._handle_message(
-                sender_id=str(event.get("sender_id", "caller")),
+                sender_id=self._coerce_text(event.get("sender_id")) or "caller",
                 chat_id=call_key,
                 content=content,
                 metadata={
@@ -184,6 +186,12 @@ class VoipChannel(BaseChannel):
         if len(spoken) > 280:
             spoken = spoken[:277].rstrip() + "..."
         return spoken
+
+    @staticmethod
+    def _coerce_text(value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value).strip()
 
     @staticmethod
     def _normalize_text(text: str) -> str:

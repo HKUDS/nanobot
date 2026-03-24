@@ -49,6 +49,7 @@ class MemoryStore:
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "HISTORY.md"
+        self.calls_file = self.memory_dir / "CALLS.md"
 
     def read_long_term(self) -> str:
         if self.memory_file.exists():
@@ -63,8 +64,15 @@ class MemoryStore:
             f.write(entry.rstrip() + "\n\n")
 
     def get_memory_context(self) -> str:
+        parts: list[str] = []
         long_term = self.read_long_term()
-        return f"## Long-term Memory\n{long_term}" if long_term else ""
+        if long_term:
+            parts.append(f"## Long-term Memory\n{long_term}")
+        if self.calls_file.exists():
+            calls = self.calls_file.read_text(encoding="utf-8").strip()
+            if calls:
+                parts.append(calls)
+        return "\n\n".join(parts)
 
     async def consolidate(
         self,
