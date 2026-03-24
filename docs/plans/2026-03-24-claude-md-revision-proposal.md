@@ -1,10 +1,63 @@
+# CLAUDE.md Revision Proposal
+
+> Date: 2026-03-24
+> Status: Draft — awaiting review
+
+## What Changed and Why
+
+Each change is tagged with the architectural problem(s) it prevents.
+
+### New Section: Package Growth Limits
+**Prevents:** Problems 1, 2, 3, 5, 11 (monolith accumulation, flat file sprawl, export bloat)
+**Why the old CLAUDE.md failed:** There were no numeric thresholds. `agent/` grew to 68 files
+and 25k LOC over many sessions, each adding "just one more file." Without a trip wire, no
+single session had a reason to restructure.
+
+### New Section: File Placement Gate (Before Adding Any File)
+**Prevents:** Problems 1, 3, 4, 6 (wrong-package placement, infrastructure/implementation mixing)
+**Why the old CLAUDE.md failed:** The change protocol said "state which package owns this change"
+but only for non-trivial changes. Trivial additions (a new tool, a helper) skipped the gate
+and accumulated in the wrong package.
+
+### New Section: File Size Limits
+**Prevents:** Problems 7, 11 (God Objects, modules doing too much)
+**Why the old CLAUDE.md failed:** No guidance on when a file is too large. `loop.py` grew to
+1025 LOC across many sessions, each adding "just one more method."
+
+### Revised Section: Composition Root (stricter)
+**Prevents:** Problems 7, 12 (constructor as service locator, scattered wiring)
+**Why the old CLAUDE.md failed:** The rule said "use agent_factory.py" but didn't prohibit
+construction *patterns* inside AgentLoop or other classes.
+
+### New Section: Pre-Refactoring Review Gate
+**Prevents:** The 4 critical issues from the restructuring (duplicated methods, fragile wiring,
+re-export chains, Protocol surface area gaps)
+**Why the old CLAUDE.md failed:** The refactoring rules were mechanical ("one PR, one change")
+but didn't require analyzing extraction boundaries against actual call paths before starting.
+
+### Revised Section: Prohibited Patterns (expanded)
+**Prevents:** All problems — adds concrete detection criteria for each anti-pattern.
+
+---
+
+## Proposed CLAUDE.md (Full Text)
+
+Below is the complete proposed file. Sections marked [NEW] or [REVISED] indicate changes
+from the current version. Unmarked sections are carried forward unchanged.
+
+---
+
+```markdown
 # CLAUDE.md — Nanobot Agent Framework
 
 > Instructions for Claude Code and other Claude-based development agents.
 
 ## Who Develops This
 
-This project is developed **entirely through LLM-driven development** (Claude Code). There is no human writing code directly. This makes architectural discipline non-negotiable — there is no code review safety net, no team convention enforcement, no PR process catching drift. Claude must be its own architect, reviewer, and quality gate.
+This project is developed **entirely through LLM-driven development** (Claude Code). There is
+no human writing code directly. This makes architectural discipline non-negotiable — there is
+no code review safety net, no team convention enforcement, no PR process catching drift. Claude
+must be its own architect, reviewer, and quality gate.
 
 ## Project Overview
 
@@ -24,7 +77,8 @@ Before committing:
 make check    # lint + typecheck + import-check + prompt-check + test (full validation)
 ```
 
-Before committing, also review documentation: check that READMEs, CHANGELOG, ADRs, docstrings, and inline comments are accurate and up to date with the changes being committed.
+Before committing, also review documentation: check that READMEs, CHANGELOG, ADRs, docstrings,
+and inline comments are accurate and up to date with the changes being committed.
 
 ## Python Conventions
 
@@ -65,9 +119,9 @@ These are foundational — they must never import from orchestration or domain s
 
 For detailed module ownership and file-level documentation, see `docs/architecture.md`.
 
-## Package Growth Limits — Early Warning Thresholds
+## [NEW] Package Growth Limits — Early Warning Thresholds
 
-These thresholds exist because the `agent/` monolith (25k LOC, 68 files, 23 `__init__.py`
+These thresholds exist because the `agent/` monolith (25k LOC, 68 files, 23 __init__.py
 exports) accumulated gradually across many sessions. No single session caused the problem;
 every session thought it was adding "just one more file." These limits make the cost of
 growth visible before it becomes a restructuring project.
@@ -97,10 +151,10 @@ find nanobot/<package> -maxdepth 1 -name '*.py' ! -name '__init__.py' | wc -l
 find nanobot/<package> -name '*.py' -exec cat {} + | wc -l
 
 # __init__.py export count
-grep -c ',' nanobot/<package>/__init__.py  # rough count from __all__
+python -c "import ast; t=ast.parse(open('nanobot/<package>/__init__.py').read()); print(len([n for n in ast.walk(t) if isinstance(n, ast.Assign) and any(t.id == '__all__' for t in n.targets if isinstance(t, ast.Name))]))"
 ```
 
-## Before Adding Any File — Placement Gate
+## [NEW] Before Adding Any File — Placement Gate
 
 **Every new `.py` file must pass this checklist before creation.** This gate exists because
 the monolith formed through dozens of individually-reasonable file additions that each skipped
@@ -126,7 +180,7 @@ the question "does this belong here?"
 5. **Will `__init__.py` need new exports?** If adding the export would exceed 12, the
    package is doing too much. Plan an extraction first.
 
-## Before Growing a File — Size Gate
+## [NEW] Before Growing a File — Size Gate
 
 **Before adding logic to an existing file, check its size.** This gate exists because
 `loop.py` grew to 1,025 LOC and `delegation.py` to 1,002 LOC across many sessions, each
@@ -146,7 +200,8 @@ adding "just one more method."
 - **`__all__`** in every `__init__.py` — list all public exports explicitly
 - **Tool results**: return `ToolResult.ok(output)` or `ToolResult.fail(error)`, never bare strings
 - **Error handling**: use typed exceptions from `nanobot/errors.py` — never bare `Exception`
-- **`except Exception`**: narrow to specific types when possible; mark intentionally-broad catches with `# crash-barrier: <reason>`
+- **`except Exception`**: narrow to specific types when possible; mark intentionally-broad
+  catches with `# crash-barrier: <reason>`
 - **Imports**: stdlib → third-party → local (enforced by ruff `I` rules)
 
 ## Testing
@@ -160,12 +215,17 @@ adding "just one more method."
 
 The memory subsystem (`nanobot/memory/`) uses a **unified SQLite storage** strategy:
 
-1. **Write path**: Events extracted by `MemoryExtractor` (LLM-based) → stored in `UnifiedMemoryDB` (SQLite + FTS5 + sqlite-vec)
-2. **Read path**: Vector search (sqlite-vec) + full-text search (FTS5) → RRF fusion → cross-encoder re-ranking via ONNX Runtime (`reranker.py`, `onnx_reranker.py`)
-3. **Persistence**: `UnifiedMemoryDB` manages all storage in a single SQLite database (events, profile, embeddings, knowledge graph)
+1. **Write path**: Events extracted by `MemoryExtractor` (LLM-based) → stored in
+   `UnifiedMemoryDB` (SQLite + FTS5 + sqlite-vec)
+2. **Read path**: Vector search (sqlite-vec) + full-text search (FTS5) → RRF fusion →
+   cross-encoder re-ranking via ONNX Runtime (`reranker.py`, `onnx_reranker.py`)
+3. **Persistence**: `UnifiedMemoryDB` manages all storage in a single SQLite database
+   (events, profile, embeddings, knowledge graph)
 4. **Consolidation**: Periodic pass merges events, updates profile, compacts snapshots
 
-**Note**: `case/memory_eval_cases.json` is used by the advisory trend benchmark (`make memory-eval`). Behavioral correctness is enforced by contract tests in `tests/contract/` and LLM round-trip tests in `tests/test_memory_roundtrip.py`.
+**Note**: `case/memory_eval_cases.json` is used by the advisory trend benchmark
+(`make memory-eval`). Behavioral correctness is enforced by contract tests in
+`tests/contract/` and LLM round-trip tests in `tests/test_memory_roundtrip.py`.
 
 ## Adding a New Tool
 
@@ -194,7 +254,8 @@ The memory subsystem (`nanobot/memory/`) uses a **unified SQLite storage** strat
 ## Security Rules
 
 - **Never** hardcode API keys — config lives in `~/.nanobot/config.json` (0600 perms)
-- **Shell commands**: `_guard_command()` in `nanobot/tools/builtin/shell.py` enforces deny patterns + optional allowlist mode
+- **Shell commands**: `_guard_command()` in `nanobot/tools/builtin/shell.py` enforces
+  deny patterns + optional allowlist mode
 - **Filesystem**: path traversal protection in filesystem tools — validate against workspace root
 - **Network**: WhatsApp bridge binds 127.0.0.1 only
 
@@ -300,7 +361,7 @@ location. If logic is expressed in two packages, one of them is wrong — dedupl
 - **`observability/`** is cross-cutting instrumentation. It is consumed by other packages but
   owns nothing about their domain logic.
 
-### Composition Root — Single Wiring Point
+### [REVISED] Composition Root — Single Wiring Point
 
 `agent/agent_factory.py` (`build_agent()`) is the **only** place where subsystems are
 constructed and wired together. This constraint exists because `AgentLoop.__init__` previously
@@ -335,16 +396,7 @@ and tested before it is considered done.
 - Never add a catch-all module (`utils.py`, `helpers.py`) at the package level. If
   shared logic is needed, place it in the package that owns the concept.
 
-## Architecture References
-
-- Architecture decisions: `docs/adr/` (ADR-001 through ADR-009)
-- Module ownership and import rules: `docs/architecture.md`
-- Refactoring guidelines: `docs/refactoring-principles.md`
-- Architecture restructuring history: `docs/plans/2026-03-24-architecture-restructuring.md`
-- Architecture review: `docs/architecture-review-2026-03.md`
-- Reusable prompts: `.github/prompts/`
-
-## Change Protocol
+## [REVISED] Change Protocol
 
 ### Before implementing any change (including trivial ones)
 
@@ -360,7 +412,7 @@ and tested before it is considered done.
 7. Do not start coding until placement is clear. If placement is ambiguous, resolve the
    design question first.
 
-### Before any structural refactoring (extracting, promoting, moving packages)
+### [NEW] Before any structural refactoring (extracting, promoting, moving packages)
 
 This gate exists because the March 2026 restructuring introduced 4 critical issues
 (duplicated methods, fragile wiring, re-export chains, Protocol surface area gaps) that
@@ -400,7 +452,7 @@ Confirm:
 - No speculative abstraction
 - Run `make lint && make typecheck` after every edit
 
-## Prohibited Patterns
+## [REVISED] Prohibited Patterns
 
 These are not suggestions — they are errors. Fix immediately if detected.
 
@@ -432,6 +484,19 @@ These are not suggestions — they are errors. Fix immediately if detected.
 - Adding code that pushes a file past 500 LOC without extracting first
 - Adding an `__init__.py` export that pushes past 12 without extracting first
 
+## Architecture References
+
+- Architecture decisions: `docs/adr/` (ADR-001 through ADR-009)
+- Module ownership and import rules: `docs/architecture.md`
+- Refactoring guidelines: `docs/refactoring-principles.md`
+- Architecture restructuring history: `docs/plans/2026-03-24-architecture-restructuring.md`
+- Architecture review: `docs/architecture-review-2026-03.md`
+- Reusable prompts: `.github/prompts/`
+
 ## Known Gotchas
 
-- **`MemorySubsystemError` (formerly `MemoryError`)**: `nanobot/errors.py` previously defined `MemoryError` which shadowed Python's built-in `MemoryError`. It was renamed to `MemorySubsystemError` (LAN-57). A backward-compat alias remains in `errors.py`. Never reintroduce a class named `MemoryError` in this codebase.
+- **`MemorySubsystemError` (formerly `MemoryError`)**: `nanobot/errors.py` previously defined
+  `MemoryError` which shadowed Python's built-in `MemoryError`. It was renamed to
+  `MemorySubsystemError` (LAN-57). A backward-compat alias remains in `errors.py`. Never
+  reintroduce a class named `MemoryError` in this codebase.
+```
