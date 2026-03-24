@@ -30,6 +30,7 @@ class TurnState:
 
     messages: list[dict[str, Any]]
     user_text: str
+    classification_result: ClassificationResult | None = None
     disabled_tools: set[str] = field(default_factory=set)
     tracker: ToolCallTracker = field(default_factory=ToolCallTracker)
     nudged_for_final: bool = False
@@ -51,16 +52,18 @@ class TurnResult:
     content: str
     tools_used: list[str]  # tool names called this turn; empty list = no tools used
     messages: list[dict[str, Any]]
+    tokens_prompt: int = 0
+    tokens_completion: int = 0
+    llm_calls: int = 0
 
 
 class Orchestrator(Protocol):
     """Structural protocol for the turn orchestrator.
 
     Any object with a compatible ``run`` method satisfies this protocol,
-    including ``TurnOrchestrator`` and test mocks.
+    including ``TurnOrchestrator`` and test mocks.  Zero attributes —
+    pure behavioral contract.
     """
-
-    _last_classification_result: ClassificationResult | None
 
     async def run(
         self,

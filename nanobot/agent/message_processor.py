@@ -41,6 +41,7 @@ from nanobot.config.schema import AgentConfig
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
+    from nanobot.agent.coordinator import ClassificationResult
     from nanobot.agent.scratchpad import Scratchpad
     from nanobot.agent.tool_executor import ToolExecutor
     from nanobot.providers.base import LLMProvider
@@ -89,16 +90,18 @@ class MessageProcessor:
         self.provider = provider
         self.model = model
 
-        # Per-turn token accumulators: these are read by the pipeline when
-        # building the response metadata.  The actual values are updated by
-        # TurnOrchestrator during the turn.  When a token source is wired via
-        # _token_source (set by AgentLoop after construction), that source's
-        # counters are used instead.  When no source is wired, we fall back to
-        # local zeros.
+        # Per-turn token accumulators: populated from TurnResult after each
+        # orchestrator run.
         self._turn_tokens_prompt = 0
         self._turn_tokens_completion = 0
         self._turn_llm_calls = 0
-        self._token_source: Any | None = None  # Set by AgentLoop for shared counters
+
+        # Classification result forwarded from AgentLoop for plan-phase
+        # delegation advice.  Consumed (reset to None) by _run_orchestrator.
+        self.classification_result: ClassificationResult | None = None
+
+        # Last TurnResult from the orchestrator, used by _sync_token_counters.
+        self._last_turn_result: Any | None = None
 
         # Observability hook: reference to the module whose
         # ``update_current_span`` should be called.  AgentLoop sets this
@@ -116,6 +119,14 @@ class MessageProcessor:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def set_classification_result(self, result: ClassificationResult | None) -> None:
+        """Forward a coordinator classification result for the next turn.
+
+        The value is consumed (reset to ``None``) by ``_run_orchestrator``
+        when it builds the ``TurnState``.
+        """
+        self.classification_result = result
 
     async def process(
         self,
@@ -422,40 +433,20 @@ class MessageProcessor:
     # ------------------------------------------------------------------
 
     def _sync_token_counters(self) -> None:
-        """Pull token counters from the orchestrator or legacy token source.
+        """Pull token counters from the last ``TurnResult``.
 
-        ``TurnOrchestrator.run()`` updates ``_turn_tokens_*`` during the turn.
-        Since the processor reads these counters for response metadata and
-        audit logging, we sync them here.  When no source is wired (e.g. in
-        unit tests with mock orchestrators), the local zeros are used.
-
-        Also pushes the values back to ``_token_source`` (AgentLoop) so that
-        tests reading ``loop._turn_tokens_prompt`` see the updated values.
+        ``TurnOrchestrator.run()`` returns token counts in the ``TurnResult``
+        dataclass.  This method reads them from the stored result so that
+        response metadata and audit logging have accurate values.  When no
+        result is available (e.g. in unit tests with mock orchestrators),
+        the local zeros are used.
         """
-        # Prefer the orchestrator's counters directly
-        orch = self.orchestrator
-        if hasattr(orch, "_turn_tokens_prompt"):
-            self._turn_tokens_prompt = getattr(orch, "_turn_tokens_prompt", 0)
-            self._turn_tokens_completion = getattr(orch, "_turn_tokens_completion", 0)
-            self._turn_llm_calls = getattr(orch, "_turn_llm_calls", 0)
-        else:
-            # Fallback: legacy _token_source (e.g. AgentLoop reference)
-            src = self._token_source
-            if src is not None:
-                self._turn_tokens_prompt = getattr(src, "_turn_tokens_prompt", 0)
-                self._turn_tokens_completion = getattr(src, "_turn_tokens_completion", 0)
-                self._turn_llm_calls = getattr(src, "_turn_llm_calls", 0)
-
-        # Push back to AgentLoop for backward-compat with tests that read
-        # loop._turn_tokens_prompt directly.
-        src = self._token_source
-        if src is not None:
-            try:
-                src._turn_tokens_prompt = self._turn_tokens_prompt
-                src._turn_tokens_completion = self._turn_tokens_completion
-                src._turn_llm_calls = self._turn_llm_calls
-            except AttributeError:
-                pass  # _token_source may not expose these attrs (e.g., during testing with mocks)
+        result = self._last_turn_result
+        if result is None:
+            return
+        self._turn_tokens_prompt = getattr(result, "tokens_prompt", 0)
+        self._turn_tokens_completion = getattr(result, "tokens_completion", 0)
+        self._turn_llm_calls = getattr(result, "llm_calls", 0)
 
     # ------------------------------------------------------------------
     # Orchestrator interaction
@@ -491,14 +482,12 @@ class MessageProcessor:
         state = TurnState(
             messages=messages,
             user_text=user_text,
+            classification_result=self.classification_result,
             tools_def_cache=list(self.tools.get_definitions()),
         )
-        # Forward classification result for plan-phase delegation advice
-        if hasattr(self, "_last_classification_result"):
-            self.orchestrator._last_classification_result = (
-                self._last_classification_result  # type: ignore[attr-defined]
-            )
+        self.classification_result = None  # consumed
         result = await self.orchestrator.run(state, on_progress)
+        self._last_turn_result = result  # stored for _sync_token_counters
 
         if isinstance(result, tuple):
             return result  # type: ignore[return-value]

@@ -42,7 +42,6 @@ from nanobot.agent.tracing import bind_trace
 from nanobot.agent.verifier import AnswerVerifier
 
 if TYPE_CHECKING:
-    from nanobot.agent.coordinator import ClassificationResult
     from nanobot.agent.delegation_advisor import DelegationAdvisor
     from nanobot.config.schema import AgentConfig
     from nanobot.providers.base import LLMProvider, LLMResponse
@@ -222,9 +221,7 @@ class TurnOrchestrator:
         self._turn_tokens_completion = 0
         self._turn_llm_calls = 0
 
-        # Set by AgentLoop before each run() call when coordinator routing
-        # is active.  Used in the plan-phase delegation advice.
-        self._last_classification_result: ClassificationResult | None = None
+        # _last_classification_result removed: now passed via TurnState.classification_result
 
     # ------------------------------------------------------------------
     # Public API
@@ -271,7 +268,7 @@ class TurnOrchestrator:
                 state.has_plan = True
                 logger.debug("Planning prompt injected for: {}...", state.user_text[:60])
                 # Delegation advisor plan-phase
-                cr = self._last_classification_result
+                cr = state.classification_result
                 plan_advice = self._delegation_advisor.advise_plan_phase(
                     role_name=self._role_name,
                     needs_orchestration=cr.needs_orchestration if cr else False,
@@ -514,6 +511,9 @@ class TurnOrchestrator:
             content=final_content or "",
             tools_used=tools_used,
             messages=state.messages,
+            tokens_prompt=self._turn_tokens_prompt,
+            tokens_completion=self._turn_tokens_completion,
+            llm_calls=self._turn_llm_calls,
         )
 
     # ------------------------------------------------------------------

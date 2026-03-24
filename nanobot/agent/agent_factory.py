@@ -462,7 +462,6 @@ def build_agent(
     role_manager = TurnRoleManager(loop)
     loop._role_manager = role_manager
     loop._processor._role_manager = role_manager
-    loop._processor._token_source = loop
     loop._processor._span_module = sys.modules["nanobot.agent.loop"]
 
     # 17. Wire dispatcher tools reference
