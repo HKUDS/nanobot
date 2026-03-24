@@ -172,15 +172,17 @@ ALLOWLIST: set[tuple[str, str]] = {
     ("nanobot/agent/loop.py", "nanobot.tools.builtin.feedback"),
     ("nanobot/agent/loop.py", "nanobot.tools.builtin.message"),
     ("nanobot/agent/message_processor.py", "nanobot.tools.builtin.message"),
-    ("nanobot/agent/message_processor.py", "nanobot.tools.builtin.scratchpad"),
-    ("nanobot/agent/message_processor.py", "nanobot.tools.builtin.cron"),
-    ("nanobot/agent/message_processor.py", "nanobot.tools.builtin.feedback"),
-    ("nanobot/agent/message_processor.py", "nanobot.tools.builtin.mission"),
+    # turn_context.py: isinstance checks moved from message_processor.py
+    ("nanobot/agent/turn_context.py", "nanobot.tools.builtin.message"),
+    ("nanobot/agent/turn_context.py", "nanobot.tools.builtin.scratchpad"),
+    ("nanobot/agent/turn_context.py", "nanobot.tools.builtin.cron"),
+    ("nanobot/agent/turn_context.py", "nanobot.tools.builtin.feedback"),
+    ("nanobot/agent/turn_context.py", "nanobot.tools.builtin.mission"),
+    ("nanobot/agent/turn_context.py", "nanobot.coordination.scratchpad"),
     # ── Known violations: cross-package instantiation ──────────────────
     # Fix: move construction to agent_factory.py or inject via factories.
     ("nanobot/agent/loop.py", "nanobot.tools.builtin.mcp"),
     ("nanobot/agent/loop.py", "nanobot.coordination.coordinator"),
-    ("nanobot/agent/message_processor.py", "nanobot.coordination.scratchpad"),
     ("nanobot/coordination/delegation.py", "nanobot.tools.builtin.delegate"),
     ("nanobot/context/context.py", "nanobot.memory.store"),
     # ── Known violations: cross-package function import ────────────────
@@ -195,6 +197,9 @@ ALLOWLIST: set[tuple[str, str]] = {
     # Fix: move to TYPE_CHECKING block (enums, pure functions).
     ("nanobot/agent/turn_orchestrator.py", "nanobot.coordination.task_types"),
     ("nanobot/agent/turn_orchestrator.py", "nanobot.coordination.delegation_advisor"),
+    # turn_phases.py: runtime imports moved from turn_orchestrator.py
+    ("nanobot/agent/turn_phases.py", "nanobot.coordination.task_types"),
+    ("nanobot/agent/turn_phases.py", "nanobot.coordination.delegation_advisor"),
 }
 
 
