@@ -44,7 +44,6 @@ from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import DeliveryResult, InboundMessage, OutboundMessage, ReactionEvent
 from nanobot.config.schema import AgentRoleConfig
 from nanobot.coordination.role_switching import TurnContext
-from nanobot.errors import NanobotError
 from nanobot.observability.bus_progress import make_bus_progress
 from nanobot.observability.langfuse import (
     flush as flush_langfuse,
@@ -147,7 +146,8 @@ class AgentLoop:
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
-        self._coordinator: Coordinator | None = None
+        self._coordinator: Coordinator | None = components.coordinator
+        self._coordinator_wired = False
         self._last_classification_result: ClassificationResult | None = None
         self._delegation_stack: list[str] = []
         self._turn_tokens_prompt = 0
@@ -327,7 +327,7 @@ class AgentLoop:
         self._running = True
         self._stop_event = asyncio.Event()
         await self._connect_mcp()
-        self._ensure_coordinator()
+        self._wire_coordinator()
         await self.context.memory.maintenance.ensure_health()  # LAN-101: non-blocking vector health
 
         logger.info("Agent loop started")
@@ -384,50 +384,7 @@ class AgentLoop:
                                 "role": self.role_name,
                             },
                         ):
-                            if self._coordinator and msg.channel != "system":
-                                t0_classify = time.monotonic()
-                                cls_result = await self._coordinator.classify(msg.content)
-                                self._last_classification_result = cls_result
-                                self._processor.set_classification_result(cls_result)
-                                role_name, confidence = (
-                                    cls_result.role_name,
-                                    cls_result.confidence,
-                                )
-                                classify_latency_ms = (time.monotonic() - t0_classify) * 1000
-                                # Confidence-aware: fall back to default on low confidence
-                                threshold = (
-                                    self._routing_config.confidence_threshold
-                                    if self._routing_config
-                                    else _DEFAULT_CONFIDENCE_THRESHOLD
-                                )
-                                if confidence < threshold:
-                                    role_name = (
-                                        self._routing_config.default_role
-                                        if self._routing_config
-                                        else "general"
-                                    )
-                                    logger.info(
-                                        "Low confidence ({:.2f} < {:.2f}), using default role '{}'",
-                                        confidence,
-                                        threshold,
-                                        role_name,
-                                    )
-                                role = (
-                                    self._coordinator.route_direct(role_name)
-                                    or self._coordinator.registry.get_default()
-                                    or AgentRoleConfig(
-                                        name=role_name,
-                                        description="General assistant",
-                                    )
-                                )
-                                self._dispatcher.record_route_trace(
-                                    "route",
-                                    role=role.name,
-                                    confidence=confidence,
-                                    latency_ms=classify_latency_ms,
-                                    message_excerpt=msg.content,
-                                )
-                                turn_ctx = self._role_manager.apply(role)
+                            turn_ctx = await self._classify_and_route(msg)
 
                             # Wrap with timeout to prevent infinite processing
                             timeout = (
@@ -503,39 +460,58 @@ class AgentLoop:
     # Delegation dispatch
     # ------------------------------------------------------------------
 
-    def _ensure_coordinator(self) -> None:
-        """Lazy-initialise the multi-agent coordinator if routing is enabled."""
-        if not self._routing_config or not self._routing_config.enabled:
-            return
-        if self._coordinator is not None:
-            return
-
-        from nanobot.coordination.coordinator import DEFAULT_ROLES, Coordinator
-
-        for role in DEFAULT_ROLES:
-            self._capabilities.register_role(role)
-        for role_cfg in self._routing_config.roles:
-            self._capabilities.merge_register_role(role_cfg)
-        registry = self._capabilities.agent_registry
-        if registry is None:
-            raise NanobotError("AgentRegistry not available for multi-agent routing")
-        registry.set_default_role(self._routing_config.default_role)
-        self._coordinator = Coordinator(
-            provider=self.provider,
-            registry=registry,
-            classifier_model=self._routing_config.classifier_model,
-            default_role=self._routing_config.default_role,
-            confidence_threshold=self._routing_config.confidence_threshold,
+    async def _classify_and_route(self, msg: InboundMessage) -> TurnContext | None:
+        """Classify message via coordinator and apply role overrides."""
+        if not self._coordinator or msg.channel == "system":
+            return None
+        t0_classify = time.monotonic()
+        cls_result = await self._coordinator.classify(msg.content)
+        self._last_classification_result = cls_result
+        self._processor.set_classification_result(cls_result)
+        role_name, confidence = cls_result.role_name, cls_result.confidence
+        classify_latency_ms = (time.monotonic() - t0_classify) * 1000
+        threshold = (
+            self._routing_config.confidence_threshold
+            if self._routing_config
+            else _DEFAULT_CONFIDENCE_THRESHOLD
         )
-        self._dispatcher.coordinator = self._coordinator
-        self.missions.coordinator = self._coordinator
+        if confidence < threshold:
+            role_name = self._routing_config.default_role if self._routing_config else "general"
+            logger.info(
+                "Low confidence ({:.2f} < {:.2f}), using default role '{}'",
+                confidence,
+                threshold,
+                role_name,
+            )
+        role = (
+            self._coordinator.route_direct(role_name)
+            or self._coordinator.registry.get_default()
+            or AgentRoleConfig(name=role_name, description="General assistant")
+        )
+        self._dispatcher.record_route_trace(
+            "route",
+            role=role.name,
+            confidence=confidence,
+            latency_ms=classify_latency_ms,
+            message_excerpt=msg.content,
+        )
+        assert self._role_manager is not None
+        return self._role_manager.apply(role)
+
+    def _wire_coordinator(self) -> None:
+        """Wire delegate tools into the coordinator (after MCP tools are available)."""
+        if self._coordinator is None:
+            return
+        if self._coordinator_wired:
+            return
+        self._coordinator_wired = True
         self._dispatcher.wire_delegate_tools(
             available_roles_fn=self._capabilities.role_names,
         )
-
+        _registry = self._capabilities.agent_registry
         logger.info(
-            "Multi-agent routing enabled with {} roles",
-            len(registry),
+            "Multi-agent routing wired with {} roles",
+            len(_registry) if _registry else 0,
         )
 
     async def close_mcp(self) -> None:
@@ -626,7 +602,7 @@ class AgentLoop:
         """
         assert self._role_manager is not None, "build_agent() must wire _role_manager"
         await self._connect_mcp()
-        self._ensure_coordinator()
+        self._wire_coordinator()
         self._last_classification_result = None
 
         # Resolve forced role (if any) before entering the trace context so

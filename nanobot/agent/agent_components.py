@@ -30,6 +30,7 @@ if TYPE_CHECKING:
         RoutingConfig,
     )
     from nanobot.context.context import ContextBuilder
+    from nanobot.coordination.coordinator import Coordinator
     from nanobot.coordination.delegation import DelegationDispatcher
     from nanobot.coordination.delegation_advisor import DelegationAdvisor
     from nanobot.coordination.mission import MissionManager
@@ -126,4 +127,5 @@ class _AgentComponents:
     core: _CoreConfig
     infra: _InfraConfig
     subsystems: _Subsystems
+    coordinator: Coordinator | None = None
     role_manager: TurnRoleManager | None = None
