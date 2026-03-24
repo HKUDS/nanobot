@@ -191,6 +191,10 @@ def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
                     texts.append(el.get("text", ""))
                 elif tag == "at":
                     texts.append(f"@{el.get('user_name', 'user')}")
+                elif tag == "code_block":
+                    lang = el.get("language", "")
+                    code_text = el.get("text", "")
+                    texts.append(f"\n```{lang}\n{code_text}\n```\n")
                 elif tag == "img" and (key := el.get("image_key")):
                     images.append(key)
         return (" ".join(texts).strip() or None), images
@@ -956,6 +960,9 @@ class FeishuChannel(BaseChannel):
                 and not msg.metadata.get("_progress", False)
             ):
                 reply_message_id = msg.metadata.get("message_id") or None
+            # For topic group messages, always reply to keep context in thread
+            elif msg.metadata.get("thread_id"):
+                reply_message_id = msg.metadata.get("root_id") or msg.metadata.get("message_id") or None
 
             first_send = True  # tracks whether the reply has already been used
 
@@ -1039,7 +1046,7 @@ class FeishuChannel(BaseChannel):
             event = data.event
             message = event.message
             sender = event.sender
-
+            
             # Deduplication check
             message_id = message.message_id
             if message_id in self._processed_message_ids:
@@ -1117,6 +1124,7 @@ class FeishuChannel(BaseChannel):
             # Extract reply context (parent/root message IDs)
             parent_id = getattr(message, "parent_id", None) or None
             root_id = getattr(message, "root_id", None) or None
+            thread_id = getattr(message, "thread_id", None) or None
 
             # Prepend quoted message text when the user replied to another message
             if parent_id and self._client:
@@ -1145,6 +1153,7 @@ class FeishuChannel(BaseChannel):
                     "msg_type": msg_type,
                     "parent_id": parent_id,
                     "root_id": root_id,
+                    "thread_id": thread_id,
                 }
             )
 

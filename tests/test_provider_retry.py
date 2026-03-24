@@ -126,10 +126,17 @@ async def test_chat_with_retry_explicit_override_beats_defaults() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Image-unsupported fallback tests
+# Image fallback tests
 # ---------------------------------------------------------------------------
 
 _IMAGE_MSG = [
+    {"role": "user", "content": [
+        {"type": "text", "text": "describe this"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}, "_meta": {"path": "/media/test.png"}},
+    ]},
+]
+
+_IMAGE_MSG_NO_META = [
     {"role": "user", "content": [
         {"type": "text", "text": "describe this"},
         {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
@@ -138,13 +145,10 @@ _IMAGE_MSG = [
 
 
 @pytest.mark.asyncio
-async def test_image_unsupported_error_retries_without_images() -> None:
-    """If the model rejects image_url, retry once with images stripped."""
+async def test_non_transient_error_with_images_retries_without_images() -> None:
+    """Any non-transient error retries once with images stripped when images are present."""
     provider = ScriptedProvider([
-        LLMResponse(
-            content="Invalid content type. image_url is only supported by certain models",
-            finish_reason="error",
-        ),
+        LLMResponse(content="API调用参数有误,请检查文档", finish_reason="error"),
         LLMResponse(content="ok, no image"),
     ])
 
@@ -157,17 +161,14 @@ async def test_image_unsupported_error_retries_without_images() -> None:
         content = msg.get("content")
         if isinstance(content, list):
             assert all(b.get("type") != "image_url" for b in content)
-            assert any("[image omitted]" in (b.get("text") or "") for b in content)
+            assert any("[image: /media/test.png]" in (b.get("text") or "") for b in content)
 
 
 @pytest.mark.asyncio
-async def test_image_unsupported_error_no_retry_without_image_content() -> None:
-    """If messages don't contain image_url blocks, don't retry on image error."""
+async def test_non_transient_error_without_images_no_retry() -> None:
+    """Non-transient errors without image content are returned immediately."""
     provider = ScriptedProvider([
-        LLMResponse(
-            content="image_url is only supported by certain models",
-            finish_reason="error",
-        ),
+        LLMResponse(content="401 unauthorized", finish_reason="error"),
     ])
 
     response = await provider.chat_with_retry(
@@ -179,31 +180,34 @@ async def test_image_unsupported_error_no_retry_without_image_content() -> None:
 
 
 @pytest.mark.asyncio
-async def test_image_unsupported_fallback_returns_error_on_second_failure() -> None:
+async def test_image_fallback_returns_error_on_second_failure() -> None:
     """If the image-stripped retry also fails, return that error."""
     provider = ScriptedProvider([
-        LLMResponse(
-            content="does not support image input",
-            finish_reason="error",
-        ),
-        LLMResponse(content="some other error", finish_reason="error"),
+        LLMResponse(content="some model error", finish_reason="error"),
+        LLMResponse(content="still failing", finish_reason="error"),
     ])
 
     response = await provider.chat_with_retry(messages=_IMAGE_MSG)
 
     assert provider.calls == 2
-    assert response.content == "some other error"
+    assert response.content == "still failing"
     assert response.finish_reason == "error"
 
 
 @pytest.mark.asyncio
-async def test_non_image_error_does_not_trigger_image_fallback() -> None:
-    """Regular non-transient errors must not trigger image stripping."""
+async def test_image_fallback_without_meta_uses_default_placeholder() -> None:
+    """When _meta is absent, fallback placeholder is '[image omitted]'."""
     provider = ScriptedProvider([
-        LLMResponse(content="401 unauthorized", finish_reason="error"),
+        LLMResponse(content="error", finish_reason="error"),
+        LLMResponse(content="ok"),
     ])
 
-    response = await provider.chat_with_retry(messages=_IMAGE_MSG)
+    response = await provider.chat_with_retry(messages=_IMAGE_MSG_NO_META)
 
-    assert provider.calls == 1
-    assert response.content == "401 unauthorized"
+    assert response.content == "ok"
+    assert provider.calls == 2
+    msgs_on_retry = provider.last_kwargs["messages"]
+    for msg in msgs_on_retry:
+        content = msg.get("content")
+        if isinstance(content, list):
+            assert any("[image omitted]" in (b.get("text") or "") for b in content)
