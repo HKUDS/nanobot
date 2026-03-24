@@ -135,3 +135,72 @@ class TestMigration:
         events = db.read_events(limit=10)
         assert len(events) == 0
         db.close()
+
+    def test_migrates_knowledge_graph_json(self, tmp_path: Path):
+        memory_dir = tmp_path / "memory"
+        memory_dir.mkdir(parents=True)
+        # Create a knowledge_graph.json in old format
+        graph_data = {
+            "nodes": [
+                {
+                    "id": "alice",
+                    "entity_type": "person",
+                    "aliases_text": "ali, smithy",
+                    "first_seen": "2026-01-01",
+                    "last_seen": "2026-03-01",
+                    "prop_department": "engineering",
+                },
+                {
+                    "id": "project_x",
+                    "entity_type": "project",
+                    "aliases_text": "",
+                    "first_seen": "2026-01-01",
+                    "last_seen": "2026-03-01",
+                },
+            ],
+            "edges": [
+                {
+                    "source": "alice",
+                    "target": "project_x",
+                    "type": "WORKS_ON",
+                    "confidence": 0.9,
+                    "source_event_id": "e1",
+                    "timestamp": "2026-01-01",
+                },
+            ],
+        }
+        (memory_dir / "knowledge_graph.json").write_text(json.dumps(graph_data))
+        db = migrate_to_sqlite(memory_dir, dims=4, embedder=None)
+        # Verify entities migrated
+        alice = db.get_entity("alice")
+        assert alice is not None
+        assert alice["type"] == "person"
+        assert "ali" in alice["aliases"]
+        # Verify edges migrated
+        edges = db.get_edges_from("alice")
+        assert len(edges) == 1
+        assert edges[0]["target"] == "project_x"
+        assert edges[0]["relation"] == "WORKS_ON"
+        assert edges[0]["confidence"] == 0.9
+        # Verify properties migrated
+        props = json.loads(alice.get("properties", "{}"))
+        assert props.get("department") == "engineering"
+        db.close()
+
+    def test_graph_json_renamed_to_bak(self, tmp_path: Path):
+        memory_dir = tmp_path / "memory"
+        memory_dir.mkdir(parents=True)
+        graph_data = {"nodes": [{"id": "x"}], "edges": []}
+        (memory_dir / "knowledge_graph.json").write_text(json.dumps(graph_data))
+        migrate_to_sqlite(memory_dir, dims=4, embedder=None)
+        assert (memory_dir / "knowledge_graph.json.bak").exists()
+        assert not (memory_dir / "knowledge_graph.json").exists()
+
+    def test_corrupted_graph_json_skipped(self, tmp_path: Path):
+        memory_dir = tmp_path / "memory"
+        memory_dir.mkdir(parents=True)
+        (memory_dir / "knowledge_graph.json").write_text("NOT VALID JSON")
+        db = migrate_to_sqlite(memory_dir, dims=4, embedder=None)
+        # Should not crash; no entities migrated
+        assert db.get_entity("anything") is None
+        db.close()

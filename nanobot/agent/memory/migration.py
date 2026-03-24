@@ -48,7 +48,13 @@ def migrate_to_sqlite(
 
     old_files_exist = any(
         (memory_dir / f).exists()
-        for f in ("events.jsonl", "profile.json", "HISTORY.md", "MEMORY.md")
+        for f in (
+            "events.jsonl",
+            "profile.json",
+            "HISTORY.md",
+            "MEMORY.md",
+            "knowledge_graph.json",
+        )
     )
 
     if not old_files_exist:
@@ -76,8 +82,19 @@ def migrate_to_sqlite(
     if memory_file.exists():
         _migrate_memory_md(db, memory_file)
 
-    # 5. Rename old files
-    for name in ("events.jsonl", "profile.json", "HISTORY.md", "MEMORY.md"):
+    # 5. Knowledge graph
+    graph_file = memory_dir / "knowledge_graph.json"
+    if graph_file.exists():
+        _migrate_graph(db, graph_file)
+
+    # 6. Rename old files
+    for name in (
+        "events.jsonl",
+        "profile.json",
+        "HISTORY.md",
+        "MEMORY.md",
+        "knowledge_graph.json",
+    ):
         src = memory_dir / name
         if src.exists():
             dst = src.with_suffix(src.suffix + ".bak")
@@ -174,3 +191,39 @@ def _migrate_memory_md(db: UnifiedMemoryDB, memory_file: Path) -> None:
     db.write_snapshot("current", text)
     if pinned:
         db.write_snapshot("user_pinned", pinned)
+
+
+def _migrate_graph(db: UnifiedMemoryDB, graph_file: Path) -> None:
+    """Migrate knowledge_graph.json nodes and edges to SQLite."""
+    try:
+        data = json.loads(graph_file.read_text())
+    except (json.JSONDecodeError, OSError):
+        logger.warning("Failed to read {} — skipping", graph_file.name)
+        return
+
+    for node in data.get("nodes", []):
+        name = node.get("id", "")
+        if not name:
+            continue
+        db.upsert_entity(
+            name,
+            type=node.get("entity_type", "unknown"),
+            aliases=node.get("aliases_text", ""),
+            properties=json.dumps({k[5:]: v for k, v in node.items() if k.startswith("prop_")}),
+            first_seen=node.get("first_seen", ""),
+            last_seen=node.get("last_seen", ""),
+        )
+
+    for edge in data.get("edges", []):
+        source = edge.get("source", "")
+        target = edge.get("target", "")
+        if not source or not target:
+            continue
+        db.add_edge(
+            source,
+            target,
+            relation=edge.get("type", "RELATED_TO"),
+            confidence=float(edge.get("confidence", 0.7)),
+            event_id=edge.get("source_event_id", ""),
+            timestamp=edge.get("timestamp", ""),
+        )

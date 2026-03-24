@@ -1,10 +1,9 @@
-"""In-process knowledge graph backed by networkx DiGraph + JSON persistence.
+"""In-process knowledge graph backed by SQLite (UnifiedMemoryDB).
 
 Architecture
 ------------
-- **KnowledgeGraph** — Primary public API.  Uses a ``networkx.DiGraph``
-  for in-memory graph operations and persists to a JSON file alongside
-  other memory artefacts.
+- **KnowledgeGraph** -- Primary public API.  Delegates all storage to
+  ``UnifiedMemoryDB`` entity/edge tables.
 - Write path: ``upsert_entity``, ``add_relationship``,
   ``ingest_event_triples`` (batch).
 - Read path: ``get_neighbors``, ``find_paths``, ``query_subgraph``,
@@ -15,29 +14,49 @@ Architecture
 from __future__ import annotations
 
 import json
-from collections import deque
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import networkx as nx
 from loguru import logger
 
 from .entity_classifier import classify_entity_type, refine_type_from_predicate
 from .ontology_rules import validate_triple_types
 from .ontology_types import Entity, EntityType, Relationship, Triple
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from .unified_db import UnifiedMemoryDB
+
+
+def _norm(name: str) -> str:
+    """Canonical name normalisation: strip, lower, spaces to underscores."""
+    return name.strip().lower().replace(" ", "_")
+
 
 class KnowledgeGraph:
-    """In-process knowledge graph backed by networkx DiGraph + JSON persistence."""
+    """In-process knowledge graph backed by SQLite (UnifiedMemoryDB)."""
 
-    def __init__(self, workspace: Path | None = None) -> None:
-        self._graph = nx.DiGraph()
-        self._workspace = workspace
-        self._json_path = (workspace / "memory" / "knowledge_graph.json") if workspace else None
-        self.enabled: bool = workspace is not None
+    def __init__(
+        self,
+        db: UnifiedMemoryDB | None = None,
+        *,
+        workspace: Path | None = None,
+    ) -> None:
+        # Preferred: pass db= directly.
+        # Backward compat: workspace= creates an internal UnifiedMemoryDB so
+        # existing callers (store.py, tests) keep working until Task 3 wires
+        # the db= parameter through store.py.
+        if db is None and workspace is not None:
+            from pathlib import Path as _P  # noqa: N814
+
+            from .unified_db import UnifiedMemoryDB
+
+            mem_dir = _P(str(workspace)) / "memory"
+            mem_dir.mkdir(parents=True, exist_ok=True)
+            db = UnifiedMemoryDB(mem_dir / "knowledge_graph.db", dims=4)
+        self._db = db
+        self.enabled: bool = db is not None
         self.error: str | None = None
-        if self.enabled and self._json_path and self._json_path.exists():
-            self._load()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -48,12 +67,10 @@ class KnowledgeGraph:
         return self.enabled
 
     async def close(self) -> None:
-        """Persist graph to disk and release resources."""
-        if self.enabled:
-            self._save()
+        """No-op -- db lifecycle managed by store.py."""
 
     async def ensure_indexes(self) -> None:
-        """No-op — networkx does not require index setup."""
+        """No-op -- SQLite indexes are created in schema init."""
 
     # ------------------------------------------------------------------
     # Write methods
@@ -61,53 +78,66 @@ class KnowledgeGraph:
 
     async def upsert_entity(self, entity: Entity) -> None:
         """Merge an entity node, updating properties and timestamps."""
-        if not self.enabled:
+        if not self.enabled or self._db is None:
             return
         canonical = entity.canonical_name
-        props: dict[str, Any] = {
-            "name": entity.name,
-            "canonical_name": canonical,
-            "entity_type": entity.entity_type.value,
-            "aliases_text": ", ".join(entity.aliases),
-            "first_seen": entity.first_seen,
-            "last_seen": entity.last_seen,
-        }
-        props.update({f"prop_{k}": v for k, v in entity.properties.items()})
+        aliases_text = ", ".join(entity.aliases)
+        # Store display name in properties so it survives the canonical key
+        merged_props = {**entity.properties, "_display_name": entity.name}
+        props_json = json.dumps(merged_props)
 
-        if canonical in self._graph:
-            existing = dict(self._graph.nodes[canonical])
-            # Merge aliases
-            old_aliases = str(existing.get("aliases_text", ""))
+        # Merge aliases with existing entity if present
+        existing = self._db.get_entity(canonical)
+        if existing:
+            old_aliases = str(existing.get("aliases", ""))
             old_set = {a.strip() for a in old_aliases.split(",") if a.strip()}
-            new_set = {a.strip() for a in props["aliases_text"].split(",") if a.strip()}
+            new_set = {a.strip() for a in aliases_text.split(",") if a.strip()}
             merged_aliases = sorted(old_set | new_set)
-            props["aliases_text"] = ", ".join(merged_aliases)
+            aliases_text = ", ".join(merged_aliases)
             # Preserve first_seen from existing
-            if existing.get("first_seen"):
-                props["first_seen"] = existing["first_seen"]
-            existing.update(props)
-            self._graph.nodes[canonical].update(existing)
+            first_seen = existing.get("first_seen") or entity.first_seen
+            # Merge properties (keep display name from new entity)
+            old_props: dict[str, Any] = json.loads(existing.get("properties", "{}"))
+            old_props.update(merged_props)
+            props_json = json.dumps(old_props)
         else:
-            self._graph.add_node(canonical, **props)
+            first_seen = entity.first_seen
 
-        self._save()
+        self._db.upsert_entity(
+            canonical,
+            type=entity.entity_type.value,
+            aliases=aliases_text,
+            properties=props_json,
+            first_seen=first_seen,
+            last_seen=entity.last_seen,
+        )
 
     async def add_relationship(self, rel: Relationship) -> None:
         """Merge a directed relationship edge between two entities."""
-        if not self.enabled:
+        if not self.enabled or self._db is None:
             return
-        src = rel.source_id.strip().lower().replace(" ", "_")
-        tgt = rel.target_id.strip().lower().replace(" ", "_")
+        src = _norm(rel.source_id)
+        tgt = _norm(rel.target_id)
         rel_type = rel.relation_type.value
 
         # Ensure source and target nodes exist (minimal stubs with display name)
-        if src not in self._graph:
-            self._graph.add_node(src, canonical_name=src, name=rel.source_id.strip())
-        if tgt not in self._graph:
-            self._graph.add_node(tgt, canonical_name=tgt, name=rel.target_id.strip())
+        if self._db.get_entity(src) is None:
+            self._db.upsert_entity(
+                src, properties=json.dumps({"_display_name": rel.source_id.strip()})
+            )
+        if self._db.get_entity(tgt) is None:
+            self._db.upsert_entity(
+                tgt, properties=json.dumps({"_display_name": rel.target_id.strip()})
+            )
 
-        self._merge_edge(src, tgt, rel_type, rel.confidence, rel.source_event_id, rel.timestamp)
-        self._save()
+        self._db.add_edge(
+            src,
+            tgt,
+            relation=rel_type,
+            confidence=rel.confidence,
+            event_id=rel.source_event_id,
+            timestamp=rel.timestamp,
+        )
 
     async def ingest_event_triples(
         self,
@@ -133,7 +163,7 @@ class KnowledgeGraph:
                 is_subject=False,
             )
 
-            # Validate domain/range constraints — demote confidence on violation
+            # Validate domain/range constraints -- demote confidence on violation
             validation = validate_triple_types(triple.predicate, sub_type, obj_type)
             confidence = triple.confidence
             if not validation.valid:
@@ -176,20 +206,22 @@ class KnowledgeGraph:
 
     async def get_entity(self, name: str) -> Entity | None:
         """Look up an entity by canonical name or alias."""
-        if not self.enabled:
+        if not self.enabled or self._db is None:
             return None
-        canonical = name.strip().lower().replace(" ", "_")
-        raw = name.strip().lower()
+        canonical = _norm(name)
+        raw_lower = name.strip().lower()
 
-        # Check by canonical_name first
-        if canonical in self._graph:
-            return self._node_to_entity(dict(self._graph.nodes[canonical]))
+        # Check by canonical name first
+        row = self._db.get_entity(canonical)
+        if row is not None:
+            return self._row_to_entity(row)
 
-        # Check aliases across all nodes
-        for _node_id, data in self._graph.nodes(data=True):
-            aliases_text = str(data.get("aliases_text", ""))
-            if raw in aliases_text.lower():
-                return self._node_to_entity(dict(data))
+        # Search aliases across all entities
+        results = self._db.search_entities(raw_lower, limit=50)
+        for r in results:
+            aliases_text = str(r.get("aliases", "")).lower()
+            if raw_lower in aliases_text:
+                return self._row_to_entity(r)
 
         return None
 
@@ -200,33 +232,34 @@ class KnowledgeGraph:
         limit: int = 10,
     ) -> list[Entity]:
         """Substring search across entity names and aliases."""
-        if not self.enabled:
+        if not self.enabled or self._db is None:
             return []
         query_lower = query.strip().lower()
-        scored: list[tuple[float, Entity]] = []
+        if not query_lower:
+            return []
 
-        for _node_id, data in self._graph.nodes(data=True):
+        results = self._db.search_entities(query_lower, limit=limit * 3)
+
+        scored: list[tuple[float, Entity]] = []
+        for row in results:
             if entity_type:
-                etype_raw = str(data.get("entity_type", "unknown"))
+                etype_raw = str(row.get("type", "unknown"))
                 if etype_raw != entity_type.value:
                     continue
 
-            name = str(data.get("name", "")).lower()
-            canonical = str(data.get("canonical_name", "")).lower()
-            aliases_text = str(data.get("aliases_text", "")).lower()
+            name = str(row.get("name", "")).lower()
+            aliases_text = str(row.get("aliases", "")).lower()
 
             score = 0.0
-            if query_lower == canonical or query_lower == name:
+            if query_lower == name:
                 score = 1.0
             elif query_lower in name:
                 score = 0.8
-            elif query_lower in canonical:
-                score = 0.7
             elif query_lower in aliases_text:
                 score = 0.6
 
             if score > 0:
-                scored.append((score, self._node_to_entity(dict(data))))
+                scored.append((score, self._row_to_entity(row)))
 
         scored.sort(key=lambda x: x[0], reverse=True)
         return [entity for _, entity in scored[:limit]]
@@ -238,68 +271,47 @@ class KnowledgeGraph:
         relation_types: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """BFS traversal returning edges up to *depth* hops."""
-        if not self.enabled:
+        if not self.enabled or self._db is None:
             return []
-        canonical = entity_name.strip().lower().replace(" ", "_")
+        canonical = _norm(entity_name)
         depth = max(1, min(depth, 5))
 
-        if canonical not in self._graph:
+        if self._db.get_entity(canonical) is None:
             return []
 
-        # BFS collecting edges (undirected traversal)
-        visited: set[str] = {canonical}
-        queue: deque[tuple[str, int]] = deque([(canonical, 0)])
+        # Use DB BFS to find neighbor entities
+        neighbors = self._db.get_neighbors(canonical, depth=depth)
+        neighbor_names = {n["name"] for n in neighbors}
+        all_names = neighbor_names | {canonical}
+
+        # Collect edges touching any of the involved entities
         edges: list[dict[str, Any]] = []
         seen_edges: set[tuple[str, str, str]] = set()
 
-        while queue:
-            current, d = queue.popleft()
-            if d >= depth:
-                continue
+        # Build display-name cache for all involved entities
+        display: dict[str, str] = {}
+        for n in all_names:
+            display[n] = self._get_display_name(n)
 
-            # Outgoing edges
-            for _, tgt, edata in self._graph.out_edges(current, data=True):
-                rel_type = edata.get("type", "")
-                if relation_types and rel_type not in relation_types:
+        for name in all_names:
+            for edge in self._db.get_edges_from(name):
+                tgt = edge["target"]
+                if tgt not in all_names:
                     continue
-                edge_key = (current, tgt, rel_type)
-                if edge_key not in seen_edges:
-                    seen_edges.add(edge_key)
-                    src_name = self._get_node_name(current)
-                    tgt_name = self._get_node_name(tgt)
+                rel = edge["relation"]
+                if relation_types and rel not in relation_types:
+                    continue
+                key = (name, tgt, rel)
+                if key not in seen_edges:
+                    seen_edges.add(key)
                     edges.append(
                         {
-                            "source": src_name,
-                            "relation": rel_type,
-                            "target": tgt_name,
-                            "confidence": edata.get("confidence", 0.0),
+                            "source": display.get(name, name),
+                            "relation": rel,
+                            "target": display.get(tgt, tgt),
+                            "confidence": edge.get("confidence", 0.0),
                         }
                     )
-                if tgt not in visited:
-                    visited.add(tgt)
-                    queue.append((tgt, d + 1))
-
-            # Incoming edges (undirected traversal like Neo4j's -[]-)
-            for src, _, edata in self._graph.in_edges(current, data=True):
-                rel_type = edata.get("type", "")
-                if relation_types and rel_type not in relation_types:
-                    continue
-                edge_key = (src, current, rel_type)
-                if edge_key not in seen_edges:
-                    seen_edges.add(edge_key)
-                    src_name = self._get_node_name(src)
-                    tgt_name = self._get_node_name(current)
-                    edges.append(
-                        {
-                            "source": src_name,
-                            "relation": rel_type,
-                            "target": tgt_name,
-                            "confidence": edata.get("confidence", 0.0),
-                        }
-                    )
-                if src not in visited:
-                    visited.add(src)
-                    queue.append((src, d + 1))
 
         return edges[:100]
 
@@ -309,41 +321,81 @@ class KnowledgeGraph:
         target: str,
         max_depth: int = 3,
     ) -> list[list[dict[str, Any]]]:
-        """Find paths between two entities."""
-        if not self.enabled:
+        """Find paths between two entities.
+
+        Uses iterative BFS. Returns up to 5 shortest paths.
+        """
+        if not self.enabled or self._db is None:
             return []
-        src = source.strip().lower().replace(" ", "_")
-        tgt = target.strip().lower().replace(" ", "_")
+        src = _norm(source)
+        tgt = _norm(target)
         max_depth = max(1, min(max_depth, 5))
 
-        if src not in self._graph or tgt not in self._graph:
+        if self._db.get_entity(src) is None or self._db.get_entity(tgt) is None:
             return []
 
-        # Use undirected view for path finding (matches Neo4j's undirected pattern)
-        undirected = self._graph.to_undirected()
+        # BFS for paths
+        from collections import deque
+
+        # Display-name cache
+        _dn: dict[str, str] = {}
+
+        def dn(canonical: str) -> str:
+            if canonical not in _dn:
+                _dn[canonical] = self._get_display_name(canonical)
+            return _dn[canonical]
+
+        def _edge_rel(n1: str, n2: str) -> str:
+            """Find the relation between two adjacent canonical nodes."""
+            assert self._db is not None
+            for e in self._db.get_edges_from(n1):
+                if e["target"] == n2:
+                    return str(e["relation"])
+            for e in self._db.get_edges_from(n2):
+                if e["target"] == n1:
+                    return str(e["relation"])
+            return ""
+
+        def _path_to_steps(node_path: list[str]) -> list[dict[str, Any]]:
+            return [
+                {
+                    "source": dn(node_path[i]),
+                    "relation": _edge_rel(node_path[i], node_path[i + 1]),
+                    "target": dn(node_path[i + 1]),
+                }
+                for i in range(len(node_path) - 1)
+            ]
+
+        queue: deque[list[str]] = deque([[src]])
         paths: list[list[dict[str, Any]]] = []
-        try:
-            for path_nodes in nx.all_simple_paths(undirected, src, tgt, cutoff=max_depth):
-                path_steps: list[dict[str, Any]] = []
-                for i in range(len(path_nodes) - 1):
-                    n1, n2 = path_nodes[i], path_nodes[i + 1]
-                    # Check both directions for the edge
-                    edata = self._graph.get_edge_data(n1, n2)
-                    if edata is None:
-                        edata = self._graph.get_edge_data(n2, n1)
-                    rel_type = edata.get("type", "") if edata else ""
-                    path_steps.append(
-                        {
-                            "source": self._get_node_name(n1),
-                            "relation": rel_type,
-                            "target": self._get_node_name(n2),
-                        }
-                    )
-                paths.append(path_steps)
-                if len(paths) >= 5:
-                    break
-        except nx.NetworkXError:  # crash-barrier: no path exists between entities
-            pass
+
+        while queue and len(paths) < 5:
+            path = queue.popleft()
+            current = path[-1]
+            if len(path) - 1 > max_depth:
+                continue
+
+            # Outgoing edges
+            for edge in self._db.get_edges_from(current):
+                neighbor = edge["target"]
+                if neighbor in path:
+                    continue
+                new_path = path + [neighbor]
+                if neighbor == tgt:
+                    paths.append(_path_to_steps(new_path))
+                elif len(new_path) - 1 < max_depth:
+                    queue.append(new_path)
+
+            # Incoming edges (undirected traversal)
+            for edge in self._db.get_edges_to(current):
+                neighbor = edge["source"]
+                if neighbor in path:
+                    continue
+                new_path = path + [neighbor]
+                if neighbor == tgt:
+                    paths.append(_path_to_steps(new_path))
+                elif len(new_path) - 1 < max_depth:
+                    queue.append(new_path)
 
         return paths
 
@@ -392,41 +444,18 @@ class KnowledgeGraph:
         Used by the sync ``retrieve()`` path in ``MemoryStore`` to collect
         graph-expanded entity names for scoring boosts.
         """
-        if not self.enabled or not entity_names:
+        if not self.enabled or not entity_names or self._db is None:
             return set()
         depth = max(1, min(depth, 3))
         related: set[str] = set()
 
         for name in entity_names:
-            canonical = name.strip().lower().replace(" ", "_")
-            # Collect nodes matching by canonical_name or containing the name
-            start_nodes: list[str] = []
-            for node_id, data in self._graph.nodes(data=True):
-                cn = str(data.get("canonical_name", node_id))
-                if cn == canonical or canonical in cn:
-                    start_nodes.append(node_id)
-
-            for start in start_nodes:
-                # BFS up to depth
-                visited: set[str] = {start}
-                queue: deque[tuple[str, int]] = deque([(start, 0)])
-                while queue:
-                    current, d = queue.popleft()
-                    if d >= depth:
-                        continue
-                    for neighbor in set(self._graph.successors(current)) | set(
-                        self._graph.predecessors(current)
-                    ):
-                        if neighbor not in visited:
-                            visited.add(neighbor)
-                            ndata = self._graph.nodes[neighbor]
-                            cn = str(ndata.get("canonical_name", neighbor))
-                            n = str(ndata.get("name", ""))
-                            if cn:
-                                related.add(cn)
-                            if n:
-                                related.add(n.lower())
-                            queue.append((neighbor, d + 1))
+            canonical = _norm(name)
+            neighbors = self._db.get_neighbors(canonical, depth=depth)
+            for n in neighbors:
+                cn = str(n.get("name", ""))
+                if cn:
+                    related.add(cn)
 
         return related
 
@@ -439,42 +468,34 @@ class KnowledgeGraph:
         Returns ``(subject, predicate, object)`` tuples for relationships
         touching any of the given entity names.
         """
-        if not self.enabled or not entity_names:
+        if not self.enabled or not entity_names or self._db is None:
             return []
         triples: list[tuple[str, str, str]] = []
         seen: set[tuple[str, str, str]] = set()
 
         for name in entity_names:
-            canonical = name.strip().lower().replace(" ", "_")
-            # Find matching nodes
-            matching_nodes: list[str] = []
-            for node_id, data in self._graph.nodes(data=True):
-                cn = str(data.get("canonical_name", node_id))
-                if cn == canonical or canonical in cn:
-                    matching_nodes.append(node_id)
+            canonical = _norm(name)
+            # Outgoing edges
+            for edge in self._db.get_edges_from(canonical):
+                src_display = self._get_display_name(canonical)
+                rel = str(edge.get("relation", ""))
+                tgt_display = self._get_display_name(str(edge.get("target", "")))
+                if src_display and rel and tgt_display:
+                    triple = (src_display, rel, tgt_display)
+                    if triple not in seen:
+                        seen.add(triple)
+                        triples.append(triple)
 
-            for node in matching_nodes:
-                # Outgoing
-                for _, tgt, edata in self._graph.out_edges(node, data=True):
-                    src_name = self._get_node_name(node)
-                    rel = str(edata.get("type", ""))
-                    tgt_name = self._get_node_name(tgt)
-                    if src_name and rel and tgt_name:
-                        triple = (src_name, rel, tgt_name)
-                        if triple not in seen:
-                            seen.add(triple)
-                            triples.append(triple)
-
-                # Incoming
-                for src, _, edata in self._graph.in_edges(node, data=True):
-                    src_name = self._get_node_name(src)
-                    rel = str(edata.get("type", ""))
-                    tgt_name = self._get_node_name(node)
-                    if src_name and rel and tgt_name:
-                        triple = (src_name, rel, tgt_name)
-                        if triple not in seen:
-                            seen.add(triple)
-                            triples.append(triple)
+            # Incoming edges
+            for edge in self._db.get_edges_to(canonical):
+                src_display = self._get_display_name(str(edge.get("source", "")))
+                rel = str(edge.get("relation", ""))
+                tgt_display = self._get_display_name(canonical)
+                if src_display and rel and tgt_display:
+                    triple = (src_display, rel, tgt_display)
+                    if triple not in seen:
+                        seen.add(triple)
+                        triples.append(triple)
 
         return triples
 
@@ -484,119 +505,76 @@ class KnowledgeGraph:
         Falls back to the input name (lowered + underscored) if not found.
         """
         if not self.enabled:
-            return name.strip().lower().replace(" ", "_")
+            return _norm(name)
         entity = await self.get_entity(name)
         if entity:
             return entity.canonical_name
-        return name.strip().lower().replace(" ", "_")
+        return _norm(name)
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _node_to_entity(props: dict[str, Any]) -> Entity:
-        """Convert a node-property dict to an ``Entity`` instance."""
-        extra: dict[str, Any] = {}
-        for k, v in props.items():
-            if k.startswith("prop_"):
-                extra[k[5:]] = v
+    def _row_to_entity(row: dict[str, Any]) -> Entity:
+        """Convert a DB row dict to an ``Entity`` instance.
 
-        aliases_raw = str(props.get("aliases_text", ""))
+        Also handles the legacy networkx node-property format (``entity_type``,
+        ``aliases_text``, ``prop_*`` keys) for backward compatibility.
+        """
+        # Support both DB format ("aliases") and legacy networkx format ("aliases_text")
+        aliases_raw = str(row.get("aliases", "") or row.get("aliases_text", ""))
         aliases = [a.strip() for a in aliases_raw.split(",") if a.strip()]
 
-        etype_raw = str(props.get("entity_type", "unknown"))
+        # Support both DB format ("type") and legacy networkx format ("entity_type")
+        etype_raw = str(row.get("type", "") or row.get("entity_type", "unknown"))
+        if not etype_raw:
+            etype_raw = "unknown"
         try:
             etype = EntityType(etype_raw)
         except ValueError:
             etype = EntityType.UNKNOWN
 
+        # Properties: DB format stores JSON string; legacy uses prop_* keys
+        props_raw = row.get("properties")
+        if isinstance(props_raw, str) and props_raw:
+            try:
+                props: dict[str, Any] = json.loads(props_raw)
+            except (json.JSONDecodeError, TypeError):
+                props = {}
+        else:
+            props = {}
+        # Also collect legacy prop_* keys
+        for k, v in row.items():
+            if k.startswith("prop_"):
+                props[k[5:]] = v
+
+        # Use display name from properties if available (stored by upsert_entity),
+        # falling back to the DB row name (canonical).
+        display_name = props.pop("_display_name", None) or str(row.get("name", ""))
+
         return Entity(
-            name=str(props.get("name", "")),
+            name=display_name,
             entity_type=etype,
             aliases=aliases,
-            properties=extra,
-            first_seen=str(props.get("first_seen", "")),
-            last_seen=str(props.get("last_seen", "")),
+            properties=props,
+            first_seen=str(row.get("first_seen", "")),
+            last_seen=str(row.get("last_seen", "")),
         )
 
-    def _get_node_name(self, node_id: str) -> str:
-        """Return the display name for a node, falling back to node_id."""
-        if node_id in self._graph:
-            return str(self._graph.nodes[node_id].get("name", node_id))
-        return node_id
+    # Backward-compat alias for tests that reference the old helper name
+    _node_to_entity = _row_to_entity
 
-    def _merge_edge(
-        self,
-        src: str,
-        tgt: str,
-        rel_type: str,
-        confidence: float,
-        source_event_id: str,
-        timestamp: str,
-    ) -> None:
-        """Merge an edge into the graph, updating confidence if higher."""
-        existing_edge = self._graph.get_edge_data(src, tgt)
-        if existing_edge and existing_edge.get("type") == rel_type:
-            old_conf = existing_edge.get("confidence", 0.0)
-            self._graph[src][tgt]["confidence"] = max(old_conf, confidence)
-            self._graph[src][tgt]["timestamp"] = timestamp
-        else:
-            self._graph.add_edge(
-                src,
-                tgt,
-                type=rel_type,
-                confidence=confidence,
-                source_event_id=source_event_id,
-                timestamp=timestamp,
-            )
-
-    # ------------------------------------------------------------------
-    # Persistence
-    # ------------------------------------------------------------------
-
-    def _load(self) -> None:
-        """Read JSON file and rebuild the DiGraph."""
-        if not self._json_path:
-            return
+    def _get_display_name(self, canonical: str) -> str:
+        """Return the original display name for a canonical entity name."""
+        if self._db is None:
+            return canonical
+        row = self._db.get_entity(canonical)
+        if row is None:
+            return canonical
+        props_raw = row.get("properties", "{}")
         try:
-            raw = self._json_path.read_text(encoding="utf-8")
-            data = json.loads(raw)
-            self._graph.clear()
-            for node in data.get("nodes", []):
-                node_id = node.pop("id", node.get("canonical_name", ""))
-                self._graph.add_node(node_id, **node)
-            for edge in data.get("edges", []):
-                src = edge.pop("source", "")
-                tgt = edge.pop("target", "")
-                if src and tgt:
-                    self._graph.add_edge(src, tgt, **edge)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("KnowledgeGraph._load failed: {}", exc)
-
-    def _save(self) -> None:
-        """Serialize DiGraph to JSON."""
-        if not self._json_path:
-            return
-        try:
-            nodes: list[dict[str, Any]] = []
-            for node_id, data in self._graph.nodes(data=True):
-                entry = {"id": node_id}
-                entry.update(data)
-                nodes.append(entry)
-
-            edges: list[dict[str, Any]] = []
-            for src, tgt, data in self._graph.edges(data=True):
-                entry = {"source": src, "target": tgt}
-                entry.update(data)
-                edges.append(entry)
-
-            payload = {"nodes": nodes, "edges": edges}
-
-            # Atomic write: write to temp file then rename
-            self._json_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = self._json_path.with_suffix(".json.tmp")
-            tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-            tmp_path.replace(self._json_path)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("KnowledgeGraph._save failed: {}", exc)
+            props = json.loads(props_raw) if props_raw else {}
+        except (json.JSONDecodeError, TypeError):
+            props = {}
+        return str(props.get("_display_name", canonical))
