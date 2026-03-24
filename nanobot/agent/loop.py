@@ -33,7 +33,6 @@ from __future__ import annotations
 import asyncio
 import time
 from contextlib import AsyncExitStack
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
@@ -48,15 +47,13 @@ from nanobot.agent.observability import (
     trace_request,
     update_current_span,
 )
-from nanobot.agent.orchestrator_protocol import TurnState
 from nanobot.agent.reaction import classify_reaction
 from nanobot.agent.role_switching import TurnContext
-from nanobot.agent.scratchpad import Scratchpad
 from nanobot.agent.tools.email import CheckEmailTool
 from nanobot.agent.tools.feedback import FeedbackTool
 from nanobot.agent.tools.message import MessageTool
-from nanobot.agent.tools.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
 from nanobot.agent.tracing import TraceContext
+from nanobot.agent.turn_types import TurnState
 from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import DeliveryResult, InboundMessage, OutboundMessage, ReactionEvent
 from nanobot.config.schema import AgentRoleConfig
@@ -110,44 +107,38 @@ class AgentLoop:
         self.bus = components.bus
         self.provider = components.provider
         self.config = components.config
-        self.workspace = components.workspace
-        self.model = components.model
-        self.temperature = components.temperature
-        self.max_iterations = components.max_iterations
-        self.role_config = components.role_config
-        self.role_name = components.role_name
-        self.channels_config = components.channels_config
-        self.brave_api_key = components.brave_api_key
-        self.exec_config = components.exec_config
-        self.cron_service = components.cron_service
-        self.memory_rollout_overrides = components.memory_rollout_overrides
+        self.workspace = components.core.workspace
+        self.model = components.core.model
+        self.temperature = components.core.temperature
+        self.max_iterations = components.core.max_iterations
+        self.role_config = components.core.role_config
+        self.role_name = components.core.role_name
+        self.channels_config = components.infra.channels_config
+        self.brave_api_key = components.infra.brave_api_key
+        self.exec_config = components.infra.exec_config
+        self.cron_service = components.infra.cron_service
+        self.memory_rollout_overrides = components.infra.memory_rollout_overrides
 
         # Subsystems
-        self.memory = components.memory
-        self.context = components.context
-        self.sessions = components.sessions
-        self.tools = components.tools
-        self._capabilities = components.capabilities
-        self.result_cache = components.result_cache
-        self.missions = components.missions
-        self._consolidator = components.consolidator
-        self._dispatcher = components.dispatcher
-        self._delegation_advisor = components.delegation_advisor
-        self._llm_caller = components.llm_caller
-        self._verifier = components.verifier
-        self._orchestrator = components.orchestrator
-        self._processor = components.processor
+        self.memory = components.subsystems.memory
+        self.context = components.subsystems.context
+        self.sessions = components.subsystems.sessions
+        self.tools = components.subsystems.tools
+        self._capabilities = components.subsystems.capabilities
+        self.result_cache = components.subsystems.result_cache
+        self.missions = components.subsystems.missions
+        self._consolidator = components.subsystems.consolidator
+        self._dispatcher = components.subsystems.dispatcher
+        self._delegation_advisor = components.subsystems.delegation_advisor
+        self._llm_caller = components.subsystems.llm_caller
+        self._verifier = components.subsystems.verifier
+        self._orchestrator = components.subsystems.orchestrator
+        self._processor = components.subsystems.processor
         self._role_manager = components.role_manager
 
         # Routing
-        self._routing_config = components.routing_config
-        self._mcp_servers = components.mcp_servers
-
-        # Cached tool references
-        self._ctx_message_tool = components.ctx_message_tool
-        self._ctx_feedback_tool = components.ctx_feedback_tool
-        self._ctx_mission_tool = components.ctx_mission_tool
-        self._ctx_cron_tool = components.ctx_cron_tool
+        self._routing_config = components.infra.routing_config
+        self._mcp_servers = components.infra.mcp_servers
 
         # Runtime state (not constructed)
         self._running = False
@@ -157,7 +148,6 @@ class AgentLoop:
         self._mcp_connecting = False
         self._coordinator: Coordinator | None = None
         self._last_classification_result: ClassificationResult | None = None
-        self._scratchpad: Scratchpad | None = None
         self._delegation_stack: list[str] = []
         self._turn_tokens_prompt = 0
         self._turn_tokens_completion = 0
@@ -241,42 +231,6 @@ class AgentLoop:
         """Pull latest contacts from the provider into the context builder."""
         if hasattr(self, "_contacts_provider"):
             self.context.set_contacts_context(self._contacts_provider())
-
-    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
-        """Update context for all tools that need routing info."""
-        self._refresh_contacts()
-        if self._ctx_message_tool:
-            self._ctx_message_tool.set_context(channel, chat_id, message_id)
-        if self._ctx_mission_tool:
-            self._ctx_mission_tool.set_context(channel, chat_id)
-        if self._ctx_cron_tool:
-            self._ctx_cron_tool.set_context(channel, chat_id)
-        if self._ctx_feedback_tool:
-            self._ctx_feedback_tool.set_context(
-                channel,
-                chat_id,
-                session_key=f"{channel}:{chat_id}",
-            )
-
-    def _ensure_scratchpad(self, session_key: str) -> None:
-        """Initialise (or swap) the per-session scratchpad and update tools."""
-        from nanobot.utils.helpers import safe_filename
-
-        safe_key = safe_filename(session_key.replace(":", "_"))
-        session_dir = self.workspace / "sessions" / safe_key
-        session_dir.mkdir(parents=True, exist_ok=True)
-        self._scratchpad = Scratchpad(session_dir)
-        self._dispatcher.scratchpad = self._scratchpad
-        self._dispatcher._trace_path = session_dir / "routing_trace.jsonl"
-        self.missions.scratchpad = self._scratchpad
-
-        # Update scratchpad tool references
-        write_tool = self.tools.get("write_scratchpad")
-        if isinstance(write_tool, ScratchpadWriteTool):
-            write_tool._scratchpad = self._scratchpad
-        read_tool = self.tools.get("read_scratchpad")
-        if isinstance(read_tool, ScratchpadReadTool):
-            read_tool._scratchpad = self._scratchpad
 
     # ------------------------------------------------------------------
     # Agent loop delegation to TurnOrchestrator
@@ -643,28 +597,6 @@ class AgentLoop:
         return await self._processor._process_message(
             msg, session_key=session_key, on_progress=on_progress
         )
-
-    def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
-        """Save new-turn messages into session, truncating large tool results.
-
-        Ephemeral system messages (reflect, progress, self-check, delegation
-        nudges) injected during the tool loop are **not** persisted — they are
-        loop-control signals that would pollute conversation history and cause
-        the LLM to infer false workflow patterns on future turns.
-        """
-
-        max_chars = self.config.tool_result_max_chars
-        for m in messages[skip:]:
-            if m.get("role") == "system":
-                continue  # ephemeral loop-control prompt — do not persist
-            entry = {k: v for k, v in m.items() if k != "reasoning_content"}
-            if entry.get("role") == "tool" and isinstance(entry.get("content"), str):
-                content = entry["content"]
-                if len(content) > max_chars:
-                    entry["content"] = content[:max_chars] + "\n... (truncated)"
-            entry.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
-            session.messages.append(entry)
-        session.updated_at = datetime.now(timezone.utc)
 
     async def _consolidate_memory(self, session: Session, archive_all: bool = False) -> bool:
         """Delegate to ConsolidationOrchestrator."""
