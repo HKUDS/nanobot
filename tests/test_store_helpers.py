@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.memory import MemoryStore
+from nanobot.memory._text import _to_datetime
 from nanobot.memory.maintenance import MemoryMaintenance
 from nanobot.memory.read.retrieval_planner import RetrievalPlanner
 from nanobot.memory.write.ingester import EventIngester
@@ -24,8 +25,8 @@ def _seed_events(store: MemoryStore, events: list[dict[str, object]]) -> None:
 
 class TestMemoryStoreExtraHelpers:
     def test_datetime_parsers(self) -> None:
-        assert MemoryStore._to_datetime("2026-01-01T00:00:00Z") is not None
-        assert MemoryStore._to_datetime("invalid") is None
+        assert _to_datetime("2026-01-01T00:00:00Z") is not None
+        assert _to_datetime("invalid") is None
 
     def test_rollout_overrides_and_status(self, tmp_path: Path) -> None:
         store = _store(tmp_path)

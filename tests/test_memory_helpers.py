@@ -1,13 +1,12 @@
-"""Tests for nanobot.memory.helpers — shared memory utilities."""
+"""Tests for nanobot.memory._text and graph._keywords — shared memory utilities."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from nanobot.memory.helpers import (
+from nanobot.memory._text import (
     _contains_any,
     _estimate_tokens,
-    _extract_query_keywords,
     _norm_text,
     _safe_float,
     _to_datetime,
@@ -15,6 +14,7 @@ from nanobot.memory.helpers import (
     _tokenize,
     _utc_now_iso,
 )
+from nanobot.memory.graph._keywords import _extract_query_keywords
 
 
 class TestUtcNowIso:

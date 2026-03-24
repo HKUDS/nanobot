@@ -19,11 +19,8 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from nanobot.observability.tracing import bind_trace
 
-from ..helpers import (
-    _contains_any,
-    _extract_query_keywords,
-    _norm_text,
-)
+from .._text import _contains_any, _norm_text
+from ..graph._keywords import _extract_query_keywords
 from .retrieval_planner import RetrievalPlan, RetrievalPlanner
 
 if TYPE_CHECKING:

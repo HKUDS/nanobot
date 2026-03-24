@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
-from ..helpers import _estimate_tokens, _norm_text, _safe_float, _to_str_list
+from .._text import _estimate_tokens, _norm_text, _safe_float, _to_str_list
+from ..event import is_resolved_task_or_decision
 from ..persistence.profile_io import ProfileStore as ProfileManager
 from ..token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
 from .retrieval_planner import RetrievalPlanner
@@ -379,7 +380,7 @@ class ContextAssembler:
             if status == self.EPISODIC_STATUS_RESOLVED:
                 continue
             summary = str(event.get("summary", "")).strip()
-            if not summary or self._is_resolved_task_or_decision(summary):
+            if not summary or is_resolved_task_or_decision(summary):
                 continue
             unresolved.append(event)
             if len(unresolved) >= max_items:
@@ -582,26 +583,10 @@ class ContextAssembler:
 
         return allocations
 
-    # ------------------------------------------------------------------
-    # Shared utility statics (duplicated from MemoryStore to avoid
-    # coupling — these are trivial one-liners)
-    # ------------------------------------------------------------------
+    # Delegate to canonical function in event.py for backward compat.
+    _is_resolved_task_or_decision = staticmethod(is_resolved_task_or_decision)
 
-    @staticmethod
-    def _is_resolved_task_or_decision(summary: str) -> bool:
-        text = summary.lower()
-        resolved_markers = (
-            "done",
-            "completed",
-            "resolved",
-            "closed",
-            "finished",
-            "cancelled",
-            "canceled",
-        )
-        return any(marker in text for marker in resolved_markers)
-
-    # -- Shared helpers imported from .helpers --------------------------------
+    # -- Shared helpers imported from ._text ----------------------------------
     _estimate_tokens = staticmethod(_estimate_tokens)
     _to_str_list = staticmethod(_to_str_list)
     _safe_float = staticmethod(_safe_float)

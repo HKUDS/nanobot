@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from ..helpers import _norm_text, _safe_float, _tokenize, _utc_now_iso
+from .._text import _norm_text, _safe_float, _tokenize, _utc_now_iso
 from ..persistence.profile_io import ProfileStore as ProfileManager
 
 if TYPE_CHECKING:

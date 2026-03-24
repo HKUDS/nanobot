@@ -24,8 +24,8 @@ from loguru import logger
 from nanobot.context.prompt_loader import prompts
 from nanobot.observability.tracing import bind_trace
 
+from ._text import _contains_any, _utc_now_iso
 from .constants import _CONSOLIDATE_MEMORY_TOOL
-from .helpers import _contains_any, _utc_now_iso
 from .write.ingester import EventIngester
 
 if TYPE_CHECKING:

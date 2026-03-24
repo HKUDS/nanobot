@@ -16,20 +16,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-# ── Constants ──────────────────────────────────────────────────────────
-
-MEMORY_TYPES: frozenset[str] = frozenset({"semantic", "episodic", "reflection"})
-
-_RESOLVED_MARKERS: tuple[str, ...] = (
-    "done",
-    "completed",
-    "resolved",
-    "closed",
-    "finished",
-    "cancelled",
-    "canceled",
+from ..event import (
+    is_resolved_task_or_decision,
 )
-
+from ..event import (
+    memory_type_for_item as _memory_type_for_item,
+)
 
 # ── Data structures ───────────────────────────────────────────────────
 
@@ -318,20 +310,7 @@ class RetrievalPlanner:
     @staticmethod
     def memory_type_for_item(item: dict[str, Any]) -> str:
         """Classify the memory type of *item*."""
-        memory_type = str(item.get("memory_type", "")).strip().lower()
-        if memory_type in MEMORY_TYPES:
-            return memory_type
-        meta = item.get("metadata")
-        if isinstance(meta, dict):
-            meta_type = str(meta.get("memory_type", "")).strip().lower()
-            if meta_type in MEMORY_TYPES:
-                return meta_type
-        event_type = str(item.get("type", "")).strip().lower()
-        if event_type in {"task", "decision"}:
-            return "episodic"
-        if event_type in {"preference", "fact", "constraint", "relationship"}:
-            return "semantic"
-        return "episodic"
+        return _memory_type_for_item(item)
 
     # ── Recency signal ─────────────────────────────────────────────────
 
@@ -352,12 +331,6 @@ class RetrievalPlanner:
 
 
 # ── Module-level helpers ───────────────────────────────────────────────
-
-
-def is_resolved_task_or_decision(summary: str) -> bool:
-    """Return *True* if *summary* text contains resolved-status markers."""
-    text = summary.lower()
-    return any(marker in text for marker in _RESOLVED_MARKERS)
 
 
 def _to_datetime(value: str | None) -> datetime | None:

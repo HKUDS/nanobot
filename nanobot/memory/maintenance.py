@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .helpers import _norm_text, _to_str_list, _utc_now_iso
+from ._text import _norm_text, _to_str_list, _utc_now_iso
 
 if TYPE_CHECKING:
     from .unified_db import UnifiedMemoryDB

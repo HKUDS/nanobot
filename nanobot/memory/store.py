@@ -19,23 +19,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from nanobot.eval.memory_eval import EvalRunner
-
+from ._text import _to_str_list, _utc_now_iso
 from .consolidation_pipeline import ConsolidationPipeline
 from .embedder import HashEmbedder, LocalEmbedder, OpenAIEmbedder
 from .graph.graph import KnowledgeGraph
-from .helpers import (
-    _GRAPH_QUERY_STOPWORDS,
-    _contains_any,
-    _estimate_tokens,
-    _extract_query_keywords,
-    _norm_text,
-    _safe_float,
-    _to_datetime,
-    _to_str_list,
-    _tokenize,
-    _utc_now_iso,
-)
 from .maintenance import MemoryMaintenance
 from .migration import migrate_to_sqlite
 from .persistence.profile_io import ProfileStore
@@ -260,6 +247,8 @@ class MemoryStore:
         self.conflict_mgr.conflict_auto_resolve_gap = self.conflict_auto_resolve_gap
 
         # Evaluation / observability helper (LAN-204)
+        from nanobot.eval.memory_eval import EvalRunner
+
         self.eval_runner = EvalRunner(
             retrieve_fn=lambda *a, **kw: self.retriever.retrieve(*a, **kw),
             workspace=self.workspace,
@@ -311,27 +300,6 @@ class MemoryStore:
             memory_file=self.memory_file,
             history_file=self.history_file,
         )
-
-    # -- Shared helpers imported from .helpers --------------------------------
-    # Kept as class attributes for backward compatibility with any external
-    # callers that use ``MemoryStore._utc_now_iso()`` etc.
-    _utc_now_iso = staticmethod(_utc_now_iso)
-    _safe_float = staticmethod(_safe_float)
-    _norm_text = staticmethod(_norm_text)
-    _tokenize = staticmethod(_tokenize)
-    _GRAPH_QUERY_STOPWORDS = _GRAPH_QUERY_STOPWORDS
-    _extract_query_keywords = staticmethod(_extract_query_keywords)  # type: ignore[assignment]
-    _to_str_list = staticmethod(_to_str_list)
-    _to_datetime = staticmethod(_to_datetime)
-    _estimate_tokens = staticmethod(_estimate_tokens)
-    _contains_any = staticmethod(_contains_any)
-
-    # Keep class-level constants as aliases so test code referencing
-    # MemoryStore._SECTION_PRIORITY_WEIGHTS / ._SECTION_MIN_TOKENS still works.
-    _SECTION_PRIORITY_WEIGHTS = DEFAULT_SECTION_WEIGHTS
-    _SECTION_MIN_TOKENS = ContextAssembler._SECTION_MIN_TOKENS
-    _MAX_EVIDENCE_REFS = 10  # Cap evidence_event_ids to avoid unbounded growth.
-    _CORRECTION_MARKERS = ConflictManager._CORRECTION_MARKERS
 
     # ------------------------------------------------------------------
     # get_memory_context — facade method (lazy assembler init)

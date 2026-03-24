@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from nanobot.observability.tracing import bind_trace
 
-from ..helpers import (
+from .._text import (
     _contains_any,
     _norm_text,
     _safe_float,
@@ -32,8 +32,7 @@ from ..helpers import (
     _tokenize,
     _utc_now_iso,
 )
-from ..read.context_assembler import ContextAssembler
-from ..read.retrieval_planner import RetrievalPlanner
+from ..event import is_resolved_task_or_decision, memory_type_for_item
 
 if TYPE_CHECKING:
     from ..embedder import Embedder
@@ -98,7 +97,7 @@ class EventIngester:
                 return normalized
         return (
             self.EPISODIC_STATUS_RESOLVED
-            if ContextAssembler._is_resolved_task_or_decision(summary)
+            if is_resolved_task_or_decision(summary)
             else self.EPISODIC_STATUS_OPEN
         )
 
@@ -638,7 +637,7 @@ class EventIngester:
         existing_events: list[dict[str, Any]],
     ) -> int | None:
         """Find an existing event that the *candidate* supersedes (contradicts)."""
-        if RetrievalPlanner.memory_type_for_item(candidate) != "semantic":
+        if memory_type_for_item(candidate) != "semantic":
             return None
         candidate_summary = str(candidate.get("summary", "")).strip()
         candidate_type = str(candidate.get("type", ""))
@@ -646,7 +645,7 @@ class EventIngester:
             return None
 
         for idx, existing in enumerate(existing_events):
-            if RetrievalPlanner.memory_type_for_item(existing) != "semantic":
+            if memory_type_for_item(existing) != "semantic":
                 continue
             if str(existing.get("type", "")) != candidate_type:
                 continue
