@@ -1,41 +1,23 @@
 """Memory subsystem — persistent memory with hybrid retrieval.
 
-Write path:
-    extractor.py            LLM + heuristic event extraction
-    ingester.py             Event ingestion pipeline
-    persistence.py          JSONL/file I/O primitives
+Organized into subdirectories by concern:
 
-Read path:
-    retriever.py            Memory retrieval orchestrator
-    keyword_search.py       Local keyword/BM25 search
-    retrieval_planner.py    Retrieval strategy planning
-    reranker.py             Cross-encoder re-ranking interface
-    onnx_reranker.py        ONNX Runtime re-ranker implementation
-    context_assembler.py    Memory context assembly for prompts
-    token_budget.py         Token budget management
+- **write/**        — Event extraction, ingestion, conflict detection
+- **read/**         — Retrieval, query planning, context assembly
+- **ranking/**      — Cross-encoder re-ranking (ONNX Runtime)
+- **persistence/**  — Profile I/O, snapshot management
+- **graph/**        — Knowledge graph, entity classification, ontology
 
-Architecture
-------------
-- **store.py** — ``MemoryStore``: thin facade composing subsystem modules;
-  owns cross-cutting coordination (consolidate, get_memory_context).
-- **ingester.py** — ``EventIngester``: event write path (classify, dedup,
-  merge, append).
-- **retriever.py** — ``MemoryRetriever``: retrieval read path (vector +
-  FTS5 via UnifiedMemoryDB, with BM25 fallback).
-- **maintenance.py** — ``MemoryMaintenance``: reindex, seed, health checks.
-- **snapshot.py** — ``MemorySnapshot``: rebuild and verify MEMORY.md.
-- **rollout.py** — ``RolloutConfig``: feature flag management.
-- **extractor.py** — ``MemoryExtractor``: LLM + heuristic pipeline that
-  converts raw conversation turns into structured memory events.
-- **unified_db.py** — ``UnifiedMemoryDB``: single SQLite database for all
-  memory storage (events, profile, snapshots, vectors via sqlite-vec).
-- **embedder.py** — ``Embedder`` protocol, ``OpenAIEmbedder``, and
-  ``LocalEmbedder`` for vector embedding generation.
-- **reranker.py** — ``Reranker`` protocol and ``CompositeReranker``
-  (zero-dependency lightweight alternative).
-- **onnx_reranker.py** — ``OnnxCrossEncoderReranker`` (ONNX Runtime-based
-  cross-encoder, replaces the old sentence-transformers implementation).
-- **constants.py** — Shared constants and tool schemas.
+Top-level modules:
+- **store.py**      — MemoryStore facade (composes all subsystems)
+- **unified_db.py** — SQLite + FTS5 + sqlite-vec storage backend
+- **embedder.py**   — Embedding protocol and implementations
+- **event.py**      — MemoryEvent Pydantic model
+- **constants.py**  — Shared constants and tool schemas
+- **helpers.py**    — Utility functions
+- **rollout.py**    — Feature flag management
+- **maintenance.py** — Reindex, seed, health checks
+- **consolidation_pipeline.py** — Consolidation orchestration
 
 Evaluation (moved to nanobot/eval/):
     memory_eval.py          EvalRunner — retrieval benchmarks + observability
@@ -43,20 +25,13 @@ Evaluation (moved to nanobot/eval/):
 
 from __future__ import annotations
 
-from .conflicts import ConflictManager
 from .consolidation_pipeline import ConsolidationPipeline
-from .context_assembler import ContextAssembler
 from .embedder import Embedder, HashEmbedder, LocalEmbedder, OpenAIEmbedder
-from .entity_classifier import classify_entity_type
 from .event import BeliefRecord, KnowledgeTriple, MemoryEvent
-from .extractor import MemoryExtractor
-from .graph import KnowledgeGraph
-from .ingester import EventIngester
-from .maintenance import MemoryMaintenance
-from .onnx_reranker import OnnxCrossEncoderReranker
-from .onnx_reranker import OnnxCrossEncoderReranker as CrossEncoderReranker  # backward-compat
-from .ontology_rules import RELATION_RULES, TripleValidation, validate_triple_types
-from .ontology_types import (
+from .graph.entity_classifier import classify_entity_type
+from .graph.graph import KnowledgeGraph
+from .graph.ontology_rules import RELATION_RULES, TripleValidation, validate_triple_types
+from .graph.ontology_types import (
     AGENT_NATIVE_TYPES,
     AGENT_RELATION_TYPES,
     Entity,
@@ -65,53 +40,60 @@ from .ontology_types import (
     RelationType,
     Triple,
 )
-from .profile_io import ProfileStore
-from .profile_io import ProfileStore as ProfileManager
-from .reranker import CompositeReranker, Reranker
-from .retrieval_planner import RetrievalPlan, RetrievalPlanner
-from .retriever import MemoryRetriever
+from .maintenance import MemoryMaintenance
+from .persistence.profile_io import ProfileStore
+from .persistence.profile_io import ProfileStore as ProfileManager
+from .persistence.snapshot import MemorySnapshot
+from .ranking.onnx_reranker import OnnxCrossEncoderReranker
+from .ranking.onnx_reranker import OnnxCrossEncoderReranker as CrossEncoderReranker
+from .ranking.reranker import CompositeReranker, Reranker
+from .read.context_assembler import ContextAssembler
+from .read.retrieval_planner import RetrievalPlan, RetrievalPlanner
+from .read.retriever import MemoryRetriever
 from .rollout import RolloutConfig
-from .snapshot import MemorySnapshot
 from .store import MemoryStore
 from .unified_db import UnifiedMemoryDB
+from .write.conflicts import ConflictManager
+from .write.extractor import MemoryExtractor
+from .write.ingester import EventIngester
 
 __all__ = [
+    "AGENT_NATIVE_TYPES",
+    "AGENT_RELATION_TYPES",
     "BeliefRecord",
+    "CompositeReranker",
     "ConflictManager",
     "ConsolidationPipeline",
     "ContextAssembler",
+    "CrossEncoderReranker",
     "Embedder",
-    "HashEmbedder",
+    "Entity",
+    "EntityType",
     "EventIngester",
+    "HashEmbedder",
+    "KnowledgeGraph",
     "KnowledgeTriple",
     "LocalEmbedder",
     "MemoryEvent",
+    "MemoryExtractor",
     "MemoryMaintenance",
     "MemoryRetriever",
     "MemorySnapshot",
     "MemoryStore",
+    "OnnxCrossEncoderReranker",
     "OpenAIEmbedder",
+    "ProfileManager",
+    "ProfileStore",
+    "RELATION_RULES",
+    "Reranker",
+    "RelationType",
+    "Relationship",
     "RetrievalPlan",
     "RetrievalPlanner",
     "RolloutConfig",
-    "ProfileManager",
-    "ProfileStore",
-    "MemoryExtractor",
-    "UnifiedMemoryDB",
-    "CompositeReranker",
-    "CrossEncoderReranker",
-    "OnnxCrossEncoderReranker",
-    "Reranker",
-    "KnowledgeGraph",
-    "Entity",
-    "EntityType",
-    "RelationType",
-    "Relationship",
     "Triple",
     "TripleValidation",
+    "UnifiedMemoryDB",
     "classify_entity_type",
     "validate_triple_types",
-    "RELATION_RULES",
-    "AGENT_NATIVE_TYPES",
-    "AGENT_RELATION_TYPES",
 ]

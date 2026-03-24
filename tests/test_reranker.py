@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from nanobot.memory.onnx_reranker import OnnxCrossEncoderReranker
-from nanobot.memory.reranker import CompositeReranker, Reranker
+from nanobot.memory.ranking.onnx_reranker import OnnxCrossEncoderReranker
+from nanobot.memory.ranking.reranker import CompositeReranker, Reranker
 
 # ---------------------------------------------------------------------------
 # Helpers

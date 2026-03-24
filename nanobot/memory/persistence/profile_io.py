@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from .event import BeliefRecord
-from .helpers import _norm_text, _safe_float, _to_str_list, _tokenize, _utc_now_iso
+from ..event import BeliefRecord
+from ..helpers import _norm_text, _safe_float, _to_str_list, _tokenize, _utc_now_iso
 
 if TYPE_CHECKING:
     from .unified_db import UnifiedMemoryDB

@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from nanobot.memory import MemoryStore
-from nanobot.memory.retrieval_planner import RetrievalPlanner
+from nanobot.memory.read.retrieval_planner import RetrievalPlanner
 
 
 def test_coerce_event_adds_normalized_metadata(tmp_path: Path) -> None:

@@ -36,7 +36,7 @@ def db(db_path: Path) -> UnifiedMemoryDB:
 
 class TestSnapshotDBPath:
     def test_rebuild_uses_db_for_read_write(self, db: UnifiedMemoryDB, tmp_path: Path) -> None:
-        from nanobot.memory.snapshot import MemorySnapshot
+        from nanobot.memory.persistence.snapshot import MemorySnapshot
 
         profile_mgr = MagicMock()
         profile_mgr.read_profile.return_value = {
@@ -84,7 +84,7 @@ class TestSnapshotDBPath:
         assert "# Memory" in stored
 
     def test_verify_memory_uses_db_events(self, db: UnifiedMemoryDB, tmp_path: Path) -> None:
-        from nanobot.memory.snapshot import MemorySnapshot
+        from nanobot.memory.persistence.snapshot import MemorySnapshot
 
         profile_mgr = MagicMock()
         profile_mgr.read_profile.return_value = {
@@ -143,7 +143,7 @@ class TestMaintenanceDBPath:
 
 class TestConflictsDBPath:
     def test_resolve_conflict_skips_mem0_with_db(self, db: UnifiedMemoryDB, tmp_path: Path) -> None:
-        from nanobot.memory.conflicts import ConflictManager
+        from nanobot.memory.write.conflicts import ConflictManager
 
         profile_mgr = MagicMock()
         profile_mgr.PROFILE_KEYS = (
@@ -190,7 +190,7 @@ class TestConflictsDBPath:
         assert result["mem0_operation"] == "none_db"
 
     def test_resolve_keep_new_skips_mem0_with_db(self, db: UnifiedMemoryDB, tmp_path: Path) -> None:
-        from nanobot.memory.conflicts import ConflictManager
+        from nanobot.memory.write.conflicts import ConflictManager
 
         profile_mgr = MagicMock()
         profile_mgr.PROFILE_KEYS = (
@@ -244,7 +244,7 @@ class TestConflictsDBPath:
 
 class TestProfileIODBPath:
     def test_read_profile_from_db(self, db: UnifiedMemoryDB, tmp_path: Path) -> None:
-        from nanobot.memory.profile_io import ProfileStore
+        from nanobot.memory.persistence.profile_io import ProfileStore
 
         profile_data = {
             "preferences": ["coffee"],
@@ -271,7 +271,7 @@ class TestProfileIODBPath:
         assert "coffee" in result["preferences"]
 
     def test_write_profile_to_db(self, db: UnifiedMemoryDB, tmp_path: Path) -> None:
-        from nanobot.memory.profile_io import ProfileStore
+        from nanobot.memory.persistence.profile_io import ProfileStore
 
         store = ProfileStore(db=db)
 
@@ -293,7 +293,7 @@ class TestProfileIODBPath:
         assert "tea" in stored["preferences"]
 
     def test_find_mem0_id_uses_db_fts(self, db: UnifiedMemoryDB, tmp_path: Path) -> None:
-        from nanobot.memory.profile_io import ProfileStore
+        from nanobot.memory.persistence.profile_io import ProfileStore
 
         store = ProfileStore(db=db)
 
@@ -314,7 +314,7 @@ class TestProfileIODBPath:
     def test_find_mem0_id_returns_none_for_no_match(
         self, db: UnifiedMemoryDB, tmp_path: Path
     ) -> None:
-        from nanobot.memory.profile_io import ProfileStore
+        from nanobot.memory.persistence.profile_io import ProfileStore
 
         store = ProfileStore(db=db)
 
