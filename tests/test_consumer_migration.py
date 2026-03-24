@@ -329,7 +329,7 @@ class TestProfileIODBPath:
 
 class TestEvalDBPath:
     def test_save_report_uses_db_path(self, db: UnifiedMemoryDB, tmp_path: Path) -> None:
-        from nanobot.agent.memory.eval import EvalRunner
+        from nanobot.eval.memory_eval import EvalRunner
 
         runner = EvalRunner(
             retrieve_fn=MagicMock(return_value=[]),
