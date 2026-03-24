@@ -56,7 +56,11 @@ class _UnavailFakeTool(Tool):
         return ToolResult.ok("done")
 
 
-def _make_loop(tmp_path: Path, **config_kw: Any) -> AgentLoop:
+def _make_loop(
+    tmp_path: Path,
+    routing_config: RoutingConfig | None = None,
+    **config_kw: Any,
+) -> AgentLoop:
     bus = MessageBus()
     defaults: dict[str, Any] = {
         "workspace": str(tmp_path),
@@ -68,7 +72,12 @@ def _make_loop(tmp_path: Path, **config_kw: Any) -> AgentLoop:
     }
     defaults.update(config_kw)
     config = AgentConfig(**defaults)
-    return build_agent(bus=bus, provider=_StubProvider(), config=config)
+    return build_agent(
+        bus=bus,
+        provider=_StubProvider(),
+        config=config,
+        routing_config=routing_config,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -162,9 +171,9 @@ class TestUnavailableToolsCallback:
 
 
 class TestCoordinatorRoleWiring:
-    """When _ensure_coordinator runs, roles are registered in CapabilityRegistry."""
+    """When build_agent() is called with a routing_config, roles are registered in CapabilityRegistry."""
 
-    def test_ensure_coordinator_populates_roles(self, tmp_path: Path) -> None:
+    def test_build_agent_with_routing_populates_roles(self, tmp_path: Path) -> None:
         roles = [
             AgentRoleConfig(
                 name="coder",
@@ -178,13 +187,11 @@ class TestCoordinatorRoleWiring:
             ),
         ]
         routing = RoutingConfig(enabled=True, roles=roles, default_role="general")
-        loop = _make_loop(tmp_path)
-        loop._routing_config = routing
-        loop._ensure_coordinator()
+        loop = _make_loop(tmp_path, routing_config=routing)
 
         # AgentRegistry should be wired
         assert loop._capabilities.agent_registry is not None
-        # Roles should be in CapabilityRegistry
+        # Roles should be in CapabilityRegistry (registered at factory time)
         assert "coder" in loop._capabilities
         assert "researcher" in loop._capabilities
         cap = loop._capabilities.get("coder")
@@ -193,7 +200,7 @@ class TestCoordinatorRoleWiring:
         assert cap.description == "Writes code"
         assert cap.health == "healthy"
 
-    def test_ensure_coordinator_disabled_role(self, tmp_path: Path) -> None:
+    def test_build_agent_with_disabled_role(self, tmp_path: Path) -> None:
         roles = [
             AgentRoleConfig(
                 name="disabled_role",
@@ -202,26 +209,19 @@ class TestCoordinatorRoleWiring:
             ),
         ]
         routing = RoutingConfig(enabled=True, roles=roles, default_role="general")
-        loop = _make_loop(tmp_path)
-        loop._routing_config = routing
-        loop._ensure_coordinator()
+        loop = _make_loop(tmp_path, routing_config=routing)
 
-        # Disabled role should still register but as unavailable
-        # Note: role_names() only returns enabled roles, so it won't appear
-        # but it should be in _capabilities if enabled=False gets registered
-        # (build_default_registry creates the "general" default role)
+        # AgentRegistry should be wired even with disabled roles
         assert loop._capabilities.agent_registry is not None
 
-    def test_ensure_coordinator_twice_is_idempotent(self, tmp_path: Path) -> None:
+    def test_wire_coordinator_is_idempotent(self, tmp_path: Path) -> None:
         roles = [
             AgentRoleConfig(name="coder", description="Writes code", enabled=True),
         ]
         routing = RoutingConfig(enabled=True, roles=roles, default_role="general")
-        loop = _make_loop(tmp_path)
-        loop._routing_config = routing
-        loop._ensure_coordinator()
+        loop = _make_loop(tmp_path, routing_config=routing)
         cap_count_1 = len(loop._capabilities)
-        loop._ensure_coordinator()
+        loop._wire_coordinator()
         cap_count_2 = len(loop._capabilities)
         assert cap_count_1 == cap_count_2
 
@@ -229,9 +229,7 @@ class TestCoordinatorRoleWiring:
         """Without routing, agent_registry exists but has no roles — LAN-150."""
         from nanobot.coordination.registry import AgentRegistry
 
-        loop = _make_loop(tmp_path)
-        loop._routing_config = None
-        loop._ensure_coordinator()
+        loop = _make_loop(tmp_path, routing_config=None)
         assert isinstance(loop._capabilities.agent_registry, AgentRegistry)
         assert len(loop._capabilities.agent_registry) == 0
 

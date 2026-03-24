@@ -389,7 +389,7 @@ class MessageProcessor:
             final_content += "\n\n---\n" + pending_conflict_question
 
         if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+            if isinstance(message_tool, MessageTool) and message_tool.sent_in_turn:
                 return None
 
         response_meta = dict(msg.metadata or {})
