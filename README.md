@@ -514,7 +514,7 @@ nanobot gateway
 </details>
 
 <details>
-<summary><b>Feishu (飞书)</b></summary>
+<summary><b>Feishu</b></summary>
 
 Uses **WebSocket** long connection — no public IP required.
 
@@ -523,8 +523,8 @@ Uses **WebSocket** long connection — no public IP required.
 - Create a new app → Enable **Bot** capability
 - **Permissions**:
   - `im:message` (send messages) and `im:message.p2p_msg:readonly` (receive messages)
-  - **Streaming replies** (default in nanobot): add **`cardkit:card:write`** (中文后台常显示为「创建与更新卡片」). This scope is required for CardKit card entities and stream-updating assistant text. It is **not** included in older minimal setups — open **权限管理**, enable it, then save and **publish** a new app version if the console requires it.
-  - If you **cannot** add `cardkit:card:write`, set `"streaming": false` under `channels.feishu` (see below). The bot still works; replies are sent as normal interactive cards without token-by-token streaming.
+  - **Streaming replies** (default in nanobot): add **`cardkit:card:write`** (often labeled **Create and update cards** in the Feishu developer console). Required for CardKit entities and streamed assistant text. Older apps may not have it yet — open **Permission management**, enable the scope, then **publish** a new app version if the console requires it.
+  - If you **cannot** add `cardkit:card:write`, set `"streaming": false` under `channels.feishu` (see below). The bot still works; replies use normal interactive cards without token-by-token streaming.
 - **Events**: Add `im.message.receive_v1` (receive messages)
   - Select **Long Connection** mode (requires running nanobot first to establish connection)
 - Get **App ID** and **App Secret** from "Credentials & Basic Info"

@@ -324,10 +324,6 @@ Enable streaming per channel:
 
 When `streaming` is `false` (default) or omitted, only `send()` is called — no streaming overhead.
 
-#### Feishu (built-in channel) and `cardkit:card:write`
-
-The Feishu/Lark channel implements `send_delta()` with **CardKit** (create card entity, stream text, then close streaming mode). The app must declare **`cardkit:card:write`** in the [Feishu Open Platform](https://open.feishu.cn/app) (**权限管理** → 创建与更新卡片). Bots configured before this feature shipped may be missing the scope — add it and republish the app. If you omit it, set `"streaming": false` for `channels.feishu` so nanobot only uses non-streaming `send()` (plain interactive messages).
-
 ### BaseChannel Streaming API
 
 | Method / Property | Description |
