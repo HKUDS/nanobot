@@ -129,6 +129,7 @@ class NanobotDingTalkHandler(CallbackHandler):
             task = asyncio.create_task(
                 self.channel._on_message(
                     content,
+                    file_paths,
                     sender_id,
                     sender_name,
                     conversation_type,
@@ -505,6 +506,7 @@ class DingTalkChannel(BaseChannel):
     async def _on_message(
         self,
         content: str,
+        media: list[str] | None,
         sender_id: str,
         sender_name: str,
         conversation_type: str | None = None,
@@ -523,6 +525,7 @@ class DingTalkChannel(BaseChannel):
                 sender_id=sender_id,
                 chat_id=chat_id,
                 content=str(content),
+                media=media or [],
                 metadata={
                     "sender_name": sender_name,
                     "platform": "dingtalk",

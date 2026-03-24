@@ -48,6 +48,7 @@ async def test_group_message_keeps_sender_id_and_routes_chat_id() -> None:
 
     await channel._on_message(
         "hello",
+        None,
         sender_id="user1",
         sender_name="Alice",
         conversation_type="2",
@@ -170,6 +171,7 @@ async def test_handler_processes_file_message(monkeypatch) -> None:
     assert (status, body) == ("OK", "OK")
     assert "[File]" in msg.content
     assert "/tmp/nanobot_dingtalk/user1/report.xlsx" in msg.content
+    assert msg.media == ["/tmp/nanobot_dingtalk/user1/report.xlsx"]
 
 
 @pytest.mark.asyncio
