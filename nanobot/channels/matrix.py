@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import mimetypes
-import pprint
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -103,7 +102,15 @@ MATRIX_HTML_CLEANER = nh3.Cleaner(
 @dataclass
 class _StreamBuf:
     """
+    Represents a buffer for managing LLM response stream data.
 
+    :ivar text: Stores the text content of the buffer.
+    :type text: str
+    :ivar event_id: Identifier for the associated event. None indicates no 
+        specific event association.
+    :type event_id: str | None
+    :ivar last_edit: Timestamp of the most recent edit to the buffer.
+    :type last_edit: float
     """
     text: str = ""
     event_id: str | None = None
@@ -126,7 +133,21 @@ def _render_markdown_html(text: str) -> str | None:
 
 
 def _build_matrix_text_content(text: str, event_id: str | None = None) -> dict[str, object]:
-    """Build Matrix m.text payload with optional HTML formatted_body."""
+    """
+    Constructs and returns a dictionary representing the matrix text content with optional
+    HTML formatting and reference to an existing event for replacement. This function is 
+    primarily used to create content payloads compatible with the Matrix messaging protocol.
+
+    :param text: The plain text content to include in the message.
+    :type text: str
+    :param event_id: Optional ID of the event to replace. If provided, the function will 
+        include information indicating that the message is a replacement of the specified 
+        event.
+    :type event_id: str | None
+    :return: A dictionary containing the matrix text content, potentially enriched with 
+        HTML formatting and replacement metadata if applicable.
+    :rtype: dict[str, object]
+    """
     content: dict[str, object] = {"msgtype": "m.text", "body": text, "m.mentions": {}}
     if html := _render_markdown_html(text):
         content["format"] = MATRIX_HTML_FORMAT
@@ -190,6 +211,7 @@ class MatrixChannel(BaseChannel):
     name = "matrix"
     display_name = "Matrix"
     _STREAM_EDIT_INTERVAL = 1.5 # min seconds between edit_message_text calls
+    monotonic_time = time.monotonic
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -322,16 +344,16 @@ class MatrixChannel(BaseChannel):
         room = getattr(self.client, "rooms", {}).get(room_id)
         return bool(getattr(room, "encrypted", False))
 
-    async def _send_room_content(self, room_id: str, content: dict[str, Any]) -> None | RoomSendResponse | RoomSendError:
+    async def _send_room_content(self, room_id: str,
+                                 content: dict[str, Any]) -> None | RoomSendResponse | RoomSendError:
         """Send m.room.message with E2EE options."""
         if not self.client:
-            return
+            return None
         kwargs: dict[str, Any] = {"room_id": room_id, "message_type": "m.room.message", "content": content}
-        
+
         if self.config.e2ee_enabled:
             kwargs["ignore_unverified_devices"] = True
         response = await self.client.room_send(**kwargs)
-        print(response)
         return response
 
     async def _resolve_server_upload_limit_bytes(self) -> int | None:
@@ -443,10 +465,9 @@ class MatrixChannel(BaseChannel):
                 await self._stop_typing_keepalive(msg.chat_id, clear_typing=True)
 
     async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
-        print(f"Sending delta for chat {chat_id}: {delta[:50]}...")
         meta = metadata or {}
         relates_to = self._build_thread_relates_to(metadata)
-    
+
         if meta.get("_stream_end"):
             buf = self._stream_bufs.pop(chat_id, None)
             if not buf or not buf.event_id or not buf.text:
@@ -459,7 +480,7 @@ class MatrixChannel(BaseChannel):
                 content["m.relates_to"] = relates_to
             await self._send_room_content(chat_id, content)
             return
-    
+
         buf = self._stream_bufs.get(chat_id)
         if buf is None:
             buf = _StreamBuf()
@@ -469,19 +490,18 @@ class MatrixChannel(BaseChannel):
         if not buf.text.strip():
             return
 
-        now = time.monotonic()
+        now = self.monotonic_time()
 
-        print(not buf.last_edit or (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL)
         if not buf.last_edit or (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL:
             try:
                 content = _build_matrix_text_content(buf.text, buf.event_id)
                 response = await self._send_room_content(chat_id, content)
                 buf.last_edit = now
                 if not buf.event_id:
+                    # we are editing the same message all the time, so only the first time the event id needs to be set
                     buf.event_id = response.event_id
-                pprint.pprint(buf)
-            except Exception as e:
-                pprint.pprint(e)
+            except Exception:
+                await self._stop_typing_keepalive(metadata["room_id"], clear_typing=True)
                 pass
 
 
