@@ -1,10 +1,10 @@
-"""Orchestrator protocol and shared TurnState dataclass.
+"""Orchestrator protocol and shared turn data types.
 
 ``TurnState`` is the mutable state bag shared across iterations of the
-Plan-Act-Observe-Reflect loop.  It lives here (rather than in
-``turn_orchestrator.py``) so that ``message_processor.py`` can reference
-it without importing the concrete ``TurnOrchestrator`` class, eliminating
-a deferred import cycle.
+Plan-Act-Observe-Reflect loop.  ``TurnResult`` is the immutable output.
+Both live here (rather than in ``turn_orchestrator.py``) so that
+``message_processor.py`` can reference them without importing the concrete
+``TurnOrchestrator`` class, avoiding an import cycle.
 
 ``Orchestrator`` is a structural ``Protocol`` satisfied by
 ``TurnOrchestrator`` (and any test mock that exposes the same ``run``
@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from nanobot.agent.callbacks import ProgressCallback
     from nanobot.agent.coordinator import ClassificationResult
     from nanobot.agent.delegation_advisor import DelegationAction
-    from nanobot.agent.turn_orchestrator import TurnResult
 
 
 @dataclass(slots=True)
@@ -45,6 +44,15 @@ class TurnState:
     tools_def_snapshot: frozenset[str] = field(default_factory=frozenset)
 
 
+@dataclass(frozen=True, slots=True)
+class TurnResult:
+    """Immutable result of a single turn of the PAOR loop."""
+
+    content: str
+    tools_used: list[str]  # tool names called this turn; empty list = no tools used
+    messages: list[dict[str, Any]]
+
+
 class Orchestrator(Protocol):
     """Structural protocol for the turn orchestrator.
 
@@ -59,4 +67,4 @@ class Orchestrator(Protocol):
         state: TurnState,
         on_progress: ProgressCallback | None,
     ) -> TurnResult:
-        """Execute one full turn of the Plan-Act-Observe-Reflect loop."""  # Protocol stub
+        """Execute one full turn of the Plan-Act-Observe-Reflect loop."""

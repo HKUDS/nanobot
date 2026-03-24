@@ -32,6 +32,7 @@ from nanobot.agent.compression import estimate_messages_tokens, summarize_and_co
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.delegation import DelegationDispatcher
 from nanobot.agent.failure import FailureClass, ToolCallTracker, _build_failure_prompt
+from nanobot.agent.orchestrator_protocol import TurnResult as TurnResult  # re-export
 from nanobot.agent.orchestrator_protocol import TurnState as TurnState  # re-export
 from nanobot.agent.prompt_loader import PromptLoader
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
@@ -169,15 +170,6 @@ class _ToolBatchResult:
     nudged_for_final: bool
     last_tool_call_msg_idx: int
     tool_calls_this_batch: int
-
-
-@dataclass(frozen=True, slots=True)
-class TurnResult:
-    """Immutable result of a single turn of the PAOR loop."""
-
-    content: str
-    tools_used: list[str]  # tool names called this turn; empty list = no tools used
-    messages: list[dict[str, Any]]
 
 
 # ---------------------------------------------------------------------------
