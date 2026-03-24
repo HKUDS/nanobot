@@ -34,6 +34,7 @@ from nanobot.tools.builtin.message import MessageTool
 
 if TYPE_CHECKING:
     from nanobot.agent.agent_components import _AgentComponents
+    from nanobot.agent.message_processor import MessageProcessor
     from nanobot.coordination.coordinator import ClassificationResult, Coordinator
 
 
@@ -92,7 +93,7 @@ class AgentLoop:
         self._llm_caller = components.subsystems.llm_caller
         self._verifier = components.subsystems.verifier
         self._orchestrator = components.subsystems.orchestrator
-        self._processor = components.subsystems.processor
+        self._processor: MessageProcessor = components.subsystems.processor
         self._role_manager = components.role_manager
 
         # Routing

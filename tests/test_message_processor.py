@@ -15,8 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from nanobot.agent.agent_components import _ProcessorServices
-from nanobot.agent.message_processor import MessageProcessor
+from nanobot.agent.message_processor import MessageProcessor, _ProcessorServices
 from nanobot.bus.events import InboundMessage, OutboundMessage
 
 # ---------------------------------------------------------------------------
