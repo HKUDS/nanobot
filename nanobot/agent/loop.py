@@ -193,9 +193,16 @@ class AgentLoop:
         if migrated_anything:
             logger.info(f"Local data migration to Honcho complete for {session_key}")
 
+    # Internal session prefixes that should skip Honcho prefetch — these carry
+    # LLM-generated prompts (heartbeat tasks, cron payloads) that would pollute
+    # the search_query and hit the wrong Honcho session.
+    _INTERNAL_SESSION_PREFIXES = ("heartbeat", "cron:", "cli:direct")
+
     def _honcho_prefetch(self, session_key: str, user_message: str) -> str:
         """Fetch user context from Honcho for system prompt injection."""
         if not self.honcho_active or not self.honcho_config or not self.honcho_config.prefetch:
+            return ""
+        if any(session_key.startswith(p) for p in self._INTERNAL_SESSION_PREFIXES):
             return ""
         try:
             ctx = self._honcho.get_prefetch_context(session_key, user_message=user_message)
@@ -611,9 +618,10 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        # Honcho: set tool contexts + prefetch user context
-        self._honcho_set_context(msg.session_key)
-        honcho_context = self._honcho_prefetch(msg.session_key, msg.content)
+        # Honcho: set tool contexts + prefetch user context (use resolved key,
+        # not msg.session_key, so explicit overrides like "heartbeat" are honoured)
+        self._honcho_set_context(key)
+        honcho_context = self._honcho_prefetch(key, msg.content)
 
         history = session.get_history(max_messages=0)
         initial_messages = self.context.build_messages(
@@ -650,7 +658,7 @@ class AgentLoop:
         self._save_turn(session, all_msgs, 1 + len(history))
 
         if self.honcho_active:
-            self._honcho_sync(msg.session_key, msg.content, final_content)
+            self._honcho_sync(key, msg.content, final_content)
         self.sessions.save(session)
         self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
 
