@@ -108,15 +108,10 @@ class TestRetrieveWithGraphAugmentation:
         retriever._graph.get_related_entity_names_sync = MagicMock(
             return_value={"python", "fastapi"}
         )
-        with patch(
-            "nanobot.agent.memory.retriever._local_retrieve",
-            return_value=[],
-        ) as mock_local:
-            retriever.retrieve("web framework", top_k=3)
-        # The augmented query should have been passed to _local_retrieve
-        call_args = mock_local.call_args
-        query_arg = call_args[0][1]
-        assert "python" in query_arg or "fastapi" in query_arg
+        retriever._extractor._extract_entities = MagicMock(return_value=["Web"])
+        # Test graph entity collection directly (unified pipeline uses this internally)
+        entities = retriever._collect_graph_entity_names("web framework", [])
+        assert "python" in entities or "fastapi" in entities
 
 
 class TestBuildGraphContextLines:
@@ -166,40 +161,55 @@ class TestRetrieveAppliesTypeBoost:
 
     def test_type_boost_increases_score(self) -> None:
         retriever = _make_retriever()
-        plan = retriever._planner.plan.return_value
-        plan.policy["type_boost"] = {"semantic": 0.1}
+        plan = _make_plan(
+            policy={
+                "candidate_multiplier": 3,
+                "half_life_days": 60.0,
+                "fallback_topics": [],
+                "fallback_types": [],
+                "type_boost": {"semantic": 0.1},
+            }
+        )
 
-        with patch(
-            "nanobot.agent.memory.retriever._local_retrieve",
-            return_value=[
-                {
-                    "id": "e1",
-                    "type": "fact",
-                    "summary": "A semantic fact",
-                    "memory_type": "semantic",
-                    "timestamp": "2025-01-01T00:00:00Z",
-                    "retrieval_reason": {"score": 0.5},
-                    "entities": [],
-                    "stability": "medium",
-                    "metadata": {"memory_type": "semantic"},
-                },
-                {
-                    "id": "e2",
-                    "type": "task",
-                    "summary": "An episodic task",
-                    "memory_type": "episodic",
-                    "timestamp": "2025-01-01T00:00:00Z",
-                    "retrieval_reason": {"score": 0.5},
-                    "entities": [],
-                    "stability": "medium",
-                    "metadata": {"memory_type": "episodic"},
-                },
-            ],
-        ):
-            results = retriever.retrieve("test", top_k=10)
+        items = [
+            {
+                "id": "e1",
+                "type": "fact",
+                "summary": "A semantic fact",
+                "memory_type": "semantic",
+                "timestamp": "2025-01-01T00:00:00Z",
+                "entities": [],
+                "stability": "medium",
+                "metadata": {"memory_type": "semantic"},
+            },
+            {
+                "id": "e2",
+                "type": "task",
+                "summary": "An episodic task",
+                "memory_type": "episodic",
+                "timestamp": "2025-01-01T00:00:00Z",
+                "entities": [],
+                "stability": "medium",
+                "metadata": {"memory_type": "episodic"},
+            },
+        ]
 
-        # The semantic item should get the 0.1 boost, making its score higher
-        scores = {r["id"]: r["score"] for r in results}
+        # Test _score_items directly — this is the pipeline stage that applies boosts
+        profile_data = {
+            "profile": {},
+            "resolved_keep_new_old": {k: set() for k in retriever.PROFILE_KEYS},
+            "resolved_keep_new_new": {k: set() for k in retriever.PROFILE_KEYS},
+        }
+        scored = retriever._score_items(
+            items,
+            plan,
+            profile_data=profile_data,
+            graph_entities=set(),
+            use_recency=True,
+            router_enabled=True,
+            type_separation_enabled=True,
+        )
+        scores = {r["id"]: r.get("score", 0.0) for r in scored}
         assert scores["e1"] > scores["e2"]
 
 
@@ -655,7 +665,6 @@ class TestGraphEntityCache:
 
         from nanobot.agent.memory.retriever import MemoryRetriever
 
-        mem0 = MagicMock()
         graph = MagicMock()
         graph.enabled = True
         graph.get_related_entity_names_sync.return_value = {"alice", "bob"}
@@ -668,7 +677,6 @@ class TestGraphEntityCache:
         extractor._extract_entities.return_value = ["coffee"]
 
         retriever = MemoryRetriever(
-            mem0=mem0,
             graph=graph,
             planner=planner,
             reranker=reranker,
@@ -708,36 +716,11 @@ class TestGraphEntityCache:
     def test_retrieve_resets_cache_between_calls(self):
         """retrieve() resets _graph_cache so each call gets a fresh traversal."""
         r = self._make_retriever_with_graph()
-        # Force stub path — no db/embedder injected
 
-        # Configure planner to return a proper plan
-        plan = MagicMock()
-        plan.intent = "fact_lookup"
-        plan.policy = {
-            "candidate_multiplier": 3,
-            "half_life_days": 60.0,
-            "fallback_topics": [],
-            "fallback_types": [],
-            "type_boost": {},
-        }
-        plan.include_superseded = False
-        plan.routing_hints = {
-            "focus_task_decision": False,
-            "focus_planning": False,
-            "focus_architecture": False,
-            "requires_open": False,
-            "requires_resolved": False,
-        }
-        r._planner.plan.return_value = plan
+        # Pre-populate cache to verify it gets cleared on retrieve()
+        r._graph_cache[frozenset({"test"})] = {"cached_entity"}
+        assert len(r._graph_cache) == 1
 
+        # retrieve() should reset _graph_cache at the start (even without db/embedder)
         r.retrieve(query="coffee query", top_k=3)
-        count_after_first = r._graph.get_related_entity_names_sync.call_count
-
-        r.retrieve(query="coffee query", top_k=3)
-        count_after_second = r._graph.get_related_entity_names_sync.call_count
-
-        # If cache resets between retrieve() calls, graph is queried again on second call
-        assert count_after_second > count_after_first, (
-            f"Expected graph traversal to re-run after cache reset; "
-            f"call_count was {count_after_first} after first, {count_after_second} after second"
-        )
+        assert r._graph_cache == {}, "Expected _graph_cache to be reset at the start of retrieve()"

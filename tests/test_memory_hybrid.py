@@ -84,8 +84,9 @@ class TestHybridMemoryStore:
         )
 
         assert ok is True
-        assert store.events_file.exists()
-        assert store.profile_file.exists()
+        # Storage redesign: events and profile now live in UnifiedMemoryDB,
+        # not events.jsonl / profile.json files.
+        assert store.db is not None
 
         events = store.ingester.read_events()
         assert len(events) == 1
@@ -140,8 +141,9 @@ class TestHybridMemoryStore:
         )
         assert len(retrieved) >= 1
         assert retrieved[0]["summary"].lower().find("oauth2") >= 0
-        assert retrieved[0]["retrieval_reason"]["provider"] in ("bm25", "mem0")
-        assert retrieved[0]["provenance"]["canonical_id"] == retrieved[0]["id"]
+        # Storage redesign: unified retrieval pipeline no longer exposes "provider".
+        # Instead, retrieval_reason contains scoring details (recency, intent, etc.).
+        assert "retrieval_reason" in retrieved[0]
 
         report = store.snapshot.verify_memory(stale_days=90)
         assert report["events"] == 2
@@ -176,7 +178,8 @@ class TestHybridMemoryStore:
         snapshot = store.snapshot.rebuild_memory_snapshot(max_events=10, write=True)
         assert "Prefer concise summaries." in snapshot
         assert "Adopt hybrid memory mode in staging." in snapshot
-        assert store.memory_file.exists()
+        # Storage redesign: MEMORY.md snapshot is now in UnifiedMemoryDB
+        assert store.db.read_snapshot("current")
 
     def test_profile_conflict_tracking_updates_meta_confidence(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
@@ -690,7 +693,8 @@ class TestHybridMemoryStore:
 
         retrieved = store.retriever.retrieve("oauth2 tokens", top_k=2, embedding_provider="hash")
         assert retrieved
-        assert "provenance" in retrieved[0]
+        # Storage redesign: provenance is now embedded in the event's extra fields
+        assert retrieved[0].get("canonical_id") == "dup-1"
 
     def test_non_duplicate_events_remain_separate(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
@@ -757,8 +761,8 @@ class TestHybridMemoryStore:
             "postgresql database", top_k=2, embedding_provider="hash"
         )
         assert retrieved
-        assert retrieved[0]["retrieval_reason"]["provider"] == "bm25"
-        assert retrieved[0]["retrieval_reason"]["backend"] == "jsonl"
+        # Storage redesign: unified pipeline replaces provider/backend fields
+        assert "retrieval_reason" in retrieved[0]
 
     def test_keyword_retrieval_with_recency(self, tmp_path: Path) -> None:
         """Recency weighting should boost recent events of same type over old ones."""

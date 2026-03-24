@@ -96,14 +96,17 @@ class MemoryStore:
     ):
         self.workspace = workspace
 
-        # Construct embedder — try OpenAI first, fall back to local ONNX
+        # Construct embedder — try OpenAI first, fall back to local ONNX.
+        # When embedding_provider is explicitly set to "hash" or "local",
+        # skip OpenAI to avoid accidental API calls in test environments.
         self._embedder: Embedder | None = None
-        try:
-            _oai = OpenAIEmbedder()
-            if _oai.available:
-                self._embedder = _oai
-        except Exception:  # crash-barrier: OpenAI init failure
-            pass
+        if embedding_provider not in ("hash", "local"):
+            try:
+                _oai = OpenAIEmbedder()
+                if _oai.available:
+                    self._embedder = _oai
+            except Exception:  # crash-barrier: OpenAI init failure
+                pass
         if self._embedder is None:
             try:
                 _local = LocalEmbedder()

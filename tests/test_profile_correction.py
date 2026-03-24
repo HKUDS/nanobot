@@ -10,12 +10,12 @@ from nanobot.agent.memory.profile_io import ProfileStore
 
 
 def _make_profile_store(tmp_path: Path) -> ProfileStore:
-    persistence = MagicMock()
-    mem0 = MagicMock()
-    profile_file = tmp_path / "profile.json"
-    profile_file.write_text("{}")
-    persistence.read_json.return_value = None
-    return ProfileStore(persistence, profile_file, mem0)
+    from nanobot.agent.memory.unified_db import UnifiedMemoryDB
+
+    mem_dir = tmp_path / "memory"
+    mem_dir.mkdir(exist_ok=True)
+    db = UnifiedMemoryDB(mem_dir / "memory.db", dims=32)
+    return ProfileStore(db=db)
 
 
 class TestCorrectionOrchestrator:

@@ -124,6 +124,10 @@ class UnifiedMemoryDB:
         embedding: list[float] | None = None,
     ) -> None:
         """Insert an event with optional vector embedding (single transaction)."""
+        # Auto-serialize metadata dict → JSON string for the TEXT column.
+        raw_meta = event.get("metadata")
+        if isinstance(raw_meta, dict):
+            raw_meta = json.dumps(raw_meta)
         with self._conn:
             # Clean up any existing vector entry before replace (rowid changes
             # on INSERT OR REPLACE)
@@ -143,7 +147,7 @@ class UnifiedMemoryDB:
                     event["timestamp"],
                     event.get("source"),
                     event.get("status", "active"),
-                    event.get("metadata"),
+                    raw_meta,
                     event.get("created_at", event.get("timestamp", _utc_now_iso())),
                 ),
             )
@@ -208,7 +212,9 @@ class UnifiedMemoryDB:
         terms = re.findall(r"\w+", query_text)
         if not terms:
             return []
-        safe_query = " OR ".join(f'"{t}"' for t in terms)
+        # Use prefix matching (t*) so "deploy" matches "deployment" and vice versa.
+        # FTS5 does exact token matching — no stemming — so prefix helps recall.
+        safe_query = " OR ".join(f"{t}*" for t in terms)
         try:
             rows = self._conn.execute(
                 """SELECT e.*, rank

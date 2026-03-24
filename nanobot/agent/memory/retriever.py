@@ -333,19 +333,15 @@ class MemoryRetriever:
         candidate_k = max(1, min(top_k * int(policy.get("candidate_multiplier", 3)), 60))
 
         # 1. Embed query (async → sync bridge)
+        # Try asyncio.run() first; if a loop is already active (e.g. inside
+        # pytest-asyncio), fall back to a helper thread.
         try:
-            loop = asyncio.get_running_loop()
+            query_vec = asyncio.run(embedder.embed(query))
         except RuntimeError:
-            loop = None
-
-        if loop is not None and loop.is_running():
-            # Already inside an event loop — use a helper thread
             import concurrent.futures
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 query_vec = pool.submit(lambda: asyncio.run(embedder.embed(query))).result()
-        else:
-            query_vec = asyncio.run(embedder.embed(query))
 
         # 2. Dual source — DB methods are synchronous
         vec_results = self._db.search_vector(query_vec, candidate_k)
@@ -355,11 +351,15 @@ class MemoryRetriever:
         candidates = self._fuse_results(vec_results, fts_results, vector_weight=0.7)
 
         if not candidates:
-            bind_trace().debug(
-                "Memory retrieve source=unified results=0 duration_ms={:.0f}",
-                (time.monotonic() - t0) * 1000,
-            )
-            return []
+            # Fallback: if vector + FTS returned nothing (e.g., events have no
+            # embeddings yet, or FTS terms don't match), try recent events.
+            candidates = self._db.read_events(limit=candidate_k)
+            if not candidates:
+                bind_trace().debug(
+                    "Memory retrieve source=unified results=0 duration_ms={:.0f}",
+                    (time.monotonic() - t0) * 1000,
+                )
+                return []
 
         # 4. Enrich metadata
         self._enrich_item_metadata(candidates)
@@ -1117,6 +1117,12 @@ class MemoryRetriever:
                     meta = {}
             if not isinstance(meta, dict):
                 meta = {}
+            # Unpack extra fields stored by ingester (entities, triples, etc.)
+            extras = meta.pop("_extra", None)
+            if isinstance(extras, dict):
+                for k, v in extras.items():
+                    if k not in item:
+                        item[k] = v
             if not item.get("topic"):
                 item["topic"] = str(meta.get("topic", "")).strip()
             if not item.get("stability"):

@@ -2,93 +2,60 @@
 
 from __future__ import annotations
 
-import json
-from unittest.mock import MagicMock
+from pathlib import Path
 
 from nanobot.agent.memory.profile_io import ProfileCache, ProfileStore
+from nanobot.agent.memory.unified_db import UnifiedMemoryDB
 
 
 class TestProfileCache:
-    def test_read_returns_empty_dict_when_file_missing(self, tmp_path):
-        persistence = MagicMock()
-        cache = ProfileCache(_path=tmp_path / "profile.json", _persistence=persistence)
+    def test_read_returns_empty_dict_when_file_missing(self):
+        cache = ProfileCache()
         result = cache.read()
         assert result == {}
-        persistence.read_json.assert_not_called()
 
-    def test_read_loads_from_disk_on_first_call(self, tmp_path):
-        profile_file = tmp_path / "profile.json"
-        profile_file.write_text('{"preferences": ["tea"]}')
-        persistence = MagicMock()
-        persistence.read_json.return_value = {"preferences": ["tea"]}
-        cache = ProfileCache(_path=profile_file, _persistence=persistence)
+    def test_read_loads_from_disk_on_first_call(self):
+        cache = ProfileCache()
+        cache.write({"preferences": ["tea"]})
         result = cache.read()
         assert result == {"preferences": ["tea"]}
-        persistence.read_json.assert_called_once_with(profile_file)
 
-    def test_read_uses_cache_on_second_call(self, tmp_path):
-        profile_file = tmp_path / "profile.json"
-        profile_file.write_text('{"preferences": ["tea"]}')
-        persistence = MagicMock()
-        persistence.read_json.return_value = {"preferences": ["tea"]}
-        cache = ProfileCache(_path=profile_file, _persistence=persistence)
-        cache.read()
-        cache.read()  # second call
-        persistence.read_json.assert_called_once()  # still only one disk read
+    def test_read_uses_cache_on_second_call(self):
+        cache = ProfileCache()
+        cache.write({"preferences": ["tea"]})
+        result1 = cache.read()
+        result2 = cache.read()
+        assert result1 == result2 == {"preferences": ["tea"]}
 
-    def test_write_updates_cache_atomically(self, tmp_path):
-        profile_file = tmp_path / "profile.json"
-        profile_file.write_text("{}")
-        persistence = MagicMock()
-        persistence.read_json.return_value = {}
-
-        def _write_json(path, data):
-            path.write_text(json.dumps(data))
-
-        persistence.write_json.side_effect = _write_json
-        cache = ProfileCache(_path=profile_file, _persistence=persistence)
+    def test_write_updates_cache_atomically(self):
+        cache = ProfileCache()
         data = {"preferences": ["coffee"]}
         cache.write(data)
-        # next read must return the written value without hitting disk again
-        persistence.read_json.reset_mock()
         result = cache.read()
         assert result == data
-        persistence.read_json.assert_not_called()
 
-    def test_invalidate_forces_reload(self, tmp_path):
-        profile_file = tmp_path / "profile.json"
-        profile_file.write_text('{"preferences": ["tea"]}')
-        persistence = MagicMock()
-        persistence.read_json.return_value = {"preferences": ["tea"]}
-        cache = ProfileCache(_path=profile_file, _persistence=persistence)
-        cache.read()
+    def test_invalidate_forces_reload(self):
+        cache = ProfileCache()
+        cache.write({"preferences": ["tea"]})
+        assert cache.read() == {"preferences": ["tea"]}
         cache.invalidate()
-        cache.read()
-        assert persistence.read_json.call_count == 2
+        assert cache.read() == {}
 
 
 class TestProfileStoreReadWrite:
-    def _make_store(self, tmp_path):
-        persistence = MagicMock()
-        mem0 = MagicMock()
-        profile_file = tmp_path / "profile.json"
-        profile_file.write_text("{}")
-        persistence.read_json.return_value = None
-        return ProfileStore(persistence, profile_file, mem0)
+    def _make_store(self, tmp_path: Path) -> ProfileStore:
+        mem_dir = tmp_path / "memory"
+        mem_dir.mkdir(exist_ok=True)
+        db = UnifiedMemoryDB(mem_dir / "memory.db", dims=32)
+        return ProfileStore(db=db)
 
-    def test_read_profile_returns_dict(self, tmp_path):
+    def test_read_profile_returns_dict(self, tmp_path: Path):
         store = self._make_store(tmp_path)
         result = store.read_profile()
         assert isinstance(result, dict)
 
-    def test_write_profile_and_read_back(self, tmp_path):
-        persistence = MagicMock()
-        mem0 = MagicMock()
-        profile_file = tmp_path / "profile.json"
-        profile_file.write_text("{}")
-        persistence.write_json.side_effect = lambda path, data: None
-        store = ProfileStore(persistence, profile_file, mem0)
+    def test_write_profile_and_read_back(self, tmp_path: Path):
+        store = self._make_store(tmp_path)
         store.write_profile({"preferences": ["tea"], "stable_facts": []})
-        # ProfileCache.write() updates _data in-memory; read_profile reads from cache
         result = store.read_profile()
         assert result["preferences"] == ["tea"]

@@ -442,9 +442,33 @@ class EventIngester:
     # ------------------------------------------------------------------
 
     def read_events(self, limit: int | None = None) -> list[dict[str, Any]]:
-        """Read events from UnifiedMemoryDB."""
+        """Read events from UnifiedMemoryDB.
+
+        Extra fields packed into metadata._extra on write are unpacked back
+        to top-level keys so callers see the same dict shape as was stored.
+        """
         if self._db is not None:
-            return self._db.read_events(limit=limit or 100)
+            import json as _json
+
+            rows = self._db.read_events(limit=limit or 100)
+            result: list[dict[str, Any]] = []
+            for row in rows:
+                event = dict(row)
+                raw_meta = event.get("metadata")
+                if isinstance(raw_meta, str):
+                    try:
+                        meta = _json.loads(raw_meta)
+                    except (ValueError, TypeError):
+                        meta = {}
+                else:
+                    meta = raw_meta if isinstance(raw_meta, dict) else {}
+                extras = meta.pop("_extra", None) if isinstance(meta, dict) else None
+                if isinstance(extras, dict):
+                    event.update(extras)
+                if meta:
+                    event["metadata"] = meta
+                result.append(event)
+            return result
         return []
 
     @staticmethod
@@ -750,7 +774,14 @@ class EventIngester:
         for raw in events:
             event_id = raw.get("id")
             if not event_id:
-                continue
+                # Auto-generate ID for events without one (mirrors _coerce_event).
+                summary = str(raw.get("summary", "")).strip()
+                if not summary:
+                    continue
+                event_type = str(raw.get("type", "fact"))
+                ts = str(raw.get("timestamp", _utc_now_iso()))
+                event_id = self._build_event_id(event_type, summary, ts)
+                raw = {**raw, "id": event_id}
             candidate = self._ensure_event_provenance(raw)
 
             if event_id in existing_ids:
@@ -803,15 +834,43 @@ class EventIngester:
         if self._db is not None:
             import json as _json
 
-            for event in appended_events:
+            # Collect all events that need writing: newly appended or modified
+            # (merged/superseded). Use existing_events which has the final state
+            # after all in-memory merges.
+            appended_ids = {a.get("id") for a in appended_events}
+            events_to_write = [
+                e
+                for e in existing_events
+                if e.get("id") in appended_ids
+                or e.get("merged_event_count", 1) > 1
+                or e.get("status") == "superseded"
+            ]
+
+            for event in events_to_write:
                 # Events are inserted without embeddings in the sync write path.
                 # Embeddings are backfilled by maintenance.reindex() or by the
                 # caller via db.insert_event() with a pre-computed embedding.
                 embedding = None
-                # Serialize metadata if dict
+                # Pack extra fields (entities, triples, confidence, salience,
+                # source_span, etc.) into metadata JSON so they survive the
+                # SQLite round-trip through the fixed-column events table.
                 evt_copy = dict(event)
-                if isinstance(evt_copy.get("metadata"), dict):
-                    evt_copy["metadata"] = _json.dumps(evt_copy["metadata"])
+                _db_columns = {
+                    "id",
+                    "type",
+                    "summary",
+                    "timestamp",
+                    "source",
+                    "status",
+                    "metadata",
+                    "created_at",
+                }
+                meta = evt_copy.get("metadata")
+                meta = meta if isinstance(meta, dict) else {}
+                extras = {k: v for k, v in evt_copy.items() if k not in _db_columns}
+                if extras:
+                    meta = {**meta, "_extra": extras}
+                evt_copy["metadata"] = _json.dumps(meta) if meta else None
                 evt_copy.setdefault("created_at", evt_copy.get("timestamp", _utc_now_iso()))
                 self._db.insert_event(evt_copy, embedding=embedding)
         bind_trace().debug(
