@@ -14,9 +14,10 @@ permissions:
   contents: read
 
 jobs:
-  lint:
+  checks:
+    name: lint + typecheck + import-check + prompt-manifest
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -28,41 +29,10 @@ jobs:
         run: ruff check nanobot/ tests/
       - name: Ruff format check
         run: ruff format --check nanobot/ tests/
-
-  typecheck:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install dependencies
-        run: pip install -e ".[dev]"
       - name: mypy
         run: python -m mypy nanobot/
-
-  import-check:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install dependencies
-        run: pip install -e ".[dev]"
       - name: Enforce module boundaries
         run: python scripts/check_imports.py
-
-  prompt-manifest:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
       - name: Verify prompt manifest
         run: python scripts/check_prompt_manifest.py
 
@@ -70,6 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
         python-version: ['3.10', '3.11', '3.12']
     steps:
