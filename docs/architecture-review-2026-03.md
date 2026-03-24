@@ -255,9 +255,9 @@ Most modules depend directly on concrete implementations:
 - `mission.py` imports DelegationDispatcher directly
 - `tool_setup.py` hardcodes which tools get registered
 
-### Problem 9: The consolidation split is awkward (ARCHITECTURE)
+### Problem 9: The consolidation split is awkward (ARCHITECTURE) — RESOLVED
 
-`consolidation.py` (orchestrator, 148 LOC) lives in `agent/`, while `consolidation_pipeline.py` (actual logic, 309 LOC) lives in `memory/`. The orchestrator is thin glue between the agent lifecycle and the memory subsystem.
+`consolidation.py` (orchestrator, 148 LOC) lives in `agent/`, while `consolidation_pipeline.py` (actual logic, 309 LOC) lives in `memory/`. After the restructuring, this split is actually correct: agent/ owns scheduling/concurrency (when and how to consolidate), memory/ owns domain logic (what consolidation does). The orchestrator calls `memory.consolidate()` — clean separation.
 
 ### Problem 10: `capability.py` has an identity crisis (ARCHITECTURE)
 

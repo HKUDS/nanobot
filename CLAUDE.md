@@ -324,6 +324,45 @@ the system's wiring without reading 1,000+ lines.
 `turn_orchestrator.py`, `message_processor.py`. If any construct a subsystem (not a local
 value object), it's a violation.
 
+### Dependency Inversion — No Cross-Package Instantiation
+
+**No package may import concrete classes from another package for the purpose of
+instantiation.** This rule exists because `coordination/delegation.py` and
+`coordination/mission.py` previously imported 8+ concrete tool classes from
+`tools/builtin/` to construct tool registries — coupling coordination to specific
+tool implementations.
+
+**Allowed cross-package dependencies:**
+
+| Pattern | Example | Why it's OK |
+|---------|---------|-------------|
+| Injected instances | Constructor receives `MemoryStore` | Dependency is provided, not constructed |
+| Injected factories | Constructor receives `Callable[..., ToolRegistry]` | Defers construction to the caller |
+| Protocol types | `TYPE_CHECKING: from nanobot.memory.store import MemoryStore` | Structural typing, no runtime coupling |
+| Data objects | Pydantic models, dataclasses, enums, constants | Value types, not services |
+| Base classes | `from nanobot.tools.base import Tool` for subclassing | Extension point, not instantiation |
+
+**Forbidden:**
+
+```python
+# In coordination/delegation.py — WRONG
+from nanobot.tools.builtin.filesystem import ReadFileTool
+registry.register(ReadFileTool(workspace=self.workspace))  # cross-package instantiation
+
+# CORRECT — receive a factory from the composition root
+def __init__(self, ..., build_tools: Callable[..., ToolRegistry]):
+    self._build_tools = build_tools
+```
+
+**Enforcement:** `scripts/check_imports.py` flags runtime imports from `tools/builtin/`
+in `coordination/`, and runtime imports from `coordination/` in `tools/`. The script
+skips imports inside `if TYPE_CHECKING:` blocks.
+
+**Detection test:** grep for import lines from another package's concrete modules
+(e.g., `from nanobot.tools.builtin.*` in non-tools code). If found outside
+`agent_factory.py` or `tools/setup.py`, it's a violation.
+value object), it's a violation.
+
 ### No Architectural Debt by Design
 
 Do not introduce code with the intent to "fix it later." There is no later — the next
