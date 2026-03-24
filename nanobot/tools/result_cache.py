@@ -17,7 +17,7 @@ from typing import Any, ClassVar, Protocol
 
 from loguru import logger
 
-from nanobot.agent.prompt_loader import prompts
+from nanobot.context.prompt_loader import prompts
 from nanobot.tools.base import Tool, ToolResult
 
 # ---------------------------------------------------------------------------

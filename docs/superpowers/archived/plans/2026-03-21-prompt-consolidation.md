@@ -56,7 +56,7 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.prompt_loader import PromptLoader
+from nanobot.context.prompt_loader import PromptLoader
 
 
 @pytest.fixture
@@ -68,7 +68,7 @@ def loader(tmp_path: Path) -> PromptLoader:
     (prompts_dir / "escaped.md").write_text("Use {{key}} for cache lookup.")
     loader = PromptLoader()
     # Point the builtin dir at our tmp fixtures
-    import nanobot.agent.prompt_loader as mod
+    import nanobot.context.prompt_loader as mod
     original = mod._BUILTIN_DIR
     mod._BUILTIN_DIR = prompts_dir
     yield loader
@@ -599,7 +599,7 @@ Replace lines 667-671:
 
 - [ ] **Step 4: Verify `prompts` is already imported**
 
-Check that `from nanobot.agent.prompt_loader import prompts` exists at the top of `context.py`.
+Check that `from nanobot.context.prompt_loader import prompts` exists at the top of `context.py`.
 
 - [ ] **Step 5: Run lint and typecheck**
 
@@ -658,7 +658,7 @@ Read the file to find the exact insertion point.
 - [ ] **Step 2: Add `prompts` import**
 
 ```python
-from nanobot.agent.prompt_loader import prompts
+from nanobot.context.prompt_loader import prompts
 ```
 
 - [ ] **Step 3: Clear the inline system_prompt strings**
@@ -739,7 +739,7 @@ add "unless delegation budget is exhausted":
 
 - [ ] **Step 2: Verify `prompts` is already imported**
 
-Check for `from nanobot.agent.prompt_loader import prompts` in loop.py.
+Check for `from nanobot.context.prompt_loader import prompts` in loop.py.
 
 - [ ] **Step 3: Run lint, typecheck, tests**
 
@@ -784,7 +784,7 @@ Replace system_prompt construction (lines 926-934) with:
         )
 ```
 
-Add import: `from nanobot.agent.prompt_loader import prompts`
+Add import: `from nanobot.context.prompt_loader import prompts`
 
 - [ ] **Step 2: Update `verifier.py`**
 
@@ -798,7 +798,7 @@ Replace revision request (lines 124-129) with:
                 "content": prompts.render("revision_request", issue_text=issue_text),
 ```
 
-Add import: `from nanobot.agent.prompt_loader import prompts`
+Add import: `from nanobot.context.prompt_loader import prompts`
 
 - [ ] **Step 3: Update `memory/store.py`**
 
@@ -807,7 +807,7 @@ Replace consolidation system prompt (line 2904) with:
                         "content": prompts.get("consolidation"),
 ```
 
-Add import: `from nanobot.agent.prompt_loader import prompts`
+Add import: `from nanobot.context.prompt_loader import prompts`
 
 - [ ] **Step 4: Update `memory/extractor.py`**
 
@@ -816,7 +816,7 @@ Replace extractor system prompt (line 461) with:
                         "content": prompts.get("extractor"),
 ```
 
-Add import: `from nanobot.agent.prompt_loader import prompts`
+Add import: `from nanobot.context.prompt_loader import prompts`
 
 - [ ] **Step 5: Update `tools/result_cache.py`**
 
@@ -828,7 +828,7 @@ def _get_summary_system() -> str:
 
 Then replace all references to `_SUMMARY_SYSTEM` with `_get_summary_system()`.
 
-Add import: `from nanobot.agent.prompt_loader import prompts`
+Add import: `from nanobot.context.prompt_loader import prompts`
 
 - [ ] **Step 6: Update `tools/powerpoint.py`**
 
@@ -850,7 +850,7 @@ Replace heartbeat system prompt (line 96) with:
                     "content": prompts.get("heartbeat"),
 ```
 
-Add import: `from nanobot.agent.prompt_loader import prompts`
+Add import: `from nanobot.context.prompt_loader import prompts`
 
 - [ ] **Step 8: Run lint, typecheck, full test suite**
 

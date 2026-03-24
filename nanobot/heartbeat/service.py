@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from loguru import logger
 
-from nanobot.agent.prompt_loader import prompts
+from nanobot.context.prompt_loader import prompts
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider

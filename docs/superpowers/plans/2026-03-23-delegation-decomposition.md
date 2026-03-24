@@ -103,7 +103,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from nanobot.agent.prompt_loader import prompts
+from nanobot.context.prompt_loader import prompts
 from nanobot.agent.task_types import TASK_TYPES
 from nanobot.observability.tracing import bind_trace
 

@@ -9,7 +9,7 @@ workspace root).
 
 Usage::
 
-    from nanobot.agent.prompt_loader import prompts
+    from nanobot.context.prompt_loader import prompts
 
     plan_text = prompts.get("plan")
     critique  = prompts.get("critique")

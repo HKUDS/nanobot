@@ -25,7 +25,6 @@ from nanobot.agent.agent_components import (
 
 if TYPE_CHECKING:
     from nanobot.agent.consolidation import ConsolidationOrchestrator
-    from nanobot.agent.context import ContextBuilder
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.config.schema import (
@@ -35,6 +34,7 @@ if TYPE_CHECKING:
         ExecToolConfig,
         RoutingConfig,
     )
+    from nanobot.context.context import ContextBuilder
     from nanobot.coordination.mission import MissionManager
     from nanobot.cron.service import CronService
     from nanobot.providers.base import LLMProvider
@@ -249,14 +249,14 @@ def build_agent(
     This is the canonical entry point for creating an agent.  All CLI commands
     and test helpers should use this instead of ``AgentLoop()`` directly.
     """
-    from nanobot.agent.context import ContextBuilder
     from nanobot.agent.loop import AgentLoop
     from nanobot.agent.message_processor import MessageProcessor
-    from nanobot.agent.prompt_loader import prompts
     from nanobot.agent.streaming import StreamingLLMCaller
     from nanobot.agent.turn_orchestrator import TurnOrchestrator
     from nanobot.agent.verifier import AnswerVerifier
     from nanobot.config.schema import ExecToolConfig as _ExecToolConfig
+    from nanobot.context.context import ContextBuilder
+    from nanobot.context.prompt_loader import prompts
     from nanobot.coordination.delegation import DelegationConfig, DelegationDispatcher
     from nanobot.coordination.delegation_advisor import DelegationAdvisor
     from nanobot.coordination.role_switching import TurnRoleManager

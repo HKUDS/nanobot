@@ -271,7 +271,7 @@ class TestContactsContext:
     def test_set_contacts_populates_prompt_section(self) -> None:
         from pathlib import Path
 
-        from nanobot.agent.context import ContextBuilder
+        from nanobot.context.context import ContextBuilder
 
         cb = ContextBuilder(workspace=Path("/tmp/test"))
         cb.set_contacts_context(["alice@x.com", "bob@x.com"])
@@ -284,7 +284,7 @@ class TestContactsContext:
     def test_empty_contacts_not_in_prompt(self) -> None:
         from pathlib import Path
 
-        from nanobot.agent.context import ContextBuilder
+        from nanobot.context.context import ContextBuilder
 
         cb = ContextBuilder(workspace=Path("/tmp/test"))
         cb.set_contacts_context([])
@@ -294,7 +294,7 @@ class TestContactsContext:
     def test_set_contacts_clears_previous(self) -> None:
         from pathlib import Path
 
-        from nanobot.agent.context import ContextBuilder
+        from nanobot.context.context import ContextBuilder
 
         cb = ContextBuilder(workspace=Path("/tmp/test"))
         cb.set_contacts_context(["old@x.com"])

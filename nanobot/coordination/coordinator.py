@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from nanobot.agent.prompt_loader import prompts
 from nanobot.config.schema import AgentRoleConfig
+from nanobot.context.prompt_loader import prompts
 from nanobot.coordination.registry import AgentRegistry
 from nanobot.metrics import classification_fallback_total, classification_total
 from nanobot.observability.langfuse import span as langfuse_span

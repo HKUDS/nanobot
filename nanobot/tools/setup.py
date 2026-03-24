@@ -37,8 +37,8 @@ from nanobot.tools.builtin.web import WebFetchTool, WebSearchTool
 from nanobot.tools.result_cache import CacheGetSliceTool, ToolResultCache
 
 if TYPE_CHECKING:
-    from nanobot.agent.skills import SkillsLoader
     from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
+    from nanobot.context.skills import SkillsLoader
     from nanobot.coordination.mission import MissionManager
     from nanobot.cron.service import CronService
     from nanobot.tools.capability import CapabilityRegistry

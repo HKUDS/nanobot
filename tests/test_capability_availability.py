@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from nanobot.agent.context import ContextBuilder
+from nanobot.context.context import ContextBuilder
 from nanobot.tools.base import Tool, ToolResult
 from nanobot.tools.builtin.delegate import DelegateParallelTool, DelegateTool
 from nanobot.tools.builtin.email import CheckEmailTool
