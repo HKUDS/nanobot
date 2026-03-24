@@ -6,7 +6,6 @@ target_role values with clear error messages before dispatching.
 
 from __future__ import annotations
 
-from nanobot.errors import UnknownRoleError
 from nanobot.tools.builtin.delegate import (
     DelegateParallelTool,
     DelegateTool,
@@ -56,34 +55,6 @@ def _make_parallel_tool(
     if with_roles:
         tool.set_available_roles_fn(_roles_fn)
     return tool
-
-
-# ---------------------------------------------------------------------------
-# UnknownRoleError
-# ---------------------------------------------------------------------------
-
-
-class TestUnknownRoleError:
-    def test_error_message_with_available(self) -> None:
-        err = UnknownRoleError("web", available=["coder", "researcher"])
-        assert "web" in str(err)
-        assert "coder" in str(err)
-        assert "researcher" in str(err)
-        assert err.role_name == "web"
-        assert err.available_roles == ["coder", "researcher"]
-        assert err.error_type == "unknown_role"
-        assert err.recoverable is True
-
-    def test_error_message_empty_available(self) -> None:
-        err = UnknownRoleError("unknown")
-        assert "none configured" in str(err)
-
-    def test_inherits_tool_execution_error(self) -> None:
-        from nanobot.errors import ToolExecutionError
-
-        err = UnknownRoleError("bad")
-        assert isinstance(err, ToolExecutionError)
-        assert err.tool_name == "delegate"
 
 
 # ---------------------------------------------------------------------------

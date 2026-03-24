@@ -327,10 +327,6 @@ def _sheet_meta(sheet_data: dict[str, Any], cache_key: str) -> dict[str, Any]:
     return meta
 
 
-# Backward-compatible alias
-ReadExcelTool = ReadSpreadsheetTool
-
-
 def _coerce_csv_value(val: str) -> Any:
     """Attempt to coerce a CSV string to a native Python type."""
     if not val:
@@ -545,7 +541,7 @@ def _summarize_allocations(pairs: list[tuple[str, Any]]) -> str | None:
         return None
     first_date = non_null[0][0].split("(")[0].strip()
     last_date = non_null[-1][0].split("(")[0].strip()
-    total = sum(float(v) for _, v in non_null if isinstance(v, (int, float)))
+    total = sum(float(v) for _, v in non_null if isinstance(v, int | float))
     days = len(non_null)
     avg = round(total / days, 2) if days else 0
     return f"{first_date}..{last_date} days={days} total={total} avg={avg}/day"

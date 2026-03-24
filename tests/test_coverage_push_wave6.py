@@ -92,8 +92,8 @@ async def test_loop_new_exception_and_fallback_archive(
 
 
 def test_graph_entity_helpers_and_disabled_paths() -> None:
-    # _node_to_entity invalid enum fallback + extra props
-    ent = KnowledgeGraph._node_to_entity(
+    # _row_to_entity invalid enum fallback + extra props
+    ent = KnowledgeGraph._row_to_entity(
         {
             "name": "Team Alpha",
             "entity_type": "invalid",

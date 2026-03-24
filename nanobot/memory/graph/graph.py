@@ -8,7 +8,6 @@ Architecture
   ``ingest_event_triples`` (batch).
 - Read path: ``get_neighbors``, ``find_paths``, ``query_subgraph``,
   ``get_entity``, ``search_entities``, ``resolve_entity``.
-- Schema: ``ensure_indexes`` is a no-op (kept for interface compat).
 """
 
 from __future__ import annotations
@@ -68,9 +67,6 @@ class KnowledgeGraph:
 
     async def close(self) -> None:
         """No-op -- db lifecycle managed by store.py."""
-
-    async def ensure_indexes(self) -> None:
-        """No-op -- SQLite indexes are created in schema init."""
 
     # ------------------------------------------------------------------
     # Write methods
@@ -561,9 +557,6 @@ class KnowledgeGraph:
             first_seen=str(row.get("first_seen", "")),
             last_seen=str(row.get("last_seen", "")),
         )
-
-    # Backward-compat alias for tests that reference the old helper name
-    _node_to_entity = _row_to_entity
 
     def _get_display_name(self, canonical: str) -> str:
         """Return the original display name for a canonical entity name."""

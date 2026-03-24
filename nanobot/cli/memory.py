@@ -108,13 +108,7 @@ def memory_inspect(
 
 
 @memory_app.command("metrics")
-def memory_metrics(
-    delta: bool = typer.Option(False, "--delta", help="(deprecated) Previously showed deltas"),
-    write_baseline: bool = typer.Option(
-        False, "--write-baseline", help="(deprecated) Previously wrote baselines"
-    ),
-    baseline_file: str = typer.Option("", "--baseline-file", help="(deprecated)"),
-) -> None:
+def memory_metrics() -> None:
     """Show memory backend health. Per-counter metrics now live in Langfuse."""
     from nanobot.config.loader import load_config
     from nanobot.memory import MemoryStore

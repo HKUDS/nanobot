@@ -69,8 +69,6 @@ async def test_write_and_read_paths(tmp_path: Path) -> None:
     sub = await g.query_subgraph(["Carlos", "Team"], depth=1)
     assert "nodes" in sub and "edges" in sub
 
-    await g.ensure_indexes()  # no-op, should not raise
-
 
 async def test_ingest_event_triples_and_resolve_entity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

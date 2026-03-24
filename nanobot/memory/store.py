@@ -71,7 +71,6 @@ class MemoryStore:
     CONFLICT_STATUS_RESOLVED = CONFLICT_STATUS_RESOLVED
     EPISODIC_STATUS_OPEN = "open"
     EPISODIC_STATUS_RESOLVED = "resolved"
-    ROLLOUT_MODES = RolloutConfig.ROLLOUT_MODES  # backward compat alias
 
     def __init__(
         self,
@@ -117,23 +116,18 @@ class MemoryStore:
 
         # Construct unified SQLite database (migrates old files if needed).
         _dims = self._embedder.dims if self._embedder is not None else 384
-        self.db: UnifiedMemoryDB | None = None
         _db_path = self.memory_dir / "memory.db"
         _has_old_files = any(
             (self.memory_dir / f).exists()
             for f in ("events.jsonl", "profile.json", "HISTORY.md", "MEMORY.md")
         )
         if _db_path.exists() or _has_old_files:
-            try:
-                self.db = migrate_to_sqlite(self.memory_dir, dims=_dims, embedder=self._embedder)
-            except Exception:  # crash-barrier: sqlite-vec unavailable or migration failure
-                pass
-        if self.db is None:
-            # Fresh workspace — always create the DB.
-            try:
-                self.db = UnifiedMemoryDB(self.memory_dir / "memory.db", dims=_dims)
-            except Exception:  # crash-barrier: sqlite-vec unavailable
-                pass
+            self.db: UnifiedMemoryDB = migrate_to_sqlite(
+                self.memory_dir, dims=_dims, embedder=self._embedder
+            )
+        else:
+            # Fresh workspace — create the DB.
+            self.db = UnifiedMemoryDB(self.memory_dir / "memory.db", dims=_dims)
 
         self.retriever: MemoryRetriever  # set after graph/ingester init
         # EventIngester is constructed after graph is ready.
@@ -171,7 +165,7 @@ class MemoryStore:
             ),
             budget_allocator=self._budget_allocator,
             db=self.db,
-            embedder_available=self._embedder is not None or self.db is None,
+            embedder_available=self._embedder is not None,
         )
 
         # MemoryMaintenance: reindex, seed, health checks, backend stats.
@@ -204,7 +198,7 @@ class MemoryStore:
 
         # Knowledge graph (SQLite-backed via UnifiedMemoryDB).
         graph_enabled = self.rollout.get("graph_enabled", True)
-        if graph_enabled and self.db is not None:
+        if graph_enabled:
             self.graph = KnowledgeGraph(db=self.db)
         else:
             self.graph = KnowledgeGraph()  # disabled — all methods return empty

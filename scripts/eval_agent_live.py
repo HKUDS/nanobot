@@ -94,12 +94,18 @@ def run_agent_question(question: str, timeout: int, qnum: int) -> tuple[str, flo
     start = time.time()
     result = subprocess.run(
         [
-            sys.executable, "-m", "nanobot", "agent",
-            "-m", question,
+            sys.executable,
+            "-m",
+            "nanobot",
+            "agent",
+            "-m",
+            question,
             "--no-markdown",
-            "--timeout", str(timeout),
+            "--timeout",
+            str(timeout),
             "--no-logs",
-            "-s", f"cli:eval-q{qnum}",
+            "-s",
+            f"cli:eval-q{qnum}",
         ],
         capture_output=True,
         text=True,
@@ -168,16 +174,18 @@ def main() -> None:
         if misses:
             print(f"    Misses: {misses}")
 
-        results.append({
-            "q": i,
-            "question": question,
-            "expected": expected,
-            "hits": hits,
-            "misses": misses,
-            "recall": recall,
-            "elapsed": round(elapsed, 1),
-            "response_len": len(response),
-        })
+        results.append(
+            {
+                "q": i,
+                "question": question,
+                "expected": expected,
+                "hits": hits,
+                "misses": misses,
+                "recall": recall,
+                "elapsed": round(elapsed, 1),
+                "response_len": len(response),
+            }
+        )
 
     # ── Summary ──
     avg_recall = total_recall / len(QUESTIONS)
@@ -195,7 +203,7 @@ def main() -> None:
 
     # Per-question summary table
     print(f"  {'Q':>3}  {'Recall':>7}  {'Time':>6}  {'Status'}")
-    print(f"  {'─'*3}  {'─'*7}  {'─'*6}  {'─'*20}")
+    print(f"  {'─' * 3}  {'─' * 7}  {'─' * 6}  {'─' * 20}")
     for r in results:
         status = "✓" if r["recall"] == 1.0 else f"✗ miss: {r['misses']}"
         print(f"  Q{r['q']:02d}  {r['recall']:>6.0%}  {r['elapsed']:>5.1f}s  {status}")
@@ -205,14 +213,20 @@ def main() -> None:
     # Save JSON results
     out_path = Path(__file__).resolve().parent.parent / "artifacts" / "live_eval_latest.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps({
-        "avg_recall": round(avg_recall, 4),
-        "perfect": perfect,
-        "total": len(QUESTIONS),
-        "graph_mentions": graph_mentions,
-        "avg_elapsed": round(avg_time, 1),
-        "results": results,
-    }, indent=2) + "\n")
+    out_path.write_text(
+        json.dumps(
+            {
+                "avg_recall": round(avg_recall, 4),
+                "perfect": perfect,
+                "total": len(QUESTIONS),
+                "graph_mentions": graph_mentions,
+                "avg_elapsed": round(avg_time, 1),
+                "results": results,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
     print(f"\n  Results saved to {out_path}")
 
 

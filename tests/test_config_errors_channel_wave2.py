@@ -10,10 +10,7 @@ from nanobot.channels.base import BaseChannel
 from nanobot.config.loader import _migrate_config, get_config_path, load_config, save_config
 from nanobot.errors import (
     ContextOverflowError,
-    MemoryConsolidationError,
     MemoryRetrievalError,
-    ProviderAuthError,
-    ProviderRateLimitError,
     ToolNotFoundError,
     ToolPermissionError,
     ToolTimeoutError,
@@ -107,17 +104,8 @@ def test_error_types_and_fields() -> None:
     perm = ToolPermissionError("tool", "denied")
     assert not perm.recoverable
 
-    rate = ProviderRateLimitError("openai", retry_after=3.5)
-    assert rate.status_code == 429
-    assert rate.retry_after == 3.5
-
-    auth = ProviderAuthError("openai")
-    assert not auth.recoverable
-
     ctx = ContextOverflowError(100, 120)
     assert ctx.budget == 100 and ctx.actual == 120
 
     mem_r = MemoryRetrievalError("oops")
-    mem_c = MemoryConsolidationError("oops2")
     assert mem_r.operation == "retrieval"
-    assert mem_c.operation == "consolidation"

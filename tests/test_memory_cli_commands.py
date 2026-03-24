@@ -244,17 +244,6 @@ def test_memory_metrics_shows_backend_health(_patched: Config, tmp_path: Path) -
     assert "Langfuse" in result.stdout
 
 
-def test_memory_metrics_deprecated_flags_ignored(_patched: Config, tmp_path: Path) -> None:
-    baseline = tmp_path / "baseline.json"
-    result = runner.invoke(
-        app,
-        ["memory", "metrics", "--write-baseline", "--baseline-file", str(baseline)],
-    )
-    # Deprecated flags are accepted but ignored — command still shows backend health.
-    assert result.exit_code == 0
-    assert "Memory Backend Health" in result.stdout
-
-
 def test_memory_rebuild_reindex_compact(_patched: Config) -> None:
     rebuild = runner.invoke(app, ["memory", "rebuild", "--max-events", "10"])
     assert rebuild.exit_code == 0

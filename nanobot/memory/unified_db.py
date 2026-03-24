@@ -16,11 +16,17 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-import sqlite_vec
-
 from ._text import _utc_now_iso
 
 __all__ = ["UnifiedMemoryDB"]
+
+
+def _load_sqlite_vec() -> Any:
+    """Lazy-import sqlite-vec so the module is importable without it installed."""
+    import sqlite_vec  # type: ignore[import-untyped]
+
+    return sqlite_vec
+
 
 # FTS5 content-sync triggers — keep events_fts in sync with events table.
 _FTS_TRIGGERS = """
@@ -60,7 +66,7 @@ class UnifiedMemoryDB:
         self._conn.execute("PRAGMA journal_mode=WAL")
         try:
             self._conn.enable_load_extension(True)
-            sqlite_vec.load(self._conn)
+            _load_sqlite_vec().load(self._conn)
             self._conn.enable_load_extension(False)
         except Exception:  # crash-barrier: sqlite-vec extension load failure
             self._conn.close()
@@ -176,7 +182,7 @@ class UnifiedMemoryDB:
                 ).fetchone()[0]
                 self._conn.execute(
                     "INSERT OR REPLACE INTO events_vec (id, embedding) VALUES (?, ?)",
-                    (rowid, sqlite_vec.serialize_float32(embedding)),
+                    (rowid, _load_sqlite_vec().serialize_float32(embedding)),
                 )
 
     def read_events(
@@ -215,7 +221,7 @@ class UnifiedMemoryDB:
                WHERE v.embedding MATCH ?
                AND k = ?
                ORDER BY v.distance""",
-            (sqlite_vec.serialize_float32(query_embedding), k),
+            (_load_sqlite_vec().serialize_float32(query_embedding), k),
         ).fetchall()
         return [dict(row) for row in rows]
 

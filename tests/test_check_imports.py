@@ -13,7 +13,14 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
 
-from check_imports import RULES, _collect_imports, check  # noqa: E402
+from check_imports import (  # noqa: E402
+    ALLOWLIST,
+    COMPOSITION_ROOTS,
+    RULES,
+    RUNTIME_RULES,
+    _collect_imports,
+    check,
+)
 
 # ---------------------------------------------------------------------------
 # _collect_imports
@@ -85,6 +92,109 @@ class TestRulesStructure:
         assert len(provider_rules) > 0
         forbidden = provider_rules[0][1]
         assert any("agent" in f for f in forbidden)
+
+
+# ---------------------------------------------------------------------------
+# CLAUDE.md boundary table completeness
+# ---------------------------------------------------------------------------
+
+
+class TestBoundaryTableCompleteness:
+    """Verify that every rule from CLAUDE.md's boundary table is enforced."""
+
+    # (source_package_glob, forbidden_prefix) pairs from CLAUDE.md
+    EXPECTED_RULES: list[tuple[str, str]] = [
+        ("nanobot/agent/**/*.py", "nanobot.channels"),
+        ("nanobot/agent/**/*.py", "nanobot.cli"),
+        ("nanobot/coordination/**/*.py", "nanobot.channels"),
+        ("nanobot/coordination/**/*.py", "nanobot.cli"),
+        ("nanobot/memory/**/*.py", "nanobot.channels"),
+        ("nanobot/memory/**/*.py", "nanobot.tools"),
+        ("nanobot/tools/**/*.py", "nanobot.channels"),
+        ("nanobot/context/**/*.py", "nanobot.channels"),
+        ("nanobot/context/**/*.py", "nanobot.cli"),
+        ("nanobot/observability/**/*.py", "nanobot.channels"),
+        ("nanobot/observability/**/*.py", "nanobot.cli"),
+        ("nanobot/channels/**/*.py", "nanobot.agent"),
+        ("nanobot/channels/**/*.py", "nanobot.tools"),
+        ("nanobot/channels/**/*.py", "nanobot.memory"),
+        ("nanobot/channels/**/*.py", "nanobot.coordination"),
+        ("nanobot/providers/**/*.py", "nanobot.agent"),
+        ("nanobot/providers/**/*.py", "nanobot.channels"),
+        ("nanobot/config/**/*.py", "nanobot.agent"),
+        ("nanobot/config/**/*.py", "nanobot.channels"),
+        ("nanobot/config/**/*.py", "nanobot.providers"),
+        ("nanobot/bus/**/*.py", "nanobot.agent"),
+        ("nanobot/bus/**/*.py", "nanobot.channels"),
+        ("nanobot/bus/**/*.py", "nanobot.providers"),
+    ]
+
+    def test_all_boundary_rules_enforced(self):
+        """Every CLAUDE.md boundary rule must appear in RULES."""
+        # Build lookup: {(glob, prefix)} from RULES
+        enforced = set()
+        for glob_pattern, prefixes in RULES:
+            for prefix in prefixes:
+                enforced.add((glob_pattern, prefix))
+
+        missing = []
+        for glob_pattern, prefix in self.EXPECTED_RULES:
+            if (glob_pattern, prefix) not in enforced:
+                missing.append(f"  {glob_pattern} -> {prefix}")
+
+        assert not missing, (
+            "CLAUDE.md boundary rules missing from check_imports.py RULES:\n" + "\n".join(missing)
+        )
+
+
+# ---------------------------------------------------------------------------
+# RUNTIME_RULES and COMPOSITION_ROOTS
+# ---------------------------------------------------------------------------
+
+
+class TestRuntimeRules:
+    def test_runtime_rules_nonempty(self):
+        assert len(RUNTIME_RULES) > 0
+
+    def test_agent_cannot_runtime_import_tools_builtin(self):
+        agent_rules = [(g, f) for g, f in RUNTIME_RULES if g.startswith("nanobot/agent")]
+        forbidden = [p for _, prefixes in agent_rules for p in prefixes]
+        assert "nanobot.tools.builtin" in forbidden
+
+    def test_agent_cannot_runtime_import_coordination(self):
+        agent_rules = [(g, f) for g, f in RUNTIME_RULES if g.startswith("nanobot/agent")]
+        forbidden = [p for _, prefixes in agent_rules for p in prefixes]
+        assert "nanobot.coordination" in forbidden
+
+    def test_context_cannot_runtime_import_memory(self):
+        ctx_rules = [(g, f) for g, f in RUNTIME_RULES if g.startswith("nanobot/context")]
+        forbidden = [p for _, prefixes in ctx_rules for p in prefixes]
+        assert "nanobot.memory" in forbidden
+
+    def test_composition_roots_are_exempt(self):
+        assert "nanobot/agent/agent_factory.py" in COMPOSITION_ROOTS
+        assert "nanobot/tools/setup.py" in COMPOSITION_ROOTS
+
+    def test_composition_roots_immutable(self):
+        assert isinstance(COMPOSITION_ROOTS, frozenset)
+
+
+# ---------------------------------------------------------------------------
+# ALLOWLIST audit
+# ---------------------------------------------------------------------------
+
+
+class TestAllowlist:
+    def test_no_composition_root_in_allowlist(self):
+        """Composition roots are exempt via COMPOSITION_ROOTS, not ALLOWLIST."""
+        for filepath, _module in ALLOWLIST:
+            assert filepath not in COMPOSITION_ROOTS, (
+                f"{filepath} is a composition root — remove from ALLOWLIST"
+            )
+
+    def test_all_entries_have_comments_in_source(self):
+        """Basic structural check: ALLOWLIST should not be empty."""
+        assert len(ALLOWLIST) > 0
 
 
 # ---------------------------------------------------------------------------

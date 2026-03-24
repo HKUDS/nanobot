@@ -473,4 +473,4 @@ These are not suggestions — they are errors. Fix immediately if detected.
 
 ## Known Gotchas
 
-- **`MemorySubsystemError` (formerly `MemoryError`)**: `nanobot/errors.py` previously defined `MemoryError` which shadowed Python's built-in `MemoryError`. It was renamed to `MemorySubsystemError` (LAN-57). A backward-compat alias remains in `errors.py`. Never reintroduce a class named `MemoryError` in this codebase.
+- **`MemorySubsystemError` (formerly `MemoryError`)**: `nanobot/errors.py` previously defined `MemoryError` which shadowed Python's built-in `MemoryError`. It was renamed to `MemorySubsystemError` (LAN-57). Never reintroduce a class named `MemoryError` in this codebase.

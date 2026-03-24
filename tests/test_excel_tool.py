@@ -11,7 +11,6 @@ import pytest
 from nanobot.tools.builtin.excel import (
     DescribeDataTool,
     QueryDataTool,
-    ReadExcelTool,
     ReadSpreadsheetTool,
     _validate_select_only,
 )
@@ -170,11 +169,6 @@ async def test_path_traversal_blocked(tmp_path: Path, sample_workbook: Path) -> 
     result = await restricted.execute(path=str(sample_workbook))
     assert not result.success
     assert "outside" in result.output.lower()
-
-
-async def test_backward_compat_alias() -> None:
-    """ReadExcelTool alias still works."""
-    assert ReadExcelTool is ReadSpreadsheetTool
 
 
 # ---------------------------------------------------------------------------

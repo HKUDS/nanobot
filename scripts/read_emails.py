@@ -9,10 +9,10 @@ Usage:
     python scripts/read_emails.py --folder "Inbox" --out-dir media/emails
     python scripts/read_emails.py --folder "Carlos.GajardoGonzalez@prattwhitney.com/x.Inbox_copy" --out-dir media/emails --max-emails 50 --unread-only
 """
+
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import sys
 from datetime import datetime
@@ -32,10 +32,10 @@ def _require_win32():
 # Safe attribute access helpers
 # ---------------------------------------------------------------------------
 
+
 def safe_get_attr(obj, attr: str, default=None):
     """Return obj.attr, catching com_error and AttributeError."""
     try:
-        import pywintypes
         val = getattr(obj, attr, default)
         return val
     except Exception:  # noqa: BLE001  # crash-barrier: COM attributes can raise anything
@@ -45,7 +45,6 @@ def safe_get_attr(obj, attr: str, default=None):
 def get_attr_with_error(obj, attr: str):
     """Return (value, error_message). error_message is None on success."""
     try:
-        import pywintypes
         val = getattr(obj, attr)
         return val, None
     except Exception as exc:  # noqa: BLE001  # crash-barrier: COM attributes can raise anything
@@ -56,11 +55,11 @@ def get_attr_with_error(obj, attr: str):
 # Sender / recipient helpers with multiple fallbacks
 # ---------------------------------------------------------------------------
 
-_PR_SENDER_NAME         = "http://schemas.microsoft.com/mapi/proptag/0x0C1A001E"
-_PR_SENDER_EMAIL        = "http://schemas.microsoft.com/mapi/proptag/0x0C1F001E"
-_PR_DISPLAY_TO          = "http://schemas.microsoft.com/mapi/proptag/0x0E04001E"
-_PR_DISPLAY_CC          = "http://schemas.microsoft.com/mapi/proptag/0x0E03001E"
-_PR_TRANSPORT_HEADERS   = "http://schemas.microsoft.com/mapi/proptag/0x007D001E"
+_PR_SENDER_NAME = "http://schemas.microsoft.com/mapi/proptag/0x0C1A001E"
+_PR_SENDER_EMAIL = "http://schemas.microsoft.com/mapi/proptag/0x0C1F001E"
+_PR_DISPLAY_TO = "http://schemas.microsoft.com/mapi/proptag/0x0E04001E"
+_PR_DISPLAY_CC = "http://schemas.microsoft.com/mapi/proptag/0x0E03001E"
+_PR_TRANSPORT_HEADERS = "http://schemas.microsoft.com/mapi/proptag/0x007D001E"
 
 
 def _safe_property(msg, schema_url: str) -> str | None:
@@ -102,20 +101,22 @@ def get_sender_fields(msg) -> tuple[str, str]:
     Falls back to '<UNAVAILABLE: reason>' when all strategies fail.
     """
     # Strategy 1: standard OOM
-    name, name_err   = get_attr_with_error(msg, "SenderName")
+    name, name_err = get_attr_with_error(msg, "SenderName")
     email, email_err = get_attr_with_error(msg, "SenderEmailAddress")
     if name and email:
         return str(name), str(email)
 
     # Strategy 2: MAPI proptags
-    mapi_name  = _safe_property(msg, _PR_SENDER_NAME)
+    mapi_name = _safe_property(msg, _PR_SENDER_NAME)
     mapi_email = _safe_property(msg, _PR_SENDER_EMAIL)
     if mapi_name or mapi_email:
         return (mapi_name or name or ""), (mapi_email or email or "")
 
     # Strategy 3: SentOnBehalf
-    sob_name  = safe_get_attr(msg, "SentOnBehalfOfName")
-    sob_email = safe_get_attr(msg, "SentOnBehalfOfEmailAddress") or safe_get_attr(msg, "SentOnBehalfOfName")
+    sob_name = safe_get_attr(msg, "SentOnBehalfOfName")
+    sob_email = safe_get_attr(msg, "SentOnBehalfOfEmailAddress") or safe_get_attr(
+        msg, "SentOnBehalfOfName"
+    )
     if sob_name:
         return str(sob_name), str(sob_email or "")
 
@@ -123,7 +124,7 @@ def get_sender_fields(msg) -> tuple[str, str]:
     try:
         sender = msg.Sender
         if sender:
-            ae_name  = safe_get_attr(sender, "Name") or ""
+            ae_name = safe_get_attr(sender, "Name") or ""
             ae_email = safe_get_attr(sender, "Address") or ""
             if ae_name or ae_email:
                 return str(ae_name), str(ae_email)
@@ -157,9 +158,9 @@ def get_recipients_by_type(msg, rtype: int) -> list[str]:
             r = msg.Recipients.Item(i)
             r_type = safe_get_attr(r, "Type", 0)
             if r_type == rtype:
-                name    = safe_get_attr(r, "Name", "")
+                name = safe_get_attr(r, "Name", "")
                 address = safe_get_attr(r, "Address", "")
-                entry   = f"{name} <{address}>" if name and address else (name or address)
+                entry = f"{name} <{address}>" if name and address else (name or address)
                 if entry:
                     recipients.append(entry)
     except Exception:  # noqa: BLE001
@@ -204,6 +205,7 @@ def get_display_field(msg, attr: str, header_field: str, recipient_type: int) ->
 # ---------------------------------------------------------------------------
 # Folder navigation
 # ---------------------------------------------------------------------------
+
 
 def get_folder(namespace, folder_path: str):
     """
@@ -264,6 +266,7 @@ def get_folder(namespace, folder_path: str):
 # Attachment saving
 # ---------------------------------------------------------------------------
 
+
 def save_attachments(msg, out_dir: Path) -> list[str]:
     """Save all attachments to out_dir. Returns list of saved filenames."""
     saved: list[str] = []
@@ -292,6 +295,7 @@ def save_attachments(msg, out_dir: Path) -> list[str]:
 # Per-email processing
 # ---------------------------------------------------------------------------
 
+
 def _safe_subject(msg) -> str:
     subj, _ = get_attr_with_error(msg, "Subject")
     if subj:
@@ -311,30 +315,30 @@ def _safe_received_time(msg) -> datetime | None:
 
 def process_email(msg, out_dir: Path, index: int) -> dict:
     """Process one MailItem: write metadata file + save attachments."""
-    subject      = _safe_subject(msg)
-    received     = _safe_received_time(msg)
+    subject = _safe_subject(msg)
+    received = _safe_received_time(msg)
     received_str = received.strftime("%Y%m%dT%H%M%S") if received else "unknown_time"
 
     # Keep folder name short to avoid Windows 260-char path limit for attachments
     short_subject = subject[:40].rstrip()
-    folder_name   = f"{index:04d}_{received_str}_{short_subject}"
-    email_dir     = out_dir / folder_name
+    folder_name = f"{index:04d}_{received_str}_{short_subject}"
+    email_dir = out_dir / folder_name
     email_dir.mkdir(parents=True, exist_ok=True)
 
     sender_name, sender_email = get_sender_fields(msg)
-    to_field  = get_display_field(msg, "To",  "To",  1)
-    cc_field  = get_display_field(msg, "CC",  "CC",  2)
+    to_field = get_display_field(msg, "To", "To", 1)
+    cc_field = get_display_field(msg, "CC", "CC", 2)
 
     body, body_err = get_attr_with_error(msg, "Body")
     body_text = str(body) if body else f"<UNAVAILABLE: {body_err or 'unknown'}>"
 
-    unread       = safe_get_attr(msg, "UnRead", None)
-    msg_class    = safe_get_attr(msg, "MessageClass", "")
-    size         = safe_get_attr(msg, "Size", None)
-    entry_id     = safe_get_attr(msg, "EntryID", "")
+    unread = safe_get_attr(msg, "UnRead", None)
+    msg_class = safe_get_attr(msg, "MessageClass", "")
+    size = safe_get_attr(msg, "Size", None)
+    entry_id = safe_get_attr(msg, "EntryID", "")
 
     # Attachments
-    attachments  = save_attachments(msg, email_dir)
+    attachments = save_attachments(msg, email_dir)
 
     # Metadata file
     meta_path = email_dir / "email_meta.txt"
@@ -354,21 +358,22 @@ def process_email(msg, out_dir: Path, index: int) -> dict:
         f.write(body_text)
 
     return {
-        "index":          index,
-        "folder":         str(email_dir),
-        "subject":        subject,
-        "received":       str(received),
-        "sender_name":    sender_name,
-        "sender_email":   sender_email,
-        "to":             to_field,
-        "cc":             cc_field,
-        "attachments":    attachments,
+        "index": index,
+        "folder": str(email_dir),
+        "subject": subject,
+        "received": str(received),
+        "sender_name": sender_name,
+        "sender_email": sender_email,
+        "to": to_field,
+        "cc": cc_field,
+        "attachments": attachments,
     }
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -424,7 +429,7 @@ def main() -> None:
             print(f"ERROR: --since must be YYYY-MM-DD, got: {args.since!r}", file=sys.stderr)
             sys.exit(1)
 
-    print(f"Connecting to Outlook...")
+    print("Connecting to Outlook...")
     outlook = win32com.client.Dispatch("Outlook.Application")
     namespace = outlook.GetNamespace("MAPI")
     namespace.Logon()
@@ -448,8 +453,8 @@ def main() -> None:
         pass
 
     processed = 0
-    skipped   = 0
-    errors    = 0
+    skipped = 0
+    errors = 0
 
     for i in range(1, total + 1):
         if args.max_emails and processed >= args.max_emails:
@@ -477,7 +482,9 @@ def main() -> None:
             received = _safe_received_time(msg)
             if received:
                 # Outlook COM returns timezone-aware datetime; compare naive
-                received_naive = received.replace(tzinfo=None) if hasattr(received, "tzinfo") else received
+                received_naive = (
+                    received.replace(tzinfo=None) if hasattr(received, "tzinfo") else received
+                )
                 if received_naive < since_dt:
                     skipped += 1
                     continue

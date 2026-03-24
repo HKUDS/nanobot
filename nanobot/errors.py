@@ -84,22 +84,6 @@ class ToolPermissionError(ToolExecutionError):
         super().__init__(tool_name, msg, error_type="permission", recoverable=False)
 
 
-class UnknownRoleError(ToolExecutionError):
-    """Requested delegation role does not exist in the registry."""
-
-    def __init__(self, role_name: str, available: list[str] | None = None):
-        avail_str = ", ".join(available or []) or "none configured"
-        msg = f"Unknown delegation role '{role_name}'. Available roles: {avail_str}"
-        super().__init__(
-            "delegate",
-            msg,
-            error_type="unknown_role",
-            recoverable=True,
-        )
-        self.role_name = role_name
-        self.available_roles = available or []
-
-
 # ---------------------------------------------------------------------------
 # Provider / LLM errors
 # ---------------------------------------------------------------------------
@@ -135,29 +119,6 @@ class BudgetExceededError(ProviderError):
         self.budget_usd = budget_usd
 
 
-class ProviderRateLimitError(ProviderError):
-    """Provider returned a rate limit (429) error."""
-
-    def __init__(self, provider: str, retry_after: float | None = None):
-        msg = f"Rate limited by {provider}"
-        if retry_after:
-            msg += f" (retry after {retry_after}s)"
-        super().__init__(provider, msg, status_code=429, retryable=True)
-        self.retry_after = retry_after
-
-
-class ProviderAuthError(ProviderError):
-    """Provider rejected authentication credentials."""
-
-    def __init__(self, provider: str):
-        super().__init__(
-            provider,
-            f"Authentication failed for provider '{provider}'",
-            status_code=401,
-            retryable=False,
-        )
-
-
 # ---------------------------------------------------------------------------
 # Context errors
 # ---------------------------------------------------------------------------
@@ -189,18 +150,8 @@ class MemorySubsystemError(NanobotError):
         self.cause = cause
 
 
-MemoryError = MemorySubsystemError  # backward-compat alias
-
-
 class MemoryRetrievalError(MemorySubsystemError):
     """Memory retrieval failed."""
 
     def __init__(self, cause: str):
         super().__init__("retrieval", cause, recoverable=True)
-
-
-class MemoryConsolidationError(MemorySubsystemError):
-    """Memory consolidation failed."""
-
-    def __init__(self, cause: str):
-        super().__init__("consolidation", cause, recoverable=True)

@@ -21,7 +21,6 @@ from nanobot.tools.base import Tool, ToolResult
 # Shared constants
 _BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
 _BOT_UA = "nanobot/1.0 (compatible; +https://github.com/cgajagon/nanobot)"
-USER_AGENT = _BROWSER_UA  # backward compat alias
 MAX_REDIRECTS = 5  # Limit redirects to prevent DoS attacks
 _BOT_TIMEOUT = 15.0  # Bot endpoints (APIs, plain-text services) are typically fast
 _BROWSER_TIMEOUT = 30.0  # HTML pages may be slower

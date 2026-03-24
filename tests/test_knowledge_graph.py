@@ -88,10 +88,6 @@ class TestGracefulDegradation:
         g = KnowledgeGraph()
         assert await g.verify_connectivity() is False
 
-    async def test_ensure_indexes_noop_when_disabled(self) -> None:
-        g = KnowledgeGraph()
-        await g.ensure_indexes()  # Should not raise
-
     async def test_close_noop_when_disabled(self) -> None:
         g = KnowledgeGraph()
         await g.close()
@@ -136,10 +132,9 @@ class TestRowToEntity:
         e = KnowledgeGraph._row_to_entity(row)
         assert e.aliases == []
 
-    def test_backward_compat_node_to_entity(self) -> None:
-        """_node_to_entity alias still works."""
+    def test_row_to_entity(self) -> None:
         row = {"name": "X", "type": "person", "aliases": ""}
-        e = KnowledgeGraph._node_to_entity(row)
+        e = KnowledgeGraph._row_to_entity(row)
         assert e.name == "X"
 
 
