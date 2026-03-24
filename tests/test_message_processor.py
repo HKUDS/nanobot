@@ -50,8 +50,13 @@ def _make_processor(tmp_path: Path) -> MessageProcessor:
     provider = MagicMock()
     provider.get_default_model = MagicMock(return_value="test-model")
 
+    dispatcher = MagicMock()
+    missions = MagicMock()
+
     return MessageProcessor(
         orchestrator=orchestrator,
+        dispatcher=dispatcher,
+        missions=missions,
         context=context,
         sessions=sessions,
         tools=tools,

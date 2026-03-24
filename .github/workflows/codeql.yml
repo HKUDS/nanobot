@@ -9,6 +9,10 @@ on:
     # Weekly scan on Wednesday at 06:00 UTC
     - cron: '0 6 * * 3'
 
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   security-events: write

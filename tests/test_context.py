@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nanobot.agent.context import (
+from nanobot.agent.compression import (
     compress_context,
     estimate_messages_tokens,
     estimate_tokens,
@@ -167,7 +167,7 @@ class TestSummarizeAndCompress:
         msgs.append({"role": "user", "content": "last"})
 
         # Clear cache for test isolation
-        from nanobot.agent.context import _summary_cache
+        from nanobot.agent.compression import _summary_cache
 
         _summary_cache.clear()
 
@@ -207,7 +207,7 @@ class TestSummarizeAndCompress:
 
     async def test_none_content_in_middle_messages(self):
         """Messages with content=None (e.g. assistant tool_calls) must not crash."""
-        from nanobot.agent.context import _summary_cache
+        from nanobot.agent.compression import _summary_cache
 
         _summary_cache.clear()
 

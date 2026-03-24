@@ -9,15 +9,17 @@ it into a single Markdown string suitable for inclusion in the system prompt.
 from __future__ import annotations
 
 import re
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
 from .helpers import _estimate_tokens, _norm_text, _safe_float, _to_str_list
-from .persistence import MemoryPersistence
 from .profile_io import ProfileStore as ProfileManager
 from .retrieval_planner import RetrievalPlanner
 from .token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
+
+if TYPE_CHECKING:
+    from .unified_db import UnifiedMemoryDB
 
 # Intents that benefit from scanning recent unresolved events.
 # For all other intents (fact_lookup, chitchat, …) the scan is skipped.
@@ -61,7 +63,6 @@ class ContextAssembler:
         self,
         profile_mgr: ProfileManager,
         retrieve_fn: Callable[..., list[dict[str, Any]]],
-        persistence: MemoryPersistence,
         planner: RetrievalPlanner,
         *,
         read_events_fn: Callable[..., list[dict[str, Any]]] | None = None,
@@ -73,10 +74,11 @@ class ContextAssembler:
         profile_section_lines_fn: Callable[[dict[str, Any]], list[str]] | None = None,
         read_profile_fn: Callable[[], dict[str, Any]] | None = None,
         budget_allocator: TokenBudgetAllocator | None = None,
+        db: UnifiedMemoryDB | None = None,
+        embedder_available: bool = True,
     ) -> None:
         self._profile_mgr = profile_mgr
         self._retrieve_fn = retrieve_fn
-        self._persistence = persistence
         self._planner = planner
         self._read_events_fn = read_events_fn
         self._read_long_term_fn = read_long_term_fn
@@ -85,6 +87,8 @@ class ContextAssembler:
         self._profile_section_lines_fn = profile_section_lines_fn
         self._read_profile_fn = read_profile_fn
         self._budget = budget_allocator
+        self._db = db
+        self._embedder_available = embedder_available
 
     # ------------------------------------------------------------------
     # Public API
@@ -105,6 +109,12 @@ class ContextAssembler:
 
         Parameters match ``MemoryStore.get_memory_context`` exactly.
         """
+        if not self._embedder_available:
+            return (
+                "[Memory unavailable: no embedding provider configured. "
+                "Memory retrieval is disabled for this session.]"
+            )
+
         intent = RetrievalPlanner.infer_retrieval_intent(query or "")
 
         long_term = self._read_long_term()
@@ -300,9 +310,11 @@ class ContextAssembler:
     # ------------------------------------------------------------------
 
     def _read_long_term(self) -> str:
+        if self._db is not None:
+            return self._db.read_snapshot("current")
         if self._read_long_term_fn is not None:
             return self._read_long_term_fn()
-        return self._persistence.read_text(self._persistence.memory_file)
+        return ""
 
     def _read_events(self, limit: int | None = None) -> list[dict[str, Any]]:
         if self._read_events_fn is not None:

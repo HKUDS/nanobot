@@ -7,11 +7,13 @@ operations from the main store orchestration.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from .helpers import _to_datetime, _to_str_list, _utc_now_iso
-from .persistence import MemoryPersistence
 from .profile_io import ProfileStore as ProfileManager
+
+if TYPE_CHECKING:
+    from .unified_db import UnifiedMemoryDB
 
 # Constants previously on MemoryStore — shared with snapshot logic.
 PROFILE_KEYS = (
@@ -40,18 +42,17 @@ class MemorySnapshot:
         self,
         *,
         profile_mgr: ProfileManager,
-        persistence: MemoryPersistence,
         read_events_fn: Callable[..., list[dict[str, Any]]],
         profile_section_lines_fn: Callable[..., list[str]],
         recent_unresolved_fn: Callable[..., list[dict[str, Any]]],
-        read_long_term_fn: Callable[[], str],
-        write_long_term_fn: Callable[[str], None],
+        read_long_term_fn: Callable[[], str] | None = None,
+        write_long_term_fn: Callable[[str], None] | None = None,
         verify_beliefs_fn: Callable[[], dict[str, Any]],
         write_profile_fn: Callable[[dict[str, Any]], None],
         profile_keys: tuple[str, ...] = PROFILE_KEYS,
+        db: UnifiedMemoryDB | None = None,
     ) -> None:
         self.profile_mgr = profile_mgr
-        self.persistence = persistence
         self._read_events = read_events_fn
         self._profile_section_lines = profile_section_lines_fn
         self._recent_unresolved = recent_unresolved_fn
@@ -60,6 +61,7 @@ class MemorySnapshot:
         self._verify_beliefs = verify_beliefs_fn
         self._write_profile = write_profile_fn
         self._profile_keys = profile_keys
+        self._db = db
 
     @classmethod
     def _extract_pinned_section(cls, text: str) -> str | None:
@@ -93,10 +95,16 @@ class MemorySnapshot:
     def rebuild_memory_snapshot(self, *, max_events: int = 30, write: bool = True) -> str:
         """Rebuild MEMORY.md from profile + events."""
         profile = self.profile_mgr.read_profile()
-        events = self._read_events(limit=max_events)
+        if self._db is not None:
+            events = self._db.read_events(limit=max_events)
+        else:
+            events = self._read_events(limit=max_events) or []
 
         # Preserve user-pinned sections across rebuilds (LAN-199 / LAN-206).
-        existing_memory = self._read_long_term()
+        if self._db is not None:
+            existing_memory = self._db.read_snapshot("current")
+        else:
+            existing_memory = self._read_long_term() if self._read_long_term is not None else ""
         pinned = self._extract_pinned_section(existing_memory) if existing_memory else None
 
         parts: list[str] = ["# Memory", ""]
@@ -123,7 +131,10 @@ class MemorySnapshot:
             snapshot = self._restore_pinned_section(snapshot, pinned)
 
         if write:
-            self._write_long_term(snapshot)
+            if self._db is not None:
+                self._db.write_snapshot("current", snapshot)
+            elif self._write_long_term is not None:
+                self._write_long_term(snapshot)
         return snapshot
 
     def verify_memory(
@@ -131,7 +142,10 @@ class MemorySnapshot:
     ) -> dict[str, Any]:
         """Produce a verification report on memory health."""
         profile = self.profile_mgr.read_profile()
-        events = self._read_events()
+        if self._db is not None:
+            events = self._db.read_events(limit=1000)
+        else:
+            events = self._read_events() if self._read_events is not None else []
         now = datetime.now(timezone.utc)
         stale = 0
         total_ttl = 0

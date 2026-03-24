@@ -8,13 +8,24 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.delegation import (
-    _SCRATCHPAD_INJECTION_LIMIT,
-    TASK_TYPES,
     DelegationConfig,
     DelegationDispatcher,
-    _cap_scratchpad_for_injection,
     _delegation_ancestry,
     get_delegation_depth,
+)
+from nanobot.agent.delegation_contract import (
+    _SCRATCHPAD_INJECTION_LIMIT,
+    _cap_scratchpad_for_injection,
+    build_delegation_contract,
+    build_execution_context,
+    extract_plan_text,
+    extract_user_request,
+    gather_recent_tool_results,
+)
+from nanobot.agent.task_types import (
+    TASK_TYPES,
+    classify_task_type,
+    has_parallel_structure,
 )
 from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
@@ -133,40 +144,34 @@ class TestGetRoutingTrace:
 
 class TestGatherRecentToolResults:
     def test_empty_messages(self, tmp_path: Path):
-        d = _make_dispatcher(tmp_path)
-        d.active_messages = None
-        assert d.gather_recent_tool_results() == ""
+        assert gather_recent_tool_results([]) == ""
 
     def test_no_tool_messages(self, tmp_path: Path):
-        d = _make_dispatcher(tmp_path)
-        d.active_messages = [{"role": "user", "content": "hello"}]
-        assert d.gather_recent_tool_results() == ""
+        msgs: list[dict[str, Any]] = [{"role": "user", "content": "hello"}]
+        assert gather_recent_tool_results(msgs) == ""
 
     def test_collects_tool_results(self, tmp_path: Path):
-        d = _make_dispatcher(tmp_path)
-        d.active_messages = [
+        msgs: list[dict[str, Any]] = [
             {"role": "tool", "name": "read_file", "content": "file contents here"},
             {"role": "tool", "name": "exec", "content": "command output"},
         ]
-        result = d.gather_recent_tool_results()
+        result = gather_recent_tool_results(msgs)
         assert "read_file" in result
         assert "exec" in result
 
     def test_respects_max_results(self, tmp_path: Path):
-        d = _make_dispatcher(tmp_path)
-        d.active_messages = [
+        msgs: list[dict[str, Any]] = [
             {"role": "tool", "name": f"t{i}", "content": f"result {i}"} for i in range(20)
         ]
-        result = d.gather_recent_tool_results(max_results=3)
+        result = gather_recent_tool_results(msgs, max_results=3)
         assert result.count("**t") == 3
 
     def test_respects_max_chars(self, tmp_path: Path):
-        d = _make_dispatcher(tmp_path)
-        d.active_messages = [
+        msgs: list[dict[str, Any]] = [
             {"role": "tool", "name": "big", "content": "x" * 5000},
             {"role": "tool", "name": "bigger", "content": "y" * 5000},
         ]
-        result = d.gather_recent_tool_results(max_chars=6000)
+        result = gather_recent_tool_results(msgs, max_chars=6000)
         # Should only include one since each is > 5000 chars
         assert "bigger" in result or "big" in result
 
@@ -178,61 +183,53 @@ class TestGatherRecentToolResults:
 
 class TestClassifyTaskType:
     def test_code_role_default(self):
-        result = DelegationDispatcher.classify_task_type("code", "review the module")
+        result = classify_task_type("code", "review the module")
         assert result == "local_code_analysis"
 
     def test_writing_role(self):
-        result = DelegationDispatcher.classify_task_type("writing", "write a report")
+        result = classify_task_type("writing", "write a report")
         assert result == "report_writing"
 
     def test_research_role_web(self):
-        result = DelegationDispatcher.classify_task_type(
-            "research", "what are the current industry benchmarks"
-        )
+        result = classify_task_type("research", "what are the current industry benchmarks")
         assert result == "web_research"
 
     def test_research_role_project(self):
-        result = DelegationDispatcher.classify_task_type("research", "analyze this project")
+        result = classify_task_type("research", "analyze this project")
         assert result == "repo_architecture"
 
     def test_bug_investigation(self):
-        result = DelegationDispatcher.classify_task_type("code", "fix the crash in parser")
+        result = classify_task_type("code", "fix the crash in parser")
         assert result == "bug_investigation"
 
     def test_architecture(self):
-        result = DelegationDispatcher.classify_task_type("any", "describe the architecture")
+        result = classify_task_type("any", "describe the architecture")
         assert result == "repo_architecture"
 
     def test_general_fallback(self):
-        result = DelegationDispatcher.classify_task_type("random", "do something")
+        result = classify_task_type("random", "do something")
         assert result == "general"
 
     def test_hybrid_web_plus_arch_signals(self) -> None:
         """Web + architecture signals -> hybrid, not repo_architecture."""
-        result = DelegationDispatcher.classify_task_type(
-            "research", "architecture of best practice DI frameworks"
-        )
+        result = classify_task_type("research", "architecture of best practice DI frameworks")
         assert result == "hybrid"
 
     def test_hybrid_web_plus_project_signals(self) -> None:
         """Web + project signals -> hybrid, not repo_architecture."""
-        result = DelegationDispatcher.classify_task_type(
+        result = classify_task_type(
             "research", "compare our codebase with current industry best practices"
         )
         assert result == "hybrid"
 
     def test_hybrid_web_plus_code_signals(self) -> None:
         """Web + code signals -> hybrid, not local_code_analysis."""
-        result = DelegationDispatcher.classify_task_type(
-            "research", "latest best practices for Python module structure"
-        )
+        result = classify_task_type("research", "latest best practices for Python module structure")
         assert result == "hybrid"
 
     def test_pure_web_still_web_research(self) -> None:
         """Pure web signals without local signals -> web_research."""
-        result = DelegationDispatcher.classify_task_type(
-            "research", "what are the current industry trends"
-        )
+        result = classify_task_type("research", "what are the current industry trends")
         assert result == "web_research"
 
     def test_task_types_dict_complete(self):
@@ -256,21 +253,17 @@ class TestClassifyTaskType:
 
 class TestHasParallelStructure:
     def test_enumerated_list(self):
-        assert DelegationDispatcher.has_parallel_structure(
-            "Analyze three areas: frontend, backend, and database"
-        )
+        assert has_parallel_structure("Analyze three areas: frontend, backend, and database")
 
     def test_numbered_items(self):
         text = "1. First task\n2. Second task\n3. Third task"
-        assert DelegationDispatcher.has_parallel_structure(text)
+        assert has_parallel_structure(text)
 
     def test_comma_separated_and(self):
-        assert DelegationDispatcher.has_parallel_structure(
-            "Check performance, security, and reliability"
-        )
+        assert has_parallel_structure("Check performance, security, and reliability")
 
     def test_no_parallel(self):
-        assert not DelegationDispatcher.has_parallel_structure("Review the code for bugs")
+        assert not has_parallel_structure("Review the code for bugs")
 
 
 # ---------------------------------------------------------------------------
@@ -280,30 +273,25 @@ class TestHasParallelStructure:
 
 class TestExtractHelpers:
     def test_extract_user_request(self, tmp_path: Path):
-        d = _make_dispatcher(tmp_path)
-        d.active_messages = [
+        msgs: list[dict[str, Any]] = [
             {"role": "system", "content": "You are an agent."},
             {"role": "user", "content": "How does the loop work?"},
         ]
-        assert d.extract_user_request() == "How does the loop work?"
+        assert extract_user_request(msgs) == "How does the loop work?"
 
     def test_extract_user_request_empty(self, tmp_path: Path):
-        d = _make_dispatcher(tmp_path)
-        d.active_messages = []
-        assert d.extract_user_request() == ""
+        assert extract_user_request([]) == ""
 
     def test_extract_plan_text_no_plan(self, tmp_path: Path):
-        d = _make_dispatcher(tmp_path)
-        d.active_messages = [{"role": "user", "content": "hello"}]
-        assert d.extract_plan_text() == ""
+        msgs: list[dict[str, Any]] = [{"role": "user", "content": "hello"}]
+        assert extract_plan_text(msgs) == ""
 
     def test_extract_plan_text_with_plan(self, tmp_path: Path):
-        d = _make_dispatcher(tmp_path)
-        d.active_messages = [
+        msgs: list[dict[str, Any]] = [
             {"role": "system", "content": "Please outline a numbered plan"},
             {"role": "assistant", "content": "1. Step one\n2. Step two"},
         ]
-        assert "Step one" in d.extract_plan_text()
+        assert "Step one" in extract_plan_text(msgs)
 
 
 # ---------------------------------------------------------------------------
@@ -329,26 +317,41 @@ class TestDelegationCount:
 
 class TestBuildDelegationContract:
     def test_basic_contract(self, tmp_path: Path):
-        d = _make_dispatcher(tmp_path)
-        d.active_messages = [{"role": "user", "content": "test request"}]
-        content, schema = d.build_delegation_contract(
-            "code", "analyze the module", None, "local_code_analysis"
+        msgs: list[dict[str, Any]] = [{"role": "user", "content": "test request"}]
+        content, schema = build_delegation_contract(
+            "code",
+            "analyze the module",
+            None,
+            "local_code_analysis",
+            workspace=tmp_path,
+            active_messages=msgs,
+            scratchpad=None,
         )
         assert "analyze the module" in content
         assert "Findings" in schema
         assert "Evidence" in schema
 
     def test_contract_includes_context(self, tmp_path: Path):
-        d = _make_dispatcher(tmp_path)
-        d.active_messages = []
-        content, _ = d.build_delegation_contract("code", "task", "extra context here", "general")
+        content, _ = build_delegation_contract(
+            "code",
+            "task",
+            "extra context here",
+            "general",
+            workspace=tmp_path,
+            active_messages=[],
+            scratchpad=None,
+        )
         assert "extra context here" in content
 
     def test_contract_includes_tool_guidance(self, tmp_path: Path):
-        d = _make_dispatcher(tmp_path)
-        d.active_messages = []
-        content, _ = d.build_delegation_contract(
-            "code", "analyze code", None, "local_code_analysis"
+        content, _ = build_delegation_contract(
+            "code",
+            "analyze code",
+            None,
+            "local_code_analysis",
+            workspace=tmp_path,
+            active_messages=[],
+            scratchpad=None,
         )
         assert "Preferred tools" in content
 
@@ -490,8 +493,7 @@ class TestBuildExecutionContext:
         (tmp_path / "README.md").write_text("# Hello")
         (tmp_path / "main.py").write_text("print('hi')")
 
-        d = _make_dispatcher(tmp_path)
-        ctx = d.build_execution_context("general")
+        ctx = build_execution_context(tmp_path, "general")
 
         assert str(tmp_path) in ctx
         assert "src/" in ctx
@@ -504,8 +506,7 @@ class TestBuildExecutionContext:
         (tmp_path / "README.md").write_text("Project readme")
         (tmp_path / "SOUL.md").write_text("Soul document")
 
-        d = _make_dispatcher(tmp_path)
-        ctx = d.build_execution_context("local_code_analysis")
+        ctx = build_execution_context(tmp_path, "local_code_analysis")
 
         assert "AGENTS.md (excerpt)" in ctx
         assert "Agent config here" in ctx
@@ -520,8 +521,7 @@ class TestBuildExecutionContext:
         (tmp_path / "README.md").write_text("Project readme")
         (tmp_path / "SOUL.md").write_text("Soul document")
 
-        d = _make_dispatcher(tmp_path)
-        ctx = d.build_execution_context("report_writing")
+        ctx = build_execution_context(tmp_path, "report_writing")
 
         assert "AGENTS.md (excerpt)" not in ctx
         assert "SOUL.md (excerpt)" not in ctx
@@ -533,8 +533,7 @@ class TestBuildExecutionContext:
         for i in range(60):
             (tmp_path / f"file_{i:03d}.txt").write_text(f"content {i}")
 
-        d = _make_dispatcher(tmp_path)
-        ctx = d.build_execution_context("general")
+        ctx = build_execution_context(tmp_path, "general")
 
         # Count the indented lines in the directory layout section
         lines = ctx.split("\n")

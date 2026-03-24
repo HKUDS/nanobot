@@ -185,12 +185,13 @@ class TestDelegateParallelTool:
 class TestDelegationDispatch:
     async def test_cycle_detection(self, tmp_path: Path) -> None:
         """Delegating to a role already in the ancestry raises _CycleError."""
-        from nanobot.agent.loop import AgentLoop, _delegation_ancestry
+        from nanobot.agent.agent_factory import build_agent
+        from nanobot.agent.delegation import _delegation_ancestry
         from nanobot.bus.queue import MessageBus
 
         provider = FakeProvider(['{"role": "code"}', "result"])
         bus = MessageBus()
-        loop = AgentLoop(bus, provider, _make_agent_config(tmp_path))
+        loop = build_agent(bus=bus, provider=provider, config=_make_agent_config(tmp_path))
 
         # Set up coordinator
         registry = build_default_registry("general")
@@ -210,13 +211,14 @@ class TestDelegationDispatch:
 
     async def test_deep_chain_allowed(self, tmp_path: Path) -> None:
         """A → B → C is allowed (no cycle)."""
-        from nanobot.agent.loop import AgentLoop, _delegation_ancestry
+        from nanobot.agent.agent_factory import build_agent
+        from nanobot.agent.delegation import _delegation_ancestry
         from nanobot.bus.queue import MessageBus
 
         # Provider returns responses for: classify → research, then agent response
         provider = FakeProvider(['{"role": "research"}', "research result"])
         bus = MessageBus()
-        loop = AgentLoop(bus, provider, _make_agent_config(tmp_path))
+        loop = build_agent(bus=bus, provider=provider, config=_make_agent_config(tmp_path))
 
         registry = build_default_registry("general")
         loop._coordinator = Coordinator(
@@ -238,7 +240,7 @@ class TestDelegationDispatch:
 
     async def test_direct_role_bypasses_classifier(self, tmp_path: Path) -> None:
         """When target_role is specified and exists, classifier is not called."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.queue import MessageBus
 
         call_count = 0
@@ -251,7 +253,7 @@ class TestDelegationDispatch:
 
         provider = CountingProvider()
         bus = MessageBus()
-        loop = AgentLoop(bus, provider, _make_agent_config(tmp_path))
+        loop = build_agent(bus=bus, provider=provider, config=_make_agent_config(tmp_path))
 
         registry = build_default_registry("general")
         loop._coordinator = Coordinator(
@@ -269,12 +271,12 @@ class TestDelegationDispatch:
 
     async def test_routing_trace_recorded(self, tmp_path: Path) -> None:
         """Delegation events are recorded in the routing trace."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.queue import MessageBus
 
         provider = FakeProvider(["delegated result"])
         bus = MessageBus()
-        loop = AgentLoop(bus, provider, _make_agent_config(tmp_path))
+        loop = build_agent(bus=bus, provider=provider, config=_make_agent_config(tmp_path))
 
         registry = build_default_registry("general")
         loop._coordinator = Coordinator(
@@ -294,12 +296,13 @@ class TestDelegationDispatch:
 
     async def test_parallel_same_role_at_depth_zero(self, tmp_path: Path) -> None:
         """At depth 0 (empty ancestry), delegating to the same role twice is allowed."""
-        from nanobot.agent.loop import AgentLoop, _delegation_ancestry
+        from nanobot.agent.agent_factory import build_agent
+        from nanobot.agent.delegation import _delegation_ancestry
         from nanobot.bus.queue import MessageBus
 
         provider = FakeProvider(["result"])
         bus = MessageBus()
-        loop = AgentLoop(bus, provider, _make_agent_config(tmp_path))
+        loop = build_agent(bus=bus, provider=provider, config=_make_agent_config(tmp_path))
 
         registry = build_default_registry("general")
         loop._coordinator = Coordinator(
@@ -316,12 +319,12 @@ class TestDelegationDispatch:
 
     async def test_max_delegation_depth_respected(self, tmp_path: Path) -> None:
         """max_delegation_depth from config caps self.max_delegations on the dispatcher."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.queue import MessageBus
 
         provider = FakeProvider(["result"])
         bus = MessageBus()
         config = _make_agent_config(tmp_path, max_delegation_depth=3)
-        loop = AgentLoop(bus, provider, config)
+        loop = build_agent(bus=bus, provider=provider, config=config)
 
         assert loop._dispatcher.max_delegations == 3

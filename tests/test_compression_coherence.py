@@ -8,11 +8,11 @@ Covers:
 
 from __future__ import annotations
 
-from nanobot.agent.context import (
+from nanobot.agent.compression import (
     _collect_tail_tool_call_ids,
     _paired_drop_tools,
 )
-from nanobot.agent.loop import _dynamic_preserve_recent
+from nanobot.agent.turn_orchestrator import _dynamic_preserve_recent
 
 # ---------------------------------------------------------------------------
 # _collect_tail_tool_call_ids

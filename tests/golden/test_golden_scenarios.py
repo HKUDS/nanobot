@@ -20,6 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -48,7 +49,7 @@ def _make_config(tmp_path: Path, **overrides: Any) -> AgentConfig:
 def _make_loop(tmp_path: Path, provider: LLMProvider, **config_overrides: Any) -> AgentLoop:
     bus = MessageBus()
     config = _make_config(tmp_path, **config_overrides)
-    return AgentLoop(bus, provider, config)
+    return build_agent(bus=bus, provider=provider, config=config)
 
 
 def _make_inbound(text: str) -> InboundMessage:

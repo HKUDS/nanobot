@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -70,7 +71,7 @@ def _make_config(tmp_path: Path, **overrides: Any) -> AgentConfig:
 def _make_loop(tmp_path: Path, provider: LLMProvider, **config_overrides: Any) -> AgentLoop:
     bus = MessageBus()
     config = _make_config(tmp_path, **config_overrides)
-    return AgentLoop(bus, provider, config)
+    return build_agent(bus=bus, provider=provider, config=config)
 
 
 def _make_inbound(text: str) -> InboundMessage:
@@ -103,8 +104,8 @@ class TestTokenFlowEndToEnd:
 
         assert result is not None
         assert "42" in result.content
-        assert loop._turn_tokens_prompt == 350
-        assert loop._turn_tokens_completion == 25
+        assert loop._processor._turn_tokens_prompt == 350
+        assert loop._processor._turn_tokens_completion == 25
 
     async def test_multi_iteration_with_usage(self, tmp_path: Path) -> None:
         """Tool calls cause multiple LLM calls; usage should not crash."""
@@ -133,9 +134,9 @@ class TestTokenFlowEndToEnd:
         result = await loop._process_message(_make_inbound("Read test.txt"))
 
         assert result is not None
-        # Two LLM calls: tokens should accumulate
-        assert loop._turn_tokens_prompt == 1000
-        assert loop._turn_tokens_completion == 50
+        # Two LLM calls: tokens should accumulate (read from processor)
+        assert loop._processor._turn_tokens_prompt == 1000
+        assert loop._processor._turn_tokens_completion == 50
 
     async def test_missing_usage_graceful(self, tmp_path: Path) -> None:
         """When LLM response has empty usage dict, loop should not crash.
@@ -153,6 +154,6 @@ class TestTokenFlowEndToEnd:
         result = await loop._process_message(_make_inbound("Hi"))
 
         assert result is not None
-        assert loop._turn_tokens_prompt == 0
+        assert loop._processor._turn_tokens_prompt == 0
         # Estimated from content "No usage data." (14 chars → ≥1 token)
-        assert loop._turn_tokens_completion >= 0
+        assert loop._processor._turn_tokens_completion >= 0

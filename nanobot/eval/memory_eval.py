@@ -12,12 +12,13 @@ import re
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from nanobot.agent.memory.helpers import _safe_float, _utc_now_iso
 from nanobot.utils.helpers import ensure_dir
 
-from .helpers import _safe_float, _utc_now_iso
-from .persistence import MemoryPersistence
+if TYPE_CHECKING:
+    from nanobot.agent.memory.unified_db import UnifiedMemoryDB
 
 
 class EvalRunner:
@@ -26,20 +27,21 @@ class EvalRunner:
     def __init__(
         self,
         retrieve_fn: Callable[..., list[dict[str, Any]]],
-        persistence: MemoryPersistence,
         workspace: Path,
+        memory_dir: Path,
         *,
         get_rollout_status_fn: Callable[[], dict[str, Any]],
         get_rollout_fn: Callable[[], dict[str, Any]],
         get_backend_stats_fn: Callable[[], dict[str, Any]],
+        db: UnifiedMemoryDB | None = None,
     ) -> None:
         self._retrieve = retrieve_fn
-        self.persistence = persistence
         self.workspace = workspace
-        self.memory_dir = persistence.memory_dir
+        self.memory_dir = memory_dir
         self._get_rollout_status = get_rollout_status_fn
         self._get_rollout = get_rollout_fn
         self._get_backend_stats = get_backend_stats_fn
+        self._db = db
 
     # ------------------------------------------------------------------
     # Public API
@@ -339,7 +341,9 @@ class EvalRunner:
             "observability": observability,
             "rollout": rollout or self._get_rollout_status(),
         }
-        self.persistence.write_json(path, payload)
+        import json as _json
+
+        path.write_text(_json.dumps(payload, default=str, indent=2), encoding="utf-8")
         return path
 
     def evaluate_rollout_gates(

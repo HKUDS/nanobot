@@ -57,9 +57,9 @@ class TestMemoryStoreInstantiation:
         assert store.memory_dir.exists()
         assert store.memory_dir.is_dir()
 
-    def test_has_persistence(self, tmp_path: Path):
+    def test_has_db(self, tmp_path: Path):
         store = _make_store(tmp_path)
-        assert store.persistence is not None
+        assert store.db is not None
 
     def test_has_extractor(self, tmp_path: Path):
         store = _make_store(tmp_path)
@@ -85,12 +85,12 @@ class TestAppendEventsContract:
         count = store.ingester.append_events([])
         assert count == 0
 
-    def test_events_persist_to_disk(self, tmp_path: Path):
+    def test_events_persist_to_db(self, tmp_path: Path):
         store = _make_store(tmp_path)
         store.ingester.append_events(_sample_events())
-        assert store.events_file.exists()
-        content = store.events_file.read_text(encoding="utf-8")
-        assert "dark mode" in content
+        events = store.ingester.read_events(limit=100)
+        assert len(events) >= 1
+        assert any("dark mode" in str(e.get("summary", "")) for e in events)
 
 
 # ---------------------------------------------------------------------------

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.streaming import StreamingLLMCaller
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -90,7 +91,7 @@ def _make_config(tmp_path: Path, **overrides: Any) -> AgentConfig:
 def _make_loop(tmp_path: Path, provider: LLMProvider, **config_overrides: Any) -> AgentLoop:
     bus = MessageBus()
     config = _make_config(tmp_path, **config_overrides)
-    return AgentLoop(bus, provider, config)
+    return build_agent(bus=bus, provider=provider, config=config)
 
 
 def _make_inbound(text: str, channel: str = "cli", chat_id: str = "test-user") -> InboundMessage:
@@ -496,7 +497,7 @@ class TestContextBuilderSpan:
     """summarize_and_compress wraps LLM compression in a langfuse span."""
 
     async def test_compress_span_created(self):
-        from nanobot.agent.context import summarize_and_compress
+        from nanobot.agent.compression import summarize_and_compress
         from nanobot.providers.base import LLMResponse
 
         provider = ScriptedProvider(
@@ -524,7 +525,7 @@ class TestContextBuilderSpan:
             messages.append({"role": "user", "content": f"Message {i} " + "x" * 200})
             messages.append({"role": "assistant", "content": f"Reply {i} " + "y" * 200})
 
-        with patch("nanobot.agent.context.langfuse_span", side_effect=fake_span):
+        with patch("nanobot.agent.compression.langfuse_span", side_effect=fake_span):
             await summarize_and_compress(
                 messages=messages,
                 provider=provider,

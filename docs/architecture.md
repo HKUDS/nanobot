@@ -289,3 +289,11 @@ The following boundaries were established during the memory subsystem completion
 - **`token_budget.py`** is pure logic (`TokenBudgetAllocator`, `SectionBudget`). Never imports from any `nanobot.agent.memory.*` or `nanobot.config.*` module.
 - **`consolidation.py`** owns structured concurrency for consolidation (`ConsolidationOrchestrator`). Never imports from `channels/` or `agent/loop`. Must be used as an async context manager.
 - **`ProfileCache`** is internal to `ProfileStore`; not exported from `nanobot/agent/memory/__init__.py`.
+
+### Storage Layer (Post-Redesign)
+
+- **`unified_db.py`** — Single SQLite database (`memory.db`) with FTS5 + sqlite-vec. All memory storage flows through this module. Replaces `persistence.py` + `mem0_adapter.py`.
+- **`embedder.py`** — `Embedder` protocol with `OpenAIEmbedder` (production, 1536 dims) and `LocalEmbedder` (tests, ONNX, 384 dims). No hash-based fallback.
+- **`migration.py`** — One-time file-to-SQLite migration. Runs on first access. Old files renamed to `.bak`.
+- **Deleted modules:** `mem0_adapter.py` (874 lines), `retrieval.py` (285 lines), `persistence.py` (87 lines) — replaced by unified_db.py.
+- **Knowledge graph** — entities and edges stored in `memory.db` (SQLite tables). Replaced networkx + JSON persistence. BFS via recursive CTE. Enabled by default (`graph_enabled=True`). Entity classification (`entity_classifier.py`) is rule-based, no LLM needed. `networkx` dependency removed.

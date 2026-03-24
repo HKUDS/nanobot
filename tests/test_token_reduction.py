@@ -32,7 +32,8 @@ def test_cap_long_term_text_called_once(tmp_path):
     store._assembler._cap_long_term_text = counting_cap  # type: ignore[method-assign]
 
     long_term_text = "fact. " * 300  # ~300 tokens, well within the 1500 cap
-    store.persistence.write_text(store.memory_file, long_term_text)
+    if store.db:
+        store.db.write_snapshot("current", long_term_text)
 
     store.get_memory_context(query="test query", token_budget=900, memory_md_token_cap=1500)
 
@@ -66,7 +67,7 @@ _SCRATCHPAD_INJECTION_LIMIT = 4000
 
 def test_scratchpad_injection_is_capped():
     """_cap_scratchpad_for_injection must truncate content over _SCRATCHPAD_INJECTION_LIMIT chars."""
-    from nanobot.agent.delegation import _cap_scratchpad_for_injection
+    from nanobot.agent.delegation_contract import _cap_scratchpad_for_injection
 
     large_content = "data. " * 5000  # ~30,000 chars
     result = _cap_scratchpad_for_injection(large_content, limit=_SCRATCHPAD_INJECTION_LIMIT)
@@ -76,7 +77,7 @@ def test_scratchpad_injection_is_capped():
 
 def test_scratchpad_injection_unchanged_when_small():
     """_cap_scratchpad_for_injection must not modify content under the limit."""
-    from nanobot.agent.delegation import _cap_scratchpad_for_injection
+    from nanobot.agent.delegation_contract import _cap_scratchpad_for_injection
 
     small_content = "short content"
     result = _cap_scratchpad_for_injection(small_content, limit=_SCRATCHPAD_INJECTION_LIMIT)

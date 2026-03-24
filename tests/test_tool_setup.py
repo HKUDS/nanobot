@@ -8,7 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from nanobot.agent.tool_executor import ToolExecutor
+from nanobot.agent.capability import CapabilityRegistry
 from nanobot.agent.tool_setup import register_default_tools
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.result_cache import ToolResultCache
@@ -43,11 +43,11 @@ def _register(
     delegation_enabled: bool = True,
     cron_service: Any = None,
     skills_loader: Any = None,
-) -> ToolExecutor:
+) -> CapabilityRegistry:
     registry = ToolRegistry()
-    tools = ToolExecutor(registry)
+    capabilities = CapabilityRegistry(tool_registry=registry)
     register_default_tools(
-        tools=tools,
+        capabilities=capabilities,
         role_config=role_config,
         workspace=workspace,
         restrict_to_workspace=False,
@@ -63,13 +63,13 @@ def _register(
         skills_enabled=bool(skills_loader),
         skills_loader=skills_loader or FakeSkillsLoader(),
     )
-    return tools
+    return capabilities
 
 
 class TestRegisterDefaultTools:
     def test_default_tools_registered(self, tmp_workspace: Path) -> None:
-        tools = _register(tmp_workspace)
-        names = tools._registry.tool_names
+        capabilities = _register(tmp_workspace)
+        names = capabilities.tool_registry.tool_names
         # Spot-check core tools are present
         for expected in (
             "read_file",
@@ -86,8 +86,8 @@ class TestRegisterDefaultTools:
             assert expected in names, f"Missing expected tool: {expected}"
 
     def test_delegation_tools_present_when_enabled(self, tmp_workspace: Path) -> None:
-        tools = _register(tmp_workspace, delegation_enabled=True)
-        names = tools._registry.tool_names
+        capabilities = _register(tmp_workspace, delegation_enabled=True)
+        names = capabilities.tool_registry.tool_names
         for expected in (
             "delegate",
             "delegate_parallel",
@@ -100,7 +100,7 @@ class TestRegisterDefaultTools:
 
     def test_expected_tool_count(self, tmp_workspace: Path) -> None:
         """Regression guard: total tool count from auditing tool_setup.py."""
-        tools = _register(tmp_workspace)
+        capabilities = _register(tmp_workspace)
         # Count derived from manual audit of tool_setup.py at commit 7470a43:
         # filesystem(4) + spreadsheet(1) + pptx_read(1) + pptx_analyze(1) +
         # exec(1) + web_search(1) + web_fetch(1) + message(1) + feedback(1) +
@@ -108,27 +108,29 @@ class TestRegisterDefaultTools:
         # excel_get_rows(1) + excel_find(1) + pptx_get_slide(1) +
         # query_data(1) + describe_data(1) = 27
         # (no cron — cron_service=None)
-        count = len(tools._registry)
-        assert count == 27, f"Expected 27 tools, got {count}: {sorted(tools._registry.tool_names)}"
+        count = len(capabilities.tool_registry)
+        assert count == 27, (
+            f"Expected 27 tools, got {count}: {sorted(capabilities.tool_registry.tool_names)}"
+        )
 
     def test_allowed_tools_whitelist(self, tmp_workspace: Path) -> None:
         role = AgentRoleConfig(
             name="restricted", description="", allowed_tools=["exec", "read_file"]
         )
-        tools = _register(tmp_workspace, role_config=role)
-        names = set(tools._registry.tool_names)
+        capabilities = _register(tmp_workspace, role_config=role)
+        names = set(capabilities.tool_registry.tool_names)
         assert names == {"exec", "read_file"}
 
     def test_denied_tools_blacklist(self, tmp_workspace: Path) -> None:
         role = AgentRoleConfig(name="safe", description="", denied_tools=["exec"])
-        tools = _register(tmp_workspace, role_config=role)
-        names = tools._registry.tool_names
+        capabilities = _register(tmp_workspace, role_config=role)
+        names = capabilities.tool_registry.tool_names
         assert "exec" not in names
         assert "read_file" in names
 
     def test_delegation_disabled_skips_tools(self, tmp_workspace: Path) -> None:
-        tools = _register(tmp_workspace, delegation_enabled=False)
-        names = tools._registry.tool_names
+        capabilities = _register(tmp_workspace, delegation_enabled=False)
+        names = capabilities.tool_registry.tool_names
         for absent in (
             "delegate",
             "delegate_parallel",
@@ -140,12 +142,12 @@ class TestRegisterDefaultTools:
             assert absent not in names, f"Should not register: {absent}"
 
     def test_no_cron_service_skips_cron(self, tmp_workspace: Path) -> None:
-        tools = _register(tmp_workspace, cron_service=None)
-        assert "cron" not in tools._registry.tool_names
+        capabilities = _register(tmp_workspace, cron_service=None)
+        assert "cron" not in capabilities.tool_registry.tool_names
 
     def test_cron_registered_when_service_provided(self, tmp_workspace: Path) -> None:
-        tools = _register(tmp_workspace, cron_service=Mock())
-        assert "cron" in tools._registry.tool_names
+        capabilities = _register(tmp_workspace, cron_service=Mock())
+        assert "cron" in capabilities.tool_registry.tool_names
 
     def test_skills_tools_discovered(self, tmp_workspace: Path) -> None:
         from nanobot.agent.tools.base import Tool, ToolResult
@@ -167,5 +169,5 @@ class TestRegisterDefaultTools:
                 return ToolResult.ok("ok")
 
         loader = FakeSkillsLoader(tools=[FakeSkillTool()])
-        tools = _register(tmp_workspace, skills_loader=loader)
-        assert "fake_skill_tool" in tools._registry.tool_names
+        capabilities = _register(tmp_workspace, skills_loader=loader)
+        assert "fake_skill_tool" in capabilities.tool_registry.tool_names

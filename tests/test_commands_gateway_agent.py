@@ -141,7 +141,7 @@ def test_gateway_runs_cron_and_heartbeat_callbacks(
     monkeypatch.setattr("nanobot.config.loader.get_data_dir", lambda: tmp_path)
     monkeypatch.setattr("nanobot.cli.gateway._make_provider", lambda _cfg: object())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: bus)
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _AgentLoop)
+    monkeypatch.setattr("nanobot.agent.agent_factory.build_agent", lambda **kw: _AgentLoop())
     monkeypatch.setattr("nanobot.session.manager.SessionManager", _SessionManager)
     monkeypatch.setattr("nanobot.cron.service.CronService", _CronService)
     monkeypatch.setattr("nanobot.heartbeat.service.HeartbeatService", _HeartbeatService)
@@ -170,7 +170,7 @@ def test_gateway_continues_when_health_port_is_busy_with_web_enabled(
     monkeypatch.setattr("nanobot.config.loader.get_data_dir", lambda: tmp_path)
     monkeypatch.setattr("nanobot.cli.gateway._make_provider", lambda _cfg: object())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: bus)
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _AgentLoop)
+    monkeypatch.setattr("nanobot.agent.agent_factory.build_agent", lambda **kw: _AgentLoop())
     monkeypatch.setattr("nanobot.session.manager.SessionManager", _SessionManager)
     monkeypatch.setattr("nanobot.cron.service.CronService", _CronService)
     monkeypatch.setattr("nanobot.heartbeat.service.HeartbeatService", _HeartbeatService)
@@ -225,7 +225,7 @@ def test_agent_single_message_and_interactive_exit(
     monkeypatch.setattr("nanobot.config.loader.get_data_dir", lambda: tmp_path)
     monkeypatch.setattr("nanobot.cli.agent._make_provider", lambda _cfg: object())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", _Bus)
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _AgentLoop)
+    monkeypatch.setattr("nanobot.agent.agent_factory.build_agent", lambda **kw: _AgentLoop())
     monkeypatch.setattr("nanobot.cron.service.CronService", _CronService)
 
     class _Timer:

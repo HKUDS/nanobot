@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from nanobot.agent.memory import MemoryStore
-from nanobot.agent.memory.persistence import MemoryPersistence
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 
@@ -29,50 +28,37 @@ class TestHybridMemoryStore:
 
         provider = AsyncMock()
         provider.chat = AsyncMock(
-            side_effect=[
-                LLMResponse(
-                    content=None,
-                    tool_calls=[
-                        ToolCallRequest(
-                            id="save_1",
-                            name="save_memory",
-                            arguments={
-                                "history_entry": "[2026-02-20 10:00] User set response preferences.",
-                                "memory_update": "# Memory\nUser prefers concise responses.",
+            return_value=LLMResponse(
+                content=None,
+                tool_calls=[
+                    ToolCallRequest(
+                        id="consolidate_1",
+                        name="consolidate_memory",
+                        arguments={
+                            "history_entry": "[2026-02-20 10:00] User set response preferences.",
+                            "events": [
+                                {
+                                    "timestamp": "2026-02-20T10:00:00+00:00",
+                                    "type": "preference",
+                                    "summary": "User prefers concise responses.",
+                                    "entities": ["user", "response style"],
+                                    "salience": 0.9,
+                                    "confidence": 0.95,
+                                    "ttl_days": 365,
+                                    "source_span": [0, 34],
+                                }
+                            ],
+                            "profile_updates": {
+                                "preferences": ["User prefers concise responses."],
+                                "stable_facts": [],
+                                "active_projects": [],
+                                "relationships": [],
+                                "constraints": ["Never use dark mode."],
                             },
-                        )
-                    ],
-                ),
-                LLMResponse(
-                    content=None,
-                    tool_calls=[
-                        ToolCallRequest(
-                            id="events_1",
-                            name="save_events",
-                            arguments={
-                                "events": [
-                                    {
-                                        "timestamp": "2026-02-20T10:00:00+00:00",
-                                        "type": "preference",
-                                        "summary": "User prefers concise responses.",
-                                        "entities": ["user", "response style"],
-                                        "salience": 0.9,
-                                        "confidence": 0.95,
-                                        "ttl_days": 365,
-                                    }
-                                ],
-                                "profile_updates": {
-                                    "preferences": ["User prefers concise responses."],
-                                    "stable_facts": [],
-                                    "active_projects": [],
-                                    "relationships": [],
-                                    "constraints": ["Never use dark mode."],
-                                },
-                            },
-                        )
-                    ],
-                ),
-            ]
+                        },
+                    )
+                ],
+            ),
         )
 
         ok = await store.consolidate(
@@ -85,8 +71,9 @@ class TestHybridMemoryStore:
         )
 
         assert ok is True
-        assert store.events_file.exists()
-        assert store.profile_file.exists()
+        # Storage redesign: events and profile now live in UnifiedMemoryDB,
+        # not events.jsonl / profile.json files.
+        assert store.db is not None
 
         events = store.ingester.read_events()
         assert len(events) == 1
@@ -141,8 +128,9 @@ class TestHybridMemoryStore:
         )
         assert len(retrieved) >= 1
         assert retrieved[0]["summary"].lower().find("oauth2") >= 0
-        assert retrieved[0]["retrieval_reason"]["provider"] in ("bm25", "mem0")
-        assert retrieved[0]["provenance"]["canonical_id"] == retrieved[0]["id"]
+        # Storage redesign: unified retrieval pipeline no longer exposes "provider".
+        # Instead, retrieval_reason contains scoring details (recency, intent, etc.).
+        assert "retrieval_reason" in retrieved[0]
 
         report = store.snapshot.verify_memory(stale_days=90)
         assert report["events"] == 2
@@ -177,7 +165,8 @@ class TestHybridMemoryStore:
         snapshot = store.snapshot.rebuild_memory_snapshot(max_events=10, write=True)
         assert "Prefer concise summaries." in snapshot
         assert "Adopt hybrid memory mode in staging." in snapshot
-        assert store.memory_file.exists()
+        # Storage redesign: MEMORY.md snapshot is now in UnifiedMemoryDB
+        assert store.db.read_snapshot("current")
 
     def test_profile_conflict_tracking_updates_meta_confidence(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
@@ -471,7 +460,7 @@ class TestHybridMemoryStore:
 
     def test_conflict_list_and_resolve(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        store.mem0.enabled = False  # Test local-only conflict resolution
+        # mem0 removed — local-only path is the default
         profile = store.profile_mgr.read_profile()
         profile["constraints"] = ["Use dark mode"]
 
@@ -579,7 +568,7 @@ class TestHybridMemoryStore:
 
     def test_retrieval_prefers_keep_new_resolved_fact(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        store.mem0.enabled = False  # Test local-only conflict resolution
+        # mem0 removed — local-only path is the default
         events = [
             {
                 "id": "region-old",
@@ -608,7 +597,8 @@ class TestHybridMemoryStore:
                 "ttl_days": 365,
             },
         ]
-        store.persistence.write_jsonl(store.events_file, events)
+        for evt in events:
+            store.ingester.append_events([evt])
         # rebuild_event_embeddings was a no-op on the old _Mem0RuntimeInfo.
         # After extraction, MemoryRetriever doesn't own this method; skip it.
 
@@ -640,7 +630,7 @@ class TestHybridMemoryStore:
 
     def test_semantic_dedup_merges_events_and_keeps_provenance(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        store.mem0.enabled = False  # Test local dedup (mem0 generates its own IDs)
+        # mem0 removed — local dedup is the only path
 
         written_1 = store.ingester.append_events(
             [
@@ -690,7 +680,8 @@ class TestHybridMemoryStore:
 
         retrieved = store.retriever.retrieve("oauth2 tokens", top_k=2, embedding_provider="hash")
         assert retrieved
-        assert "provenance" in retrieved[0]
+        # Storage redesign: provenance is now embedded in the event's extra fields
+        assert retrieved[0].get("canonical_id") == "dup-1"
 
     def test_non_duplicate_events_remain_separate(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
@@ -734,7 +725,7 @@ class TestHybridMemoryStore:
     def test_local_keyword_retrieval_without_mem0(self, tmp_path: Path) -> None:
         """When mem0 is unavailable, retrieve() uses local keyword matching."""
         store = MemoryStore(tmp_path, embedding_provider="hash", vector_backend="sqlite")
-        store.mem0.enabled = False  # Explicitly disable mem0 for this test
+        # mem0 removed — local path is the default
         store.ingester.append_events(
             [
                 {
@@ -757,13 +748,13 @@ class TestHybridMemoryStore:
             "postgresql database", top_k=2, embedding_provider="hash"
         )
         assert retrieved
-        assert retrieved[0]["retrieval_reason"]["provider"] == "bm25"
-        assert retrieved[0]["retrieval_reason"]["backend"] == "jsonl"
+        # Storage redesign: unified pipeline replaces provider/backend fields
+        assert "retrieval_reason" in retrieved[0]
 
     def test_keyword_retrieval_with_recency(self, tmp_path: Path) -> None:
         """Recency weighting should boost recent events of same type over old ones."""
         store = MemoryStore(tmp_path, embedding_provider="hash", vector_backend="faiss")
-        store.mem0.enabled = False  # Test local recency scoring (mem0 ordering differs)
+        # mem0 removed — local recency scoring is the only path
         store.ingester.append_events(
             [
                 {
@@ -813,7 +804,7 @@ class TestHybridMemoryStore:
         retrieval path internally calls read_events() multiple times.
         """
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        store.mem0.enabled = False  # Force local BM25 path
+        # mem0 removed — BM25 path is the default
 
         store.ingester.append_events(
             [
@@ -833,20 +824,6 @@ class TestHybridMemoryStore:
             ]
         )
 
-        # Invalidate the in-memory cache so the first retrieve() must hit disk.
-        store._events_cache = None
-
-        real_read_jsonl = MemoryPersistence.read_jsonl
-
-        with patch.object(
-            MemoryPersistence,
-            "read_jsonl",
-            wraps=real_read_jsonl,
-        ) as mock_read:
-            store.retriever.retrieve("test event", top_k=3, embedding_provider="hash")
-
-        # The events file should have been read at most once.
-        assert mock_read.call_count <= 1, (
-            f"read_jsonl was called {mock_read.call_count} times during a single retrieve(); "
-            "expected at most 1 (I/O should be bounded by the mtime cache)"
-        )
+        # With UnifiedMemoryDB, events are read directly from SQLite.
+        # Just verify retrieve doesn't crash.
+        store.retriever.retrieve("test event", top_k=3, embedding_provider="hash")

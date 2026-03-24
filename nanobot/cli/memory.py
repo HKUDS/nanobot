@@ -194,8 +194,8 @@ def memory_reindex(
         read_events_fn=store.ingester.read_events,
         ingester=store.ingester,
         profile_keys=store.PROFILE_KEYS,
-        vector_points_count_fn=store.maintenance._vector_points_count,
-        mem0_get_all_rows_fn=store.maintenance._mem0_get_all_rows,
+        vector_points_count_fn=None,
+        mem0_get_all_rows_fn=None,
     )
     table = Table(title="Memory Reindex")
     table.add_column("Field", style="cyan")
@@ -241,8 +241,8 @@ def memory_compact(
         read_events_fn=store.ingester.read_events,
         ingester=store.ingester,
         profile_keys=store.PROFILE_KEYS,
-        vector_points_count_fn=store.maintenance._vector_points_count,
-        mem0_get_all_rows_fn=store.maintenance._mem0_get_all_rows,
+        vector_points_count_fn=None,
+        mem0_get_all_rows_fn=None,
     )
     table = Table(title="Memory Compaction")
     table.add_column("Field", style="cyan")
@@ -345,8 +345,8 @@ def memory_eval(
             read_events_fn=store.ingester.read_events,
             ingester=store.ingester,
             profile_keys=store.PROFILE_KEYS,
-            vector_points_count_fn=store.maintenance._vector_points_count,
-            mem0_get_all_rows_fn=store.maintenance._mem0_get_all_rows,
+            vector_points_count_fn=None,
+            mem0_get_all_rows_fn=None,
         )
         seed_table = Table(title="Seeded Corpus")
         seed_table.add_column("Field", style="cyan")
@@ -664,17 +664,18 @@ def migrate_graph(
         if driver is not None:
             driver.close()
 
-    # Build networkx graph
-    from nanobot.agent.memory.graph import KnowledgeGraph
+    # Import graph into SQLite database
+    from nanobot.agent.memory.migration import migrate_to_sqlite
 
-    graph = KnowledgeGraph(workspace=workspace)
+    db = migrate_to_sqlite(workspace / "memory", dims=384, embedder=None)
 
     node_count = 0
     for record in nodes:
         node = record["n"]
         props = dict(node.items())
         name = props.pop("name", str(node.id))
-        graph._graph.add_node(name.lower(), **props)
+        entity_type = props.pop("entity_type", "unknown")
+        db.upsert_entity(name.lower(), type=entity_type)
         node_count += 1
 
     edge_count = 0
@@ -683,11 +684,10 @@ def migrate_graph(
         tgt = record.get("tgt", "").lower()
         rel_type = record.get("type", "RELATED_TO")
         if src and tgt:
-            graph._graph.add_edge(src, tgt, type=rel_type)
+            db.add_edge(src, tgt, relation=rel_type)
             edge_count += 1
 
-    graph._save()
     console.print(
         f"[green]Migration complete: {node_count} entities, {edge_count} relationships[/green]"
     )
-    console.print(f"Saved to: {graph._json_path}")
+    console.print(f"Saved to: {workspace / 'memory' / 'memory.db'}")

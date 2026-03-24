@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -21,8 +20,7 @@ from .event import BeliefRecord
 from .helpers import _norm_text, _safe_float, _to_str_list, _tokenize, _utc_now_iso
 
 if TYPE_CHECKING:
-    from .mem0_adapter import _Mem0Adapter
-    from .persistence import MemoryPersistence
+    from .unified_db import UnifiedMemoryDB
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -57,40 +55,21 @@ __all__ = [
 
 @dataclass(slots=True)
 class ProfileCache:
-    """Mtime-aware cache for profile.json. Owned exclusively by ProfileStore."""
-
-    _path: Path
-    _persistence: MemoryPersistence
+    """Simple in-memory profile cache. Owned exclusively by ProfileStore."""
 
     _data: dict[str, Any] | None = field(default=None, init=False)
-    _mtime: float = field(default=-1.0, init=False)
 
     def read(self) -> dict[str, Any]:
-        """Return cached data if file unchanged, else reload from disk."""
-        try:
-            mtime = self._path.stat().st_mtime
-        except FileNotFoundError:
-            return {}
-        if self._data is not None and mtime == self._mtime:
-            return self._data
-        raw = self._persistence.read_json(self._path)
-        self._data = raw if isinstance(raw, dict) else {}
-        self._mtime = mtime
-        return self._data
+        """Return cached data (or empty dict if not yet written)."""
+        return self._data if self._data is not None else {}
 
     def write(self, data: dict[str, Any]) -> None:
-        """Write to disk and update cache atomically."""
-        self._persistence.write_json(self._path, data)
+        """Update cache."""
         self._data = data
-        try:
-            self._mtime = self._path.stat().st_mtime
-        except FileNotFoundError:
-            self._mtime = -1.0
 
     def invalidate(self) -> None:
-        """Force next read() to reload from disk."""
+        """Force next read() to return empty."""
         self._data = None
-        self._mtime = -1.0
 
 
 # ---------------------------------------------------------------------------
@@ -117,25 +96,21 @@ class ProfileStore:
 
     def __init__(
         self,
-        persistence: MemoryPersistence,
-        profile_file: Path,
-        mem0: _Mem0Adapter,
         *,
         extractor: Any | None = None,
         ingester: Any | None = None,
         conflict_mgr: Any | None = None,
         snapshot: Any | None = None,
+        db: UnifiedMemoryDB | None = None,
     ) -> None:
-        self.persistence = persistence
-        self.profile_file = profile_file
-        self.mem0 = mem0
+        self._db = db
         # Subsystem references — set after construction by MemoryStore.__init__
         # (required by apply_live_user_correction).
         self._extractor: Any = extractor
         self._ingester: Any = ingester
         self._conflict_mgr: Any = conflict_mgr
         self._snapshot: Any = snapshot
-        self._cache = ProfileCache(_path=profile_file, _persistence=persistence)
+        self._cache = ProfileCache()
         self._corrector: Any = None  # wired post-construction by MemoryStore
 
     # -- Shared helpers imported from .helpers --------------------------------
@@ -156,7 +131,10 @@ class ProfileStore:
     # ------------------------------------------------------------------
 
     def read_profile(self) -> dict[str, Any]:
-        data = self._cache.read()
+        if self._db is not None:
+            data = self._db.read_profile("profile")
+        else:
+            data = self._cache.read() or {}
         if isinstance(data, dict) and data:
             # normalise legacy entries — same logic as before
             for key in self.PROFILE_KEYS:
@@ -192,7 +170,7 @@ class ProfileStore:
                         entry.setdefault("created_at", created)
                         entry["id"] = self._generate_belief_id(key, norm, entry["created_at"])
             return data
-        if self.profile_file.exists() and data is None:
+        if data is None:
             logger.warning("Failed to parse memory profile, resetting")
         return {
             "preferences": [],
@@ -208,7 +186,10 @@ class ProfileStore:
 
     def write_profile(self, profile: dict[str, Any]) -> None:
         profile["updated_at"] = self._utc_now_iso()
-        self._cache.write(profile)
+        if self._db is not None:
+            self._db.write_profile("profile", profile)
+        else:
+            self._cache.write(profile)  # in-memory fallback
 
     def _meta_section(self, profile: dict[str, Any], key: str) -> dict[str, Any]:
         profile.setdefault("meta", {})
@@ -714,24 +695,15 @@ class ProfileStore:
 
     def _find_mem0_id_for_text(self, text: str, *, top_k: int = 8) -> str | None:
         target = self._norm_text(text)
-        if not target or not self.mem0.enabled:
-            return None
-        search_result = self.mem0.search(text, top_k=top_k)
-        if isinstance(search_result, tuple) and len(search_result) == 2:
-            rows = search_result[0]
-        else:
-            rows = search_result if isinstance(search_result, list) else []
-        if not rows:
+        if not target:
             return None
 
-        for row in rows:
-            summary = self._norm_text(str(row.get("summary", "")))
-            if summary and (summary == target or target in summary or summary in target):
-                value = str(row.get("id", "")).strip()
-                if value:
-                    return value
-        value = str(rows[0].get("id", "")).strip()
-        return value or None
+        if self._db is not None:
+            rows = self._db.search_fts(text, k=top_k)
+            if rows:
+                value = str(rows[0].get("id", "")).strip()
+                return value or None
+        return None
 
     # ------------------------------------------------------------------
     # Live correction

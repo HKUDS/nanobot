@@ -2,34 +2,9 @@
 
 from __future__ import annotations
 
-_SAVE_MEMORY_TOOL = [
-    {
-        "type": "function",
-        "function": {
-            "name": "save_memory",
-            "description": "Save the memory consolidation result to persistent storage.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "history_entry": {
-                        "type": "string",
-                        "description": "A paragraph (2-5 sentences) summarizing key events/decisions/topics. "
-                        "Start with [YYYY-MM-DD HH:MM]. Include detail useful for grep search.",
-                    },
-                    "memory_update": {
-                        "type": "string",
-                        "description": "(Deprecated — ignored.) Kept for backward compatibility "
-                        "with cached tool calls.",
-                    },
-                },
-                "required": ["history_entry"],
-            },
-        },
-    }
-]
+from typing import Any
 
-
-_SAVE_EVENTS_TOOL = [
+_SAVE_EVENTS_TOOL: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
@@ -91,6 +66,40 @@ _SAVE_EVENTS_TOOL = [
                     },
                 },
                 "required": ["events", "profile_updates"],
+            },
+        },
+    }
+]
+
+
+# -- Combined single-tool schema for one-call consolidation (Task 6) ----------
+
+_CONSOLIDATE_MEMORY_TOOL: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "consolidate_memory",
+            "description": (
+                "Consolidate conversation into memory: history summary, "
+                "structured events, and profile updates."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "history_entry": {
+                        "type": "string",
+                        "description": (
+                            "2-5 sentence summary of key events, decisions, and topics discussed."
+                        ),
+                    },
+                    "events": _SAVE_EVENTS_TOOL[0]["function"]["parameters"]["properties"][
+                        "events"
+                    ],
+                    "profile_updates": _SAVE_EVENTS_TOOL[0]["function"]["parameters"]["properties"][
+                        "profile_updates"
+                    ],
+                },
+                "required": ["history_entry", "events"],
             },
         },
     }

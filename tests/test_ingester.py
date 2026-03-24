@@ -7,36 +7,27 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from nanobot.agent.memory.ingester import EventIngester
-from nanobot.agent.memory.persistence import MemoryPersistence
+from nanobot.agent.memory.unified_db import UnifiedMemoryDB
 
 
 def _make_ingester(
     *,
     rollout: dict[str, Any] | None = None,
     conflict_pair_fn: Any = None,
-    mem0_enabled: bool = False,
     graph_enabled: bool = False,
-) -> tuple[EventIngester, MagicMock, MagicMock, MagicMock]:
+    db: UnifiedMemoryDB | None = None,
+) -> tuple[EventIngester, MagicMock]:
     """Build an ``EventIngester`` with mocked dependencies."""
-    persistence = MagicMock(spec=MemoryPersistence)
-    persistence.events_file = Path("/tmp/fake/events.jsonl")
-    persistence.read_jsonl.return_value = []
-
-    mem0 = MagicMock()
-    mem0.enabled = mem0_enabled
-    mem0.add_text.return_value = True
-
     graph = MagicMock()
     graph.enabled = graph_enabled
 
     ing = EventIngester(
-        persistence=persistence,
-        mem0=mem0,
         graph=graph,
         rollout=rollout or {},
         conflict_pair_fn=conflict_pair_fn,
+        db=db,
     )
-    return ing, persistence, mem0, graph
+    return ing, graph
 
 
 class TestCoerceEvent:
@@ -218,12 +209,7 @@ class TestMergeEvents:
 
 class TestAppendEventsDedup:
     def test_duplicate_merged_on_append(self, tmp_path: Path) -> None:
-        events_file = tmp_path / "events.jsonl"
-        events_file.write_text("")  # empty file so exists() returns True
-
-        persistence = MagicMock(spec=MemoryPersistence)
-        persistence.events_file = events_file
-
+        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
         existing_event = {
             "id": "abc123",
             "type": "fact",
@@ -234,19 +220,11 @@ class TestAppendEventsDedup:
             "source": "chat",
             "timestamp": "2025-01-01T00:00:00+00:00",
         }
-        persistence.read_jsonl.return_value = [existing_event]
+        db.insert_event(existing_event)
 
-        mem0 = MagicMock()
-        mem0.enabled = False
         graph = MagicMock()
         graph.enabled = False
-
-        ing = EventIngester(
-            persistence=persistence,
-            mem0=mem0,
-            graph=graph,
-            rollout={},
-        )
+        ing = EventIngester(graph=graph, rollout={}, db=db)
 
         # Append a very similar event.
         new_event = {
@@ -260,9 +238,10 @@ class TestAppendEventsDedup:
             "timestamp": "2025-01-02T00:00:00+00:00",
         }
         ing.append_events([new_event])
-        # The event should be merged (duplicate detected), so write_jsonl is called
-        # to persist the updated (merged) event list.
-        assert persistence.write_jsonl.called
+        # The event should be merged (duplicate detected).
+        events = db.read_events(limit=100)
+        assert len(events) >= 1
+        db.close()
 
 
 class TestSanitizeMem0Text:
@@ -294,46 +273,21 @@ class TestSanitizeMem0Text:
         assert len(result) <= 23  # 20 + "..."
 
 
-class TestReadEventsCaching:
-    def test_mtime_cache_works(self, tmp_path: Path) -> None:
-        events_file = tmp_path / "events.jsonl"
-        events_file.write_text('{"id": "1", "summary": "test"}\n')
-
-        persistence = MagicMock(spec=MemoryPersistence)
-        persistence.events_file = events_file
-        persistence.read_jsonl.return_value = [{"id": "1", "summary": "test"}]
-
-        mem0 = MagicMock()
-        mem0.enabled = False
-        graph = MagicMock()
-        graph.enabled = False
-
-        ing = EventIngester(
-            persistence=persistence,
-            mem0=mem0,
-            graph=graph,
-            rollout={},
+class TestReadEvents:
+    def test_read_events_from_db(self, tmp_path: Path) -> None:
+        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
+        db.insert_event(
+            {"id": "1", "summary": "test", "type": "fact", "timestamp": "2026-01-01T00:00:00Z"}
         )
+        ing = EventIngester(graph=MagicMock(enabled=False), rollout={}, db=db)
+        events = ing.read_events(limit=10)
+        assert len(events) >= 1
+        db.close()
 
-        # First read — cache miss.
-        result1 = ing.read_events()
-        assert len(result1) == 1
-        assert persistence.read_jsonl.call_count == 1
-
-        # Second read — cache hit (same mtime).
-        result2 = ing.read_events()
-        assert len(result2) == 1
-        assert persistence.read_jsonl.call_count == 1  # NOT called again
-
-        # Touch file to change mtime — cache miss.
-        events_file.write_text('{"id": "1", "summary": "test"}\n{"id": "2", "summary": "two"}\n')
-        persistence.read_jsonl.return_value = [
-            {"id": "1", "summary": "test"},
-            {"id": "2", "summary": "two"},
-        ]
-        result3 = ing.read_events()
-        assert len(result3) == 2
-        assert persistence.read_jsonl.call_count == 2
+    def test_read_events_no_db(self) -> None:
+        ing = EventIngester(graph=MagicMock(enabled=False), rollout={}, db=None)
+        events = ing.read_events()
+        assert events == []
 
 
 class TestBuildEventId:
@@ -406,3 +360,60 @@ class TestLooksBlobLikeSummary:
 
     def test_multiline_blob(self) -> None:
         assert EventIngester._looks_blob_like_summary("a\nb\nc\nd\ne") is True
+
+
+class TestIngesterWithUnifiedDB:
+    """Tests for ingester writing to UnifiedMemoryDB."""
+
+    def _make_ingester_with_db(self, tmp_path: Path) -> tuple[EventIngester, Any, MagicMock]:
+        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
+        graph = MagicMock()
+        graph.enabled = False
+
+        ingester = EventIngester(
+            graph=graph,
+            rollout={},
+            conflict_pair_fn=lambda old, new: False,
+            db=db,
+            embedder=None,
+        )
+        return ingester, db, MagicMock()  # third return for compat
+
+    def test_events_written_to_db(self, tmp_path: Path) -> None:
+        ingester, db, _ = self._make_ingester_with_db(tmp_path)
+        ingester.append_events(
+            [
+                {
+                    "id": "test-001",
+                    "type": "fact",
+                    "summary": "User likes coffee",
+                    "timestamp": "2026-01-01T00:00:00Z",
+                }
+            ]
+        )
+        events = db.read_events(limit=10)
+        assert len(events) >= 1
+        assert any("coffee" in e["summary"] for e in events)
+        db.close()
+
+    def test_read_events_from_db(self, tmp_path: Path) -> None:
+        ingester, db, _ = self._make_ingester_with_db(tmp_path)
+        ingester.append_events(
+            [
+                {
+                    "id": "test-002",
+                    "type": "fact",
+                    "summary": "Test event",
+                    "timestamp": "2026-01-01T00:00:00Z",
+                }
+            ]
+        )
+        events = ingester.read_events(limit=10)
+        assert len(events) >= 1
+        db.close()
+
+    def test_sync_events_to_mem0_noop_with_db(self, tmp_path: Path) -> None:
+        ingester, db, _ = self._make_ingester_with_db(tmp_path)
+        result = ingester._sync_events_to_mem0([{"type": "fact", "summary": "ignored", "id": "x"}])
+        assert result == 0
+        db.close()

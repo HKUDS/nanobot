@@ -12,16 +12,11 @@ from nanobot.agent.memory.retriever import MemoryRetriever
 
 def _make_retriever(
     *,
-    mem0_enabled: bool = False,
     rollout: dict[str, Any] | None = None,
     events: list[dict[str, Any]] | None = None,
     graph_enabled: bool = False,
 ) -> MemoryRetriever:
     """Build a MemoryRetriever with mocked dependencies."""
-    mem0 = MagicMock()
-    mem0.enabled = mem0_enabled
-    mem0.mode = "local"
-
     graph = MagicMock()
     graph.enabled = graph_enabled
     graph.get_related_entity_names_sync = MagicMock(return_value=set())
@@ -58,7 +53,6 @@ def _make_retriever(
     extractor._extract_entities = MagicMock(return_value=[])
 
     return MemoryRetriever(
-        mem0=mem0,
         graph=graph,
         planner=planner,
         reranker=reranker,
@@ -97,89 +91,12 @@ def _make_plan(
     return plan
 
 
-class TestRetrieveMem0Disabled:
-    """When mem0 is disabled, retrieve uses BM25 local path."""
+class TestRetrieveWithoutDB:
+    """When neither db nor embedder is available, retrieve returns empty."""
 
-    def test_returns_local_results(self) -> None:
-        events = [
-            {
-                "id": "e1",
-                "type": "fact",
-                "summary": "Python is great",
-                "timestamp": "2025-01-01T00:00:00Z",
-                "entities": [],
-                "status": "active",
-            }
-        ]
-        retriever = _make_retriever(events=events)
-        with patch(
-            "nanobot.agent.memory.retriever._local_retrieve",
-            return_value=[
-                {
-                    "id": "e1",
-                    "type": "fact",
-                    "summary": "Python is great",
-                    "timestamp": "2025-01-01T00:00:00Z",
-                    "retrieval_reason": {"score": 0.5},
-                    "entities": [],
-                }
-            ],
-        ):
-            results = retriever.retrieve("Python", top_k=3)
-        assert len(results) == 1
-        assert results[0]["id"] == "e1"
-        assert "score" in results[0]
-
-
-class TestRetrieveMem0Enabled:
-    """When mem0 is enabled, retrieve calls _run_mem0_pipeline."""
-
-    def test_calls_mem0_search(self) -> None:
-        retriever = _make_retriever(mem0_enabled=True)
-        retriever._mem0.search = MagicMock(
-            return_value=(
-                [
-                    {
-                        "id": "m1",
-                        "type": "fact",
-                        "summary": "Test memory",
-                        "timestamp": "2025-01-01T00:00:00Z",
-                        "score": 0.8,
-                        "stability": "high",
-                        "entities": [],
-                    }
-                ],
-                {
-                    "source_vector": 1,
-                    "source_get_all": 0,
-                    "source_history": 0,
-                    "rejected_blob_like": 0,
-                },
-            )
-        )
-        results = retriever.retrieve("test", top_k=3)
-        assert len(results) == 1
-        assert results[0]["id"] == "m1"
-        retriever._mem0.search.assert_called_once()
-
-
-class TestRetrieveEmptyResults:
-    """Empty mem0 results return empty list."""
-
-    def test_empty_mem0(self) -> None:
-        retriever = _make_retriever(mem0_enabled=True)
-        retriever._mem0.search = MagicMock(
-            return_value=(
-                [],
-                {
-                    "source_vector": 0,
-                    "source_get_all": 0,
-                    "source_history": 0,
-                    "rejected_blob_like": 0,
-                },
-            )
-        )
-        results = retriever.retrieve("anything", top_k=3)
+    def test_returns_empty_without_db(self) -> None:
+        retriever = _make_retriever()
+        results = retriever.retrieve("Python", top_k=3)
         assert results == []
 
 
@@ -191,15 +108,10 @@ class TestRetrieveWithGraphAugmentation:
         retriever._graph.get_related_entity_names_sync = MagicMock(
             return_value={"python", "fastapi"}
         )
-        with patch(
-            "nanobot.agent.memory.retriever._local_retrieve",
-            return_value=[],
-        ) as mock_local:
-            retriever.retrieve("web framework", top_k=3)
-        # The augmented query should have been passed to _local_retrieve
-        call_args = mock_local.call_args
-        query_arg = call_args[0][1]
-        assert "python" in query_arg or "fastapi" in query_arg
+        retriever._extractor._extract_entities = MagicMock(return_value=["Web"])
+        # Test graph entity collection directly (unified pipeline uses this internally)
+        entities = retriever._collect_graph_entity_names("web framework", [])
+        assert "python" in entities or "fastapi" in entities
 
 
 class TestBuildGraphContextLines:
@@ -216,7 +128,7 @@ class TestBuildGraphContextLines:
                 ],
             }
         ]
-        with patch("nanobot.agent.memory.ontology.classify_entity_type") as mock_classify:
+        with patch("nanobot.agent.memory.entity_classifier.classify_entity_type") as mock_classify:
             mock_type = MagicMock()
             mock_type.value = "unknown"
             mock_classify.return_value = mock_type
@@ -249,40 +161,55 @@ class TestRetrieveAppliesTypeBoost:
 
     def test_type_boost_increases_score(self) -> None:
         retriever = _make_retriever()
-        plan = retriever._planner.plan.return_value
-        plan.policy["type_boost"] = {"semantic": 0.1}
+        plan = _make_plan(
+            policy={
+                "candidate_multiplier": 3,
+                "half_life_days": 60.0,
+                "fallback_topics": [],
+                "fallback_types": [],
+                "type_boost": {"semantic": 0.1},
+            }
+        )
 
-        with patch(
-            "nanobot.agent.memory.retriever._local_retrieve",
-            return_value=[
-                {
-                    "id": "e1",
-                    "type": "fact",
-                    "summary": "A semantic fact",
-                    "memory_type": "semantic",
-                    "timestamp": "2025-01-01T00:00:00Z",
-                    "retrieval_reason": {"score": 0.5},
-                    "entities": [],
-                    "stability": "medium",
-                    "metadata": {"memory_type": "semantic"},
-                },
-                {
-                    "id": "e2",
-                    "type": "task",
-                    "summary": "An episodic task",
-                    "memory_type": "episodic",
-                    "timestamp": "2025-01-01T00:00:00Z",
-                    "retrieval_reason": {"score": 0.5},
-                    "entities": [],
-                    "stability": "medium",
-                    "metadata": {"memory_type": "episodic"},
-                },
-            ],
-        ):
-            results = retriever.retrieve("test", top_k=10)
+        items = [
+            {
+                "id": "e1",
+                "type": "fact",
+                "summary": "A semantic fact",
+                "memory_type": "semantic",
+                "timestamp": "2025-01-01T00:00:00Z",
+                "entities": [],
+                "stability": "medium",
+                "metadata": {"memory_type": "semantic"},
+            },
+            {
+                "id": "e2",
+                "type": "task",
+                "summary": "An episodic task",
+                "memory_type": "episodic",
+                "timestamp": "2025-01-01T00:00:00Z",
+                "entities": [],
+                "stability": "medium",
+                "metadata": {"memory_type": "episodic"},
+            },
+        ]
 
-        # The semantic item should get the 0.1 boost, making its score higher
-        scores = {r["id"]: r["score"] for r in results}
+        # Test _score_items directly — this is the pipeline stage that applies boosts
+        profile_data = {
+            "profile": {},
+            "resolved_keep_new_old": {k: set() for k in retriever.PROFILE_KEYS},
+            "resolved_keep_new_new": {k: set() for k in retriever.PROFILE_KEYS},
+        }
+        scored = retriever._score_items(
+            items,
+            plan,
+            profile_data=profile_data,
+            graph_entities=set(),
+            use_recency=True,
+            router_enabled=True,
+            type_separation_enabled=True,
+        )
+        scores = {r["id"]: r.get("score", 0.0) for r in scored}
         assert scores["e1"] > scores["e2"]
 
 
@@ -595,6 +522,132 @@ class TestRerankItemsDisabled:
         assert result is items
 
 
+# ======================================================================
+# Reciprocal Rank Fusion tests
+# ======================================================================
+
+
+class TestRRFFusion:
+    """Tests for Reciprocal Rank Fusion."""
+
+    def test_fuse_combines_results(self) -> None:
+        vec = [{"id": "a", "summary": "alpha"}, {"id": "b", "summary": "beta"}]
+        fts = [{"id": "b", "summary": "beta"}, {"id": "c", "summary": "gamma"}]
+        fused = MemoryRetriever._fuse_results(vec, fts, vector_weight=0.7)
+        ids = [r["id"] for r in fused]
+        assert "a" in ids
+        assert "b" in ids
+        assert "c" in ids
+        # b appears in both — should have highest score
+        assert ids[0] == "b"
+
+    def test_fuse_empty_inputs(self) -> None:
+        fused = MemoryRetriever._fuse_results([], [], vector_weight=0.7)
+        assert fused == []
+
+    def test_fuse_vector_only(self) -> None:
+        vec = [{"id": "a", "summary": "alpha"}]
+        fused = MemoryRetriever._fuse_results(vec, [], vector_weight=0.7)
+        assert len(fused) == 1
+        assert fused[0]["id"] == "a"
+
+    def test_fuse_fts_only(self) -> None:
+        fts = [{"id": "x", "summary": "xray"}]
+        fused = MemoryRetriever._fuse_results([], fts, vector_weight=0.7)
+        assert len(fused) == 1
+        assert fused[0]["id"] == "x"
+
+    def test_fuse_preserves_rrf_score(self) -> None:
+        vec = [{"id": "a", "summary": "alpha"}]
+        fts = [{"id": "a", "summary": "alpha"}]
+        fused = MemoryRetriever._fuse_results(vec, fts, vector_weight=0.7)
+        assert "_rrf_score" in fused[0]
+        assert fused[0]["_rrf_score"] > 0
+
+    def test_fuse_score_ordering(self) -> None:
+        """Items appearing in both lists should rank above single-list items."""
+        vec = [{"id": "a", "summary": "a"}, {"id": "b", "summary": "b"}]
+        fts = [{"id": "c", "summary": "c"}, {"id": "a", "summary": "a"}]
+        fused = MemoryRetriever._fuse_results(vec, fts, vector_weight=0.7)
+        ids = [r["id"] for r in fused]
+        # "a" is in both lists so should be first
+        assert ids[0] == "a"
+
+    def test_fuse_vector_weight_respected(self) -> None:
+        """Higher vector_weight means vector-only items score above FTS-only."""
+        vec = [{"id": "v", "summary": "vec"}]
+        fts = [{"id": "f", "summary": "fts"}]
+        fused = MemoryRetriever._fuse_results(vec, fts, vector_weight=0.9)
+        # v gets 0.9/60, f gets 0.1/60 — v should be first
+        assert fused[0]["id"] == "v"
+        assert fused[0]["_rrf_score"] > fused[1]["_rrf_score"]
+
+
+class TestUnifiedRetrievePath:
+    """Tests for the unified retrieval path (db + embedder injected)."""
+
+    def test_unified_path_dispatched_when_db_and_embedder_set(self) -> None:
+        """When db and embedder are provided, retrieve uses unified path."""
+        retriever = _make_retriever()
+
+        mock_db = MagicMock()
+        mock_db.search_vector = MagicMock(
+            return_value=[
+                {
+                    "id": "v1",
+                    "type": "fact",
+                    "summary": "vector hit",
+                    "timestamp": "2025-01-01T00:00:00Z",
+                    "entities": [],
+                    "status": "active",
+                },
+            ]
+        )
+        mock_db.search_fts = MagicMock(
+            return_value=[
+                {
+                    "id": "f1",
+                    "type": "fact",
+                    "summary": "fts hit",
+                    "timestamp": "2025-01-01T00:00:00Z",
+                    "entities": [],
+                    "status": "active",
+                },
+            ]
+        )
+
+        mock_embedder = MagicMock()
+
+        async def _fake_embed(text: str) -> list[float]:
+            return [0.1, 0.2, 0.3]
+
+        mock_embedder.embed = _fake_embed
+
+        retriever._db = mock_db
+        retriever._embedder = mock_embedder
+
+        results = retriever.retrieve("test query", top_k=5)
+        mock_db.search_vector.assert_called_once()
+        mock_db.search_fts.assert_called_once()
+        assert len(results) >= 1
+
+    def test_unified_path_skipped_when_db_is_none(self) -> None:
+        """Without db, returns empty list."""
+        retriever = _make_retriever()
+        retriever._db = None
+        retriever._embedder = MagicMock()
+        results = retriever.retrieve("test", top_k=3)
+        assert results == []
+
+    def test_unified_path_skipped_when_embedder_is_none(self) -> None:
+        """Without embedder, returns empty list."""
+        retriever = _make_retriever()
+        retriever._db = MagicMock()
+        retriever._embedder = None
+        results = retriever.retrieve("test", top_k=3)
+        assert results == []
+
+
 class TestGraphEntityCache:
     """Graph entity name cache is reset per retrieve() call."""
 
@@ -603,7 +656,6 @@ class TestGraphEntityCache:
 
         from nanobot.agent.memory.retriever import MemoryRetriever
 
-        mem0 = MagicMock()
         graph = MagicMock()
         graph.enabled = True
         graph.get_related_entity_names_sync.return_value = {"alice", "bob"}
@@ -616,7 +668,6 @@ class TestGraphEntityCache:
         extractor._extract_entities.return_value = ["coffee"]
 
         retriever = MemoryRetriever(
-            mem0=mem0,
             graph=graph,
             planner=planner,
             reranker=reranker,
@@ -656,37 +707,11 @@ class TestGraphEntityCache:
     def test_retrieve_resets_cache_between_calls(self):
         """retrieve() resets _graph_cache so each call gets a fresh traversal."""
         r = self._make_retriever_with_graph()
-        # Force BM25 path by disabling mem0
-        r._mem0.enabled = False
 
-        # Configure planner to return a proper plan
-        plan = MagicMock()
-        plan.intent = "fact_lookup"
-        plan.policy = {
-            "candidate_multiplier": 3,
-            "half_life_days": 60.0,
-            "fallback_topics": [],
-            "fallback_types": [],
-            "type_boost": {},
-        }
-        plan.include_superseded = False
-        plan.routing_hints = {
-            "focus_task_decision": False,
-            "focus_planning": False,
-            "focus_architecture": False,
-            "requires_open": False,
-            "requires_resolved": False,
-        }
-        r._planner.plan.return_value = plan
+        # Pre-populate cache to verify it gets cleared on retrieve()
+        r._graph_cache[frozenset({"test"})] = {"cached_entity"}
+        assert len(r._graph_cache) == 1
 
+        # retrieve() should reset _graph_cache at the start (even without db/embedder)
         r.retrieve(query="coffee query", top_k=3)
-        count_after_first = r._graph.get_related_entity_names_sync.call_count
-
-        r.retrieve(query="coffee query", top_k=3)
-        count_after_second = r._graph.get_related_entity_names_sync.call_count
-
-        # If cache resets between retrieve() calls, graph is queried again on second call
-        assert count_after_second > count_after_first, (
-            f"Expected graph traversal to re-run after cache reset; "
-            f"call_count was {count_after_first} after first, {count_after_second} after second"
-        )
+        assert r._graph_cache == {}, "Expected _graph_cache to be reset at the start of retrieve()"

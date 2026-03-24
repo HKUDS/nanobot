@@ -36,9 +36,9 @@ from .helpers import (
 from .retrieval_planner import RetrievalPlanner
 
 if TYPE_CHECKING:
+    from .embedder import Embedder
     from .graph import KnowledgeGraph
-    from .mem0_adapter import _Mem0Adapter
-    from .persistence import MemoryPersistence
+    from .unified_db import UnifiedMemoryDB
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -63,22 +63,18 @@ class EventIngester:
 
     def __init__(
         self,
-        persistence: MemoryPersistence,
-        mem0: _Mem0Adapter,
         graph: KnowledgeGraph | None,
         rollout: dict[str, Any],
         *,
         conflict_pair_fn: Callable[[str, str], bool] | None = None,
+        db: UnifiedMemoryDB | None = None,
+        embedder: Embedder | None = None,
     ) -> None:
-        self._persistence = persistence
-        self._mem0 = mem0
         self._graph = graph
         self._rollout = rollout
         self._conflict_pair_fn = conflict_pair_fn
-
-        # mtime-based cache for events.jsonl (P-01/P-02).
-        self._events_cache: list[dict[str, Any]] | None = None
-        self._events_cache_mtime: float = -1.0
+        self._db = db
+        self._embedder = embedder
 
     # ------------------------------------------------------------------
     # Event coercion & ID building
@@ -446,21 +442,34 @@ class EventIngester:
     # ------------------------------------------------------------------
 
     def read_events(self, limit: int | None = None) -> list[dict[str, Any]]:
-        """Read events from persistence with mtime-based caching."""
-        events_file = self._persistence.events_file
-        try:
-            current_mtime = events_file.stat().st_mtime if events_file.exists() else -1.0
-        except OSError:
-            current_mtime = -1.0
+        """Read events from UnifiedMemoryDB.
 
-        if self._events_cache is None or current_mtime != self._events_cache_mtime:
-            self._events_cache = self._persistence.read_jsonl(events_file)
-            self._events_cache_mtime = current_mtime
+        Extra fields packed into metadata._extra on write are unpacked back
+        to top-level keys so callers see the same dict shape as was stored.
+        """
+        if self._db is not None:
+            import json as _json
 
-        out = self._events_cache
-        if limit is not None and limit > 0:
-            return out[-limit:]
-        return out
+            rows = self._db.read_events(limit=limit or 100)
+            result: list[dict[str, Any]] = []
+            for row in rows:
+                event = dict(row)
+                raw_meta = event.get("metadata")
+                if isinstance(raw_meta, str):
+                    try:
+                        meta = _json.loads(raw_meta)
+                    except (ValueError, TypeError):
+                        meta = {}
+                else:
+                    meta = raw_meta if isinstance(raw_meta, dict) else {}
+                extras = meta.pop("_extra", None) if isinstance(meta, dict) else None
+                if isinstance(extras, dict):
+                    event.update(extras)
+                if meta:
+                    event["metadata"] = meta
+                result.append(event)
+            return result
+        return []
 
     @staticmethod
     def _merge_source_span(base: list[int] | Any, incoming: list[int] | Any) -> list[int]:
@@ -765,7 +774,14 @@ class EventIngester:
         for raw in events:
             event_id = raw.get("id")
             if not event_id:
-                continue
+                # Auto-generate ID for events without one (mirrors _coerce_event).
+                summary = str(raw.get("summary", "")).strip()
+                if not summary:
+                    continue
+                event_type = str(raw.get("type", "fact"))
+                ts = str(raw.get("timestamp", _utc_now_iso()))
+                event_id = self._build_event_id(event_type, summary, ts)
+                raw = {**raw, "id": event_id}
             candidate = self._ensure_event_provenance(raw)
 
             if event_id in existing_ids:
@@ -814,21 +830,49 @@ class EventIngester:
         if written <= 0 and merged <= 0:
             return 0
 
-        events_file = self._persistence.events_file
-        self._persistence.write_jsonl(events_file, existing_events)
+        # Write to UnifiedMemoryDB
+        if self._db is not None:
+            import json as _json
 
-        if written > 0 and self._mem0.enabled:
-            for event in appended_events:
-                plan = self._event_mem0_write_plan(event)
-                for text, metadata in plan:
-                    clean_text = self._sanitize_mem0_text(
-                        text,
-                        allow_archival=bool(metadata.get("archival")),
-                    )
-                    if not clean_text:
-                        continue
-                    clean_metadata = self._sanitize_mem0_metadata(metadata)
-                    self._mem0.add_text(clean_text, metadata=clean_metadata)
+            # Collect all events that need writing: newly appended or modified
+            # (merged/superseded). Use existing_events which has the final state
+            # after all in-memory merges.
+            appended_ids = {a.get("id") for a in appended_events}
+            events_to_write = [
+                e
+                for e in existing_events
+                if e.get("id") in appended_ids
+                or e.get("merged_event_count", 1) > 1
+                or e.get("status") == "superseded"
+            ]
+
+            for event in events_to_write:
+                # Events are inserted without embeddings in the sync write path.
+                # Embeddings are backfilled by maintenance.reindex() or by the
+                # caller via db.insert_event() with a pre-computed embedding.
+                embedding = None
+                # Pack extra fields (entities, triples, confidence, salience,
+                # source_span, etc.) into metadata JSON so they survive the
+                # SQLite round-trip through the fixed-column events table.
+                evt_copy = dict(event)
+                _db_columns = {
+                    "id",
+                    "type",
+                    "summary",
+                    "timestamp",
+                    "source",
+                    "status",
+                    "metadata",
+                    "created_at",
+                }
+                meta = evt_copy.get("metadata")
+                meta = meta if isinstance(meta, dict) else {}
+                extras = {k: v for k, v in evt_copy.items() if k not in _db_columns}
+                if extras:
+                    meta = {**meta, "_extra": extras}
+                evt_copy["metadata"] = _json.dumps(meta) if meta else None
+                evt_copy.setdefault("created_at", evt_copy.get("timestamp", _utc_now_iso()))
+                self._db.insert_event(evt_copy, embedding=embedding)
         bind_trace().debug(
             "memory_append | written={} | merged={} | superseded={} | {:.0f}ms",
             written,
@@ -846,7 +890,7 @@ class EventIngester:
         if not self._graph or not self._graph.enabled:
             return 0
 
-        from .ontology import Triple
+        from .ontology_types import Triple
 
         total = 0
         for event in events:
@@ -868,28 +912,8 @@ class EventIngester:
     # ------------------------------------------------------------------
 
     def _sync_events_to_mem0(self, events: list[dict[str, Any]]) -> int:
-        """Write structured events to mem0 as semantic index entries.
+        """No-op: events are stored directly in UnifiedMemoryDB.
 
-        This is the preferred path for populating mem0 — it indexes the same
-        structured events that are persisted to ``events.jsonl``, ensuring
-        mem0 acts as a **semantic index** rather than a raw transcript store.
-
-        Uses ``_event_mem0_write_plan`` to derive (text, metadata) pairs for
-        each event, matching the logic used by the full reindex path.
-
-        Returns the number of entries successfully written.
+        Legacy mem0 sync has been removed.  Returns 0.
         """
-        written = 0
-        for event in events:
-            for text, raw_metadata in self._event_mem0_write_plan(event):
-                summary = self._sanitize_mem0_text(
-                    text,
-                    allow_archival=bool(raw_metadata.get("archival")),
-                )
-                if not summary:
-                    continue
-                metadata = self._sanitize_mem0_metadata(dict(raw_metadata))
-                metadata["source"] = "events"
-                if self._mem0.add_text(summary, metadata=metadata):
-                    written += 1
-        return written
+        return 0

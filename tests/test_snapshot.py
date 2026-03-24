@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from nanobot.agent.memory.profile_io import ProfileStore as ProfileManager
 from nanobot.agent.memory.snapshot import MemorySnapshot
 
 
@@ -15,22 +16,13 @@ def _make_snapshot(
     events: list[dict[str, Any]] | None = None,
 ) -> MemorySnapshot:
     """Create a MemorySnapshot with mocked collaborators."""
-    from nanobot.agent.memory.persistence import MemoryPersistence
-    from nanobot.agent.memory.profile_io import ProfileStore as ProfileManager
-
-    persistence = MemoryPersistence(tmp_path)
-
-    from nanobot.agent.memory.mem0_adapter import _Mem0Adapter
-
-    mem0 = _Mem0Adapter(workspace=tmp_path)
-    profile_mgr = ProfileManager(persistence, persistence.profile_file, mem0)
+    profile_mgr = ProfileManager()
 
     _events = events or []
     _long_term: dict[str, str] = {"content": ""}
 
     return MemorySnapshot(
         profile_mgr=profile_mgr,
-        persistence=persistence,
         read_events_fn=lambda **kw: _events[: kw.get("limit") or len(_events)],
         profile_section_lines_fn=lambda p, **kw: (
             ["## Preferences", "- test pref"] if p.get("preferences") else []

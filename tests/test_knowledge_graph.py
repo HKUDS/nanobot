@@ -1,4 +1,4 @@
-"""Tests for the knowledge graph adapter (networkx + JSON persistence)."""
+"""Tests for the knowledge graph adapter (SQLite via UnifiedMemoryDB)."""
 
 from __future__ import annotations
 
@@ -7,29 +7,38 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.memory.graph import KnowledgeGraph
-from nanobot.agent.memory.ontology import (
+from nanobot.agent.memory.ontology_types import (
     Entity,
     EntityType,
     Relationship,
     RelationType,
     Triple,
 )
+from nanobot.agent.memory.unified_db import UnifiedMemoryDB
+
+
+def _make_graph(tmp_path: Path) -> tuple[KnowledgeGraph, UnifiedMemoryDB]:
+    """Create a KnowledgeGraph backed by an in-tmp SQLite DB."""
+    db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
+    return KnowledgeGraph(db=db), db
+
 
 # ---------------------------------------------------------------------------
-# Graceful degradation — workspace=None (disabled)
+# Graceful degradation — db=None (disabled)
 # ---------------------------------------------------------------------------
 
 
 class TestGracefulDegradation:
-    """Verify the adapter stays disabled when no workspace is provided."""
+    """Verify the adapter stays disabled when no db is provided."""
 
-    def test_disabled_when_no_workspace(self) -> None:
+    def test_disabled_when_no_db(self) -> None:
         g = KnowledgeGraph()
         assert g.enabled is False
 
-    def test_enabled_when_workspace_provided(self, tmp_path: Path) -> None:
-        g = KnowledgeGraph(workspace=tmp_path)
+    def test_enabled_when_db_provided(self, tmp_path: Path) -> None:
+        g, db = _make_graph(tmp_path)
         assert g.enabled is True
+        db.close()
 
     async def test_upsert_entity_noop_when_disabled(self) -> None:
         g = KnowledgeGraph()
@@ -99,18 +108,17 @@ class TestGracefulDegradation:
 # ---------------------------------------------------------------------------
 
 
-class TestNodeToEntity:
+class TestRowToEntity:
     def test_basic_conversion(self) -> None:
-        props = {
+        row = {
             "name": "Carlos",
-            "canonical_name": "carlos",
-            "entity_type": "person",
-            "aliases_text": "Charlie, C",
+            "type": "person",
+            "aliases": "Charlie, C",
             "first_seen": "2024-01-01",
             "last_seen": "2024-06-01",
-            "prop_department": "engineering",
+            "properties": '{"department": "engineering"}',
         }
-        e = KnowledgeGraph._node_to_entity(props)
+        e = KnowledgeGraph._row_to_entity(row)
         assert e.name == "Carlos"
         assert e.entity_type == EntityType.PERSON
         assert "Charlie" in e.aliases
@@ -119,27 +127,34 @@ class TestNodeToEntity:
         assert e.first_seen == "2024-01-01"
 
     def test_unknown_entity_type(self) -> None:
-        props = {"name": "X", "entity_type": "alien"}
-        e = KnowledgeGraph._node_to_entity(props)
+        row = {"name": "X", "type": "alien"}
+        e = KnowledgeGraph._row_to_entity(row)
         assert e.entity_type == EntityType.UNKNOWN
 
     def test_empty_aliases(self) -> None:
-        props = {"name": "X", "aliases_text": ""}
-        e = KnowledgeGraph._node_to_entity(props)
+        row = {"name": "X", "aliases": ""}
+        e = KnowledgeGraph._row_to_entity(row)
         assert e.aliases == []
 
+    def test_backward_compat_node_to_entity(self) -> None:
+        """_node_to_entity alias still works."""
+        row = {"name": "X", "type": "person", "aliases": ""}
+        e = KnowledgeGraph._node_to_entity(row)
+        assert e.name == "X"
+
 
 # ---------------------------------------------------------------------------
-# Networkx graph operations
+# SQLite-backed graph operations
 # ---------------------------------------------------------------------------
 
 
-class TestNetworkxGraphOperations:
-    """Test actual graph operations with networkx backend."""
+class TestGraphOperations:
+    """Test actual graph operations with SQLite backend."""
 
     @pytest.fixture()
     def graph(self, tmp_path: Path) -> KnowledgeGraph:
-        return KnowledgeGraph(workspace=tmp_path)
+        g, _db = _make_graph(tmp_path)
+        return g
 
     async def test_upsert_and_get_entity(self, graph: KnowledgeGraph) -> None:
         entity = Entity(
@@ -245,8 +260,8 @@ class TestNetworkxGraphOperations:
         await graph.upsert_entity(Entity(name="Carlos", entity_type=EntityType.PERSON))
         await graph.upsert_entity(Entity(name="Python", entity_type=EntityType.TECHNOLOGY))
 
-        results = await graph.search_entities("", entity_type=EntityType.PERSON, limit=10)
         # Empty query won't match anything via substring
+        results = await graph.search_entities("", entity_type=EntityType.PERSON, limit=10)
         assert all(r.entity_type == EntityType.PERSON for r in results)
 
     async def test_get_neighbors_with_depth(self, graph: KnowledgeGraph) -> None:
@@ -318,7 +333,7 @@ class TestNetworkxGraphOperations:
         )
         paths = await graph.find_paths("A", "C", max_depth=3)
         assert len(paths) >= 1
-        # Path should go A -> B -> C
+        # Path should go a -> b -> c
         assert paths[0][0]["source"] == "A"
         assert paths[0][-1]["target"] == "C"
 
@@ -405,21 +420,23 @@ class TestNetworkxGraphOperations:
     async def test_verify_connectivity_when_enabled(self, graph: KnowledgeGraph) -> None:
         assert await graph.verify_connectivity() is True
 
-    async def test_close_saves(self, graph: KnowledgeGraph) -> None:
+    async def test_close_noop(self, graph: KnowledgeGraph) -> None:
         await graph.upsert_entity(Entity(name="Test", entity_type=EntityType.PERSON))
         await graph.close()
-        assert graph._json_path is not None
-        assert graph._json_path.exists()
+        # Data survives close since DB lifecycle is separate
+        result = await graph.get_entity("Test")
+        assert result is not None
 
 
 # ---------------------------------------------------------------------------
-# JSON persistence round-trip
+# Persistence round-trip (data survives graph reconstruction via same DB)
 # ---------------------------------------------------------------------------
 
 
-class TestJsonPersistence:
-    async def test_save_and_load_roundtrip(self, tmp_path: Path) -> None:
-        g1 = KnowledgeGraph(workspace=tmp_path)
+class TestPersistenceRoundTrip:
+    async def test_data_survives_reopen(self, tmp_path: Path) -> None:
+        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
+        g1 = KnowledgeGraph(db=db)
         await g1.upsert_entity(
             Entity(
                 name="Carlos",
@@ -440,9 +457,11 @@ class TestJsonPersistence:
             )
         )
         await g1.close()
+        db.close()
 
-        # Load into a new instance
-        g2 = KnowledgeGraph(workspace=tmp_path)
+        # Reopen with a new DB instance
+        db2 = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
+        g2 = KnowledgeGraph(db=db2)
         entity = await g2.get_entity("Carlos")
         assert entity is not None
         assert entity.name == "Carlos"
@@ -451,22 +470,15 @@ class TestJsonPersistence:
         neighbors = await g2.get_neighbors("Carlos")
         assert len(neighbors) >= 1
         assert neighbors[0]["relation"] == "WORKS_ON"
+        db2.close()
 
-    async def test_load_nonexistent_file(self, tmp_path: Path) -> None:
-        """First run — no JSON file yet — should start empty."""
-        g = KnowledgeGraph(workspace=tmp_path)
+    async def test_empty_db_starts_empty(self, tmp_path: Path) -> None:
+        """First run — no prior data — should start empty."""
+        g, db = _make_graph(tmp_path)
         assert g.enabled is True
-        assert len(g._graph.nodes) == 0
-
-    async def test_corrupted_json_handled(self, tmp_path: Path) -> None:
-        """Corrupted JSON file should be handled gracefully."""
-        mem_dir = tmp_path / "memory"
-        mem_dir.mkdir()
-        (mem_dir / "knowledge_graph.json").write_text("NOT VALID JSON")
-        g = KnowledgeGraph(workspace=tmp_path)
-        # Should not crash; graph starts empty
-        assert g.enabled is True
-        assert len(g._graph.nodes) == 0
+        result = await g.get_entity("anything")
+        assert result is None
+        db.close()
 
 
 # ---------------------------------------------------------------------------
@@ -557,14 +569,19 @@ class TestGraphContextBuilder:
                 "confidence": 0.8,
             }
         ]
-        store.persistence.write_jsonl(store.events_file, events)
+        store.ingester.append_events(events)
+        # Add entities and edges to the graph's backing DB.
+        if store.graph._db is not None:
+            store.graph._db.upsert_entity("carlos")
+            store.graph._db.upsert_entity("platform-team")
+            store.graph._db.add_edge("carlos", "platform-team", relation="WORKS_WITH")
 
         lines = store.retriever._build_graph_context_lines(
             query="Tell me about Carlos",
             retrieved=[{"entities": ["Carlos"]}],
         )
         assert len(lines) >= 1
-        assert "Carlos" in lines[0]
+        assert "Carlos" in lines[0] or "carlos" in lines[0]
         assert "WORKS_WITH" in lines[0]
 
     def test_no_lines_when_no_matching_entities(self, tmp_path: Path) -> None:
@@ -586,7 +603,7 @@ class TestGraphContextBuilder:
                 "confidence": 0.5,
             }
         ]
-        store.persistence.write_jsonl(store.events_file, events)
+        store.ingester.append_events(events)
 
         lines = store.retriever._build_graph_context_lines(
             query="Tell me about Carlos",

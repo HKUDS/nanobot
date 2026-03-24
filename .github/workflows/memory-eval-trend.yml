@@ -23,6 +23,10 @@ on:
       - 'scripts/memory_eval_trend.py'
       - '.github/workflows/memory-eval-trend.yml'
 
+concurrency:
+  group: memory-eval-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   memory-eval:
     runs-on: ubuntu-latest

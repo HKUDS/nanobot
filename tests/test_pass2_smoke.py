@@ -10,13 +10,15 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.context import (
+from nanobot.agent.agent_factory import build_agent
+from nanobot.agent.compression import (
     compress_context,
     estimate_messages_tokens,
 )
-from nanobot.agent.loop import AgentLoop, _dynamic_preserve_recent
+from nanobot.agent.loop import AgentLoop
 from nanobot.agent.scratchpad import Scratchpad
 from nanobot.agent.tools.delegate import DelegateTool, DelegationResult
+from nanobot.agent.turn_orchestrator import _dynamic_preserve_recent
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.email import EmailChannel
@@ -61,7 +63,7 @@ def _agent_config(tmp_path: Path, **overrides) -> AgentConfig:
 
 
 def _make_loop(tmp_path: Path, provider: LLMProvider) -> AgentLoop:
-    return AgentLoop(MessageBus(), provider, _agent_config(tmp_path))
+    return build_agent(bus=MessageBus(), provider=provider, config=_agent_config(tmp_path))
 
 
 class FakeSMTP:

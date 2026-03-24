@@ -19,84 +19,17 @@ def _store(tmp_path: Path, **overrides: object) -> MemoryStore:
 
 
 class TestReindexBranches:
-    def test_reindex_mem0_disabled(self, tmp_path: Path) -> None:
+    def test_reindex_returns_unified_db_active(self, tmp_path: Path) -> None:
+        """With UnifiedMemoryDB, reindex is a no-op success."""
         store = _store(tmp_path)
-        store.mem0.enabled = False
         out = store.maintenance.reindex_from_structured_memory(
             read_profile_fn=store.profile_mgr.read_profile,
             read_events_fn=store.ingester.read_events,
             ingester=store.ingester,
             profile_keys=store.PROFILE_KEYS,
-            vector_points_count_fn=store.maintenance._vector_points_count,
-            mem0_get_all_rows_fn=store.maintenance._mem0_get_all_rows,
-        )
-        assert out["ok"] is False
-        assert out["reason"] == "mem0_disabled"
-
-    def test_reindex_reset_failure(self, tmp_path: Path) -> None:
-        store = _store(tmp_path)
-        store.mem0.enabled = True
-        store.mem0.delete_all_user_memories = MagicMock(return_value=(False, "boom", 0))
-
-        out = store.maintenance.reindex_from_structured_memory(
-            reset_existing=True,
-            read_profile_fn=store.profile_mgr.read_profile,
-            read_events_fn=store.ingester.read_events,
-            ingester=store.ingester,
-            profile_keys=store.PROFILE_KEYS,
-            vector_points_count_fn=store.maintenance._vector_points_count,
-            mem0_get_all_rows_fn=store.maintenance._mem0_get_all_rows,
-        )
-        assert out["ok"] is False
-        assert out["reason"] == "structured_reindex_reset_failed"
-
-    def test_reindex_success_with_compaction(self, tmp_path: Path) -> None:
-        store = _store(tmp_path)
-        profile = store.profile_mgr.read_profile()
-        profile["preferences"] = ["Use Python", "Use Python"]
-        store.profile_mgr.write_profile(profile)
-        store.persistence.write_jsonl(
-            store.events_file,
-            [
-                {
-                    "id": "e1",
-                    "type": "fact",
-                    "summary": "Project uses OAuth2",
-                    "timestamp": "2026-01-01T00:00:00+00:00",
-                    "entities": ["project", "oauth2"],
-                },
-                {
-                    "id": "e2",
-                    "type": "fact",
-                    "summary": "Project uses OAuth2",
-                    "timestamp": "2026-01-01T00:00:00+00:00",
-                    "entities": ["project", "oauth2"],
-                },
-            ],
-        )
-
-        store.mem0.enabled = True
-        store.mem0.delete_all_user_memories = MagicMock(return_value=(True, "", 2))
-        store.mem0.add_text = MagicMock(return_value=True)
-        store.mem0.flush_vector_store = MagicMock(return_value=True)
-        store.mem0.reopen_client = MagicMock(return_value=None)
-        store.mem0.last_add_mode = "vector"
-        store.maintenance._vector_points_count = MagicMock(return_value=2)
-        store.maintenance._mem0_get_all_rows = MagicMock(return_value=[{"id": "x"}])
-
-        out = store.maintenance.reindex_from_structured_memory(
-            reset_existing=True,
-            compact=True,
-            read_profile_fn=store.profile_mgr.read_profile,
-            read_events_fn=store.ingester.read_events,
-            ingester=store.ingester,
-            profile_keys=store.PROFILE_KEYS,
-            vector_points_count_fn=store.maintenance._vector_points_count,
-            mem0_get_all_rows_fn=store.maintenance._mem0_get_all_rows,
         )
         assert out["ok"] is True
-        assert out["written"] >= 1
-        assert out["flush_applied"] is True
+        assert out["reason"] == "unified_db_active"
 
     def test_seed_structured_corpus_invalid_profile(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
@@ -113,8 +46,6 @@ class TestReindexBranches:
             read_events_fn=store.ingester.read_events,
             ingester=store.ingester,
             profile_keys=store.PROFILE_KEYS,
-            vector_points_count_fn=store.maintenance._vector_points_count,
-            mem0_get_all_rows_fn=store.maintenance._mem0_get_all_rows,
         )
         assert out["ok"] is False
         assert "invalid_profile_seed" in out["reason"]
@@ -147,15 +78,6 @@ class TestReindexBranches:
             encoding="utf-8",
         )
 
-        store.mem0.enabled = True
-        store.mem0.delete_all_user_memories = MagicMock(return_value=(True, "", 0))
-        store.mem0.add_text = MagicMock(return_value=True)
-        store.mem0.flush_vector_store = MagicMock(return_value=False)
-        store.mem0.reopen_client = MagicMock(return_value=None)
-        store.mem0.last_add_mode = "history"
-        store.maintenance._vector_points_count = MagicMock(return_value=1)
-        store.maintenance._mem0_get_all_rows = MagicMock(return_value=[{"id": "m"}])
-
         out = store.maintenance.seed_structured_corpus(
             profile_path=profile_path,
             events_path=events_path,
@@ -164,36 +86,9 @@ class TestReindexBranches:
             read_events_fn=store.ingester.read_events,
             ingester=store.ingester,
             profile_keys=store.PROFILE_KEYS,
-            vector_points_count_fn=store.maintenance._vector_points_count,
-            mem0_get_all_rows_fn=store.maintenance._mem0_get_all_rows,
         )
         assert out["ok"] is True
         assert out["seeded_events"] >= 1
-
-
-class TestVectorHealthBranches:
-    def test_vector_health_disabled_and_mem0_disabled(self, tmp_path: Path) -> None:
-        store = _store(tmp_path)
-        store.rollout["memory_vector_health_enabled"] = False
-        store.maintenance._ensure_vector_health()
-
-        store.rollout["memory_vector_health_enabled"] = True
-        store.mem0.enabled = False
-        store.maintenance._ensure_vector_health()
-
-    def test_vector_health_degraded_no_auto_reindex(self, tmp_path: Path) -> None:
-        store = _store(tmp_path)
-        store.mem0.enabled = True
-        store.mem0.search = MagicMock(return_value=[])
-        store.rollout["memory_auto_reindex_on_empty_vector"] = False
-        store.maintenance._mem0_get_all_rows = MagicMock(return_value=[])
-        store.maintenance._vector_points_count = MagicMock(return_value=0)
-        store.maintenance._history_row_count = MagicMock(return_value=10)
-
-        store.maintenance._reindex_fn = MagicMock()
-
-        store.maintenance._ensure_vector_health()
-        store.maintenance._reindex_fn.assert_not_called()
 
 
 class TestConsolidationHelpers:
@@ -235,7 +130,7 @@ class TestConsolidationHelpers:
         )
         assert selected_all is not None
 
-    def test_format_prompt_and_save_tool_result(self, tmp_path: Path) -> None:
+    def test_format_conversation_lines(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         pipeline = store._consolidation
         lines = pipeline._format_conversation_lines(
@@ -250,17 +145,12 @@ class TestConsolidationHelpers:
             ]
         )
         assert len(lines) == 2
-        prompt = pipeline._build_consolidation_prompt("# Memory", lines)
+        # Single-tool prompt includes the conversation lines
+        prompt = pipeline._build_single_tool_prompt("# Memory", lines)
         assert "Current Long-term Memory" in prompt
 
-        pipeline._apply_save_memory_tool_result(
-            args={"history_entry": {"x": 1}, "memory_update": {"y": 2}}, current_memory=""
-        )
-        assert store.history_file.exists()
-        # LAN-206: memory_update is ignored; MEMORY.md not written by this method
-        assert not store.memory_file.exists()
-
-    async def test_consolidate_no_tool_call(self, tmp_path: Path) -> None:
+    async def test_consolidate_no_tool_call_uses_fallback(self, tmp_path: Path) -> None:
+        """When LLM returns no tool call, single-tool path uses heuristic fallback."""
         store = _store(tmp_path)
         session = SimpleNamespace(
             key="k1",
@@ -273,9 +163,11 @@ class TestConsolidationHelpers:
         provider.chat = AsyncMock(return_value=LLMResponse(content="plain text"))
 
         ok = await store.consolidate(session, provider, model="m", memory_window=10)
-        assert ok is False
+        # Single-tool path uses heuristic fallback, so it succeeds.
+        assert ok is True
 
-    async def test_consolidate_parsing_failure(self, tmp_path: Path) -> None:
+    async def test_consolidate_parsing_failure_uses_fallback(self, tmp_path: Path) -> None:
+        """When parse_tool_args returns None, single-tool path uses heuristic fallback."""
         store = _store(tmp_path)
         session = SimpleNamespace(
             key="k2",
@@ -290,14 +182,15 @@ class TestConsolidationHelpers:
             return_value=LLMResponse(
                 content=None,
                 tool_calls=[
-                    ToolCallRequest(id="x", name="save_memory", arguments={"bad": object()})
+                    ToolCallRequest(id="x", name="consolidate_memory", arguments={"bad": object()})
                 ],
             )
         )
         store.extractor.parse_tool_args = MagicMock(return_value=None)
 
         ok = await store.consolidate(session, provider, model="m", memory_window=10)
-        assert ok is False
+        # Single-tool path uses heuristic fallback when parsing fails.
+        assert ok is True
 
     async def test_consolidate_exception_path(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
@@ -329,17 +222,19 @@ class TestVerifyAndContextBranches:
             }
         }
         store.profile_mgr.write_profile(profile)
-        store.persistence.write_jsonl(
-            store.events_file,
-            [
-                {
-                    "type": "fact",
-                    "summary": "old",
-                    "timestamp": "2020-01-01T00:00:00+00:00",
-                    "ttl_days": 1,
-                }
-            ],
-        )
+
+        events = [
+            {
+                "id": "ev1",
+                "type": "fact",
+                "summary": "old",
+                "timestamp": "2020-01-01T00:00:00+00:00",
+                "ttl_days": 1,
+            }
+        ]
+        if store.db:
+            for evt in events:
+                store.db.insert_event(evt)
 
         report = store.snapshot.verify_memory(stale_days=30, update_profile=True)
         assert report["stale_events"] >= 1
@@ -356,56 +251,13 @@ class TestVerifyAndContextBranches:
         )
         assert isinstance(out, dict)
 
-    def test_apply_live_user_correction_with_conflict_and_mem0_write(self, tmp_path: Path) -> None:
+
+class TestConsolidationWithExtraction:
+    async def test_consolidate_success_with_extraction(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
-        profile = store.profile_mgr.read_profile()
-        profile["preferences"] = ["Use dark mode"]
-        profile["stable_facts"] = ["Project uses Flask"]
-        store.profile_mgr.write_profile(profile)
-
-        store.extractor.extract_explicit_preference_corrections = MagicMock(
-            return_value=[("Do not use dark mode", "Use dark mode")]
-        )
-        store.extractor.extract_explicit_fact_corrections = MagicMock(
-            return_value=[("Project uses FastAPI", "Project uses Flask")]
-        )
-        store.mem0.enabled = True
-        store.mem0.add_text = MagicMock(return_value=True)
-
-        out = store.profile_mgr.apply_live_user_correction(
-            "Actually, not dark mode and not Flask anymore.",
-            channel="cli",
-            chat_id="direct",
-        )
-        assert out["events"] >= 1
-        assert out["conflicts"] >= 1
-
-    def test_apply_live_user_correction_mem0_failure_branch(self, tmp_path: Path) -> None:
-        store = _store(tmp_path)
-        store.extractor.extract_explicit_preference_corrections = MagicMock(
-            return_value=[("Use light mode", "Use dark mode")]
-        )
-        store.extractor.extract_explicit_fact_corrections = MagicMock(return_value=[])
-        store.mem0.enabled = True
-        store.mem0.add_text = MagicMock(return_value=False)
-
-        out = store.profile_mgr.apply_live_user_correction(
-            "I use light mode now, not dark mode.",
-            channel="cli",
-            chat_id="direct",
-        )
-        assert isinstance(out, dict)
-
-
-class TestConsolidationMem0Path:
-    async def test_consolidate_success_with_mem0_turn_writes(self, tmp_path: Path) -> None:
-        store = _store(tmp_path)
-        store.mem0.enabled = True
-        store.mem0.add_text = MagicMock(return_value=True)
-        store.mem0.last_add_mode = "vector"
 
         session = SimpleNamespace(
-            key="mem0-session",
+            key="extract-session",
             messages=[
                 {
                     "role": "user",
@@ -525,27 +377,30 @@ class TestStoreCoreBranchHelpers:
         )
         assert total == 1
 
-    def test_find_mem0_id_for_text_tuple_and_fallback(self, tmp_path: Path) -> None:
+    def test_find_mem0_id_for_text_via_fts(self, tmp_path: Path) -> None:
+        """_find_mem0_id_for_text searches FTS via UnifiedMemoryDB."""
         store = _store(tmp_path)
-        store.mem0.enabled = True
-        store.mem0.search = MagicMock(
-            return_value=(
-                [
-                    {"id": "m1", "summary": "unrelated"},
-                    {"id": "m2", "summary": "target fact"},
-                ],
-                {"source_vector": 1},
+        # Insert an event so FTS has something to search
+        if store.db:
+            store.db.insert_event(
+                {
+                    "id": "m2",
+                    "type": "fact",
+                    "summary": "target fact about Python",
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                }
             )
-        )
         out = store.profile_mgr._find_mem0_id_for_text("target fact")
-        assert out in {"m1", "m2"}
+        # With FTS data, should find a match
+        if store.db:
+            assert out is not None
 
     def test_validate_profile_field_raises(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         with pytest.raises(ValueError):
             store.profile_mgr._validate_profile_field("unknown")
 
-    def test_resolve_conflict_details_dismiss_and_mem0_update_fail(self, tmp_path: Path) -> None:
+    def test_resolve_conflict_details_dismiss(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         profile = store.profile_mgr.read_profile()
         profile["preferences"] = ["old", "new"]
@@ -564,45 +419,23 @@ class TestStoreCoreBranchHelpers:
         dismissed = store.conflict_mgr.resolve_conflict_details(0, "dismiss")
         assert dismissed["ok"] is True
 
-        profile = store.profile_mgr.read_profile()
-        profile["conflicts"] = [
-            {
-                "field": "preferences",
-                "old": "old",
-                "new": "new",
-                "status": "open",
-                "old_memory_id": "old-id",
-            }
-        ]
-        store.profile_mgr.write_profile(profile)
-        store.mem0.enabled = True
-        store.mem0.update = MagicMock(return_value=False)
-        failed = store.conflict_mgr.resolve_conflict_details(0, "keep_new")
-        assert failed["ok"] is False
-
-    def test_build_graph_context_lines_with_graph_and_local_triples(self, tmp_path: Path) -> None:
+    def test_build_graph_context_lines_with_graph(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         store.extractor._extract_entities = MagicMock(return_value=["Alice"])
         store.graph.enabled = True
         store.graph.get_triples_for_entities_sync = MagicMock(
             return_value=[("Alice", "WORKS_ON", "Nanobot")]
         )
-        store.persistence.write_jsonl(
-            store.events_file,
-            [
+        if store.db:
+            store.db.insert_event(
                 {
                     "id": "e1",
+                    "type": "fact",
+                    "summary": "Alice works on Nanobot",
+                    "timestamp": "2026-01-01T00:00:00+00:00",
                     "entities": ["alice", "nanobot"],
-                    "triples": [
-                        {
-                            "subject": "Alice",
-                            "predicate": "CONTRIBUTES_TO",
-                            "object": "Nanobot",
-                        }
-                    ],
                 }
-            ],
-        )
+            )
 
         lines = store.retriever._build_graph_context_lines("alice", [], max_tokens=40)
         assert isinstance(lines, list)
@@ -610,123 +443,15 @@ class TestStoreCoreBranchHelpers:
 
 
 class TestRetrieveAndContextBranches:
-    def test_retrieve_mem0_enabled_mode_disabled(self, tmp_path: Path) -> None:
-        store = _store(tmp_path, memory_rollout_mode="disabled")
-        store.mem0.enabled = True
-        store.mem0.search = MagicMock(
-            return_value=(
-                [
-                    {
-                        "id": "m1",
-                        "type": "fact",
-                        "summary": "Project uses OAuth2",
-                        "entities": ["project", "oauth2"],
-                        "metadata": {"memory_type": "semantic", "topic": "knowledge"},
-                        "score": 0.4,
-                    }
-                ],
-                {
-                    "source_vector": 1,
-                    "source_get_all": 0,
-                    "source_history": 0,
-                    "rejected_blob_like": 0,
-                },
-            )
-        )
-        out = store.retriever.retrieve("oauth2", top_k=3)
-        assert isinstance(out, list)
-        assert len(out) >= 1
-
-    def test_run_mem0_pipeline_empty_results(self, tmp_path: Path) -> None:
-        store = _store(tmp_path)
-        store.mem0.enabled = True
-        store.mem0.search = MagicMock(
-            return_value=(
-                [],
-                {
-                    "source_vector": 0,
-                    "source_get_all": 0,
-                    "source_history": 0,
-                    "rejected_blob_like": 0,
-                },
-            )
-        )
-        final, stats = store.retriever._run_mem0_pipeline(
-            query="nothing",
-            top_k=3,
-            router_enabled=True,
-            type_separation_enabled=True,
-            reflection_enabled=True,
-        )
-        assert final == []
-        assert stats["retrieved_count"] == 0
-
-    def test_run_mem0_pipeline_rollout_status_injects_synthetic(self, tmp_path: Path) -> None:
-        store = _store(tmp_path)
-        store.mem0.enabled = True
-        store.mem0.search = MagicMock(
-            return_value=(
-                [],
-                {
-                    "source_vector": 0,
-                    "source_get_all": 0,
-                    "source_history": 0,
-                    "rejected_blob_like": 0,
-                },
-            )
-        )
-        final, stats = store.retriever._run_mem0_pipeline(
-            query="rollout status",
-            top_k=2,
-            router_enabled=True,
-            type_separation_enabled=True,
-            reflection_enabled=True,
-        )
-        assert len(final) >= 1
-        assert any(str(item.get("id", "")).startswith("rollout_status") for item in final)
-        assert stats["intent"] == "rollout_status"
-
-    def test_run_mem0_pipeline_reflection_filtering(self, tmp_path: Path) -> None:
-        store = _store(tmp_path)
-        store.mem0.enabled = True
-        store.mem0.search = MagicMock(
-            return_value=(
-                [
-                    {
-                        "id": "r1",
-                        "type": "fact",
-                        "summary": "Reflection without evidence",
-                        "metadata": {"memory_type": "reflection", "topic": "reflection"},
-                        "score": 0.9,
-                    }
-                ],
-                {
-                    "source_vector": 1,
-                    "source_get_all": 0,
-                    "source_history": 0,
-                    "rejected_blob_like": 0,
-                },
-            )
-        )
-        final, stats = store.retriever._run_mem0_pipeline(
-            query="reflect",
-            top_k=3,
-            router_enabled=True,
-            type_separation_enabled=True,
-            reflection_enabled=True,
-        )
-        assert isinstance(final, list)
-        assert stats["counts"]["reflection_filtered_no_evidence"] >= 1
-
     def test_get_memory_context_with_sections(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
-        store.persistence.write_text(store.memory_file, "## Long\nProject memory details")
+        if store.db:
+            store.db.write_snapshot("current", "## Long\nProject memory details")
         profile = store.profile_mgr.read_profile()
         profile["preferences"] = ["Prefer concise output"]
         store.profile_mgr.write_profile(profile)
-        store.persistence.write_jsonl(
-            store.events_file,
-            [
+        if store.db:
+            store.db.insert_event(
                 {
                     "id": "e1",
                     "type": "task",
@@ -734,23 +459,24 @@ class TestRetrieveAndContextBranches:
                     "status": "open",
                     "timestamp": "2026-03-10T00:00:00+00:00",
                     "entities": ["deploy"],
-                },
+                }
+            )
+            store.db.insert_event(
                 {
                     "id": "e2",
                     "type": "fact",
                     "summary": "Project uses OAuth2",
                     "timestamp": "2026-03-10T00:00:00+00:00",
                     "entities": ["project", "oauth2"],
-                },
-            ],
-        )
+                }
+            )
         context = store.get_memory_context(query="open tasks", retrieval_k=4, token_budget=300)
         assert isinstance(context, str)
         assert len(context) > 0
 
 
 class TestConflictResolutionBranches:
-    def test_resolve_conflict_keep_old_delete_new(self, tmp_path: Path) -> None:
+    def test_resolve_conflict_keep_old(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         profile = store.profile_mgr.read_profile()
         profile["preferences"] = ["old", "new"]
@@ -764,13 +490,11 @@ class TestConflictResolutionBranches:
             }
         ]
         store.profile_mgr.write_profile(profile)
-        store.mem0.delete = MagicMock(return_value=True)
 
         result = store.conflict_mgr.resolve_conflict_details(0, "keep_old")
         assert result["ok"] is True
-        assert result["mem0_operation"] in {"delete_new", "none"}
 
-    def test_resolve_conflict_keep_new_add_new_path(self, tmp_path: Path) -> None:
+    def test_resolve_conflict_keep_new_path(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         profile = store.profile_mgr.read_profile()
         profile["preferences"] = ["old"]
@@ -785,11 +509,9 @@ class TestConflictResolutionBranches:
             }
         ]
         store.profile_mgr.write_profile(profile)
-        store.mem0.add_text = MagicMock(return_value=True)
 
         result = store.conflict_mgr.resolve_conflict_details(0, "keep_new")
         assert result["ok"] is True
-        assert result["mem0_operation"] == "add_new"
 
     def test_resolve_conflict_invalid_action(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
