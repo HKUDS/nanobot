@@ -13,7 +13,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from loguru import logger
 
-__all__ = ["Embedder", "LocalEmbedder", "OpenAIEmbedder"]
+__all__ = ["Embedder", "HashEmbedder", "LocalEmbedder", "OpenAIEmbedder"]
 
 
 @runtime_checkable
@@ -163,3 +163,53 @@ class LocalEmbedder:
             return result
 
         return await asyncio.to_thread(_run)
+
+
+class HashEmbedder:
+    """Deterministic hash-based embedder for tests. Zero external dependencies.
+
+    Produces real float vectors from text hashes — sqlite-vec KNN works,
+    cosine distance works, but distances are not semantically meaningful.
+    Use LocalEmbedder for tests that verify semantic quality.
+    """
+
+    def __init__(self, dims: int = 384) -> None:
+        self._dims = dims
+
+    @property
+    def dims(self) -> int:
+        return self._dims
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    async def embed(self, text: str) -> list[float]:
+        return self._hash_to_vector(text)
+
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [self._hash_to_vector(t) for t in texts]
+
+    def _hash_to_vector(self, text: str) -> list[float]:
+        """Convert text to a deterministic float vector via hashing."""
+        import hashlib
+        import math
+        import struct
+
+        # Generate enough hash bytes for dims floats (4 bytes each)
+        h = hashlib.sha256(text.encode("utf-8")).digest()
+        # Extend hash by chaining
+        result: list[float] = []
+        seed = h
+        while len(result) < self._dims:
+            seed = hashlib.sha256(seed).digest()
+            # Unpack 8 floats from 32 bytes
+            floats = struct.unpack(f"{len(seed) // 4}f", seed)
+            # Replace inf/nan with 0.0 to ensure valid vector components
+            result.extend(0.0 if (math.isinf(f) or math.isnan(f)) else f for f in floats)
+        # Truncate to exact dims and normalize to unit length
+        vec = result[: self._dims]
+        norm = sum(x * x for x in vec) ** 0.5
+        if norm > 0:
+            vec = [x / norm for x in vec]
+        return vec

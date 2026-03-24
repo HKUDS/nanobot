@@ -46,7 +46,7 @@ from __future__ import annotations
 from .conflicts import ConflictManager
 from .consolidation_pipeline import ConsolidationPipeline
 from .context_assembler import ContextAssembler
-from .embedder import Embedder, LocalEmbedder, OpenAIEmbedder
+from .embedder import Embedder, HashEmbedder, LocalEmbedder, OpenAIEmbedder
 from .entity_classifier import classify_entity_type
 from .event import BeliefRecord, KnowledgeTriple, MemoryEvent
 from .extractor import MemoryExtractor
@@ -81,6 +81,7 @@ __all__ = [
     "ConsolidationPipeline",
     "ContextAssembler",
     "Embedder",
+    "HashEmbedder",
     "EventIngester",
     "KnowledgeTriple",
     "LocalEmbedder",

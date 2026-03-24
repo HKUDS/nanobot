@@ -29,7 +29,7 @@ from .conflicts import (
 )
 from .consolidation_pipeline import ConsolidationPipeline
 from .context_assembler import ContextAssembler
-from .embedder import LocalEmbedder, OpenAIEmbedder
+from .embedder import HashEmbedder, LocalEmbedder, OpenAIEmbedder
 from .extractor import MemoryExtractor
 from .graph import KnowledgeGraph
 from .helpers import (
@@ -96,11 +96,21 @@ class MemoryStore:
     ):
         self.workspace = workspace
 
-        # Construct embedder — try OpenAI first, fall back to local ONNX.
-        # When embedding_provider is explicitly set to "hash" or "local",
-        # skip OpenAI to avoid accidental API calls in test environments.
+        # Construct embedder — try OpenAI first, fall back to HashEmbedder.
+        # LocalEmbedder (ONNX, ~90MB) is only used when explicitly requested
+        # via embedding_provider="local" or "onnx".
         self._embedder: Embedder | None = None
-        if embedding_provider not in ("hash", "local"):
+        if embedding_provider in ("local", "onnx"):
+            try:
+                _local = LocalEmbedder()
+                if _local.available:
+                    self._embedder = _local
+            except Exception:  # crash-barrier: local embedder init failure
+                pass
+        elif embedding_provider == "hash":
+            self._embedder = HashEmbedder()
+        else:
+            # Default path: try OpenAI, fall back to HashEmbedder.
             try:
                 _oai = OpenAIEmbedder()
                 if _oai.available:
@@ -108,12 +118,7 @@ class MemoryStore:
             except Exception:  # crash-barrier: OpenAI init failure
                 pass
         if self._embedder is None:
-            try:
-                _local = LocalEmbedder()
-                if _local.available:
-                    self._embedder = _local
-            except Exception:  # crash-barrier: local embedder init failure
-                pass
+            self._embedder = HashEmbedder()
 
         self.memory_dir: Path = workspace / "memory"
         self.memory_dir.mkdir(parents=True, exist_ok=True)
