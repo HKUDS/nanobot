@@ -296,4 +296,4 @@ The following boundaries were established during the memory subsystem completion
 - **`embedder.py`** — `Embedder` protocol with `OpenAIEmbedder` (production, 1536 dims) and `LocalEmbedder` (tests, ONNX, 384 dims). No hash-based fallback.
 - **`migration.py`** — One-time file-to-SQLite migration. Runs on first access. Old files renamed to `.bak`.
 - **Deleted modules:** `mem0_adapter.py` (874 lines), `retrieval.py` (285 lines), `persistence.py` (87 lines) — replaced by unified_db.py.
-- **Knowledge graph** (`graph.py`, `entity_classifier.py`) — untouched, disabled by default. Phase 2 decision pending.
+- **Knowledge graph** — entities and edges stored in `memory.db` (SQLite tables). Replaced networkx + JSON persistence. BFS via recursive CTE. Enabled by default (`graph_enabled=True`). Entity classification (`entity_classifier.py`) is rule-based, no LLM needed. `networkx` dependency removed.
