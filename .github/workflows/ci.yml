@@ -23,6 +23,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      # TEMPORARY: litellm pulled from PyPI after supply chain attack (2026-03-24).
+      # Pre-install from GitHub at pinned safe commit before pip install resolves deps.
+      # Remove this step once litellm publishes verified releases to PyPI.
+      - name: Pre-install litellm from source (PyPI unavailable)
+        run: pip install "litellm @ git+https://github.com/BerriAI/litellm.git@v1.76.2"
       - name: Install dependencies
         run: pip install -e ".[dev]"
       - name: Ruff lint
@@ -48,6 +53,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Pre-install litellm from source (PyPI unavailable)
+        run: pip install "litellm @ git+https://github.com/BerriAI/litellm.git@v1.76.2"
       - name: Install dependencies
         run: pip install -e ".[dev]"
       - name: Run tests with coverage
@@ -65,6 +72,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Pre-install litellm from source (PyPI unavailable)
+        run: pip install "litellm @ git+https://github.com/BerriAI/litellm.git@v1.76.2"
       - name: Install dependencies
         run: pip install -e ".[dev]"
       - name: Run LLM round-trip tests
