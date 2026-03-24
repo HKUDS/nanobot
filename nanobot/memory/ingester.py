@@ -21,7 +21,7 @@ import re
 import time
 from typing import TYPE_CHECKING, Any, Callable
 
-from nanobot.agent.tracing import bind_trace
+from nanobot.observability.tracing import bind_trace
 
 from .context_assembler import ContextAssembler
 from .helpers import (

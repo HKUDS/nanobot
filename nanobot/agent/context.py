@@ -28,13 +28,13 @@ from loguru import logger
 
 from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.skills import SkillsLoader
-from nanobot.agent.tracing import bind_trace
 from nanobot.errors import (
     MemoryRetrievalError,
 )
 from nanobot.errors import (
     MemorySubsystemError as NanobotMemoryError,
 )
+from nanobot.observability.tracing import bind_trace
 from nanobot.tools.builtin.feedback import feedback_summary
 
 if TYPE_CHECKING:

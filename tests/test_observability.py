@@ -1,4 +1,4 @@
-"""Tests for nanobot.agent.observability — langfuse integration."""
+"""Tests for nanobot.observability.langfuse — langfuse integration."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nanobot.agent import observability
+from nanobot.observability import langfuse as observability
 
 
 @pytest.fixture(autouse=True)
@@ -315,7 +315,7 @@ class TestLoggingFilters:
     def test_proxy_filter_suppresses_message(self):
         import logging
 
-        from nanobot.agent.observability import init_langfuse
+        from nanobot.observability.langfuse import init_langfuse
 
         mock_lf_cls = MagicMock()
         cfg = MagicMock(enabled=True, public_key="pk", secret_key="sk", host="http://h")
@@ -338,7 +338,7 @@ class TestLoggingFilters:
     def test_span_ctx_filter_suppresses_message(self):
         import logging
 
-        from nanobot.agent.observability import init_langfuse
+        from nanobot.observability.langfuse import init_langfuse
 
         mock_lf_cls = MagicMock()
         cfg = MagicMock(enabled=True, public_key="pk", secret_key="sk", host="http://h")
@@ -360,7 +360,7 @@ class TestLoggingFilters:
     def test_proxy_filter_passes_normal_messages(self):
         import logging
 
-        from nanobot.agent.observability import init_langfuse
+        from nanobot.observability.langfuse import init_langfuse
 
         mock_lf_cls = MagicMock()
         cfg = MagicMock(enabled=True, public_key="pk", secret_key="sk", host="http://h")

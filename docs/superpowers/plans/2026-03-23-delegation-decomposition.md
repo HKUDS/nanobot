@@ -105,7 +105,7 @@ from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.task_types import TASK_TYPES
-from nanobot.agent.tracing import bind_trace
+from nanobot.observability.tracing import bind_trace
 
 if TYPE_CHECKING:
     from nanobot.agent.scratchpad import Scratchpad

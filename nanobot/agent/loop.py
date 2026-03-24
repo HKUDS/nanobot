@@ -37,23 +37,23 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
-from nanobot.agent.bus_progress import make_bus_progress
 from nanobot.agent.callbacks import ProgressCallback
-from nanobot.agent.observability import (
-    flush as flush_langfuse,
-)
-from nanobot.agent.observability import (
-    reset_trace_context,
-    trace_request,
-    update_current_span,
-)
 from nanobot.agent.reaction import classify_reaction
-from nanobot.agent.tracing import TraceContext
 from nanobot.agent.turn_types import TurnState
 from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import DeliveryResult, InboundMessage, OutboundMessage, ReactionEvent
 from nanobot.config.schema import AgentRoleConfig
 from nanobot.coordination.role_switching import TurnContext
+from nanobot.observability.bus_progress import make_bus_progress
+from nanobot.observability.langfuse import (
+    flush as flush_langfuse,
+)
+from nanobot.observability.langfuse import (
+    reset_trace_context,
+    trace_request,
+    update_current_span,
+)
+from nanobot.observability.tracing import TraceContext
 from nanobot.session.manager import Session
 from nanobot.tools.builtin.email import CheckEmailTool
 from nanobot.tools.builtin.feedback import FeedbackTool

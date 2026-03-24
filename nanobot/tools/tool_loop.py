@@ -12,7 +12,7 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.agent.observability import tool_span
+from nanobot.observability.langfuse import tool_span
 from nanobot.providers.base import LLMProvider
 from nanobot.tools.base import ToolResult
 from nanobot.tools.executor import ToolExecutor

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from nanobot.agent.tracing import TraceContext, bind_trace
+from nanobot.observability.tracing import TraceContext, bind_trace
 from nanobot.providers.base import ToolCallRequest
 from nanobot.tools.base import Tool, ToolResult
 from nanobot.tools.executor import ToolExecutor
