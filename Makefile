@@ -1,6 +1,6 @@
 .PHONY: install install-all test test-verbose test-cov lint format typecheck check ci pre-push import-check prompt-check coverage-check memory-eval live-eval clean worktree-clean pre-commit-install
 
-PYTHON ?= python3
+PYTHON ?= $(shell python3 --version >/dev/null 2>&1 && echo python3 || echo python)
 
 install:
 	$(PYTHON) -m pip install -e ".[dev]"
