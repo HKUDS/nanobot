@@ -19,9 +19,9 @@ from loguru import logger
 
 from nanobot.agent.observability import span as langfuse_span
 from nanobot.agent.prompt_loader import prompts
-from nanobot.agent.registry import AgentRegistry
 from nanobot.agent.tracing import sanitize_for_trace
 from nanobot.config.schema import AgentRoleConfig
+from nanobot.coordination.registry import AgentRegistry
 from nanobot.metrics import classification_fallback_total, classification_total
 
 if TYPE_CHECKING:

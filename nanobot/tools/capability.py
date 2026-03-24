@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
-from nanobot.agent.registry import AgentRegistry
+from nanobot.coordination.registry import AgentRegistry
 from nanobot.tools.base import Tool, ToolResult
 from nanobot.tools.registry import ToolRegistry
 

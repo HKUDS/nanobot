@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from nanobot.agent.scratchpad import Scratchpad
+from nanobot.coordination.scratchpad import Scratchpad
 from nanobot.tools.builtin.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
 
 # ---------------------------------------------------------------------------

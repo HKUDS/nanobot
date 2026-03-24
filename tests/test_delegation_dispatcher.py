@@ -1,4 +1,4 @@
-"""Tests for nanobot.agent.delegation — DelegationDispatcher unit tests."""
+"""Tests for nanobot.coordination.delegation — DelegationDispatcher unit tests."""
 
 from __future__ import annotations
 
@@ -7,13 +7,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.delegation import (
+from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
+from nanobot.coordination.delegation import (
     DelegationConfig,
     DelegationDispatcher,
     _delegation_ancestry,
     get_delegation_depth,
 )
-from nanobot.agent.delegation_contract import (
+from nanobot.coordination.delegation_contract import (
     _SCRATCHPAD_INJECTION_LIMIT,
     _cap_scratchpad_for_injection,
     build_delegation_contract,
@@ -22,18 +23,17 @@ from nanobot.agent.delegation_contract import (
     extract_user_request,
     gather_recent_tool_results,
 )
-from nanobot.agent.task_types import (
+from nanobot.coordination.task_types import (
     TASK_TYPES,
     classify_task_type,
     has_parallel_structure,
 )
-from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
 
 # Module reference for monkey-patching run_tool_loop in retry tests.
 # Using sys.modules avoids mixing `import X` and `from X import Y` in the
 # same file, which CodeQL flags as py/import-and-import-from.
-_delegation_mod = sys.modules["nanobot.agent.delegation"]
+_delegation_mod = sys.modules["nanobot.coordination.delegation"]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -398,7 +398,7 @@ class TestCapScratchpadForInjection:
 class TestDelegationIdUniqueness:
     async def test_parallel_dispatches_produce_unique_ids(self, tmp_path: Path):
         """Fires 5+ parallel dispatches and verifies all delegation_id values are unique."""
-        from nanobot.agent.coordinator import Coordinator, build_default_registry
+        from nanobot.coordination.coordinator import Coordinator, build_default_registry
         from nanobot.providers.base import LLMProvider, LLMResponse
 
         class StubProvider(LLMProvider):

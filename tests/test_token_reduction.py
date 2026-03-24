@@ -67,7 +67,7 @@ _SCRATCHPAD_INJECTION_LIMIT = 4000
 
 def test_scratchpad_injection_is_capped():
     """_cap_scratchpad_for_injection must truncate content over _SCRATCHPAD_INJECTION_LIMIT chars."""
-    from nanobot.agent.delegation_contract import _cap_scratchpad_for_injection
+    from nanobot.coordination.delegation_contract import _cap_scratchpad_for_injection
 
     large_content = "data. " * 5000  # ~30,000 chars
     result = _cap_scratchpad_for_injection(large_content, limit=_SCRATCHPAD_INJECTION_LIMIT)
@@ -77,7 +77,7 @@ def test_scratchpad_injection_is_capped():
 
 def test_scratchpad_injection_unchanged_when_small():
     """_cap_scratchpad_for_injection must not modify content under the limit."""
-    from nanobot.agent.delegation_contract import _cap_scratchpad_for_injection
+    from nanobot.coordination.delegation_contract import _cap_scratchpad_for_injection
 
     small_content = "short content"
     result = _cap_scratchpad_for_injection(small_content, limit=_SCRATCHPAD_INJECTION_LIMIT)

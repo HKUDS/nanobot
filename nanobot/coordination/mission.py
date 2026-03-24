@@ -29,10 +29,10 @@ from nanobot.agent.observability import (
 from nanobot.agent.observability import (
     span as langfuse_span,
 )
-from nanobot.agent.task_types import TASK_TYPES, classify_task_type
 from nanobot.agent.tracing import TraceContext
 from nanobot.bus.events import OutboundMessage
 from nanobot.config.schema import AgentRoleConfig
+from nanobot.coordination.task_types import TASK_TYPES, classify_task_type
 from nanobot.errors import ToolExecutionError
 from nanobot.tools.builtin.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.tools.builtin.shell import ExecTool
@@ -41,10 +41,10 @@ from nanobot.tools.registry import ToolRegistry
 from nanobot.tools.tool_loop import run_tool_loop
 
 if TYPE_CHECKING:
-    from nanobot.agent.coordinator import Coordinator
-    from nanobot.agent.scratchpad import Scratchpad
     from nanobot.bus.queue import MessageBus
     from nanobot.config.schema import ExecToolConfig
+    from nanobot.coordination.coordinator import Coordinator
+    from nanobot.coordination.scratchpad import Scratchpad
     from nanobot.providers.base import LLMProvider
     from nanobot.tools.base import Tool
 

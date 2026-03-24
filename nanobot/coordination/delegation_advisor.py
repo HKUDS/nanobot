@@ -14,8 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from nanobot.agent.delegation import get_delegation_depth
-from nanobot.agent.task_types import has_parallel_structure
+from nanobot.coordination.delegation import get_delegation_depth
+from nanobot.coordination.task_types import has_parallel_structure
 
 
 class DelegationAction(str, Enum):

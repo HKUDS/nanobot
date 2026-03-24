@@ -8,8 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from nanobot.agent.mission import Mission, MissionManager, MissionStatus
 from nanobot.config.schema import AgentRoleConfig
+from nanobot.coordination.mission import Mission, MissionManager, MissionStatus
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.tools.base import Tool, ToolResult
 from nanobot.tools.builtin.mission import (
@@ -583,7 +583,7 @@ async def test_mission_emits_langfuse_span() -> None:
     """_execute_mission should wrap execution in a langfuse span."""
     mgr = _make_manager(responses=[LLMResponse(content="done")])
 
-    with patch("nanobot.agent.mission.langfuse_span") as mock_span:
+    with patch("nanobot.coordination.mission.langfuse_span") as mock_span:
         # Make the mock work as an async context manager
         ctx = AsyncMock()
         ctx.__aenter__ = AsyncMock(return_value=None)
@@ -613,7 +613,7 @@ async def test_mission_scores_grounding() -> None:
         ],
     )
 
-    with patch("nanobot.agent.mission.score_current_trace") as mock_score:
+    with patch("nanobot.coordination.mission.score_current_trace") as mock_score:
         _mission = await mgr.start(task="grounding test")
         # Await the background task directly (Pattern A)
         for task in list(mgr._running_tasks.values()):
@@ -629,7 +629,7 @@ async def test_mission_sets_trace_context() -> None:
     """Mission execution should set TraceContext with the mission ID."""
     mgr = _make_manager(responses=[LLMResponse(content="ok")])
 
-    with patch("nanobot.agent.mission.TraceContext") as mock_tc:
+    with patch("nanobot.coordination.mission.TraceContext") as mock_tc:
         mission = await mgr.start(task="trace test")
         # Await the background task directly (Pattern A)
         for task in list(mgr._running_tasks.values()):

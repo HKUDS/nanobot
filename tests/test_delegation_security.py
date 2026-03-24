@@ -17,9 +17,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.delegation import DelegationConfig, DelegationDispatcher
-from nanobot.agent.registry import AgentRegistry
 from nanobot.config.schema import AgentRoleConfig
+from nanobot.coordination.delegation import DelegationConfig, DelegationDispatcher
+from nanobot.coordination.registry import AgentRegistry
 from nanobot.tools.builtin.delegate import _CycleError
 
 # ---------------------------------------------------------------------------
@@ -84,7 +84,7 @@ class TestWebToolPermissions:
             captured_registry.append(tools)
             return "result", [], []
 
-        import nanobot.agent.delegation as delegation_mod
+        import nanobot.coordination.delegation as delegation_mod
 
         original = delegation_mod.run_tool_loop
         delegation_mod.run_tool_loop = fake_tool_loop  # type: ignore[assignment]
@@ -116,7 +116,7 @@ class TestWebToolPermissions:
             captured_registry.append(tools)
             return "result", [], []
 
-        import nanobot.agent.delegation as delegation_mod
+        import nanobot.coordination.delegation as delegation_mod
 
         original = delegation_mod.run_tool_loop
         delegation_mod.run_tool_loop = fake_tool_loop  # type: ignore[assignment]
@@ -148,7 +148,7 @@ class TestWebToolPermissions:
             captured_registry.append(tools)
             return "result", [], []
 
-        import nanobot.agent.delegation as delegation_mod
+        import nanobot.coordination.delegation as delegation_mod
 
         original = delegation_mod.run_tool_loop
         delegation_mod.run_tool_loop = fake_tool_loop  # type: ignore[assignment]
@@ -179,7 +179,7 @@ class TestWebToolPermissions:
             captured_registry.append(tools)
             return "result", [], []
 
-        import nanobot.agent.delegation as delegation_mod
+        import nanobot.coordination.delegation as delegation_mod
 
         original = delegation_mod.run_tool_loop
         delegation_mod.run_tool_loop = fake_tool_loop  # type: ignore[assignment]
@@ -210,7 +210,7 @@ class TestWebToolPermissions:
             captured_registry.append(tools)
             return "result", [], []
 
-        import nanobot.agent.delegation as delegation_mod
+        import nanobot.coordination.delegation as delegation_mod
 
         original = delegation_mod.run_tool_loop
         delegation_mod.run_tool_loop = fake_tool_loop  # type: ignore[assignment]
@@ -266,7 +266,7 @@ class TestDisabledRoleRouting:
 
     def test_route_direct_returns_none_for_disabled(self) -> None:
         """Coordinator.route_direct must return None for a disabled role."""
-        from nanobot.agent.coordinator import Coordinator
+        from nanobot.coordination.coordinator import Coordinator
         from nanobot.providers.base import LLMProvider, LLMResponse
 
         class StubProvider(LLMProvider):
@@ -299,7 +299,7 @@ class TestDisabledRoleRouting:
 
     def test_route_direct_returns_role_when_enabled(self) -> None:
         """Coordinator.route_direct must return the config for an enabled role."""
-        from nanobot.agent.coordinator import Coordinator
+        from nanobot.coordination.coordinator import Coordinator
         from nanobot.providers.base import LLMProvider, LLMResponse
 
         class StubProvider(LLMProvider):

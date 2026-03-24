@@ -5,11 +5,11 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.agent_factory import build_agent
-from nanobot.agent.coordinator import ClassificationResult
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig, AgentRoleConfig
+from nanobot.coordination.coordinator import ClassificationResult
 from nanobot.providers.base import LLMProvider, LLMResponse
 
 

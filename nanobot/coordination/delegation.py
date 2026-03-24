@@ -30,15 +30,15 @@ from nanobot.agent.callbacks import (
     DelegateStartEvent,
     ProgressCallback,
 )
-from nanobot.agent.delegation_contract import (
+from nanobot.agent.observability import span as langfuse_span
+from nanobot.agent.prompt_loader import prompts
+from nanobot.agent.tracing import sanitize_for_trace
+from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
+from nanobot.coordination.delegation_contract import (
     _cap_scratchpad_for_injection,
     build_delegation_contract,
 )
-from nanobot.agent.observability import span as langfuse_span
-from nanobot.agent.prompt_loader import prompts
-from nanobot.agent.task_types import classify_task_type
-from nanobot.agent.tracing import sanitize_for_trace
-from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
+from nanobot.coordination.task_types import classify_task_type
 from nanobot.errors import NanobotError
 from nanobot.metrics import delegation_latency_seconds, delegation_total
 from nanobot.tools.builtin.delegate import (
@@ -59,8 +59,8 @@ from nanobot.tools.registry import ToolRegistry
 from nanobot.tools.tool_loop import run_tool_loop
 
 if TYPE_CHECKING:
-    from nanobot.agent.coordinator import Coordinator
-    from nanobot.agent.scratchpad import Scratchpad
+    from nanobot.coordination.coordinator import Coordinator
+    from nanobot.coordination.scratchpad import Scratchpad
     from nanobot.providers.base import LLMProvider
     from nanobot.tools.base import Tool
     from nanobot.tools.executor import ToolExecutor

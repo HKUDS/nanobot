@@ -16,12 +16,12 @@ from nanobot.agent.compression import (
     estimate_messages_tokens,
 )
 from nanobot.agent.loop import AgentLoop
-from nanobot.agent.scratchpad import Scratchpad
 from nanobot.agent.turn_orchestrator import _dynamic_preserve_recent
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.email import EmailChannel
 from nanobot.config.schema import AgentConfig, EmailConfig
+from nanobot.coordination.scratchpad import Scratchpad
 from nanobot.errors import DeliverySkippedError
 from nanobot.providers.base import LLMProvider
 from nanobot.tools.builtin.delegate import DelegateTool, DelegationResult

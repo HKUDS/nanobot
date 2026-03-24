@@ -17,8 +17,8 @@ from typing import Any
 import pytest
 from conftest import FakeProvider
 
-from nanobot.agent.coordinator import Coordinator, build_default_registry
 from nanobot.config.schema import AgentConfig
+from nanobot.coordination.coordinator import Coordinator, build_default_registry
 from nanobot.providers.base import LLMResponse
 from nanobot.tools.builtin.delegate import (
     DelegateParallelTool,
@@ -186,8 +186,8 @@ class TestDelegationDispatch:
     async def test_cycle_detection(self, tmp_path: Path) -> None:
         """Delegating to a role already in the ancestry raises _CycleError."""
         from nanobot.agent.agent_factory import build_agent
-        from nanobot.agent.delegation import _delegation_ancestry
         from nanobot.bus.queue import MessageBus
+        from nanobot.coordination.delegation import _delegation_ancestry
 
         provider = FakeProvider(['{"role": "code"}', "result"])
         bus = MessageBus()
@@ -212,8 +212,8 @@ class TestDelegationDispatch:
     async def test_deep_chain_allowed(self, tmp_path: Path) -> None:
         """A → B → C is allowed (no cycle)."""
         from nanobot.agent.agent_factory import build_agent
-        from nanobot.agent.delegation import _delegation_ancestry
         from nanobot.bus.queue import MessageBus
+        from nanobot.coordination.delegation import _delegation_ancestry
 
         # Provider returns responses for: classify → research, then agent response
         provider = FakeProvider(['{"role": "research"}', "research result"])
@@ -297,8 +297,8 @@ class TestDelegationDispatch:
     async def test_parallel_same_role_at_depth_zero(self, tmp_path: Path) -> None:
         """At depth 0 (empty ancestry), delegating to the same role twice is allowed."""
         from nanobot.agent.agent_factory import build_agent
-        from nanobot.agent.delegation import _delegation_ancestry
         from nanobot.bus.queue import MessageBus
+        from nanobot.coordination.delegation import _delegation_ancestry
 
         provider = FakeProvider(["result"])
         bus = MessageBus()

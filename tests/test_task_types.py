@@ -1,8 +1,8 @@
-"""Tests for nanobot.agent.task_types module."""
+"""Tests for nanobot.coordination.task_types module."""
 
 from __future__ import annotations
 
-from nanobot.agent.task_types import TASK_TYPES, classify_task_type, has_parallel_structure
+from nanobot.coordination.task_types import TASK_TYPES, classify_task_type, has_parallel_structure
 
 
 def test_task_types_has_seven_keys() -> None:

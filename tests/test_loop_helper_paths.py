@@ -4,16 +4,16 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from nanobot.agent.consolidation import ConsolidationOrchestrator
-from nanobot.agent.delegation import DelegationDispatcher
-from nanobot.agent.delegation_contract import (
+from nanobot.agent.loop import AgentLoop
+from nanobot.agent.verifier import AnswerVerifier
+from nanobot.coordination.delegation import DelegationDispatcher
+from nanobot.coordination.delegation_contract import (
     build_execution_context,
     build_parallel_work_summary,
     extract_plan_text,
     extract_user_request,
 )
-from nanobot.agent.loop import AgentLoop
-from nanobot.agent.task_types import classify_task_type
-from nanobot.agent.verifier import AnswerVerifier
+from nanobot.coordination.task_types import classify_task_type
 
 
 def _make_loop(tmp_path: Path) -> AgentLoop:
@@ -96,7 +96,7 @@ def test_build_parallel_and_contract_includes_optional_sections(
     tmp_path: Path,
     monkeypatch: object,
 ) -> None:
-    from nanobot.agent import delegation_contract
+    from nanobot.coordination import delegation_contract
 
     scratchpad = SimpleNamespace(
         list_entries=lambda: [
@@ -126,7 +126,7 @@ def test_build_parallel_and_contract_includes_optional_sections(
         lambda msgs, **kw: "prior",
     )
 
-    from nanobot.agent.delegation_contract import build_delegation_contract
+    from nanobot.coordination.delegation_contract import build_delegation_contract
 
     active_messages = [{"role": "user", "content": "User request"}]
     user_content, output_schema = build_delegation_contract(

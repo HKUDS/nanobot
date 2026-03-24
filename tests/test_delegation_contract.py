@@ -1,8 +1,8 @@
-"""Tests for nanobot.agent.delegation_contract module."""
+"""Tests for nanobot.coordination.delegation_contract module."""
 
 from __future__ import annotations
 
-from nanobot.agent.delegation_contract import (
+from nanobot.coordination.delegation_contract import (
     _SCRATCHPAD_INJECTION_LIMIT,
     _cap_scratchpad_for_injection,
     extract_user_request,

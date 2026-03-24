@@ -3,8 +3,8 @@
 Extracts ``TurnContext`` and ``TurnRoleManager`` from ``loop.py`` so that
 role-override / restore logic is self-contained and testable in isolation.
 
-See also ``nanobot.agent.coordinator`` for intent classification and
-``nanobot.agent.delegation`` for cross-agent delegation.
+See also ``nanobot.coordination.coordinator`` for intent classification and
+``nanobot.coordination.delegation`` for cross-agent delegation.
 """
 
 from __future__ import annotations

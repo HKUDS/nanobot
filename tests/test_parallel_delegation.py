@@ -15,8 +15,8 @@ from typing import Any
 
 from conftest import FakeProvider
 
-from nanobot.agent.coordinator import Coordinator, build_default_registry
 from nanobot.config.schema import AgentConfig
+from nanobot.coordination.coordinator import Coordinator, build_default_registry
 from nanobot.tools.builtin.delegate import DelegateParallelTool, DelegationResult, _CycleError
 from nanobot.tools.registry import ToolRegistry
 
