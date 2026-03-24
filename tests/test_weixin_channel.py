@@ -1,4 +1,6 @@
 import asyncio
+import json
+import tempfile
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -17,7 +19,11 @@ from nanobot.channels.weixin import (
 def _make_channel() -> tuple[WeixinChannel, MessageBus]:
     bus = MessageBus()
     channel = WeixinChannel(
-        WeixinConfig(enabled=True, allow_from=["*"]),
+        WeixinConfig(
+            enabled=True,
+            allow_from=["*"],
+            state_dir=tempfile.mkdtemp(prefix="nanobot-weixin-test-"),
+        ),
         bus,
     )
     return channel, bus
@@ -35,6 +41,30 @@ def test_make_headers_includes_route_tag_when_configured() -> None:
 
     assert headers["Authorization"] == "Bearer token"
     assert headers["SKRouteTag"] == "123"
+
+
+def test_save_and_load_state_persists_context_tokens(tmp_path) -> None:
+    bus = MessageBus()
+    channel = WeixinChannel(
+        WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
+        bus,
+    )
+    channel._token = "token"
+    channel._get_updates_buf = "cursor"
+    channel._context_tokens = {"wx-user": "ctx-1"}
+
+    channel._save_state()
+
+    saved = json.loads((tmp_path / "account.json").read_text())
+    assert saved["context_tokens"] == {"wx-user": "ctx-1"}
+
+    restored = WeixinChannel(
+        WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
+        bus,
+    )
+
+    assert restored._load_state() is True
+    assert restored._context_tokens == {"wx-user": "ctx-1"}
 
 
 @pytest.mark.asyncio
@@ -84,6 +114,30 @@ async def test_process_message_caches_context_token_and_send_uses_it() -> None:
     )
 
     channel._send_text.assert_awaited_once_with("wx-user", "pong", "ctx-2")
+
+
+@pytest.mark.asyncio
+async def test_process_message_persists_context_token_to_state_file(tmp_path) -> None:
+    bus = MessageBus()
+    channel = WeixinChannel(
+        WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
+        bus,
+    )
+
+    await channel._process_message(
+        {
+            "message_type": 1,
+            "message_id": "m2b",
+            "from_user_id": "wx-user",
+            "context_token": "ctx-2b",
+            "item_list": [
+                {"type": ITEM_TEXT, "text_item": {"text": "ping"}},
+            ],
+        }
+    )
+
+    saved = json.loads((tmp_path / "account.json").read_text())
+    assert saved["context_tokens"] == {"wx-user": "ctx-2b"}
 
 
 @pytest.mark.asyncio

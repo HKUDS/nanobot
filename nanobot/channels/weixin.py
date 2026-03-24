@@ -147,6 +147,15 @@ class WeixinChannel(BaseChannel):
             data = json.loads(state_file.read_text())
             self._token = data.get("token", "")
             self._get_updates_buf = data.get("get_updates_buf", "")
+            context_tokens = data.get("context_tokens", {})
+            if isinstance(context_tokens, dict):
+                self._context_tokens = {
+                    str(user_id): str(token)
+                    for user_id, token in context_tokens.items()
+                    if str(user_id).strip() and str(token).strip()
+                }
+            else:
+                self._context_tokens = {}
             base_url = data.get("base_url", "")
             if base_url:
                 self.config.base_url = base_url
@@ -161,6 +170,7 @@ class WeixinChannel(BaseChannel):
             data = {
                 "token": self._token,
                 "get_updates_buf": self._get_updates_buf,
+                "context_tokens": self._context_tokens,
                 "base_url": self.config.base_url,
             }
             state_file.write_text(json.dumps(data, ensure_ascii=False))
@@ -502,6 +512,7 @@ class WeixinChannel(BaseChannel):
         ctx_token = msg.get("context_token", "")
         if ctx_token:
             self._context_tokens[from_user_id] = ctx_token
+            self._save_state()
 
         # Parse item_list (WeixinMessage.item_list — types.ts:161)
         item_list: list[dict] = msg.get("item_list") or []
