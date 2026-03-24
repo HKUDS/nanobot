@@ -1,6 +1,6 @@
 # Design: Resilient Session Load
 
-**Datum:** 2026-03-24 (v8 — Plan-Review Runde 7 konsolidiert)
+**Datum:** 2026-03-24 (v9 — Plan-Review Runde 8 konsolidiert)
 **Repo:** HKUDS/nanobot
 **Branch:** `fix/resilient-session-load`
 **Target:** `main` (Bug Fix, keine Verhaltensänderung für valide Dateien)
@@ -22,7 +22,8 @@
 | v5 | 5× | 7 dedup (0B, 0M, 5m, 2n, 2s) | → v6 |
 | v6 | 5× | 14 dedup (1M, 10m, 2n, 1s) | → v7 |
 | v7 | 5× | 12 dedup (1M, 7m, 2n, 2s) | → v8 |
-| v8 | — | — | **PROCEED** |
+| v8 | 5× | 11 dedup (1M, 8m, 2n, 1s) | → v9 |
+| v9 | — | — | **PROCEED** |
 
 ### v7 → v8 Änderungen (12 Findings adressiert)
 - **MAJOR:** `skipped_before_boundary` Check aus non-dict Branch entfernt — non-dict JSON Werte waren nie Messages und belegen keinen Message-Slot, verursachen also keinen Index-Shift
@@ -38,6 +39,18 @@
 - **SUGGESTION:** Neuer Test `test_load_non_dict_line_before_boundary_no_over_consolidation` — verifiziert dass non-dict vor boundary KEINEN Fallback triggert (nach MAJOR-Fix)
 - **SUGGESTION:** Summary-Log-Klartext für Duplikat-Metadata-Limitation
 - **Test count:** 22 (was 20)
+
+### v8 → v9 Änderungen (11 Findings adressiert)
+- **MAJOR:** `and messages` Guard aus Fallback-Condition entfernt — bei validem Metadata mit hohem lc + corrupten Messages wurde der Fallback nicht getriggert → Regression (neue User-Nachrichten unsichtbar). `len([]) = 0` ist korrekt.
+- **MINOR:** Plan-Header "v7" → "v9" (Version aktualisiert)
+- **MINOR:** Plan-Header Summe korrigiert auf 93 kumulativ (81 über 7 Runden + 12 Runde 8)
+- **MINOR:** Test #18 (`test_load_non_dict_line_before_boundary_no_over_consolidation`) verschoben von `TestLastConsolidatedNoUpperClamp` nach `TestIndexShiftProtection`
+- **MINOR:** Design-Doc Changelog "69" → korrekter kumulativer Wert
+- **MINOR:** Theoretischer dict→non-dict Korruptions-Gap im Design-Doc dokumentiert (extrem selten, konservative Failure-Mode)
+- **NITPICK:** Neuer Test `test_load_valid_metadata_high_lc_all_messages_corrupt` — verifiziert dass Fallback auch bei leerer Messages-Liste triggert
+- **NITPICK:** Pre-existing metadata-only mit lc>0 als Follow-Up dokumentiert (out of scope)
+- **SUGGESTION:** Dict→non-dict Gap als parenthetical in Design-Doc aufgenommen
+- **Test count:** 23 (was 22)
 
 ## Lösung
 
@@ -79,11 +92,11 @@ if metadata_parsed and msg_index < last_consolidated:
 msg_index += 1
 
 # Nach dem Loop:
-if (last_consolidated_untrustworthy or not metadata_parsed or skipped_before_boundary) and messages:
+if last_consolidated_untrustworthy or not metadata_parsed or skipped_before_boundary:
     last_consolidated = len(messages)
 ```
 
-**Warum non-dict keinen Index-Shift verursacht:** `save()` schreibt nur dicts. Ein non-dict JSON Wert (z.B. `"just a string"`) stammt aus manuellen Edits oder Diskfehlern. Er belegt keine Position im Message-Stream — überspringen verursacht keine Verschiebung der nachfolgenden Messages.
+**Warum non-dict keinen Index-Shift verursacht:** `save()` schreibt nur dicts. Ein non-dict JSON Wert (z.B. `"just a string"`) stammt aus manuellen Edits oder Diskfehlern. Er belegt keine Position im Message-Stream — überspringen verursacht keine Verschiebung der nachfolgenden Messages. (Theoretischer Edge-Case: Disk-Korruption könnte ein Dict in ein valides Non-Dict JSON verwandeln. Wahrscheinlichkeit ist extrem gering, und die konservative Failure-Mode ist Over-Consolidation — selbstheilend beim nächsten Consolidation-Zyklus. Das Setzen von `skipped_before_boundary` würde häufigere manuelle Edit-Szenarien falsch-positiv über-consolidieren, was schlimmer wäre.)
 
 **Known Limitation:** `skipped_before_boundary` wird nur ausgewertet wenn `metadata_parsed=True`. Wenn die metadata-line *nach* den Messages steht (nicht-standard Format, nur bei manuellen Edits), werden pre-metadata Skips nicht erfasst. `save()` schreibt immer metadata zuerst — dieses Szenario ist extrem unwahrscheinlich.
 
@@ -165,6 +178,7 @@ logger.info(
 | 20 | `test_load_messages_only_no_metadata` | Nur Message-Zeilen, keine metadata-line → `len(messages)` |
 | 21 | `test_load_last_consolidated_exceeds_message_count` | lc=10, nur 5 Messages → lc bleibt 10 (kein Upper-Clamp) |
 | 22 | `test_load_valid_file_roundtrip` | save() → frischer Manager → _load() → alle Felder inkl. `last_consolidated=7` und `created_at` intakt |
+| 23 | `test_load_valid_metadata_high_lc_all_messages_corrupt` | Metadata lc=100, alle Messages corrupt → `lc=0` (Fallback auch bei leerer Messages-Liste) |
 
 ## Ausgespart (Folge-PRs)
 
@@ -173,3 +187,4 @@ logger.info(
 - **`list_sessions()` Resilienz** — separater Scope; Encoding-Inkonsistenz (`utf-8` vs `utf-8-sig`) in Follow-Up beheben
 - **`save()` Error-Handling** — separater Scope
 - **`updated_at` Round-Trip** — pre-existing behavior
+- **Metadata-only mit lc>0** — pre-existing: Session(lc=N, messages=[]) macht neue Messages unsichtbar. Follow-up PR nötig.

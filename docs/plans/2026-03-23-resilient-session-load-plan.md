@@ -1,4 +1,4 @@
-# Resilient Session Load Implementation Plan (v7)
+# Resilient Session Load Implementation Plan (v9)
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -13,7 +13,7 @@
 **Branch:** `fix/resilient-session-load` (from `main`)
 **Target:** `main` (Bug Fix, no behavior changes for valid files)
 
-**Review findings addressed:** 82 cumulative across 7 review rounds (12 + 11 + 13 + 12 + 7 + 14 + 12 dedup)
+**Review findings addressed:** 93 cumulative across 8 review rounds (12 + 11 + 13 + 12 + 7 + 14 + 12 + 11 dedup)
 
 **Execution policy:** Tasks 1–4 may be executed autonomously. Task 5 (push) is autonomous. Task 6 (PR) requires **explicit user approval** before execution. The user may also choose to create the PR themselves.
 
@@ -54,7 +54,7 @@ Expected: All PASS (establishes baseline for regression detection)
 **Files:**
 - Create: `tests/test_session_resilient_load.py`
 
-**Step 1: Write all 22 tests for corrupt message lines, corrupt metadata, bounds, index-shift, and roundtrip**
+**Step 1: Write all 23 tests for corrupt message lines, corrupt metadata, bounds, index-shift, and roundtrip**
 
 Create `tests/test_session_resilient_load.py`:
 
@@ -412,6 +412,25 @@ class TestIndexShiftProtection:
         # skipped_before_boundary=False → NO fallback → last_consolidated stays at 2
         assert session.last_consolidated == 2
 
+    def test_load_non_dict_line_before_boundary_no_over_consolidation(self, tmp_session_manager: SessionManager):
+        """Non-dict JSON before consolidation boundary does NOT trigger over-consolidation."""
+        path = tmp_session_manager._get_session_path("telegram:12345")
+        lines = [
+            _make_metadata_line(last_consolidated=2),
+            _make_message_line("user", "msg0"),  # index 0 — consolidated
+            '"garbage string"',                  # non-dict — NOT a message, no index-shift
+            _make_message_line("user", "msg1"),  # index 1 — consolidated
+            _make_message_line("user", "msg2"),  # index 2 — unconsolidated
+        ]
+        _write_session_file(path, lines)
+
+        session = tmp_session_manager._load("telegram:12345")
+
+        assert session is not None
+        assert len(session.messages) == 3  # 4 minus 1 non-dict
+        # Non-dict skips do NOT set skipped_before_boundary → lc stays at 2
+        assert session.last_consolidated == 2
+
 
 class TestMessagesOnlyNoMetadata:
     def test_load_messages_only_no_metadata(self, tmp_session_manager: SessionManager):
@@ -432,6 +451,33 @@ class TestMessagesOnlyNoMetadata:
         assert session.metadata == {}  # default when no metadata line
 
 
+class TestFallbackWithEmptyMessages:
+    def test_load_valid_metadata_high_lc_all_messages_corrupt(self, tmp_session_manager: SessionManager):
+        """Metadata says lc=100 but all message lines are corrupt → lc corrected to 0.
+        Regression test: the `and messages` guard was removed in v9 because it prevented
+        the fallback when messages is empty, leaving a high lc that would make new user
+        messages invisible to the LLM."""
+        path = tmp_session_manager._get_session_path("telegram:12345")
+        lines = [
+            _make_metadata_line(last_consolidated=100),
+            "CORRUPT{{{",
+            "ALSO BAD{{{",
+        ]
+        _write_session_file(path, lines)
+
+        session = tmp_session_manager._load("telegram:12345")
+
+        assert session is not None
+        assert session.messages == []
+        # No corrupt skip before boundary (msg_index never reached lc=100),
+        # but this is a metadata-only recovery with corrupt messages.
+        # With `and messages` guard removed: lc = len([]) = 0.
+        # NOTE: The actual trigger here is that ALL lines after metadata are corrupt.
+        # skipped_count > 0, but since the corrupt lines are non-dict-parseable,
+        # msg_index stays at 0 which is < lc=100 → skipped_before_boundary=True.
+        assert session.last_consolidated == 0
+
+
 class TestLastConsolidatedNoUpperClamp:
     def test_load_last_consolidated_exceeds_message_count(self, tmp_session_manager: SessionManager):
         """Metadata says lc=10 but only 5 messages in file — lc preserved (no upper clamp)."""
@@ -447,25 +493,6 @@ class TestLastConsolidatedNoUpperClamp:
         assert len(session.messages) == 5
         # No upper-bound clamp — all consumers handle via slice semantics
         assert session.last_consolidated == 10
-
-    def test_load_non_dict_line_before_boundary_no_over_consolidation(self, tmp_session_manager: SessionManager):
-        """Non-dict JSON before consolidation boundary does NOT trigger over-consolidation."""
-        path = tmp_session_manager._get_session_path("telegram:12345")
-        lines = [
-            _make_metadata_line(last_consolidated=2),
-            _make_message_line("user", "msg0"),  # index 0 — consolidated
-            '"garbage string"',                  # non-dict — NOT a message, no index-shift
-            _make_message_line("user", "msg1"),  # index 1 — consolidated
-            _make_message_line("user", "msg2"),  # index 2 — unconsolidated
-        ]
-        _write_session_file(path, lines)
-
-        session = tmp_session_manager._load("telegram:12345")
-
-        assert session is not None
-        assert len(session.messages) == 3  # 4 minus 1 non-dict
-        # Non-dict skips do NOT set skipped_before_boundary → lc stays at 2
-        assert session.last_consolidated == 2
 
 
 class TestValidFileRoundtrip:
@@ -505,7 +532,7 @@ Expected: Most FAIL (current `_load()` returns `None` for corrupt files). Note: 
 
 ```bash
 git add tests/test_session_resilient_load.py
-        git commit -m "test: add 22 failing tests for resilient session loading"
+        git commit -m "test: add 23 failing tests for resilient session loading"
 ```
 
 ---
@@ -630,7 +657,9 @@ Replace the entire `_load()` method with:
             # metadata line missing, or a corrupt line was skipped before the
             # consolidation boundary (index-shift protection), assume all loaded
             # messages are already consolidated.
-            if (last_consolidated_untrustworthy or not metadata_parsed or skipped_before_boundary) and messages:
+            # No `and messages` guard — when messages is empty, len(messages)=0
+            # is the correct fallback (prevents high lc from making new messages invisible).
+            if last_consolidated_untrustworthy or not metadata_parsed or skipped_before_boundary:
                 last_consolidated = len(messages)
                 logger.warning(
                     "Consolidation boundary uncertain in session {} (skipped={}, "
@@ -726,13 +755,14 @@ Expected: All PASS (no regressions)
 ```bash
 python -m pytest tests/test_session_resilient_load.py -v --tb=short
 ```
-        Expected: 22 tests, all PASS
+        Expected: 23 tests, all PASS
 
 **Step 5: Verify specific edge cases**
 
 ```bash
 python -m pytest tests/test_session_resilient_load.py::TestIndexShiftProtection -v
 python -m pytest tests/test_session_resilient_load.py::TestLastConsolidatedNoUpperClamp -v
+python -m pytest tests/test_session_resilient_load.py::TestFallbackWithEmptyMessages -v
 python -m pytest tests/test_session_resilient_load.py::TestValidFileRoundtrip -v
 python -m pytest tests/test_session_resilient_load.py::TestCorruptMetadata::test_load_non_dict_metadata_defaults_to_empty -v
 python -m pytest tests/test_session_resilient_load.py::TestMessagesOnlyNoMetadata -v
@@ -828,6 +858,7 @@ Process restart during `save()` (which uses `open("w")`) truncates the file befo
 - [x] Non-dict metadata field → defaults to empty dict
 - [x] Messages only (no metadata line) → recovered with len(messages) fallback
 - [x] last_consolidated > len(messages) preserved (no upper clamp)
+- [x] Valid metadata high lc + all messages corrupt → lc corrected to 0 (no `and messages` guard)
 - [x] Valid file roundtrip via fresh SessionManager → all fields including last_consolidated=7 and created_at intact
 - [x] Existing session tests pass (no regression)' \
   --base main \
