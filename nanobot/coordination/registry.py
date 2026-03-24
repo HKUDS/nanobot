@@ -68,6 +68,10 @@ class AgentRegistry:
         """Return the default (fallback) role."""
         return self._roles.get(self._default_role)
 
+    def set_default_role(self, role: str) -> None:
+        """Set the default role name for routing fallback."""
+        self._default_role = role
+
     def list_roles(self) -> list[AgentRoleConfig]:
         """Return all registered roles (enabled only)."""
         if self._cached_roles is None:

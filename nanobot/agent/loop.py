@@ -44,6 +44,7 @@ from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import DeliveryResult, InboundMessage, OutboundMessage, ReactionEvent
 from nanobot.config.schema import AgentRoleConfig
 from nanobot.coordination.role_switching import TurnContext
+from nanobot.errors import NanobotError
 from nanobot.observability.bus_progress import make_bus_progress
 from nanobot.observability.langfuse import (
     flush as flush_langfuse,
@@ -522,8 +523,9 @@ class AgentLoop:
         for role_cfg in self._routing_config.roles:
             self._capabilities.merge_register_role(role_cfg)
         registry = self._capabilities.agent_registry
-        assert registry is not None, "agent_registry must be set before enabling routing"
-        registry._default_role = self._routing_config.default_role
+        if registry is None:
+            raise NanobotError("AgentRegistry not available for multi-agent routing")
+        registry.set_default_role(self._routing_config.default_role)
         self._coordinator = Coordinator(
             provider=self.provider,
             registry=registry,

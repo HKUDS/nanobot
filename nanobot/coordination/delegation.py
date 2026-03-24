@@ -182,6 +182,10 @@ class DelegationDispatcher:
         # Injected by the composition root via build_delegation_tools().
         self._cached_tools: dict[str, Tool] = delegation_tools or {}
 
+    def set_trace_path(self, path: Path) -> None:
+        """Set the file path for routing trace persistence."""
+        self._trace_path = path
+
     # ------------------------------------------------------------------
     # Wiring
     # ------------------------------------------------------------------

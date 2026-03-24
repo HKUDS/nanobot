@@ -18,6 +18,10 @@ class ScratchpadWriteTool(Tool):
     def __init__(self, scratchpad: Scratchpad) -> None:
         self._scratchpad = scratchpad
 
+    def set_scratchpad(self, scratchpad: Scratchpad) -> None:
+        """Update the scratchpad instance for this session."""
+        self._scratchpad = scratchpad
+
     name = "write_scratchpad"
     description = "Write a labeled artifact to the session scratchpad for other agents to read."
     parameters: ClassVar[dict[str, Any]] = {
@@ -50,6 +54,10 @@ class ScratchpadReadTool(Tool):
     readonly = True
 
     def __init__(self, scratchpad: Scratchpad) -> None:
+        self._scratchpad = scratchpad
+
+    def set_scratchpad(self, scratchpad: Scratchpad) -> None:
+        """Update the scratchpad instance for this session."""
         self._scratchpad = scratchpad
 
     name = "read_scratchpad"
