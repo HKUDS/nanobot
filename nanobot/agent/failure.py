@@ -14,7 +14,7 @@ import json
 from enum import Enum
 from typing import Any, ClassVar
 
-from nanobot.agent.tools.base import ToolResult
+from nanobot.tools.base import ToolResult
 
 
 class FailureClass(str, Enum):

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable, ClassVar
 
-from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.bus.events import DeliveryResult, OutboundMessage
+from nanobot.tools.base import Tool, ToolResult
 
 
 class MessageTool(Tool):

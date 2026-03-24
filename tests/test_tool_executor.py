@@ -1,13 +1,13 @@
-"""Tests for nanobot.agent.tool_executor — parallel/sequential batch execution."""
+"""Tests for nanobot.tools.executor — parallel/sequential batch execution."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from nanobot.agent.tool_executor import ToolExecutor
-from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import ToolCallRequest
+from nanobot.tools.base import Tool, ToolResult
+from nanobot.tools.executor import ToolExecutor
+from nanobot.tools.registry import ToolRegistry
 
 # ---------------------------------------------------------------------------
 # Stub tools

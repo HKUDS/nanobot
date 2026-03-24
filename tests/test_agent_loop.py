@@ -692,8 +692,8 @@ class TestDelegationDepthLimit:
             DelegationDispatcher,
             _delegation_ancestry,
         )
-        from nanobot.agent.tools.delegate import _CycleError
         from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
+        from nanobot.tools.builtin.delegate import _CycleError
 
         provider = ScriptedProvider([])
         dispatcher = DelegationDispatcher(

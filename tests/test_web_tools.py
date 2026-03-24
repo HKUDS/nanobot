@@ -1,4 +1,4 @@
-"""Tests for nanobot.agent.tools.web — WebSearchTool & WebFetchTool."""
+"""Tests for nanobot.tools.builtin.web — WebSearchTool & WebFetchTool."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import nanobot.agent.tools.web as _web_mod
-from nanobot.agent.tools.web import (
+import nanobot.tools.builtin.web as _web_mod
+from nanobot.tools.builtin.web import (
     WebFetchTool,
     WebSearchTool,
     _check_ssrf_host,
@@ -67,7 +67,7 @@ async def test_web_search_uses_configured_api_key(monkeypatch) -> None:
             seen["timeout"] = timeout
             return FakeResponse()
 
-    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda: FakeClient())
+    monkeypatch.setattr("nanobot.tools.builtin.web.httpx.AsyncClient", lambda: FakeClient())
 
     tool = WebSearchTool(api_key="test-token")
     output = await tool.execute("nanobot", count=1)
@@ -97,7 +97,7 @@ async def test_web_search_no_key_and_error(monkeypatch: pytest.MonkeyPatch) -> N
             raise RuntimeError("network")
 
     tool2 = WebSearchTool(api_key="token")
-    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda: _ErrClient())
+    monkeypatch.setattr("nanobot.tools.builtin.web.httpx.AsyncClient", lambda: _ErrClient())
     err = await tool2.execute("nanobot")
     assert not err.success
 
@@ -120,7 +120,7 @@ async def test_web_search_empty_results(monkeypatch: pytest.MonkeyPatch) -> None
         async def get(self, *args, **kwargs):
             return _Resp()
 
-    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda: _Client())
+    monkeypatch.setattr("nanobot.tools.builtin.web.httpx.AsyncClient", lambda: _Client())
     tool = WebSearchTool(api_key="token")
     out = await tool.execute("nanobot")
     assert out.success
@@ -268,7 +268,7 @@ async def test_web_fetch_json_and_raw(monkeypatch: pytest.MonkeyPatch) -> None:
         _Resp("text/plain", "hello raw"),
     ]
     monkeypatch.setattr(
-        "nanobot.agent.tools.web.httpx.AsyncClient", lambda **kwargs: _Client(responses)
+        "nanobot.tools.builtin.web.httpx.AsyncClient", lambda **kwargs: _Client(responses)
     )
 
     tool = WebFetchTool(max_chars=1000)
@@ -313,7 +313,7 @@ async def test_web_fetch_html_and_error(monkeypatch: pytest.MonkeyPatch) -> None
         async def get(self, *args, **kwargs):
             return _Resp()
 
-    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda **kwargs: _Client())
+    monkeypatch.setattr("nanobot.tools.builtin.web.httpx.AsyncClient", lambda **kwargs: _Client())
     monkeypatch.setitem(__import__("sys").modules, "readability", SimpleNamespace(Document=_Doc))
 
     tool = WebFetchTool(max_chars=20)
@@ -333,7 +333,9 @@ async def test_web_fetch_html_and_error(monkeypatch: pytest.MonkeyPatch) -> None
         async def get(self, *args, **kwargs):
             raise RuntimeError("boom")
 
-    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda **kwargs: _BadClient())
+    monkeypatch.setattr(
+        "nanobot.tools.builtin.web.httpx.AsyncClient", lambda **kwargs: _BadClient()
+    )
     _url_cache.clear()  # clear cached success for same URL
     _web_mod._http_client = None  # force _BadClient to be picked up
     fail = await tool.execute(url="https://example.com")
@@ -378,7 +380,7 @@ async def test_web_fetch_bot_user_agent(monkeypatch: pytest.MonkeyPatch) -> None
             captured_headers.update(kwargs.get("headers", {}))
             return _Resp()
 
-    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda **kwargs: _Client())
+    monkeypatch.setattr("nanobot.tools.builtin.web.httpx.AsyncClient", lambda **kwargs: _Client())
 
     tool = WebFetchTool()
     result = await tool.execute(url="https://wttr.in/Montreal?format=3", userAgent="bot")
@@ -416,7 +418,7 @@ async def test_web_fetch_browser_user_agent_default(monkeypatch: pytest.MonkeyPa
             captured_headers.update(kwargs.get("headers", {}))
             return _Resp()
 
-    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda **kwargs: _Client())
+    monkeypatch.setattr("nanobot.tools.builtin.web.httpx.AsyncClient", lambda **kwargs: _Client())
 
     tool = WebFetchTool()
     result = await tool.execute(url="https://example.com")

@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.tools.base import Tool, ToolResult
 
 
 class DemoTool(Tool):

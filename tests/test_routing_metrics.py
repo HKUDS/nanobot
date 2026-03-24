@@ -15,9 +15,9 @@ import pytest
 from conftest import FakeProvider
 
 from nanobot.agent.coordinator import Coordinator, build_default_registry
-from nanobot.agent.tools.delegate import _CycleError
 from nanobot.config.schema import AgentConfig
 from nanobot.providers.base import LLMProvider
+from nanobot.tools.builtin.delegate import _CycleError
 
 # ---------------------------------------------------------------------------
 # Helpers

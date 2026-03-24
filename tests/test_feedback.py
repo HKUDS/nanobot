@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.reaction import classify_reaction
-from nanobot.agent.tools.feedback import FeedbackTool, feedback_summary, load_feedback_events
 from nanobot.bus.events import ReactionEvent
+from nanobot.tools.builtin.feedback import FeedbackTool, feedback_summary, load_feedback_events
 
 # ---------------------------------------------------------------------------
 # FeedbackTool unit tests

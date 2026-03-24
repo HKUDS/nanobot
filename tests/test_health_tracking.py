@@ -8,13 +8,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.capability import (
+from nanobot.heartbeat.service import HeartbeatService
+from nanobot.tools.base import Tool, ToolResult
+from nanobot.tools.capability import (
     CapabilityRegistry,
     HealthChange,
     HealthRefreshResult,
 )
-from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.heartbeat.service import HeartbeatService
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -187,7 +187,7 @@ class TestTransitionLogging:
         reg.register_tool(tool)
 
         tool._available = False
-        with caplog.at_level(logging.WARNING, logger="nanobot.agent.capability"):
+        with caplog.at_level(logging.WARNING, logger="nanobot.tools.capability"):
             reg.refresh_health()
 
         assert any("unavailable" in r.message and "toggle" in r.message for r in caplog.records)
@@ -199,7 +199,7 @@ class TestTransitionLogging:
         reg.register_tool(tool)
 
         tool._available = True
-        with caplog.at_level(logging.INFO, logger="nanobot.agent.capability"):
+        with caplog.at_level(logging.INFO, logger="nanobot.tools.capability"):
             reg.refresh_health()
 
         assert any("recovered" in r.message and "toggle" in r.message for r in caplog.records)
@@ -209,10 +209,10 @@ class TestTransitionLogging:
         tool = _ToggleTool()
         reg.register_tool(tool)
 
-        with caplog.at_level(logging.DEBUG, logger="nanobot.agent.capability"):
+        with caplog.at_level(logging.DEBUG, logger="nanobot.tools.capability"):
             reg.refresh_health()
 
-        cap_records = [r for r in caplog.records if r.name == "nanobot.agent.capability"]
+        cap_records = [r for r in caplog.records if r.name == "nanobot.tools.capability"]
         assert len(cap_records) == 0
 
 

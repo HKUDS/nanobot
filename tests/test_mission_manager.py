@@ -9,15 +9,15 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from nanobot.agent.mission import Mission, MissionManager, MissionStatus
-from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.agent.tools.mission import (
+from nanobot.config.schema import AgentRoleConfig
+from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.tools.base import Tool, ToolResult
+from nanobot.tools.builtin.mission import (
     MissionCancelTool,
     MissionListTool,
     MissionStartTool,
     MissionStatusTool,
 )
-from nanobot.config.schema import AgentRoleConfig
-from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 # ---------------------------------------------------------------------------
 # Helpers

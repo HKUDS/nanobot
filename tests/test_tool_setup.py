@@ -8,11 +8,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from nanobot.agent.capability import CapabilityRegistry
-from nanobot.agent.tool_setup import register_default_tools
-from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.result_cache import ToolResultCache
 from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
+from nanobot.tools.capability import CapabilityRegistry
+from nanobot.tools.registry import ToolRegistry
+from nanobot.tools.result_cache import ToolResultCache
+from nanobot.tools.setup import register_default_tools
 
 
 class FakeSkillsLoader:
@@ -150,7 +150,7 @@ class TestRegisterDefaultTools:
         assert "cron" in capabilities.tool_registry.tool_names
 
     def test_skills_tools_discovered(self, tmp_workspace: Path) -> None:
-        from nanobot.agent.tools.base import Tool, ToolResult
+        from nanobot.tools.base import Tool, ToolResult
 
         class FakeSkillTool(Tool):
             @property

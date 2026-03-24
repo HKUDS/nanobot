@@ -142,7 +142,7 @@ NanobotError (base, has recoverable flag)
 ## Security Rules
 
 - **Never** hardcode API keys — use `~/.nanobot/config.json` with 0600 permissions
-- **Shell commands** go through `_guard_command()` in `nanobot/agent/tools/shell.py` (deny patterns + optional allowlist)
+- **Shell commands** go through `_guard_command()` in `nanobot/tools/shell.py` (deny patterns + optional allowlist)
 - **Filesystem tools** validate paths against workspace boundaries (path traversal protection)
 - **Network**: WhatsApp bridge binds to 127.0.0.1 only
 
@@ -170,12 +170,12 @@ make pre-commit-install  # Install pre-commit hooks
 
 ## Adding a New Tool
 
-1. Create a class extending `Tool` in `nanobot/agent/tools/base.py`
+1. Create a class extending `Tool` in `nanobot/tools/base.py`
 2. Define `name`, `description`, `parameters` (JSON Schema dict)
 3. Implement `async def execute(self, **kwargs) -> ToolResult`
 4. Return `ToolResult.ok(output)` on success, `ToolResult.fail(error)` on failure
 5. Register in `AgentLoop.__init__` via `self.registry.register(YourTool(...))`
-6. Reference: `ReadFileTool` in `nanobot/agent/tools/filesystem.py`
+6. Reference: `ReadFileTool` in `nanobot/tools/filesystem.py`
 
 ## Adding a New Skill
 
@@ -193,11 +193,11 @@ changes. The module ownership map and import rules are in `docs/architecture.md`
 
 Each top-level package has explicit import rules. Key forbidden imports:
 
-- `channels/` must **never** import from `agent/loop`, `agent/tools/`, or `memory/`
+- `channels/` must **never** import from `agent/loop`, `tools/`, or `memory/`
 - `providers/` must **never** import from `agent/` or `channels/`
 - `config/` must **never** import from `agent/`, `channels/`, or `providers/`
 - `bus/` must **never** import from `agent/`, `channels/`, or `providers/`
-- `agent/tools/` must **never** import from `channels/`
+- `tools/` must **never** import from `channels/`
 
 ### Refactoring Principles
 

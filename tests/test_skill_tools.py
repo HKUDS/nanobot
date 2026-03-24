@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.skills import SkillsLoader
-from nanobot.agent.tools.base import ToolResult
+from nanobot.tools.base import ToolResult
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -33,7 +33,7 @@ def _make_skill(
 SIMPLE_TOOLS_PY = '''\
 """Custom tools for the demo skill."""
 
-from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.tools.base import Tool, ToolResult
 from typing import Any
 
 
@@ -130,7 +130,7 @@ class TestDiscoverTools:
             builtin_dir,
             "demo",
             tools_py="""\
-from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.tools.base import Tool, ToolResult
 from typing import Any
 
 class BuiltinOnly(Tool):
@@ -166,7 +166,7 @@ class BuiltinOnly(Tool):
             workspace / "skills",
             "abstract-skill",
             tools_py='''\
-from nanobot.agent.tools.base import Tool
+from nanobot.tools.base import Tool
 from typing import Any
 
 class IncompleteTool(Tool):
@@ -184,7 +184,7 @@ class IncompleteTool(Tool):
             workspace / "skills",
             "private-skill",
             tools_py="""\
-from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.tools.base import Tool, ToolResult
 from typing import Any
 
 class _HelperTool(Tool):
@@ -223,7 +223,7 @@ class _HelperTool(Tool):
             workspace / "skills",
             "needs-args",
             tools_py="""\
-from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.tools.base import Tool, ToolResult
 from typing import Any
 
 class NeedsArgsTool(Tool):

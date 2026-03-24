@@ -16,9 +16,9 @@ from typing import Any
 from conftest import FakeProvider
 
 from nanobot.agent.coordinator import Coordinator, build_default_registry
-from nanobot.agent.tools.delegate import DelegateParallelTool, DelegationResult, _CycleError
-from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import AgentConfig
+from nanobot.tools.builtin.delegate import DelegateParallelTool, DelegationResult, _CycleError
+from nanobot.tools.registry import ToolRegistry
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -177,7 +177,7 @@ class TestWriteLock:
 
     async def test_readonly_tools_run_concurrently(self) -> None:
         """Multiple readonly tools can execute in parallel."""
-        from nanobot.agent.tools.base import Tool, ToolResult
+        from nanobot.tools.base import Tool, ToolResult
 
         class SlowReadTool(Tool):
             readonly = True
@@ -229,7 +229,7 @@ class TestWriteLock:
 
     async def test_write_tools_serialised(self) -> None:
         """Non-readonly tools are serialised by the write lock."""
-        from nanobot.agent.tools.base import Tool, ToolResult
+        from nanobot.tools.base import Tool, ToolResult
 
         execution_log: list[tuple[str, str]] = []
 

@@ -9,8 +9,8 @@ from typing import Any
 import httpx
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.tools.base import Tool, ToolResult
+from nanobot.tools.registry import ToolRegistry
 
 
 class MCPToolWrapper(Tool):

@@ -6,7 +6,7 @@ import difflib
 from pathlib import Path
 from typing import Any, ClassVar
 
-from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.tools.base import Tool, ToolResult
 
 # Paths that the agent must never read or write, even when no workspace
 # restriction is active.  These are resolved to absolute paths at module

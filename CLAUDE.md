@@ -56,22 +56,28 @@ nanobot/
 │   ├── tool_loop.py     # Shared lightweight think→act→observe loop
 │   ├── observability.py # Langfuse OTEL tracing: init, shutdown, spans, scoring
 │   ├── tracing.py       # Correlation IDs via contextvars, structured log binding
-│   └── tools/           # Tool implementations
-│       ├── base.py      # Tool ABC + ToolResult dataclass
-│       ├── registry.py  # ToolRegistry — dynamic registration + parallel/sequential execution
+├── tools/               # Tool system (top-level bounded context)
+│   ├── base.py          # Tool ABC + ToolResult dataclass
+│   ├── registry.py      # ToolRegistry — dynamic registration + parallel/sequential execution
+│   ├── executor.py      # Tool batching (parallel readonly / sequential write)
+│   ├── tool_loop.py     # Shared lightweight think→act→observe loop
+│   ├── setup.py         # Default tool registration
+│   ├── capability.py    # Unified capability registry (ADR-009)
+│   ├── result_cache.py  # Large result caching + LLM summarization
+│   └── builtin/         # Domain tool implementations
 │       ├── shell.py     # ExecTool — deny/allow pattern security model
 │       ├── filesystem.py # File read/write/edit/list tools with path validation
 │       ├── web.py       # WebFetch + WebSearch
-│       ├── mcp.py       # Model Context Protocol
 │       ├── delegate.py  # Multi-agent delegation tools
-│       ├── result_cache.py # Large result caching + LLM summarization
-│       ├── email.py     # On-demand email checking (CheckEmailTool)
 │       ├── excel.py     # Spreadsheet read, query, describe, find tools
+│       ├── powerpoint.py # Presentation tools
+│       ├── email.py     # On-demand email checking (CheckEmailTool)
 │       ├── cron.py      # Scheduled task tool
 │       ├── feedback.py  # User feedback capture tool
 │       ├── message.py   # Outbound message tool
-│       ├── mission.py   # Background mission launch, status, list, cancel tools
-│       └── scratchpad.py # Scratchpad read/write tools
+│       ├── mission.py   # Background mission tools
+│       ├── scratchpad.py # Scratchpad read/write tools
+│       └── mcp.py       # Model Context Protocol
 ├── memory/              # Memory subsystem (top-level bounded context)
 │   ├── store.py         # MemoryStore — primary public API
 │   ├── unified_db.py    # SQLite + FTS5 + sqlite-vec storage backend
@@ -136,12 +142,12 @@ The memory subsystem (`nanobot/memory/`) uses a **unified SQLite storage** strat
 
 ## Adding a New Tool
 
-1. Create a class extending `Tool` in `nanobot/agent/tools/base.py`
+1. Create a class extending `Tool` in `nanobot/tools/base.py`
 2. Define `name`, `description`, `parameters` (JSON Schema dict)
 3. Implement `async def execute(self, **kwargs) -> ToolResult`
 4. Return `ToolResult.ok(output)` or `ToolResult.fail(error, error_type="...")`
-5. Register in `AgentLoop.__init__` via `self.registry.register(YourTool(...))`
-6. Reference: `ReadFileTool` in `nanobot/agent/tools/filesystem.py`
+5. Register via `nanobot/tools/setup.py`
+6. Reference: `ReadFileTool` in `nanobot/tools/builtin/filesystem.py`
 
 ## Adding a New Skill
 
@@ -160,7 +166,7 @@ The memory subsystem (`nanobot/memory/`) uses a **unified SQLite storage** strat
 ## Security Rules
 
 - **Never** hardcode API keys — config lives in `~/.nanobot/config.json` (0600 perms)
-- **Shell commands**: `_guard_command()` in `nanobot/agent/tools/shell.py` enforces deny patterns + optional allowlist mode
+- **Shell commands**: `_guard_command()` in `nanobot/tools/builtin/shell.py` enforces deny patterns + optional allowlist mode
 - **Filesystem**: path traversal protection in filesystem tools — validate against workspace root
 - **Network**: WhatsApp bridge binds 127.0.0.1 only
 
@@ -233,11 +239,12 @@ Use worktrees to isolate experimental or parallel work from the main checkout.
 
 ### Module Boundaries
 
-- `channels/` must **never** import from `agent/loop`, `agent/tools/`, or `memory/`
+- `channels/` must **never** import from `agent/`, `tools/`, or `memory/`
 - `providers/` must **never** import from `agent/` or `channels/`
 - `config/` must **never** import from `agent/`, `channels/`, or `providers/`
 - `bus/` must **never** import from `agent/`, `channels/`, or `providers/`
-- `agent/tools/` must **never** import from `channels/`
+- `tools/` must **never** import from `channels/`
+- `memory/` must **never** import from `channels/` or `tools/`
 
 ### Refactoring Rules
 

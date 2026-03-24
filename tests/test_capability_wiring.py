@@ -11,12 +11,12 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.agent_factory import build_agent
-from nanobot.agent.capability import CapabilityRegistry
 from nanobot.agent.loop import AgentLoop
-from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig, AgentRoleConfig, RoutingConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
+from nanobot.tools.base import Tool, ToolResult
+from nanobot.tools.capability import CapabilityRegistry
 
 # ---------------------------------------------------------------------------
 # Helpers

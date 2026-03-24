@@ -26,8 +26,8 @@ import re
 from pathlib import Path
 from typing import Any, ClassVar
 
-from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.errors import ToolPermissionError, ToolTimeoutError
+from nanobot.tools.base import Tool, ToolResult
 
 # Default deny patterns — designed to catch common destructive commands
 # even through basic shell quoting / escaping tricks.

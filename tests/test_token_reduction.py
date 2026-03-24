@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nanobot.agent.tools.result_cache import _heuristic_summary
+from nanobot.tools.result_cache import _heuristic_summary
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 

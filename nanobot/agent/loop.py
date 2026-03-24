@@ -49,15 +49,15 @@ from nanobot.agent.observability import (
 )
 from nanobot.agent.reaction import classify_reaction
 from nanobot.agent.role_switching import TurnContext
-from nanobot.agent.tools.email import CheckEmailTool
-from nanobot.agent.tools.feedback import FeedbackTool
-from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tracing import TraceContext
 from nanobot.agent.turn_types import TurnState
 from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import DeliveryResult, InboundMessage, OutboundMessage, ReactionEvent
 from nanobot.config.schema import AgentRoleConfig
 from nanobot.session.manager import Session
+from nanobot.tools.builtin.email import CheckEmailTool
+from nanobot.tools.builtin.feedback import FeedbackTool
+from nanobot.tools.builtin.message import MessageTool
 
 if TYPE_CHECKING:
     from nanobot.agent.agent_components import _AgentComponents
@@ -168,7 +168,7 @@ class AgentLoop:
         if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
             return
         self._mcp_connecting = True
-        from nanobot.agent.tools.mcp import connect_mcp_servers
+        from nanobot.tools.builtin.mcp import connect_mcp_servers
 
         try:
             self._mcp_stack = AsyncExitStack()

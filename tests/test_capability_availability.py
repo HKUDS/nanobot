@@ -8,11 +8,11 @@ from typing import Any
 import pytest
 
 from nanobot.agent.context import ContextBuilder
-from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool
-from nanobot.agent.tools.email import CheckEmailTool
-from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.web import WebSearchTool
+from nanobot.tools.base import Tool, ToolResult
+from nanobot.tools.builtin.delegate import DelegateParallelTool, DelegateTool
+from nanobot.tools.builtin.email import CheckEmailTool
+from nanobot.tools.builtin.web import WebSearchTool
+from nanobot.tools.registry import ToolRegistry
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -45,7 +45,7 @@ def _restore_loguru_namespaces():
 @pytest.fixture()
 def minimal_tool_registry():
     """A bare ToolRegistry with no tools registered."""
-    from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.tools.registry import ToolRegistry
 
     return ToolRegistry()
 

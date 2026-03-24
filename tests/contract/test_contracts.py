@@ -14,11 +14,11 @@ from __future__ import annotations
 from dataclasses import fields
 from pathlib import Path
 
-from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
-from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.tools.base import Tool, ToolResult
+from nanobot.tools.builtin.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.tools.builtin.shell import ExecTool
+from nanobot.tools.builtin.web import WebFetchTool, WebSearchTool
 
 # ---------------------------------------------------------------------------
 # Contract: ToolResult factory methods

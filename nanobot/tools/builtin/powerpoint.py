@@ -19,11 +19,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.prompt_loader import prompts
-from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.agent.tools.filesystem import _resolve_path
+from nanobot.tools.base import Tool, ToolResult
+from nanobot.tools.builtin.filesystem import _resolve_path
 
 if TYPE_CHECKING:
-    from nanobot.agent.tools.result_cache import ToolResultCache
+    from nanobot.tools.result_cache import ToolResultCache
 
 # ---------------------------------------------------------------------------
 # Constants & prompts

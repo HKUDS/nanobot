@@ -10,7 +10,7 @@ Skill discovery is handled by :class:`~nanobot.agent.skills.SkillsLoader`,
 which scans both built-in skills (this package) and user workspace skills.
 
 Optionally, a skill directory may include a ``tools.py`` module that defines
-custom :class:`~nanobot.agent.tools.base.Tool` subclasses.  These are
+custom :class:`~nanobot.tools.base.Tool` subclasses.  These are
 auto-registered when the skill is loaded.
 
 See ``nanobot/skills/weather/`` for a minimal reference implementation.

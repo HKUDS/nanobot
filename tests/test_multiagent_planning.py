@@ -448,7 +448,7 @@ class TestCycleDetectionInMultiAgent:
         token = _delegation_ancestry.set(("code",))
         try:
             # Attempting to delegate to "code" again should raise _CycleError
-            from nanobot.agent.tools.delegate import _CycleError
+            from nanobot.tools.builtin.delegate import _CycleError
 
             with pytest.raises(_CycleError, match="cycle"):
                 await loop._dispatcher.dispatch("code", "Write more code", None)

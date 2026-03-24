@@ -13,10 +13,10 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.observability import tool_span
-from nanobot.agent.tool_executor import ToolExecutor
-from nanobot.agent.tools.base import ToolResult
-from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider
+from nanobot.tools.base import ToolResult
+from nanobot.tools.executor import ToolExecutor
+from nanobot.tools.registry import ToolRegistry
 
 # Compress the message list when it exceeds this threshold to prevent unbounded growth.
 # Keeps system-role messages + the most recent exchanges.

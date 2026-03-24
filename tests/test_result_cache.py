@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from nanobot.agent.tools.base import ToolResult
-from nanobot.agent.tools.excel import ExcelFindTool, ExcelGetRowsTool
-from nanobot.agent.tools.result_cache import (
+from nanobot.tools.base import ToolResult
+from nanobot.tools.builtin.excel import ExcelFindTool, ExcelGetRowsTool
+from nanobot.tools.result_cache import (
     CacheGetSliceTool,
     ToolResultCache,
     _heuristic_summary,
@@ -447,8 +447,8 @@ class TestRegistryCacheIntegration:
     """Test that ToolRegistry uses the cache for dedup."""
 
     async def test_duplicate_call_returns_cached(self, tmp_path: Path):
-        from nanobot.agent.tools.base import Tool
-        from nanobot.agent.tools.registry import ToolRegistry
+        from nanobot.tools.base import Tool
+        from nanobot.tools.registry import ToolRegistry
 
         call_count = 0
 
@@ -486,8 +486,8 @@ class TestRegistryCacheIntegration:
         assert call_count == 0  # Tool was NOT executed — cache hit
 
     async def test_cache_miss_executes_and_caches(self, tmp_path: Path):
-        from nanobot.agent.tools.base import Tool
-        from nanobot.agent.tools.registry import ToolRegistry
+        from nanobot.tools.base import Tool
+        from nanobot.tools.registry import ToolRegistry
 
         class BigTool(Tool):
             readonly = True
@@ -519,8 +519,8 @@ class TestRegistryCacheIntegration:
         assert result.metadata.get("cache_key") is not None
 
     async def test_small_result_not_cached(self, tmp_path: Path):
-        from nanobot.agent.tools.base import Tool
-        from nanobot.agent.tools.registry import ToolRegistry
+        from nanobot.tools.base import Tool
+        from nanobot.tools.registry import ToolRegistry
 
         class SmallTool(Tool):
             readonly = True

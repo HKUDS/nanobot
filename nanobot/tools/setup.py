@@ -11,37 +11,37 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from nanobot.agent.scratchpad import Scratchpad
-from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool
-from nanobot.agent.tools.email import CheckEmailTool
-from nanobot.agent.tools.excel import (
+from nanobot.tools.builtin.cron import CronTool
+from nanobot.tools.builtin.delegate import DelegateParallelTool, DelegateTool
+from nanobot.tools.builtin.email import CheckEmailTool
+from nanobot.tools.builtin.excel import (
     DescribeDataTool,
     ExcelFindTool,
     ExcelGetRowsTool,
     QueryDataTool,
     ReadSpreadsheetTool,
 )
-from nanobot.agent.tools.feedback import FeedbackTool
-from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
-from nanobot.agent.tools.message import MessageTool
-from nanobot.agent.tools.mission import (
+from nanobot.tools.builtin.feedback import FeedbackTool
+from nanobot.tools.builtin.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.tools.builtin.message import MessageTool
+from nanobot.tools.builtin.mission import (
     MissionCancelTool,
     MissionListTool,
     MissionStartTool,
     MissionStatusTool,
 )
-from nanobot.agent.tools.powerpoint import AnalyzePptxTool, PptxGetSlideTool, ReadPptxTool
-from nanobot.agent.tools.result_cache import CacheGetSliceTool, ToolResultCache
-from nanobot.agent.tools.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
-from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+from nanobot.tools.builtin.powerpoint import AnalyzePptxTool, PptxGetSlideTool, ReadPptxTool
+from nanobot.tools.builtin.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
+from nanobot.tools.builtin.shell import ExecTool
+from nanobot.tools.builtin.web import WebFetchTool, WebSearchTool
+from nanobot.tools.result_cache import CacheGetSliceTool, ToolResultCache
 
 if TYPE_CHECKING:
-    from nanobot.agent.capability import CapabilityRegistry
     from nanobot.agent.mission import MissionManager
     from nanobot.agent.skills import SkillsLoader
     from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
     from nanobot.cron.service import CronService
+    from nanobot.tools.capability import CapabilityRegistry
 
 
 def register_default_tools(  # noqa: PLR0913

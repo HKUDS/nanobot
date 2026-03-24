@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
 
-from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.tools.base import Tool, ToolResult
 
 
 class FeedbackTool(Tool):

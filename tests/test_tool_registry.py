@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.errors import ToolExecutionError
+from nanobot.tools.base import Tool, ToolResult
+from nanobot.tools.registry import ToolRegistry
 
 
 class _OkTool(Tool):

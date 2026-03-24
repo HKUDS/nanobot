@@ -19,8 +19,8 @@ import pytest
 
 from nanobot.agent.delegation import DelegationConfig, DelegationDispatcher
 from nanobot.agent.registry import AgentRegistry
-from nanobot.agent.tools.delegate import _CycleError
 from nanobot.config.schema import AgentRoleConfig
+from nanobot.tools.builtin.delegate import _CycleError
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -368,7 +368,7 @@ class TestMaxDelegationsEnforcement:
             return_value=("result text", ["read_file"])
         )
 
-        from nanobot.agent.tools.delegate import DelegationResult
+        from nanobot.tools.builtin.delegate import DelegationResult
 
         result = await dispatcher.dispatch("", "search for info", None)
         assert isinstance(result, DelegationResult)

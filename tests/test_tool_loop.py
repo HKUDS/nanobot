@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from nanobot.agent.tool_loop import run_tool_loop
-from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.tools.base import Tool, ToolResult
+from nanobot.tools.registry import ToolRegistry
+from nanobot.tools.tool_loop import run_tool_loop
 
 
 class _DummyProvider:
