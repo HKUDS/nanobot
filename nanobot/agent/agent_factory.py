@@ -59,6 +59,7 @@ class _ToolBuildResult:
     capabilities: CapabilityRegistry
     result_cache: ToolResultCache
     missions: MissionManager
+    delegation_tools: dict
 
 
 def _build_rollout_overrides(config: AgentConfig) -> dict:
@@ -120,7 +121,7 @@ def _build_tools(
     from nanobot.tools.executor import ToolExecutor
     from nanobot.tools.registry import ToolRegistry as _ToolRegistry
     from nanobot.tools.result_cache import ToolResultCache
-    from nanobot.tools.setup import register_default_tools
+    from nanobot.tools.setup import build_delegation_tools, register_default_tools
 
     if tool_registry is not None:
         _tool_registry = tool_registry
@@ -139,6 +140,12 @@ def _build_tools(
         summary_model=config.tool_summary_model or None,
     )
     context.set_unavailable_tools_fn(capabilities.get_unavailable_summary)
+    _delegation_tools = build_delegation_tools(
+        workspace=workspace,
+        restrict_to_workspace=config.restrict_to_workspace,
+        exec_config=exec_config,
+        brave_api_key=brave_api_key,
+    )
     missions = MissionManager(
         provider=provider,
         workspace=workspace,
@@ -152,6 +159,7 @@ def _build_tools(
         brave_api_key=brave_api_key,
         exec_config=exec_config,
         restrict_to_workspace=config.restrict_to_workspace,
+        delegation_tools=_delegation_tools,
     )
     if tool_registry is None:
         register_default_tools(
@@ -178,6 +186,7 @@ def _build_tools(
         capabilities=capabilities,
         result_cache=result_cache,
         missions=missions,
+        delegation_tools=_delegation_tools,
     )
 
 
@@ -338,6 +347,7 @@ def build_agent(
         provider=provider,
         tools=_tool_build.tools,
         max_delegation_depth=config.max_delegation_depth,
+        delegation_tools=_tool_build.delegation_tools,
     )
 
     # 9. Construct DelegationAdvisor

@@ -459,8 +459,14 @@ class TestDelegationIdUniqueness:
 class TestShellModeForwarding:
     def test_exec_tool_receives_shell_mode(self, tmp_path: Path):
         """Dispatcher with exec_config shell_mode='allowlist' creates ExecTool accordingly."""
+        from nanobot.tools.setup import build_delegation_tools
+
         exec_cfg = ExecToolConfig(timeout=30, shell_mode="allowlist")
-        d = _make_dispatcher(tmp_path, exec_config=exec_cfg)
+        tools = build_delegation_tools(
+            workspace=tmp_path,
+            exec_config=exec_cfg,
+        )
+        d = _make_dispatcher(tmp_path, exec_config=exec_cfg, delegation_tools=tools)
 
         exec_tool = d._cached_tools.get("exec")
         assert exec_tool is not None, "ExecTool should be in cached tools"
@@ -468,8 +474,14 @@ class TestShellModeForwarding:
 
     def test_exec_tool_default_denylist(self, tmp_path: Path):
         """Default ExecToolConfig uses denylist mode."""
+        from nanobot.tools.setup import build_delegation_tools
+
         exec_cfg = ExecToolConfig()
-        d = _make_dispatcher(tmp_path, exec_config=exec_cfg)
+        tools = build_delegation_tools(
+            workspace=tmp_path,
+            exec_config=exec_cfg,
+        )
+        d = _make_dispatcher(tmp_path, exec_config=exec_cfg, delegation_tools=tools)
 
         exec_tool = d._cached_tools.get("exec")
         assert exec_tool is not None

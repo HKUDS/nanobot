@@ -47,14 +47,6 @@ from nanobot.tools.builtin.delegate import (
     DelegationResult,
     _CycleError,
 )
-from nanobot.tools.builtin.filesystem import (
-    EditFileTool,
-    ListDirTool,
-    ReadFileTool,
-    WriteFileTool,
-)
-from nanobot.tools.builtin.shell import ExecTool
-from nanobot.tools.builtin.web import WebFetchTool, WebSearchTool
 from nanobot.tools.registry import ToolRegistry
 from nanobot.tools.tool_loop import run_tool_loop
 
@@ -120,6 +112,7 @@ class DelegationDispatcher:
         mcp_tools: list[Tool] | None = None,
         on_progress: ProgressCallback | None = None,
         max_delegation_depth: int = 8,
+        delegation_tools: dict[str, Tool] | None = None,
     ) -> None:
         """Initialise the delegation dispatcher.
 
@@ -186,24 +179,8 @@ class DelegationDispatcher:
 
         # Pre-built stateless tool instances — shared across delegations to avoid
         # per-call object construction overhead (LAN-138).
-        _allowed_dir = self.workspace if self.restrict_to_workspace else None
-        _tools: list[Tool] = [
-            ReadFileTool(workspace=self.workspace, allowed_dir=_allowed_dir),
-            ListDirTool(workspace=self.workspace, allowed_dir=_allowed_dir),
-            WriteFileTool(workspace=self.workspace, allowed_dir=_allowed_dir),
-            EditFileTool(workspace=self.workspace, allowed_dir=_allowed_dir),
-        ]
-        if self.exec_config is not None:
-            _tools.append(
-                ExecTool(
-                    working_dir=str(self.workspace),
-                    timeout=self.exec_config.timeout,
-                    restrict_to_workspace=self.restrict_to_workspace,
-                    shell_mode=self.exec_config.shell_mode,
-                )
-            )
-        _tools.extend([WebSearchTool(api_key=self.brave_api_key), WebFetchTool()])
-        self._cached_tools: dict[str, Tool] = {t.name: t for t in _tools}
+        # Injected by the composition root via build_delegation_tools().
+        self._cached_tools: dict[str, Tool] = delegation_tools or {}
 
     # ------------------------------------------------------------------
     # Wiring

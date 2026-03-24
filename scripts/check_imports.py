@@ -77,6 +77,11 @@ ALLOWLIST: set[tuple[str, str]] = {
     ("nanobot/tools/capability.py", "nanobot.coordination.registry"),
     # tools/builtin/mission.py imports MissionStatus enum (data object, not service).
     ("nanobot/tools/builtin/mission.py", "nanobot.coordination.mission"),
+    # coordination/delegation.py imports DelegateTool, DelegationResult, _CycleError —
+    # shared contract types (not instantiation of domain tools). DelegateTool is
+    # instantiated for child delegates, but it's a coordination primitive, not a
+    # domain tool like ReadFileTool.
+    ("nanobot/coordination/delegation.py", "nanobot.tools.builtin.delegate"),
 }
 
 

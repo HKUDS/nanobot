@@ -200,3 +200,43 @@ def register_default_tools(  # noqa: PLR0913
     describe_tool = DescribeDataTool(cache=result_cache)
     if _should_register(describe_tool.name):
         capabilities.register_tool(describe_tool)
+
+
+def build_delegation_tools(
+    *,
+    workspace: Path,
+    restrict_to_workspace: bool = True,
+    exec_config: ExecToolConfig | None = None,
+    brave_api_key: str | None = None,
+) -> dict[str, Any]:
+    """Build the restricted tool set used by delegated agents and missions.
+
+    Returns a dict mapping tool name to Tool instance. This factory keeps
+    concrete tool imports inside ``tools/`` — coordination modules receive
+    the built tools rather than importing and constructing them directly.
+    """
+    from nanobot.tools.base import Tool
+
+    allowed_dir = workspace if restrict_to_workspace else None
+    tools: list[Tool] = [
+        ReadFileTool(workspace=workspace, allowed_dir=allowed_dir),
+        ListDirTool(workspace=workspace, allowed_dir=allowed_dir),
+        WriteFileTool(workspace=workspace, allowed_dir=allowed_dir),
+        EditFileTool(workspace=workspace, allowed_dir=allowed_dir),
+    ]
+    if exec_config is not None:
+        tools.append(
+            ExecTool(
+                working_dir=str(workspace),
+                timeout=exec_config.timeout,
+                restrict_to_workspace=restrict_to_workspace,
+                shell_mode=getattr(exec_config, "shell_mode", None),
+            )
+        )
+    tools.extend(
+        [
+            WebSearchTool(api_key=brave_api_key),
+            WebFetchTool(),
+        ]
+    )
+    return {t.name: t for t in tools}

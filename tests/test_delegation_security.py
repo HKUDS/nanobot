@@ -48,6 +48,15 @@ def _make_dispatcher(tmp_path: Path, **overrides: Any) -> DelegationDispatcher:
     wiring_overrides = {k: v for k, v in overrides.items() if k not in _CONFIG_FIELDS}
     config_defaults.update(cfg_overrides)
     config = DelegationConfig(**config_defaults)  # type: ignore[arg-type]
+    if "delegation_tools" not in wiring_overrides:
+        from nanobot.tools.setup import build_delegation_tools
+
+        wiring_overrides["delegation_tools"] = build_delegation_tools(
+            workspace=config.workspace,
+            restrict_to_workspace=config.restrict_to_workspace,
+            exec_config=config.exec_config,
+            brave_api_key=config.brave_api_key,
+        )
     return DelegationDispatcher(
         config=config,
         provider=wiring_overrides.pop("provider", None),

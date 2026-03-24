@@ -34,9 +34,6 @@ from nanobot.observability.langfuse import (
     span as langfuse_span,
 )
 from nanobot.observability.tracing import TraceContext
-from nanobot.tools.builtin.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
-from nanobot.tools.builtin.shell import ExecTool
-from nanobot.tools.builtin.web import WebFetchTool, WebSearchTool
 from nanobot.tools.registry import ToolRegistry
 from nanobot.tools.tool_loop import run_tool_loop
 
@@ -103,6 +100,7 @@ class MissionManager:
         brave_api_key: str | None = None,
         exec_config: ExecToolConfig | None = None,
         restrict_to_workspace: bool = False,
+        delegation_tools: dict[str, Any] | None = None,
     ) -> None:
         from nanobot.config.schema import ExecToolConfig as _Etc
 
@@ -118,6 +116,7 @@ class MissionManager:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or _Etc()
         self.restrict_to_workspace = restrict_to_workspace
+        self._delegation_tools: dict[str, Any] = delegation_tools or {}
 
         # Set lazily by AgentLoop when coordinator is available
         self.coordinator: Coordinator | None = None
@@ -356,19 +355,10 @@ class MissionManager:
     def _build_tool_registry(self, role: AgentRoleConfig) -> ToolRegistry:
         """Build an isolated tool set for the mission, filtered by role."""
         tools = ToolRegistry()
-        allowed_dir = self.workspace if self.restrict_to_workspace else None
 
-        for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
-            tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
-        tools.register(
-            ExecTool(
-                working_dir=str(self.workspace),
-                timeout=self.exec_config.timeout,
-                restrict_to_workspace=self.restrict_to_workspace,
-            )
-        )
-        tools.register(WebSearchTool(api_key=self.brave_api_key))
-        tools.register(WebFetchTool())
+        # Register pre-built delegation tools (injected by composition root).
+        for tool in self._delegation_tools.values():
+            tools.register(tool)
 
         # MCP tools (shared instances, injected by AgentLoop)
         for tool in self.mcp_tools:
