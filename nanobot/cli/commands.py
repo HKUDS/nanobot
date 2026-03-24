@@ -261,7 +261,7 @@ def main(
 # ============================================================================
 
 
-@app.command()
+@app.command(help='Initialize nanobot configuration and workspace. Example: nanobot onboard')
 def onboard(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
@@ -459,7 +459,7 @@ def _print_deprecated_memory_window_notice(config: Config) -> None:
 # ============================================================================
 
 
-@app.command()
+@app.command(help='Start the nanobot gateway. Example: nanobot gateway')
 def gateway(
     port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
@@ -647,6 +647,34 @@ def gateway(
     asyncio.run(run())
 
 
+@app.command("http")
+def http_api(
+    port: int | None = typer.Option(None, "--port", "-p", help="HTTP API port"),
+    host: str | None = typer.Option(None, "--host", help="HTTP API host"),
+    token: str | None = typer.Option(None, "--token", help="Bearer token required for API requests"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Start a local HTTP chat API. Example: nanobot http --token YOUR_TOKEN."""
+    from nanobot.http_api.server import run_http_api
+
+    config = _load_runtime_config(config, workspace)
+    _print_deprecated_memory_window_notice(config)
+    sync_workspace_templates(config.workspace_path)
+    http_cfg = config.gateway.http_api
+    host = host or http_cfg.host
+    port = port or http_cfg.port
+    token = token if token is not None else (http_cfg.token or None)
+
+    console.print(f"{__logo__} Starting nanobot HTTP API on http://{host}:{port} ...")
+    if token:
+        console.print("[green]✓[/green] Bearer token auth enabled")
+    else:
+        console.print("[yellow]Warning: No bearer token configured[/yellow]")
+
+    asyncio.run(run_http_api(config=config, host=host, port=port, token=token))
+
+
 
 
 # ============================================================================
@@ -654,7 +682,7 @@ def gateway(
 # ============================================================================
 
 
-@app.command()
+@app.command(help='Interact with the agent directly. Example: nanobot agent -m "Hello!"')
 def agent(
     message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
@@ -841,7 +869,7 @@ def agent(
 # ============================================================================
 
 
-channels_app = typer.Typer(help="Manage channels")
+channels_app = typer.Typer(help="Manage channels. Example: nanobot channels status")
 app.add_typer(channels_app, name="channels")
 
 
@@ -971,7 +999,7 @@ def channels_login():
 # Plugin Commands
 # ============================================================================
 
-plugins_app = typer.Typer(help="Manage channel plugins")
+plugins_app = typer.Typer(help="Manage channel plugins. Example: nanobot plugins list")
 app.add_typer(plugins_app, name="plugins")
 
 
@@ -1014,7 +1042,7 @@ def plugins_list():
 # ============================================================================
 
 
-@app.command()
+@app.command(help="Show nanobot status. Example: nanobot status")
 def status():
     """Show nanobot status."""
     from nanobot.config.loader import get_config_path, load_config
@@ -1055,7 +1083,7 @@ def status():
 # OAuth Login
 # ============================================================================
 
-provider_app = typer.Typer(help="Manage providers")
+provider_app = typer.Typer(help="Manage providers. Example: nanobot provider login openai-codex")
 app.add_typer(provider_app, name="provider")
 
 

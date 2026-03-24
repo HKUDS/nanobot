@@ -19,6 +19,7 @@ classifiers = [
 
 dependencies = [
     "typer>=0.20.0,<1.0.0",
+    "aiohttp>=3.11.0,<4.0.0",
     "litellm>=1.82.1,<2.0.0",
     "pydantic>=2.12.0,<3.0.0",
     "pydantic-settings>=2.12.0,<3.0.0",

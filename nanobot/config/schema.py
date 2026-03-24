@@ -96,12 +96,21 @@ class HeartbeatConfig(Base):
     interval_s: int = 30 * 60  # 30 minutes
 
 
+class HttpApiConfig(Base):
+    """HTTP API configuration."""
+
+    host: str = "127.0.0.1"
+    port: int = 18789
+    token: str = ""
+
+
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
     host: str = "0.0.0.0"
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    http_api: HttpApiConfig = Field(default_factory=HttpApiConfig)
 
 
 class WebSearchConfig(Base):

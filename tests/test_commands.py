@@ -596,3 +596,120 @@ def test_gateway_cli_port_overrides_configured_port(monkeypatch, tmp_path: Path)
 
     assert isinstance(result.exception, _StopGateway)
     assert "port 18792" in result.stdout
+
+
+def test_http_command_uses_default_localhost_and_port(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr(
+        "nanobot.cli.commands.sync_workspace_templates",
+        lambda path: seen.__setitem__("workspace", path),
+    )
+
+    def _fake_run_http_api(*, config: Config, host: str, port: int, token: str | None) -> None:
+        seen["config"] = config
+        seen["host"] = host
+        seen["port"] = port
+        seen["token"] = token
+        raise _StopGateway("stop")
+
+    monkeypatch.setattr("nanobot.http_api.server.run_http_api", _fake_run_http_api)
+
+    result = runner.invoke(app, ["http", "--config", str(config_file)])
+
+    assert isinstance(result.exception, _StopGateway)
+    assert seen["workspace"] == config.workspace_path
+    assert seen["host"] == "127.0.0.1"
+    assert seen["port"] == 18789
+    assert seen["token"] is None
+
+
+def test_http_command_passes_explicit_token_host_and_port(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+
+    def _fake_run_http_api(*, config: Config, host: str, port: int, token: str | None) -> None:
+        seen["host"] = host
+        seen["port"] = port
+        seen["token"] = token
+        raise _StopGateway("stop")
+
+    monkeypatch.setattr("nanobot.http_api.server.run_http_api", _fake_run_http_api)
+
+    result = runner.invoke(
+        app,
+        ["http", "--config", str(config_file), "--host", "0.0.0.0", "--port", "19000", "--token", "secret"],
+    )
+
+    assert isinstance(result.exception, _StopGateway)
+    assert seen["host"] == "0.0.0.0"
+    assert seen["port"] == 19000
+    assert seen["token"] == "secret"
+
+
+def test_http_command_uses_configured_http_api_defaults(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config.model_validate(
+        {
+            "gateway": {
+                "httpApi": {
+                    "host": "127.0.0.2",
+                    "port": 18888,
+                    "token": "from-config",
+                }
+            }
+        }
+    )
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+
+    def _fake_run_http_api(*, config: Config, host: str, port: int, token: str | None) -> None:
+        seen["host"] = host
+        seen["port"] = port
+        seen["token"] = token
+        raise _StopGateway("stop")
+
+    monkeypatch.setattr("nanobot.http_api.server.run_http_api", _fake_run_http_api)
+
+    result = runner.invoke(app, ["http", "--config", str(config_file)])
+
+    assert isinstance(result.exception, _StopGateway)
+    assert seen["host"] == "127.0.0.2"
+    assert seen["port"] == 18888
+    assert seen["token"] == "from-config"
+
+
+def test_root_help_includes_examples_for_top_level_commands():
+    result = runner.invoke(app, ["--help"])
+
+    stripped_output = _strip_ansi(result.stdout)
+
+    assert "Initialize nanobot configuration and workspace. Example: nanobot onboard" in stripped_output
+    assert "Start the nanobot gateway. Example: nanobot gateway" in stripped_output
+    assert "Start a local HTTP chat API. Example: nanobot http --token YOUR_TOKEN" in stripped_output
+    assert 'Interact with the agent directly. Example: nanobot agent -m "Hello!"' in stripped_output
+    assert "Show nanobot status. Example: nanobot status" in stripped_output
+    assert "Manage channels. Example: nanobot channels status" in stripped_output
+    assert "Manage channel plugins. Example: nanobot plugins list" in stripped_output
+    assert "Manage providers. Example: nanobot provider login openai-codex" in stripped_output
