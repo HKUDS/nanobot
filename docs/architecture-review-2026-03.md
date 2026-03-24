@@ -1,7 +1,7 @@
 # Architectural Review: Nanobot Project Structure
 
 > Date: 2026-03-23
-> Status: Reference document — to be revisited after `loop.py` decomposition refactor
+> Status: Completed — all 7 PRs merged — to be revisited after `loop.py` decomposition refactor
 
 ---
 

@@ -12,11 +12,11 @@ Accepted — ToolExecutor extracted (2026-03-12)
 
 Tools are central to the agent's ability to act. The current tool system has:
 
-- **`Tool` ABC** (`nanobot/agent/tools/base.py`) with `name`, `description`, `parameters`
+- **`Tool` ABC** (`nanobot/tools/base.py`) with `name`, `description`, `parameters`
   (JSON Schema), `readonly` flag, and `async execute(**kwargs) -> str | ToolResult`.
 - **`ToolResult`** dataclass with `ok()`/`fail()` factories, `output`, `success`,
   `error`, `truncated`, `metadata`.
-- **`ToolRegistry`** (`nanobot/agent/tools/registry.py`) for registration, validation,
+- **`ToolRegistry`** (`nanobot/tools/registry.py`) for registration, validation,
   and parallel/sequential execution.
 
 This contract is already well-defined. The gap is that tool *execution orchestration*

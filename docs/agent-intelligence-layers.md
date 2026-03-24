@@ -18,7 +18,7 @@
 
 **ADR**: [ADR-009](adr/ADR-009-capability-registry.md)
 
-`CapabilityRegistry` (`nanobot/agent/capability.py`) composes `ToolRegistry`,
+`CapabilityRegistry` (`nanobot/tools/capability.py`) composes `ToolRegistry`,
 `SkillsLoader`, and `AgentRegistry` behind a single facade that tracks availability,
 health, and metadata. The LLM only sees capabilities that are configured, installed,
 and healthy.
@@ -38,14 +38,14 @@ LLM intent classification pass, and a pre-planning routing step before every LLM
 
 **What was built instead**: The same goal was achieved with less complexity.
 
-- **Skill activation** (`nanobot/agent/skills.py` — `detect_relevant_skills()`): Two-pass
+- **Skill activation** (`nanobot/context/skills.py` — `detect_relevant_skills()`): Two-pass
   matching — exact trigger phrases first, then stemmed description-keyword scoring with
   `max(precision, recall)` to avoid bias against long descriptions. Activated before every
   LLM call and loaded into the system prompt.
-- **Role classification** (`nanobot/agent/coordinator.py` — `Coordinator.classify()`):
+- **Role classification** (`nanobot/coordination/coordinator.py` — `Coordinator.classify()`):
   LLM-based routing to specialised roles with multi-agent orchestration detection
   (`needs_orchestration` / `relevant_roles` ≥ 2 → auto-route to PM role).
-- **Delegation validation** (Phase D, `nanobot/agent/tools/delegate.py`): Both
+- **Delegation validation** (Phase D, `nanobot/tools/builtin/delegate.py`): Both
   `DelegateTool` and `DelegateParallelTool` validate `target_role` upfront against
   `CapabilityRegistry.role_names()` and return a structured error listing available roles.
 

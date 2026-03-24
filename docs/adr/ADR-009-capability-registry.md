@@ -13,13 +13,13 @@ Accepted (Phase A + B + C + D + E implemented)
 The agent framework presents tools, skills, and delegation roles to the LLM through
 three independent registries:
 
-- **`ToolRegistry`** (`agent/tools/registry.py`): Simple `dict[str, Tool]` with no
+- **`ToolRegistry`** (`tools/registry.py`): Simple `dict[str, Tool]` with no
   availability checks. `get_definitions()` returns all registered tools to the LLM
   regardless of configuration state (e.g., missing API keys).
-- **`SkillsLoader`** (`agent/skills.py`): Checks binary/env requirements via
+- **`SkillsLoader`** (`context/skills.py`): Checks binary/env requirements via
   `_check_requirements()`, but still includes unavailable skills in the summary
   (with an `available="false"` XML flag the LLM frequently ignores).
-- **`AgentRegistry`** (`agent/registry.py`): Simple `dict[str, AgentRoleConfig]`.
+- **`AgentRegistry`** (`coordination/registry.py`): Simple `dict[str, AgentRoleConfig]`.
   `route_direct()` returns `None` for unknown roles, silently falling back to
   LLM classification instead of returning a clear error.
 
