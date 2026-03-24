@@ -25,13 +25,13 @@ from loguru import logger
 
 from nanobot.agent.callbacks import ProgressCallback
 from nanobot.agent.consolidation import ConsolidationOrchestrator
-from nanobot.agent.context import ContextBuilder
 from nanobot.agent.turn_types import Orchestrator, TurnState
 from nanobot.agent.verifier import AnswerVerifier
 from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig
+from nanobot.context.context import ContextBuilder
 from nanobot.coordination.role_switching import TurnRoleManager
 from nanobot.observability.bus_progress import make_bus_progress
 from nanobot.observability.langfuse import update_current_span

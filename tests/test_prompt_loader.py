@@ -1,10 +1,10 @@
-"""Tests for nanobot.agent.prompt_loader — template loading and caching."""
+"""Tests for nanobot.context.prompt_loader — template loading and caching."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import nanobot.agent.prompt_loader as _prompt_loader_mod
+import nanobot.context.prompt_loader as _prompt_loader_mod
 
 PromptLoader = _prompt_loader_mod.PromptLoader
 

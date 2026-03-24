@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from nanobot.agent.prompt_loader import prompts
+from nanobot.context.prompt_loader import prompts
 
 from .constants import _SAVE_EVENTS_TOOL
 

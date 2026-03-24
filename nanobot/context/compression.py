@@ -20,7 +20,7 @@ from typing import Any, Protocol
 
 from loguru import logger
 
-from nanobot.agent.prompt_loader import prompts
+from nanobot.context.prompt_loader import prompts
 from nanobot.observability.langfuse import span as langfuse_span
 from nanobot.observability.tracing import bind_trace
 

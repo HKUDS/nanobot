@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.prompt_loader import PromptLoader
+from nanobot.context.prompt_loader import PromptLoader
 
 # ---------------------------------------------------------------------------
 # Expected prompts and their required key phrases

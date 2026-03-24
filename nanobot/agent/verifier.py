@@ -23,8 +23,8 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.streaming import strip_think
+from nanobot.context.prompt_loader import prompts
 from nanobot.observability.langfuse import score_current_trace
 from nanobot.observability.langfuse import span as langfuse_span
 

@@ -616,7 +616,7 @@ Add to `tests/test_token_reduction.py`:
 
 def test_skills_summary_is_compact(tmp_path, monkeypatch):
     """Skills summary must use one line per skill, not multi-line XML."""
-    from nanobot.agent.skills import SkillsLoader
+    from nanobot.context.skills import SkillsLoader
 
     loader = SkillsLoader(workspace=tmp_path)
 

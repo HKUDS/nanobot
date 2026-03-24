@@ -30,8 +30,8 @@ from nanobot.agent.callbacks import (
     DelegateStartEvent,
     ProgressCallback,
 )
-from nanobot.agent.prompt_loader import prompts
 from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
+from nanobot.context.prompt_loader import prompts
 from nanobot.coordination.delegation_contract import (
     _cap_scratchpad_for_injection,
     build_delegation_contract,

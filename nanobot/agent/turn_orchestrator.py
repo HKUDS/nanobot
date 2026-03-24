@@ -28,14 +28,14 @@ from nanobot.agent.callbacks import (
     ToolCallEvent,
     ToolResultEvent,
 )
-from nanobot.agent.compression import estimate_messages_tokens, summarize_and_compress
-from nanobot.agent.context import ContextBuilder
 from nanobot.agent.failure import FailureClass, ToolCallTracker, _build_failure_prompt
-from nanobot.agent.prompt_loader import PromptLoader
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
 from nanobot.agent.turn_types import TurnResult as TurnResult  # re-export
 from nanobot.agent.turn_types import TurnState as TurnState  # re-export
 from nanobot.agent.verifier import AnswerVerifier
+from nanobot.context.compression import estimate_messages_tokens, summarize_and_compress
+from nanobot.context.context import ContextBuilder
+from nanobot.context.prompt_loader import PromptLoader
 from nanobot.coordination.delegation import DelegationDispatcher
 from nanobot.coordination.task_types import has_parallel_structure
 from nanobot.observability.tracing import bind_trace

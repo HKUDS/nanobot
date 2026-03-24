@@ -10,7 +10,7 @@ sent to the LLM on each iteration.  Key responsibilities:
   context fits within the model's context window.
 
 Compression logic (token truncation, tool-result dropping, LLM-based
-summarisation) lives in :mod:`nanobot.agent.compression`.
+summarisation) lives in :mod:`nanobot.context.compression`.
 """
 
 from __future__ import annotations
@@ -26,8 +26,8 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
-from nanobot.agent.prompt_loader import prompts
-from nanobot.agent.skills import SkillsLoader
+from nanobot.context.prompt_loader import prompts
+from nanobot.context.skills import SkillsLoader
 from nanobot.errors import (
     MemoryRetrievalError,
 )

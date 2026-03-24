@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from nanobot.agent.consolidation import ConsolidationOrchestrator
-    from nanobot.agent.context import ContextBuilder
     from nanobot.agent.message_processor import MessageProcessor
     from nanobot.agent.streaming import StreamingLLMCaller
     from nanobot.agent.turn_orchestrator import TurnOrchestrator
@@ -28,6 +27,7 @@ if TYPE_CHECKING:
         ExecToolConfig,
         RoutingConfig,
     )
+    from nanobot.context.context import ContextBuilder
     from nanobot.coordination.delegation import DelegationDispatcher
     from nanobot.coordination.delegation_advisor import DelegationAdvisor
     from nanobot.coordination.mission import MissionManager

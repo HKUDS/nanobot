@@ -45,9 +45,12 @@ nanobot/
 │   ├── streaming.py     # Streaming LLM call with think-tag stripping
 │   ├── verifier.py      # Answer verification via LLM + grounding confidence
 │   ├── failure.py       # Failure classification + tool-call loop detection
-│   ├── context.py       # Prompt assembly + token budgeting
 │   ├── consolidation.py # Memory consolidation orchestration
-│   ├── agent_factory.py # Composition root: build_agent()
+│   └── agent_factory.py # Composition root: build_agent()
+├── context/              # Prompt assembly and skill discovery
+│   ├── context.py       # Prompt assembly + token budgeting
+│   ├── compression.py   # Context compression (truncate → summarize)
+│   ├── prompt_loader.py # Prompt template loading and caching
 │   └── skills.py        # Skill discovery and loading
 ├── observability/        # Cross-cutting instrumentation
 │   ├── langfuse.py      # Langfuse OTEL tracing: init, shutdown, spans, scoring

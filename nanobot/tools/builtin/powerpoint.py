@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from nanobot.agent.prompt_loader import prompts
+from nanobot.context.prompt_loader import prompts
 from nanobot.tools.base import Tool, ToolResult
 from nanobot.tools.builtin.filesystem import _resolve_path
 

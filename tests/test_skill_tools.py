@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.skills import SkillsLoader
+from nanobot.context.skills import SkillsLoader
 from nanobot.tools.base import ToolResult
 
 # ---------------------------------------------------------------------------

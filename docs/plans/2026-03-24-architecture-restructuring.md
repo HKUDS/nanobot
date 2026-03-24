@@ -146,7 +146,7 @@ nanobot/
 | **Files moved** | 28 (entire memory package) |
 | **Import rewrites** | ~90 across agent core (6), cli/memory.py (~12), eval (2), scripts (2), tests (~68) |
 | **Internal changes** | None — all 28 memory modules use relative imports |
-| **Cross-package imports** | Memory imports `nanobot.agent.prompt_loader` and `nanobot.observability.tracing` — these become cross-package; direction is correct (memory → agent utilities) |
+| **Cross-package imports** | Memory imports `nanobot.context.prompt_loader` and `nanobot.observability.tracing` — these become cross-package; direction is correct (memory → agent utilities) |
 | **Other changes** | Remove `MemoryStore` from `agent/__init__.py` exports; update `scripts/check_imports.py` boundary rules; update `consolidation.py` import |
 | **Risk** | Low — pure move + rename, no logic changes |
 | **Validation** | `make check` catches any missed imports |

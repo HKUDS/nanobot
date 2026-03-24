@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from nanobot.agent.context import ContextBuilder
+from nanobot.context.context import ContextBuilder
 from nanobot.memory.store import MemoryStore
 
 

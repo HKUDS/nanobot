@@ -11,16 +11,16 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.agent_factory import build_agent
-from nanobot.agent.compression import (
-    compress_context,
-    estimate_messages_tokens,
-)
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.turn_orchestrator import _dynamic_preserve_recent
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.email import EmailChannel
 from nanobot.config.schema import AgentConfig, EmailConfig
+from nanobot.context.compression import (
+    compress_context,
+    estimate_messages_tokens,
+)
 from nanobot.coordination.scratchpad import Scratchpad
 from nanobot.errors import DeliverySkippedError
 from nanobot.providers.base import LLMProvider

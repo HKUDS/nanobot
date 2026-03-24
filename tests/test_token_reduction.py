@@ -127,7 +127,7 @@ def test_read_events_called_for_planning(tmp_path):
 
 def test_identity_memory_block_under_token_limit():
     """The memory instructions in _get_identity() must be ≤60 tokens (~240 chars)."""
-    from nanobot.agent.context import ContextBuilder
+    from nanobot.context.context import ContextBuilder
 
     builder = ContextBuilder.__new__(ContextBuilder)
     builder.workspace = Path("/tmp")
@@ -153,7 +153,7 @@ def test_identity_memory_block_under_token_limit():
 
 def test_skills_summary_is_compact(tmp_path, monkeypatch):
     """Skills summary must use one line per skill, not multi-line XML."""
-    from nanobot.agent.skills import SkillsLoader
+    from nanobot.context.skills import SkillsLoader
 
     loader = SkillsLoader(workspace=tmp_path)
 

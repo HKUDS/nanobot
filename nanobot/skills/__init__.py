@@ -6,7 +6,7 @@ containing metadata (name, description, tools) followed by Markdown
 instructions that are injected into the agent's system prompt when the
 skill is activated.
 
-Skill discovery is handled by :class:`~nanobot.agent.skills.SkillsLoader`,
+Skill discovery is handled by :class:`~nanobot.context.skills.SkillsLoader`,
 which scans both built-in skills (this package) and user workspace skills.
 
 Optionally, a skill directory may include a ``tools.py`` module that defines

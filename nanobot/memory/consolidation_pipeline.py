@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from nanobot.agent.prompt_loader import prompts
+from nanobot.context.prompt_loader import prompts
 from nanobot.observability.tracing import bind_trace
 
 from .constants import _CONSOLIDATE_MEMORY_TOOL

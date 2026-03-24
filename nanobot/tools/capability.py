@@ -21,8 +21,8 @@ from nanobot.tools.base import Tool, ToolResult
 from nanobot.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
-    from nanobot.agent.skills import SkillsLoader
     from nanobot.config.schema import AgentRoleConfig
+    from nanobot.context.skills import SkillsLoader
 
 CapabilityKind = Literal["tool", "skill", "delegate_role"]
 CapabilityHealth = Literal["healthy", "degraded", "unavailable"]
