@@ -6,11 +6,12 @@ import asyncio
 import re
 import time
 import unicodedata
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from loguru import logger
 from pydantic import Field
-from telegram import BotCommand, ReplyParameters, Update
+from telegram import BotCommand, ReactionTypeEmoji, ReplyParameters, Update
 from telegram.error import TimedOut
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
@@ -156,6 +157,14 @@ _SEND_MAX_RETRIES = 3
 _SEND_RETRY_BASE_DELAY = 0.5  # seconds, doubled each retry
 
 
+@dataclass
+class _StreamBuf:
+    """Per-chat streaming accumulator for progressive message editing."""
+    text: str = ""
+    message_id: int | None = None
+    last_edit: float = 0.0
+
+
 class TelegramConfig(Base):
     """Telegram channel configuration."""
 
@@ -164,9 +173,11 @@ class TelegramConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     proxy: str | None = None
     reply_to_message: bool = False
+    react_emoji: str = "👀"
     group_policy: Literal["open", "mention"] = "mention"
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
+    streaming: bool = True
 
 
 class TelegramChannel(BaseChannel):
@@ -188,11 +199,14 @@ class TelegramChannel(BaseChannel):
         BotCommand("btw", "Run an async side task"),
         BotCommand("help", "Show available commands"),
         BotCommand("restart", "Restart the bot"),
+        BotCommand("status", "Show bot status"),
     ]
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
         return TelegramConfig().model_dump(by_alias=True)
+
+    _STREAM_EDIT_INTERVAL = 0.6  # min seconds between edit_message_text calls
 
     def __init__(self, config: Any, bus: MessageBus):
         if isinstance(config, dict):
@@ -207,6 +221,7 @@ class TelegramChannel(BaseChannel):
         self._message_threads: dict[tuple[str, int], int] = {}
         self._bot_user_id: int | None = None
         self._bot_username: str | None = None
+        self._stream_bufs: dict[str, _StreamBuf] = {}  # chat_id -> streaming state
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -268,6 +283,7 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("team", self._forward_command))
         self._app.add_handler(CommandHandler("btw", self._forward_command))
         self._app.add_handler(CommandHandler("restart", self._forward_command))
+        self._app.add_handler(CommandHandler("status", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
 
         # Add message handler for text, photos, voice, documents
@@ -418,14 +434,8 @@ class TelegramChannel(BaseChannel):
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
-            is_progress = msg.metadata.get("_progress", False)
-
             for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
-                # Final response: simulate streaming via draft, then persist
-                if not is_progress:
-                    await self._send_with_streaming(chat_id, chunk, reply_params, thread_kwargs)
-                else:
-                    await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
+                await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
 
     async def _call_with_retry(self, fn, *args, **kwargs):
         """Call an async Telegram API function with retry on pool/network timeout."""
@@ -471,29 +481,67 @@ class TelegramChannel(BaseChannel):
             except Exception as e2:
                 logger.error("Error sending Telegram message: {}", e2)
 
-    async def _send_with_streaming(
-        self,
-        chat_id: int,
-        text: str,
-        reply_params=None,
-        thread_kwargs: dict | None = None,
-    ) -> None:
-        """Simulate streaming via send_message_draft, then persist with send_message."""
-        draft_id = int(time.time() * 1000) % (2**31)
-        try:
-            step = max(len(text) // 8, 40)
-            for i in range(step, len(text), step):
-                await self._app.bot.send_message_draft(
-                    chat_id=chat_id, draft_id=draft_id, text=text[:i],
+    async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
+        """Progressive message editing: send on first delta, edit on subsequent ones."""
+        if not self._app:
+            return
+        meta = metadata or {}
+        int_chat_id = int(chat_id)
+
+        if meta.get("_stream_end"):
+            buf = self._stream_bufs.pop(chat_id, None)
+            if not buf or not buf.message_id or not buf.text:
+                return
+            self._stop_typing(chat_id)
+            try:
+                html = _markdown_to_telegram_html(buf.text)
+                await self._call_with_retry(
+                    self._app.bot.edit_message_text,
+                    chat_id=int_chat_id, message_id=buf.message_id,
+                    text=html, parse_mode="HTML",
                 )
-                await asyncio.sleep(0.04)
-            await self._app.bot.send_message_draft(
-                chat_id=chat_id, draft_id=draft_id, text=text,
-            )
-            await asyncio.sleep(0.15)
-        except Exception:
-            pass
-        await self._send_text(chat_id, text, reply_params, thread_kwargs)
+            except Exception as e:
+                logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
+                try:
+                    await self._call_with_retry(
+                        self._app.bot.edit_message_text,
+                        chat_id=int_chat_id, message_id=buf.message_id,
+                        text=buf.text,
+                    )
+                except Exception:
+                    pass
+            return
+
+        buf = self._stream_bufs.get(chat_id)
+        if buf is None:
+            buf = _StreamBuf()
+            self._stream_bufs[chat_id] = buf
+        buf.text += delta
+
+        if not buf.text.strip():
+            return
+
+        now = time.monotonic()
+        if buf.message_id is None:
+            try:
+                sent = await self._call_with_retry(
+                    self._app.bot.send_message,
+                    chat_id=int_chat_id, text=buf.text,
+                )
+                buf.message_id = sent.message_id
+                buf.last_edit = now
+            except Exception as e:
+                logger.warning("Stream initial send failed: {}", e)
+        elif (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL:
+            try:
+                await self._call_with_retry(
+                    self._app.bot.edit_message_text,
+                    chat_id=int_chat_id, message_id=buf.message_id,
+                    text=buf.text,
+                )
+                buf.last_edit = now
+            except Exception:
+                pass
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
@@ -516,6 +564,7 @@ class TelegramChannel(BaseChannel):
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
             "/restart — Restart the bot\n"
+            "/status — Show bot status\n"
             "/help — Show available commands"
         )
 
@@ -768,6 +817,7 @@ class TelegramChannel(BaseChannel):
                     "session_key": session_key,
                 }
                 self._start_typing(str_chat_id)
+                await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
             buf = self._media_group_buffers[key]
             if content and content != "[empty message]":
                 buf["contents"].append(content)
@@ -778,6 +828,7 @@ class TelegramChannel(BaseChannel):
 
         # Start typing indicator before processing
         self._start_typing(str_chat_id)
+        await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
 
         # Forward to the message bus
         await self._handle_message(
@@ -816,6 +867,19 @@ class TelegramChannel(BaseChannel):
         task = self._typing_tasks.pop(chat_id, None)
         if task and not task.done():
             task.cancel()
+
+    async def _add_reaction(self, chat_id: str, message_id: int, emoji: str) -> None:
+        """Add emoji reaction to a message (best-effort, non-blocking)."""
+        if not self._app or not emoji:
+            return
+        try:
+            await self._app.bot.set_message_reaction(
+                chat_id=int(chat_id),
+                message_id=message_id,
+                reaction=[ReactionTypeEmoji(emoji=emoji)],
+            )
+        except Exception as e:
+            logger.debug("Telegram reaction failed: {}", e)
 
     async def _typing_loop(self, chat_id: str) -> None:
         """Repeatedly send 'typing' action until cancelled."""

@@ -64,6 +64,58 @@ def test_legitimate_tool_pairs_preserved_after_trim():
     assert history[0]["role"] == "user"
 
 
+def test_retain_recent_legal_suffix_keeps_recent_messages():
+    session = Session(key="test:trim")
+    for i in range(10):
+        session.messages.append({"role": "user", "content": f"msg{i}"})
+
+    session.retain_recent_legal_suffix(4)
+
+    assert len(session.messages) == 4
+    assert session.messages[0]["content"] == "msg6"
+    assert session.messages[-1]["content"] == "msg9"
+
+
+def test_retain_recent_legal_suffix_adjusts_last_consolidated():
+    session = Session(key="test:trim-cons")
+    for i in range(10):
+        session.messages.append({"role": "user", "content": f"msg{i}"})
+    session.last_consolidated = 7
+
+    session.retain_recent_legal_suffix(4)
+
+    assert len(session.messages) == 4
+    assert session.last_consolidated == 1
+
+
+def test_retain_recent_legal_suffix_zero_clears_session():
+    session = Session(key="test:trim-zero")
+    for i in range(10):
+        session.messages.append({"role": "user", "content": f"msg{i}"})
+    session.last_consolidated = 5
+
+    session.retain_recent_legal_suffix(0)
+
+    assert session.messages == []
+    assert session.last_consolidated == 0
+
+
+def test_retain_recent_legal_suffix_keeps_legal_tool_boundary():
+    session = Session(key="test:trim-tools")
+    session.messages.append({"role": "user", "content": "old"})
+    session.messages.extend(_tool_turn("old", 0))
+    session.messages.append({"role": "user", "content": "keep"})
+    session.messages.extend(_tool_turn("keep", 0))
+    session.messages.append({"role": "assistant", "content": "done"})
+
+    session.retain_recent_legal_suffix(4)
+
+    history = session.get_history(max_messages=500)
+    _assert_no_orphans(history)
+    assert history[0]["role"] == "user"
+    assert history[0]["content"] == "keep"
+
+
 # --- last_consolidated > 0 ---
 
 def test_orphan_trim_with_last_consolidated():

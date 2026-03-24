@@ -3,6 +3,9 @@
 import json
 from pathlib import Path
 
+import pydantic
+from loguru import logger
+
 from nanobot.config.schema import Config
 
 # Global variable to store current config path (for multi-instance support)
@@ -40,9 +43,9 @@ def load_config(config_path: Path | None = None) -> Config:
                 data = json.load(f)
             data = _migrate_config(data)
             return Config.model_validate(data)
-        except (json.JSONDecodeError, ValueError) as e:
-            print(f"Warning: Failed to load config from {path}: {e}")
-            print("Using default configuration.")
+        except (json.JSONDecodeError, ValueError, pydantic.ValidationError) as e:
+            logger.warning(f"Failed to load config from {path}: {e}")
+            logger.warning("Using default configuration.")
 
     return Config()
 

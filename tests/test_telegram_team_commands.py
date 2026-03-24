@@ -1,6 +1,5 @@
-from nanobot.channels.telegram import TelegramChannel
+from nanobot.channels.telegram import TelegramChannel, TelegramConfig
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import TelegramConfig
 
 
 def test_telegram_bot_commands_include_team_and_btw():

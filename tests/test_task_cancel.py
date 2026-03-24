@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
-def _make_loop():
+def _make_loop(*, exec_config=None):
     """Create a minimal AgentLoop with mocked dependencies."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
@@ -23,7 +23,7 @@ def _make_loop():
          patch("nanobot.agent.loop.SessionManager"), \
          patch("nanobot.agent.loop.SubagentManager") as MockSubMgr:
         MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
-        loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
+        loop = AgentLoop(bus=bus, provider=provider, workspace=workspace, exec_config=exec_config)
     return loop, bus
 
 
@@ -31,16 +31,20 @@ class TestHandleStop:
     @pytest.mark.asyncio
     async def test_stop_no_active_task(self):
         from nanobot.bus.events import InboundMessage
+        from nanobot.command.builtin import cmd_stop
+        from nanobot.command.router import CommandContext
 
         loop, bus = _make_loop()
         msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/stop")
-        await loop._handle_stop(msg)
-        out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/stop", loop=loop)
+        out = await cmd_stop(ctx)
         assert "No active task" in out.content
 
     @pytest.mark.asyncio
     async def test_stop_cancels_active_task(self):
         from nanobot.bus.events import InboundMessage
+        from nanobot.command.builtin import cmd_stop
+        from nanobot.command.router import CommandContext
 
         loop, bus = _make_loop()
         cancelled = asyncio.Event()
@@ -57,15 +61,17 @@ class TestHandleStop:
         loop._active_tasks["test:c1"] = [task]
 
         msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/stop")
-        await loop._handle_stop(msg)
+        ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/stop", loop=loop)
+        out = await cmd_stop(ctx)
 
         assert cancelled.is_set()
-        out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
         assert "stopped" in out.content.lower()
 
     @pytest.mark.asyncio
     async def test_stop_cancels_multiple_tasks(self):
         from nanobot.bus.events import InboundMessage
+        from nanobot.command.builtin import cmd_stop
+        from nanobot.command.router import CommandContext
 
         loop, bus = _make_loop()
         events = [asyncio.Event(), asyncio.Event()]
@@ -82,14 +88,21 @@ class TestHandleStop:
         loop._active_tasks["test:c1"] = tasks
 
         msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/stop")
-        await loop._handle_stop(msg)
+        ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/stop", loop=loop)
+        out = await cmd_stop(ctx)
 
         assert all(e.is_set() for e in events)
-        out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
         assert "2 task" in out.content
 
 
 class TestDispatch:
+    def test_exec_tool_not_registered_when_disabled(self):
+        from nanobot.config.schema import ExecToolConfig
+
+        loop, _bus = _make_loop(exec_config=ExecToolConfig(enable=False))
+
+        assert loop.tools.get("exec") is None
+
     @pytest.mark.asyncio
     async def test_dispatch_processes_and_publishes(self):
         from nanobot.bus.events import InboundMessage, OutboundMessage
