@@ -1,10 +1,10 @@
-# Resilient Session Load Implementation Plan (v6)
+# Resilient Session Load Implementation Plan (v7)
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Make `SessionManager._load()` recover partial session data from corrupt JSONL files instead of discarding the entire session.
 
-**Architecture:** Refactor `_load()` to parse metadata and message lines individually with per-line error handling. Use `last_consolidated = len(messages)` fallback when `last_consolidated` is untrustworthy or any lines were skipped (index-shift protection) — no sentinel field, no cross-module changes. Clamp negative `last_consolidated` to `0` (upper-bound clamp removed — dead code, all consumers handle oversized values correctly via Python slice semantics).
+**Architecture:** Refactor `_load()` to parse metadata and message lines individually with per-line error handling. Use `last_consolidated = len(messages)` fallback when `last_consolidated` is untrustworthy, metadata line is missing, or a corrupt line was skipped *before* the consolidation boundary (position-aware index-shift protection) — no sentinel field, no cross-module changes. Clamp negative `last_consolidated` to `0` (upper-bound clamp removed — dead code, all consumers handle oversized values correctly via Python slice semantics).
 
 **Tech Stack:** Python 3.11+, pytest, loguru, json
 
@@ -13,9 +13,9 @@
 **Branch:** `fix/resilient-session-load` (from `main`)
 **Target:** `main` (Bug Fix, no behavior changes for valid files)
 
-**Review findings addressed:** 7/7 (v5 deduplizierte Findings aus Runde 5)
+**Review findings addressed:** 14/14 (v6 deduplizierte Findings aus Runde 6) + 7/7 (v5 Runde 5) + 12/12 (v4 Runde 4) = 33 total
 
-**Execution policy:** Tasks 1–5 may be executed autonomously. Task 6 (push) is autonomous. Task 7 (PR) requires **explicit user approval** before execution. The user may also choose to create the PR themselves.
+**Execution policy:** Tasks 1–4 may be executed autonomously. Task 5 (push) is autonomous. Task 6 (PR) requires **explicit user approval** before execution. The user may also choose to create the PR themselves.
 
 ---
 
@@ -49,12 +49,14 @@ Expected: All PASS (establishes baseline for regression detection)
 
 ---
 
-### Task 2: Write failing tests — corrupt message lines
+### Task 2: Write all failing tests
 
 **Files:**
 - Create: `tests/test_session_resilient_load.py`
 
-**Step 1: Write failing tests for corrupt message line handling**
+**Step 1: Write all 20 tests for corrupt message lines, corrupt metadata, bounds, index-shift, and roundtrip**
+
+Create `tests/test_session_resilient_load.py`:
 
 ```python
 """Tests for resilient session loading from corrupt JSONL files."""
@@ -123,6 +125,8 @@ class TestCorruptMessageLines:
         assert len(session.messages) == 2
         assert session.messages[0]["content"] == "hello"
         assert session.messages[1]["content"] == "hi there"
+        # skipped_count > 0 but skip is AFTER boundary (lc=0) → no fallback
+        assert session.last_consolidated == 0
 
     def test_load_corrupt_middle_line(self, tmp_session_manager: SessionManager):
         """Invalid JSON in middle: that line skipped, before and after load."""
@@ -143,6 +147,8 @@ class TestCorruptMessageLines:
         assert session.messages[0]["content"] == "before"
         assert session.messages[1]["content"] == "after"
         assert session.messages[2]["content"] == "response"
+        # skip at msg_index=1, lc=0 → not before boundary → no fallback
+        assert session.last_consolidated == 0
 
     def test_load_all_lines_corrupt_returns_none(self, tmp_session_manager: SessionManager):
         """All lines invalid: returns None (fresh session)."""
@@ -181,6 +187,8 @@ class TestCorruptMessageLines:
         assert len(session.messages) == 2
         assert session.messages[0]["content"] == "before"
         assert session.messages[1]["content"] == "after"
+        # non-dict at msg_index=1, lc=0 → not before boundary → no fallback
+        assert session.last_consolidated == 0
 
     def test_load_bom_file(self, tmp_session_manager: SessionManager):
         """File with UTF-8 BOM is parsed correctly."""
@@ -231,35 +239,8 @@ class TestCorruptMessageLines:
         session = tmp_session_manager._load("telegram:12345")
 
         assert session is None
-```
 
-**Step 2: Run tests to verify expected status**
 
-```bash
-cd /root/.nanobot/workspace/forks/nanobot
-python -m pytest tests/test_session_resilient_load.py -v
-```
-Expected: Most FAIL (current `_load()` returns `None` for corrupt files). Note: `test_load_all_lines_corrupt_returns_none` and `test_load_unicode_decode_error_returns_none` may PASS against current code (current `except Exception` already returns `None` for these cases).
-
-**Step 3: Commit test file**
-
-```bash
-git add tests/test_session_resilient_load.py
-git commit -m "test: add failing tests for corrupt message line handling"
-```
-
----
-
-### Task 3: Write failing tests — corrupt metadata and edge cases
-
-**Files:**
-- Modify: `tests/test_session_resilient_load.py`
-
-**Step 1: Add tests for corrupt metadata, bounds, index-shift, and roundtrip**
-
-Append to `tests/test_session_resilient_load.py`:
-
-```python
 class TestCorruptMetadata:
     def test_load_metadata_only_returns_session(self, tmp_session_manager: SessionManager):
         """Metadata-only file with empty metadata dict: returns Session (not None)."""
@@ -336,6 +317,23 @@ class TestCorruptMetadata:
         assert len(session.messages) == 2
         assert session.last_consolidated == 2  # len(messages) — no metadata parsed
 
+    def test_load_non_dict_metadata_defaults_to_empty(self, tmp_session_manager: SessionManager):
+        """Non-dict metadata field: defaults to empty dict, messages still load."""
+        path = tmp_session_manager._get_session_path("telegram:12345")
+        raw_metadata = (
+            '{"_type":"metadata","key":"telegram:12345",'
+            '"created_at":"2026-03-23T10:00:00","updated_at":"2026-03-23T22:00:00",'
+            '"metadata":"not a dict","last_consolidated":0}'
+        )
+        lines = [raw_metadata, _make_message_line("user", "hello")]
+        _write_session_file(path, lines)
+
+        session = tmp_session_manager._load("telegram:12345")
+
+        assert session is not None
+        assert session.metadata == {}
+        assert len(session.messages) == 1
+
 
 class TestLastConsolidatedBounds:
     def test_load_negative_last_consolidated_clamped(self, tmp_session_manager: SessionManager):
@@ -371,16 +369,18 @@ class TestLastConsolidatedBounds:
         assert session.last_consolidated == 1  # len(messages)
         assert len(session.messages) == 1
 
+
+class TestIndexShiftProtection:
     def test_load_skipped_line_before_consolidation_boundary(self, tmp_session_manager: SessionManager):
         """Corrupt line before last_consolidated boundary triggers index-shift protection."""
         path = tmp_session_manager._get_session_path("telegram:12345")
         lines = [
             _make_metadata_line(last_consolidated=3),
-            _make_message_line("user", "msg0"),
-            "CORRUPT LINE {{{",           # original index 1 — skipped
-            _make_message_line("user", "msg2"),
-            _make_message_line("user", "msg3"),
-            _make_message_line("user", "msg4"),
+            _make_message_line("user", "msg0"),  # index 0
+            "CORRUPT LINE {{{",                  # index 1 — skipped, BEFORE boundary (lc=3)
+            _make_message_line("user", "msg2"),  # index 2 (shifted)
+            _make_message_line("user", "msg3"),  # index 3 (shifted)
+            _make_message_line("user", "msg4"),  # index 4 (shifted)
         ]
         _write_session_file(path, lines)
 
@@ -388,50 +388,90 @@ class TestLastConsolidatedBounds:
 
         assert session is not None
         assert len(session.messages) == 4  # 5 minus 1 corrupt
-        # skipped_count > 0 → fallback: last_consolidated = len(messages) = 4
+        # skipped_before_boundary=True → fallback: last_consolidated = len(messages) = 4
         assert session.last_consolidated == 4
+
+    def test_load_skipped_line_after_consolidation_boundary(self, tmp_session_manager: SessionManager):
+        """Corrupt line after boundary: last_consolidated stays unchanged."""
+        path = tmp_session_manager._get_session_path("telegram:12345")
+        lines = [
+            _make_metadata_line(last_consolidated=2),
+            _make_message_line("user", "msg0"),  # index 0 — consolidated
+            _make_message_line("user", "msg1"),  # index 1 — consolidated
+            _make_message_line("user", "msg2"),  # index 2 — unconsolidated
+            "CORRUPT LINE {{{",                  # index 3 — skipped, AFTER boundary (lc=2)
+        ]
+        _write_session_file(path, lines)
+
+        session = tmp_session_manager._load("telegram:12345")
+
+        assert session is not None
+        assert len(session.messages) == 3  # 4 minus 1 corrupt
+        # skipped_before_boundary=False → NO fallback → last_consolidated stays at 2
+        assert session.last_consolidated == 2
+
+
+class TestMessagesOnlyNoMetadata:
+    def test_load_messages_only_no_metadata(self, tmp_session_manager: SessionManager):
+        """File with only message lines (no metadata): recovered with len(messages) fallback."""
+        path = tmp_session_manager._get_session_path("telegram:12345")
+        lines = [
+            _make_message_line("user", "hello"),
+            _make_message_line("assistant", "world"),
+        ]
+        _write_session_file(path, lines)
+
+        session = tmp_session_manager._load("telegram:12345")
+
+        assert session is not None
+        assert len(session.messages) == 2
+        # metadata_parsed=False → fallback: last_consolidated = len(messages) = 2
+        assert session.last_consolidated == 2
 
 
 class TestValidFileRoundtrip:
     def test_load_valid_file_roundtrip(self, tmp_session_manager: SessionManager):
-        """A valid file saved by save() loads back via fresh SessionManager with all fields intact."""
-        session = Session(key="telegram:12345", metadata={"lang": "en"})
-        session.add_message("user", "hello")
-        session.last_consolidated = 0
+        """Valid file saved by save() loads back via fresh SessionManager with key, messages,
+        metadata, last_consolidated, and created_at intact."""
+        fixed_time = datetime(2026, 1, 15, 12, 0, 0)
+        session = Session(key="telegram:12345", metadata={"lang": "en"}, created_at=fixed_time)
+        for i in range(10):
+            session.add_message("user", f"msg{i}")
+        session.last_consolidated = 7
         tmp_session_manager.save(session)
 
         # Fresh SessionManager with empty cache — forces _load() from disk
-        from nanobot.session.manager import SessionManager as SM
-        fresh_manager = SM(workspace=tmp_session_manager.workspace)
+        fresh_manager = SessionManager(workspace=tmp_session_manager.workspace)
         loaded = fresh_manager._load("telegram:12345")
 
         assert loaded is not None
         assert loaded.key == "telegram:12345"
-        assert len(loaded.messages) == 1
-        assert loaded.messages[0]["content"] == "hello"
+        assert len(loaded.messages) == 10
+        assert loaded.messages[0]["content"] == "msg0"
+        assert loaded.messages[9]["content"] == "msg9"
         assert loaded.metadata == {"lang": "en"}
-        assert loaded.last_consolidated == 0
-        assert loaded.created_at is not None
-        assert abs((loaded.created_at - session.created_at).total_seconds()) < 2
+        assert loaded.last_consolidated == 7
+        assert loaded.created_at == fixed_time
 ```
 
-**Step 2: Run tests**
+**Step 2: Run tests to verify expected status**
 
 ```bash
+cd /root/.nanobot/workspace/forks/nanobot
 python -m pytest tests/test_session_resilient_load.py -v
 ```
-Expected: FAIL — current `_load()` returns None for corrupt cases, may crash on overflow
+Expected: Most FAIL (current `_load()` returns `None` for corrupt files). Note: `test_load_all_lines_corrupt_returns_none` and `test_load_unicode_decode_error_returns_none` may PASS against current code.
 
-**Step 3: Commit**
+**Step 3: Commit test file**
 
 ```bash
 git add tests/test_session_resilient_load.py
-git commit -m "test: add corrupt metadata, bounds, index-shift, and roundtrip tests"
+git commit -m "test: add 20 failing tests for resilient session loading"
 ```
 
 ---
 
-### Task 4: Implement resilient `_load()`
+### Task 3: Implement resilient `_load()`
 
 **Files:**
 - Modify: `nanobot/session/manager.py` (`_load` method)
@@ -467,6 +507,12 @@ Replace the entire `_load()` method with:
             skipped_count = 0
             total_lines = 0
 
+            # Position-aware index-shift tracking:
+            # If a corrupt line is skipped BEFORE the known consolidation boundary,
+            # subsequent messages shift to lower indices, making the boundary unreliable.
+            msg_index = 0
+            skipped_before_boundary = False
+
             with open(path, encoding="utf-8-sig") as f:
                 for line_num, raw in enumerate(f, 1):
                     stripped = raw.strip()
@@ -482,6 +528,9 @@ Replace the entire `_load()` method with:
                             line_num, key, path,
                         )
                         skipped_count += 1
+                        # Check if this skip is before the consolidation boundary
+                        if metadata_parsed and msg_index < last_consolidated:
+                            skipped_before_boundary = True
                         continue
 
                     if not isinstance(data, dict):
@@ -490,6 +539,8 @@ Replace the entire `_load()` method with:
                             line_num, key, path,
                         )
                         skipped_count += 1
+                        if metadata_parsed and msg_index < last_consolidated:
+                            skipped_before_boundary = True
                         continue
 
                     if data.get("_type") == "metadata":
@@ -525,20 +576,24 @@ Replace the entire `_load()` method with:
                         recovered = True
                     else:
                         messages.append(data)
+                        msg_index += 1
                         recovered = True
 
             if not recovered:
                 return None
 
             # Consolidation safety: when last_consolidated is untrustworthy,
-            # metadata line missing, or any lines were skipped (index-shift protection),
-            # assume all loaded messages are already consolidated.
-            if (last_consolidated_untrustworthy or not metadata_parsed or skipped_count > 0) and messages:
+            # metadata line missing, or a corrupt line was skipped before the
+            # consolidation boundary (index-shift protection), assume all loaded
+            # messages are already consolidated.
+            if (last_consolidated_untrustworthy or not metadata_parsed or skipped_before_boundary) and messages:
                 last_consolidated = len(messages)
                 logger.warning(
-                    "Untrusted last_consolidated in session {} — assuming all {} loaded messages "
-                    "are consolidated (some may not have been summarized)",
-                    key, len(messages),
+                    "Consolidation boundary uncertain in session {} (skipped={}, "
+                    "untrusted={}, no_metadata={}) — assuming all {} loaded messages "
+                    "are consolidated",
+                    key, skipped_count, last_consolidated_untrustworthy,
+                    not metadata_parsed, len(messages),
                 )
 
             # Lower-bound clamping for negative values.
@@ -595,7 +650,7 @@ git commit -m "fix(session): resilient load with per-line error recovery"
 
 ---
 
-### Task 5: Verify & validate (lint + full test suite + edge cases)
+### Task 4: Verify & validate (lint + full test suite + edge cases)
 
 **Files:**
 - None (verification only)
@@ -604,14 +659,14 @@ git commit -m "fix(session): resilient load with per-line error recovery"
 
 ```bash
 cd /root/.nanobot/workspace/forks/nanobot
-ruff check nanobot/session/manager.py
+ruff check nanobot/session/manager.py tests/test_session_resilient_load.py
 ```
 Expected: No errors
 
 **Step 2: Format check**
 
 ```bash
-ruff format --check nanobot/session/manager.py
+ruff format --check nanobot/session/manager.py tests/test_session_resilient_load.py
 ```
 Expected: No formatting issues (or auto-fix with `ruff format`)
 
@@ -627,35 +682,35 @@ Expected: All PASS (no regressions)
 ```bash
 python -m pytest tests/test_session_resilient_load.py -v --tb=short
 ```
-Expected: 17 tests, all PASS
+Expected: 20 tests, all PASS
 
 **Step 5: Verify specific edge cases**
 
 ```bash
-python -m pytest tests/test_session_resilient_load.py::TestCorruptMetadata::test_load_corrupt_metadata_json_with_valid_messages -v
-python -m pytest tests/test_session_resilient_load.py::TestCorruptMessageLines::test_load_unicode_decode_error_returns_none -v
-python -m pytest tests/test_session_resilient_load.py::TestLastConsolidatedBounds::test_load_skipped_line_before_consolidation_boundary -v
+python -m pytest tests/test_session_resilient_load.py::TestIndexShiftProtection -v
 python -m pytest tests/test_session_resilient_load.py::TestValidFileRoundtrip -v
+python -m pytest tests/test_session_resilient_load.py::TestCorruptMetadata::test_load_non_dict_metadata_defaults_to_empty -v
+python -m pytest tests/test_session_resilient_load.py::TestMessagesOnlyNoMetadata -v
 ```
 Expected: All PASS
 
 **Step 6: Verify no regressions in existing session tests**
 
 ```bash
-python -m pytest tests/test_session_manager_history.py tests/test_consolidate_offset.py -v 2>/dev/null || python -m pytest tests/test_session_manager_history.py -v
+python -m pytest tests/test_session_manager_history.py -v
 ```
 Expected: All PASS
 
 **Step 7: Commit any lint fixes if needed**
 
 ```bash
-git add nanobot/session/manager.py
+git add nanobot/session/manager.py tests/test_session_resilient_load.py
 git commit -m "style: lint/format fixes" || true
 ```
 
 ---
 
-### Task 6: Push to fork (autonomous)
+### Task 5: Push to fork (autonomous)
 
 **Step 1: Push feature branch to origin (fork)**
 
@@ -667,13 +722,13 @@ No approval needed — push to fork is autonomous.
 
 ---
 
-### Task 7: Create PR ⛔ GATE (requires explicit user approval)
+### Task 6: Create PR ⛔ GATE (requires explicit user approval)
 
-> **Execution policy:** Task 7 requires **explicit user approval** before execution. The user may also choose to create the PR themselves.
+> **Execution policy:** Task 6 requires **explicit user approval** before execution. The user may also choose to create the PR themselves.
 
 **Step 0: Wait for user approval**
 
-Before proceeding, present the completion summary from Tasks 1–6 and ask for approval to create the PR.
+Before proceeding, present the completion summary from Tasks 1–4 and ask for approval to create the PR.
 
 **Step 1: Create PR via gh CLI**
 
@@ -688,7 +743,8 @@ This PR makes session loading resilient:
 
 - **Per-line parsing**: Each JSONL line is parsed independently. A corrupt line is logged and skipped instead of failing the entire load.
 - **Robust metadata**: Each metadata field (`created_at`, `last_consolidated`, `metadata`) is parsed individually with safe defaults on failure.
-- **Consolidation safety**: When `last_consolidated` is corrupt, missing, the metadata line itself is invalid JSON, or any lines were skipped (index-shift protection), it defaults to `len(messages)` (assume all loaded messages are already consolidated), preventing re-consolidation and duplicate MEMORY.md/HISTORY.md entries.
+- **Consolidation safety**: When `last_consolidated` is corrupt, missing, the metadata line itself is invalid JSON, or a corrupt line was skipped *before* the consolidation boundary (position-aware index-shift protection), it defaults to `len(messages)` (assume all loaded messages are already consolidated), preventing re-consolidation and duplicate MEMORY.md/HISTORY.md entries.
+- **Position-aware index-shift protection**: Unlike a blanket `skipped_count > 0` check, this PR tracks whether skipped lines fall before the consolidation boundary. Post-boundary corruption (the primary truncation scenario) leaves `last_consolidated` unchanged — unconsolidated messages remain visible to the LLM.
 - **Lower-bound clamping**: Negative `last_consolidated` values are clamped to `0`. Upper-bound clamping is intentionally omitted — all consumers (`get_history()`, `pick_consolidation_boundary()`, `retain_recent_legal_suffix()`) handle `last_consolidated > len(messages)` correctly via Python slice semantics (`messages[N:]` → `[]`).
 - **Encoding resilience**: Uses `utf-8-sig` encoding (BOM-tolerant). `UnicodeDecodeError` from mid-multi-byte truncation is caught gracefully.
 - **Defensive guards**: Non-dict JSON values are skipped. `RecursionError` and `OverflowError` are caught.
@@ -704,7 +760,7 @@ Process restart during `save()` (which uses `open("w")`) truncates the file befo
 
 ## Test plan
 
-- [x] Truncated last line → all previous messages recovered
+- [x] Truncated last line → all previous messages recovered, last_consolidated unchanged
 - [x] Corrupt middle line → line skipped, before/after messages recovered
 - [x] All lines corrupt → returns None (fresh session)
 - [x] Empty file → returns None
@@ -720,7 +776,10 @@ Process restart during `save()` (which uses `open("w")`) truncates the file befo
 - [x] Negative last_consolidated → clamped to 0
 - [x] Overflow last_consolidated (1e999) → OverflowError → fallback to len(messages)
 - [x] Skipped line before consolidation boundary → index-shift protection, fallback to len(messages)
-- [x] Valid file roundtrip via fresh SessionManager → all fields including created_at intact
+- [x] Skipped line after consolidation boundary → last_consolidated unchanged (no over-consolidation)
+- [x] Non-dict metadata field → defaults to empty dict
+- [x] Messages only (no metadata line) → recovered with len(messages) fallback
+- [x] Valid file roundtrip via fresh SessionManager → all fields including last_consolidated=7 and created_at intact
 - [x] Existing session tests pass (no regression)' \
   --base main \
   --head data219:fix/resilient-session-load

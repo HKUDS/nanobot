@@ -1,6 +1,6 @@
 # Design: Resilient Session Load
 
-**Datum:** 2026-03-24 (v6 — Plan-Review Runde 5 konsolidiert)
+**Datum:** 2026-03-24 (v7 — Plan-Review Runde 6 konsolidiert)
 **Repo:** HKUDS/nanobot
 **Branch:** `fix/resilient-session-load`
 **Target:** `main` (Bug Fix, keine Verhaltensänderung für valide Dateien)
@@ -20,30 +20,35 @@
 | v3 | 5× | 18 → 13 dedup (2B, 2M, 9m) | → v4 |
 | v4 | 5× | 13 → 12 dedup (1B, 0M, 7m, 2n, 2s) | → v5 |
 | v5 | 5× | 7 dedup (0B, 0M, 5m, 2n, 2s) | → v6 |
-| v6 | — | — | **PROCEED** |
-
-### v4 → v5 Änderungen (12 Findings adressiert)
-- **BLOCKER:** `_make_metadata_line` Default `last_consolidated=0` statt `5` (verhindert ungewolltes Clamping in 6 Tests)
-- **BLOCKER:** `test_load_metadata_only_returns_session` Assertion `== 0` statt `== 5`
-- **MINOR:** Overflow-Test nutzt `1e999` (JSON float → `inf` → echtes `OverflowError`) statt `10**1000`
-- **MINOR:** Non-dict JSON Warning inkl. Dateipfad
-- **MINOR:** `total_lines` zählt nur non-empty Zeilen (nach `strip()` Check)
-- **MINOR:** Upper-Clamp gestrichen (dead code — alle Consumer handhaben oversized korrekt)
-- **MINOR:** Non-dict metadata Warning vor Zuweisung (Lesbarkeit)
-- **MINOR:** Happy-Path Roundtrip-Test hinzugefügt (frischer SessionManager)
-- **NITPICK:** `updated_at` Verhalten im PR-Description dokumentiert
-- **SUGGESTION:** Summary-Log Duplikat-Metadata-Edge-Case als known limitation dokumentiert
+| v6 | 5× | 14 dedup (1M, 10m, 2n, 1s) | → v7 |
+| v7 | — | — | **PROCEED** |
 
 ### v5 → v6 Änderungen (7 Findings adressiert)
-- **MINOR:** PR-Description "Bounds clamping" korrigiert → "Lower-bound clamping" (nur negative Werte)
-- **MINOR:** Roundtrip-Test `created_at` Assertion hinzugefügt (End-to-End Verifikation)
-- **MINOR:** Index-Shift-Schutz: `or skipped_count > 0` zur Fallback-Condition hinzugefügt (verhindert stilles Verschieben von unconsolidated Messages)
-- **MINOR:** `list_sessions()` Encoding-Inkonsistenz als Follow-Up dokumentiert (out-of-scope)
-- **MINOR:** Task 5 `--timeout=30` entfernt (pytest-timeout keine Dependency)
+- **MINOR:** PR-Description "Bounds clamping" → "Lower-bound clamping"
+- **MINOR:** Roundtrip-Test `created_at` Assertion hinzugefügt
+- **MINOR:** Index-Shift-Schutz: `or skipped_count > 0` zur Fallback-Condition
+- **MINOR:** `list_sessions()` Encoding-Inkonsistenz als Follow-Up dokumentiert
+- **MINOR:** Task 5 `--timeout=30` entfernt
 - **NITPICK:** Task 1 Baseline-Test-Run hinzugefügt
-- **NITPICK:** Task 2 "Expected: FAIL" Text korrigiert (2 Tests würden gegen aktuellen Code schon PASS)
-- **SUGGESTION:** Kommentar über outer `except`-Clause hinzugefügt
-- **SUGGESTION:** Tasks 5+6 zusammengelegt zu "Verify & validate"
+- **NITPICK:** Task 2 "Expected: FAIL" Text korrigiert
+- **SUGGESTION:** Kommentar über outer `except`-Clause
+- **SUGGESTION:** Tasks 5+6 zusammengelegt
+
+### v6 → v7 Änderungen (14 Findings adressiert)
+- **MAJOR:** `skipped_count > 0` ersetzt durch `skipped_before_boundary` Flag (präziser — triggert nur bei corrupten Zeilen vor der Consolidation-Grenze, vermeidet Over-Consolidation im primären Truncation-Szenario)
+- **MAJOR:** Roundtrip-Test erweitert: `last_consolidated > 0` wird über `_load()` verifiziert
+- **MINOR:** Design Doc "idempotente Re-Consolidation" korrigiert → "konservative Annahme"
+- **MINOR:** Roundtrip-Test nutzt deterministische `datetime` statt Zeitdelta-Assertion
+- **MINOR:** Test für after-boundary skip hinzugefügt (verifiziert non-fallback)
+- **MINOR:** Test für non-dict metadata field hinzugefügt
+- **MINOR:** Test für Datei ohne metadata-line (nur messages) hinzugefügt
+- **MINOR:** Skip-Tests assertieren `last_consolidated` (Defense-in-Depth)
+- **MINOR:** Unused `datetime` import entfernt
+- **MINOR:** Roundtrip Docstring "all fields" korrigiert
+- **MINOR:** Warning-Log generalisiert (deckt alle 3 Trigger ab)
+- **NITPICK:** Redundanter `SessionManager as SM` Re-Import entfernt
+- **NITPICK:** Tasks 2+3 zusammengelegt zu "Write all failing tests"
+- **Test count:** 20 (was 17)
 
 ## Lösung
 
@@ -68,14 +73,28 @@ Jede JSONL-Zeile wird separat geparst:
 
 ### 3. Consolidation-Sicherheit
 
-**Fallback:** Wenn `last_consolidated` nicht vertrauenswürdig ODER Zeilen übersprungen wurden:
+**Position-aware Index-Shift-Schutz:** Ein `skipped_before_boundary` Flag wird gesetzt, wenn eine corrupte Zeile an einer Position übersprungen wird, die *vor* dem bekannten `last_consolidated`-Wert liegt. Nur dann wird der Fallback ausgelöst:
 
 ```python
-if (last_consolidated_untrustworthy or not metadata_parsed or skipped_count > 0) and messages:
+msg_index = 0
+skipped_before_boundary = False
+
+# Im Skip-Branch:
+if metadata_parsed and msg_index < last_consolidated:
+    skipped_before_boundary = True
+
+# Im Message-Branch:
+msg_index += 1
+
+# Nach dem Loop:
+if (last_consolidated_untrustworthy or not metadata_parsed or skipped_before_boundary) and messages:
     last_consolidated = len(messages)
 ```
 
-Der `skipped_count > 0` Check verhindert einen Index-Shift: wenn corrupte Message-Zeilen vor der Consolidation-Grenze liegen, verschieben sich die verbleibenden Messages zu niedrigeren Indizes. Ohne den Check würde `last_consolidated` auf dem alten Wert bleiben und `messages[last_consolidated:]` unconsolidated Messages überspringen. Mit dem Check werden alle geladenen Messages als consolidated betrachtet — sichere Richtung (idempotente Re-Consolidation, kein Datenverlust).
+**Warum `skipped_before_boundary` statt `skipped_count > 0`:**
+- Das primäre Truncation-Szenario (corrupte letzte Zeile) platziert die corrupte Zeile *nach* der Consolidation-Grenze. `skipped_count > 0` würde hier den Fallback triggern und die letzten unconsolidated Messages dauerhaft für den LLM unsichtbar machen.
+- `skipped_before_boundary` triggert nur bei corrupten Zeilen, die den Index-Shift tatsächlich verursachen (vor der Grenze). Nach-boundary Corruption lässt `last_consolidated` unverändert — die unconsolidated Messages bleiben sichtbar.
+- Trade-off: Pre-boundary Corruption (extrem selten, nur bei manuellen Edits oder Diskfehlern) triggert den Fallback → konservative Annahme, dass alle geladenen Messages bereits konsolidiert sind. Consolidation wird verhindert, aber keine Daten gehen verloren.
 
 **Bounds-Clamping (nur Lower-Bound):**
 
@@ -130,25 +149,28 @@ logger.info(
 
 ## Tests
 
-| Test | Szenario |
-|------|----------|
-| `test_load_truncated_last_line` | Letzte Zeile truncated JSON → vorherige Messages geladen |
-| `test_load_corrupt_middle_line` | Mittlere Zeile invalid JSON → übersprungen, Rest geladen |
-| `test_load_all_lines_corrupt_returns_none` | Alle Zeilen invalid → `None` |
-| `test_load_completely_empty_file_returns_none` | Leere Datei → `None` |
-| `test_load_non_dict_line_skipped` | JSON-Zeile ist String statt Dict → übersprungen |
-| `test_load_bom_file` | UTF-8 BOM in Datei → korrekt geladen |
-| `test_load_recursion_error_line_skipped` | Deep-nested JSON → `RecursionError` gefangen |
-| `test_load_unicode_decode_error_returns_none` | Mid-Multi-Byte Truncation → `None` |
-| `test_load_metadata_only_returns_session` | Nur metadata-line → Session, `last_consolidated=0` |
-| `test_load_corrupt_metadata_created_at` | Invalid created_at → Default |
-| `test_load_corrupt_metadata_last_consolidated` | Invalid last_consolidated → `len(messages)` |
-| `test_load_metadata_missing_fields` | Nur `_type` → Defaults, `last_consolidated=len(messages)` |
-| `test_load_corrupt_metadata_json_with_valid_messages` | Metadata-Zeile kaputt + Messages → `len(messages)` |
-| `test_load_negative_last_consolidated_clamped` | `last_consolidated=-1` → geclampt auf 0 |
-| `test_load_overflow_last_consolidated_clamped` | `last_consolidated=1e999` → `OverflowError` → `len(messages)` |
-| `test_load_skipped_line_before_consolidation_boundary` | Corrupte Zeile vor Grenze → `last_consolidated=len(messages)` (Index-Shift Schutz) |
-| `test_load_valid_file_roundtrip` | save() → frischer Manager → _load() → alle Felder inkl. `created_at` intakt |
+| # | Test | Szenario |
+|---|------|----------|
+| 1 | `test_load_truncated_last_line` | Letzte Zeile truncated JSON → vorherige Messages geladen |
+| 2 | `test_load_corrupt_middle_line` | Mittlere Zeile invalid JSON → übersprungen, Rest geladen |
+| 3 | `test_load_all_lines_corrupt_returns_none` | Alle Zeilen invalid → `None` |
+| 4 | `test_load_completely_empty_file_returns_none` | Leere Datei → `None` |
+| 5 | `test_load_non_dict_line_skipped` | JSON-Zeile ist String statt Dict → übersprungen |
+| 6 | `test_load_bom_file` | UTF-8 BOM in Datei → korrekt geladen |
+| 7 | `test_load_recursion_error_line_skipped` | Deep-nested JSON → `RecursionError` gefangen |
+| 8 | `test_load_unicode_decode_error_returns_none` | Mid-Multi-Byte Truncation → `None` |
+| 9 | `test_load_metadata_only_returns_session` | Nur metadata-line → Session, `last_consolidated=0` |
+| 10 | `test_load_corrupt_metadata_created_at` | Invalid created_at → Default |
+| 11 | `test_load_corrupt_metadata_last_consolidated` | Invalid last_consolidated → `len(messages)` |
+| 12 | `test_load_metadata_missing_fields` | Nur `_type` → Defaults, `last_consolidated=len(messages)` |
+| 13 | `test_load_corrupt_metadata_json_with_valid_messages` | Metadata-Zeile kaputt + Messages → `len(messages)` |
+| 14 | `test_load_negative_last_consolidated_clamped` | `last_consolidated=-1` → geclampt auf 0 |
+| 15 | `test_load_overflow_last_consolidated_clamped` | `last_consolidated=1e999` → `OverflowError` → `len(messages)` |
+| 16 | `test_load_skipped_line_before_consolidation_boundary` | Corrupte Zeile vor Grenze → `len(messages)` (Index-Shift Schutz) |
+| 17 | `test_load_skipped_line_after_consolidation_boundary` | Corrupte Zeile nach Grenze → `last_consolidated` unverändert |
+| 18 | `test_load_non_dict_metadata_defaults_to_empty` | metadata Feld ist String statt Dict → `{}` |
+| 19 | `test_load_messages_only_no_metadata` | Nur Message-Zeilen, keine metadata-line → `len(messages)` |
+| 20 | `test_load_valid_file_roundtrip` | save() → frischer Manager → _load() → alle Felder inkl. `last_consolidated=7` und `created_at` intakt |
 
 ## Ausgespart (Folge-PRs)
 
