@@ -1,7 +1,7 @@
 import pytest
 
-from nanobot.utils.evaluator import evaluate_response
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.utils.evaluator import evaluate_response
 
 
 class DummyProvider(LLMProvider):
@@ -60,4 +60,30 @@ async def test_fallback_on_error() -> None:
 async def test_no_tool_call_fallback() -> None:
     provider = DummyProvider([LLMResponse(content="I think you should notify", tool_calls=[])])
     result = await evaluate_response("some response", "some task", provider, "m")
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_reminder_should_always_notify() -> None:
+    """Test that user-scheduled reminders are always delivered."""
+    provider = DummyProvider([_eval_tool_call(True, "user reminder must be delivered")])
+    result = await evaluate_response(
+        "Time to take a bath 🛁",
+        "Remind me in 2 minutes to take a bath",
+        provider,
+        "m"
+    )
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_cron_reminder_with_context() -> None:
+    """Test that cron job reminders with context are delivered."""
+    provider = DummyProvider([_eval_tool_call(True, "scheduled reminder")])
+    result = await evaluate_response(
+        "Here's your daily reminder to check the server logs",
+        "[Scheduled Task] Timer finished. Task 'daily-check' has been triggered. Scheduled instruction: Remind me daily to check server logs",
+        provider,
+        "m"
+    )
     assert result is True

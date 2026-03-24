@@ -42,11 +42,15 @@ _SYSTEM_PROMPT = (
     "You will be given the original task and the agent's response. "
     "Call the evaluate_notification tool to decide whether the user "
     "should be notified.\n\n"
-    "Notify when the response contains actionable information, errors, "
-    "completed deliverables, or anything the user explicitly asked to "
-    "be reminded about.\n\n"
-    "Suppress when the response is a routine status check with nothing "
-    "new, a confirmation that everything is normal, or essentially empty."
+    "ALWAYS notify when:\n"
+    "- The original task mentions 'remind' or 'reminder' (user-scheduled reminders MUST be delivered)\n"
+    "- The response contains actionable information or errors\n"
+    "- The response includes completed deliverables\n"
+    "- The response asks for user input or decisions\n\n"
+    "Suppress ONLY when:\n"
+    "- The response is a routine status check with nothing new\n"
+    "- The response confirms everything is normal with no changes\n"
+    "- The response is essentially empty or just an acknowledgment"
 )
 
 
