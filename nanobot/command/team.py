@@ -25,7 +25,7 @@ async def cmd_team_exact(ctx: CommandContext) -> OutboundMessage:
 
 
 async def cmd_team_prefix(ctx: CommandContext) -> OutboundMessage | None:
-    """Dispatch /team <sub> and /teams <sub>."""
+    """Dispatch /team <sub>."""
     loop = ctx.loop
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
 
@@ -116,32 +116,6 @@ async def cmd_team_prefix(ctx: CommandContext) -> OutboundMessage | None:
     )
 
 
-async def cmd_btw(ctx: CommandContext) -> OutboundMessage:
-    """Bare /btw with no arguments — show usage."""
-    return OutboundMessage(
-        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
-        content="Usage: /btw <instruction>",
-    )
-
-
-async def cmd_btw_prefix(ctx: CommandContext) -> OutboundMessage:
-    """Spawn a background subagent for an async side task."""
-    arg = ctx.args.strip()
-    if not arg:
-        return OutboundMessage(
-            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
-            content="Usage: /btw <instruction>",
-        )
-    started = await ctx.loop.subagents.spawn(
-        task=arg, label="btw",
-        origin_channel=ctx.msg.channel, origin_chat_id=ctx.msg.chat_id,
-        session_key=ctx.key,
-    )
-    return OutboundMessage(
-        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id, content=started,
-    )
-
-
 async def team_active_interceptor(ctx: CommandContext) -> OutboundMessage | None:
     """Block normal messages when team mode is active."""
     loop = ctx.loop
@@ -166,8 +140,7 @@ async def team_active_interceptor(ctx: CommandContext) -> OutboundMessage | None
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content=(
             "Team mode is active. Supported input:\n"
-            "- /team <instruction|status|log|approve|reject|manual|stop>\n"
-            "- /btw <instruction>"
+            "- /team <instruction|status|log|approve|reject|manual|stop>"
         ),
     )
 
@@ -175,9 +148,5 @@ async def team_active_interceptor(ctx: CommandContext) -> OutboundMessage | None
 def register_team_commands(router: CommandRouter) -> None:
     """Register all team-mode commands on the given router."""
     router.exact("/team", cmd_team_exact)
-    router.exact("/teams", cmd_team_exact)
     router.prefix("/team ", cmd_team_prefix)
-    router.prefix("/teams ", cmd_team_prefix)
-    router.exact("/btw", cmd_btw)
-    router.prefix("/btw ", cmd_btw_prefix)
     router.intercept(team_active_interceptor)

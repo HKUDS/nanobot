@@ -70,7 +70,6 @@ class TeamViewState:
     focus_index: int = 0
     detail_member: str | None = None
     members: list[str] = field(default_factory=list)
-    suppress_board_once: bool = False
 
     def targets(self) -> list[str | None]:
         return [None, *self.members]
@@ -245,7 +244,6 @@ def _sync_team_view(team_manager) -> None:
         _TEAM_VIEW.focus_index = 0
         _TEAM_VIEW.detail_member = None
         _TEAM_VIEW.members = []
-        _TEAM_VIEW.suppress_board_once = False
         return
     if _TEAM_VIEW.team_id != team_manager.active_team_id(sk):
         _TEAM_VIEW.focus_index = 0
@@ -352,9 +350,6 @@ def _prompt_message(team_manager):
     if team_manager is not None:
         _sync_team_view(team_manager)
     if _TEAM_VIEW.active and team_manager is not None:
-        if _TEAM_VIEW.suppress_board_once:
-            _TEAM_VIEW.suppress_board_once = False
-            return HTML("<b fg='ansiblue'>You:</b> ")
         return ANSI(_render_compact_board(team_manager) + "> ")
     return HTML("<b fg='ansiblue'>You:</b> ")
 
@@ -1068,10 +1063,6 @@ def agent(
                             _restore_terminal()
                             console.print("\nGoodbye!")
                             break
-
-                        lowered = command.lower()
-                        if lowered.startswith("/btw "):
-                            _TEAM_VIEW.suppress_board_once = True
 
                         turn_done.clear()
                         turn_response.clear()

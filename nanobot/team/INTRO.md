@@ -40,8 +40,8 @@ nanobot/team/
 ├── state.py       纯数据结构：Task, Teammate, Mail, TeamState, TeamRuntime
 ├── board.py       任务看板：claim / complete / approve / reject（文件锁保证并发安全）
 ├── mailbox.py     消息邮箱：send / broadcast / read_unread（JSONL 追加写，自动截断到 200 条）
-├── tools.py       暴露给 LLM 的工具：TeamTool（管理端）、TeamWorkerTool（worker 端）
-└── _filelock.py   跨平台文件锁（Unix fcntl / Windows msvcrt）
+├── tools.py       worker 端工具：TeamWorkerTool
+└── ../utils/filelock.py  跨平台文件锁（Unix fcntl / Windows msvcrt）
 ```
 
 ### 数据流
@@ -49,9 +49,8 @@ nanobot/team/
 - **state.py** 定义所有数据结构，不含业务逻辑，纯 dataclass + JSON 序列化。
 - **board.py** 管理 `tasks.json`——所有对任务状态的变更都经过 `_locked_update()`，通过文件锁保证多个 worker 并发写入安全。
 - **mailbox.py** 管理 `mailbox.jsonl`——worker 之间、lead 与 worker 之间的消息通信。同样使用文件锁。每次写入后自动截断保留最近 200 条，防止文件无限增长。
-- **tools.py** 包含两个 Tool 类：
-  - `TeamTool`：暴露给主 agent 的管理接口（create / shutdown / approve / reject / board / message / add_task）
-  - `TeamWorkerTool`：暴露给每个 worker 的协作接口（board / claim / complete / submit_plan / mail_send / mail_read）
+- **tools.py** 包含 `TeamWorkerTool`：
+  - 暴露给每个 worker 的协作接口（board / claim / complete / submit_plan / mail_send / mail_read）
 
 ### TeamManager 核心流程
 
@@ -120,17 +119,21 @@ CLI 模式下，团队看板会嵌入到 prompt 中实时刷新，支持 `Shift+
 /team stop                           # 停止
 ```
 
-### 通过 LLM Tool 调用（TeamTool）
+### 启动边界
 
-主 agent 也可以通过 `team` tool 自主创建和管理团队：
+`team mode` 只能通过显式 slash command 启动和控制：
 
-```json
-{"action": "create", "team_id": "research", "members": [...], "tasks": [...], "mission": "..."}
-{"action": "board"}
-{"action": "approve", "task_id": "t1"}
-{"action": "message", "to": "researcher", "content": "请优先完成 t2"}
-{"action": "shutdown"}
+```text
+/team <goal>
+/team status
+/team log [n]
+/team approve <task_id>
+/team reject <task_id> <reason>
+/team manual <task_id> <instruction>
+/team stop
 ```
+
+主 agent 不会通过普通 tool call 自动拉起 team mode。
 
 ## 测试覆盖
 
@@ -139,5 +142,5 @@ CLI 模式下，团队看板会嵌入到 prompt 中实时刷新，支持 `Shift+
 | 文件 | 覆盖范围 |
 |------|----------|
 | `test_team_mode.py` | TeamManager 核心逻辑：计划校验（重复成员/空任务/循环依赖）、fallback 计划、会话隔离、生命周期（start → route → stop with snapshot）、自然语言审批（approve / reject / manual change） |
-| `test_team_routing.py` | AgentLoop 层的命令路由：`/team status` / `/team log` / `/team <goal>` / `/teams` 别名 / `/team approve` / `/team reject` / `/team manual` / `/team stop`（CLI 快照）/ `/btw` 子任务、Telegram 自然语言审批拦截、team mode 下普通消息被阻断 |
+| `test_team_routing.py` | AgentLoop 层的命令路由：`/team status` / `/team log` / `/team <goal>` / `/team approve` / `/team reject` / `/team manual` / `/team stop`（CLI 快照）、Telegram 自然语言审批拦截、team mode 下普通消息被阻断 |
 | `test_cli_input.py` | CLI 团队视图：`_sync_team_view` / `_prompt_message` 的看板渲染和 suppress 逻辑 |

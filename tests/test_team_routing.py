@@ -103,20 +103,6 @@ async def test_non_cli_plain_message_handles_approval_reply(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_teams_alias_works(tmp_path):
-    loop = _make_loop(tmp_path)
-    loop.team.start_or_route_goal = AsyncMock(return_value="started")
-    loop.team.is_active = MagicMock(return_value=True)
-
-    msg = InboundMessage(channel="cli", sender_id="u1", chat_id="room", content="/teams write docs")
-    out = await loop._process_message(msg)
-
-    assert out is not None
-    assert out.content == "started"
-    loop.team.start_or_route_goal.assert_awaited_once_with("cli:room", "write docs")
-
-
-@pytest.mark.asyncio
 async def test_team_log_default_and_custom_count(tmp_path):
     loop = _make_loop(tmp_path)
     loop.team.log_text = MagicMock(return_value="logs")
@@ -132,19 +118,6 @@ async def test_team_log_default_and_custom_count(tmp_path):
     assert out_custom is not None
     assert out_custom.content == "logs"
     loop.team.log_text.assert_called_with("cli:room", n=50)
-
-
-@pytest.mark.asyncio
-async def test_btw_command_spawns_single_subagent(tmp_path):
-    loop = _make_loop(tmp_path)
-    loop.subagents.spawn = AsyncMock(return_value="spawned")
-
-    msg = InboundMessage(channel="cli", sender_id="u1", chat_id="room", content="/btw summarize logs")
-    out = await loop._process_message(msg)
-
-    assert out is not None
-    assert out.content == "spawned"
-    loop.subagents.spawn.assert_awaited_once()
 
 
 @pytest.mark.asyncio

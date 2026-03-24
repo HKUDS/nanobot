@@ -149,14 +149,11 @@ class _PromptTeamManager:
         }
 
 
-def test_prompt_message_suppresses_board_once_for_btw():
+def test_prompt_message_renders_team_board_when_active():
     tm = _PromptTeamManager()
     commands._sync_team_view(tm)
-    commands._TEAM_VIEW.suppress_board_once = True
-    first = commands._prompt_message(tm)
-    second = commands._prompt_message(tm)
-    assert isinstance(first, HTML)
-    assert isinstance(second, ANSI)
+    prompt = commands._prompt_message(tm)
+    assert isinstance(prompt, ANSI)
 
 
 def test_response_renderable_uses_text_for_explicit_plain_rendering():

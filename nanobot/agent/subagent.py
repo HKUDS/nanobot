@@ -74,8 +74,6 @@ class SubagentManager:
         bg_task.add_done_callback(_cleanup)
 
         logger.info("Spawned subagent [{}]: {}", task_id, display_label)
-        if label == "btw":
-            return f"BTW accepted (id: {task_id}). I'll send the result when it finishes."
         return f"Task accepted (id: {task_id}). I'll notify you when it completes."
 
     async def _run_subagent(

@@ -196,7 +196,6 @@ class TelegramChannel(BaseChannel):
         BotCommand("new", "Start a new conversation"),
         BotCommand("stop", "Stop the current task"),
         BotCommand("team", "Start or control nano team mode"),
-        BotCommand("btw", "Run an async side task"),
         BotCommand("help", "Show available commands"),
         BotCommand("restart", "Restart the bot"),
         BotCommand("status", "Show bot status"),
@@ -281,7 +280,6 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("new", self._forward_command))
         self._app.add_handler(CommandHandler("stop", self._forward_command))
         self._app.add_handler(CommandHandler("team", self._forward_command))
-        self._app.add_handler(CommandHandler("btw", self._forward_command))
         self._app.add_handler(CommandHandler("restart", self._forward_command))
         self._app.add_handler(CommandHandler("status", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))

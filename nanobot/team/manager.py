@@ -280,7 +280,7 @@ class TeamManager:
             )
 
     # ------------------------------------------------------------------
-    # Compatibility API for TeamTool / CLI panel
+    # Compatibility API for CLI panel and command handlers
     # ------------------------------------------------------------------
     async def create(
         self,

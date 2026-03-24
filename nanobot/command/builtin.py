@@ -103,7 +103,6 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
         "/team reject <task_id> <reason> — Reject a pending task",
         "/team manual <task_id> <instruction> — Send change request",
         "/team stop — Stop nano team mode",
-        "/btw <instruction> — Async side task via subagent",
         "/help — Show available commands",
     ]
     return OutboundMessage(

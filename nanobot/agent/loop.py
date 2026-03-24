@@ -16,7 +16,6 @@ from loguru import logger
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryConsolidator
 from nanobot.team import TeamManager
-from nanobot.team.tools import TeamTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
@@ -164,7 +163,6 @@ class AgentLoop:
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
-        self.tools.register(TeamTool(manager=self.team))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
@@ -192,7 +190,7 @@ class AgentLoop:
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
-        for name in ("message", "spawn", "cron", "team"):
+        for name in ("message", "spawn", "cron"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
