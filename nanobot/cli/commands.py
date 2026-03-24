@@ -407,7 +407,11 @@ def _make_provider(config: Config):
     # --- instantiation by backend ---
     if backend == "openai_codex":
         from nanobot.providers.openai_codex_provider import OpenAICodexProvider
-        provider = OpenAICodexProvider(default_model=model)
+        provider = OpenAICodexProvider(
+            default_model=model,
+            api_key=p.api_key if p and p.api_key else None,
+            api_base=p.api_base if p and p.api_base else None,
+        )
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
         provider = AzureOpenAIProvider(
@@ -438,6 +442,7 @@ def _make_provider(config: Config):
         temperature=defaults.temperature,
         max_tokens=defaults.max_tokens,
         reasoning_effort=defaults.reasoning_effort,
+        service_tier=defaults.service_tier,
     )
     return provider
 
