@@ -390,9 +390,20 @@ def build_agent(
         role_name=role_config.name if role_config else "",
     )
 
-    # 13. Construct MessageProcessor (role_manager wired post-construction
-    #     via set_role_manager; span_module passed at construction time)
-    processor = MessageProcessor(
+    # 12.5 Construct TurnContextManager
+    from nanobot.agent.turn_context import TurnContextManager
+
+    turn_context = TurnContextManager(
+        tools=_tool_build.tools,
+        dispatcher=dispatcher,
+        missions=_tool_build.missions,
+        context=context,
+    )
+
+    # 13. Construct _ProcessorServices and MessageProcessor
+    from nanobot.agent.agent_components import _ProcessorServices
+
+    services = _ProcessorServices(
         orchestrator=orchestrator,
         dispatcher=dispatcher,
         missions=_tool_build.missions,
@@ -402,13 +413,16 @@ def build_agent(
         consolidator=consolidator,
         verifier=verifier,
         bus=bus,
+        turn_context=turn_context,
+        span_module=sys.modules["nanobot.agent.loop"],
+    )
+    processor = MessageProcessor(
+        services=services,
         config=config,
         workspace=config.workspace_path,
         role_name=role_config.name if role_config else "",
-        role_manager=None,
         provider=provider,
         model=model,
-        span_module=sys.modules["nanobot.agent.loop"],
     )
 
     # 14. Pack _AgentComponents (nested groups)

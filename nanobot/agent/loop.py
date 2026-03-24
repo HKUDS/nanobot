@@ -214,8 +214,7 @@ class AgentLoop:
         provider: Callable[[], list[str]],
     ) -> None:
         """Set a callback that returns known email contacts (refreshed per-turn)."""
-        self._contacts_provider = provider
-        self._processor._contacts_provider = provider  # forward to processor
+        self._processor._turn_context.set_contacts_provider(provider)
 
     def set_email_fetch(
         self,
@@ -227,11 +226,6 @@ class AgentLoop:
             if isinstance(tool, CheckEmailTool):
                 tool._fetch = fetch_callback
                 tool._fetch_unread = fetch_unread_callback
-
-    def _refresh_contacts(self) -> None:
-        """Pull latest contacts from the provider into the context builder."""
-        if hasattr(self, "_contacts_provider"):
-            self.context.set_contacts_context(self._contacts_provider())
 
     # ------------------------------------------------------------------
     # Agent loop delegation to TurnOrchestrator

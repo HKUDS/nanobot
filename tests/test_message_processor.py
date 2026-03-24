@@ -15,6 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+from nanobot.agent.agent_components import _ProcessorServices
 from nanobot.agent.message_processor import MessageProcessor
 from nanobot.bus.events import InboundMessage, OutboundMessage
 
@@ -46,14 +47,14 @@ def _make_processor(tmp_path: Path) -> MessageProcessor:
     config.max_tokens = 4096
     config.verification_mode = "off"
 
-    role_manager = MagicMock()
     provider = MagicMock()
     provider.get_default_model = MagicMock(return_value="test-model")
 
     dispatcher = MagicMock()
     missions = MagicMock()
+    turn_context = MagicMock()
 
-    return MessageProcessor(
+    services = _ProcessorServices(
         orchestrator=orchestrator,
         dispatcher=dispatcher,
         missions=missions,
@@ -63,10 +64,14 @@ def _make_processor(tmp_path: Path) -> MessageProcessor:
         consolidator=consolidator,
         verifier=verifier,
         bus=bus,
+        turn_context=turn_context,
+    )
+
+    return MessageProcessor(
+        services=services,
         config=config,
         workspace=tmp_path,
         role_name="default",
-        role_manager=role_manager,
         provider=provider,
         model="test-model",
     )

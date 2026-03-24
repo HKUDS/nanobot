@@ -19,34 +19,28 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from nanobot.agent.agent_components import _ProcessorServices
 from nanobot.agent.callbacks import ProgressCallback
-from nanobot.agent.consolidation import ConsolidationOrchestrator
-from nanobot.agent.turn_types import Orchestrator, TurnState
+from nanobot.agent.turn_types import TurnState
 from nanobot.agent.verifier import AnswerVerifier
 from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig
-from nanobot.context.context import ContextBuilder
 from nanobot.coordination.role_switching import TurnRoleManager
 from nanobot.observability.bus_progress import make_bus_progress
 from nanobot.observability.langfuse import update_current_span
 from nanobot.observability.tracing import TraceContext, bind_trace
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import Session
 from nanobot.tools.builtin.message import MessageTool
-from nanobot.tools.builtin.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
 
 if TYPE_CHECKING:
     from nanobot.coordination.coordinator import ClassificationResult
-    from nanobot.coordination.delegation import DelegationDispatcher
-    from nanobot.coordination.mission import MissionManager
     from nanobot.coordination.scratchpad import Scratchpad
     from nanobot.providers.base import LLMProvider
-    from nanobot.tools.executor import ToolExecutor
 
 
 class MessageProcessor:
@@ -64,36 +58,28 @@ class MessageProcessor:
     def __init__(
         self,
         *,
-        orchestrator: Orchestrator,
-        dispatcher: DelegationDispatcher,
-        missions: MissionManager,
-        context: ContextBuilder,
-        sessions: SessionManager,
-        tools: ToolExecutor,
-        consolidator: ConsolidationOrchestrator,
-        verifier: AnswerVerifier,
-        bus: MessageBus,
+        services: _ProcessorServices,
         config: AgentConfig,
         workspace: Path,
         role_name: str,
-        role_manager: TurnRoleManager | None,
         provider: LLMProvider,
         model: str,
-        span_module: Any = None,
     ) -> None:
-        self.orchestrator = orchestrator
-        self._dispatcher = dispatcher
-        self._missions = missions
-        self.context = context
-        self.sessions = sessions
-        self.tools = tools
-        self._consolidator = consolidator
-        self.verifier = verifier
-        self.bus = bus
+        self.orchestrator = services.orchestrator
+        self._dispatcher = services.dispatcher
+        self._missions = services.missions
+        self.context = services.context
+        self.sessions = services.sessions
+        self.tools = services.tools
+        self._consolidator = services.consolidator
+        self.verifier = services.verifier
+        self.bus = services.bus
+        self._turn_context = services.turn_context
+        self._span_module: Any | None = services.span_module
         self.config = config
         self.workspace = workspace
         self.role_name = role_name
-        self._role_manager = role_manager
+        self._role_manager: TurnRoleManager | None = None
         self.provider = provider
         self.model = model
 
@@ -110,17 +96,7 @@ class MessageProcessor:
         # Last TurnResult from the orchestrator, used by _sync_token_counters.
         self._last_turn_result: Any | None = None
 
-        # Observability hook: reference to the module whose
-        # ``update_current_span`` should be called.  Passed at construction
-        # time (typically ``sys.modules["nanobot.agent.loop"]``) so that
-        # tests patching ``nanobot.agent.loop.update_current_span`` see
-        # their patches take effect at call time (the attribute is resolved late).
-        self._span_module: Any | None = span_module
-
-        # Contacts provider callback (forwarded from AgentLoop.set_contacts_provider)
-        self._contacts_provider: Callable[[], list[str]] | None = None
-
-        # Scratchpad reference (set lazily via _ensure_scratchpad)
+        # Scratchpad reference (accessed via turn_context)
         self._scratchpad: Scratchpad | None = None
 
     # ------------------------------------------------------------------
@@ -200,7 +176,7 @@ class MessageProcessor:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+            self._turn_context.set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=self.config.memory_window)
             skill_names = self.context.skills.detect_relevant_skills(msg.content)
             messages = await self.context.build_messages(
@@ -279,8 +255,10 @@ class MessageProcessor:
         if self.config.memory_enabled and unconsolidated >= self.config.memory_window:
             self._consolidator.submit(session.key, session, self.provider, self.model)
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
-        self._ensure_scratchpad(key)
+        self._turn_context.set_tool_context(
+            msg.channel, msg.chat_id, msg.metadata.get("message_id")
+        )
+        self._turn_context.ensure_scratchpad(key, self.workspace)
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
@@ -574,59 +552,6 @@ class MessageProcessor:
             return cr, corr
 
         return await asyncio.to_thread(_inner)
-
-    # ------------------------------------------------------------------
-    # Tool context and scratchpad
-    # ------------------------------------------------------------------
-
-    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
-        """Update context for tools that need routing info.
-
-        Delegates to the tool executor's get() method to find typed tool
-        instances and set their per-turn context.
-        """
-        from nanobot.tools.builtin.cron import CronTool
-        from nanobot.tools.builtin.feedback import FeedbackTool
-        from nanobot.tools.builtin.mission import MissionStartTool
-
-        if self._contacts_provider is not None:
-            self.context.set_contacts_context(self._contacts_provider())
-
-        msg_t = self.tools.get("message")
-        if isinstance(msg_t, MessageTool):
-            msg_t.set_context(channel, chat_id, message_id)
-        ms_t = self.tools.get("mission_start")
-        if isinstance(ms_t, MissionStartTool):
-            ms_t.set_context(channel, chat_id)
-        cr_t = self.tools.get("cron")
-        if isinstance(cr_t, CronTool):
-            cr_t.set_context(channel, chat_id)
-        fb_t = self.tools.get("feedback")
-        if isinstance(fb_t, FeedbackTool):
-            fb_t.set_context(channel, chat_id, session_key=f"{channel}:{chat_id}")
-
-    def _ensure_scratchpad(self, session_key: str) -> None:
-        """Initialise (or swap) the per-session scratchpad and update tools."""
-        from nanobot.coordination.scratchpad import Scratchpad
-        from nanobot.utils.helpers import safe_filename
-
-        safe_key = safe_filename(session_key.replace(":", "_"))
-        session_dir = self.workspace / "sessions" / safe_key
-        session_dir.mkdir(parents=True, exist_ok=True)
-        self._scratchpad = Scratchpad(session_dir)
-
-        # Update scratchpad in delegation dispatcher and mission manager
-        self._dispatcher.scratchpad = self._scratchpad
-        self._dispatcher._trace_path = session_dir / "routing_trace.jsonl"
-        self._missions.scratchpad = self._scratchpad
-
-        # Update scratchpad tool references
-        write_tool = self.tools.get("write_scratchpad")
-        if isinstance(write_tool, ScratchpadWriteTool):
-            write_tool._scratchpad = self._scratchpad
-        read_tool = self.tools.get("read_scratchpad")
-        if isinstance(read_tool, ScratchpadReadTool):
-            read_tool._scratchpad = self._scratchpad
 
     # ------------------------------------------------------------------
     # Session persistence
