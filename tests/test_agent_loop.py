@@ -721,7 +721,7 @@ class TestDelegationDepthLimit:
         token = _delegation_ancestry.set(tuple(f"role_{i}" for i in range(MAX_DELEGATION_DEPTH)))
         try:
             with pytest.raises(_CycleError, match="Maximum delegation depth"):
-                asyncio.get_event_loop().run_until_complete(
+                asyncio.new_event_loop().run_until_complete(
                     dispatcher.dispatch("child", "do something", context=None)
                 )
         finally:
