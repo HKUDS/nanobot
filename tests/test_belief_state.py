@@ -182,7 +182,7 @@ class TestEvidenceLinking:
                 entry, confidence_delta=0.01, evidence_event_id=f"evt-{i:03d}"
             )
         refs = entry["evidence_event_ids"]
-        assert len(refs) == store._MAX_EVIDENCE_REFS
+        assert len(refs) == store.profile_mgr._MAX_EVIDENCE_REFS
         # Most recent should be present.
         assert "evt-014" in refs
 

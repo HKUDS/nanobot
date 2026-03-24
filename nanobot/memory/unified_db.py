@@ -18,7 +18,7 @@ from typing import Any
 
 import sqlite_vec
 
-from .helpers import _utc_now_iso
+from ._text import _utc_now_iso
 
 __all__ = ["UnifiedMemoryDB"]
 

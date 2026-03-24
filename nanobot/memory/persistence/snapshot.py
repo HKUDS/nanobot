@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable
 
-from ..helpers import _to_datetime, _to_str_list, _utc_now_iso
+from .._text import _to_datetime, _to_str_list, _utc_now_iso
 from .profile_io import ProfileStore as ProfileManager
 
 if TYPE_CHECKING:

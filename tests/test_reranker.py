@@ -37,7 +37,9 @@ class TestBackwardCompatAlias:
     """CrossEncoderReranker is aliased to OnnxCrossEncoderReranker in __init__.py."""
 
     def test_alias_importable(self) -> None:
-        from nanobot.memory import CrossEncoderReranker
+        from nanobot.memory.ranking.onnx_reranker import (
+            OnnxCrossEncoderReranker as CrossEncoderReranker,
+        )
 
         assert CrossEncoderReranker is OnnxCrossEncoderReranker
 

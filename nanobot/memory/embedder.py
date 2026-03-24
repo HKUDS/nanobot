@@ -110,7 +110,7 @@ class LocalEmbedder:
                 self._tokenizer.enable_padding(length=128)
                 self._tokenizer.enable_truncation(max_length=128)
                 self._initialized = True
-            except Exception:
+            except Exception:  # crash-barrier: ONNX/tokenizer load can fail in many ways
                 logger.exception("Failed to load local ONNX embedder")
                 raise
 

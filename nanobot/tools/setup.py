@@ -230,7 +230,7 @@ def build_delegation_tools(
                 working_dir=str(workspace),
                 timeout=exec_config.timeout,
                 restrict_to_workspace=restrict_to_workspace,
-                shell_mode=getattr(exec_config, "shell_mode", None),
+                shell_mode=getattr(exec_config, "shell_mode", None) or "denylist",
             )
         )
     tools.extend(

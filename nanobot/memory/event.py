@@ -14,6 +14,43 @@ EventType = Literal["preference", "fact", "task", "decision", "constraint", "rel
 MemoryType = Literal["semantic", "episodic", "reflection"]
 Stability = Literal["high", "medium", "low"]
 
+# Runtime set for membership checks (mirrors the MemoryType Literal above).
+MEMORY_TYPES: frozenset[str] = frozenset({"semantic", "episodic", "reflection"})
+
+_RESOLVED_MARKERS: tuple[str, ...] = (
+    "done",
+    "completed",
+    "resolved",
+    "closed",
+    "finished",
+    "cancelled",
+    "canceled",
+)
+
+
+def is_resolved_task_or_decision(summary: str) -> bool:
+    """Check whether a task/decision summary indicates resolved status."""
+    text = summary.lower()
+    return any(marker in text for marker in _RESOLVED_MARKERS)
+
+
+def memory_type_for_item(item: dict[str, Any]) -> str:
+    """Classify the memory type of an event/item dict."""
+    mt = str(item.get("memory_type", "")).strip().lower()
+    if mt in MEMORY_TYPES:
+        return mt
+    meta = item.get("metadata")
+    if isinstance(meta, dict):
+        meta_type = str(meta.get("memory_type", "")).strip().lower()
+        if meta_type in MEMORY_TYPES:
+            return meta_type
+    event_type = str(item.get("type", "")).strip().lower()
+    if event_type in {"task", "decision"}:
+        return "episodic"
+    if event_type in {"preference", "fact", "constraint", "relationship"}:
+        return "semantic"
+    return "episodic"
+
 
 # ---------------------------------------------------------------------------
 # Sub-models

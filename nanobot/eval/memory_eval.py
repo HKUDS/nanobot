@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from nanobot.memory.helpers import _safe_float, _utc_now_iso
+from nanobot.memory._text import _safe_float, _utc_now_iso
 from nanobot.utils.helpers import ensure_dir
 
 if TYPE_CHECKING:

@@ -37,7 +37,10 @@ jobs:
         run: pip install pip-audit==2.7.3
 
       - name: Run pip-audit
-        run: pip-audit --strict --desc
+        # GHSA-5239-wwwm-4pmq: pygments ≤2.19.2 ReDoS in AdlLexer — no fix
+        # available yet (transitive dep via rich/pytest). Remove ignore when
+        # pygments releases a patched version.
+        run: pip-audit --strict --desc --ignore-vuln GHSA-5239-wwwm-4pmq
 
   trivy-image:
     name: Container image scan
