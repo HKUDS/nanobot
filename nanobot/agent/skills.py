@@ -16,7 +16,7 @@ from typing import Any, ClassVar
 import yaml  # type: ignore[import-untyped]
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool
+from nanobot.tools.base import Tool
 
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"

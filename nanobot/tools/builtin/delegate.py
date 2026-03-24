@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, ClassVar
 
 from nanobot.agent.failure import _CycleError
-from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.tools.base import Tool, ToolResult
 
 
 @dataclass(slots=True)

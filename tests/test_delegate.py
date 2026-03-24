@@ -18,14 +18,14 @@ import pytest
 from conftest import FakeProvider
 
 from nanobot.agent.coordinator import Coordinator, build_default_registry
-from nanobot.agent.tools.delegate import (
+from nanobot.config.schema import AgentConfig
+from nanobot.providers.base import LLMResponse
+from nanobot.tools.builtin.delegate import (
     DelegateParallelTool,
     DelegateTool,
     DelegationResult,
     _CycleError,
 )
-from nanobot.config.schema import AgentConfig
-from nanobot.providers.base import LLMResponse
 
 # ---------------------------------------------------------------------------
 # Helpers

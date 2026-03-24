@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.scratchpad import Scratchpad
-from nanobot.agent.tools.delegate import (
+from nanobot.tools.builtin.delegate import (
     _INVESTIGATION_RE,
     DelegateParallelTool,
     DelegateTool,

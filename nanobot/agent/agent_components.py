@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from nanobot.agent.capability import CapabilityRegistry
     from nanobot.agent.consolidation import ConsolidationOrchestrator
     from nanobot.agent.context import ContextBuilder
     from nanobot.agent.delegation import DelegationDispatcher
@@ -23,9 +22,6 @@ if TYPE_CHECKING:
     from nanobot.agent.mission import MissionManager
     from nanobot.agent.role_switching import TurnRoleManager
     from nanobot.agent.streaming import StreamingLLMCaller
-    from nanobot.agent.tool_executor import ToolExecutor
-    from nanobot.agent.tools.registry import ToolRegistry
-    from nanobot.agent.tools.result_cache import ToolResultCache
     from nanobot.agent.turn_orchestrator import TurnOrchestrator
     from nanobot.agent.verifier import AnswerVerifier
     from nanobot.bus.queue import MessageBus
@@ -40,6 +36,10 @@ if TYPE_CHECKING:
     from nanobot.memory import MemoryStore
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import SessionManager
+    from nanobot.tools.capability import CapabilityRegistry
+    from nanobot.tools.executor import ToolExecutor
+    from nanobot.tools.registry import ToolRegistry
+    from nanobot.tools.result_cache import ToolResultCache
 
 
 @dataclass(slots=True)

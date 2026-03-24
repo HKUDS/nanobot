@@ -227,7 +227,7 @@ class _StubProvider:
 class TestToolRegistryInjection:
     def test_injected_registry_skips_default_tools(self, tmp_path: Path) -> None:
         """When tool_registry is provided, _register_default_tools is skipped."""
-        from nanobot.agent.tools.registry import ToolRegistry
+        from nanobot.tools.registry import ToolRegistry
 
         reg = ToolRegistry()
         loop = _make_loop_via_init(tmp_path, _StubProvider(), tool_registry=reg)

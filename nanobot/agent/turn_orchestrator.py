@@ -35,11 +35,11 @@ from nanobot.agent.failure import FailureClass, ToolCallTracker, _build_failure_
 from nanobot.agent.prompt_loader import PromptLoader
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
 from nanobot.agent.task_types import has_parallel_structure
-from nanobot.agent.tool_executor import ToolExecutor
 from nanobot.agent.tracing import bind_trace
 from nanobot.agent.turn_types import TurnResult as TurnResult  # re-export
 from nanobot.agent.turn_types import TurnState as TurnState  # re-export
 from nanobot.agent.verifier import AnswerVerifier
+from nanobot.tools.executor import ToolExecutor
 
 if TYPE_CHECKING:
     from nanobot.agent.delegation_advisor import DelegationAdvisor

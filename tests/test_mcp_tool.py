@@ -8,8 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from nanobot.agent.tools.mcp import MCPToolWrapper, connect_mcp_servers
-from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.tools.builtin.mcp import MCPToolWrapper, connect_mcp_servers
+from nanobot.tools.registry import ToolRegistry
 
 
 class _FakeText:

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronSchedule
+from nanobot.tools.base import Tool, ToolResult
 
 
 class CronTool(Tool):

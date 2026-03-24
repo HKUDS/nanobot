@@ -1,4 +1,4 @@
-"""Tests for nanobot.agent.tools.filesystem — file system tools."""
+"""Tests for nanobot.tools.builtin.filesystem — file system tools."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.tools.filesystem import (
+from nanobot.tools.builtin.filesystem import (
     EditFileTool,
     ListDirTool,
     ReadFileTool,

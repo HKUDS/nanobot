@@ -6,12 +6,12 @@ target_role values with clear error messages before dispatching.
 
 from __future__ import annotations
 
-from nanobot.agent.tools.delegate import (
+from nanobot.errors import UnknownRoleError
+from nanobot.tools.builtin.delegate import (
     DelegateParallelTool,
     DelegateTool,
     DelegationResult,
 )
-from nanobot.errors import UnknownRoleError
 
 # ---------------------------------------------------------------------------
 # Helpers

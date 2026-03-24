@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.agent.tools.powerpoint import (
+from nanobot.tools.builtin.powerpoint import (
     AnalyzePptxTool,
     PptxGetSlideTool,
     ReadPptxTool,
@@ -16,7 +16,7 @@ from nanobot.agent.tools.powerpoint import (
     _format_slides_markdown,
     _parse_json_response,
 )
-from nanobot.agent.tools.result_cache import ToolResultCache
+from nanobot.tools.result_cache import ToolResultCache
 
 pptx = pytest.importorskip("pptx")
 
@@ -298,8 +298,8 @@ async def test_analyze_pptx_text_only(
 ) -> None:
     """Analyze in text-only mode (no LibreOffice available)."""
     with (
-        patch("nanobot.agent.tools.powerpoint._call_llm") as mock_llm,
-        patch("nanobot.agent.tools.powerpoint._render_slides", return_value=None),
+        patch("nanobot.tools.builtin.powerpoint._call_llm") as mock_llm,
+        patch("nanobot.tools.builtin.powerpoint._render_slides", return_value=None),
     ):
         # Mock the per-slide and synthesis calls
         slide_result = _SLIDE_ANALYSIS.copy()
@@ -342,10 +342,10 @@ async def test_analyze_pptx_custom_output_path(
         return json.dumps(_SLIDE_ANALYSIS)
 
     with (
-        patch("nanobot.agent.tools.powerpoint._call_llm", side_effect=_mock_call),
-        patch("nanobot.agent.tools.powerpoint._render_slides", return_value=None),
+        patch("nanobot.tools.builtin.powerpoint._call_llm", side_effect=_mock_call),
+        patch("nanobot.tools.builtin.powerpoint._render_slides", return_value=None),
         patch(
-            "nanobot.agent.tools.powerpoint._synthesize_deck",
+            "nanobot.tools.builtin.powerpoint._synthesize_deck",
             return_value=_DECK_SYNTHESIS,
         ),
     ):

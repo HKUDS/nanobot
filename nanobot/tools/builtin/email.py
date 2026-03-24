@@ -6,7 +6,7 @@ import asyncio
 from datetime import date, timedelta
 from typing import Any, Callable, ClassVar
 
-from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.tools.base import Tool, ToolResult
 
 
 class CheckEmailTool(Tool):

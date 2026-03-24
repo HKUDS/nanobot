@@ -458,8 +458,8 @@ class TestToolRegistryToolSpan:
     """ToolRegistry._execute_inner wraps tool execution in a tool_span."""
 
     async def test_tool_span_called_with_name_and_input(self):
-        from nanobot.agent.tools.base import Tool, ToolResult
-        from nanobot.agent.tools.registry import ToolRegistry
+        from nanobot.tools.base import Tool, ToolResult
+        from nanobot.tools.registry import ToolRegistry
 
         class DummyTool(Tool):
             name = "dummy"
@@ -479,7 +479,7 @@ class TestToolRegistryToolSpan:
             captured_spans.append(kwargs)
             yield None
 
-        with patch("nanobot.agent.tools.registry.tool_span", side_effect=fake_tool_span):
+        with patch("nanobot.agent.observability.tool_span", side_effect=fake_tool_span):
             result = await registry.execute("dummy", {})
 
         assert result.success

@@ -29,8 +29,6 @@ from nanobot.agent.consolidation import ConsolidationOrchestrator
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.observability import update_current_span
 from nanobot.agent.role_switching import TurnRoleManager
-from nanobot.agent.tools.message import MessageTool
-from nanobot.agent.tools.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
 from nanobot.agent.tracing import TraceContext, bind_trace
 from nanobot.agent.turn_types import Orchestrator, TurnState
 from nanobot.agent.verifier import AnswerVerifier
@@ -39,14 +37,16 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig
 from nanobot.session.manager import Session, SessionManager
+from nanobot.tools.builtin.message import MessageTool
+from nanobot.tools.builtin.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
 
 if TYPE_CHECKING:
     from nanobot.agent.coordinator import ClassificationResult
     from nanobot.agent.delegation import DelegationDispatcher
     from nanobot.agent.mission import MissionManager
     from nanobot.agent.scratchpad import Scratchpad
-    from nanobot.agent.tool_executor import ToolExecutor
     from nanobot.providers.base import LLMProvider
+    from nanobot.tools.executor import ToolExecutor
 
 
 class MessageProcessor:
@@ -585,9 +585,9 @@ class MessageProcessor:
         Delegates to the tool executor's get() method to find typed tool
         instances and set their per-turn context.
         """
-        from nanobot.agent.tools.cron import CronTool
-        from nanobot.agent.tools.feedback import FeedbackTool
-        from nanobot.agent.tools.mission import MissionStartTool
+        from nanobot.tools.builtin.cron import CronTool
+        from nanobot.tools.builtin.feedback import FeedbackTool
+        from nanobot.tools.builtin.mission import MissionStartTool
 
         if self._contacts_provider is not None:
             self.context.set_contacts_context(self._contacts_provider())

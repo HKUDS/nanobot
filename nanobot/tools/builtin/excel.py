@@ -9,11 +9,11 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.agent.tools.filesystem import _resolve_path
+from nanobot.tools.base import Tool, ToolResult
+from nanobot.tools.builtin.filesystem import _resolve_path
 
 if TYPE_CHECKING:
-    from nanobot.agent.tools.result_cache import ToolResultCache
+    from nanobot.tools.result_cache import ToolResultCache
 
 # Pattern for repeating date-allocation columns like "3/1/2026 (d)"
 _DATE_ALLOC_RE = re.compile(r"^\d{1,2}/\d{1,2}/\d{4}\s*\(")

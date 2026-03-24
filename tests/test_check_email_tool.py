@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from nanobot.agent.tools.email import CheckEmailTool
+from nanobot.tools.builtin.email import CheckEmailTool
 
 
 def _sample_messages(n: int = 2) -> list[dict[str, Any]]:

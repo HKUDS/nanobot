@@ -1,4 +1,4 @@
-"""Tests for nanobot.agent.tools.cron — CronTool."""
+"""Tests for nanobot.tools.builtin.cron — CronTool."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from nanobot.agent.tools.cron import CronTool
+from nanobot.tools.builtin.cron import CronTool
 
 
 @pytest.fixture()

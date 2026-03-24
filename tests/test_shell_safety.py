@@ -10,8 +10,8 @@ import sys
 
 import pytest
 
-from nanobot.agent.tools.shell import ExecTool
 from nanobot.errors import ToolPermissionError
+from nanobot.tools.builtin.shell import ExecTool
 
 # ---------------------------------------------------------------------------
 # Deny-pattern coverage

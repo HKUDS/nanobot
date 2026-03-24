@@ -8,12 +8,12 @@ import pytest
 
 from nanobot.agent.delegation import _delegation_ancestry
 from nanobot.agent.loop import AgentLoop
-from nanobot.agent.tools.base import ToolResult
 from nanobot.bus.events import InboundMessage, ReactionEvent
 from nanobot.memory.extractor import MemoryExtractor
 from nanobot.memory.graph import KnowledgeGraph
 from nanobot.memory.retrieval_planner import RetrievalPlanner
 from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.tools.base import ToolResult
 from tests.test_agent_loop import ScriptedProvider, _make_loop
 from tests.test_store_helpers import _store
 
@@ -163,7 +163,7 @@ async def test_loop_connect_mcp_and_tool_parallel_error_path(
     async def _failing_connect(*_args, **_kwargs):
         raise RuntimeError("mcp boom")
 
-    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _failing_connect)
+    monkeypatch.setattr("nanobot.tools.builtin.mcp.connect_mcp_servers", _failing_connect)
     await loop._connect_mcp()
     assert loop._mcp_connected is False
 

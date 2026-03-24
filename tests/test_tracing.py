@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 
-from nanobot.agent.tool_executor import ToolExecutor
-from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tracing import TraceContext, bind_trace
 from nanobot.providers.base import ToolCallRequest
+from nanobot.tools.base import Tool, ToolResult
+from nanobot.tools.executor import ToolExecutor
+from nanobot.tools.registry import ToolRegistry
 
 # -- helpers ---------------------------------------------------------------
 

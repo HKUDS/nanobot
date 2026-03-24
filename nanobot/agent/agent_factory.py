@@ -24,14 +24,10 @@ from nanobot.agent.agent_components import (
 )
 
 if TYPE_CHECKING:
-    from nanobot.agent.capability import CapabilityRegistry
     from nanobot.agent.consolidation import ConsolidationOrchestrator
     from nanobot.agent.context import ContextBuilder
     from nanobot.agent.loop import AgentLoop
     from nanobot.agent.mission import MissionManager
-    from nanobot.agent.tool_executor import ToolExecutor
-    from nanobot.agent.tools.registry import ToolRegistry
-    from nanobot.agent.tools.result_cache import ToolResultCache
     from nanobot.bus.queue import MessageBus
     from nanobot.config.schema import (
         AgentConfig,
@@ -43,6 +39,10 @@ if TYPE_CHECKING:
     from nanobot.cron.service import CronService
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import SessionManager
+    from nanobot.tools.capability import CapabilityRegistry
+    from nanobot.tools.executor import ToolExecutor
+    from nanobot.tools.registry import ToolRegistry
+    from nanobot.tools.result_cache import ToolResultCache
 
 
 # ---------------------------------------------------------------------------
@@ -115,12 +115,12 @@ def _build_tools(
 
     Returns a ``_ToolBuildResult`` with the constructed subsystems.
     """
-    from nanobot.agent.capability import CapabilityRegistry
     from nanobot.agent.mission import MissionManager
-    from nanobot.agent.tool_executor import ToolExecutor
-    from nanobot.agent.tool_setup import register_default_tools
-    from nanobot.agent.tools.registry import ToolRegistry as _ToolRegistry
-    from nanobot.agent.tools.result_cache import ToolResultCache
+    from nanobot.tools.capability import CapabilityRegistry
+    from nanobot.tools.executor import ToolExecutor
+    from nanobot.tools.registry import ToolRegistry as _ToolRegistry
+    from nanobot.tools.result_cache import ToolResultCache
+    from nanobot.tools.setup import register_default_tools
 
     if tool_registry is not None:
         _tool_registry = tool_registry

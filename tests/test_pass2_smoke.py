@@ -17,7 +17,6 @@ from nanobot.agent.compression import (
 )
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.scratchpad import Scratchpad
-from nanobot.agent.tools.delegate import DelegateTool, DelegationResult
 from nanobot.agent.turn_orchestrator import _dynamic_preserve_recent
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -25,6 +24,7 @@ from nanobot.channels.email import EmailChannel
 from nanobot.config.schema import AgentConfig, EmailConfig
 from nanobot.errors import DeliverySkippedError
 from nanobot.providers.base import LLMProvider
+from nanobot.tools.builtin.delegate import DelegateTool, DelegationResult
 from tests.helpers import ScriptedProvider
 
 # ---------------------------------------------------------------------------

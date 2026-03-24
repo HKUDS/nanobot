@@ -74,11 +74,11 @@ class TestRulesStructure:
             assert isinstance(forbidden, list)
             assert all(isinstance(p, str) for p in forbidden)
 
-    def test_channels_cannot_import_agent_tools(self):
+    def test_channels_cannot_import_tools(self):
         channel_rules = [(g, f) for g, f in RULES if "channels" in g]
         assert len(channel_rules) > 0
         forbidden = channel_rules[0][1]
-        assert any("agent.tools" in f for f in forbidden)
+        assert any("nanobot.tools" in f for f in forbidden)
 
     def test_providers_cannot_import_agent(self):
         provider_rules = [(g, f) for g, f in RULES if "providers" in g]

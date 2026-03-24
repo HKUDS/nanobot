@@ -6,10 +6,10 @@ from pathlib import Path
 
 from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.loop import AgentLoop
-from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig, AgentRoleConfig
 from nanobot.providers.base import LLMResponse
+from nanobot.tools.registry import ToolRegistry
 from tests.helpers import ScriptedProvider
 
 

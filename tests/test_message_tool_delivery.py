@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from nanobot.agent.tools.message import MessageTool
 from nanobot.bus.events import DeliveryResult, OutboundMessage
 from nanobot.errors import DeliverySkippedError
+from nanobot.tools.builtin.message import MessageTool
 
 # ---------------------------------------------------------------------------
 # Helpers

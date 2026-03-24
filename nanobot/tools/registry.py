@@ -22,14 +22,11 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from nanobot.agent.metrics import tool_calls_total, tool_latency_seconds
-from nanobot.agent.observability import tool_span
-from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.agent.tracing import bind_trace
 from nanobot.errors import ToolExecutionError, ToolNotFoundError, ToolValidationError
+from nanobot.tools.base import Tool, ToolResult
 
 if TYPE_CHECKING:
-    from nanobot.agent.tools.result_cache import ToolResultCache, _ChatProvider
+    from nanobot.tools.result_cache import ToolResultCache, _ChatProvider
 
 
 class ToolRegistry:
@@ -143,6 +140,10 @@ class ToolRegistry:
 
     async def _execute_inner(self, name: str, tool: Tool, params: dict[str, Any]) -> ToolResult:
         """Run validation and execute, wrapping errors."""
+        from nanobot.agent.metrics import tool_calls_total, tool_latency_seconds
+        from nanobot.agent.observability import tool_span
+        from nanobot.agent.tracing import bind_trace
+
         t0 = time.monotonic()
 
         async with tool_span(name=name, input=params):

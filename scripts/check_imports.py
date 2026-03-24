@@ -17,9 +17,9 @@ from pathlib import Path
 RULES: list[tuple[str, list[str]]] = [
     ("nanobot/channels/**/*.py", [
         "nanobot.agent.loop",
-        "nanobot.agent.tool_executor",
+        "nanobot.tools.executor",
         "nanobot.agent.delegation",
-        "nanobot.agent.tools",
+        "nanobot.tools",
         "nanobot.memory",
     ]),
     ("nanobot/providers/**/*.py", [
@@ -36,12 +36,12 @@ RULES: list[tuple[str, list[str]]] = [
         "nanobot.channels",
         "nanobot.providers",
     ]),
-    ("nanobot/agent/tools/**/*.py", [
+    ("nanobot/tools/**/*.py", [
         "nanobot.channels",
     ]),
     ("nanobot/memory/**/*.py", [
         "nanobot.channels",
-        "nanobot.agent.tools",
+        "nanobot.tools",
     ]),
 ]
 

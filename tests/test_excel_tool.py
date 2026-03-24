@@ -8,14 +8,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from nanobot.agent.tools.excel import (
+from nanobot.tools.builtin.excel import (
     DescribeDataTool,
     QueryDataTool,
     ReadExcelTool,
     ReadSpreadsheetTool,
     _validate_select_only,
 )
-from nanobot.agent.tools.result_cache import ToolResultCache
+from nanobot.tools.result_cache import ToolResultCache
 
 openpyxl = pytest.importorskip("openpyxl")
 

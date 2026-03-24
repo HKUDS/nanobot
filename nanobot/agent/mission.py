@@ -30,23 +30,23 @@ from nanobot.agent.observability import (
     span as langfuse_span,
 )
 from nanobot.agent.task_types import TASK_TYPES, classify_task_type
-from nanobot.agent.tool_loop import run_tool_loop
-from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
-from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.agent.tracing import TraceContext
 from nanobot.bus.events import OutboundMessage
 from nanobot.config.schema import AgentRoleConfig
 from nanobot.errors import ToolExecutionError
+from nanobot.tools.builtin.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.tools.builtin.shell import ExecTool
+from nanobot.tools.builtin.web import WebFetchTool, WebSearchTool
+from nanobot.tools.registry import ToolRegistry
+from nanobot.tools.tool_loop import run_tool_loop
 
 if TYPE_CHECKING:
     from nanobot.agent.coordinator import Coordinator
     from nanobot.agent.scratchpad import Scratchpad
-    from nanobot.agent.tools.base import Tool
     from nanobot.bus.queue import MessageBus
     from nanobot.config.schema import ExecToolConfig
     from nanobot.providers.base import LLMProvider
+    from nanobot.tools.base import Tool
 
 
 class MissionStatus(Enum):

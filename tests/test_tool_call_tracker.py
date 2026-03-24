@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from nanobot.agent.failure import FailureClass, ToolCallTracker
-from nanobot.agent.tools.base import ToolResult
+from nanobot.tools.base import ToolResult
 
 
 def test_first_failure_returns_one() -> None:

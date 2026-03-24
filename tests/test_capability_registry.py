@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
-from nanobot.agent.capability import CapabilityRegistry
-from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.tools.base import Tool, ToolResult
+from nanobot.tools.capability import CapabilityRegistry
+from nanobot.tools.registry import ToolRegistry
 
 # ---------------------------------------------------------------------------
 # Test helpers

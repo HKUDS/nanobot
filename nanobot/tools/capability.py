@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING, Any, Literal
 from loguru import logger
 
 from nanobot.agent.registry import AgentRegistry
-from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.tools.base import Tool, ToolResult
+from nanobot.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
     from nanobot.agent.skills import SkillsLoader

@@ -67,11 +67,11 @@ nanobot/
 ## Key Patterns
 
 ### Adding a Tool
-1. Subclass `Tool` from `nanobot/agent/tools/base.py`
+1. Subclass `Tool` from `nanobot/tools/base.py`
 2. Define `name`, `description`, `parameters` (JSON Schema)
 3. `async def execute(self, **kwargs) -> ToolResult`
 4. Register in `AgentLoop.__init__`
-5. Template: `ReadFileTool` in `nanobot/agent/tools/filesystem.py`
+5. Template: `ReadFileTool` in `nanobot/tools/filesystem.py`
 
 ### Adding a Skill
 1. Create `nanobot/skills/<name>/SKILL.md` (YAML frontmatter)
@@ -88,7 +88,7 @@ nanobot/
 ## Security
 
 - Never hardcode API keys
-- Shell commands: `_guard_command()` deny patterns in `nanobot/agent/tools/shell.py`
+- Shell commands: `_guard_command()` deny patterns in `nanobot/tools/shell.py`
 - Filesystem: path traversal protection against workspace root
 - Network: localhost-only bindings for internal services
 

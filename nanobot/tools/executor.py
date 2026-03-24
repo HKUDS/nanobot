@@ -16,14 +16,14 @@ import asyncio
 import time
 from typing import TYPE_CHECKING, Any
 
-from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tracing import bind_trace
 from nanobot.errors import ToolExecutionError
+from nanobot.tools.base import ToolResult
 
 if TYPE_CHECKING:
-    from nanobot.agent.tools.base import Tool
-    from nanobot.agent.tools.registry import ToolRegistry
     from nanobot.providers.base import ToolCallRequest
+    from nanobot.tools.base import Tool
+    from nanobot.tools.registry import ToolRegistry
 
 
 class ToolExecutor:

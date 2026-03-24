@@ -606,10 +606,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from nanobot.agent.tool_executor import ToolExecutor
+from nanobot.tools.executor import ToolExecutor
 from nanobot.agent.tool_setup import register_default_tools
-from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.result_cache import ToolResultCache
+from nanobot.tools.registry import ToolRegistry
+from nanobot.tools.result_cache import ToolResultCache
 from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
 
 
@@ -737,7 +737,7 @@ class TestRegisterDefaultTools:
         assert "cron" in tools._registry.tool_names
 
     def test_skills_tools_discovered(self, tmp_workspace: Path) -> None:
-        from nanobot.agent.tools.base import Tool, ToolResult
+        from nanobot.tools.base import Tool, ToolResult
 
         class FakeSkillTool(Tool):
             name = "fake_skill_tool"

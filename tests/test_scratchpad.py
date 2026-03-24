@@ -15,7 +15,7 @@ import asyncio
 from pathlib import Path
 
 from nanobot.agent.scratchpad import Scratchpad
-from nanobot.agent.tools.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
+from nanobot.tools.builtin.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
 
 # ---------------------------------------------------------------------------
 # Scratchpad core

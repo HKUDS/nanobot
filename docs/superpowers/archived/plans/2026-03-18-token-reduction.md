@@ -196,7 +196,7 @@ Add to `tests/test_token_reduction.py`:
 ```python
 # ── Task 2: Heuristic summary preview length ─────────────────────────────────
 
-from nanobot.agent.tools.result_cache import _heuristic_summary
+from nanobot.tools.result_cache import _heuristic_summary
 
 _PREVIEW_MAX_CHARS = 400
 

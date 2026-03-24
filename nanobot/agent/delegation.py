@@ -37,33 +37,33 @@ from nanobot.agent.delegation_contract import (
 from nanobot.agent.observability import span as langfuse_span
 from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.task_types import classify_task_type
-from nanobot.agent.tool_loop import run_tool_loop
-from nanobot.agent.tools.delegate import (
+from nanobot.agent.tracing import sanitize_for_trace
+from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
+from nanobot.errors import NanobotError
+from nanobot.metrics import delegation_latency_seconds, delegation_total
+from nanobot.tools.builtin.delegate import (
     DelegateParallelTool,
     DelegateTool,
     DelegationResult,
     _CycleError,
 )
-from nanobot.agent.tools.filesystem import (
+from nanobot.tools.builtin.filesystem import (
     EditFileTool,
     ListDirTool,
     ReadFileTool,
     WriteFileTool,
 )
-from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
-from nanobot.agent.tracing import sanitize_for_trace
-from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
-from nanobot.errors import NanobotError
-from nanobot.metrics import delegation_latency_seconds, delegation_total
+from nanobot.tools.builtin.shell import ExecTool
+from nanobot.tools.builtin.web import WebFetchTool, WebSearchTool
+from nanobot.tools.registry import ToolRegistry
+from nanobot.tools.tool_loop import run_tool_loop
 
 if TYPE_CHECKING:
     from nanobot.agent.coordinator import Coordinator
     from nanobot.agent.scratchpad import Scratchpad
-    from nanobot.agent.tool_executor import ToolExecutor
-    from nanobot.agent.tools.base import Tool
     from nanobot.providers.base import LLMProvider
+    from nanobot.tools.base import Tool
+    from nanobot.tools.executor import ToolExecutor
 
 # Per-coroutine delegation ancestry — isolated across asyncio.gather branches.
 _delegation_ancestry: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(

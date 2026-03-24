@@ -28,7 +28,6 @@ from nanobot.agent.registry import AgentRegistry
 from nanobot.agent.scratchpad import Scratchpad
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.streaming import StreamingLLMCaller
-from nanobot.agent.tool_executor import ToolExecutor
 from nanobot.agent.turn_types import TurnResult
 from nanobot.agent.verifier import AnswerVerifier
 
@@ -55,7 +54,6 @@ __all__ = [
     "StreamingLLMCaller",
     "TextChunk",
     "ToolCallEvent",
-    "ToolExecutor",
     "ToolResultEvent",
     "TurnResult",
     "build_agent",
