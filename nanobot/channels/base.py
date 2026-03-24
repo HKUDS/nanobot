@@ -49,6 +49,18 @@ class BaseChannel(ABC):
             logger.warning("{}: audio transcription failed: {}", self.name, e)
             return ""
 
+    async def login(self, force: bool = False) -> bool:
+        """
+        Perform channel-specific interactive login (e.g. QR code scan).
+
+        Args:
+            force: If True, ignore existing credentials and force re-authentication.
+
+        Returns True if already authenticated or login succeeds.
+        Override in subclasses that support interactive login.
+        """
+        return True
+
     @abstractmethod
     async def start(self) -> None:
         """
