@@ -19,7 +19,7 @@ from ..token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
 from .retrieval_planner import RetrievalPlanner
 
 if TYPE_CHECKING:
-    from .unified_db import UnifiedMemoryDB
+    from ..unified_db import UnifiedMemoryDB
 
 # Intents that benefit from scanning recent unresolved events.
 # For all other intents (fact_lookup, chitchat, …) the scan is skipped.

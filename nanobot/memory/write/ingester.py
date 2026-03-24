@@ -36,9 +36,9 @@ from ..read.context_assembler import ContextAssembler
 from ..read.retrieval_planner import RetrievalPlanner
 
 if TYPE_CHECKING:
+    from ..embedder import Embedder
     from ..graph.graph import KnowledgeGraph
-    from .embedder import Embedder
-    from .unified_db import UnifiedMemoryDB
+    from ..unified_db import UnifiedMemoryDB
 
 # ---------------------------------------------------------------------------
 # Constants

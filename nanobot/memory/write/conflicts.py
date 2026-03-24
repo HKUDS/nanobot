@@ -18,7 +18,7 @@ from ..persistence.profile_io import ProfileStore as ProfileManager
 
 if TYPE_CHECKING:
     from ..persistence.profile_io import ProfileStore
-    from .unified_db import UnifiedMemoryDB
+    from ..unified_db import UnifiedMemoryDB
 
 # ---------------------------------------------------------------------------
 # Constants

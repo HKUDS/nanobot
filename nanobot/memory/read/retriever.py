@@ -27,12 +27,12 @@ from ..helpers import (
 from .retrieval_planner import RetrievalPlan, RetrievalPlanner
 
 if TYPE_CHECKING:
+    from ..embedder import Embedder
     from ..graph.graph import KnowledgeGraph
     from ..persistence.profile_io import ProfileStore as ProfileManager
     from ..ranking.reranker import Reranker
+    from ..unified_db import UnifiedMemoryDB
     from ..write.extractor import MemoryExtractor
-    from .embedder import Embedder
-    from .unified_db import UnifiedMemoryDB
 
 
 # ---------------------------------------------------------------------------
