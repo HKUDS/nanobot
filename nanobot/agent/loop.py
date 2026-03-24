@@ -313,18 +313,16 @@ class AgentLoop:
         state = TurnState(
             messages=initial_messages,
             user_text=user_text,
+            classification_result=self._last_classification_result,
             tools_def_cache=list(self.tools.get_definitions()),
         )
 
-        # Forward coordinator classification to the orchestrator
-        self._orchestrator._last_classification_result = self._last_classification_result
-
         result = await self._orchestrator.run(state, on_progress)
 
-        # Sync token counters back to AgentLoop for the processor to read
-        self._turn_tokens_prompt = self._orchestrator._turn_tokens_prompt
-        self._turn_tokens_completion = self._orchestrator._turn_tokens_completion
-        self._turn_llm_calls = self._orchestrator._turn_llm_calls
+        # Read token counters from TurnResult
+        self._turn_tokens_prompt = result.tokens_prompt
+        self._turn_tokens_completion = result.tokens_completion
+        self._turn_llm_calls = result.llm_calls
 
         return result.content or None, result.tools_used, result.messages
 
@@ -441,6 +439,7 @@ class AgentLoop:
                                 t0_classify = time.monotonic()
                                 cls_result = await self._coordinator.classify(msg.content)
                                 self._last_classification_result = cls_result
+                                self._processor.set_classification_result(cls_result)
                                 role_name, confidence = (
                                     cls_result.role_name,
                                     cls_result.confidence,
@@ -600,9 +599,9 @@ class AgentLoop:
             await self.provider.aclose()
         except (RuntimeError, OSError, AttributeError) as e:
             logger.debug("Provider cleanup failed: {}", e)
-        if hasattr(self, "memory_store") and self.memory_store.graph:
+        if hasattr(self, "memory") and self.memory.graph:
             try:
-                await self.memory_store.graph.close()
+                await self.memory.graph.close()
             except (RuntimeError, OSError) as e:
                 logger.debug("Graph driver cleanup failed: {}", e)
 
