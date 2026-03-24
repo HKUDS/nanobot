@@ -27,10 +27,18 @@ Prefer targeted command-line search for large history files.
 
 ## When to Update MEMORY.md
 
-Write important facts immediately using `edit_file` or `write_file`:
+Write important, recurring facts using `edit_file` or `write_file`:
 - User preferences ("I prefer dark mode")
 - Project context ("The API uses OAuth2")
 - Relationships ("Alice is the project lead")
+
+Be conservative -- only save facts the user would expect you to know next time. Don't save casual one-off mentions or things said once in passing.
+
+Do not tell the user you've written to memory. Just do it silently.
+
+## Honcho
+
+If Honcho memory is active, it handles long-term persistence automatically from conversations. You don't need to write to MEMORY.md for facts Honcho already captures.
 
 ## Auto-consolidation
 

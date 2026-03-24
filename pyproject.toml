@@ -51,6 +51,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+honcho = ["honcho-ai>=2.0.1"]
 wecom = [
     "wecom-aibot-sdk-python>=0.1.5",
 ]
