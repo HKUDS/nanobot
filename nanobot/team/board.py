@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.team._filelock import lock, unlock
-from nanobot.agent.team.state import Task, Teammate
+from nanobot.utils.filelock import filelock
+from nanobot.team.state import Task, Teammate
 from nanobot.utils.helpers import ensure_dir
 
 
@@ -29,20 +29,16 @@ def save(team_dir: Path, tasks: list[Task]) -> None:
 
 def _locked_update(team_dir: Path, update) -> Any:
     path = _path(team_dir)
-    with open(path, "a+", encoding="utf-8") as f:
-        lock(f)
-        try:
-            f.seek(0)
-            raw = f.read().strip()
-            tasks = [Task.from_dict(item) for item in json.loads(raw or "[]")]
-            result = update(tasks)
-            f.seek(0)
-            f.truncate()
-            f.write(json.dumps([t.__dict__ for t in tasks], ensure_ascii=False, indent=2))
-            f.flush()
-        finally:
-            unlock(f)
-        return result
+    with open(path, "a+", encoding="utf-8") as f, filelock(f):
+        f.seek(0)
+        raw = f.read().strip()
+        tasks = [Task.from_dict(item) for item in json.loads(raw or "[]")]
+        result = update(tasks)
+        f.seek(0)
+        f.truncate()
+        f.write(json.dumps([t.__dict__ for t in tasks], ensure_ascii=False, indent=2))
+        f.flush()
+    return result
 
 
 def _deps_met(task: Task, tasks: list[Task]) -> bool:

@@ -6,7 +6,7 @@ from nanobot.agent.tools.base import Tool
 from . import board, mailbox
 
 if TYPE_CHECKING:
-    from nanobot.agent.team import TeamManager
+    from nanobot.team import TeamManager
 
 
 class TeamTool(Tool):
@@ -71,7 +71,7 @@ class TeamTool(Tool):
         if action == "resume":
             return await self._manager.resume(sk, kwargs.get("team_id") or "")
         if action == "shutdown":
-            return await self._manager.shutdown(sk)
+            return await self._manager.stop_mode(sk)
         if action == "board":
             return self._manager.render_board(sk)
         if action == "approve":

@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-from nanobot.agent.team import TeamManager
-from nanobot.agent.team import board, mailbox
+from nanobot.team import TeamManager
+from nanobot.team import board, mailbox
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse
 from nanobot.session.manager import SessionManager

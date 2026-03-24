@@ -15,8 +15,8 @@ from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryConsolidator
-from nanobot.agent.team import TeamManager
-from nanobot.agent.team.tools import TeamTool
+from nanobot.team import TeamManager
+from nanobot.team.tools import TeamTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR

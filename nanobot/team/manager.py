@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -11,28 +10,13 @@ from typing import Any
 from loguru import logger
 
 from . import board, mailbox
-from .state import Task, TeamState, Teammate
-from .tools import TeamWorkerTool
-from nanobot.agent.tools.registry import build_base_tools
+from .state import Task, TeamRuntime, TeamState, Teammate
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import ensure_dir, parse_json_from_llm, safe_filename, timestamp
-
-
-@dataclass
-class TeamRuntime:
-    session_key: str
-    run_dir: Path
-    state: TeamState
-    worker_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
-    prompted_approvals: set[str] = field(default_factory=set)
-
-    @property
-    def events_path(self) -> Path:
-        return self.run_dir / "events.jsonl"
 
 
 class TeamManager:
@@ -73,6 +57,7 @@ class TeamManager:
 
         self._active_by_session: dict[str, TeamRuntime] = {}
         self._runtime_lock = asyncio.Lock()
+        self._worker_semaphore = asyncio.Semaphore(max_workers)
 
     # ------------------------------------------------------------------
     # Context/session helpers
@@ -346,9 +331,6 @@ class TeamManager:
                     self._append_event(runtime, "team_resumed", f"Resumed team {team_id}")
                     return f"Resumed team '{state.team_id}'."
             return f"Error: team '{team_id}' not found"
-
-    async def shutdown(self, session_key: str) -> str:
-        return await self.stop_mode(session_key)
 
     async def cancel_by_session(self, session_key: str) -> int:
         async with self._runtime_lock:
@@ -935,6 +917,8 @@ class TeamManager:
         self._append_event(runtime, "team_stopped", f"Stopped team with status {runtime.state.status}")
 
     def _build_worker_tools(self, runtime: TeamRuntime, mate: Teammate) -> "ToolRegistry":
+        from nanobot.agent.tools.registry import build_base_tools
+
         tools = build_base_tools(
             workspace=self.workspace,
             exec_config=self.exec_config,
@@ -942,6 +926,8 @@ class TeamManager:
             web_proxy=self.web_proxy,
             restrict_to_workspace=self.restrict_to_workspace,
         )
+        from .tools import TeamWorkerTool
+
         tools.register(TeamWorkerTool(manager=self, worker_name=mate.name, session_key=runtime.session_key))
         return tools
 
@@ -1021,6 +1007,11 @@ Work autonomously and coordinate through the board and mailbox."""
         mate = next((m for m in runtime.state.members if m.name == worker_name), None)
         if not mate:
             return
+        async with self._worker_semaphore:
+            await self._run_worker_loop(runtime, mate)
+
+    async def _run_worker_loop(self, runtime: TeamRuntime, mate: Teammate) -> None:
+        session_key = runtime.session_key
         logger.info("Team worker [{}] starting for session {}", mate.name, session_key)
         self._set_member_status(runtime, mate.name, "working")
         session = self.sessions.get_or_create(f"team:{runtime.state.run_id}:{mate.name}")

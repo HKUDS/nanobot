@@ -4,8 +4,8 @@ import json
 import uuid
 from pathlib import Path
 
-from nanobot.agent.team._filelock import lock, unlock
-from nanobot.agent.team.state import Mail
+from nanobot.utils.filelock import filelock
+from nanobot.team.state import Mail
 from nanobot.utils.helpers import ensure_dir, timestamp
 
 
@@ -26,21 +26,17 @@ def _load(team_dir: Path) -> list[Mail]:
 
 def _locked_update(team_dir: Path, update):
     path = _path(team_dir)
-    with open(path, "a+", encoding="utf-8") as f:
-        lock(f)
-        try:
-            f.seek(0)
-            mails = [Mail.from_dict(json.loads(line)) for line in f if line.strip()]
-            result = update(mails)
-            del mails[:-200]
-            f.seek(0)
-            f.truncate()
-            if mails:
-                f.write("\n".join(json.dumps(m.__dict__, ensure_ascii=False) for m in mails) + "\n")
-            f.flush()
-        finally:
-            unlock(f)
-        return result
+    with open(path, "a+", encoding="utf-8") as f, filelock(f):
+        f.seek(0)
+        mails = [Mail.from_dict(json.loads(line)) for line in f if line.strip()]
+        result = update(mails)
+        del mails[:-200]
+        f.seek(0)
+        f.truncate()
+        if mails:
+            f.write("\n".join(json.dumps(m.__dict__, ensure_ascii=False) for m in mails) + "\n")
+        f.flush()
+    return result
 
 
 def send(team_dir: Path, from_agent: str, to_agent: str, content: str) -> str:

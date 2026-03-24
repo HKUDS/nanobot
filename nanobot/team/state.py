@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from nanobot.utils.helpers import timestamp
+
+
+def _filter_fields(cls, data: dict) -> dict:
+    """Return only the keys that ``cls`` accepts, so extra JSON fields don't crash."""
+    valid = {f.name for f in cls.__dataclass_fields__.values()}
+    return {k: v for k, v in data.items() if k in valid}
 
 
 @dataclass
@@ -21,7 +28,7 @@ class Task:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Task":
-        return cls(**data)
+        return cls(**_filter_fields(cls, data))
 
 
 @dataclass
@@ -33,7 +40,7 @@ class Teammate:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Teammate":
-        return cls(**data)
+        return cls(**_filter_fields(cls, data))
 
 
 @dataclass
@@ -47,7 +54,7 @@ class Mail:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Mail":
-        return cls(**data)
+        return cls(**_filter_fields(cls, data))
 
 
 @dataclass
@@ -83,3 +90,18 @@ class TeamState:
     @classmethod
     def load(cls, path: Path) -> "TeamState":
         return cls.from_dict(json.loads(path.read_text(encoding="utf-8")))
+
+
+@dataclass
+class TeamRuntime:
+    """In-memory runtime state for an active team session."""
+
+    session_key: str
+    run_dir: Path
+    state: TeamState
+    worker_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
+    prompted_approvals: set[str] = field(default_factory=set)
+
+    @property
+    def events_path(self) -> Path:
+        return self.run_dir / "events.jsonl"

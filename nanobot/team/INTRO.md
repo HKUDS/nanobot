@@ -34,9 +34,10 @@ AgentLoop ──/team <goal>──► TeamManager.start_or_route_goal()
 ## 模块职责
 
 ```
-team/
-├── __init__.py    TeamManager — 运行时生命周期、LLM 规划、worker 调度
-├── state.py       纯数据结构：Task, Teammate, Mail, TeamState
+nanobot/team/
+├── __init__.py    瘦入口，re-export TeamManager / TeamRuntime / TeamState
+├── manager.py     TeamManager — 运行时生命周期、LLM 规划、worker 调度
+├── state.py       纯数据结构：Task, Teammate, Mail, TeamState, TeamRuntime
 ├── board.py       任务看板：claim / complete / approve / reject（文件锁保证并发安全）
 ├── mailbox.py     消息邮箱：send / broadcast / read_unread（JSONL 追加写，自动截断到 200 条）
 ├── tools.py       暴露给 LLM 的工具：TeamTool（管理端）、TeamWorkerTool（worker 端）
