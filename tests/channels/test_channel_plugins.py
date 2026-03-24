@@ -22,6 +22,10 @@ class _FakePlugin(BaseChannel):
     name = "fakeplugin"
     display_name = "Fake Plugin"
 
+    def __init__(self, config, bus):
+        super().__init__(config, bus)
+        self.login_calls: list[bool] = []
+
     async def start(self) -> None:
         pass
 
@@ -30,6 +34,10 @@ class _FakePlugin(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         pass
+
+    async def login(self, force: bool = False) -> bool:
+        self.login_calls.append(force)
+        return True
 
 
 class _FakeTelegram(BaseChannel):
@@ -181,6 +189,34 @@ async def test_manager_loads_plugin_from_dict_config():
 
     assert "fakeplugin" in mgr.channels
     assert isinstance(mgr.channels["fakeplugin"], _FakePlugin)
+
+
+def test_channels_login_uses_discovered_plugin_class(monkeypatch):
+    from nanobot.cli.commands import app
+    from nanobot.config.schema import Config
+    from typer.testing import CliRunner
+
+    runner = CliRunner()
+    seen: dict[str, object] = {}
+
+    class _LoginPlugin(_FakePlugin):
+        display_name = "Login Plugin"
+
+        async def login(self, force: bool = False) -> bool:
+            seen["force"] = force
+            seen["config"] = self.config
+            return True
+
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda: Config())
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_all",
+        lambda: {"fakeplugin": _LoginPlugin},
+    )
+
+    result = runner.invoke(app, ["channels", "login", "fakeplugin", "--force"])
+
+    assert result.exit_code == 0
+    assert seen["force"] is True
 
 
 @pytest.mark.asyncio
