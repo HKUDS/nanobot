@@ -16,9 +16,11 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
-from nanobot.coordination.registry import AgentRegistry
 from nanobot.tools.base import Tool, ToolResult
 from nanobot.tools.registry import ToolRegistry
+
+if TYPE_CHECKING:
+    from nanobot.coordination.registry import AgentRegistry
 
 if TYPE_CHECKING:
     from nanobot.config.schema import AgentRoleConfig
@@ -85,7 +87,7 @@ class CapabilityRegistry:
     ) -> None:
         self._tools = tool_registry if tool_registry is not None else ToolRegistry()
         self._skills = skills_loader
-        self._agents = agent_registry if agent_registry is not None else AgentRegistry()
+        self._agents = agent_registry
         self._capabilities: dict[str, Capability] = {}
 
     # ------------------------------------------------------------------
@@ -101,7 +103,7 @@ class CapabilityRegistry:
         return self._skills
 
     @property
-    def agent_registry(self) -> AgentRegistry:
+    def agent_registry(self) -> AgentRegistry | None:
         return self._agents
 
     # ------------------------------------------------------------------
@@ -159,6 +161,9 @@ class CapabilityRegistry:
         intents: list[str] | None = None,
     ) -> None:
         """Register a delegation role as a capability."""
+        if self._agents is None:
+            logger.warning("register_role called without AgentRegistry; skipping")
+            return
         self._agents.register(role)
         health: CapabilityHealth = "healthy" if role.enabled else "unavailable"
         self._capabilities[role.name] = Capability(
@@ -178,6 +183,9 @@ class CapabilityRegistry:
         intents: list[str] | None = None,
     ) -> None:
         """Merge a role config, updating an existing entry if present."""
+        if self._agents is None:
+            logger.warning("merge_register_role called without AgentRegistry; skipping")
+            return
         self._agents.merge_register(role)
         merged = self._agents.get(role.name)
         if merged is not None:

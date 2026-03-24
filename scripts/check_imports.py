@@ -73,8 +73,6 @@ ALLOWLIST: set[tuple[str, str]] = {
     # tools/setup.py is the tool registration entry point — it must import
     # Scratchpad to create placeholder instances for scratchpad tools.
     ("nanobot/tools/setup.py", "nanobot.coordination.scratchpad"),
-    # tools/capability.py composes AgentRegistry by design (ADR-009).
-    ("nanobot/tools/capability.py", "nanobot.coordination.registry"),
     # tools/builtin/mission.py imports MissionStatus enum (data object, not service).
     ("nanobot/tools/builtin/mission.py", "nanobot.coordination.mission"),
     # coordination/delegation.py imports DelegateTool, DelegationResult, _CycleError —

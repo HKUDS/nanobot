@@ -128,9 +128,12 @@ def _build_tools(
     else:
         _tool_registry = _ToolRegistry()
 
+    from nanobot.coordination.registry import AgentRegistry as _AgentRegistry
+
     capabilities = CapabilityRegistry(
         tool_registry=_tool_registry,
         skills_loader=context.skills,
+        agent_registry=_AgentRegistry(),
     )
     tools = ToolExecutor(_tool_registry)
     result_cache = ToolResultCache(workspace=workspace)

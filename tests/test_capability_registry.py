@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from nanobot.coordination.registry import AgentRegistry
 from nanobot.tools.base import Tool, ToolResult
 from nanobot.tools.capability import CapabilityRegistry
 from nanobot.tools.registry import ToolRegistry
@@ -66,7 +67,7 @@ def _make_role(
 
 class TestRegistration:
     def test_register_tool_creates_capability(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         tool = _AvailableTool()
         reg.register_tool(tool, intents=["do_stuff"])
 
@@ -78,7 +79,7 @@ class TestRegistration:
         assert cap.tool is tool
 
     def test_register_unavailable_tool(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         reg.register_tool(_UnavailableTool())
 
         cap = reg.get("unavail_tool")
@@ -94,7 +95,7 @@ class TestRegistration:
         assert tr.has("avail_tool")
 
     def test_register_skill(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         reg.register_skill(
             "weather",
             description="Check weather",
@@ -109,7 +110,7 @@ class TestRegistration:
         assert cap.skill_path == "/skills/weather/SKILL.md"
 
     def test_register_unavailable_skill(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         reg.register_skill(
             "playwright",
             description="Browser automation",
@@ -123,7 +124,7 @@ class TestRegistration:
         assert "not installed" in (cap.unavailability_reason or "")
 
     def test_register_role(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         role = _make_role("research", "Research specialist")
         reg.register_role(role, intents=["research", "investigate"])
 
@@ -134,7 +135,7 @@ class TestRegistration:
         assert "investigate" in cap.intents
 
     def test_register_disabled_role(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         role = _make_role("legacy", "Old role", enabled=False)
         reg.register_role(role)
 
@@ -152,20 +153,20 @@ class TestRegistration:
         assert not tr.has("avail_tool")
 
     def test_unregister_skill(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         reg.register_skill("weather", description="Check weather")
         reg.unregister("weather")
         assert reg.get("weather") is None
 
     def test_unregister_nonexistent_is_noop(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         reg.unregister("nonexistent")  # should not raise
 
     def test_capability_is_immutable(self) -> None:
         """Capability dataclass is frozen — direct mutation raises FrozenInstanceError."""
         from dataclasses import FrozenInstanceError
 
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         reg.register_tool(_AvailableTool())
         cap = reg.get("avail_tool")
         assert cap is not None
@@ -180,7 +181,7 @@ class TestRegistration:
 
 class TestQueries:
     def test_get_available_excludes_unavailable(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         reg.register_tool(_AvailableTool())
         reg.register_tool(_UnavailableTool())
 
@@ -190,7 +191,7 @@ class TestQueries:
         assert "unavail_tool" not in names
 
     def test_get_available_filter_by_kind(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         reg.register_tool(_AvailableTool())
         reg.register_skill("weather", description="Weather")
         role = _make_role("research")
@@ -206,7 +207,7 @@ class TestQueries:
         assert all(c.kind == "delegate_role" for c in roles)
 
     def test_get_available_filter_by_intent(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         reg.register_tool(_AvailableTool(), intents=["do_stuff"])
         reg.register_tool(_SearchTool(), intents=["search_web"])
 
@@ -215,7 +216,7 @@ class TestQueries:
         assert results[0].name == "search"
 
     def test_get_available_sorted_by_priority(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         reg.register_tool(_SearchTool(), intents=["search"], fallback_priority=10)
         reg.register_tool(_AvailableTool(), intents=["search"], fallback_priority=1)
 
@@ -224,7 +225,7 @@ class TestQueries:
         assert results[1].name == "search"
 
     def test_get_unavailable(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         reg.register_tool(_AvailableTool())
         reg.register_tool(_UnavailableTool())
 
@@ -244,7 +245,7 @@ class TestQueries:
         assert "unavail_tool" not in names
 
     def test_get_unavailable_summary(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         reg.register_tool(_AvailableTool())
         reg.register_tool(_UnavailableTool())
         reg.register_skill(
@@ -260,12 +261,12 @@ class TestQueries:
         assert not any(line.startswith("- avail_tool") for line in lines)
 
     def test_get_unavailable_summary_empty(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         reg.register_tool(_AvailableTool())
         assert reg.get_unavailable_summary() == ""
 
     def test_role_names(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         reg.register_role(_make_role("research"))
         reg.register_role(_make_role("code"))
         reg.register_role(_make_role("disabled", enabled=False))
@@ -283,7 +284,7 @@ class TestQueries:
 
 class TestToolExecution:
     def test_get_tool(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         tool = _AvailableTool()
         reg.register_tool(tool)
 
@@ -291,7 +292,7 @@ class TestToolExecution:
         assert reg.get_tool("nonexistent") is None
 
     async def test_execute_tool(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         reg.register_tool(_AvailableTool())
 
         result = await reg.execute_tool("avail_tool", {})
@@ -299,7 +300,7 @@ class TestToolExecution:
         assert result.output == "ok"
 
     async def test_execute_nonexistent_tool(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         result = await reg.execute_tool("nonexistent", {})
         assert not result.success
 
@@ -329,7 +330,7 @@ class _ToggleTool(Tool):
 
 class TestHealthRefresh:
     def test_refresh_updates_health(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         tool = _ToggleTool()
         reg.register_tool(tool)
 
@@ -342,7 +343,7 @@ class TestHealthRefresh:
         assert reg.get("toggle").health == "unavailable"  # type: ignore[union-attr]
 
     def test_refresh_recovers_health(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         tool = _ToggleTool()
         tool._available = False
         reg.register_tool(tool)
@@ -361,7 +362,7 @@ class TestHealthRefresh:
 
 class TestIntrospection:
     def test_len(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         assert len(reg) == 0
         reg.register_tool(_AvailableTool())
         assert len(reg) == 1
@@ -369,13 +370,13 @@ class TestIntrospection:
         assert len(reg) == 2
 
     def test_contains(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         reg.register_tool(_AvailableTool())
         assert "avail_tool" in reg
         assert "nonexistent" not in reg
 
     def test_all_capabilities(self) -> None:
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         reg.register_tool(_AvailableTool())
         reg.register_tool(_UnavailableTool())
         reg.register_skill("weather", description="Weather")
@@ -384,18 +385,17 @@ class TestIntrospection:
         assert len(all_caps) == 3
 
     def test_property_accessors(self) -> None:
-        from nanobot.coordination.registry import AgentRegistry
-
         tr = ToolRegistry()
-        reg = CapabilityRegistry(tool_registry=tr)
+        ar = AgentRegistry()
+        reg = CapabilityRegistry(tool_registry=tr, agent_registry=ar)
 
         assert reg.tool_registry is tr
         assert reg.skills_loader is None
-        assert isinstance(reg.agent_registry, AgentRegistry)
+        assert reg.agent_registry is ar
 
     def test_register_role_always_propagates_to_agent_registry(self) -> None:
         """register_role writes to both _capabilities and agent_registry."""
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         role = _make_role("research", "Research specialist")
         reg.register_role(role, intents=["research"])
 
@@ -415,7 +415,7 @@ class TestIntrospection:
         """merge_register_role updates both _capabilities and agent_registry."""
         from nanobot.config.schema import AgentRoleConfig
 
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         # Register a base role
         reg.register_role(_make_role("code", "Code generation"))
         # Merge an override with a new description
@@ -435,7 +435,7 @@ class TestIntrospection:
         """Register default, merge user override, verify merged config wins."""
         from nanobot.config.schema import AgentRoleConfig
 
-        reg = CapabilityRegistry()
+        reg = CapabilityRegistry(agent_registry=AgentRegistry())
         # Register default
         default_role = _make_role("research", "Default research")
         reg.register_role(default_role, intents=["research"])
