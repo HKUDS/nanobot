@@ -21,18 +21,18 @@ repos:
     hooks:
       - id: mypy
         name: mypy type check
-        entry: python3 -m mypy nanobot/
+        entry: python -m mypy nanobot/
         language: system
         types: [python]
         pass_filenames: false
       - id: import-check
         name: import boundary check
-        entry: make import-check
+        entry: python scripts/check_imports.py
         language: system
         pass_filenames: false
       - id: prompt-check
         name: prompt manifest check
-        entry: python3 scripts/check_prompt_manifest.py
+        entry: python scripts/check_prompt_manifest.py
         language: system
         pass_filenames: false
         files: '^prompts/'
