@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from nanobot.agent.memory.graph import KnowledgeGraph
-from nanobot.agent.memory.ontology import Entity, EntityType, RelationType, Triple
+from nanobot.agent.memory.ontology_types import Entity, EntityType, RelationType, Triple
 
 
 @dataclass
@@ -39,7 +39,7 @@ async def test_write_and_read_paths(tmp_path: Path) -> None:
     await g.upsert_entity(Entity(name="Team", entity_type=EntityType.ORGANIZATION))
 
     # Add relationship
-    from nanobot.agent.memory.ontology import Relationship
+    from nanobot.agent.memory.ontology_types import Relationship
 
     await g.add_relationship(
         Relationship(
@@ -111,7 +111,7 @@ async def test_ingest_event_triples_and_resolve_entity(
 
 
 async def test_sync_helpers_paths_and_error_handling(tmp_path: Path) -> None:
-    from nanobot.agent.memory.ontology import Relationship
+    from nanobot.agent.memory.ontology_types import Relationship
 
     g = KnowledgeGraph(workspace=tmp_path)
 

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig, AgentRoleConfig
@@ -30,7 +31,7 @@ def _make_config(tmp_path: Path, **overrides: Any) -> AgentConfig:
 def _make_loop(tmp_path: Path, provider: ScriptedProvider, **overrides: Any) -> AgentLoop:
     bus = MessageBus()
     config = _make_config(tmp_path, **overrides)
-    return AgentLoop(bus, provider, config)
+    return build_agent(bus=bus, provider=provider, config=config)
 
 
 class TestProcessDirectForcedRole:

@@ -356,7 +356,7 @@ class TestAgentLoopContextCompression:
         loop = _make_loop(tmp_path, provider, context_window_tokens=128_000)
 
         with patch(
-            "nanobot.agent.loop.summarize_and_compress", new_callable=AsyncMock
+            "nanobot.agent.turn_orchestrator.summarize_and_compress", new_callable=AsyncMock
         ) as mock_compress:
             await loop._process_message(_make_inbound("Hello"))
             mock_compress.assert_not_called()
@@ -503,7 +503,7 @@ class TestToolCallTrackerIntegration:
         to _run_agent_loop. The registry must never be mutated, so suppressed tools must
         remain registered and available for subsequent turns.
         """
-        from nanobot.agent.loop import ToolCallTracker
+        from nanobot.agent.failure import ToolCallTracker
 
         bad_path = str(tmp_path / "does_not_exist.bin")
 
@@ -547,7 +547,7 @@ class TestToolCallTrackerIntegration:
     async def test_suppressed_tool_absent_from_tools_def_same_turn(self, tmp_path: Path):
         """After REMOVE_THRESHOLD failures, the tool must not appear in tools_def
         for subsequent LLM calls within the same turn (TEST-H2 regression guard)."""
-        from nanobot.agent.loop import ToolCallTracker
+        from nanobot.agent.failure import ToolCallTracker
 
         bad_path = str(tmp_path / "does_not_exist.bin")
 
@@ -616,7 +616,7 @@ class TestBuildFailurePrompt:
 
     def test_permanent_failure_includes_disabled_language(self):
         """PERMANENT_CONFIG failure must say 'permanently disabled' and list removed tools."""
-        from nanobot.agent.loop import FailureClass, _build_failure_prompt
+        from nanobot.agent.failure import FailureClass, _build_failure_prompt
 
         prompt = _build_failure_prompt(
             [("web_search", FailureClass.PERMANENT_CONFIG)],
@@ -629,7 +629,7 @@ class TestBuildFailurePrompt:
 
     def test_transient_timeout_includes_retry_guidance(self):
         """TRANSIENT_TIMEOUT failure must suggest retry with shorter operation."""
-        from nanobot.agent.loop import FailureClass, _build_failure_prompt
+        from nanobot.agent.failure import FailureClass, _build_failure_prompt
 
         prompt = _build_failure_prompt(
             [("web_fetch", FailureClass.TRANSIENT_TIMEOUT)],
@@ -640,7 +640,7 @@ class TestBuildFailurePrompt:
 
     def test_logical_error_suggests_parameter_fix(self):
         """LOGICAL_ERROR must tell the model to fix parameters before retrying."""
-        from nanobot.agent.loop import FailureClass, _build_failure_prompt
+        from nanobot.agent.failure import FailureClass, _build_failure_prompt
 
         prompt = _build_failure_prompt(
             [("read_file", FailureClass.LOGICAL_ERROR)],
@@ -651,7 +651,7 @@ class TestBuildFailurePrompt:
 
     def test_available_alternatives_listed(self):
         """Remaining (non-permanent) tools must appear in the alternatives section."""
-        from nanobot.agent.loop import FailureClass, _build_failure_prompt
+        from nanobot.agent.failure import FailureClass, _build_failure_prompt
 
         prompt = _build_failure_prompt(
             [("web_search", FailureClass.PERMANENT_CONFIG)],
@@ -663,7 +663,7 @@ class TestBuildFailurePrompt:
 
     def test_no_permanent_failures_no_disabled_list(self):
         """When no tools are permanently failed, the 'do NOT call' line must not appear."""
-        from nanobot.agent.loop import FailureClass, _build_failure_prompt
+        from nanobot.agent.failure import FailureClass, _build_failure_prompt
 
         prompt = _build_failure_prompt(
             [("web_fetch", FailureClass.TRANSIENT_TIMEOUT)],

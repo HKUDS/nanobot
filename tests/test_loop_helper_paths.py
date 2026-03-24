@@ -5,7 +5,14 @@ from types import SimpleNamespace
 
 from nanobot.agent.consolidation import ConsolidationOrchestrator
 from nanobot.agent.delegation import DelegationDispatcher
+from nanobot.agent.delegation_contract import (
+    build_execution_context,
+    build_parallel_work_summary,
+    extract_plan_text,
+    extract_user_request,
+)
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.task_types import classify_task_type
 from nanobot.agent.verifier import AnswerVerifier
 
 
@@ -40,93 +47,96 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
 
 
 def test_classify_task_type_paths() -> None:
-    assert DelegationDispatcher.classify_task_type("writing", "write a summary") == "report_writing"
-    assert DelegationDispatcher.classify_task_type("code", "fix this bug") == "bug_investigation"
-    assert (
-        DelegationDispatcher.classify_task_type("research", "architecture dependency map")
-        == "repo_architecture"
-    )
-    assert (
-        DelegationDispatcher.classify_task_type("research", "current industry trends")
-        == "web_research"
-    )
-    assert (
-        DelegationDispatcher.classify_task_type("research", "nanobot architecture overview")
-        == "repo_architecture"
-    )
-    assert DelegationDispatcher.classify_task_type("general", "hello world") == "general"
+    assert classify_task_type("writing", "write a summary") == "report_writing"
+    assert classify_task_type("code", "fix this bug") == "bug_investigation"
+    assert classify_task_type("research", "architecture dependency map") == "repo_architecture"
+    assert classify_task_type("research", "current industry trends") == "web_research"
+    assert classify_task_type("research", "nanobot architecture overview") == "repo_architecture"
+    assert classify_task_type("general", "hello world") == "general"
     # hybrid: web + arch/code/project signals combined
+    assert classify_task_type("research", "architecture of best practice DI frameworks") == "hybrid"
     assert (
-        DelegationDispatcher.classify_task_type(
-            "research", "architecture of best practice DI frameworks"
-        )
+        classify_task_type("research", "compare our codebase with current industry best practices")
         == "hybrid"
     )
     assert (
-        DelegationDispatcher.classify_task_type(
-            "research", "compare our codebase with current industry best practices"
-        )
-        == "hybrid"
-    )
-    assert (
-        DelegationDispatcher.classify_task_type(
-            "research", "latest best practices for Python module structure"
-        )
+        classify_task_type("research", "latest best practices for Python module structure")
         == "hybrid"
     )
 
 
 def test_extract_plan_and_user_request(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path)
-    assert loop._dispatcher.extract_plan_text() == ""
-    assert loop._dispatcher.extract_user_request() == ""
+    assert extract_plan_text(list(loop._dispatcher.active_messages)) == ""
+    assert extract_user_request(list(loop._dispatcher.active_messages)) == ""
 
     loop._dispatcher.active_messages = [  # type: ignore[assignment]
         {"role": "user", "content": "  fix tests  "},
         {"role": "system", "content": "please outline a numbered plan"},
         {"role": "assistant", "content": "  1. search\n2. patch  "},
     ]
-    assert loop._dispatcher.extract_user_request() == "fix tests"
-    assert loop._dispatcher.extract_plan_text().startswith("1. search")
+    assert extract_user_request(list(loop._dispatcher.active_messages)) == "fix tests"
+    assert extract_plan_text(list(loop._dispatcher.active_messages)).startswith("1. search")
 
 
 def test_build_execution_context_includes_conditional_excerpts(tmp_path: Path) -> None:
     (tmp_path / "AGENTS.md").write_text("agents body", encoding="utf-8")
     (tmp_path / "README.md").write_text("readme body", encoding="utf-8")
-    loop = _make_loop(tmp_path)
 
-    general = loop._dispatcher.build_execution_context("general")
+    general = build_execution_context(tmp_path, "general")
     assert "Workspace:" in general
     assert "AGENTS.md (excerpt)" not in general
 
-    investigative = loop._dispatcher.build_execution_context("repo_architecture")
+    investigative = build_execution_context(tmp_path, "repo_architecture")
     assert "AGENTS.md (excerpt)" in investigative
     assert "README.md (excerpt)" in investigative
 
 
-def test_build_parallel_and_contract_includes_optional_sections(tmp_path: Path) -> None:
-    loop = _make_loop(tmp_path)
-    loop._scratchpad = SimpleNamespace(
+def test_build_parallel_and_contract_includes_optional_sections(
+    tmp_path: Path,
+    monkeypatch: object,
+) -> None:
+    from nanobot.agent import delegation_contract
+
+    scratchpad = SimpleNamespace(
         list_entries=lambda: [
             {"role": "code", "label": "done one"},
             {"role": "research", "label": "done two"},
         ]
     )
-    loop._dispatcher.scratchpad = loop._scratchpad
-    loop._dispatcher.active_messages = [{"role": "user", "content": "User request"}]
-    loop._dispatcher.extract_plan_text = lambda: "1. p"  # type: ignore[method-assign]
-    loop._dispatcher.build_execution_context = lambda _tt: "ctx"  # type: ignore[method-assign]
-    loop._dispatcher.gather_recent_tool_results = lambda: "prior"  # type: ignore[method-assign]
 
-    summary = loop._dispatcher.build_parallel_work_summary("code")
+    summary = build_parallel_work_summary(scratchpad, "code")
     assert "research" in summary
     assert "code" not in summary
 
-    user_content, output_schema = loop._dispatcher.build_delegation_contract(
+    # Mock helpers to verify contract assembly without real workspace I/O
+    monkeypatch.setattr(  # type: ignore[union-attr]
+        delegation_contract,
+        "extract_plan_text",
+        lambda msgs: "1. p",
+    )
+    monkeypatch.setattr(  # type: ignore[union-attr]
+        delegation_contract,
+        "build_execution_context",
+        lambda ws, tt: "ctx",
+    )
+    monkeypatch.setattr(  # type: ignore[union-attr]
+        delegation_contract,
+        "gather_recent_tool_results",
+        lambda msgs, **kw: "prior",
+    )
+
+    from nanobot.agent.delegation_contract import build_delegation_contract
+
+    active_messages = [{"role": "user", "content": "User request"}]
+    user_content, output_schema = build_delegation_contract(
         role="code",
         task="inspect module",
         context="focus failures",
         task_type="local_code_analysis",
+        workspace=tmp_path,
+        active_messages=active_messages,
+        scratchpad=scratchpad,
     )
     assert "Original User Request" in user_content
     assert "Other Agents' Work" in user_content
@@ -199,7 +209,9 @@ def _make_loop_via_init(
     kwargs: dict[str, object] = {}
     if tool_registry is not None:
         kwargs["tool_registry"] = tool_registry
-    return AgentLoop(bus, provider, config, **kwargs)  # type: ignore[arg-type]
+    from nanobot.agent.agent_factory import build_agent
+
+    return build_agent(bus=bus, provider=provider, config=config, **kwargs)  # type: ignore[arg-type]
 
 
 class _StubProvider:

@@ -19,6 +19,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from nanobot.eval.memory_eval import EvalRunner
+
 from .conflicts import (
     CONFLICT_STATUS_NEEDS_USER,
     CONFLICT_STATUS_OPEN,
@@ -27,7 +29,6 @@ from .conflicts import (
 )
 from .consolidation_pipeline import ConsolidationPipeline
 from .context_assembler import ContextAssembler
-from .eval import EvalRunner
 from .extractor import MemoryExtractor
 from .graph import KnowledgeGraph
 from .helpers import (

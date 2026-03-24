@@ -178,7 +178,7 @@ def _make_agent_loop(
 
     Heavy imports are deferred to keep CLI startup fast.
     """
-    from nanobot.agent.loop import AgentLoop as _AgentLoop
+    from nanobot.agent.agent_factory import build_agent
     from nanobot.bus.queue import MessageBus as _MessageBus
 
     if bus is None:
@@ -186,7 +186,7 @@ def _make_agent_loop(
 
     provider = _make_provider(config)
 
-    return _AgentLoop(
+    return build_agent(
         bus=bus,
         provider=provider,
         config=_make_agent_config(config),

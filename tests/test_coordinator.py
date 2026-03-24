@@ -477,7 +477,7 @@ class TestIntegrationRoutedFlow:
 
     async def test_routed_message_uses_correct_role(self, tmp_path: Path) -> None:
         """Coordinator classifies as 'code', agent processes with code role settings."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
 
@@ -490,10 +490,10 @@ class TestIntegrationRoutedFlow:
         )
         routing = RoutingConfig(enabled=True, default_role="general")
         bus = MessageBus()
-        loop = AgentLoop(
-            bus,
-            provider,
-            _make_agent_config(tmp_path),
+        loop = build_agent(
+            bus=bus,
+            provider=provider,
+            config=_make_agent_config(tmp_path),
             routing_config=routing,
         )
 
@@ -530,12 +530,12 @@ class TestIntegrationRoutedFlow:
 
     async def test_routed_tool_filtering(self, tmp_path: Path) -> None:
         """When routed to 'research' role, write_file/edit_file are unavailable."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.queue import MessageBus
 
         provider = ScriptedProvider([LLMResponse(content="done")])
         bus = MessageBus()
-        loop = AgentLoop(bus, provider, _make_agent_config(tmp_path))
+        loop = build_agent(bus=bus, provider=provider, config=_make_agent_config(tmp_path))
 
         # Check baseline: all tools registered
         all_tool_names = loop.tools.tool_names
@@ -564,12 +564,12 @@ class TestIntegrationRoutedFlow:
 
     async def test_tool_filtering_with_allowlist(self, tmp_path: Path) -> None:
         """When a role specifies allowed_tools, only those are available."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.queue import MessageBus
 
         provider = ScriptedProvider([LLMResponse(content="done")])
         bus = MessageBus()
-        loop = AgentLoop(bus, provider, _make_agent_config(tmp_path))
+        loop = build_agent(bus=bus, provider=provider, config=_make_agent_config(tmp_path))
 
         role = AgentRoleConfig(
             name="minimal",
@@ -589,13 +589,13 @@ class TestBackwardCompatibility:
 
     async def test_routing_disabled_by_default(self, tmp_path: Path) -> None:
         """Without routing_config, coordinator is None and agent works normally."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
 
         provider = ScriptedProvider([LLMResponse(content="Hello!")])
         bus = MessageBus()
-        loop = AgentLoop(bus, provider, _make_agent_config(tmp_path))
+        loop = build_agent(bus=bus, provider=provider, config=_make_agent_config(tmp_path))
 
         assert loop._coordinator is None
         assert loop._routing_config is None
@@ -607,16 +607,16 @@ class TestBackwardCompatibility:
 
     async def test_routing_config_disabled_flag(self, tmp_path: Path) -> None:
         """Explicit routing_config with enabled=False doesn't activate coordinator."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.queue import MessageBus
 
         routing = RoutingConfig(enabled=False)
         provider = ScriptedProvider([LLMResponse(content="Hi!")])
         bus = MessageBus()
-        loop = AgentLoop(
-            bus,
-            provider,
-            _make_agent_config(tmp_path),
+        loop = build_agent(
+            bus=bus,
+            provider=provider,
+            config=_make_agent_config(tmp_path),
             routing_config=routing,
         )
 
@@ -627,12 +627,12 @@ class TestBackwardCompatibility:
 
     async def test_no_role_no_tool_filtering(self, tmp_path: Path) -> None:
         """Without a role, all default tools are registered."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.queue import MessageBus
 
         provider = ScriptedProvider([LLMResponse(content="ok")])
         bus = MessageBus()
-        loop = AgentLoop(bus, provider, _make_agent_config(tmp_path))
+        loop = build_agent(bus=bus, provider=provider, config=_make_agent_config(tmp_path))
 
         names = loop.tools.tool_names
         # All core tools should be present

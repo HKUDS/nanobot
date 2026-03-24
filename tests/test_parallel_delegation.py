@@ -138,12 +138,12 @@ class TestParallelDelegation:
 
     async def test_per_branch_stack_isolation(self, tmp_path: Path) -> None:
         """Each parallel branch gets independent delegation stack tracking."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.queue import MessageBus
 
         provider = FakeProvider(["result"] * 10)
         bus = MessageBus()
-        loop = AgentLoop(bus, provider, _make_agent_config(tmp_path))
+        loop = build_agent(bus=bus, provider=provider, config=_make_agent_config(tmp_path))
 
         registry = build_default_registry("general")
         loop._coordinator = Coordinator(

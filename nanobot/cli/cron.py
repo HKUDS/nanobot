@@ -178,7 +178,7 @@ def cron_run(
     """Manually run a job."""
     from loguru import logger
 
-    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.agent_factory import build_agent
     from nanobot.bus.queue import MessageBus
     from nanobot.config.loader import get_data_dir, load_config
     from nanobot.cron.service import CronService
@@ -196,7 +196,7 @@ def cron_run(
 
     provider = _make_provider(config)
     bus = MessageBus()
-    agent_loop = AgentLoop(
+    agent_loop = build_agent(
         bus=bus,
         provider=provider,
         config=_make_agent_config(config),

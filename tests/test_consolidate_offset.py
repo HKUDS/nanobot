@@ -486,7 +486,7 @@ class TestConsolidationDeduplicationGuard:
 
     async def test_consolidation_guard_prevents_duplicate_tasks(self, tmp_path: Path) -> None:
         """Concurrent messages above memory_window spawn only one consolidation task."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
         from nanobot.config.schema import AgentConfig
@@ -496,7 +496,7 @@ class TestConsolidationDeduplicationGuard:
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
         cfg = AgentConfig(workspace=str(tmp_path), model="test-model", memory_window=10)
-        loop = AgentLoop(bus=bus, provider=provider, config=cfg)
+        loop = build_agent(bus=bus, provider=provider, config=cfg)
 
         loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
         loop.tools.get_definitions = MagicMock(return_value=[])
@@ -530,7 +530,7 @@ class TestConsolidationDeduplicationGuard:
         self, tmp_path: Path
     ) -> None:
         """/new command does not run consolidation concurrently with in-flight consolidation."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
         from nanobot.config.schema import AgentConfig
@@ -540,7 +540,7 @@ class TestConsolidationDeduplicationGuard:
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
         cfg = AgentConfig(workspace=str(tmp_path), model="test-model", memory_window=10)
-        loop = AgentLoop(bus=bus, provider=provider, config=cfg)
+        loop = build_agent(bus=bus, provider=provider, config=cfg)
 
         loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
         loop.tools.get_definitions = MagicMock(return_value=[])
@@ -586,7 +586,7 @@ class TestConsolidationDeduplicationGuard:
         self, tmp_path: Path
     ) -> None:
         """/new waits for in-flight consolidation and archives before clear."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
         from nanobot.config.schema import AgentConfig
@@ -596,7 +596,7 @@ class TestConsolidationDeduplicationGuard:
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
         cfg = AgentConfig(workspace=str(tmp_path), model="test-model", memory_window=10)
-        loop = AgentLoop(bus=bus, provider=provider, config=cfg)
+        loop = build_agent(bus=bus, provider=provider, config=cfg)
 
         loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
         loop.tools.get_definitions = MagicMock(return_value=[])
@@ -648,7 +648,7 @@ class TestConsolidationDeduplicationGuard:
 
     async def test_new_does_not_clear_session_when_archive_fails(self, tmp_path: Path) -> None:
         """/new must keep session data if archive step reports failure."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
         from nanobot.config.schema import AgentConfig
@@ -658,7 +658,7 @@ class TestConsolidationDeduplicationGuard:
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
         cfg = AgentConfig(workspace=str(tmp_path), model="test-model", memory_window=10)
-        loop = AgentLoop(bus=bus, provider=provider, config=cfg)
+        loop = build_agent(bus=bus, provider=provider, config=cfg)
 
         loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
         loop.tools.get_definitions = MagicMock(return_value=[])
@@ -694,7 +694,7 @@ class TestConsolidationDeduplicationGuard:
         self, tmp_path: Path
     ) -> None:
         """/new waits for in-flight background consolidation then archives."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
         from nanobot.config.schema import AgentConfig
@@ -704,7 +704,7 @@ class TestConsolidationDeduplicationGuard:
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
         cfg = AgentConfig(workspace=str(tmp_path), model="test-model", memory_window=10)
-        loop = AgentLoop(bus=bus, provider=provider, config=cfg)
+        loop = build_agent(bus=bus, provider=provider, config=cfg)
 
         loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
         loop.tools.get_definitions = MagicMock(return_value=[])

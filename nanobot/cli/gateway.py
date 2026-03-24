@@ -28,7 +28,7 @@ def gateway(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ) -> None:
     """Start the nanobot gateway."""
-    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.agent_factory import build_agent
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
     from nanobot.config.loader import get_data_dir, load_config
@@ -69,7 +69,7 @@ def gateway(
     cron = CronService(cron_store_path)
 
     # Create agent with cron service
-    agent = AgentLoop(
+    agent = build_agent(
         bus=bus,
         provider=provider,
         config=_make_agent_config(config),
@@ -295,7 +295,7 @@ def ui(
         )
         raise typer.Exit(1) from None
 
-    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.agent_factory import build_agent
     from nanobot.agent.observability import init_langfuse
     from nanobot.agent.observability import shutdown as shutdown_langfuse
     from nanobot.bus.queue import MessageBus
@@ -324,7 +324,7 @@ def ui(
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
-    agent_loop = AgentLoop(
+    agent_loop = build_agent(
         bus=bus,
         provider=provider,
         config=_make_agent_config(config),

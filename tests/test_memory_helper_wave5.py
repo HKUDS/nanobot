@@ -8,15 +8,15 @@ import pytest
 
 from nanobot.agent.memory import extractor as extractor_mod
 from nanobot.agent.memory.entity_linker import register_alias, resolve_alias
-from nanobot.agent.memory.mem0_adapter import _Mem0Adapter
-from nanobot.agent.memory.onnx_reranker import OnnxCrossEncoderReranker
-from nanobot.agent.memory.retrieval import (
+from nanobot.agent.memory.keyword_search import (
     _bm25_score,
     _build_bm25_index,
     _keyword_score,
     _local_retrieve,
     _topic_fallback_retrieve,
 )
+from nanobot.agent.memory.mem0_adapter import _Mem0Adapter
+from nanobot.agent.memory.onnx_reranker import OnnxCrossEncoderReranker
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 

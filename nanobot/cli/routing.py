@@ -263,7 +263,7 @@ def routing_replay(
     """Replay a misrouted message with a corrected role."""
     from loguru import logger
 
-    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.agent_factory import build_agent
     from nanobot.bus.queue import MessageBus
     from nanobot.config.loader import get_data_dir, load_config
     from nanobot.cron.service import CronService
@@ -313,7 +313,7 @@ def routing_replay(
     logger.disable("nanobot")
     _configure_log_sink(config, logger)
 
-    agent_loop = AgentLoop(
+    agent_loop = build_agent(
         bus=bus,
         provider=provider,
         config=_make_agent_config(config),
