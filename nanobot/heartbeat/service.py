@@ -82,6 +82,22 @@ class HeartbeatService:
                 return None
         return None
 
+    def _has_active_tasks(self, content: str) -> bool:
+        """Check if HEARTBEAT.md has actual tasks (non-comment/non-empty content).
+
+        Returns True if there are any non-comment, non-whitespace lines that could
+        represent tasks. This avoids calling the LLM when the file is effectively empty.
+        """
+        lines = content.strip().split("\n")
+        for line in lines:
+            stripped = line.strip()
+            # Skip empty lines, comments, and markdown headers
+            if not stripped or stripped.startswith("#") or stripped.startswith("<!--"):
+                continue
+            # If we find any non-empty, non-comment line, assume it could be a task
+            return True
+        return False
+
     async def _decide(self, content: str) -> tuple[str, str]:
         """Phase 1: ask LLM to decide skip/run via virtual tool call.
 
@@ -147,6 +163,10 @@ class HeartbeatService:
         content = self._read_heartbeat_file()
         if not content:
             logger.debug("Heartbeat: HEARTBEAT.md missing or empty")
+            return
+
+        if not self._has_active_tasks(content):
+            logger.debug("Heartbeat: no active tasks, skipping LLM call")
             return
 
         logger.info("Heartbeat: checking for tasks...")
