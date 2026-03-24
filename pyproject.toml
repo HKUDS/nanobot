@@ -44,7 +44,6 @@ dependencies = [
     "fastapi>=0.115.0,<1.0.0",
     "uvicorn[standard]>=0.32.0,<1.0.0",
     "sse-starlette>=2.0.0,<3.0.0",
-    "networkx>=3.0,<4.0",
     "onnxruntime>=1.17.0,<2.0.0",
     "tokenizers>=0.15.0,<1.0.0",
 ]

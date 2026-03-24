@@ -215,10 +215,10 @@ class MemoryStore:
         else:
             self._reranker = CompositeReranker(alpha=reranker_alpha)
 
-        # Knowledge graph (networkx + JSON persistence).
-        graph_enabled = self.rollout.get("graph_enabled", False)
-        if graph_enabled:
-            self.graph = KnowledgeGraph(workspace=workspace)
+        # Knowledge graph (SQLite-backed via UnifiedMemoryDB).
+        graph_enabled = self.rollout.get("graph_enabled", True)
+        if graph_enabled and self.db is not None:
+            self.graph = KnowledgeGraph(db=self.db)
         else:
             self.graph = KnowledgeGraph()  # disabled — all methods return empty
 

@@ -39,6 +39,7 @@ class RolloutConfig:
                 "max_avg_memory_context_tokens": 1400.0,
                 "max_history_fallback_ratio": 0.05,
             },
+            "graph_enabled": True,
             "reranker_mode": "enabled",
             "reranker_alpha": 0.5,
             "reranker_model": "onnx:ms-marco-MiniLM-L-6-v2",
