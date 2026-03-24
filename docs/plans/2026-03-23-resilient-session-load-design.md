@@ -1,6 +1,6 @@
 # Design: Resilient Session Load
 
-**Datum:** 2026-03-23 (v4 — Plan-Review Runde 3 konsolidiert)
+**Datum:** 2026-03-24 (v5 — Plan-Review Runde 4 konsolidiert)
 **Repo:** HKUDS/nanobot
 **Branch:** `fix/resilient-session-load`
 **Target:** `main` (Bug Fix, keine Verhaltensänderung für valide Dateien)
@@ -15,39 +15,23 @@
 
 | Runde | Reviewer | Findings | Decision |
 |-------|----------|----------|----------|
-| v1 | 5× (code-review-master, skeptic-coding, skeptic-architecture, skeptic-complexity, code-review-excellence) | 12 (3B, 5M, 4m) | BLOCK |
-| v2 | 5× (gleicher Pool) | 20 → 11 dedupliziert (4B, 2M, 5m) | BLOCK |
-| v3 | 5× (gleicher Pool) | 18 → 13 dedupliziert (2B, 2M, 9m) | → v4 |
-| v4 | — | — | PROCEED |
+| v1 | 5× | 12 (3B, 5M, 4m) | BLOCK |
+| v2 | 5× | 20 → 11 dedup (4B, 2M, 5m) | BLOCK |
+| v3 | 5× | 18 → 13 dedup (2B, 2M, 9m) | → v4 |
+| v4 | 5× | 13 → 12 dedup (1B, 0M, 7m, 2n, 2s) | → v5 |
+| v5 | — | — | **PROCEED** |
 
-### v1 → v2 Änderungen
-- Backup gestrichen (löste 5 Findings)
-- `recovered` Flag statt `parsed_any`
-- Consolidation-Guard `_last_consolidated_recovered` hinzugefügt
-- Encoding `utf-8-sig` + `errors="replace"`
-- `except OSError` statt `Exception`
-- `isinstance(data, dict)` + `_MAX_LINE_BYTES` Guards
-
-### v2 → v3 Änderungen (11 Findings adressiert)
-- Consolidation-Guard ersetzt durch `last_consolidated = len(messages)` Fallback
-- `_MAX_LINE_BYTES` gestrichen
-- `errors='replace'` gestrichen
-- `RecursionError` + `OverflowError` in except-Blöcke
-- `metadata_parsed` Tracking
-- metadata `isinstance` Check
-- Summary-Log
-
-### v3 → v4 Änderungen (13 Findings adressiert)
-- **BLOCKER 1:** `metadata_parsed` wird jetzt im Fallback-Condition genutzt: `(last_consolidated_untrustworthy or not metadata_parsed) and messages`
-- **BLOCKER 2:** `except (OSError, UnicodeDecodeError)` — fängt auch Truncation mid-Multi-Byte
-- **MAJOR 1:** Negative `last_consolidated` wird auf 0 geclampt
-- **MAJOR 2:** `last_consolidated > len(messages)` wird auf `len(messages)` geclampt (deckt auch Index-Shift-Szenario)
-- **MINOR:** Summary-Log Formel und Condition synchronisiert
-- **MINOR:** `utf-8-sig` als defensive Maßnahme dokumentiert (kein evidenz-basierter Fix)
-- **MINOR:** `isinstance(raw_meta, dict)` als opportunistische Härtung dokumentiert
-- **MINOR:** Under-Consolidation Warning erweitert: "(some may not have been summarized)"
-- **MINOR:** Self-Correction Claim präzisiert: "self-corrects on next consolidation run if budget is exceeded"
-- **MINOR:** OverflowError + UnicodeDecodeError Tests hinzugefügt
+### v4 → v5 Änderungen (12 Findings adressiert)
+- **BLOCKER:** `_make_metadata_line` Default `last_consolidated=0` statt `5` (verhindert ungewolltes Clamping in 6 Tests)
+- **BLOCKER:** `test_load_metadata_only_returns_session` Assertion `== 0` statt `== 5`
+- **MINOR:** Overflow-Test nutzt `1e999` (JSON float → `inf` → echtes `OverflowError`) statt `10**1000`
+- **MINOR:** Non-dict JSON Warning inkl. Dateipfad
+- **MINOR:** `total_lines` zählt nur non-empty Zeilen (nach `strip()` Check)
+- **MINOR:** Upper-Clamp gestrichen (dead code — alle Consumer handhaben oversized korrekt)
+- **MINOR:** Non-dict metadata Warning vor Zuweisung (Lesbarkeit)
+- **MINOR:** Happy-Path Roundtrip-Test hinzugefügt (frischer SessionManager)
+- **NITPICK:** `updated_at` Verhalten im PR-Description dokumentiert
+- **SUGGESTION:** Summary-Log Duplikat-Metadata-Edge-Case als known limitation dokumentiert
 
 ## Lösung
 
@@ -57,40 +41,36 @@ Jedes Feld der metadata-line wird einzeln mit `try/except` umhüllt:
 
 - `created_at`: `datetime.fromisoformat()` — bei Fehler → `None`
 - `last_consolidated`: Explizite `"last_consolidated" not in data` Prüfung, dann `int()` — bei Fehler oder fehlend → `last_consolidated_untrustworthy = True`
-- `metadata`: `isinstance(raw_meta, dict)` Check — non-dict → `{}` + Warning (opportunistische Härtung, nicht Teil des Truncation-Fix)
+- `metadata`: `isinstance(raw_meta, dict)` Check — non-dict → `{}` + Warning (opportunistische Härtung)
 
 ### 2. Message-Zeilen einzeln parsen
 
 Jede JSONL-Zeile wird separat geparst:
 
 - `json.loads(line)` in eigenem try/except (inklusive `RecursionError`)
-- Type-Guard: `isinstance(data, dict)` — non-dict Werte werden übersprungen
+- Type-Guard: `isinstance(data, dict)` — non-dict Werte werden übersprungen + Warning mit Dateipfad
 - Bad line → `logger.warning()` mit Zeilennummer, Session-Key UND Dateipfad
 - Zeile wird übersprungen, Rest wird normal geladen
 - Leere Zeilen und Whitespace werden weiterhin ignoriert
-- Encoding: `open(path, encoding="utf-8-sig")` — BOM-tolerant (defensive Maßnahme für Windows-edited Files; `save()` schreibt nie BOM)
+- Encoding: `open(path, encoding="utf-8-sig")` — BOM-tolerant (defensive Maßnahme)
 
 ### 3. Consolidation-Sicherheit
 
-**Fallback:** Wenn `last_consolidated` nicht vertrauenswürdig (korrupt, fehlend, oder Metadata-Zeile komplett kaputt):
+**Fallback:** Wenn `last_consolidated` nicht vertrauenswürdig:
 
 ```python
 if (last_consolidated_untrustworthy or not metadata_parsed) and messages:
     last_consolidated = len(messages)
 ```
 
-Bedeutet: "Alle geladenen Messages gelten als bereits konsolidiert." Konservative Annahme die Duplikate in MEMORY.md/HISTORY.md verhindert. Trade-off: einige Messages die eigentlich noch nicht konsolidiert waren werden übersprungen — diese sind aber weiterhin in der JSONL-Datei und im LLM-Context.
-
-**Bounds-Clamping:** Für den Fall dass Metadata geparst wurde aber Werte außerhalb des gültigen Bereichs liegen:
+**Bounds-Clamping (nur Lower-Bound):**
 
 ```python
 if last_consolidated < 0:
     last_consolidated = 0
-elif last_consolidated > len(messages):
-    last_consolidated = len(messages)
 ```
 
-Dies deckt auch das Index-Shift-Szenario ab (corrupte Lines vor der Consolidation-Grenze verschieben die Indizes). Schlimmster Fall: eine Nachricht die eigentlich unconsolidated war wird als consolidated behandelt — aber die History ist nie leer.
+Upper-Bound-Clamp wurde gestrichen (dead code): alle Consumer (`get_history()`, `pick_consolidation_boundary()`, `retain_recent_legal_suffix()`) handhaben `last_consolidated > len(messages)` korrekt via Python-Slice-Semantik (`messages[N:]` → `[]`).
 
 ### 4. Summary-Log
 
@@ -99,16 +79,18 @@ Nach dem Parse-Loop, wenn `skipped_count > 0`:
 ```python
 logger.info(
     "Session {} partially recovered: {}/{} lines loaded, {} skipped",
-    key, len(messages) + (1 if metadata_parsed else 0), total_lines, skipped_count,
+    key, loaded_count, total_lines, skipped_count,
 )
 ```
+
+`total_lines` zählt nur non-empty Zeilen. `loaded_count = len(messages) + (1 if metadata_parsed else 0)`. **Known limitation:** Bei doppelten Metadata-Zeilen stimmt `loaded + skipped != total_lines` (extrem selten, nur bei manuellen Edits oder Double-Writes).
 
 ### 5. Error-Handling
 
 - Inner per-line: `json.JSONDecodeError, RecursionError` → skip + Warning
 - Inner per-field: `ValueError, TypeError, OverflowError` → default + Warning
-- Outer: `except (OSError, UnicodeDecodeError)` — I/O-Fehler und Encoding-Fehler abfangen, aber keine programmatischen Fehler verschlucken
-- Non-dict JSON Werte: `isinstance(data, dict)` Check → skip
+- Outer: `except (OSError, UnicodeDecodeError)` — I/O und Encoding
+- Non-dict JSON: `isinstance(data, dict)` Check → skip
 - Non-dict metadata: `isinstance(raw_meta, dict)` Check → default `{}`
 
 ### 6. Rückgabe-Logik
@@ -117,18 +99,20 @@ logger.info(
 |---------|----------|
 | Metadata OK + N Messages geladen | `Session(messages=N, metadata=...)` |
 | Metadata kaputt + N Messages geladen | `Session(messages=N, defaults, last_consolidated=N)` |
-| Metadata OK + 0 Messages (auch mit `metadata={}`) | `Session(messages=[], metadata=...)` |
-| Alles kaputt (nur Errors) | `None` (frische Session, aktuelles Verhalten) |
-| Datei existiert nicht | `None` (aktuelles Verhalten) |
+| Metadata OK + 0 Messages | `Session(messages=[], metadata=...)` |
+| Alles kaputt (nur Errors) | `None` (frische Session) |
+| Datei existiert nicht | `None` |
+
+**Known:** `updated_at` wird von `_load()` nicht gelesen — Session nutzt `datetime.now()` als Default. Pre-existing behavior, kein Regression.
 
 ## Files
 
 | File | Änderung |
 |------|----------|
-| `nanobot/session/manager.py` | `_load()` refactor (per-line, encoding, guards, clamping, summary log) |
+| `nanobot/session/manager.py` | `_load()` refactor |
 | `tests/test_session_resilient_load.py` | Neue Testdatei |
 
-**Keine Änderung an `memory.py`** — keine Cross-Module-Kopplung.
+**Keine Änderung an `memory.py`.**
 
 ## Tests
 
@@ -140,19 +124,21 @@ logger.info(
 | `test_load_completely_empty_file_returns_none` | Leere Datei → `None` |
 | `test_load_non_dict_line_skipped` | JSON-Zeile ist String statt Dict → übersprungen |
 | `test_load_bom_file` | UTF-8 BOM in Datei → korrekt geladen |
-| `test_load_recursion_error_line_skipped` | Deep-nested JSON → `RecursionError` gefangen, übersprungen |
-| `test_load_unicode_decode_error_returns_none` | Mid-Multi-Byte Truncation → `None` statt Crash |
-| `test_load_metadata_only_returns_session` | Nur metadata-line, `metadata={}` → Session (nicht None!) |
-| `test_load_corrupt_metadata_created_at` | Invalid created_at → Default, Messages geladen |
+| `test_load_recursion_error_line_skipped` | Deep-nested JSON → `RecursionError` gefangen |
+| `test_load_unicode_decode_error_returns_none` | Mid-Multi-Byte Truncation → `None` |
+| `test_load_metadata_only_returns_session` | Nur metadata-line → Session, `last_consolidated=0` |
+| `test_load_corrupt_metadata_created_at` | Invalid created_at → Default |
 | `test_load_corrupt_metadata_last_consolidated` | Invalid last_consolidated → `len(messages)` |
 | `test_load_metadata_missing_fields` | Nur `_type` → Defaults, `last_consolidated=len(messages)` |
-| `test_load_corrupt_metadata_json_with_valid_messages` | Metadata-Zeile invalid JSON + Messages → `last_consolidated=len(messages)` |
+| `test_load_corrupt_metadata_json_with_valid_messages` | Metadata-Zeile kaputt + Messages → `len(messages)` |
 | `test_load_negative_last_consolidated_clamped` | `last_consolidated=-1` → geclampt auf 0 |
-| `test_load_overflow_last_consolidated_clamped` | `last_consolidated=1e999` → OverflowError → `len(messages)` |
+| `test_load_overflow_last_consolidated_clamped` | `last_consolidated=1e999` → `OverflowError` → `len(messages)` |
+| `test_load_valid_file_roundtrip` | save() → frischer Manager → _load() → alle Felder intakt |
 
 ## Ausgespart (Folge-PRs)
 
-- **Atomic Save** (write-to-tmp + os.replace) — behebt die Root Cause, ist aber ein separater PR
-- **Backup-Mechanismus** — nur wenn konkreter Consumer-Need identifiziert
-- **`list_sessions()` Resilienz** — gleiche Vulnerability, separater Scope
-- **`save()` Error-Handling** — Caller-seitiges Problem, separater Scope
+- **Atomic Save** (write-to-tmp + os.replace) — Root Cause Fix
+- **Backup-Mechanismus** — nur bei konkretem Consumer-Need
+- **`list_sessions()` Resilienz** — separater Scope
+- **`save()` Error-Handling** — separater Scope
+- **`updated_at` Round-Trip** — pre-existing behavior

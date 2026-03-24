@@ -1,10 +1,10 @@
-# Resilient Session Load Implementation Plan (v4)
+# Resilient Session Load Implementation Plan (v5)
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Make `SessionManager._load()` recover partial session data from corrupt JSONL files instead of discarding the entire session.
 
-**Architecture:** Refactor `_load()` to parse metadata and message lines individually with per-line error handling. Use `last_consolidated = len(messages)` fallback when `last_consolidated` is untrustworthy — no sentinel field, no cross-module changes. Clamp `last_consolidated` to `[0, len(messages)]` for trusted-but-out-of-range values.
+**Architecture:** Refactor `_load()` to parse metadata and message lines individually with per-line error handling. Use `last_consolidated = len(messages)` fallback when `last_consolidated` is untrustworthy — no sentinel field, no cross-module changes. Clamp negative `last_consolidated` to `0` (upper-bound clamp removed — dead code, all consumers handle oversized values correctly via Python slice semantics).
 
 **Tech Stack:** Python 3.11+, pytest, loguru, json
 
@@ -13,7 +13,7 @@
 **Branch:** `fix/resilient-session-load` (from `main`)
 **Target:** `main` (Bug Fix, no behavior changes for valid files)
 
-**Review findings addressed:** 13/13 (v3 deduplizierte Findings aus Runde 3)
+**Review findings addressed:** 12/12 (v4 deduplizierte Findings aus Runde 4)
 
 **Execution policy:** Tasks 1–6 may be executed autonomously. Task 7 (push) is autonomous. Task 8 (PR) requires **explicit user approval** before execution. The user may also choose to create the PR themselves.
 
@@ -84,7 +84,7 @@ def _make_metadata_line(**overrides) -> str:
         "created_at": "2026-03-23T10:00:00",
         "updated_at": "2026-03-23T22:00:00",
         "metadata": {},
-        "last_consolidated": 5,
+        "last_consolidated": 0,
     }
     data.update(overrides)
     return json.dumps(data, ensure_ascii=False)
@@ -263,7 +263,7 @@ class TestCorruptMetadata:
         assert session is not None
         assert session.messages == []
         assert session.metadata == {}
-        assert session.last_consolidated == 5
+        assert session.last_consolidated == 0
 
     def test_load_corrupt_metadata_created_at(self, tmp_session_manager: SessionManager):
         """Invalid created_at in metadata: defaults to None, messages still load."""
@@ -345,12 +345,15 @@ class TestLastConsolidatedBounds:
         assert len(session.messages) == 1
 
     def test_load_overflow_last_consolidated_clamped(self, tmp_session_manager: SessionManager):
-        """OverflowError on int(last_consolidated) triggers fallback to len(messages)."""
+        """JSON float 1e999 triggers OverflowError on int() → fallback to len(messages)."""
         path = tmp_session_manager._get_session_path("telegram:12345")
-        lines = [
-            _make_metadata_line(last_consolidated=10**1000),
-            _make_message_line("user", "hello"),
-        ]
+        # 1e999 → json.loads → float('inf') → int(float('inf')) → OverflowError
+        raw_metadata = (
+            '{"_type":"metadata","key":"telegram:12345",'
+            '"created_at":"2026-03-23T10:00:00","updated_at":"2026-03-23T22:00:00",'
+            '"metadata":{},"last_consolidated":1e999}'
+        )
+        lines = [raw_metadata, _make_message_line("user", "hello")]
         _write_session_file(path, lines)
 
         session = tmp_session_manager._load("telegram:12345")
@@ -358,6 +361,27 @@ class TestLastConsolidatedBounds:
         assert session is not None
         assert session.last_consolidated == 1  # len(messages)
         assert len(session.messages) == 1
+
+
+class TestValidFileRoundtrip:
+    def test_load_valid_file_roundtrip(self, tmp_session_manager: SessionManager):
+        """A valid file saved by save() loads back via fresh SessionManager with all fields intact."""
+        session = Session(key="telegram:12345", metadata={"lang": "en"})
+        session.add_message("user", "hello")
+        session.last_consolidated = 0
+        tmp_session_manager.save(session)
+
+        # Fresh SessionManager with empty cache — forces _load() from disk
+        from nanobot.session.manager import SessionManager as SM
+        fresh_manager = SM(workspace=tmp_session_manager.workspace)
+        loaded = fresh_manager._load("telegram:12345")
+
+        assert loaded is not None
+        assert loaded.key == "telegram:12345"
+        assert len(loaded.messages) == 1
+        assert loaded.messages[0]["content"] == "hello"
+        assert loaded.metadata == {"lang": "en"}
+        assert loaded.last_consolidated == 0
 ```
 
 **Step 2: Run tests**
@@ -414,10 +438,10 @@ Replace the entire `_load()` method with:
 
             with open(path, encoding="utf-8-sig") as f:
                 for line_num, raw in enumerate(f, 1):
-                    total_lines += 1
                     stripped = raw.strip()
                     if not stripped:
                         continue
+                    total_lines += 1
 
                     try:
                         data = json.loads(stripped)
@@ -431,8 +455,8 @@ Replace the entire `_load()` method with:
 
                     if not isinstance(data, dict):
                         logger.warning(
-                            "Non-dict JSON on line {} in session {} — skipping",
-                            line_num, key,
+                            "Non-dict JSON on line {} in session {} at {} — skipping",
+                            line_num, key, path,
                         )
                         skipped_count += 1
                         continue
@@ -440,9 +464,10 @@ Replace the entire `_load()` method with:
                     if data.get("_type") == "metadata":
                         # Parse metadata fields individually with safe defaults
                         raw_meta = data.get("metadata", {})
-                        metadata = raw_meta if isinstance(raw_meta, dict) else {}
                         if not isinstance(raw_meta, dict):
                             logger.warning("Non-dict metadata in session {} at {}", key, path)
+                            raw_meta = {}
+                        metadata = raw_meta
 
                         try:
                             created_at = (
@@ -485,20 +510,16 @@ Replace the entire `_load()` method with:
                     key, len(messages),
                 )
 
-            # Bounds-clamping for trusted-but-out-of-range values.
-            # Covers negative values and index-shift from skipped lines.
+            # Bounds-clamping for negative values.
+            # Upper-bound clamp intentionally omitted: all consumers (get_history(),
+            # pick_consolidation_boundary, retain_recent_legal_suffix) handle
+            # last_consolidated > len(messages) correctly via Python slice semantics.
             if last_consolidated < 0:
                 logger.warning(
                     "Negative last_consolidated ({}) in session {} — clamping to 0",
                     last_consolidated, key,
                 )
                 last_consolidated = 0
-            elif last_consolidated > len(messages):
-                logger.warning(
-                    "last_consolidated ({}) exceeds loaded messages ({}) in session {} — clamping",
-                    last_consolidated, len(messages), key,
-                )
-                last_consolidated = len(messages)
 
             if skipped_count > 0:
                 logger.info(
@@ -587,7 +608,7 @@ git commit -m "style: lint/format fixes" || true
 ```bash
 python -m pytest tests/test_session_resilient_load.py -v --tb=short
 ```
-Expected: 15 tests, all PASS
+Expected: 16 tests, all PASS
 
 **Step 2: Verify specific edge cases**
 
@@ -652,6 +673,8 @@ Process restart during `save()` (which uses `open("w")`) truncates the file befo
 
 **Follow-up:** Atomic save (write-to-tmp + `os.replace`) will be addressed in a separate PR to fix the root cause.
 
+**Known:** `updated_at` is written by `save()` but not parsed by `_load()` — Session defaults to `datetime.now()`. This is pre-existing behavior and not a regression of this PR.
+
 ## Test plan
 
 - [x] Truncated last line → all previous messages recovered
@@ -668,7 +691,8 @@ Process restart during `save()` (which uses `open("w")`) truncates the file befo
 - [x] Missing metadata fields → safe defaults + len(messages) fallback
 - [x] Corrupt metadata JSON + valid messages → recovered with len(messages) fallback
 - [x] Negative last_consolidated → clamped to 0
-- [x] Overflow last_consolidated → fallback to len(messages)
+- [x] Overflow last_consolidated (1e999) → OverflowError → fallback to len(messages)
+- [x] Valid file roundtrip via fresh SessionManager → all fields intact
 - [x] Existing session tests pass (no regression)' \
   --base main \
   --head data219:fix/resilient-session-load
