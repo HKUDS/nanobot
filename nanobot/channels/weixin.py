@@ -63,6 +63,7 @@ SESSION_PAUSE_DURATION_S = 60 * 60
 MAX_CONSECUTIVE_FAILURES = 3
 BACKOFF_DELAY_S = 30
 RETRY_DELAY_S = 2
+MAX_QR_REFRESH_COUNT = 3
 
 # Default long-poll timeout; overridden by server via longpolling_timeout_ms.
 DEFAULT_LONG_POLL_TIMEOUT_S = 35
@@ -241,24 +242,25 @@ class WeixinChannel(BaseChannel):
     # QR Code Login  (matches login-qr.ts)
     # ------------------------------------------------------------------
 
+    async def _fetch_qr_code(self) -> tuple[str, str]:
+        """Fetch a fresh QR code. Returns (qrcode_id, scan_url)."""
+        data = await self._api_get(
+            "ilink/bot/get_bot_qrcode",
+            params={"bot_type": "3"},
+            auth=False,
+        )
+        qrcode_img_content = data.get("qrcode_img_content", "")
+        qrcode_id = data.get("qrcode", "")
+        if not qrcode_id:
+            raise RuntimeError(f"Failed to get QR code from WeChat API: {data}")
+        return qrcode_id, (qrcode_img_content or qrcode_id)
+
     async def _qr_login(self) -> bool:
         """Perform QR code login flow. Returns True on success."""
         try:
             logger.info("Starting WeChat QR code login...")
-
-            data = await self._api_get(
-                "ilink/bot/get_bot_qrcode",
-                params={"bot_type": "3"},
-                auth=False,
-            )
-            qrcode_img_content = data.get("qrcode_img_content", "")
-            qrcode_id = data.get("qrcode", "")
-
-            if not qrcode_id:
-                logger.error("Failed to get QR code from WeChat API: {}", data)
-                return False
-
-            scan_url = qrcode_img_content or qrcode_id
+            refresh_count = 0
+            qrcode_id, scan_url = await self._fetch_qr_code()
             self._print_qr_code(scan_url)
 
             logger.info("Waiting for QR code scan...")
@@ -298,8 +300,23 @@ class WeixinChannel(BaseChannel):
                 elif status == "scaned":
                     logger.info("QR code scanned, waiting for confirmation...")
                 elif status == "expired":
-                    logger.warning("QR code expired")
-                    return False
+                    refresh_count += 1
+                    if refresh_count > MAX_QR_REFRESH_COUNT:
+                        logger.warning(
+                            "QR code expired too many times ({}/{}), giving up.",
+                            refresh_count - 1,
+                            MAX_QR_REFRESH_COUNT,
+                        )
+                        return False
+                    logger.warning(
+                        "QR code expired, refreshing... ({}/{})",
+                        refresh_count,
+                        MAX_QR_REFRESH_COUNT,
+                    )
+                    qrcode_id, scan_url = await self._fetch_qr_code()
+                    self._print_qr_code(scan_url)
+                    logger.info("New QR code generated, waiting for scan...")
+                    continue
                 # status == "wait" — keep polling
 
                 await asyncio.sleep(1)

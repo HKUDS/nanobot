@@ -207,6 +207,57 @@ async def test_poll_once_pauses_session_on_expired_errcode() -> None:
 
 
 @pytest.mark.asyncio
+async def test_qr_login_refreshes_expired_qr_and_then_succeeds() -> None:
+    channel, _bus = _make_channel()
+    channel._running = True
+    channel._save_state = lambda: None
+    channel._print_qr_code = lambda url: None
+    channel._api_get = AsyncMock(
+        side_effect=[
+            {"qrcode": "qr-1", "qrcode_img_content": "url-1"},
+            {"status": "expired"},
+            {"qrcode": "qr-2", "qrcode_img_content": "url-2"},
+            {
+                "status": "confirmed",
+                "bot_token": "token-2",
+                "ilink_bot_id": "bot-2",
+                "baseurl": "https://example.test",
+                "ilink_user_id": "wx-user",
+            },
+        ]
+    )
+
+    ok = await channel._qr_login()
+
+    assert ok is True
+    assert channel._token == "token-2"
+    assert channel.config.base_url == "https://example.test"
+
+
+@pytest.mark.asyncio
+async def test_qr_login_returns_false_after_too_many_expired_qr_codes() -> None:
+    channel, _bus = _make_channel()
+    channel._running = True
+    channel._print_qr_code = lambda url: None
+    channel._api_get = AsyncMock(
+        side_effect=[
+            {"qrcode": "qr-1", "qrcode_img_content": "url-1"},
+            {"status": "expired"},
+            {"qrcode": "qr-2", "qrcode_img_content": "url-2"},
+            {"status": "expired"},
+            {"qrcode": "qr-3", "qrcode_img_content": "url-3"},
+            {"status": "expired"},
+            {"qrcode": "qr-4", "qrcode_img_content": "url-4"},
+            {"status": "expired"},
+        ]
+    )
+
+    ok = await channel._qr_login()
+
+    assert ok is False
+
+
+@pytest.mark.asyncio
 async def test_process_message_skips_bot_messages() -> None:
     channel, bus = _make_channel()
 
