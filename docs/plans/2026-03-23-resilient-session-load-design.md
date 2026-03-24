@@ -1,6 +1,6 @@
 # Design: Resilient Session Load
 
-**Datum:** 2026-03-24 (v5 — Plan-Review Runde 4 konsolidiert)
+**Datum:** 2026-03-24 (v6 — Plan-Review Runde 5 konsolidiert)
 **Repo:** HKUDS/nanobot
 **Branch:** `fix/resilient-session-load`
 **Target:** `main` (Bug Fix, keine Verhaltensänderung für valide Dateien)
@@ -19,7 +19,8 @@
 | v2 | 5× | 20 → 11 dedup (4B, 2M, 5m) | BLOCK |
 | v3 | 5× | 18 → 13 dedup (2B, 2M, 9m) | → v4 |
 | v4 | 5× | 13 → 12 dedup (1B, 0M, 7m, 2n, 2s) | → v5 |
-| v5 | — | — | **PROCEED** |
+| v5 | 5× | 7 dedup (0B, 0M, 5m, 2n, 2s) | → v6 |
+| v6 | — | — | **PROCEED** |
 
 ### v4 → v5 Änderungen (12 Findings adressiert)
 - **BLOCKER:** `_make_metadata_line` Default `last_consolidated=0` statt `5` (verhindert ungewolltes Clamping in 6 Tests)
@@ -32,6 +33,17 @@
 - **MINOR:** Happy-Path Roundtrip-Test hinzugefügt (frischer SessionManager)
 - **NITPICK:** `updated_at` Verhalten im PR-Description dokumentiert
 - **SUGGESTION:** Summary-Log Duplikat-Metadata-Edge-Case als known limitation dokumentiert
+
+### v5 → v6 Änderungen (7 Findings adressiert)
+- **MINOR:** PR-Description "Bounds clamping" korrigiert → "Lower-bound clamping" (nur negative Werte)
+- **MINOR:** Roundtrip-Test `created_at` Assertion hinzugefügt (End-to-End Verifikation)
+- **MINOR:** Index-Shift-Schutz: `or skipped_count > 0` zur Fallback-Condition hinzugefügt (verhindert stilles Verschieben von unconsolidated Messages)
+- **MINOR:** `list_sessions()` Encoding-Inkonsistenz als Follow-Up dokumentiert (out-of-scope)
+- **MINOR:** Task 5 `--timeout=30` entfernt (pytest-timeout keine Dependency)
+- **NITPICK:** Task 1 Baseline-Test-Run hinzugefügt
+- **NITPICK:** Task 2 "Expected: FAIL" Text korrigiert (2 Tests würden gegen aktuellen Code schon PASS)
+- **SUGGESTION:** Kommentar über outer `except`-Clause hinzugefügt
+- **SUGGESTION:** Tasks 5+6 zusammengelegt zu "Verify & validate"
 
 ## Lösung
 
@@ -56,12 +68,14 @@ Jede JSONL-Zeile wird separat geparst:
 
 ### 3. Consolidation-Sicherheit
 
-**Fallback:** Wenn `last_consolidated` nicht vertrauenswürdig:
+**Fallback:** Wenn `last_consolidated` nicht vertrauenswürdig ODER Zeilen übersprungen wurden:
 
 ```python
-if (last_consolidated_untrustworthy or not metadata_parsed) and messages:
+if (last_consolidated_untrustworthy or not metadata_parsed or skipped_count > 0) and messages:
     last_consolidated = len(messages)
 ```
+
+Der `skipped_count > 0` Check verhindert einen Index-Shift: wenn corrupte Message-Zeilen vor der Consolidation-Grenze liegen, verschieben sich die verbleibenden Messages zu niedrigeren Indizes. Ohne den Check würde `last_consolidated` auf dem alten Wert bleiben und `messages[last_consolidated:]` unconsolidated Messages überspringen. Mit dem Check werden alle geladenen Messages als consolidated betrachtet — sichere Richtung (idempotente Re-Consolidation, kein Datenverlust).
 
 **Bounds-Clamping (nur Lower-Bound):**
 
@@ -133,12 +147,13 @@ logger.info(
 | `test_load_corrupt_metadata_json_with_valid_messages` | Metadata-Zeile kaputt + Messages → `len(messages)` |
 | `test_load_negative_last_consolidated_clamped` | `last_consolidated=-1` → geclampt auf 0 |
 | `test_load_overflow_last_consolidated_clamped` | `last_consolidated=1e999` → `OverflowError` → `len(messages)` |
-| `test_load_valid_file_roundtrip` | save() → frischer Manager → _load() → alle Felder intakt |
+| `test_load_skipped_line_before_consolidation_boundary` | Corrupte Zeile vor Grenze → `last_consolidated=len(messages)` (Index-Shift Schutz) |
+| `test_load_valid_file_roundtrip` | save() → frischer Manager → _load() → alle Felder inkl. `created_at` intakt |
 
 ## Ausgespart (Folge-PRs)
 
 - **Atomic Save** (write-to-tmp + os.replace) — Root Cause Fix
 - **Backup-Mechanismus** — nur bei konkretem Consumer-Need
-- **`list_sessions()` Resilienz** — separater Scope
+- **`list_sessions()` Resilienz** — separater Scope; Encoding-Inkonsistenz (`utf-8` vs `utf-8-sig`) in Follow-Up beheben
 - **`save()` Error-Handling** — separater Scope
 - **`updated_at` Round-Trip** — pre-existing behavior
