@@ -50,7 +50,7 @@ cron(action="remove", job_id="abc123")
 | every day at 8am | cron_expr: "0 8 * * *" |
 | weekdays at 5pm | cron_expr: "0 17 * * 1-5" |
 | 9am Vancouver time daily | cron_expr: "0 9 * * *", tz: "America/Vancouver" |
-| at a specific time | at: ISO datetime string |
+| at a specific time | at: ISO datetime string (compute from current time) |
 
 ## Timezone
 
