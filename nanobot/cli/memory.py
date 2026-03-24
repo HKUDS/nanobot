@@ -194,8 +194,8 @@ def memory_reindex(
         read_events_fn=store.ingester.read_events,
         ingester=store.ingester,
         profile_keys=store.PROFILE_KEYS,
-        vector_points_count_fn=store.maintenance._vector_points_count,
-        mem0_get_all_rows_fn=store.maintenance._mem0_get_all_rows,
+        vector_points_count_fn=None,
+        mem0_get_all_rows_fn=None,
     )
     table = Table(title="Memory Reindex")
     table.add_column("Field", style="cyan")
@@ -241,8 +241,8 @@ def memory_compact(
         read_events_fn=store.ingester.read_events,
         ingester=store.ingester,
         profile_keys=store.PROFILE_KEYS,
-        vector_points_count_fn=store.maintenance._vector_points_count,
-        mem0_get_all_rows_fn=store.maintenance._mem0_get_all_rows,
+        vector_points_count_fn=None,
+        mem0_get_all_rows_fn=None,
     )
     table = Table(title="Memory Compaction")
     table.add_column("Field", style="cyan")
@@ -345,8 +345,8 @@ def memory_eval(
             read_events_fn=store.ingester.read_events,
             ingester=store.ingester,
             profile_keys=store.PROFILE_KEYS,
-            vector_points_count_fn=store.maintenance._vector_points_count,
-            mem0_get_all_rows_fn=store.maintenance._mem0_get_all_rows,
+            vector_points_count_fn=None,
+            mem0_get_all_rows_fn=None,
         )
         seed_table = Table(title="Seeded Corpus")
         seed_table.add_column("Field", style="cyan")

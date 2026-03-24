@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-_SAVE_MEMORY_TOOL = [
+from typing import Any
+
+_SAVE_MEMORY_TOOL: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
@@ -29,7 +31,7 @@ _SAVE_MEMORY_TOOL = [
 ]
 
 
-_SAVE_EVENTS_TOOL = [
+_SAVE_EVENTS_TOOL: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
@@ -99,7 +101,7 @@ _SAVE_EVENTS_TOOL = [
 
 # -- Combined single-tool schema for one-call consolidation (Task 6) ----------
 
-_CONSOLIDATE_MEMORY_TOOL = [
+_CONSOLIDATE_MEMORY_TOOL: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {

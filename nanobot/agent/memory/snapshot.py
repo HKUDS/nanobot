@@ -45,8 +45,8 @@ class MemorySnapshot:
         read_events_fn: Callable[..., list[dict[str, Any]]],
         profile_section_lines_fn: Callable[..., list[str]],
         recent_unresolved_fn: Callable[..., list[dict[str, Any]]],
-        read_long_term_fn: Callable[[], str],
-        write_long_term_fn: Callable[[str], None],
+        read_long_term_fn: Callable[[], str] | None = None,
+        write_long_term_fn: Callable[[str], None] | None = None,
         verify_beliefs_fn: Callable[[], dict[str, Any]],
         write_profile_fn: Callable[[dict[str, Any]], None],
         profile_keys: tuple[str, ...] = PROFILE_KEYS,
@@ -104,7 +104,7 @@ class MemorySnapshot:
         if self._db is not None:
             existing_memory = self._db.read_snapshot("current")
         else:
-            existing_memory = self._read_long_term() if self._read_long_term else ""
+            existing_memory = self._read_long_term() if self._read_long_term is not None else ""
         pinned = self._extract_pinned_section(existing_memory) if existing_memory else None
 
         parts: list[str] = ["# Memory", ""]
@@ -145,7 +145,7 @@ class MemorySnapshot:
         if self._db is not None:
             events = self._db.read_events(limit=1000)
         else:
-            events = self._read_events() if self._read_events else []
+            events = self._read_events() if self._read_events is not None else []
         now = datetime.now(timezone.utc)
         stale = 0
         total_ttl = 0

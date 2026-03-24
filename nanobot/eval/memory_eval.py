@@ -20,6 +20,7 @@ from nanobot.utils.helpers import ensure_dir
 if TYPE_CHECKING:
     from nanobot.agent.memory.unified_db import UnifiedMemoryDB
 
+
 class EvalRunner:
     """Retrieval evaluation, rollout-gate checking, and observability reports."""
 

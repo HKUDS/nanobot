@@ -335,9 +335,14 @@ class MemoryRetriever:
         # 1. Embed query (async → sync bridge)
         # Try asyncio.run() first; if a loop is already active (e.g. inside
         # pytest-asyncio), fall back to a helper thread.
+        coro = embedder.embed(query)
         try:
-            query_vec = asyncio.run(embedder.embed(query))
+            query_vec = asyncio.run(coro)
         except RuntimeError:
+            # asyncio.run() failed because a loop is already running.
+            # Close the unawaited coroutine to suppress the
+            # "coroutine was never awaited" warning.
+            coro.close()
             import concurrent.futures
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
@@ -564,8 +569,6 @@ class MemoryRetriever:
                 target_memory_types=fallback_types,
                 exclude_ids=bm25_ids,
                 top_k=remaining,
-                base_score=0.25,
-                include_superseded=plan.include_superseded,
             )
             candidates.extend(fallback)
 
@@ -581,33 +584,13 @@ class MemoryRetriever:
         plan: RetrievalPlan,
         candidate_k: int,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        """Source candidates from mem0 vector search."""
-        allowed_sources = {
-            str(item).strip().lower()
-            for item in self._rollout.get("memory_fallback_allowed_sources", [])
-            if str(item).strip()
-        }
-        max_summary_chars = int(self._rollout.get("memory_fallback_max_summary_chars", 280) or 280)
+        """Source candidates from mem0 vector search.
 
-        search_result = self._mem0.search(
-            query,
-            top_k=candidate_k,
-            allow_get_all_fallback=True,
-            allow_history_fallback=bool(
-                self._rollout.get("memory_history_fallback_enabled", False)
-            ),
-            allowed_sources=allowed_sources,
-            max_summary_chars=max_summary_chars,
-            reject_blob_like=True,
-            return_stats=True,
-        )
-        if isinstance(search_result, tuple) and len(search_result) == 2:
-            retrieved, source_stats = search_result
-        else:
-            retrieved = search_result if isinstance(search_result, list) else []
-            source_stats = dict(_DEFAULT_SOURCE_STATS)
-
-        return retrieved, source_stats
+        Stub: mem0 backend has been removed.  Returns empty results so that
+        the legacy ``_retrieve_mem0_path`` (unreachable from ``retrieve()``)
+        still type-checks.
+        """
+        return [], dict(_DEFAULT_SOURCE_STATS)
 
     # ------------------------------------------------------------------
     # Pipeline stage: supplementary BM25 merge (graph-augmented)

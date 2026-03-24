@@ -223,10 +223,13 @@ def _wire_memory(
                 f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}] "
                 f"Fallback archive ({len(lines)} messages)"
             )
-            context.memory.persistence.append_text(
-                context.memory.history_file,
-                header + "\n" + "\n".join(lines) + "\n\n",
-            )
+            text = header + "\n" + "\n".join(lines) + "\n\n"
+            if context.memory.db is not None:
+                context.memory.db.append_history(text)
+            else:
+                # Fallback: write to HISTORY.md file directly.
+                with open(context.memory.history_file, "a", encoding="utf-8") as f:
+                    f.write(text)
 
     return ConsolidationOrchestrator(
         memory=context.memory,

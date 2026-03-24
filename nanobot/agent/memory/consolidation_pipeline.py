@@ -186,10 +186,6 @@ class ConsolidationPipeline:
                 {"role": "user", "content": prompt},
             ],
             tools=_CONSOLIDATE_MEMORY_TOOL,
-            tool_choice={
-                "type": "function",
-                "function": {"name": "consolidate_memory"},
-            },
             model=model,
         )
 
