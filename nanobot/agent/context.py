@@ -18,6 +18,7 @@ class ContextBuilder:
 
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
+    _MAX_DYNAMIC_CONTEXT_CHARS = 4000
 
     def __init__(self, workspace: Path, input_limits: InputLimitsConfig | None = None):
         self.workspace = workspace
@@ -53,7 +54,12 @@ class ContextBuilder:
         # Validate hooks configuration without loading
         load_hooks_from_json(self.workspace, validate_only=True)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        channel: str | None = None,
+        chat_id: str | None = None,
+    ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
 
@@ -79,6 +85,10 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
 
 {skills_summary}""")
+
+        dynamic = self._collect_prompt_injections(channel, chat_id)
+        if dynamic:
+            parts.append(dynamic)
 
         return "\n\n---\n\n".join(parts)
 
@@ -106,6 +116,16 @@ Skills with available="false" need dependencies installed first - you can try in
         """Apply PRE_BUILD_CONTEXT hooks to a skills list."""
         result = self.hooks.emit(HookEvent.PRE_BUILD_CONTEXT, {"type": "skills", "data": skills})
         return result.modified_data if result.modified_data is not None else skills
+
+    def _collect_prompt_injections(self, channel: str | None, chat_id: str | None) -> str:
+        """Collect dynamic prompt injections from hooks, wrapped in <dynamic_context>."""
+        raw = self.hooks.collect_prompt_injections(channel=channel, chat_id=chat_id)
+        if not raw:
+            return ""
+        combined = "\n\n".join(raw)
+        if len(combined) > self._MAX_DYNAMIC_CONTEXT_CHARS:
+            combined = combined[: self._MAX_DYNAMIC_CONTEXT_CHARS] + "\n... (truncated)"
+        return f"<dynamic_context>\n{combined}\n</dynamic_context>"
 
     def _get_identity(self) -> str:
         """Get the core identity section."""
@@ -193,7 +213,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel, chat_id=chat_id)},
             *history,
             {"role": current_role, "content": merged},
         ]

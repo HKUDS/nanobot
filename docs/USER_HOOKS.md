@@ -62,6 +62,7 @@ Done! Nanobot will automatically load and execute your hook.
 | `SessionStart` | Session initialization | `HOOK_EVENT` |
 | `PreToolUse` | Before tool execution | `HOOK_EVENT`, `TOOL_NAME`, `TOOL_ARGS` |
 | `PostToolUse` | After tool execution | `HOOK_EVENT`, `TOOL_NAME`, `TOOL_ARGS`, `TOOL_RESULT` |
+| `PreBuildContext` | Before building system prompt | `HOOK_EVENT`, `CONTEXT_TYPE`, `CHANNEL`, `CHAT_ID` |
 | `Stop` | Agent shutdown | `HOOK_EVENT` |
 
 ### Exit Codes
@@ -204,6 +205,91 @@ Nanobot includes one built-in hook:
 - **SkillsEnabledFilter**: Filters disabled skills from the system prompt
   - Managed via `nanobot skills disable/enable` commands
   - State stored in `hooks/state.json`
+
+## Dynamic Prompt Injection
+
+Hooks can inject content into the system prompt at build time using the `PreBuildContext` event with `CONTEXT_TYPE=prompt_injection`. This enables use cases like topic-specific memory, per-channel personality, or any runtime-conditional prompt content.
+
+### How It Works
+
+1. During context building, nanobot fires `PreBuildContext` with `CONTEXT_TYPE=prompt_injection`
+2. Your hook receives `CHANNEL` and `CHAT_ID` as environment variables
+3. Your hook prints content to stdout and exits with code 0
+4. The output is collected and wrapped in `<dynamic_context>` tags in the system prompt
+
+Multiple hooks can each contribute content — injections are accumulated, not chained.
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `HOOK_EVENT` | Always `PreBuildContext` |
+| `CONTEXT_TYPE` | Always `prompt_injection` for this flow |
+| `CHANNEL` | Current channel name (may be empty) |
+| `CHAT_ID` | Current chat/conversation ID (may be empty) |
+
+### Exit Codes
+
+- **0**: Proceed; stdout is captured as injected content
+- **2**: Block; stops further injection collection
+- **Other**: Treated as error, skipped
+
+### Example: Topic Memory
+
+Inject topic-specific notes based on the chat ID:
+
+```json
+{
+  "hooks": [
+    {
+      "name": "topic-memory",
+      "event": "PreBuildContext",
+      "command": "~/.nanobot/hooks/topic-memory.sh",
+      "priority": 50
+    }
+  ]
+}
+```
+
+```bash
+#!/bin/bash
+# topic-memory.sh — inject topic-specific context
+
+[ "$CONTEXT_TYPE" != "prompt_injection" ] && exit 0
+
+MEMORY_DIR="$HOME/.nanobot/topics"
+TOPIC_FILE="$MEMORY_DIR/${CHAT_ID}.md"
+
+if [ -f "$TOPIC_FILE" ]; then
+    cat "$TOPIC_FILE"
+fi
+
+exit 0
+```
+
+### Example: Per-Channel Personality
+
+```bash
+#!/bin/bash
+# channel-personality.sh
+
+[ "$CONTEXT_TYPE" != "prompt_injection" ] && exit 0
+
+case "$CHANNEL" in
+  "support")
+    echo "You are a patient, helpful support agent. Always ask clarifying questions."
+    ;;
+  "engineering")
+    echo "You are a senior engineer. Be concise and technical."
+    ;;
+esac
+
+exit 0
+```
+
+### Limits
+
+Injected content is capped at 4000 characters total across all hooks. Content beyond this limit is truncated.
 
 ## Debugging
 

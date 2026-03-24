@@ -60,6 +60,11 @@ class JsonConfigHook(Hook):
             if event == HookEvent.POST_TOOL_USE:
                 env["TOOL_RESULT"] = str(context.get("result", ""))
 
+        if event == HookEvent.PRE_BUILD_CONTEXT:
+            env["CONTEXT_TYPE"] = context.get("type", "")
+            env["CHANNEL"] = context.get("channel", "")
+            env["CHAT_ID"] = context.get("chat_id", "")
+
         try:
             result = subprocess.run(
                 self._command,
@@ -82,6 +87,16 @@ class JsonConfigHook(Hook):
                     result.returncode,
                     result.stderr.strip(),
                 )
+
+            # For prompt_injection events, capture stdout as injected content
+            if (
+                result.returncode == 0
+                and event == HookEvent.PRE_BUILD_CONTEXT
+                and context.get("type") == "prompt_injection"
+            ):
+                stdout = result.stdout.strip()
+                if stdout:
+                    return HookResult(modified_data=stdout)
 
             return HookResult()
 

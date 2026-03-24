@@ -75,3 +75,30 @@ class HookRegistry:
         """Apply all registered hooks to skills list via PRE_BUILD_CONTEXT."""
         result = self.emit(HookEvent.PRE_BUILD_CONTEXT, {"type": "skills", "data": skills})
         return result.modified_data if result.modified_data is not None else skills
+
+    def collect_prompt_injections(
+        self, channel: str | None = None, chat_id: str | None = None,
+    ) -> list[str]:
+        """Collect dynamic prompt injections from hooks via PRE_BUILD_CONTEXT.
+
+        Each hook can return a string via ``modified_data`` which is accumulated
+        (not chained).  A hook returning ``proceed=False`` stops collection.
+        """
+        ctx: dict[str, Any] = {
+            "type": "prompt_injection",
+            "channel": channel or "",
+            "chat_id": chat_id or "",
+        }
+        hooks = sorted(self._hooks.values(), key=lambda h: h.priority)
+        injections: list[str] = []
+        for hook in hooks:
+            try:
+                result = hook.on_event(HookEvent.PRE_BUILD_CONTEXT, ctx)
+            except Exception:
+                logger.exception("Hook '{}' raised on prompt_injection", hook.name)
+                continue
+            if not result.proceed:
+                break
+            if result.modified_data is not None and isinstance(result.modified_data, str):
+                injections.append(result.modified_data)
+        return injections
