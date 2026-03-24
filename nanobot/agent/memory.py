@@ -7,13 +7,14 @@ import json
 import weakref
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
 from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain
 
 if TYPE_CHECKING:
+    from nanobot.openviking.client import VikingClient
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session, SessionManager
 
@@ -99,6 +100,28 @@ class MemoryStore:
         long_term = self.read_long_term()
         return f"## Long-term Memory\n{long_term}" if long_term else ""
 
+    # ------------------------------------------------------------------
+    # OpenViking semantic memory
+    # ------------------------------------------------------------------
+
+    async def get_viking_memory_context(
+        self, current_message: str, viking_client: VikingClient,
+    ) -> str:
+        """Fetch relevant memories from OpenViking for the current message."""
+        try:
+            return await viking_client.get_viking_memory_context(current_message)
+        except Exception as e:
+            logger.warning("OpenViking memory context failed: {}", e)
+            return ""
+
+    async def get_viking_user_profile(self, viking_client: VikingClient) -> str:
+        """Fetch user profile from OpenViking."""
+        try:
+            return await viking_client.get_viking_user_profile()
+        except Exception as e:
+            logger.warning("OpenViking user profile failed: {}", e)
+            return ""
+          
     @staticmethod
     def _format_messages(messages: list[dict]) -> str:
         lines = []
@@ -233,8 +256,9 @@ class MemoryConsolidator:
         model: str,
         sessions: SessionManager,
         context_window_tokens: int,
-        build_messages: Callable[..., list[dict[str, Any]]],
+        build_messages: Callable[..., Awaitable[list[dict[str, Any]]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
+        on_consolidated: Callable[[list[dict[str, Any]], str], Awaitable[None]] | None = None,
         max_completion_tokens: int = 4096,
     ):
         self.store = MemoryStore(workspace)
@@ -245,15 +269,24 @@ class MemoryConsolidator:
         self.max_completion_tokens = max_completion_tokens
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
+        self._on_consolidated = on_consolidated
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
 
-    async def consolidate_messages(self, messages: list[dict[str, object]]) -> bool:
+    async def consolidate_messages(
+        self, messages: list[dict[str, object]], session_key: str = "",
+    ) -> bool:
         """Archive a selected message chunk into persistent memory."""
-        return await self.store.consolidate(messages, self.provider, self.model)
+        result = await self.store.consolidate(messages, self.provider, self.model)
+        if result and self._on_consolidated:
+            try:
+                await self._on_consolidated(messages, session_key)
+            except Exception:
+                logger.exception("on_consolidated callback failed")
+        return result
 
     def pick_consolidation_boundary(
         self,
@@ -277,11 +310,11 @@ class MemoryConsolidator:
 
         return last_boundary
 
-    def estimate_session_prompt_tokens(self, session: Session) -> tuple[int, str]:
+    async def estimate_session_prompt_tokens(self, session: Session) -> tuple[int, str]:
         """Estimate current prompt size for the normal session history view."""
         history = session.get_history(max_messages=0)
         channel, chat_id = (session.key.split(":", 1) if ":" in session.key else (None, None))
-        probe_messages = self._build_messages(
+        probe_messages = await self._build_messages(
             history=history,
             current_message="[token-probe]",
             channel=channel,
@@ -294,12 +327,12 @@ class MemoryConsolidator:
             self._get_tool_definitions(),
         )
 
-    async def archive_messages(self, messages: list[dict[str, object]]) -> bool:
+    async def archive_messages(self, messages: list[dict[str, object]], session_key: str = "") -> bool:
         """Archive messages with guaranteed persistence (retries until raw-dump fallback)."""
         if not messages:
             return True
         for _ in range(self.store._MAX_FAILURES_BEFORE_RAW_ARCHIVE):
-            if await self.consolidate_messages(messages):
+            if await self.consolidate_messages(messages, session_key=session_key):
                 return True
         return True
 
@@ -356,11 +389,11 @@ class MemoryConsolidator:
                     source,
                     len(chunk),
                 )
-                if not await self.consolidate_messages(chunk):
+                if not await self.consolidate_messages(chunk, session_key=session.key):
                     return
                 session.last_consolidated = end_idx
                 self.sessions.save(session)
 
-                estimated, source = self.estimate_session_prompt_tokens(session)
+                estimated, source = await self.estimate_session_prompt_tokens(session)
                 if estimated <= 0:
                     return

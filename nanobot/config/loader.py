@@ -3,10 +3,22 @@
 import json
 from pathlib import Path
 
+from pydantic.alias_generators import to_camel
 import pydantic
 from loguru import logger
 
 from nanobot.config.schema import Config
+
+
+def _keys_to_camel(obj):
+    """Recursively convert dict keys from snake_case to camelCase.
+    Env-injected values use snake_case; config file expects camelCase."""
+    if isinstance(obj, dict):
+        return {to_camel(k): _keys_to_camel(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_keys_to_camel(i) for i in obj]
+    return obj
+
 
 # Global variable to store current config path (for multi-instance support)
 _current_config_path: Path | None = None
@@ -22,7 +34,7 @@ def get_config_path() -> Path:
     """Get the configuration file path."""
     if _current_config_path:
         return _current_config_path
-    return Path.home() / ".nanobot" / "config.json"
+    return Path.home() / ".hiperone" / "config.json"
 
 
 def load_config(config_path: Path | None = None) -> Config:
@@ -62,6 +74,7 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     data = config.model_dump(mode="json", by_alias=True)
+    data = _keys_to_camel(data)
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)

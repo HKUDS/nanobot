@@ -72,6 +72,16 @@ def _make_get_message_response(text: str, msg_type: str = "text", success: bool 
     return resp
 
 
+def _make_contact_user_response(name: str = "", en_name: str = "", nickname: str = ""):
+    """Build a fake contact.v3.user.get response object."""
+    user = SimpleNamespace(name=name, en_name=en_name, nickname=nickname)
+    data = SimpleNamespace(user=user)
+    resp = MagicMock()
+    resp.success.return_value = True
+    resp.data = data
+    return resp
+
+
 # ---------------------------------------------------------------------------
 # Config tests
 # ---------------------------------------------------------------------------
@@ -83,6 +93,42 @@ def test_feishu_config_reply_to_message_defaults_false() -> None:
 def test_feishu_config_reply_to_message_can_be_enabled() -> None:
     config = FeishuConfig(reply_to_message=True)
     assert config.reply_to_message is True
+
+
+# ---------------------------------------------------------------------------
+# _get_user_name_sync tests
+# ---------------------------------------------------------------------------
+
+def test_get_user_name_sync_uses_name() -> None:
+    channel = _make_feishu_channel()
+    channel._client.contact.v3.user.get.return_value = _make_contact_user_response(
+        name="张三", en_name="Zhang San", nickname="小张"
+    )
+    assert channel._get_user_name_sync("ou_123") == "张三"
+
+
+def test_get_user_name_sync_fallback_to_en_name_when_name_empty() -> None:
+    channel = _make_feishu_channel()
+    channel._client.contact.v3.user.get.return_value = _make_contact_user_response(
+        name="", en_name="Zhang San", nickname="小张"
+    )
+    assert channel._get_user_name_sync("ou_123") == "Zhang San"
+
+
+def test_get_user_name_sync_fallback_to_nickname_when_name_and_en_name_empty() -> None:
+    channel = _make_feishu_channel()
+    channel._client.contact.v3.user.get.return_value = _make_contact_user_response(
+        name="", en_name="", nickname="依琪 王依琪"
+    )
+    assert channel._get_user_name_sync("ou_123") == "依琪 王依琪"
+
+
+def test_get_user_name_sync_returns_empty_on_failure() -> None:
+    channel = _make_feishu_channel()
+    resp = MagicMock()
+    resp.success.return_value = False
+    channel._client.contact.v3.user.get.return_value = resp
+    assert channel._get_user_name_sync("ou_unknown") == ""
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +391,9 @@ async def test_on_message_captures_parent_and_root_id_in_metadata() -> None:
     channel = _make_feishu_channel()
     channel._processed_message_ids.clear()
     channel._client.im.v1.message.react.return_value = MagicMock(success=lambda: True)
+    channel._client.contact.v3.user.get.return_value = _make_contact_user_response(
+        name="Alice"
+    )
 
     captured = []
 
@@ -366,12 +415,16 @@ async def test_on_message_captures_parent_and_root_id_in_metadata() -> None:
     assert meta["parent_id"] == "om_parent"
     assert meta["root_id"] == "om_root"
     assert meta["message_id"] == "om_001"
+    assert meta["sender_open_id"] == "ou_alice"
 
 
 @pytest.mark.asyncio
 async def test_on_message_parent_and_root_id_none_when_absent() -> None:
     channel = _make_feishu_channel()
     channel._processed_message_ids.clear()
+    channel._client.contact.v3.user.get.return_value = _make_contact_user_response(
+        name="Alice"
+    )
 
     captured = []
 
@@ -394,6 +447,9 @@ async def test_on_message_prepends_reply_context_when_parent_id_present() -> Non
     channel = _make_feishu_channel()
     channel._processed_message_ids.clear()
     channel._client.im.v1.message.get.return_value = _make_get_message_response("original question")
+    channel._client.contact.v3.user.get.return_value = _make_contact_user_response(
+        name="Alice"
+    )
 
     captured = []
 
@@ -420,6 +476,9 @@ async def test_on_message_prepends_reply_context_when_parent_id_present() -> Non
 async def test_on_message_no_extra_api_call_when_no_parent_id() -> None:
     channel = _make_feishu_channel()
     channel._processed_message_ids.clear()
+    channel._client.contact.v3.user.get.return_value = _make_contact_user_response(
+        name="Alice"
+    )
 
     captured = []
 

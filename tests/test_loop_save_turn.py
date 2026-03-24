@@ -72,3 +72,23 @@ def test_save_turn_keeps_tool_results_under_16k() -> None:
     )
 
     assert session.messages[0]["content"] == content
+
+
+def test_save_turn_skips_system_messages() -> None:
+    """System messages (OpenViking memory injection, etc.) must not be persisted."""
+    loop = _mk_loop()
+    session = Session(key="test:no-system")
+
+    loop._save_turn(
+        session,
+        [
+            {"role": "user", "content": "hello"},
+            {"role": "system", "content": "## Your memories about the current conversation.\nviking://user/default/memories/..."},
+            {"role": "assistant", "content": "Hi there!"},
+        ],
+        skip=0,
+    )
+
+    roles = [m["role"] for m in session.messages]
+    assert "system" not in roles
+    assert roles == ["user", "assistant"]

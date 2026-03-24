@@ -10,11 +10,33 @@ Example:
     python package_skill.py skills/public/my-skill ./dist
 """
 
+import fnmatch
 import sys
 import zipfile
 from pathlib import Path
 
-from quick_validate import validate_skill
+try:
+    from scripts.quick_validate import validate_skill
+except ImportError:
+    from quick_validate import validate_skill
+
+EXCLUDE_DIRS = {"__pycache__", "node_modules", ".git", ".svn", ".hg"}
+EXCLUDE_GLOBS = {"*.pyc"}
+EXCLUDE_FILES = {".DS_Store"}
+ROOT_EXCLUDE_DIRS = {"evals"}
+
+
+def should_exclude(rel_path: Path) -> bool:
+    """Check if a path should be excluded from packaging."""
+    parts = rel_path.parts
+    if any(part in EXCLUDE_DIRS for part in parts):
+        return True
+    if len(parts) > 1 and parts[1] in ROOT_EXCLUDE_DIRS:
+        return True
+    name = rel_path.name
+    if name in EXCLUDE_FILES:
+        return True
+    return any(fnmatch.fnmatch(name, pat) for pat in EXCLUDE_GLOBS)
 
 
 def _is_within(path: Path, root: Path) -> bool:
@@ -46,7 +68,6 @@ def package_skill(skill_path, output_dir=None):
     """
     skill_path = Path(skill_path).resolve()
 
-    # Validate skill folder exists
     if not skill_path.exists():
         print(f"[ERROR] Skill folder not found: {skill_path}")
         return None
@@ -55,13 +76,11 @@ def package_skill(skill_path, output_dir=None):
         print(f"[ERROR] Path is not a directory: {skill_path}")
         return None
 
-    # Validate SKILL.md exists
     skill_md = skill_path / "SKILL.md"
     if not skill_md.exists():
         print(f"[ERROR] SKILL.md not found in {skill_path}")
         return None
 
-    # Run validation before packaging
     print("Validating skill...")
     valid, message = validate_skill(skill_path)
     if not valid:
@@ -70,7 +89,6 @@ def package_skill(skill_path, output_dir=None):
         return None
     print(f"[OK] {message}\n")
 
-    # Determine output location
     skill_name = skill_path.name
     if output_dir:
         output_path = Path(output_dir).resolve()
@@ -79,41 +97,38 @@ def package_skill(skill_path, output_dir=None):
         output_path = Path.cwd()
 
     skill_filename = output_path / f"{skill_name}.skill"
-
-    EXCLUDED_DIRS = {".git", ".svn", ".hg", "__pycache__", "node_modules"}
-
-    files_to_package = []
     resolved_archive = skill_filename.resolve()
 
+    files_to_package = []
+
     for file_path in skill_path.rglob("*"):
-        # Fail closed on symlinks so the packaged contents are explicit and predictable.
         if file_path.is_symlink():
             print(f"[ERROR] Symlink not allowed in packaged skill: {file_path}")
             _cleanup_partial_archive(skill_filename)
             return None
 
-        rel_parts = file_path.relative_to(skill_path).parts
-        if any(part in EXCLUDED_DIRS for part in rel_parts):
+        if not file_path.is_file():
             continue
 
-        if file_path.is_file():
-            resolved_file = file_path.resolve()
-            if not _is_within(resolved_file, skill_path):
-                print(f"[ERROR] File escapes skill root: {file_path}")
-                _cleanup_partial_archive(skill_filename)
-                return None
-            # If output lives under skill_path, avoid writing archive into itself.
-            if resolved_file == resolved_archive:
-                print(f"[WARN] Skipping output archive: {file_path}")
-                continue
-            files_to_package.append(file_path)
+        arcname = Path(skill_name) / file_path.relative_to(skill_path)
+        if should_exclude(arcname):
+            print(f"  Skipped: {arcname}")
+            continue
 
-    # Create the .skill file (zip format)
+        resolved_file = file_path.resolve()
+        if not _is_within(resolved_file, skill_path):
+            print(f"[ERROR] File escapes skill root: {file_path}")
+            _cleanup_partial_archive(skill_filename)
+            return None
+        if resolved_file == resolved_archive:
+            print(f"[WARN] Skipping output archive: {file_path}")
+            continue
+
+        files_to_package.append((file_path, arcname))
+
     try:
         with zipfile.ZipFile(skill_filename, "w", zipfile.ZIP_DEFLATED) as zipf:
-            for file_path in files_to_package:
-                # Calculate the relative path within the zip.
-                arcname = Path(skill_name) / file_path.relative_to(skill_path)
+            for file_path, arcname in files_to_package:
                 zipf.write(file_path, arcname)
                 print(f"  Added: {arcname}")
 
