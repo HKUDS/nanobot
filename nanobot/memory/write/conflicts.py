@@ -13,12 +13,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from .helpers import _norm_text, _safe_float, _tokenize, _utc_now_iso
-from .profile_io import ProfileStore as ProfileManager
+from ..helpers import _norm_text, _safe_float, _tokenize, _utc_now_iso
+from ..persistence.profile_io import ProfileStore as ProfileManager
 
 if TYPE_CHECKING:
-    from .profile_io import ProfileStore
-    from .unified_db import UnifiedMemoryDB
+    from ..persistence.profile_io import ProfileStore
+    from ..unified_db import UnifiedMemoryDB
 
 # ---------------------------------------------------------------------------
 # Constants

@@ -13,13 +13,13 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
-from .helpers import _estimate_tokens, _norm_text, _safe_float, _to_str_list
-from .profile_io import ProfileStore as ProfileManager
+from ..helpers import _estimate_tokens, _norm_text, _safe_float, _to_str_list
+from ..persistence.profile_io import ProfileStore as ProfileManager
+from ..token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
 from .retrieval_planner import RetrievalPlanner
-from .token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
 
 if TYPE_CHECKING:
-    from .unified_db import UnifiedMemoryDB
+    from ..unified_db import UnifiedMemoryDB
 
 # Intents that benefit from scanning recent unresolved events.
 # For all other intents (fact_lookup, chitchat, …) the scan is skipped.

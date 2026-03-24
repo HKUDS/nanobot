@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from nanobot.memory import MemoryStore
-from nanobot.memory.snapshot import MemorySnapshot
+from nanobot.memory.persistence.snapshot import MemorySnapshot
 
 # ---------------------------------------------------------------------------
 # LAN-196: Stable IDs for profile item metadata

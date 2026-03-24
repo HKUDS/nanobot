@@ -25,7 +25,7 @@ from .ontology_types import Entity, EntityType, Relationship, Triple
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from .unified_db import UnifiedMemoryDB
+    from ..unified_db import UnifiedMemoryDB
 
 
 def _norm(name: str) -> str:
@@ -49,7 +49,7 @@ class KnowledgeGraph:
         if db is None and workspace is not None:
             from pathlib import Path as _P  # noqa: N814
 
-            from .unified_db import UnifiedMemoryDB
+            from ..unified_db import UnifiedMemoryDB
 
             mem_dir = _P(str(workspace)) / "memory"
             mem_dir.mkdir(parents=True, exist_ok=True)

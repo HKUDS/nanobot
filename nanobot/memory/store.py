@@ -21,17 +21,9 @@ from typing import TYPE_CHECKING, Any
 
 from nanobot.eval.memory_eval import EvalRunner
 
-from .conflicts import (
-    CONFLICT_STATUS_NEEDS_USER,
-    CONFLICT_STATUS_OPEN,
-    CONFLICT_STATUS_RESOLVED,
-    ConflictManager,
-)
 from .consolidation_pipeline import ConsolidationPipeline
-from .context_assembler import ContextAssembler
 from .embedder import HashEmbedder, LocalEmbedder, OpenAIEmbedder
-from .extractor import MemoryExtractor
-from .graph import KnowledgeGraph
+from .graph.graph import KnowledgeGraph
 from .helpers import (
     _GRAPH_QUERY_STOPWORDS,
     _contains_any,
@@ -44,17 +36,25 @@ from .helpers import (
     _tokenize,
     _utc_now_iso,
 )
-from .ingester import EventIngester
 from .maintenance import MemoryMaintenance
 from .migration import migrate_to_sqlite
-from .profile_io import ProfileStore
-from .reranker import CompositeReranker, Reranker
-from .retrieval_planner import RetrievalPlanner
-from .retriever import MemoryRetriever
+from .persistence.profile_io import ProfileStore
+from .persistence.snapshot import MemorySnapshot
+from .ranking.reranker import CompositeReranker, Reranker
+from .read.context_assembler import ContextAssembler
+from .read.retrieval_planner import RetrievalPlanner
+from .read.retriever import MemoryRetriever
 from .rollout import RolloutConfig
-from .snapshot import MemorySnapshot
 from .token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
 from .unified_db import UnifiedMemoryDB
+from .write.conflicts import (
+    CONFLICT_STATUS_NEEDS_USER,
+    CONFLICT_STATUS_OPEN,
+    CONFLICT_STATUS_RESOLVED,
+    ConflictManager,
+)
+from .write.extractor import MemoryExtractor
+from .write.ingester import EventIngester
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -207,7 +207,7 @@ class MemoryStore:
         reranker_alpha = float(self.rollout.get("reranker_alpha", 0.5))
         self._reranker: Reranker
         if reranker_model.startswith("onnx:"):
-            from .onnx_reranker import OnnxCrossEncoderReranker
+            from .ranking.onnx_reranker import OnnxCrossEncoderReranker
 
             self._reranker = OnnxCrossEncoderReranker(
                 model_name=reranker_model.split(":", 1)[1], alpha=reranker_alpha
@@ -288,7 +288,9 @@ class MemoryStore:
         )
 
         # Wire profile_mgr subsystem dependencies (must happen after all are built).
-        from .profile_correction import CorrectionOrchestrator as _CorrectionOrchestrator
+        from .persistence.profile_correction import (
+            CorrectionOrchestrator as _CorrectionOrchestrator,
+        )
 
         self.profile_mgr._conflict_mgr = self.conflict_mgr  # keep — used by delegate wrappers
         self.profile_mgr._corrector = _CorrectionOrchestrator(

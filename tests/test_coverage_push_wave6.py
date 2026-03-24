@@ -9,9 +9,9 @@ import pytest
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage, ReactionEvent
 from nanobot.coordination.delegation import _delegation_ancestry
-from nanobot.memory.extractor import MemoryExtractor
-from nanobot.memory.graph import KnowledgeGraph
-from nanobot.memory.retrieval_planner import RetrievalPlanner
+from nanobot.memory.graph.graph import KnowledgeGraph
+from nanobot.memory.read.retrieval_planner import RetrievalPlanner
+from nanobot.memory.write.extractor import MemoryExtractor
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.tools.base import ToolResult
 from tests.test_agent_loop import ScriptedProvider, _make_loop

@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from nanobot.memory.profile_correction import CorrectionOrchestrator
-from nanobot.memory.profile_io import ProfileStore
+from nanobot.memory.persistence.profile_correction import CorrectionOrchestrator
+from nanobot.memory.persistence.profile_io import ProfileStore
 
 
 def _make_profile_store(tmp_path: Path) -> ProfileStore:

@@ -9,9 +9,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .conflicts import ConflictManager
-    from .extractor import MemoryExtractor
-    from .ingester import EventIngester
+    from ..write.conflicts import ConflictManager
+    from ..write.extractor import MemoryExtractor
+    from ..write.ingester import EventIngester
     from .profile_io import ProfileStore
     from .snapshot import MemorySnapshot
 

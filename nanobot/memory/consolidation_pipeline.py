@@ -26,16 +26,16 @@ from nanobot.observability.tracing import bind_trace
 
 from .constants import _CONSOLIDATE_MEMORY_TOOL
 from .helpers import _contains_any, _utc_now_iso
-from .ingester import EventIngester
+from .write.ingester import EventIngester
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session
 
-    from .conflicts import ConflictManager
-    from .extractor import MemoryExtractor
-    from .profile_io import ProfileStore as ProfileManager
-    from .snapshot import MemorySnapshot
+    from .persistence.profile_io import ProfileStore as ProfileManager
+    from .persistence.snapshot import MemorySnapshot
+    from .write.conflicts import ConflictManager
+    from .write.extractor import MemoryExtractor
 
 
 class ConsolidationPipeline:

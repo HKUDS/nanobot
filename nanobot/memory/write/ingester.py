@@ -23,8 +23,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from nanobot.observability.tracing import bind_trace
 
-from .context_assembler import ContextAssembler
-from .helpers import (
+from ..helpers import (
     _contains_any,
     _norm_text,
     _safe_float,
@@ -33,12 +32,13 @@ from .helpers import (
     _tokenize,
     _utc_now_iso,
 )
-from .retrieval_planner import RetrievalPlanner
+from ..read.context_assembler import ContextAssembler
+from ..read.retrieval_planner import RetrievalPlanner
 
 if TYPE_CHECKING:
-    from .embedder import Embedder
-    from .graph import KnowledgeGraph
-    from .unified_db import UnifiedMemoryDB
+    from ..embedder import Embedder
+    from ..graph.graph import KnowledgeGraph
+    from ..unified_db import UnifiedMemoryDB
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -890,7 +890,7 @@ class EventIngester:
         if not self._graph or not self._graph.enabled:
             return 0
 
-        from .ontology_types import Triple
+        from ..graph.ontology_types import Triple
 
         total = 0
         for event in events:

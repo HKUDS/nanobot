@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from nanobot.observability.tracing import bind_trace
 
-from .helpers import (
+from ..helpers import (
     _contains_any,
     _extract_query_keywords,
     _norm_text,
@@ -27,12 +27,12 @@ from .helpers import (
 from .retrieval_planner import RetrievalPlan, RetrievalPlanner
 
 if TYPE_CHECKING:
-    from .embedder import Embedder
-    from .extractor import MemoryExtractor
-    from .graph import KnowledgeGraph
-    from .profile_io import ProfileStore as ProfileManager
-    from .reranker import Reranker
-    from .unified_db import UnifiedMemoryDB
+    from ..embedder import Embedder
+    from ..graph.graph import KnowledgeGraph
+    from ..persistence.profile_io import ProfileStore as ProfileManager
+    from ..ranking.reranker import Reranker
+    from ..unified_db import UnifiedMemoryDB
+    from ..write.extractor import MemoryExtractor
 
 
 # ---------------------------------------------------------------------------
@@ -799,7 +799,7 @@ class MemoryRetriever:
 
         # Deduplicate and format as compact lines, respecting token budget.
         # Annotate entities with ontology types to help the LLM disambiguate.
-        from .entity_classifier import classify_entity_type
+        from ..graph.entity_classifier import classify_entity_type
 
         seen: set[tuple[str, str, str]] = set()
         graph_lines: list[str] = []

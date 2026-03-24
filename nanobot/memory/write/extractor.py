@@ -23,7 +23,7 @@ from loguru import logger
 
 from nanobot.context.prompt_loader import prompts
 
-from .constants import _SAVE_EVENTS_TOOL
+from ..constants import _SAVE_EVENTS_TOOL
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider

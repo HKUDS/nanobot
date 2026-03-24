@@ -8,8 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from nanobot.memory.graph import KnowledgeGraph
-from nanobot.memory.ontology_types import Entity, EntityType, RelationType, Triple
+from nanobot.memory.graph.graph import KnowledgeGraph
+from nanobot.memory.graph.ontology_types import Entity, EntityType, RelationType, Triple
 
 
 @dataclass
@@ -39,7 +39,7 @@ async def test_write_and_read_paths(tmp_path: Path) -> None:
     await g.upsert_entity(Entity(name="Team", entity_type=EntityType.ORGANIZATION))
 
     # Add relationship
-    from nanobot.memory.ontology_types import Relationship
+    from nanobot.memory.graph.ontology_types import Relationship
 
     await g.add_relationship(
         Relationship(
@@ -94,7 +94,7 @@ async def test_ingest_event_triples_and_resolve_entity(
     g.get_entity = _get_entity  # type: ignore[method-assign]
 
     monkeypatch.setattr(
-        "nanobot.memory.graph.validate_triple_types",
+        "nanobot.memory.graph.graph.validate_triple_types",
         lambda predicate, s, o: _Validation(valid=False, reason="domain mismatch"),
     )
 
@@ -111,7 +111,7 @@ async def test_ingest_event_triples_and_resolve_entity(
 
 
 async def test_sync_helpers_paths_and_error_handling(tmp_path: Path) -> None:
-    from nanobot.memory.ontology_types import Relationship
+    from nanobot.memory.graph.ontology_types import Relationship
 
     g = KnowledgeGraph(workspace=tmp_path)
 
