@@ -525,7 +525,9 @@ def gateway(
     # Warn if Honcho is enabled but API key is missing
     if config.honcho.enabled and not os.environ.get("HONCHO_API_KEY"):
         console.print("[yellow]Warning: Honcho is enabled but HONCHO_API_KEY is not set.[/yellow]")
-        console.print("[yellow]  Long-term memory will be inactive. Set the key or run: nanobot honcho disable[/yellow]")
+        console.print("[yellow]  Long-term memory will be inactive until configured.[/yellow]")
+        console.print("[yellow]  Get a free key: https://app.honcho.dev[/yellow]")
+        console.print("[yellow]  Then run: nanobot honcho enable --api-key YOUR_KEY[/yellow]")
 
     bus = MessageBus()
     provider = _make_provider(config)
@@ -732,7 +734,9 @@ def agent(
     # Warn if Honcho is enabled but API key is missing
     if config.honcho.enabled and not os.environ.get("HONCHO_API_KEY"):
         console.print("[yellow]Warning: Honcho is enabled but HONCHO_API_KEY is not set.[/yellow]")
-        console.print("[yellow]  Long-term memory will be inactive. Set the key or run: nanobot honcho disable[/yellow]")
+        console.print("[yellow]  Long-term memory will be inactive until configured.[/yellow]")
+        console.print("[yellow]  Get a free key: https://app.honcho.dev[/yellow]")
+        console.print("[yellow]  Then run: nanobot honcho enable --api-key YOUR_KEY[/yellow]")
 
 
     bus = MessageBus()
