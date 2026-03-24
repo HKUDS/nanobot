@@ -61,9 +61,9 @@ All functions, constants, and the `_ChatProvider` Protocol move as-is. No signat
 **`compression.py`** (new) — imports:
 - `collections.OrderedDict`, `hashlib`, `json`, `typing` (stdlib)
 - `loguru.logger` (third-party)
-- `nanobot.agent.observability.span` (for Langfuse span in `summarize_and_compress`)
+- `nanobot.observability.langfuse.span` (for Langfuse span in `summarize_and_compress`)
 - `nanobot.agent.prompt_loader.prompts` (for the `"compress"` prompt template)
-- `nanobot.agent.tracing.bind_trace` (for structured logging)
+- `nanobot.observability.tracing.bind_trace` (for structured logging)
 
 **`context.py`** (modified) — drops imports for:
 - `collections.OrderedDict`

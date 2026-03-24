@@ -167,8 +167,8 @@ def agent(
     config = load_config()
 
     # Initialize langfuse observability (auto-instruments litellm via OTEL)
-    from nanobot.agent.observability import init_langfuse
-    from nanobot.agent.observability import shutdown as shutdown_langfuse
+    from nanobot.observability.langfuse import init_langfuse
+    from nanobot.observability.langfuse import shutdown as shutdown_langfuse
 
     init_langfuse(config.langfuse)
 

@@ -6,7 +6,7 @@ and LLM calls — without changing function signatures.
 
 Usage::
 
-    from nanobot.agent.tracing import TraceContext, bind_trace
+    from nanobot.observability.tracing import TraceContext, bind_trace
 
     # At request entry point:
     TraceContext.set(request_id="abc", session_id="s1", agent_id="code")

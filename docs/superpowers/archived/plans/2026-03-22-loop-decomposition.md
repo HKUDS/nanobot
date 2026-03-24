@@ -503,7 +503,7 @@ from loguru import logger
 
 from nanobot.agent.bus_progress import make_bus_progress
 from nanobot.agent.callbacks import ProgressCallback
-from nanobot.agent.tracing import bind_trace, correlation_id
+from nanobot.observability.tracing import bind_trace, correlation_id
 from nanobot.bus.models import InboundMessage, OutboundMessage
 
 if TYPE_CHECKING:

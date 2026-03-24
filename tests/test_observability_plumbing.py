@@ -479,7 +479,7 @@ class TestToolRegistryToolSpan:
             captured_spans.append(kwargs)
             yield None
 
-        with patch("nanobot.agent.observability.tool_span", side_effect=fake_tool_span):
+        with patch("nanobot.observability.langfuse.tool_span", side_effect=fake_tool_span):
             result = await registry.execute("dummy", {})
 
         assert result.success

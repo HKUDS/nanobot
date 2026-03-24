@@ -16,8 +16,8 @@ import asyncio
 import time
 from typing import TYPE_CHECKING, Any
 
-from nanobot.agent.tracing import bind_trace
 from nanobot.errors import ToolExecutionError
+from nanobot.observability.tracing import bind_trace
 from nanobot.tools.base import ToolResult
 
 if TYPE_CHECKING:

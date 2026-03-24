@@ -140,9 +140,9 @@ class ToolRegistry:
 
     async def _execute_inner(self, name: str, tool: Tool, params: dict[str, Any]) -> ToolResult:
         """Run validation and execute, wrapping errors."""
-        from nanobot.agent.metrics import tool_calls_total, tool_latency_seconds
-        from nanobot.agent.observability import tool_span
-        from nanobot.agent.tracing import bind_trace
+        from nanobot.metrics import tool_calls_total, tool_latency_seconds
+        from nanobot.observability.langfuse import tool_span
+        from nanobot.observability.tracing import bind_trace
 
         t0 = time.monotonic()
 

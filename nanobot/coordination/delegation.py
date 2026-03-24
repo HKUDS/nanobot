@@ -30,9 +30,7 @@ from nanobot.agent.callbacks import (
     DelegateStartEvent,
     ProgressCallback,
 )
-from nanobot.agent.observability import span as langfuse_span
 from nanobot.agent.prompt_loader import prompts
-from nanobot.agent.tracing import sanitize_for_trace
 from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
 from nanobot.coordination.delegation_contract import (
     _cap_scratchpad_for_injection,
@@ -41,6 +39,8 @@ from nanobot.coordination.delegation_contract import (
 from nanobot.coordination.task_types import classify_task_type
 from nanobot.errors import NanobotError
 from nanobot.metrics import delegation_latency_seconds, delegation_total
+from nanobot.observability.langfuse import span as langfuse_span
+from nanobot.observability.tracing import sanitize_for_trace
 from nanobot.tools.builtin.delegate import (
     DelegateParallelTool,
     DelegateTool,

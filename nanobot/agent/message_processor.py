@@ -23,12 +23,9 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
-from nanobot.agent.bus_progress import make_bus_progress
 from nanobot.agent.callbacks import ProgressCallback
 from nanobot.agent.consolidation import ConsolidationOrchestrator
 from nanobot.agent.context import ContextBuilder
-from nanobot.agent.observability import update_current_span
-from nanobot.agent.tracing import TraceContext, bind_trace
 from nanobot.agent.turn_types import Orchestrator, TurnState
 from nanobot.agent.verifier import AnswerVerifier
 from nanobot.bus.canonical import CanonicalEventBuilder
@@ -36,6 +33,9 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig
 from nanobot.coordination.role_switching import TurnRoleManager
+from nanobot.observability.bus_progress import make_bus_progress
+from nanobot.observability.langfuse import update_current_span
+from nanobot.observability.tracing import TraceContext, bind_trace
 from nanobot.session.manager import Session, SessionManager
 from nanobot.tools.builtin.message import MessageTool
 from nanobot.tools.builtin.scratchpad import ScratchpadReadTool, ScratchpadWriteTool

@@ -20,9 +20,9 @@ from typing import Any, Protocol
 
 from loguru import logger
 
-from nanobot.agent.observability import span as langfuse_span
 from nanobot.agent.prompt_loader import prompts
-from nanobot.agent.tracing import bind_trace
+from nanobot.observability.langfuse import span as langfuse_span
+from nanobot.observability.tracing import bind_trace
 
 # ---------------------------------------------------------------------------
 # Async provider protocol (avoids circular import with providers module)

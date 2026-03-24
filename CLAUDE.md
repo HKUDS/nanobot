@@ -47,10 +47,12 @@ nanobot/
 │   ├── failure.py       # Failure classification + tool-call loop detection
 │   ├── context.py       # Prompt assembly + token budgeting
 │   ├── consolidation.py # Memory consolidation orchestration
-│   ├── observability.py # Langfuse OTEL tracing: init, shutdown, spans, scoring
-│   ├── tracing.py       # Correlation IDs via contextvars, structured log binding
 │   ├── agent_factory.py # Composition root: build_agent()
 │   └── skills.py        # Skill discovery and loading
+├── observability/        # Cross-cutting instrumentation
+│   ├── langfuse.py      # Langfuse OTEL tracing: init, shutdown, spans, scoring
+│   ├── tracing.py       # Correlation IDs via contextvars, structured log binding
+│   └── bus_progress.py  # Bus progress adapter
 ├── coordination/         # Multi-agent routing and delegation
 │   ├── coordinator.py   # Intent routing, role classification
 │   ├── delegation.py    # Delegation routing, cycle detection, contracts

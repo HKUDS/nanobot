@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from nanobot.agent.callbacks import ProgressCallback, StatusEvent, TextChunk
-from nanobot.agent.tracing import bind_trace
+from nanobot.observability.tracing import bind_trace
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider, LLMResponse

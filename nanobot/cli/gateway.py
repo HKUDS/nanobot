@@ -50,8 +50,8 @@ def gateway(
     config = load_config()
 
     # Initialize langfuse observability (auto-instruments litellm via OTEL)
-    from nanobot.agent.observability import init_langfuse
-    from nanobot.agent.observability import shutdown as shutdown_langfuse
+    from nanobot.observability.langfuse import init_langfuse
+    from nanobot.observability.langfuse import shutdown as shutdown_langfuse
 
     init_langfuse(config.langfuse)
 
@@ -296,12 +296,12 @@ def ui(
         raise typer.Exit(1) from None
 
     from nanobot.agent.agent_factory import build_agent
-    from nanobot.agent.observability import init_langfuse
-    from nanobot.agent.observability import shutdown as shutdown_langfuse
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.web import WebChannel
     from nanobot.config.loader import get_data_dir, load_config
     from nanobot.cron.service import CronService
+    from nanobot.observability.langfuse import init_langfuse
+    from nanobot.observability.langfuse import shutdown as shutdown_langfuse
     from nanobot.session.manager import SessionManager
     from nanobot.web.app import create_app
 

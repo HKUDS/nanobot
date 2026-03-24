@@ -22,18 +22,18 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from nanobot.agent.observability import (
-    score_current_trace,
-    update_current_span,
-)
-from nanobot.agent.observability import (
-    span as langfuse_span,
-)
-from nanobot.agent.tracing import TraceContext
 from nanobot.bus.events import OutboundMessage
 from nanobot.config.schema import AgentRoleConfig
 from nanobot.coordination.task_types import TASK_TYPES, classify_task_type
 from nanobot.errors import ToolExecutionError
+from nanobot.observability.langfuse import (
+    score_current_trace,
+    update_current_span,
+)
+from nanobot.observability.langfuse import (
+    span as langfuse_span,
+)
+from nanobot.observability.tracing import TraceContext
 from nanobot.tools.builtin.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.tools.builtin.shell import ExecTool
 from nanobot.tools.builtin.web import WebFetchTool, WebSearchTool
