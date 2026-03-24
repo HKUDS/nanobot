@@ -725,9 +725,7 @@ class MatrixChannel(BaseChannel):
         await self._start_typing_keepalive(room.room_id)
         try:
             meta = self._base_metadata(room, event)
-            meta["attachments"] = []
-            if attachment:
-                meta["attachments"] = [attachment]
+            meta["attachments"] = [attachment] if attachment else []
             await self._handle_message(
                 sender_id=event.sender, chat_id=room.room_id,
                 content="\n".join(parts),
