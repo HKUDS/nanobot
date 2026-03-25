@@ -251,20 +251,14 @@ def main(
 def onboard(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
-    non_interactive: bool = typer.Option(False, "--non-interactive", help="Skip interactive wizard"),
-    wizard: bool = typer.Option(
-        True,
-        "--wizard/--no-wizard",
-        help="Run interactive setup wizard (skipped with --non-interactive)",
-    ),
+    wizard: bool = typer.Option(False, "--wizard", help="Use interactive wizard"),
 ):
     """Initialize nanobot configuration and workspace."""
     from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
     from nanobot.config.schema import Config
 
-    cli_config_arg = config
-    if cli_config_arg:
-        config_path = Path(cli_config_arg).expanduser().resolve()
+    if config:
+        config_path = Path(config).expanduser().resolve()
         set_config_path(config_path)
         console.print(f"[dim]Using config: {config_path}[/dim]")
     else:
@@ -275,28 +269,8 @@ def onboard(
             loaded.agents.defaults.workspace = workspace
         return loaded
 
-    if non_interactive:
-        if config_path.exists():
-            console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
-            console.print("  [bold]y[/bold] = overwrite with defaults (existing values will be lost)")
-            console.print("  [bold]N[/bold] = refresh config, keeping existing values and adding new fields")
-            if typer.confirm("Overwrite?"):
-                config = _apply_workspace_override(Config())
-                save_config(config, config_path)
-                console.print(f"[green]✓[/green] Config reset to defaults at {config_path}")
-            else:
-                config = _apply_workspace_override(load_config(config_path))
-                save_config(config, config_path)
-                console.print(f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)")
-        else:
-            config = _apply_workspace_override(Config())
-            save_config(config, config_path)
-            console.print(f"[green]✓[/green] Created config at {config_path}")
-        console.print(
-            "[dim]Config template now uses `maxTokens` + `contextWindowTokens`; "
-            "`memoryWindow` is no longer a runtime setting.[/dim]"
-        )
-    elif config_path.exists():
+    # Create or update config
+    if config_path.exists():
         if wizard:
             config = _apply_workspace_override(load_config(config_path))
         else:
@@ -313,11 +287,13 @@ def onboard(
                 console.print(f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)")
     else:
         config = _apply_workspace_override(Config())
+        # In wizard mode, don't save yet - the wizard will handle saving if should_save=True
         if not wizard:
             save_config(config, config_path)
             console.print(f"[green]✓[/green] Created config at {config_path}")
 
-    if wizard and not non_interactive:
+    # Run interactive wizard if enabled
+    if wizard:
         from nanobot.cli.onboard import run_onboard
 
         try:
@@ -345,17 +321,13 @@ def onboard(
 
     agent_cmd = 'nanobot agent -m "Hello!"'
     gateway_cmd = "nanobot gateway"
-    if cli_config_arg:
+    if config:
         agent_cmd += f" --config {config_path}"
         gateway_cmd += f" --config {config_path}"
 
     console.print(f"\n{__logo__} nanobot is ready!")
     console.print("\nNext steps:")
-    if non_interactive:
-        console.print(f"  1. Add your API key to [cyan]{config_path}[/cyan]")
-        console.print("     Get one at: https://openrouter.ai/keys")
-        console.print(f"  2. Chat: [cyan]{agent_cmd}[/cyan]")
-    elif wizard:
+    if wizard:
         console.print(f"  1. Chat: [cyan]{agent_cmd}[/cyan]")
         console.print(f"  2. Start gateway: [cyan]{gateway_cmd}[/cyan]")
     else:
@@ -572,13 +544,12 @@ def gateway(
         web_search_config=config.tools.web.search,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
-        input_limits=config.tools.input_limits,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
-        enable_steering=config.agents.defaults.enable_steering,
+        timezone=config.agents.defaults.timezone,
     )
 
     # Set cron callback (needs agent)
@@ -663,6 +634,13 @@ def gateway(
             chat_id=chat_id,
             on_progress=_silent,
         )
+
+        # Keep a small tail of heartbeat history so the loop stays bounded
+        # without losing all short-term context between runs.
+        session = agent.sessions.get_or_create("heartbeat")
+        session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+        agent.sessions.save(session)
+
         return resp.content if resp else ""
 
     async def on_heartbeat_notify(response: str) -> None:
@@ -682,6 +660,7 @@ def gateway(
         on_notify=on_heartbeat_notify,
         interval_s=hb_cfg.interval_s,
         enabled=hb_cfg.enabled,
+        timezone=config.agents.defaults.timezone,
     )
 
     if channels.enabled_channels:
@@ -771,12 +750,11 @@ def agent(
         web_search_config=config.tools.web.search,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
-        input_limits=config.tools.input_limits,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
-        enable_steering=config.agents.defaults.enable_steering,
+        timezone=config.agents.defaults.timezone,
     )
 
     # Shared reference for progress callbacks
@@ -1046,36 +1024,33 @@ def _get_bridge_dir() -> Path:
 
 
 @channels_app.command("login")
-def channels_login():
-    """Link device via QR code."""
-    import shutil
-    import subprocess
-
+def channels_login(
+    channel_name: str = typer.Argument(..., help="Channel name (e.g. weixin, whatsapp)"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force re-authentication even if already logged in"),
+):
+    """Authenticate with a channel via QR code or other interactive login."""
+    from nanobot.channels.registry import discover_all
     from nanobot.config.loader import load_config
-    from nanobot.config.paths import get_runtime_subdir
 
     config = load_config()
-    bridge_dir = _get_bridge_dir()
+    channel_cfg = getattr(config.channels, channel_name, None) or {}
 
-    console.print(f"{__logo__} Starting bridge...")
-    console.print("Scan the QR code to connect.\n")
-
-    env = {**os.environ}
-    wa_cfg = getattr(config.channels, "whatsapp", None) or {}
-    bridge_token = wa_cfg.get("bridgeToken", "") if isinstance(wa_cfg, dict) else getattr(wa_cfg, "bridge_token", "")
-    if bridge_token:
-        env["BRIDGE_TOKEN"] = bridge_token
-    env["AUTH_DIR"] = str(get_runtime_subdir("whatsapp-auth"))
-
-    npm_path = shutil.which("npm")
-    if not npm_path:
-        console.print("[red]npm not found. Please install Node.js.[/red]")
+    # Validate channel exists
+    all_channels = discover_all()
+    if channel_name not in all_channels:
+        available = ", ".join(all_channels.keys())
+        console.print(f"[red]Unknown channel: {channel_name}[/red]  Available: {available}")
         raise typer.Exit(1)
 
-    try:
-        subprocess.run([npm_path, "start"], cwd=bridge_dir, check=True, env=env)
-    except subprocess.CalledProcessError as e:
-        console.print(f"[red]Bridge failed: {e}[/red]")
+    console.print(f"{__logo__} {all_channels[channel_name].display_name} Login\n")
+
+    channel_cls = all_channels[channel_name]
+    channel = channel_cls(channel_cfg, bus=None)
+
+    success = asyncio.run(channel.login(force=force))
+
+    if not success:
+        raise typer.Exit(1)
 
 
 # ============================================================================

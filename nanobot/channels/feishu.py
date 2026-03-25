@@ -1182,6 +1182,7 @@ class FeishuChannel(BaseChannel):
 
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)
+            raise
 
     def _on_message_sync(self, data: Any) -> None:
         """

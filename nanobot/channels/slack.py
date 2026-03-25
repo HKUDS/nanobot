@@ -145,6 +145,7 @@ class SlackChannel(BaseChannel):
 
         except Exception as e:
             logger.error("Error sending Slack message: {}", e)
+            raise
 
     async def _on_socket_request(
         self,

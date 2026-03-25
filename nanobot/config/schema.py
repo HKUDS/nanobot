@@ -25,6 +25,7 @@ class ChannelsConfig(Base):
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
+    send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
 
 
 class AgentDefaults(Base):
@@ -39,15 +40,8 @@ class AgentDefaults(Base):
     context_window_tokens: int = 65_536
     temperature: float = 0.1
     max_tool_iterations: int = 40
-    # Deprecated compatibility field: accepted from old configs but ignored at runtime.
-    memory_window: int | None = Field(default=None, exclude=True)
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
-    enable_steering: bool = False  # Dual-layer architecture: interruption checking + context hooks
-
-    @property
-    def should_warn_deprecated_memory_window(self) -> bool:
-        """Return True when old memoryWindow is present without contextWindowTokens."""
-        return self.memory_window is not None and "context_window_tokens" not in self.model_fields_set
+    timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
 
 
 class AgentsConfig(Base):
@@ -83,6 +77,7 @@ class ProvidersConfig(Base):
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     mistral: ProviderConfig = Field(default_factory=ProviderConfig)
+    stepfun: ProviderConfig = Field(default_factory=ProviderConfig)  # Step Fun (阶跃星辰)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎)
@@ -134,13 +129,6 @@ class ExecToolConfig(Base):
     timeout: int = 60
     path_append: str = ""
 
-class InputLimitsConfig(Base):
-    """Limits for user-provided multimodal inputs."""
-
-    max_input_images: int = 3
-    max_input_image_bytes: int = 10 * 1024 * 1024
-
-
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
 
@@ -158,7 +146,6 @@ class ToolsConfig(Base):
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
-    input_limits: InputLimitsConfig = Field(default_factory=InputLimitsConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
