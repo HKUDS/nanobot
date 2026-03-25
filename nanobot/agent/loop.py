@@ -293,6 +293,14 @@ class AgentLoop:
                         ):
                             turn_ctx = await self._classify_and_route(msg)
 
+                            # Propagate role-switched values to the processor
+                            self._processor.set_active_settings(
+                                model=self.model,
+                                temperature=self.temperature,
+                                max_iterations=self.max_iterations,
+                                role_name=self.role_name,
+                            )
+
                             # Wrap with timeout to prevent infinite processing
                             timeout = (
                                 self.config.message_timeout
@@ -479,6 +487,14 @@ class AgentLoop:
                 )
                 return f"Unknown role: {forced_role}"
             turn_ctx = self._role_manager.apply(role)
+
+        # Always sync active settings (covers no-role and forced-role paths)
+        self._processor.set_active_settings(
+            model=self.model,
+            temperature=self.temperature,
+            max_iterations=self.max_iterations,
+            role_name=self.role_name,
+        )
 
         try:
             async with trace_request(

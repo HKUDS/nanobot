@@ -53,7 +53,7 @@ def _make_minimal_mocks() -> dict[str, Any]:
     # Verifier mock: verify is async and returns (content, messages)
     verifier = MagicMock()
     verifier.verify = AsyncMock(
-        side_effect=lambda user_text, content, messages: (content, messages)
+        side_effect=lambda user_text, content, messages, **kwargs: (content, messages)
     )
 
     # Config mock: use a simple namespace with numeric defaults

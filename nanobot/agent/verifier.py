@@ -60,6 +60,9 @@ class AnswerVerifier:
         user_text: str,
         candidate: str,
         messages: list[dict],
+        *,
+        model: str | None = None,
+        temperature: float | None = None,
     ) -> tuple[str, list[dict]]:
         """Run a verification pass on the candidate answer.
 
@@ -74,6 +77,9 @@ class AnswerVerifier:
         ):
             return candidate, messages
 
+        effective_model = model if model is not None else self.model
+        effective_temperature = temperature if temperature is not None else self.temperature
+
         logger.debug("Running verification pass (mode={})", self.verification_mode)
 
         critique_messages = [
@@ -86,13 +92,13 @@ class AnswerVerifier:
 
         async with langfuse_span(
             name="verify",
-            metadata={"mode": self.verification_mode, "model": self.model},
+            metadata={"mode": self.verification_mode, "model": effective_model},
         ):
             try:
                 critique_response = await self.provider.chat(
                     messages=critique_messages,
                     tools=None,
-                    model=self.model,
+                    model=effective_model,
                     temperature=0.0,
                     max_tokens=512,
                 )
@@ -128,8 +134,8 @@ class AnswerVerifier:
                 revision = await self.provider.chat(
                     messages=messages,
                     tools=None,
-                    model=self.model,
-                    temperature=self.temperature,
+                    model=effective_model,
+                    temperature=effective_temperature,
                     max_tokens=self.max_tokens,
                 )
                 revised = strip_think(revision.content) or candidate
@@ -208,6 +214,8 @@ class AnswerVerifier:
         channel: str,
         chat_id: str,
         all_msgs: list[dict[str, Any]],
+        model: str | None = None,
+        temperature: float | None = None,
     ) -> str | None:
         """Try a single recovery LLM call with minimal context when the main loop produced None.
 
@@ -234,13 +242,16 @@ class AnswerVerifier:
             },
         ]
 
+        effective_model = model if model is not None else self.model
+        effective_temperature = temperature if temperature is not None else self.temperature
+
         logger.info("Attempting recovery LLM call for {}:{}", channel, chat_id)
         try:
             response = await self.provider.chat(
                 messages=recovery_messages,
                 tools=None,
-                model=self.model,
-                temperature=self.temperature,
+                model=effective_model,
+                temperature=effective_temperature,
                 max_tokens=self.max_tokens,
             )
         except Exception:  # crash-barrier: recovery LLM call

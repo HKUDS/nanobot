@@ -328,19 +328,29 @@ class ReflectPhase:
         response: LLMResponse,
         any_failed: bool,
         failed_this_batch: list[tuple[str, FailureClass]],
+        *,
+        role_name: str | None = None,
     ) -> None:
         """Append REFLECT-phase system messages based on the current turn state.
 
         Mutates ``state`` in-place: updates ``last_delegation_advice`` and may
         filter ``tools_def_cache`` when delegate tools are removed.
+
+        Parameters
+        ----------
+        role_name:
+            Optional per-call override for the active role.  When provided,
+            takes precedence over the construction-time ``_role_name``.
         """
         from nanobot.coordination.delegation_advisor import DelegationAction
+
+        effective_role = role_name if role_name is not None else self._role_name
 
         had_delegations = any(tc.name in _DELEGATION_TOOL_NAMES for tc in response.tool_calls)
 
         # --- Delegation advisor (replaces 3 independent triggers) ---
         delegation_advice = self._delegation_advisor.advise_reflect_phase(
-            role_name=self._role_name,
+            role_name=effective_role,
             turn_tool_calls=state.turn_tool_calls,
             delegation_count=self._dispatcher.delegation_count,
             max_delegations=self._dispatcher.max_delegations,
