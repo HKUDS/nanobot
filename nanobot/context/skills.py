@@ -58,6 +58,30 @@ CLAUDE_TOOL_MAPPING: dict[str, tuple[str, str]] = {
 }
 
 
+def _detect_skill_tools(content: str) -> dict[str, str]:
+    """Scan skill content for Claude Code tool references and bash code blocks.
+
+    Returns a dict mapping detected source → preamble hint string.
+    The synthetic key ``__bash_blocks__`` indicates bash/shell/sh fenced blocks.
+    """
+    detected: dict[str, str] = {}
+
+    # 1. Bash code blocks
+    if re.search(r"```(?:bash|shell|sh)\b", content):
+        detected["__bash_blocks__"] = "use the `exec` tool"
+
+    # 2. Claude Code tool names — detection uses the SAME patterns as rewrite
+    # to avoid detecting names we can't reliably rewrite (e.g., bare "Bash" in prose).
+    for tool_name, (_nanobot_name, hint) in CLAUDE_TOOL_MAPPING.items():
+        # Both safe and ambiguous names use contextual matching:
+        # backtick-wrapped, "the X tool", or "X tool".
+        pattern = rf"`{tool_name}`|the\s+{tool_name}\s+tool|\b{tool_name}\s+tool\b"
+        if re.search(pattern, content):
+            detected[tool_name] = hint
+
+    return detected
+
+
 class SkillsLoader:
     """
     Loader for agent skills.
