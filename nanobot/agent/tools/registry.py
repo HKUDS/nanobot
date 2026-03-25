@@ -58,6 +58,14 @@ class ToolRegistry:
         except Exception as e:
             return f"Error executing {name}: {str(e)}" + _HINT
 
+    def filter(self, names: list[str]) -> "ToolRegistry":
+        """Return a new registry containing only the named tools."""
+        filtered = ToolRegistry()
+        for n in names:
+            if t := self._tools.get(n):
+                filtered.register(t)
+        return filtered
+
     @property
     def tool_names(self) -> list[str]:
         """Get list of registered tool names."""

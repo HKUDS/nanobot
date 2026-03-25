@@ -186,7 +186,11 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
                 notes.append(f"[Skipped image: unsupported or invalid image format ({p.name})]")
                 continue
             b64 = base64.b64encode(raw).decode()
-            images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+            images.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime};base64,{b64}"},
+                "_meta": {"path": str(p)},
+            })
 
         note_text = "\n".join(notes).strip()
         text_block = text if not note_text else (f"{note_text}\n\n{text}" if text else note_text)

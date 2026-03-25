@@ -43,10 +43,9 @@ class MessageTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Send a message to the user, optionally with file attachments. "
-            "This is the ONLY way to deliver files (images, documents, audio, video) to the user. "
-            "Use the 'media' parameter with file paths to attach files. "
-            "Do NOT use read_file to send files — that only reads content for your own analysis."
+            "Send a message (and optionally files/images) to the user. "
+            "Use this when you want to communicate something, or deliver generated files. "
+            "Pass local file paths in the 'media' parameter to attach images or documents."
         )
 
     @property
@@ -69,7 +68,10 @@ class MessageTool(Tool):
                 "media": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional: list of file paths to attach (images, audio, documents)"
+                    "description": (
+                        "List of ABSOLUTE local file paths to send as attachments. "
+                        "USE THIS when the user wants a file — do NOT paste contents as text."
+                    )
                 }
             },
             "required": ["content"]

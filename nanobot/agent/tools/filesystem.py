@@ -121,6 +121,8 @@ class ReadFileTool(_FsTool):
 
             if offset < 1:
                 offset = 1
+            if total == 0:
+                return f"(Empty file: {path})"
             if offset > total:
                 return f"Error: offset {offset} is beyond end of file ({total} lines)"
 
@@ -254,18 +256,10 @@ class EditFileTool(_FsTool):
         }
 
     async def execute(
-        self, path: str | None = None, old_text: str | None = None,
-        new_text: str | None = None,
+        self, path: str, old_text: str, new_text: str,
         replace_all: bool = False, **kwargs: Any,
     ) -> str:
         try:
-            if not path:
-                raise ValueError("Unknown path")
-            if old_text is None:
-                raise ValueError("Unknown old_text")
-            if new_text is None:
-                raise ValueError("Unknown new_text")
-
             fp = self._resolve(path)
             if not fp.exists():
                 return f"Error: File not found: {path}"
@@ -364,12 +358,10 @@ class ListDirTool(_FsTool):
         }
 
     async def execute(
-        self, path: str | None = None, recursive: bool = False,
+        self, path: str, recursive: bool = False,
         max_entries: int | None = None, **kwargs: Any,
     ) -> str:
         try:
-            if path is None:
-                raise ValueError("Unknown path")
             dp = self._resolve(path)
             if not dp.exists():
                 return f"Error: Directory not found: {path}"
