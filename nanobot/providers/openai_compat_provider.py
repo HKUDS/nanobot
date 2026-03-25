@@ -24,6 +24,32 @@ _ALLOWED_MSG_KEYS = frozenset({
 _ALNUM = string.ascii_letters + string.digits
 
 
+def _get_attr_or_item(obj: Any, key: str, default: Any = None) -> Any:
+    """Read an attribute or dict key from provider SDK objects."""
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _coerce_dict(value: Any) -> dict[str, Any] | None:
+    """Return a shallow dict if the value looks mapping-like."""
+    if isinstance(value, dict):
+        return dict(value)
+    return None
+
+
+def _extract_tool_call_fields(tc: Any) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Extract provider-specific metadata from a tool call object."""
+    provider_specific_fields = _coerce_dict(_get_attr_or_item(tc, "provider_specific_fields"))
+    function = _get_attr_or_item(tc, "function")
+    function_provider_specific_fields = _coerce_dict(
+        _get_attr_or_item(function, "provider_specific_fields")
+    )
+    return provider_specific_fields, function_provider_specific_fields
+
+
 def _short_tool_id() -> str:
     """9-char alphanumeric ID compatible with all providers (incl. Mistral)."""
     return "".join(secrets.choice(_ALNUM) for _ in range(9))
@@ -214,13 +240,17 @@ class OpenAICompatProvider(LLMProvider):
 
         tool_calls = []
         for tc in raw_tool_calls:
-            args = tc.function.arguments
+            function = _get_attr_or_item(tc, "function")
+            args = _get_attr_or_item(function, "arguments")
             if isinstance(args, str):
                 args = json_repair.loads(args)
+            provider_specific_fields, function_provider_specific_fields = _extract_tool_call_fields(tc)
             tool_calls.append(ToolCallRequest(
                 id=_short_tool_id(),
-                name=tc.function.name,
+                name=_get_attr_or_item(function, "name", ""),
                 arguments=args,
+                provider_specific_fields=provider_specific_fields,
+                function_provider_specific_fields=function_provider_specific_fields,
             ))
 
         usage: dict[str, int] = {}
@@ -264,13 +294,34 @@ class OpenAICompatProvider(LLMProvider):
             if delta and delta.content:
                 content_parts.append(delta.content)
             for tc in (delta.tool_calls or []) if delta else []:
-                buf = tc_bufs.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
-                if tc.id:
-                    buf["id"] = tc.id
-                if tc.function and tc.function.name:
-                    buf["name"] = tc.function.name
-                if tc.function and tc.function.arguments:
-                    buf["arguments"] += tc.function.arguments
+                idx = _get_attr_or_item(tc, "index")
+                if idx is None:
+                    continue
+                buf = tc_bufs.setdefault(
+                    idx,
+                    {
+                        "id": "",
+                        "name": "",
+                        "arguments": "",
+                        "provider_specific_fields": None,
+                        "function_provider_specific_fields": None,
+                    },
+                )
+                tc_id = _get_attr_or_item(tc, "id")
+                if tc_id:
+                    buf["id"] = tc_id
+                function = _get_attr_or_item(tc, "function")
+                function_name = _get_attr_or_item(function, "name")
+                if function_name:
+                    buf["name"] = function_name
+                arguments = _get_attr_or_item(function, "arguments")
+                if arguments:
+                    buf["arguments"] += arguments
+                provider_specific_fields, function_provider_specific_fields = _extract_tool_call_fields(tc)
+                if provider_specific_fields:
+                    buf["provider_specific_fields"] = provider_specific_fields
+                if function_provider_specific_fields:
+                    buf["function_provider_specific_fields"] = function_provider_specific_fields
 
         return LLMResponse(
             content="".join(content_parts) or None,
@@ -279,6 +330,8 @@ class OpenAICompatProvider(LLMProvider):
                     id=b["id"] or _short_tool_id(),
                     name=b["name"],
                     arguments=json_repair.loads(b["arguments"]) if b["arguments"] else {},
+                    provider_specific_fields=b["provider_specific_fields"],
+                    function_provider_specific_fields=b["function_provider_specific_fields"],
                 )
                 for b in tc_bufs.values()
             ],
