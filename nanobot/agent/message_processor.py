@@ -197,11 +197,9 @@ class MessageProcessor:
                     channel, chat_id, msg.metadata.get("message_id")
                 )
                 history = session.get_history(max_messages=self.config.memory_window)
-                skill_names = self.context.skills.detect_relevant_skills(msg.content)
                 messages = await self.context.build_messages(
                     history=history,
                     current_message=msg.content,
-                    skill_names=skill_names,
                     channel=channel,
                     chat_id=chat_id,
                 )
@@ -284,11 +282,9 @@ class MessageProcessor:
 
             history = session.get_history(max_messages=self.config.memory_window)
             verify_before_answer = self.verifier.should_force_verification(msg.content)
-            skill_names = self.context.skills.detect_relevant_skills(msg.content)
             initial_messages = await self.context.build_messages(
                 history=history,
                 current_message=msg.content,
-                skill_names=skill_names,
                 media=msg.media if msg.media else None,
                 channel=msg.channel,
                 chat_id=msg.chat_id,

@@ -1,10 +1,13 @@
-"""Tests for progressive skill loading — summary-only for trigger-matched skills."""
+"""Tests for skill loading — flat summary + load_skill tool."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from nanobot.context.skills import SkillsLoader
+from nanobot.tools.builtin.skills import LoadSkillTool
 
 
 def _create_skill(
@@ -13,77 +16,85 @@ def _create_skill(
     description: str,
     *,
     always: bool = False,
-    triggers: list[str] | None = None,
 ) -> Path:
-    """Create a minimal skill directory with SKILL.md."""
     skill_dir = workspace / "skills" / name
     skill_dir.mkdir(parents=True, exist_ok=True)
-    frontmatter_lines = [
-        "---",
-        f"name: {name}",
-        f"description: {description}",
-    ]
+    frontmatter_lines = ["---", f"name: {name}", f"description: {description}"]
     if always:
         frontmatter_lines.append("always: true")
-    if triggers:
-        frontmatter_lines.append("triggers:")
-        for t in triggers:
-            frontmatter_lines.append(f"  - {t}")
     frontmatter_lines.append("---")
-    content = "\n".join(frontmatter_lines) + "\n\n# Full content\n" + "x" * 200
+    content = "\n".join(frontmatter_lines) + "\n\n# Full content\nInstructions here."
     (skill_dir / "SKILL.md").write_text(content)
     return skill_dir
 
 
-def test_matched_skills_highlighted_in_summary(tmp_path: Path) -> None:
-    """Matched skills appear with star marker in summary."""
-    _create_skill(tmp_path, "obsidian-cli", "Obsidian CLI tool", triggers=["obsidian"])
-    loader = SkillsLoader(tmp_path)
-    summary = loader.build_skills_summary(matched=["obsidian-cli"])
-    assert "★" in summary
-    assert "obsidian-cli" in summary
-    assert "Matched for this message" in summary
-
-
-def test_unmatched_skills_in_other_section(tmp_path: Path) -> None:
-    """Non-matched skills appear in 'Other available' section."""
+def test_summary_is_flat_list(tmp_path: Path) -> None:
+    """Skills summary is a flat list with no matched/unmatched sections."""
     _create_skill(tmp_path, "weather", "Check weather")
+    _create_skill(tmp_path, "github", "GitHub integration")
     loader = SkillsLoader(tmp_path)
-    summary = loader.build_skills_summary(matched=[])
-    assert "Other available skills" in summary
+
+    summary = loader.build_skills_summary()
+
     assert "weather" in summary
+    assert "github" in summary
+    assert "Matched for this message" not in summary
+    assert "Other available" not in summary
     assert "★" not in summary
-
-
-def test_matched_skills_include_path(tmp_path: Path) -> None:
-    """Matched skills include SKILL.md path for read_file."""
-    _create_skill(tmp_path, "my-skill", "A skill", triggers=["mytest"])
-    loader = SkillsLoader(tmp_path)
-    summary = loader.build_skills_summary(matched=["my-skill"])
-    assert "SKILL.md" in summary
-    assert "Path:" in summary
+    assert "Path:" not in summary
 
 
 def test_always_skills_excluded_from_summary(tmp_path: Path) -> None:
-    """Always-on skills don't appear in summary (already fully injected)."""
     _create_skill(tmp_path, "always-skill", "Always loaded", always=True)
     loader = SkillsLoader(tmp_path)
-    summary = loader.build_skills_summary(matched=[])
+
+    summary = loader.build_skills_summary()
+
     assert "always-skill" not in summary
 
 
-def test_no_matched_no_matched_section(tmp_path: Path) -> None:
-    """When matched=[] or None, no 'Matched' section appears."""
-    _create_skill(tmp_path, "some-skill", "A skill")
-    loader = SkillsLoader(tmp_path)
-    summary = loader.build_skills_summary(matched=None)
-    assert "Matched for this message" not in summary
-    assert "some-skill" in summary
+def test_summary_empty_when_no_skills(tmp_path: Path) -> None:
+    loader = SkillsLoader(tmp_path, builtin_skills_dir=tmp_path / "no-builtins")
 
-
-def test_backward_compat_no_matched_param(tmp_path: Path) -> None:
-    """Calling build_skills_summary() without matched still works."""
-    _create_skill(tmp_path, "compat-skill", "Backward compat")
-    loader = SkillsLoader(tmp_path)
     summary = loader.build_skills_summary()
-    assert "compat-skill" in summary
+
+    assert summary == ""
+
+
+@pytest.mark.asyncio
+async def test_load_skill_tool_returns_content(tmp_path: Path) -> None:
+    _create_skill(tmp_path, "test-skill", "A test skill")
+    loader = SkillsLoader(tmp_path)
+    tool = LoadSkillTool(skills_loader=loader)
+
+    result = await tool.execute(name="test-skill")
+
+    assert result.success
+    assert "Full content" in result.output
+    assert "Instructions here" in result.output
+    # Frontmatter should be stripped
+    assert "---" not in result.output
+
+
+@pytest.mark.asyncio
+async def test_load_skill_tool_not_found(tmp_path: Path) -> None:
+    loader = SkillsLoader(tmp_path, builtin_skills_dir=tmp_path / "no-builtins")
+    tool = LoadSkillTool(skills_loader=loader)
+
+    result = await tool.execute(name="nonexistent")
+
+    assert not result.success
+    assert "not found" in result.error.lower()
+
+
+@pytest.mark.asyncio
+async def test_load_skill_strips_frontmatter(tmp_path: Path) -> None:
+    _create_skill(tmp_path, "fm-skill", "Has frontmatter")
+    loader = SkillsLoader(tmp_path)
+    tool = LoadSkillTool(skills_loader=loader)
+
+    result = await tool.execute(name="fm-skill")
+
+    assert result.success
+    assert "name: fm-skill" not in result.output  # frontmatter stripped
+    assert "Full content" in result.output

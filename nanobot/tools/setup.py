@@ -171,8 +171,13 @@ def register_default_tools(  # noqa: PLR0913
         if _should_register(st.name):
             capabilities.register_tool(st)
 
-    # Skill-provided custom tools (Step 14)
+    # Skill loading tool + skill-provided custom tools (Step 14)
     if skills_enabled:
+        from nanobot.tools.builtin.skills import LoadSkillTool
+
+        load_skill_tool = LoadSkillTool(skills_loader=skills_loader)
+        if _should_register(load_skill_tool.name):
+            capabilities.register_tool(load_skill_tool)
         for skill_tool in skills_loader.discover_tools():
             capabilities.register_tool(skill_tool)
 
