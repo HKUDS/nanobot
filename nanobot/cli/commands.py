@@ -4,6 +4,7 @@ import asyncio
 from contextlib import contextmanager, nullcontext
 
 import os
+import time
 import select
 import signal
 import sys
@@ -573,7 +574,7 @@ def gateway(
         try:
             resp = await agent.process_direct(
                 reminder_note,
-                session_key=f"cron:{job.id}",
+                session_key=f"cron:{job.id}:{int(time.time() * 1000)}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
             )
