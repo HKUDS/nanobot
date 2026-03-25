@@ -7,7 +7,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from nanobot.memory.read.graph_augmentation import GraphAugmenter
 from nanobot.memory.read.retriever import MemoryRetriever
+from nanobot.memory.read.scoring import PROFILE_KEYS, RetrievalScorer
 
 
 def _make_retriever(
@@ -52,15 +54,29 @@ def _make_retriever(
     extractor = MagicMock()
     extractor._extract_entities = MagicMock(return_value=[])
 
-    return MemoryRetriever(
-        graph=graph,
-        planner=planner,
-        reranker=reranker,
+    scorer = RetrievalScorer(
         profile_mgr=profile_mgr,
+        reranker=reranker,
         rollout_fn=lambda: rollout or {},
-        read_events_fn=lambda **kw: events or [],
-        extractor=extractor,
     )
+    graph_aug = GraphAugmenter(
+        graph=graph,
+        extractor=extractor,
+        read_events_fn=lambda **kw: events or [],
+    )
+
+    retriever = MemoryRetriever(
+        scorer=scorer,
+        graph_aug=graph_aug,
+        planner=planner,
+    )
+    # Expose collaborators on the retriever for test access
+    retriever._test_scorer = scorer  # type: ignore[attr-defined]
+    retriever._test_graph_aug = graph_aug  # type: ignore[attr-defined]
+    retriever._test_graph = graph  # type: ignore[attr-defined]
+    retriever._test_extractor = extractor  # type: ignore[attr-defined]
+    retriever._test_reranker = reranker  # type: ignore[attr-defined]
+    return retriever
 
 
 def _make_plan(
@@ -105,22 +121,24 @@ class TestRetrieveWithGraphAugmentation:
 
     def test_graph_terms_expand_query(self) -> None:
         retriever = _make_retriever(graph_enabled=True)
-        retriever._graph.get_related_entity_names_sync = MagicMock(
+        graph_aug = retriever._graph_aug
+        graph_aug._graph.get_related_entity_names_sync = MagicMock(
             return_value={"python", "fastapi"}
         )
-        retriever._extractor._extract_entities = MagicMock(return_value=["Web"])
+        graph_aug._extractor._extract_entities = MagicMock(return_value=["Web"])
         # Test graph entity collection directly (unified pipeline uses this internally)
-        entities = retriever._collect_graph_entity_names("web framework", [])
+        entities = graph_aug.collect_graph_entity_names("web framework", [])
         assert "python" in entities or "fastapi" in entities
 
 
 class TestBuildGraphContextLines:
-    """_build_graph_context_lines formats triples correctly."""
+    """build_graph_context_lines formats triples correctly."""
 
     def test_formats_graph_lines(self) -> None:
         retriever = _make_retriever()
-        retriever._extractor._extract_entities = MagicMock(return_value=["Alice"])
-        retriever._read_events_fn = lambda **kw: [
+        graph_aug = retriever._graph_aug
+        graph_aug._extractor._extract_entities = MagicMock(return_value=["Alice"])
+        graph_aug._read_events_fn = lambda **kw: [
             {
                 "entities": ["Alice", "Bob"],
                 "triples": [
@@ -132,7 +150,7 @@ class TestBuildGraphContextLines:
             mock_type = MagicMock()
             mock_type.value = "unknown"
             mock_classify.return_value = mock_type
-            lines = retriever._build_graph_context_lines("Who is Alice?", [], max_tokens=100)
+            lines = graph_aug.build_graph_context_lines("Who is Alice?", [], max_tokens=100)
         assert len(lines) >= 1
         assert "Alice" in lines[0]
         assert "knows" in lines[0]
@@ -140,19 +158,21 @@ class TestBuildGraphContextLines:
 
 
 class TestExtractQueryEntities:
-    """_extract_query_entities matches tokens against entity index."""
+    """extract_query_entities matches tokens against entity index."""
 
     def test_extracts_unigrams(self) -> None:
         retriever = _make_retriever()
+        graph_aug = retriever._graph_aug
         entity_index = {"alice", "bob", "python"}
-        matched = retriever._extract_query_entities("who is alice", entity_index)
+        matched = graph_aug.extract_query_entities("who is alice", entity_index)
         assert "alice" in matched
         assert "bob" not in matched
 
     def test_extracts_bigrams(self) -> None:
         retriever = _make_retriever()
+        graph_aug = retriever._graph_aug
         entity_index = {"github actions", "python"}
-        matched = retriever._extract_query_entities("setup github actions pipeline", entity_index)
+        matched = graph_aug.extract_query_entities("setup github actions pipeline", entity_index)
         assert "github actions" in matched
 
 
@@ -194,13 +214,13 @@ class TestRetrieveAppliesTypeBoost:
             },
         ]
 
-        # Test _score_items directly — this is the pipeline stage that applies boosts
+        # Test score_items directly — this is the pipeline stage that applies boosts
         profile_data = {
             "profile": {},
-            "resolved_keep_new_old": {k: set() for k in retriever.PROFILE_KEYS},
-            "resolved_keep_new_new": {k: set() for k in retriever.PROFILE_KEYS},
+            "resolved_keep_new_old": {k: set() for k in PROFILE_KEYS},
+            "resolved_keep_new_new": {k: set() for k in PROFILE_KEYS},
         }
-        scored = retriever._score_items(
+        scored = retriever._scorer.score_items(
             items,
             plan,
             profile_data=profile_data,
@@ -218,40 +238,12 @@ class TestRetrieveAppliesTypeBoost:
 # ======================================================================
 
 
-class TestAugmentQueryWithGraph:
-    """_augment_query_with_graph expands query with entity names."""
-
-    def test_expands_with_entity_names(self) -> None:
-        retriever = _make_retriever(graph_enabled=True)
-        retriever._graph.get_related_entity_names_sync = MagicMock(
-            return_value={"python", "fastapi", "web"}
-        )
-        augmented, extra = retriever._augment_query_with_graph("web framework")
-        # "web" is already a keyword, so extra should contain python and fastapi
-        assert "python" in augmented or "fastapi" in augmented
-        assert len(extra) > 0
-
-    def test_no_graph_returns_original(self) -> None:
-        retriever = _make_retriever(graph_enabled=False)
-        # graph is not None but disabled
-        retriever._graph.enabled = False
-        augmented, extra = retriever._augment_query_with_graph("hello world")
-        assert augmented == "hello world"
-        assert extra == set()
-
-    def test_no_graph_object_returns_original(self) -> None:
-        retriever = _make_retriever()
-        retriever._graph = None
-        augmented, extra = retriever._augment_query_with_graph("test query")
-        assert augmented == "test query"
-        assert extra == set()
-
-
 class TestFilterItemsByIntent:
     """_filter_items filters items based on routing hints and intent."""
 
     def test_focus_task_decision_filters_non_tasks(self) -> None:
         retriever = _make_retriever()
+        scorer = retriever._scorer
         plan = _make_plan(
             routing_hints={
                 "focus_task_decision": True,
@@ -265,12 +257,13 @@ class TestFilterItemsByIntent:
             {"id": "t1", "type": "task", "summary": "Build feature", "topic": "task_progress"},
             {"id": "f1", "type": "fact", "summary": "Python is great", "topic": "language"},
         ]
-        filtered, counts = retriever._filter_items(items, plan)
+        filtered, counts = scorer.filter_items(items, plan)
         assert len(filtered) == 1
         assert filtered[0]["id"] == "t1"
 
     def test_constraints_lookup_filters_non_semantic(self) -> None:
         retriever = _make_retriever()
+        scorer = retriever._scorer
         plan = _make_plan(intent="constraints_lookup")
         items = [
             {
@@ -288,12 +281,13 @@ class TestFilterItemsByIntent:
                 "metadata": {"memory_type": "episodic"},
             },
         ]
-        filtered, _ = retriever._filter_items(items, plan)
+        filtered, _ = scorer.filter_items(items, plan)
         assert len(filtered) == 1
         assert filtered[0]["id"] == "c1"
 
     def test_reflection_filtered_when_disabled(self) -> None:
         retriever = _make_retriever()
+        scorer = retriever._scorer
         plan = _make_plan()
         items = [
             {
@@ -304,18 +298,19 @@ class TestFilterItemsByIntent:
                 "metadata": {"memory_type": "reflection"},
             },
         ]
-        filtered, counts = retriever._filter_items(items, plan, reflection_enabled=False)
+        filtered, counts = scorer.filter_items(items, plan, reflection_enabled=False)
         assert len(filtered) == 0
         assert counts["reflection_filtered_non_reflection_intent"] == 1
 
     def test_general_intent_passes_all(self) -> None:
         retriever = _make_retriever()
+        scorer = retriever._scorer
         plan = _make_plan()
         items = [
             {"id": "f1", "type": "fact", "summary": "Fact one", "topic": "general"},
             {"id": "f2", "type": "fact", "summary": "Fact two", "topic": "general"},
         ]
-        filtered, _ = retriever._filter_items(items, plan)
+        filtered, _ = scorer.filter_items(items, plan)
         assert len(filtered) == 2
 
 
@@ -324,6 +319,7 @@ class TestScoreItemsRecencyBoost:
 
     def test_recent_items_score_higher(self) -> None:
         retriever = _make_retriever()
+        scorer = retriever._scorer
         plan = _make_plan(
             policy={
                 "candidate_multiplier": 3,
@@ -335,8 +331,8 @@ class TestScoreItemsRecencyBoost:
         )
         profile_data = {
             "profile": {},
-            "resolved_keep_new_old": {k: set() for k in MemoryRetriever.PROFILE_KEYS},
-            "resolved_keep_new_new": {k: set() for k in MemoryRetriever.PROFILE_KEYS},
+            "resolved_keep_new_old": {k: set() for k in PROFILE_KEYS},
+            "resolved_keep_new_new": {k: set() for k in PROFILE_KEYS},
         }
         items = [
             {
@@ -360,7 +356,7 @@ class TestScoreItemsRecencyBoost:
                 "entities": [],
             },
         ]
-        scored = retriever._score_items(
+        scored = scorer.score_items(
             items,
             plan,
             profile_data,
@@ -378,6 +374,7 @@ class TestScoreItemsTypeBoost:
 
     def test_semantic_boosted_over_episodic(self) -> None:
         retriever = _make_retriever()
+        scorer = retriever._scorer
         plan = _make_plan(
             policy={
                 "candidate_multiplier": 3,
@@ -389,8 +386,8 @@ class TestScoreItemsTypeBoost:
         )
         profile_data = {
             "profile": {},
-            "resolved_keep_new_old": {k: set() for k in MemoryRetriever.PROFILE_KEYS},
-            "resolved_keep_new_new": {k: set() for k in MemoryRetriever.PROFILE_KEYS},
+            "resolved_keep_new_old": {k: set() for k in PROFILE_KEYS},
+            "resolved_keep_new_new": {k: set() for k in PROFILE_KEYS},
         }
         items = [
             {
@@ -414,7 +411,7 @@ class TestScoreItemsTypeBoost:
                 "entities": [],
             },
         ]
-        scored = retriever._score_items(
+        scored = scorer.score_items(
             items,
             plan,
             profile_data,
@@ -432,6 +429,7 @@ class TestScoreItemsUnified:
 
     def test_same_adjustments_different_bases(self) -> None:
         retriever = _make_retriever()
+        scorer = retriever._scorer
         plan = _make_plan(
             policy={
                 "candidate_multiplier": 3,
@@ -443,8 +441,8 @@ class TestScoreItemsUnified:
         )
         profile_data = {
             "profile": {},
-            "resolved_keep_new_old": {k: set() for k in MemoryRetriever.PROFILE_KEYS},
-            "resolved_keep_new_new": {k: set() for k in MemoryRetriever.PROFILE_KEYS},
+            "resolved_keep_new_old": {k: set() for k in PROFILE_KEYS},
+            "resolved_keep_new_new": {k: set() for k in PROFILE_KEYS},
         }
         # BM25 candidate: base from retrieval_reason
         bm25_item = {
@@ -468,7 +466,7 @@ class TestScoreItemsUnified:
             "stability": "high",
             "entities": [],
         }
-        bm25_scored = retriever._score_items(
+        bm25_scored = scorer.score_items(
             [bm25_item],
             plan,
             profile_data,
@@ -477,7 +475,7 @@ class TestScoreItemsUnified:
             router_enabled=True,
             type_separation_enabled=True,
         )
-        mem0_scored = retriever._score_items(
+        mem0_scored = scorer.score_items(
             [mem0_item],
             plan,
             profile_data,
@@ -500,12 +498,13 @@ class TestRerankItemsEnabled:
 
     def test_reranker_called(self) -> None:
         retriever = _make_retriever(rollout={"reranker_mode": "enabled"})
+        scorer = retriever._scorer
         items = [
             {"id": "a", "score": 0.5, "summary": "Item A"},
             {"id": "b", "score": 0.3, "summary": "Item B"},
         ]
-        reranked = retriever._rerank_items("test query", items)
-        retriever._reranker.rerank.assert_called_once_with("test query", items)
+        reranked = scorer.rerank_items("test query", items)
+        scorer._reranker.rerank.assert_called_once_with("test query", items)
         assert len(reranked) == 2
 
 
@@ -514,11 +513,12 @@ class TestRerankItemsDisabled:
 
     def test_passthrough(self) -> None:
         retriever = _make_retriever(rollout={"reranker_mode": "disabled"})
+        scorer = retriever._scorer
         items = [
             {"id": "a", "score": 0.5, "summary": "Item A"},
         ]
-        result = retriever._rerank_items("test query", items)
-        retriever._reranker.rerank.assert_not_called()
+        result = scorer.rerank_items("test query", items)
+        scorer._reranker.rerank.assert_not_called()
         assert result is items
 
 
@@ -654,7 +654,9 @@ class TestGraphEntityCache:
     def _make_retriever_with_graph(self):
         from unittest.mock import MagicMock
 
+        from nanobot.memory.read.graph_augmentation import GraphAugmenter
         from nanobot.memory.read.retriever import MemoryRetriever
+        from nanobot.memory.read.scoring import RetrievalScorer
 
         graph = MagicMock()
         graph.enabled = True
@@ -667,51 +669,62 @@ class TestGraphEntityCache:
         extractor = MagicMock()
         extractor._extract_entities.return_value = ["coffee"]
 
-        retriever = MemoryRetriever(
-            graph=graph,
-            planner=planner,
-            reranker=reranker,
+        scorer = RetrievalScorer(
             profile_mgr=profile_mgr,
+            reranker=reranker,
             rollout_fn=lambda: {"enabled": True},
-            read_events_fn=lambda **kw: [],
+        )
+        graph_aug = GraphAugmenter(
+            graph=graph,
             extractor=extractor,
+            read_events_fn=lambda **kw: [],
+        )
+        retriever = MemoryRetriever(
+            scorer=scorer,
+            graph_aug=graph_aug,
+            planner=planner,
         )
         return retriever
 
     def test_graph_cache_initialized_in_init(self):
         r = self._make_retriever_with_graph()
-        assert hasattr(r, "_graph_cache")
-        assert r._graph_cache == {}
+        assert hasattr(r._graph_aug, "_graph_cache")
+        assert r._graph_aug._graph_cache == {}
 
     def test_same_entities_use_cache_within_retrieve(self):
         r = self._make_retriever_with_graph()
-        # Directly call _collect_graph_entity_names twice with same query
-        r._graph_cache = {}  # ensure clean state
-        r._collect_graph_entity_names("coffee query", [])
-        r._collect_graph_entity_names("coffee query", [])
+        graph_aug = r._graph_aug
+        # Directly call collect_graph_entity_names twice with same query
+        graph_aug.reset_cache()
+        graph_aug.collect_graph_entity_names("coffee query", [])
+        graph_aug.collect_graph_entity_names("coffee query", [])
         # get_related_entity_names_sync should be called only once
-        assert r._graph.get_related_entity_names_sync.call_count == 1
+        assert graph_aug._graph.get_related_entity_names_sync.call_count == 1
 
     def test_cache_reset_triggers_fresh_traversal(self):
         r = self._make_retriever_with_graph()
+        graph_aug = r._graph_aug
         # First call populates the cache
-        r._collect_graph_entity_names("coffee query", [])
-        assert len(r._graph_cache) > 0, "cache should be populated after first call"
+        graph_aug.collect_graph_entity_names("coffee query", [])
+        assert len(graph_aug._graph_cache) > 0, "cache should be populated after first call"
         # Simulate retrieve() resetting the cache at the start of a new request
-        r._graph_cache = {}
+        graph_aug.reset_cache()
         # Second call after reset should trigger a fresh graph traversal
-        r._collect_graph_entity_names("coffee query", [])
+        graph_aug.collect_graph_entity_names("coffee query", [])
         # get_related_entity_names_sync called twice: once before reset, once after
-        assert r._graph.get_related_entity_names_sync.call_count == 2
+        assert graph_aug._graph.get_related_entity_names_sync.call_count == 2
 
     def test_retrieve_resets_cache_between_calls(self):
         """retrieve() resets _graph_cache so each call gets a fresh traversal."""
         r = self._make_retriever_with_graph()
+        graph_aug = r._graph_aug
 
         # Pre-populate cache to verify it gets cleared on retrieve()
-        r._graph_cache[frozenset({"test"})] = {"cached_entity"}
-        assert len(r._graph_cache) == 1
+        graph_aug._graph_cache[frozenset({"test"})] = {"cached_entity"}
+        assert len(graph_aug._graph_cache) == 1
 
         # retrieve() should reset _graph_cache at the start (even without db/embedder)
         r.retrieve(query="coffee query", top_k=3)
-        assert r._graph_cache == {}, "Expected _graph_cache to be reset at the start of retrieve()"
+        assert graph_aug._graph_cache == {}, (
+            "Expected _graph_cache to be reset at the start of retrieve()"
+        )

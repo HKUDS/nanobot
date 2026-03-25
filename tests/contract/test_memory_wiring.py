@@ -71,9 +71,9 @@ def test_rollout_override_atomic_consistency(tmp_path):
 
     # Both subsystems' rollout_fn should return the same dict
     ingester_rollout = store.ingester._rollout_fn()
-    retriever_rollout = store.retriever._rollout_fn()
+    scorer_rollout = store._scorer._rollout_fn()
 
-    assert ingester_rollout is retriever_rollout
+    assert ingester_rollout is scorer_rollout
     assert ingester_rollout.get("reranker_mode") == "disabled"
 
 

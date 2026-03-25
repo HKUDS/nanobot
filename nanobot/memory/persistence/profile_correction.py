@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from ..write.coercion import EventCoercer
     from ..write.conflicts import ConflictManager
     from ..write.extractor import MemoryExtractor
     from ..write.ingester import EventIngester
@@ -28,12 +29,14 @@ class CorrectionOrchestrator:
         profile_store: ProfileStore,
         extractor: MemoryExtractor,
         ingester: EventIngester,
+        coercer: EventCoercer,
         conflict_mgr: ConflictManager,
         snapshot: MemorySnapshot,
     ) -> None:
         self._profile_store = profile_store
         self._extractor = extractor
         self._ingester = ingester
+        self._coercer = coercer
         self._conflict_mgr = conflict_mgr
         self._snapshot = snapshot
 
@@ -143,7 +146,7 @@ class CorrectionOrchestrator:
                     )
                     local_conflicts += 1
 
-                event = self._ingester._coerce_event(
+                event = self._coercer.coerce_event(
                     {
                         "timestamp": self._profile_store._utc_now_iso(),
                         "type": event_type,

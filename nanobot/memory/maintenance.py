@@ -190,7 +190,8 @@ class MemoryMaintenance:
             write_profile_fn(seeded_profile)
 
         seeded_events: list[dict[str, Any]] = []
-        coerce_event = ingester._coerce_event if ingester else None
+        _coercer = getattr(ingester, "_coercer", None)
+        coerce_event = _coercer.coerce_event if _coercer is not None else None
         try:
             for line in events_path.read_text(encoding="utf-8").splitlines():
                 text = str(line).strip()

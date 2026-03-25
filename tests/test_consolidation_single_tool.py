@@ -36,14 +36,11 @@ def _make_pipeline(
     """Build a ``ConsolidationPipeline`` with all dependencies mocked."""
     _base = tmp_path or Path("/tmp/test")
     defaults: dict[str, object] = {
-        "persistence": MagicMock(),
         "extractor": MagicMock(),
         "ingester": MagicMock(),
         "profile_mgr": MagicMock(),
         "conflict_mgr": MagicMock(),
         "snapshot": MagicMock(),
-        "mem0": MagicMock(enabled=False),
-        "mem0_raw_turn_ingestion": False,
         "memory_file": _base / "MEMORY.md",
         "history_file": _base / "HISTORY.md",
         "rollout": rollout,

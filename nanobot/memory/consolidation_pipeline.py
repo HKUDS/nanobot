@@ -7,8 +7,7 @@ previously spread across six methods on ``MemoryStore``.  The pipeline:
 2. Formats them as text lines (``_format_conversation_lines``).
 3. Calls the LLM with a ``save_memory`` tool to produce a history entry.
 4. Runs structured extraction (events + profile updates).
-5. Syncs events to mem0 and optionally ingests raw turns.
-6. Rebuilds MEMORY.md and updates the session pointer.
+5. Rebuilds MEMORY.md and updates the session pointer.
 
 ``MemoryStore`` delegates to this class via a one-line wrapper.
 """
@@ -24,9 +23,8 @@ from loguru import logger
 from nanobot.context.prompt_loader import prompts
 from nanobot.observability.tracing import bind_trace
 
-from ._text import _contains_any, _utc_now_iso
+from ._text import _utc_now_iso
 from .constants import _CONSOLIDATE_MEMORY_TOOL
-from .write.ingester import EventIngester
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -36,6 +34,7 @@ if TYPE_CHECKING:
     from .persistence.snapshot import MemorySnapshot
     from .write.conflicts import ConflictManager
     from .write.extractor import MemoryExtractor
+    from .write.ingester import EventIngester
 
 
 class ConsolidationPipeline:
@@ -46,26 +45,20 @@ class ConsolidationPipeline:
     def __init__(
         self,
         *,
-        persistence: Any = None,
         extractor: MemoryExtractor,
         ingester: EventIngester,
         profile_mgr: ProfileManager,
         conflict_mgr: ConflictManager,
         snapshot: MemorySnapshot,
-        mem0: Any = None,
-        mem0_raw_turn_ingestion: bool = False,
         memory_file: Path,
         history_file: Path,
         rollout: dict[str, Any] | None = None,
     ) -> None:
-        self._persistence = persistence
         self._extractor = extractor
         self._ingester = ingester
         self._profile_mgr = profile_mgr
         self._conflict_mgr = conflict_mgr
         self._snapshot = snapshot
-        self._mem0 = mem0
-        self._mem0_raw_turn_ingestion = mem0_raw_turn_ingestion
         self._memory_file = memory_file
         self._history_file = history_file
         self._rollout: dict[str, Any] = rollout or {}
@@ -244,59 +237,6 @@ class ConsolidationPipeline:
             self._conflict_mgr.auto_resolve_conflicts(max_items=10)
 
         self._snapshot.rebuild_memory_snapshot(write=True)
-
-        if self._mem0 is not None and self._mem0.enabled and events:
-            self._ingester._sync_events_to_mem0(events)
-
-        if self._mem0 is not None and self._mem0.enabled and self._mem0_raw_turn_ingestion:
-            for m in old_messages:
-                role = str(m.get("role", "user")).strip().lower() or "user"
-                content = str(m.get("content", "")).strip()
-                if not content:
-                    continue
-                memory_type = "episodic"
-                if role == "user":
-                    memory_type = (
-                        "semantic"
-                        if _contains_any(
-                            content,
-                            (
-                                "prefer",
-                                "always",
-                                "never",
-                                "must",
-                                "cannot",
-                                "my setup",
-                                "i use",
-                            ),
-                        )
-                        else "episodic"
-                    )
-                turn_meta, _ = self._ingester._normalize_memory_metadata(
-                    {
-                        "topic": "conversation_turn",
-                        "memory_type": memory_type,
-                        "stability": "medium",
-                    },
-                    event_type="fact",
-                    summary=content,
-                    source="chat",
-                )
-                turn_meta.update(
-                    {
-                        "event_type": "conversation_turn",
-                        "role": role,
-                        "timestamp": str(m.get("timestamp", "")),
-                        "session": session.key,
-                    }
-                )
-                clean_content = self._ingester._sanitize_mem0_text(content, allow_archival=False)
-                turn_meta = EventIngester._sanitize_mem0_metadata(turn_meta)
-                if clean_content:
-                    self._mem0.add_text(
-                        clean_content,
-                        metadata=turn_meta,
-                    )
 
         self._finalize_consolidation(
             session,
