@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nanobot.context.skills import CLAUDE_TOOL_MAPPING, _detect_skill_tools
+from nanobot.context.skills import CLAUDE_TOOL_MAPPING, _detect_skill_tools, _rewrite_skill_content
 
 
 def test_mapping_has_expected_keys():
@@ -142,3 +142,75 @@ class TestDetectSkillTools:
         result = _detect_skill_tools(content)
         assert "Bash" in result
         assert "WebFetch" in result
+
+
+class TestRewriteSkillContent:
+    """Tests for _rewrite_skill_content()."""
+
+    def test_rewrites_backtick_bash(self):
+        content = "Use `Bash` to run commands."
+        detected = {"Bash": "use the `exec` tool"}
+        result = _rewrite_skill_content(content, detected)
+        assert "`exec`" in result
+        assert "`Bash`" not in result
+
+    def test_rewrites_the_bash_tool(self):
+        content = "the Bash tool runs shell commands."
+        detected = {"Bash": "use the `exec` tool"}
+        result = _rewrite_skill_content(content, detected)
+        assert "the exec tool" in result
+
+    def test_does_not_rewrite_inside_code_blocks(self):
+        content = "Use `Bash`:\n```bash\nBash is great\n```\nMore `Bash` usage."
+        detected = {"Bash": "use the `exec` tool"}
+        result = _rewrite_skill_content(content, detected)
+        # Prose sections rewritten
+        assert result.startswith("Use `exec`")
+        assert result.endswith("More `exec` usage.")
+        # Code block preserved
+        assert "Bash is great" in result
+
+    def test_rewrites_multiple_tools(self):
+        content = "Use `Bash` and `WebFetch` together."
+        detected = {
+            "Bash": "use the `exec` tool",
+            "WebFetch": "use the `web_fetch` tool",
+        }
+        result = _rewrite_skill_content(content, detected)
+        assert "`exec`" in result
+        assert "`web_fetch`" in result
+        assert "`Bash`" not in result
+        assert "`WebFetch`" not in result
+
+    def test_no_detections_returns_unchanged(self):
+        content = "This is plain text with no tools."
+        result = _rewrite_skill_content(content, {})
+        assert result == content
+
+    def test_bash_blocks_key_does_not_rewrite(self):
+        content = "Run this:\n```bash\ncurl example.com\n```"
+        detected = {"__bash_blocks__": "use the `exec` tool"}
+        result = _rewrite_skill_content(content, detected)
+        # __bash_blocks__ is synthetic, not a tool name — no rewriting
+        assert result == content
+
+    def test_rewrites_read_in_backticks_only(self):
+        content = "Read the docs. Use `Read` for files."
+        detected = {"Read": "use the `read_file` tool"}
+        result = _rewrite_skill_content(content, detected)
+        assert "Read the docs" in result  # prose unchanged
+        assert "`read_file`" in result  # backtick reference rewritten
+
+    def test_rewrites_the_edit_tool_ambiguous(self):
+        content = "the Edit tool can modify files."
+        detected = {"Edit": "use the `edit_file` tool"}
+        result = _rewrite_skill_content(content, detected)
+        assert "the edit_file tool" in result
+
+    def test_preserves_nested_code_blocks(self):
+        content = "Text `Bash` here.\n````python\n```bash\ninner\n```\n````\nMore `Bash`."
+        detected = {"Bash": "use the `exec` tool"}
+        result = _rewrite_skill_content(content, detected)
+        assert result.startswith("Text `exec`")
+        assert result.endswith("More `exec`.")
+        assert "```bash\ninner\n```" in result  # inner block preserved

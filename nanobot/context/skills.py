@@ -82,6 +82,69 @@ def _detect_skill_tools(content: str) -> dict[str, str]:
     return detected
 
 
+def _rewrite_skill_content(content: str, detected: dict[str, str]) -> str:
+    """Replace Claude Code tool names with nanobot equivalents in prose sections.
+
+    Fenced code blocks are preserved — only prose outside fences is rewritten.
+    The synthetic ``__bash_blocks__`` key is skipped (it drives the preamble, not rewrites).
+    """
+    # Filter to only Claude Code tool names (skip __bash_blocks__ and other synthetic keys)
+    tool_names = [k for k in detected if k in CLAUDE_TOOL_MAPPING]
+    if not tool_names:
+        return content
+
+    # Split into prose and code-block segments using a state machine.
+    segments = _split_fenced_blocks(content)
+
+    # Rewrite only prose segments.
+    for i, (is_code, text) in enumerate(segments):
+        if is_code:
+            continue
+        for tool_name in tool_names:
+            nanobot_name = CLAUDE_TOOL_MAPPING[tool_name][0]
+            # Same contextual patterns for all tool names (safe and ambiguous):
+            # backtick-wrapped, "the X tool", or "X tool".
+            text = re.sub(rf"`{tool_name}`", f"`{nanobot_name}`", text)
+            text = re.sub(rf"\bthe\s+{tool_name}\s+tool\b", f"the {nanobot_name} tool", text)
+            text = re.sub(rf"\b{tool_name}\s+tool\b", f"{nanobot_name} tool", text)
+        segments[i] = (False, text)
+
+    return "".join(text for _, text in segments)
+
+
+def _split_fenced_blocks(content: str) -> list[tuple[bool, str]]:
+    """Split markdown content into (is_code, text) segments.
+
+    Uses a state machine to track fenced code blocks (3+ backticks).
+    Handles nested fences by matching fence length on close.
+    """
+    segments: list[tuple[bool, str]] = []
+    fence_pattern = re.compile(r"^(`{3,})\s*(\w*)\s*$", re.MULTILINE)
+    pos = 0
+    open_fence: str | None = None  # The backtick string that opened the current block
+
+    for match in fence_pattern.finditer(content):
+        backticks = match.group(1)
+        if open_fence is None:
+            # Opening a code block — flush prose before it
+            if match.start() > pos:
+                segments.append((False, content[pos : match.start()]))
+            open_fence = backticks
+            pos = match.start()
+        elif len(backticks) >= len(open_fence) and not match.group(2):
+            # Closing a code block — fence length must match or exceed opener,
+            # and closing fence must have no info string.
+            segments.append((True, content[pos : match.end()]))
+            pos = match.end()
+            open_fence = None
+
+    # Remaining content
+    if pos < len(content):
+        segments.append((open_fence is not None, content[pos:]))
+
+    return segments
+
+
 class SkillsLoader:
     """
     Loader for agent skills.
