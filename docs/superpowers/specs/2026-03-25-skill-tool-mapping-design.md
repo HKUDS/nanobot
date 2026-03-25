@@ -60,13 +60,17 @@ CLAUDE_TOOL_MAPPING: dict[str, tuple[str, str]] = {
     "Grep": ("exec", "use the `exec` tool with `grep` or `rg`"),
     "WebFetch": ("web_fetch", "use the `web_fetch` tool"),
     "WebSearch": ("web_search", "use the `web_search` tool"),
-    "Agent": ("delegate", "use the `delegate` tool"),
-    "TodoWrite": ("scratchpad_write", "use the `scratchpad_write` tool"),
+    "Agent": ("delegate", "use the `delegate` tool (approximate — nanobot delegation, not autonomous sub-agents)"),
+    "TodoWrite": ("write_scratchpad", "use the `write_scratchpad` tool"),
+    "TodoRead": ("read_scratchpad", "use the `read_scratchpad` tool"),
+    "ListDir": ("list_dir", "use the `list_dir` tool"),
     "AskUserQuestion": ("message", "use the `message` tool to ask the user"),
 }
 ```
 
 Keys are Claude Code tool names (case-sensitive, matched with word boundaries). Values are `(nanobot_tool_name, usage_hint)` — the tool name is used for text rewriting, the hint for the preamble.
+
+**Note:** `Agent` → `delegate` is an approximate mapping. Claude Code's `Agent` spawns autonomous sub-agents; nanobot's `delegate` is multi-agent routing. Skills expecting full sub-agent autonomy may not behave identically.
 
 ### Detection Logic
 
@@ -82,6 +86,8 @@ Scans skill content and returns a dict of detected source → preamble hint.
    - **Safe names** (match on `\b` alone): `Bash`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `Agent`, `TodoWrite`, `AskUserQuestion`
    - **Ambiguous names** (require context): `Read`, `Write`, `Edit` — only match when in backticks (`` `Read` ``), preceded by "the" (`the Read tool`), or followed by "tool" (`Read tool`)
 
+**Design principle:** Under-matching is preferred over false positives. A missed tool reference means the agent doesn't get a mapping hint — it may still figure it out. A false positive rewrites prose incorrectly and confuses the agent. When in doubt, don't match.
+
 3. **Nanobot-native tool names** — if the skill already mentions `exec`, `read_file`, etc., those are noted for the preamble (to confirm availability) but not rewritten.
 
 ### Rewrite Logic
@@ -95,7 +101,7 @@ Replaces Claude Code tool names with nanobot equivalents in prose sections only.
 - `the Bash tool` → `the exec tool`
 - Same patterns for all detected Claude Code tool names
 
-**Skips content inside fenced code blocks** to avoid corrupting bash commands or example output. Implementation splits on ` ``` ` boundaries, rewrites prose sections only, reassembles.
+**Skips content inside fenced code blocks** to avoid corrupting bash commands or example output. Implementation uses a state-machine approach: track open/close of fenced blocks (3+ backticks, with optional info string), only rewrite prose sections outside fences, reassemble. Indented code blocks (4-space prefix) are not tracked — only fenced blocks. Nested fences (4-backtick outer containing 3-backtick inner) are handled by matching fence length on close.
 
 **Bash code blocks are left as-is** — only the preamble instructs the agent to use `exec` for them.
 
@@ -118,6 +124,7 @@ Builds a concise, dynamic preamble from detection results.
 **Rules:**
 - Bash code blocks line comes first (most common, most important)
 - Claude Code tool mappings follow, one per line, only for detected tools
+- Preamble uses the original Claude Code name as the key (e.g., `` `Grep` → ``), since the content has been rewritten — this helps the agent understand what was mapped
 - If bash blocks AND `Bash` tool name are both detected, they merge (no duplication)
 - If nothing detected, returns empty string (no preamble)
 
@@ -128,6 +135,8 @@ Builds a concise, dynamic preamble from detection results.
 **`LoadSkillTool.execute()`** (`nanobot/tools/builtin/skills.py`):
 
 ```python
+content = self._loader.load_skill(name)
+# ... error handling ...
 stripped = self._loader._strip_frontmatter(content)
 transformed = self._loader.transform_for_agent(stripped)  # new
 return ToolResult.ok(transformed)
