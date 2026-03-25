@@ -210,7 +210,7 @@ class MatrixChannel(BaseChannel):
 
     name = "matrix"
     display_name = "Matrix"
-    _STREAM_EDIT_INTERVAL = 1.5 # min seconds between edit_message_text calls
+    _STREAM_EDIT_INTERVAL = 2 # min seconds between edit_message_text calls
     monotonic_time = time.monotonic
 
     @classmethod
