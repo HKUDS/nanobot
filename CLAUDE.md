@@ -185,7 +185,12 @@ The memory subsystem (`nanobot/memory/`) uses a **unified SQLite storage** strat
 4. Return `ToolResult.ok(output)` or `ToolResult.fail(error, error_type="...")`
 5. Register via `nanobot/tools/setup.py`
 6. The new file goes in `nanobot/tools/builtin/` — never at the `tools/` level
-7. Reference: `ReadFileTool` in `nanobot/tools/builtin/filesystem.py`
+7. **Caching**: Tools default to `cacheable = False` (full content always reaches the agent).
+   Set `cacheable = True` only on data-retrieval tools (`read_file`, `exec`, `web_fetch`,
+   `list_dir`) where a summary is acceptable and re-retrieval via `cache_get_slice` is
+   available. Tools that return content the agent must see in full (instructions, skill
+   content, messages) must keep the default `cacheable = False`.
+8. Reference: `ReadFileTool` in `nanobot/tools/builtin/filesystem.py`
 
 ## Adding a New Skill
 

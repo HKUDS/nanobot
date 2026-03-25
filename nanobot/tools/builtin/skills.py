@@ -18,6 +18,7 @@ class LoadSkillTool(Tool):
     """
 
     readonly = True
+    cacheable = False  # Skill content must be returned in full, never summarized
 
     def __init__(self, skills_loader: SkillsLoader) -> None:
         self._loader = skills_loader

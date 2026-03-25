@@ -63,9 +63,11 @@ class Tool(ABC):
     readonly: bool = False
 
     # Whether results from this tool should be cached and summarised.
-    # Set to False for retrieval tools (cache_get_slice, excel_get_rows, …)
-    # whose purpose is to return raw data from the cache.
-    cacheable: bool = True
+    # Default is False (safe — full content always reaches the agent).
+    # Set to True explicitly on data-retrieval tools (read_file, exec,
+    # web_fetch, list_dir) where a summary is acceptable and re-retrieval
+    # via cache_get_slice is available.
+    cacheable: bool = False
 
     # Whether large results should be *summarised* in the LLM context.
     # When False the full output is shown on the current turn and cached

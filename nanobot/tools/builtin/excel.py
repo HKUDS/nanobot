@@ -692,6 +692,7 @@ class QueryDataTool(Tool):
     """Run a SQL SELECT query over previously loaded spreadsheet data."""
 
     readonly = True
+    cacheable = True
 
     def __init__(self, cache: ToolResultCache) -> None:
         self._cache = cache
@@ -802,6 +803,7 @@ class DescribeDataTool(Tool):
     """Get schema, statistics, and sample rows from loaded spreadsheet data."""
 
     readonly = True
+    cacheable = True
 
     def __init__(self, cache: ToolResultCache) -> None:
         self._cache = cache

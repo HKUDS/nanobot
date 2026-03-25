@@ -70,6 +70,7 @@ class ReadFileTool(Tool):
     """Tool to read file contents."""
 
     readonly = True
+    cacheable = True
 
     def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
         self._workspace = workspace
@@ -212,6 +213,7 @@ class ListDirTool(Tool):
     """Tool to list directory contents."""
 
     readonly = True
+    cacheable = True
 
     def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
         self._workspace = workspace

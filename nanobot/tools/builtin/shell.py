@@ -77,6 +77,7 @@ class ExecTool(Tool):
     """Tool to execute shell commands."""
 
     readonly = False
+    cacheable = True
 
     def __init__(
         self,

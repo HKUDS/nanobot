@@ -454,6 +454,7 @@ class TestRegistryCacheIntegration:
 
         class CountingTool(Tool):
             readonly = True
+            cacheable = True  # opt-in to caching for this test
 
             @property
             def name(self) -> str:
@@ -491,6 +492,7 @@ class TestRegistryCacheIntegration:
 
         class BigTool(Tool):
             readonly = True
+            cacheable = True  # opt-in to caching for this test
 
             @property
             def name(self) -> str:
@@ -524,6 +526,7 @@ class TestRegistryCacheIntegration:
 
         class SmallTool(Tool):
             readonly = True
+            cacheable = True  # opt-in; verifies size threshold (small results skip cache)
 
             @property
             def name(self) -> str:

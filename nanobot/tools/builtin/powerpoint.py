@@ -447,6 +447,7 @@ class AnalyzePptxTool(Tool):
     """Deep multimodal analysis of a PowerPoint deck using LLM."""
 
     readonly = False  # writes analysis JSON + rendered images
+    cacheable = True
 
     def __init__(
         self,

@@ -136,6 +136,7 @@ class WebSearchTool(Tool):
     """Search the web using Brave Search API."""
 
     readonly = True
+    cacheable = True
     name = "web_search"
     description = "Search the web. Returns titles, URLs, and snippets."
     parameters = {
