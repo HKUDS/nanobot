@@ -78,3 +78,12 @@ jobs:
             exit 0
           fi
           pytest tests/test_memory_roundtrip.py -v -m llm --timeout=120
+      - name: Run integration tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "No API key — skipping integration tests"
+            exit 0
+          fi
+          pytest tests/integration/ -v --timeout=120
