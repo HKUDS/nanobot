@@ -201,6 +201,20 @@ class OpenAICompatProvider(LLMProvider):
                 clean["tool_calls"] = normalized
             if "tool_call_id" in clean and clean["tool_call_id"]:
                 clean["tool_call_id"] = map_id(clean["tool_call_id"])
+
+        # Mistral: reasoning_content must be sent back inside content list, not as a separate field
+        if self._spec and self._spec.name == "mistral":
+            for clean in sanitized:
+                rc = clean.pop("reasoning_content", None)
+                if rc and clean.get("role") == "assistant":
+                    content_list: list[dict[str, Any]] = [
+                        {"type": "thinking", "thinking": [{"type": "text", "text": rc}]},
+                    ]
+                    text_content = clean.get("content")
+                    if text_content:
+                        content_list.append({"type": "text", "text": text_content})
+                    clean["content"] = content_list
+
         return sanitized
 
     # ------------------------------------------------------------------
@@ -267,6 +281,21 @@ class OpenAICompatProvider(LLMProvider):
             if isinstance(dumped, dict):
                 return dumped
         return None
+
+    @classmethod
+    def _extract_thinking(cls, raw_content: Any) -> str | None:
+        """Extract reasoning/thinking from Mistral-style list content."""
+        if not isinstance(raw_content, list):
+            return None
+        parts: list[str] = []
+        for block in raw_content:
+            block_map = cls._maybe_mapping(block)
+            if block_map and block_map.get("type") == "thinking":
+                for t in (block_map.get("thinking") or []):
+                    t_map = cls._maybe_mapping(t)
+                    if t_map and t_map.get("text"):
+                        parts.append(t_map["text"])
+        return "".join(parts) or None
 
     @classmethod
     def _extract_text_content(cls, value: Any) -> str | None:
@@ -356,6 +385,10 @@ class OpenAICompatProvider(LLMProvider):
                 if not reasoning_content:
                     reasoning_content = m.get("reasoning_content")
 
+            # Mistral: extract thinking from content list chunks
+            if not reasoning_content:
+                reasoning_content = self._extract_thinking(msg0.get("content"))
+
             parsed_tool_calls = []
             for tc in raw_tool_calls:
                 tc_map = self._maybe_mapping(tc) or {}
@@ -386,7 +419,7 @@ class OpenAICompatProvider(LLMProvider):
 
         choice = response.choices[0]
         msg = choice.message
-        content = msg.content
+        content = self._extract_text_content(msg.content)
         finish_reason = choice.finish_reason
 
         raw_tool_calls: list[Any] = []
@@ -397,7 +430,12 @@ class OpenAICompatProvider(LLMProvider):
                 if ch.finish_reason in ("tool_calls", "stop"):
                     finish_reason = ch.finish_reason
             if not content and m.content:
-                content = m.content
+                content = self._extract_text_content(m.content)
+
+        # Extract thinking from list content (Mistral embeds it inline)
+        reasoning_content_extracted = getattr(msg, "reasoning_content", None)
+        if not reasoning_content_extracted:
+            reasoning_content_extracted = self._extract_thinking(getattr(msg, "content", None))
 
         tool_calls = []
         for tc in raw_tool_calls:
@@ -419,7 +457,7 @@ class OpenAICompatProvider(LLMProvider):
             tool_calls=tool_calls,
             finish_reason=finish_reason or "stop",
             usage=self._extract_usage(response),
-            reasoning_content=getattr(msg, "reasoning_content", None) or None,
+            reasoning_content=reasoning_content_extracted if isinstance(reasoning_content_extracted, str) else None,
         )
 
     @classmethod
@@ -491,7 +529,9 @@ class OpenAICompatProvider(LLMProvider):
                 finish_reason = choice.finish_reason
             delta = choice.delta
             if delta and delta.content:
-                content_parts.append(delta.content)
+                extracted = cls._extract_text_content(delta.content)
+                if extracted:
+                    content_parts.append(extracted)
             for tc in (delta.tool_calls or []) if delta else []:
                 _accum_tc(tc, getattr(tc, "index", 0))
 
@@ -564,9 +604,15 @@ class OpenAICompatProvider(LLMProvider):
             async for chunk in stream:
                 chunks.append(chunk)
                 if on_content_delta and chunk.choices:
-                    text = getattr(chunk.choices[0].delta, "content", None)
-                    if text:
-                        await on_content_delta(text)
+                    delta_content = getattr(chunk.choices[0].delta, "content", None)
+                    if isinstance(delta_content, str) and delta_content:
+                        await on_content_delta(delta_content)
+                    elif isinstance(delta_content, list):
+                        for part in delta_content:
+                            if isinstance(part, dict):
+                                t = part.get("text")
+                                if t:
+                                    await on_content_delta(t)
             return self._parse_chunks(chunks)
         except Exception as e:
             return self._handle_error(e)
