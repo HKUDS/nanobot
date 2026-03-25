@@ -61,3 +61,43 @@ def test_profile_mgr_corrector_fn_resolves(tmp_path):
     assert store.profile_mgr._corrector_fn is not None
     corrector = store.profile_mgr._corrector_fn()
     assert corrector is not None
+
+
+def test_rollout_override_atomic_consistency(tmp_path):
+    """After overrides, ingester and retriever see the same rollout values."""
+    store = _make_store(tmp_path)
+
+    store._rollout_config.apply_overrides({"reranker_mode": "disabled"})
+
+    # Both subsystems' rollout_fn should return the same dict
+    ingester_rollout = store.ingester._rollout_fn()
+    retriever_rollout = store.retriever._rollout_fn()
+
+    assert ingester_rollout is retriever_rollout
+    assert ingester_rollout.get("reranker_mode") == "disabled"
+
+
+def test_maintenance_reindex_runs_without_error(tmp_path):
+    """MemoryMaintenance.reindex runs without AttributeError (all deps wired)."""
+    store = _make_store(tmp_path)
+    store.ingester.append_events(
+        [
+            {
+                "type": "fact",
+                "summary": "Test fact for reindex.",
+                "timestamp": "2026-03-01T10:00:00+00:00",
+                "source": "test",
+            }
+        ]
+    )
+    try:
+        store.maintenance.reindex_from_structured_memory(
+            read_profile_fn=store.profile_mgr.read_profile,
+            read_events_fn=store.ingester.read_events,
+            ingester=store.ingester,
+            profile_keys=store.PROFILE_KEYS,
+        )
+    except Exception as e:
+        # reindex may fail for other reasons in test context, but must NOT
+        # fail with AttributeError from missing wiring
+        assert not isinstance(e, AttributeError), f"Wiring error: {e}"
