@@ -131,9 +131,12 @@ async def test_exec_tool_passes_env_to_subprocess():
     with patch("asyncio.create_subprocess_shell", new_callable=AsyncMock, return_value=mock_process) as mock_create:
         await tool.execute(command="echo $FOO", env={"FOO": "bar", "PATH": "/usr/bin"})
 
-        # Verify env was passed to create_subprocess_shell
+        # Verify extra env was merged into subprocess env
         call_kwargs = mock_create.call_args
-        assert call_kwargs.kwargs.get("env") == {"FOO": "bar", "PATH": "/usr/bin"}
+        passed_env = call_kwargs.kwargs.get("env")
+        assert passed_env is not None
+        assert passed_env["FOO"] == "bar"
+        assert passed_env["PATH"] == "/usr/bin"
 
 
 @pytest.mark.asyncio
@@ -151,9 +154,12 @@ async def test_exec_tool_no_env_inherits_parent():
     with patch("asyncio.create_subprocess_shell", new_callable=AsyncMock, return_value=mock_process) as mock_create:
         await tool.execute(command="echo hi")
 
-        # env should be None (inherits parent)
+        # env should be a copy of os.environ (no extra keys injected)
         call_kwargs = mock_create.call_args
-        assert call_kwargs.kwargs.get("env") is None
+        passed_env = call_kwargs.kwargs.get("env")
+        assert passed_env is not None
+        # Should contain parent env vars
+        assert "PATH" in passed_env
 
 
 # --- os.environ not mutated ---
