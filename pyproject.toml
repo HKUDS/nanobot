@@ -58,7 +58,9 @@ weixin = [
     "qrcode[pil]>=8.0",
     "pycryptodome>=3.20.0",
 ]
-
+wecom-app-svr = [
+    "wecom-app-svr>=0.1.0",
+]
 matrix = [
     "matrix-nio[e2e]>=0.25.2",
     "mistune>=3.0.0,<4.0.0",
@@ -120,3 +122,16 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["nanobot"]
+omit = ["tests/*", "**/tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
