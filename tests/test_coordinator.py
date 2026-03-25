@@ -508,22 +508,9 @@ class TestIntegrationRoutedFlow:
         # Manually trigger the coordinator lazy init
         await loop._connect_mcp()
 
-        # Process one message directly through the coordinator path
+        # Process one message — routing is now handled inside _process_message
         msg = await asyncio.wait_for(bus.consume_inbound(), timeout=1.0)
-        # Manually init coordinator the same way run() does
-        registry = build_default_registry(routing.default_role)
-        loop._coordinator = Coordinator(
-            provider=provider,
-            registry=registry,
-            classifier_model=routing.classifier_model,
-            default_role=routing.default_role,
-        )
-
-        role = await loop._coordinator.route(msg.content)
-        ctx = loop._role_manager.apply(role)
-        assert loop.role_name == "code"
         response = await loop._process_message(msg)
-        loop._role_manager.reset(ctx)
 
         assert response is not None
         assert "function" in response.content.lower() or "foo" in response.content.lower()
