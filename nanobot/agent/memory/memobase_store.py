@@ -28,8 +28,22 @@ Reference: https://github.com/memodb-io/memobase
 from __future__ import annotations
 
 import asyncio
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+# Stable namespace for deterministic UUID generation from logical user IDs.
+_UUID_NS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")  # URL namespace
+
+
+def _to_uuid(user_id: str) -> str:
+    """Convert an arbitrary user_id string to a deterministic UUID v5.
+
+    Memobase requires UUID-format user IDs.  ``uuid5`` is deterministic:
+    the same ``user_id`` string always produces the same UUID, so no
+    external mapping table is needed.
+    """
+    return str(uuid.uuid5(_UUID_NS, user_id))
 
 from loguru import logger
 
@@ -113,10 +127,33 @@ class MemobaseMemoryStore(BaseMemoryStore):
     # ── internal ─────────────────────────────────────────────────────────────
 
     async def _get_user(self, user_id: str) -> Any:
-        """Get or create a Memobase user handle for *user_id*."""
-        if user_id not in self._users:
-            self._users[user_id] = await self._client.get_or_create_user(user_id)
-        return self._users[user_id]
+        """Get or create a Memobase user handle for *user_id*.
+
+        Memobase requires UUID-format IDs.  We convert the logical ``user_id``
+        to a deterministic UUID v5, then call ``get_or_create_user``.
+
+        The SDK's ``get_or_create_user`` catches ``ServerError`` (404), but the
+        local Memobase server raises ``httpx.HTTPStatusError`` (422) for
+        unknown UUIDs, so we fall back to explicit ``add_user`` + ``get_user``
+        when needed.
+        """
+        if user_id in self._users:
+            return self._users[user_id]
+
+        memobase_id = _to_uuid(user_id)
+        try:
+            user = await self._client.get_or_create_user(memobase_id)
+        except Exception:
+            # get_or_create_user may not catch httpx.HTTPStatusError on local
+            # deployments — explicitly create the user and retrieve the handle.
+            try:
+                await self._client.add_user(data={"nanobot_user_id": user_id}, id=memobase_id)
+            except Exception:
+                pass  # already exists or creation failed — proceed to get_user
+            user = await self._client.get_user(memobase_id)
+
+        self._users[user_id] = user
+        return user
 
     # ── CRUD ─────────────────────────────────────────────────────────────────
 
@@ -174,7 +211,7 @@ class MemobaseMemoryStore(BaseMemoryStore):
         try:
             u = await self._get_user(user_id)
             events = await u.search_event(query=query, topk=limit)
-            return [
+            search_result=[
                 {
                     "id": str(getattr(e, "event_id", getattr(e, "id", ""))),
                     "memory": getattr(e, "event_tip", getattr(e, "event_data", str(e))),
@@ -182,6 +219,8 @@ class MemobaseMemoryStore(BaseMemoryStore):
                 }
                 for e in events
             ]
+            logger.info("MemobaseMemoryStore search result={}".format(search_result))
+            return search_result
         except Exception:
             logger.exception("Memobase search failed for user={}", user_id)
             return []
@@ -316,12 +355,11 @@ if __name__ == "__main__":
 
     async def _main():
         await _store.add(_messages, user_id="test_user", sync=True)
-        ctx = await _store._get_context("test_user", 500)
-        print("=== Memobase Context ===")
-        print(ctx)
         all_profiles = await _store.get_all(user_id="test_user")
+        logger.info(all_profiles)
         print("\n=== Profile Entries ===")
         for p in all_profiles:
             print(f"  [{p.get('topic','')}/{p.get('sub_topic','')}] {p.get('content','')}")
+        await _store.search(query="王芳的职业", user_id="test_user", sync=True)
 
     asyncio.run(_main())
