@@ -27,7 +27,9 @@ class MissionStartTool(Tool):
         self._origin_chat_id = "direct"
         self.readonly = False
 
-    def set_context(self, channel: str, chat_id: str) -> None:
+    def set_context(
+        self, channel: str = "", chat_id: str = "", message_id: str | None = None, **kwargs: Any
+    ) -> None:
         """Set the origin context so mission results reach the correct channel."""
         self._origin_channel = channel
         self._origin_chat_id = chat_id

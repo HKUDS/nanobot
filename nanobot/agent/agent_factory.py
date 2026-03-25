@@ -57,6 +57,16 @@ class _ToolBuildResult:
     delegation_tools: dict
 
 
+def _mcp_connector_fn() -> Any:
+    """Return the ``connect_mcp_servers`` function, or *None* if MCP is unavailable."""
+    try:
+        from nanobot.tools.builtin.mcp import connect_mcp_servers
+
+        return connect_mcp_servers
+    except ImportError:
+        return None
+
+
 def _build_rollout_overrides(config: AgentConfig) -> dict:
     """Extract memory rollout overrides from ``AgentConfig``."""
     return {
@@ -215,6 +225,7 @@ def _wire_memory(
                 f"Fallback archive ({len(lines)} messages)"
             )
             text = header + "\n" + "\n".join(lines) + "\n\n"
+            assert context.memory is not None  # always injected by build_agent
             if context.memory.db is not None:
                 context.memory.db.append_history(text)
             else:
@@ -222,6 +233,7 @@ def _wire_memory(
                 with open(context.memory.history_file, "a", encoding="utf-8") as f:
                     f.write(text)
 
+    assert context.memory is not None  # always injected by build_agent
     return ConsolidationOrchestrator(
         memory=context.memory,
         archive_fn=_archive,
@@ -325,6 +337,8 @@ def build_agent(
     consolidator = _wire_memory(context=context, config=config)
 
     # 8. Construct DelegationDispatcher (tools wired at construction)
+    from nanobot.tools.builtin.delegate import DelegateTool
+
     dispatcher = DelegationDispatcher(
         config=DelegationConfig(
             workspace=config.workspace_path,
@@ -341,6 +355,7 @@ def build_agent(
         tools=_tool_build.tools,
         max_delegation_depth=config.max_delegation_depth,
         delegation_tools=_tool_build.delegation_tools,
+        delegate_tool_factory=DelegateTool,
     )
 
     # 8.5 Construct Coordinator (if routing is enabled)
@@ -404,12 +419,14 @@ def build_agent(
 
     # 12.5 Construct TurnContextManager
     from nanobot.agent.turn_context import TurnContextManager
+    from nanobot.coordination.scratchpad import Scratchpad
 
     turn_context = TurnContextManager(
         tools=_tool_build.tools,
         dispatcher=dispatcher,
         missions=_tool_build.missions,
         context=context,
+        scratchpad_factory=Scratchpad,
     )
 
     # 13. Construct _ProcessorServices and MessageProcessor
@@ -454,6 +471,7 @@ def build_agent(
         exec_config=resolved_exec_config,
         cron_service=cron_service,
         memory_rollout_overrides=memory_rollout_overrides,
+        mcp_connector=_mcp_connector_fn(),
     )
     _subs = _Subsystems(
         memory=memory,

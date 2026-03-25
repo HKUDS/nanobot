@@ -49,7 +49,9 @@ class CronTool(Tool):
         self._channel = ""
         self._chat_id = ""
 
-    def set_context(self, channel: str, chat_id: str) -> None:
+    def set_context(
+        self, channel: str = "", chat_id: str = "", message_id: str | None = None, **kwargs: Any
+    ) -> None:
         """Set the current session context for delivery."""
         self._channel = channel
         self._chat_id = chat_id

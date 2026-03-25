@@ -117,7 +117,7 @@ async def test_sent_in_turn_set_on_success() -> None:
         return DeliveryResult(success=True, channel=msg.channel, chat_id=msg.chat_id)
 
     tool = _tool(_deliver)
-    tool.start_turn()
+    tool.on_turn_start()
     assert not tool._sent_in_turn
     await tool.execute(content="hello")
     assert tool._sent_in_turn
@@ -128,7 +128,7 @@ async def test_sent_in_turn_not_set_on_failure() -> None:
         return DeliveryResult(success=False, channel=msg.channel, chat_id=msg.chat_id, error="fail")
 
     tool = _tool(_deliver)
-    tool.start_turn()
+    tool.on_turn_start()
     await tool.execute(content="hello")
     assert not tool._sent_in_turn
 
@@ -154,7 +154,7 @@ async def test_message_tool_paths() -> None:
         sent.append(msg)
 
     tool.set_send_callback(_send)
-    tool.start_turn()
+    tool.on_turn_start()
     ok = await tool.execute(content="hello", media=["a.png"])
     assert ok.success
     assert "attachments" in ok.output

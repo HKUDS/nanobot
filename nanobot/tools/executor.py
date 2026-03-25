@@ -63,6 +63,10 @@ class ToolExecutor:
         """Replace the current tool set with a previously captured snapshot."""
         self._registry.restore(snap)
 
+    def all_tools(self) -> list[Tool]:
+        """Return all registered tool instances."""
+        return list(self._registry.get_all().values())
+
     def get_definitions(self) -> list[dict[str, Any]]:
         return self._registry.get_definitions()
 

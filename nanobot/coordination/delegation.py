@@ -30,6 +30,7 @@ from nanobot.agent.callbacks import (
     DelegateStartEvent,
     ProgressCallback,
 )
+from nanobot.agent.failure import _CycleError
 from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
 from nanobot.context.prompt_loader import prompts
 from nanobot.coordination.delegation_contract import (
@@ -41,12 +42,7 @@ from nanobot.errors import NanobotError
 from nanobot.metrics import delegation_latency_seconds, delegation_total
 from nanobot.observability.langfuse import span as langfuse_span
 from nanobot.observability.tracing import sanitize_for_trace
-from nanobot.tools.builtin.delegate import (
-    DelegateParallelTool,
-    DelegateTool,
-    DelegationResult,
-    _CycleError,
-)
+from nanobot.tools.builtin.delegate import DelegationResult
 from nanobot.tools.registry import ToolRegistry
 from nanobot.tools.tool_loop import run_tool_loop
 
@@ -113,6 +109,7 @@ class DelegationDispatcher:
         on_progress: ProgressCallback | None = None,
         max_delegation_depth: int = 8,
         delegation_tools: dict[str, Tool] | None = None,
+        delegate_tool_factory: Callable[[], Any] | None = None,
     ) -> None:
         """Initialise the delegation dispatcher.
 
@@ -182,6 +179,10 @@ class DelegationDispatcher:
         # Injected by the composition root via build_delegation_tools().
         self._cached_tools: dict[str, Tool] = delegation_tools or {}
 
+        # Factory for constructing DelegateTool instances for child re-delegation.
+        # Injected by the composition root to avoid cross-package instantiation.
+        self._delegate_tool_factory = delegate_tool_factory
+
     def set_trace_path(self, path: Path) -> None:
         """Set the file path for routing trace persistence."""
         self._trace_path = path
@@ -206,9 +207,9 @@ class DelegationDispatcher:
             return
         for name in ("delegate", "delegate_parallel"):
             tool = self.tools.get(name)
-            if isinstance(tool, DelegateTool | DelegateParallelTool):
+            if tool is not None and hasattr(tool, "set_dispatch"):
                 tool.set_dispatch(self.dispatch)
-                if available_roles_fn is not None:
+                if available_roles_fn is not None and hasattr(tool, "set_available_roles_fn"):
                     tool.set_available_roles_fn(available_roles_fn)
 
     # ------------------------------------------------------------------
@@ -447,11 +448,12 @@ class DelegationDispatcher:
             if _grant(_t.name):
                 tools.register(_t)
 
-        # Re-delegation — privileged
-        child_delegate = DelegateTool()
-        child_delegate.set_dispatch(self.dispatch)
-        if _grant(child_delegate.name):
-            tools.register(child_delegate)
+        # Re-delegation — privileged; factory injected from composition root
+        if self._delegate_tool_factory:
+            child_delegate = self._delegate_tool_factory()
+            child_delegate.set_dispatch(self.dispatch)
+            if _grant(child_delegate.name):
+                tools.register(child_delegate)
 
         # MCP tools (shared instances, injected by AgentLoop)
         for tool in self.mcp_tools:

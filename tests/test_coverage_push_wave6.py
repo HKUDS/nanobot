@@ -163,7 +163,7 @@ async def test_loop_connect_mcp_and_tool_parallel_error_path(
     async def _failing_connect(*_args, **_kwargs):
         raise RuntimeError("mcp boom")
 
-    monkeypatch.setattr("nanobot.tools.builtin.mcp.connect_mcp_servers", _failing_connect)
+    loop._mcp_connector = _failing_connect
     await loop._connect_mcp()
     assert loop._mcp_connected is False
 
