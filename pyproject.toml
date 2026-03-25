@@ -126,6 +126,7 @@ markers = [
     "golden: golden regression tests (frozen behavior baselines)",
     "contract: contract tests for core abstractions",
     "llm: tests requiring a real LLM API key (skipped when unavailable)",
+    "integration: integration tests (cross-subsystem, require LLM API key)",
 ]
 
 [tool.mypy]

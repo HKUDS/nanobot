@@ -1,4 +1,4 @@
-.PHONY: install install-all test test-verbose test-cov lint format typecheck check ci pre-push import-check structure-check prompt-check coverage-check memory-eval live-eval clean worktree-clean pre-commit-install
+.PHONY: install install-all test test-verbose test-cov test-integration lint format typecheck check ci pre-push import-check structure-check prompt-check coverage-check memory-eval live-eval clean worktree-clean pre-commit-install
 
 PYTHON ?= $(shell python3 --version >/dev/null 2>&1 && echo python3 || echo python)
 
@@ -17,6 +17,9 @@ test-verbose:
 
 test-cov:
 	$(PYTHON) -m pytest tests/ --cov=nanobot --cov-report=term-missing --cov-report=json --cov-fail-under=85
+
+test-integration:  ## Run integration tests only (requires LLM API key)
+	$(PYTHON) -m pytest tests/integration/ -v --tb=short -x --timeout=120
 
 lint:
 	ruff check nanobot/ tests/
