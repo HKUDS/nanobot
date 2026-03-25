@@ -9,17 +9,17 @@ install-all:
 	$(PYTHON) -m pip install -e ".[dev,oauth]"
 	cd bridge && npm install
 
-test:
-	$(PYTHON) -m pytest tests/ -x -q
+test:  ## Fast unit tests only (every edit)
+	$(PYTHON) -m pytest tests/ --ignore=tests/integration -x -q
 
 test-verbose:
-	$(PYTHON) -m pytest tests/ -v
+	$(PYTHON) -m pytest tests/ --ignore=tests/integration -v
 
 test-cov:
-	$(PYTHON) -m pytest tests/ --cov=nanobot --cov-report=term-missing --cov-report=json --cov-fail-under=85
+	$(PYTHON) -m pytest tests/ --ignore=tests/integration --cov=nanobot --cov-report=term-missing --cov-report=json --cov-fail-under=85
 
-test-integration:  ## Run integration tests only (requires LLM API key)
-	$(PYTHON) -m pytest tests/integration/ -v --tb=short -x --timeout=120
+test-integration:  ## Integration tests (before push, LLM tests need API key)
+	$(PYTHON) -m pytest tests/integration/ -v --tb=short -x
 
 lint:
 	ruff check nanobot/ tests/
@@ -32,9 +32,9 @@ format:
 typecheck:
 	$(PYTHON) -m mypy nanobot/
 
-check: lint typecheck import-check structure-check prompt-check test
+check: lint typecheck import-check structure-check prompt-check test test-integration
 
-ci: lint typecheck import-check structure-check prompt-check test-cov coverage-check
+ci: lint typecheck import-check structure-check prompt-check test-cov coverage-check test-integration
 
 pre-push: ## Full CI validation + merge-readiness check (run before pushing PRs)
 	@echo "=== Syncing with origin/main ==="

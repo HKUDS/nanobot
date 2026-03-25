@@ -154,7 +154,17 @@ adding "just one more method."
 - **Framework**: pytest + pytest-asyncio (auto mode)
 - **Mock LLM**: `ScriptedProvider` in `tests/test_agent_loop.py` for deterministic tests
 - **Coverage**: `@pytest.mark.parametrize` for variant coverage
-- **Commands**: `make test` (fast), `make test-cov` (with coverage report)
+
+### Test Tiers
+
+| Tier | Command | What runs | When to run |
+|------|---------|-----------|-------------|
+| **Unit** | `make test` | `tests/` excluding `tests/integration/` — fast, deterministic, no external deps | After every edit |
+| **Integration** | `make test-integration` | `tests/integration/` — real subsystems wired together, LLM tests skip without API key | Before push |
+| **Full** | `make check` | Unit + integration + lint + typecheck + boundary checks | Before commit |
+
+`make test` must stay fast (< 30s). Integration tests may do real I/O and are excluded
+from the fast loop. `make check` runs both tiers — never commit without it passing.
 
 ## Memory System Architecture
 
@@ -203,14 +213,15 @@ The memory subsystem (`nanobot/memory/`) uses a **unified SQLite storage** strat
 ```bash
 make install        # Install dev dependencies
 make install-all    # Install with optional extras (reranker, oauth) + npm bridge
-make test           # Run tests (stop on first failure)
-make test-verbose   # Run tests with verbose output
-make test-cov       # Run tests with coverage report (85% gate)
+make test           # Fast unit tests only (excludes integration)
+make test-verbose   # Unit tests with verbose output
+make test-cov       # Unit tests with coverage report (85% gate)
+make test-integration # Integration tests (LLM tests skip without API key)
 make lint           # Ruff lint + format check
 make format         # Auto-format with ruff
 make typecheck      # mypy type checker
-make check          # Full validation: lint + typecheck + import-check + structure-check + prompt-check + test
-make ci             # CI pipeline: lint + typecheck + import-check + structure-check + prompt-check + test-cov
+make check          # Full validation: lint + typecheck + import-check + structure-check + prompt-check + test + integration
+make ci             # CI pipeline: lint + typecheck + import-check + structure-check + prompt-check + test-cov + integration
 make pre-push       # CI + merge-readiness check (run before pushing PRs)
 make import-check   # Check module boundary violations
 make structure-check # Check structural rules (file size, crash-barriers, __all__, catch-all filenames)

@@ -86,4 +86,4 @@ jobs:
             echo "No API key — skipping integration tests"
             exit 0
           fi
-          pytest tests/integration/ -v --timeout=120
+          pytest tests/integration/ -v
