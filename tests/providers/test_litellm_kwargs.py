@@ -30,7 +30,7 @@ def _fake_chat_response(content: str = "ok") -> SimpleNamespace:
 
 
 def _fake_tool_call_response() -> SimpleNamespace:
-    """Build a minimal chat response that includes Gemini-style provider fields."""
+    """Build a minimal chat response that includes Gemini-style extra_content."""
     function = SimpleNamespace(
         name="exec",
         arguments='{"cmd":"ls"}',
@@ -39,6 +39,7 @@ def _fake_tool_call_response() -> SimpleNamespace:
     tool_call = SimpleNamespace(
         id="call_123",
         index=0,
+        type="function",
         function=function,
         extra_content={"google": {"thought_signature": "signed-token"}},
     )
@@ -134,8 +135,8 @@ async def test_standard_provider_passes_model_through() -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_compat_preserves_provider_specific_fields_on_tool_calls() -> None:
-    """Gemini thought signatures must survive parsing so they can be sent back."""
+async def test_openai_compat_preserves_extra_content_on_tool_calls() -> None:
+    """Gemini extra_content (thought signatures) must survive parse→serialize round-trip."""
     mock_create = AsyncMock(return_value=_fake_tool_call_response())
     spec = find_by_name("gemini")
 
@@ -156,7 +157,7 @@ async def test_openai_compat_preserves_provider_specific_fields_on_tool_calls() 
 
     assert len(result.tool_calls) == 1
     tool_call = result.tool_calls[0]
-    assert tool_call.provider_specific_fields == {"thought_signature": "signed-token"}
+    assert tool_call.extra_content == {"google": {"thought_signature": "signed-token"}}
     assert tool_call.function_provider_specific_fields == {"inner": "value"}
 
     serialized = tool_call.to_openai_tool_call()
