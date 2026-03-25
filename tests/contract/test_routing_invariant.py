@@ -226,3 +226,150 @@ async def test_router_low_confidence_uses_default_role():
     decision = await router.route("hello", "web")
     assert decision is not None
     assert decision.role.name == "general"
+
+
+# ---------------------------------------------------------------------------
+# Integration-level: routing fires through MessageProcessor
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_process_direct_calls_router_when_available():
+    """process_direct() must trigger router.route() when a router is wired."""
+    from pathlib import Path
+    from unittest.mock import AsyncMock, MagicMock
+
+    from nanobot.agent.agent_components import _ProcessorServices
+    from nanobot.agent.message_processor import MessageProcessor
+    from nanobot.config.schema import AgentConfig
+    from nanobot.coordination.router import MessageRouter
+    from nanobot.providers.base import LLMResponse
+    from tests.helpers import ScriptedProvider
+
+    # Router returns None → no role-switch, but route() must still be called.
+    mock_router = MagicMock(spec=MessageRouter)
+    mock_router.route = AsyncMock(return_value=None)
+
+    provider = ScriptedProvider([LLMResponse(content="ok")])
+
+    # Minimal session stub — needs a real list for session.messages.
+    mock_session = MagicMock()
+    mock_session.messages = []
+    mock_session.last_consolidated = 0
+    mock_session.get_history = MagicMock(return_value=[])
+    mock_session.updated_at = None
+
+    # Turn result stub — _run_orchestrator reads .content/.tools_used/.messages.
+    mock_turn_result = MagicMock()
+    mock_turn_result.content = "ok"
+    mock_turn_result.tools_used = []
+    mock_turn_result.messages = []
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.run = AsyncMock(return_value=mock_turn_result)
+
+    mock_bus = MagicMock()
+    mock_bus.publish_outbound = AsyncMock(return_value=None)
+
+    mock_tools = MagicMock()
+    mock_tools.get = MagicMock(return_value=None)
+    mock_tools.get_definitions = MagicMock(return_value=[])
+
+    mock_context = MagicMock()
+    mock_context.memory = MagicMock()  # must be non-None (asserted in processor)
+    mock_context.skills = MagicMock()
+    mock_context.skills.detect_relevant_skills = MagicMock(return_value=[])
+    mock_context.build_messages = AsyncMock(return_value=[])
+    mock_context.add_assistant_message = MagicMock(return_value=[])
+
+    mock_sessions = MagicMock()
+    mock_sessions.get_or_create = MagicMock(return_value=mock_session)
+    mock_sessions.save = MagicMock()
+
+    mock_verifier = MagicMock()
+    mock_verifier.should_force_verification = MagicMock(return_value=False)
+    mock_verifier.attempt_recovery = AsyncMock(return_value=None)
+
+    mock_turn_context = MagicMock()
+    mock_turn_context.set_tool_context = MagicMock()
+    mock_turn_context.ensure_scratchpad = MagicMock()
+
+    services = MagicMock(spec=_ProcessorServices)
+    services.orchestrator = mock_orchestrator
+    services.dispatcher = MagicMock()
+    services.missions = MagicMock()
+    services.context = mock_context
+    services.sessions = mock_sessions
+    services.tools = mock_tools
+    services.consolidator = MagicMock()
+    services.verifier = mock_verifier
+    services.bus = mock_bus
+    services.turn_context = mock_turn_context
+    services.span_module = None
+
+    config = MagicMock(spec=AgentConfig)
+    config.memory_window = 10
+    config.memory_enabled = False
+    config.streaming_enabled = False
+    config.tool_result_max_chars = 2000
+
+    processor = MessageProcessor(
+        services=services,
+        config=config,
+        workspace=Path("/tmp/test"),
+        role_name="general",
+        provider=provider,
+        model="test-model",
+        router=mock_router,
+    )
+
+    await processor.process_direct("test message")
+
+    # The router must have been called with the message content and channel.
+    mock_router.route.assert_called_once()
+    call_args = mock_router.route.call_args
+    assert call_args[0][0] == "test message"  # content positional arg
+    assert call_args[0][1] == "cli"  # channel positional arg
+
+
+@pytest.mark.asyncio
+async def test_unknown_forced_role_returns_error_message():
+    """process_direct(forced_role='bad') must return error, not silently use defaults."""
+    from pathlib import Path
+    from unittest.mock import AsyncMock, MagicMock
+
+    from nanobot.agent.agent_components import _ProcessorServices
+    from nanobot.agent.message_processor import MessageProcessor
+    from nanobot.config.schema import AgentConfig
+    from nanobot.coordination.router import MessageRouter, UnknownRoleError
+    from nanobot.providers.base import LLMResponse
+    from tests.helpers import ScriptedProvider
+
+    # Router raises UnknownRoleError — processor must return the error string.
+    mock_router = MagicMock(spec=MessageRouter)
+    mock_router.route = AsyncMock(side_effect=UnknownRoleError("bad"))
+
+    provider = ScriptedProvider([LLMResponse(content="ok")])
+
+    # UnknownRoleError is caught before any services are touched,
+    # so only a minimal services stub is required.
+    services = MagicMock(spec=_ProcessorServices)
+    services.span_module = None
+
+    config = MagicMock(spec=AgentConfig)
+    config.memory_window = 10
+    config.memory_enabled = False
+
+    processor = MessageProcessor(
+        services=services,
+        config=config,
+        workspace=Path("/tmp/test"),
+        role_name="general",
+        provider=provider,
+        model="test-model",
+        router=mock_router,
+    )
+
+    result = await processor.process_direct("hello", forced_role="bad")
+
+    assert "Unknown role: bad" in result
