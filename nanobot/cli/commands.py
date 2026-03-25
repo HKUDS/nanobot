@@ -431,7 +431,7 @@ def _make_provider(config: Config, agent_cfg: AgentDefaults | None = None):
 
         provider = AnthropicProvider(
             api_key=p.api_key if p else None,
-            api_base=config.get_api_base(model),
+            api_base=p.api_base if p else None,
             default_model=model,
             extra_headers=p.extra_headers if p else None,
         )
@@ -440,7 +440,7 @@ def _make_provider(config: Config, agent_cfg: AgentDefaults | None = None):
 
         provider = OpenAICompatProvider(
             api_key=p.api_key if p else None,
-            api_base=config.get_api_base(model),
+            api_base=p.api_base if p else None,
             default_model=model,
             extra_headers=p.extra_headers if p else None,
             spec=spec,
