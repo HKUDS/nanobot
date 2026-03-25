@@ -388,8 +388,8 @@ class AgentLoop:
         if final_content is None and iteration >= self.max_iterations:
             logger.warning("Max iterations ({}) reached", self.max_iterations)
             final_content = (
-                f"I reached the maximum number of tool call iterations ({self.max_iterations}) "
-                "without completing the task. You can try breaking the task into smaller steps."
+                f"I used all {self.max_iterations} tool iterations for this response and couldn't finish yet. "
+                "Please send a follow-up message so I can continue — each new message resets my iteration counter."
             )
 
         return final_content, tools_used, messages
@@ -549,9 +549,22 @@ class AgentLoop:
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
+            sys_content = msg.content
+            prev_hit_cap = any(
+                m.get("role") == "assistant"
+                and isinstance(m.get("content"), str)
+                and "tool iterations for this response" in m["content"]
+                for m in history[-3:]
+            )
+            if prev_hit_cap:
+                sys_content = (
+                    "[System note: your tool-call iteration counter has been reset. "
+                    f"You have {self.max_iterations} fresh iterations available.]\n\n"
+                    + sys_content
+                )
             messages = self.context.build_messages(
                 history=history,
-                current_message=msg.content, channel=channel, chat_id=chat_id,
+                current_message=sys_content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
             )
             save_offset = [1 + len(history)]
@@ -595,9 +608,28 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=0)
+
+        # If the previous turn hit the iteration cap the LLM may "remember"
+        # the exhaustion message and refuse to call tools.  Inject a one-shot
+        # system note so it knows the counter is fresh.
+        prev_hit_cap = any(
+            m.get("role") == "assistant"
+            and isinstance(m.get("content"), str)
+            and "tool iterations for this response" in m["content"]
+            for m in history[-3:]
+        )
+
+        current_message = msg.content
+        if prev_hit_cap:
+            current_message = (
+                "[System note: your tool-call iteration counter has been reset. "
+                f"You have {self.max_iterations} fresh iterations available for this message. "
+                "Continue the task where you left off.]\n\n" + current_message
+            )
+
         initial_messages = self.context.build_messages(
             history=history,
-            current_message=msg.content,
+            current_message=current_message,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
         )
