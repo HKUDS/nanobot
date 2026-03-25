@@ -56,8 +56,10 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
         content=build_status_content(
-            version=__version__, model=loop.model,
-            start_time=loop._start_time, last_usage=loop._last_usage,
+            version=__version__,
+            model=loop.model,
+            start_time=loop._start_time,
+            last_usage=loop._last_usage,
             context_window_tokens=loop.context_window_tokens,
             session_msg_count=len(session.get_history(max_messages=0)),
             context_tokens_estimate=ctx_est,
@@ -70,16 +72,65 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     """Start a fresh session."""
     loop = ctx.loop
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
-    snapshot = session.messages[session.last_consolidated:]
+    snapshot = session.messages[session.last_consolidated :]
     session.clear()
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
     if snapshot:
         loop._schedule_background(loop.memory_consolidator.archive_messages(snapshot))
     return OutboundMessage(
-        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
         content="New session started.",
     )
+
+
+async def cmd_skill_list(ctx: CommandContext) -> OutboundMessage:
+    """List all available skills."""
+    loader = ctx.loop.context.skills
+    skills = loader.list_skills(filter_unavailable=False)
+    if not skills:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="No skills found.",
+        )
+    lines = ["Available skills:"]
+    for s in skills:
+        desc = loader._get_skill_description(s["name"])
+        available = loader._check_requirements(loader._get_skill_meta(s["name"]))
+        mark = "✓" if available else "✗"
+        lines.append(f"  {mark} {s['name']} — {desc}")
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content="\n".join(lines),
+        metadata={"render_as": "text"},
+    )
+
+
+async def cmd_skill_activate(ctx: CommandContext) -> OutboundMessage | None:
+    """Activate a skill by injecting its content into the user message."""
+    loader = ctx.loop.context.skills
+    parts = ctx.args.strip().split(None, 1)
+    name = parts[0] if parts else ""
+    message = parts[1] if len(parts) > 1 else ""
+
+    if not name:
+        return await cmd_skill_list(ctx)
+
+    content = loader.load_skill(name)
+    if content is None:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=f"Skill '{name}' not found. Use /skills to see available skills.",
+        )
+
+    stripped = loader._strip_frontmatter(content)
+    injected = f'<activated-skill name="{name}">\n{stripped}\n</activated-skill>'
+    ctx.msg.content = f"{injected}\n\n{message}" if message else injected
+    return None  # fall through to LLM
 
 
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
@@ -90,6 +141,8 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
         "/stop — Stop the current task",
         "/restart — Restart the bot",
         "/status — Show bot status",
+        "/skill <name> [message] — Activate a skill for this message",
+        "/skills — List available skills",
         "/help — Show available commands",
     ]
     return OutboundMessage(
@@ -108,3 +161,6 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/new", cmd_new)
     router.exact("/status", cmd_status)
     router.exact("/help", cmd_help)
+    router.exact("/skill", cmd_skill_list)
+    router.exact("/skills", cmd_skill_list)
+    router.prefix("/skill ", cmd_skill_activate)
