@@ -250,7 +250,7 @@ def onboard() -> None:
     """Initialize nanobot configuration and workspace."""
     from nanobot.config.loader import get_config_path, load_config, save_config
     from nanobot.config.schema import Config
-    from nanobot.utils.helpers import get_workspace_path
+    from nanobot.utils.paths import get_workspace_path
 
     config_path = get_config_path()
 

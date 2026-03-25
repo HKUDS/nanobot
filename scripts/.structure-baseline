@@ -16,6 +16,3 @@ nanobot/memory/write/conflicts.py: 526 LOC (limit 500, add '# size-exception: <r
 nanobot/memory/write/ingester.py: 832 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/tools/builtin/excel.py: 953 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/tools/builtin/powerpoint.py: 559 LOC (limit 500, add '# size-exception: <reason>')
-
-# --- Catch-all filename ---
-nanobot/utils/helpers.py: prohibited catch-all filename

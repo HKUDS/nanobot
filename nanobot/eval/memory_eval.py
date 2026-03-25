@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from nanobot.memory._text import _safe_float, _utc_now_iso
-from nanobot.utils.helpers import ensure_dir
+from nanobot.utils.paths import ensure_dir
 
 if TYPE_CHECKING:
     from nanobot.memory.unified_db import UnifiedMemoryDB

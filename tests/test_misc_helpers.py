@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import nanobot.skills
-from nanobot.utils.helpers import (
+from nanobot.utils.paths import (
     ensure_dir,
     get_data_path,
     get_sessions_path,

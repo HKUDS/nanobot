@@ -64,7 +64,7 @@ class TurnContextManager:
 
     def ensure_scratchpad(self, session_key: str, workspace: Path) -> None:
         """Create or retrieve per-session scratchpad and update tools."""
-        from nanobot.utils.helpers import safe_filename
+        from nanobot.utils.paths import safe_filename
 
         safe_key = safe_filename(session_key.replace(":", "_"))
         session_dir = workspace / "sessions" / safe_key

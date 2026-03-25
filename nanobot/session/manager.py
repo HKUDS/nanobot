@@ -12,7 +12,7 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.utils.helpers import ensure_dir, safe_filename
+from nanobot.utils.paths import ensure_dir, safe_filename
 
 _TOOL_ID_MAX = 40
 

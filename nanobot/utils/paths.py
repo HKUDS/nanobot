@@ -1,4 +1,4 @@
-"""Utility functions for nanobot."""
+"""Path and string utility functions for nanobot."""
 
 from __future__ import annotations
 
