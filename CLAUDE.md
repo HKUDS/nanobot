@@ -419,6 +419,12 @@ would have been caught by reviewing extraction boundaries against actual call pa
    imports first.
 5. **Verify Protocol surface area** — if extraction requires a new Protocol interface,
    define it and verify that the concrete implementation satisfies it *before* moving files.
+6. **Check role-switched field propagation** — if the extracted component receives
+   `model`, `temperature`, `max_iterations`, or `role_name` at construction time,
+   verify that per-turn overrides from role switching reach the component. Add an
+   integration test (see `tests/contract/test_role_propagation.py`) that wires real
+   components via `build_agent()`, applies a role, runs a turn, and asserts the
+   provider received the role's values.
 
 ### After completing changes
 
@@ -465,6 +471,10 @@ These are not suggestions — they are errors. Fix immediately if detected.
 - Post-construction wiring that reaches into private attributes of another subsystem
 - Re-export chains (A re-exports from B re-exports from C) — flatten to direct imports
 - Concrete class imports across package boundaries where a Protocol should be used
+- Construction-time caching of role-switched fields (`model`, `temperature`,
+  `max_iterations`, `role_name`) in extracted components without a per-turn
+  override mechanism — components must accept per-turn values via `TurnState`
+  or method parameters; construction-time values serve only as fallback defaults
 
 **Growth violations:**
 - Adding a file to a package at its file-count limit without extracting first
