@@ -200,6 +200,54 @@ def test_classify_failure_parametrized(
     )
 
 
+# ---------------------------------------------------------------------------
+# Repeated-success detection
+# ---------------------------------------------------------------------------
+
+
+def test_record_success_returns_count() -> None:
+    """record_success() returns the repeated-success count."""
+    tracker = ToolCallTracker()
+    assert tracker.record_success("message", {"content": "hello"}) == 1
+    assert tracker.record_success("message", {"content": "hello"}) == 2
+    assert tracker.record_success("message", {"content": "hello"}) == 3
+
+
+def test_repeated_success_different_args_tracked_separately() -> None:
+    """Different args produce independent success counters."""
+    tracker = ToolCallTracker()
+    tracker.record_success("message", {"content": "hello"})
+    tracker.record_success("message", {"content": "hello"})
+    count = tracker.record_success("message", {"content": "world"})
+    assert count == 1  # different args, fresh counter
+
+
+def test_repeated_success_threshold() -> None:
+    """After REPEAT_SUCCESS_THRESHOLD identical successes, the tool should be flagged."""
+    tracker = ToolCallTracker()
+    for _ in range(ToolCallTracker.REPEAT_SUCCESS_THRESHOLD - 1):
+        count = tracker.record_success("message", {"content": "hello"})
+    assert count < ToolCallTracker.REPEAT_SUCCESS_THRESHOLD
+    count = tracker.record_success("message", {"content": "hello"})
+    assert count >= ToolCallTracker.REPEAT_SUCCESS_THRESHOLD
+
+
+def test_failure_after_success_resets_success_count() -> None:
+    """A failure resets the success counter for that signature.
+
+    If a tool starts failing after repeated successes, the success loop
+    detection should reset so it doesn't interfere with failure tracking.
+    """
+    tracker = ToolCallTracker()
+    tracker.record_success("tool", {"a": 1})
+    tracker.record_success("tool", {"a": 1})
+    # Now a failure — success count should not persist
+    tracker.record_failure("tool", {"a": 1})
+    # Next success starts fresh
+    count = tracker.record_success("tool", {"a": 1})
+    assert count == 1
+
+
 def test_key_stability() -> None:
     """_key() must produce the same digest for the same (name, args) regardless of dict insertion order."""
     k1 = ToolCallTracker._key("my_tool", {"b": 2, "a": 1})

@@ -58,20 +58,30 @@ class FailureClass(str, Enum):
 
 
 class ToolCallTracker:
-    """Detect and break infinite identical-failure tool call loops.
+    """Detect and break infinite tool call loops — both failures and repeated successes.
 
-    Tracks ``(tool_name, args_hash)`` → failure count.  Escalation levels:
+    Tracks ``(tool_name, args_hash)`` → count for failures and successes separately.
+
+    **Failure escalation:**
       - 2nd identical failure  → inject "stop retrying" prompt
       - 3rd identical failure  → add to ``disabled_tools`` for the rest of the turn
       - >8 total failures      → force the agent to produce a final answer
+
+    **Repeated-success detection:**
+      - 3rd identical success  → inject "stop repeating" prompt + disable the tool
+
+    This prevents loops where a side-effect tool (e.g. ``message``) succeeds
+    with identical arguments every iteration without advancing the agent's goal.
 
     Permanent failures (``FailureClass.is_permanent``) are added to
     ``disabled_tools`` immediately on the first occurrence via
     ``_permanent_failures``, regardless of count.
 
-    ``record_failure()`` now returns ``(count, FailureClass)`` — callers must
-    unpack both values.  The tool registry is **never mutated**; suppression is
-    enforced by filtering ``tools_def`` at definition-generation time.
+    ``record_failure()`` returns ``(count, FailureClass)`` — callers must
+    unpack both values.  ``record_success()`` returns the repeated-success
+    count for that signature.  The tool registry is **never mutated**;
+    suppression is enforced by filtering ``tools_def`` at definition-generation
+    time.
 
     **Scope**: A ``ToolCallTracker`` instance is scoped to a single agent
     turn, not an entire session.  ``AgentLoop`` creates a fresh tracker at
@@ -82,6 +92,7 @@ class ToolCallTracker:
 
     WARN_THRESHOLD: ClassVar[int] = 2
     REMOVE_THRESHOLD: ClassVar[int] = 3
+    REPEAT_SUCCESS_THRESHOLD: ClassVar[int] = 3
     # Maximum total failures allowed per agent turn.  When
     # ``total_failures >= GLOBAL_BUDGET`` the agent is forced to produce a
     # final answer.  This budget is per-turn (not per-session) because the
@@ -90,6 +101,7 @@ class ToolCallTracker:
 
     def __init__(self) -> None:
         self._counts: dict[str, int] = {}  # key → failure count
+        self._success_counts: dict[str, int] = {}  # key → repeated-success count
         self._total_failures: int = 0
         self._permanent_failures: set[str] = set()  # tool names permanently removed
 
@@ -160,16 +172,25 @@ class ToolCallTracker:
         """Record a tool failure; returns (count, failure_class) for this signature."""
         k = self._key(name, args)
         self._counts[k] = self._counts.get(k, 0) + 1
+        self._success_counts.pop(k, None)  # reset success streak on failure
         self._total_failures += 1
         fc = self.classify_failure(name, result) if result is not None else FailureClass.UNKNOWN
         if fc.is_permanent:
             self._permanent_failures.add(name)
         return self._counts[k], fc
 
-    def record_success(self, name: str, args: dict[str, Any]) -> None:
-        """Reset the count for a successful tool call signature."""
+    def record_success(self, name: str, args: dict[str, Any]) -> int:
+        """Record a successful tool call and return the repeated-success count.
+
+        Clears any failure count for this signature (a success after failures
+        means the issue was resolved).  Increments the repeated-success count
+        so callers can detect loops where a tool succeeds with identical
+        arguments without advancing the agent's goal.
+        """
         k = self._key(name, args)
         self._counts.pop(k, None)
+        self._success_counts[k] = self._success_counts.get(k, 0) + 1
+        return self._success_counts[k]
 
     @property
     def permanent_failures(self) -> frozenset[str]:

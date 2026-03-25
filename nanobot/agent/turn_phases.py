@@ -273,7 +273,20 @@ class ActPhase:
                         }
                     )
             else:
-                state.tracker.record_success(tool_call.name, tool_call.arguments)
+                success_count = state.tracker.record_success(tool_call.name, tool_call.arguments)
+                if success_count >= ToolCallTracker.REPEAT_SUCCESS_THRESHOLD:
+                    tools_to_remove.append(tool_call.name)
+                    state.messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                f"TOOL REMOVED: `{tool_call.name}` has been called "
+                                f"{success_count} times with identical arguments and "
+                                "is not making progress. It has been disabled. "
+                                "Use a different approach or provide your best answer."
+                            ),
+                        }
+                    )
 
         state.disabled_tools.update(tools_to_remove)
 
