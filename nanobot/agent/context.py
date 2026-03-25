@@ -9,6 +9,7 @@ from typing import Any
 from nanobot.utils.helpers import current_time_str
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.memory.base import BaseMemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.utils.helpers import build_assistant_message, detect_image_mime
 
@@ -19,9 +20,9 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, *, memory_store: BaseMemoryStore | None = None):
         self.workspace = workspace
-        self.memory = MemoryStore(workspace)
+        self.memory = memory_store or MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:

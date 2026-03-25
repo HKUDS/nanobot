@@ -26,6 +26,27 @@ class ChannelsConfig(Base):
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
 
 
+class MemoryConfig(Base):
+    """Configuration for memory backends.
+
+    Each backend section is stored as an extra field (dict) with an ``enabled``
+    key.  Only ONE backend may be enabled at a time.  The remaining keys in
+    each section are passed through to the backend constructor as-is.
+
+    Example JSON::
+
+        "memory": {
+            "longTerm": { "enabled": true },
+            "mem0": {
+                "enabled": false,
+                "config": { "llm": {...}, "vector_store": {...} }
+            }
+        }
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -155,6 +176,7 @@ class Config(BaseSettings):
 
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
