@@ -500,7 +500,15 @@ These are not suggestions — they are errors. Fix immediately if detected.
 **Wiring violations:**
 - Subsystem construction outside `agent_factory.py` (grep for `SomeSubsystem(` in
   orchestration modules)
-- Post-construction wiring that reaches into private attributes of another subsystem
+- Post-construction wiring that reaches into private attributes of another subsystem.
+  If a component needs a dependency, pass it at construction time. If a circular
+  dependency prevents this, use a lazy callback (`lambda: self.dependency`) to break
+  the cycle — never leave a field as None with defensive null-checks.
+  See `tests/contract/test_memory_wiring.py` for the pattern.
+- Sharing mutable collections (dicts, lists, sets) across multiple components without
+  a documented synchronization strategy. Either pass immutable snapshots (replace
+  atomically, not mutate in-place), or document the sharing contract with a comment
+  at each receiver: `# shared-ref: <what>, <mutation contract>`
 - Re-export chains (A re-exports from B re-exports from C) — flatten to direct imports
 - Concrete class imports across package boundaries where a Protocol should be used
 - Extracted components caching mutable state that the parent class modifies at
