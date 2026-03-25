@@ -88,7 +88,7 @@ Scans skill content and returns a dict of detected source → preamble hint.
 
 **Design principle:** Under-matching is preferred over false positives. A missed tool reference means the agent doesn't get a mapping hint — it may still figure it out. A false positive rewrites prose incorrectly and confuses the agent. When in doubt, don't match.
 
-3. **Nanobot-native tool names** — if the skill already mentions `exec`, `read_file`, etc., those are noted for the preamble (to confirm availability) but not rewritten.
+3. **Nanobot-native tool names** — if the skill already mentions `exec`, `read_file`, etc., they are left as-is (no rewriting, no preamble entry needed — the agent already knows these names). Future enhancement: optionally confirm availability in the preamble.
 
 ### Rewrite Logic
 
