@@ -5,9 +5,15 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+# Check optional Telegram dependencies before running tests
+try:
+    import telegram  # noqa: F401
+except ImportError:
+    pytest.skip("Telegram dependencies not installed (python-telegram-bot)", allow_module_level=True)
+
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.telegram import TELEGRAM_REPLY_CONTEXT_MAX_LEN, TelegramChannel
+from nanobot.channels.telegram import TELEGRAM_REPLY_CONTEXT_MAX_LEN, TelegramChannel, _StreamBuf
 from nanobot.channels.telegram import TelegramConfig
 
 
@@ -265,11 +271,28 @@ async def test_send_text_gives_up_after_max_retries() -> None:
     orig_delay = tg_mod._SEND_RETRY_BASE_DELAY
     tg_mod._SEND_RETRY_BASE_DELAY = 0.01
     try:
-        await channel._send_text(123, "hello", None, {})
+        with pytest.raises(TimedOut):
+            await channel._send_text(123, "hello", None, {})
     finally:
         tg_mod._SEND_RETRY_BASE_DELAY = orig_delay
 
     assert channel._app.bot.sent_messages == []
+
+
+@pytest.mark.asyncio
+async def test_send_delta_stream_end_raises_and_keeps_buffer_on_failure() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.edit_message_text = AsyncMock(side_effect=RuntimeError("boom"))
+    channel._stream_bufs["123"] = _StreamBuf(text="hello", message_id=7, last_edit=0.0)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await channel.send_delta("123", "", {"_stream_end": True})
+
+    assert "123" in channel._stream_bufs
 
 
 def test_derive_topic_session_key_uses_thread_id() -> None:

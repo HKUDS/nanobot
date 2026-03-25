@@ -146,6 +146,7 @@ class WhatsAppChannel(BaseChannel):
                 await self._ws.send(json.dumps(payload, ensure_ascii=False))
             except Exception as e:
                 logger.error("Error sending WhatsApp message: {}", e)
+                raise
 
         for media_path in msg.media or []:
             try:
@@ -160,6 +161,7 @@ class WhatsAppChannel(BaseChannel):
                 await self._ws.send(json.dumps(payload, ensure_ascii=False))
             except Exception as e:
                 logger.error("Error sending WhatsApp media {}: {}", media_path, e)
+                raise
 
     async def _handle_bridge_message(self, raw: str) -> None:
         """Handle a message from the bridge."""

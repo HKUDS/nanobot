@@ -17,6 +17,4 @@ def test_mistral_provider_in_registry():
 
     mistral = specs["mistral"]
     assert mistral.env_key == "MISTRAL_API_KEY"
-    assert mistral.litellm_prefix == "mistral"
     assert mistral.default_api_base == "https://api.mistral.ai/v1"
-    assert "mistral/" in mistral.skip_prefixes
