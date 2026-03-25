@@ -120,6 +120,20 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://aihubmix.com/v1",
         strip_model_prefix=True,
     ),
+    # AICodewith: Anthropic-compatible gateway, keys start with "sk-acw-"
+    ProviderSpec(
+        name="aicodewith",
+        keywords=("aicodewith",),
+        env_key="ANTHROPIC_API_KEY",
+        display_name="AICodewith",
+        backend="anthropic",
+        is_gateway=True,
+        detect_by_key_prefix="sk-acw-",
+        detect_by_base_keyword="aicodewith",
+        default_api_base="https://api.aicodewith.com",
+        strip_model_prefix=True,
+        supports_prompt_caching=True,
+    ),
     # SiliconFlow (硅基流动): OpenAI-compatible gateway, model names keep org prefix
     ProviderSpec(
         name="siliconflow",
