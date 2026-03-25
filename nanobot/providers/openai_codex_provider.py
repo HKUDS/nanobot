@@ -45,6 +45,7 @@ class OpenAICodexProvider(LLMProvider):
         reasoning_effort: str | None,
         tool_choice: str | dict[str, Any] | None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        service_tier: str | None = None,
     ) -> LLMResponse:
         """Shared request logic for both chat() and chat_stream()."""
         model = model or self.default_model
@@ -72,6 +73,8 @@ class OpenAICodexProvider(LLMProvider):
         }
         if reasoning_effort:
             body["reasoning"] = {"effort": reasoning_effort}
+        if service_tier:
+            body["service_tier"] = service_tier
         if tools:
             body["tools"] = _convert_tools(tools)
 
@@ -99,7 +102,8 @@ class OpenAICodexProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
-        return await self._call_codex(messages, tools, model, reasoning_effort, tool_choice)
+        return await self._call_codex(messages, tools, model, reasoning_effort, tool_choice,
+                                      service_tier=self.generation.service_tier)
 
     async def chat_stream(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
@@ -108,7 +112,8 @@ class OpenAICodexProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
-        return await self._call_codex(messages, tools, model, reasoning_effort, tool_choice, on_content_delta)
+        return await self._call_codex(messages, tools, model, reasoning_effort, tool_choice, on_content_delta,
+                                      service_tier=self.generation.service_tier)
 
     def get_default_model(self) -> str:
         return self.default_model
