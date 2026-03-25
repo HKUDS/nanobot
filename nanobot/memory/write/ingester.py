@@ -63,14 +63,14 @@ class EventIngester:
     def __init__(
         self,
         graph: KnowledgeGraph | None,
-        rollout: dict[str, Any],
+        rollout_fn: Callable[[], dict[str, Any]],
         *,
         conflict_pair_fn: Callable[[str, str], bool] | None = None,
         db: UnifiedMemoryDB | None = None,
         embedder: Embedder | None = None,
     ) -> None:
         self._graph = graph
-        self._rollout = rollout
+        self._rollout_fn = rollout_fn
         self._conflict_pair_fn = conflict_pair_fn
         self._db = db
         self._embedder = embedder
@@ -427,7 +427,7 @@ class EventIngester:
         if "[Runtime Context]" in value:
             value = value.split("[Runtime Context]", 1)[0]
         value = re.sub(r"\s+", " ", value).strip()
-        max_chars = int(self._rollout.get("memory_fallback_max_summary_chars", 280) or 280)
+        max_chars = int(self._rollout_fn().get("memory_fallback_max_summary_chars", 280) or 280)
         if len(value) > max_chars and not allow_archival:
             return ""
         if len(value) > max_chars and allow_archival:

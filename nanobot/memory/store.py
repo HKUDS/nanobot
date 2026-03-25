@@ -170,15 +170,9 @@ class MemoryStore:
 
         # MemoryMaintenance: reindex, seed, health checks, backend stats.
         self.maintenance = MemoryMaintenance(
-            rollout=self.rollout,
+            rollout_fn=lambda: self._rollout_config.rollout,
             db=self.db,
-        )
-        # Wire reindex callback so health check can trigger reindex.
-        self.maintenance._reindex_fn = lambda: self.maintenance.reindex_from_structured_memory(
-            read_profile_fn=self.profile_mgr.read_profile,
-            read_events_fn=self.ingester.read_events,
-            ingester=self.ingester,
-            profile_keys=self.PROFILE_KEYS,
+            reindex_fn=self._reindex_callback,
         )
 
         # Cross-encoder re-ranker (Step 7)
@@ -206,7 +200,7 @@ class MemoryStore:
         # EventIngester: owns the full event write path.
         self.ingester = EventIngester(
             graph=self.graph,
-            rollout=self.rollout,
+            rollout_fn=lambda: self._rollout_config.rollout,
             conflict_pair_fn=lambda old, new: self.profile_mgr._conflict_pair(old, new),
             db=self.db,
             embedder=self._embedder,
@@ -219,6 +213,9 @@ class MemoryStore:
             normalize_metadata_fn=self.ingester._normalize_memory_metadata,
             sanitize_metadata_fn=EventIngester._sanitize_mem0_metadata,
             db=self.db,
+            resolve_gap_fn=lambda: float(
+                self._rollout_config.rollout.get("conflict_auto_resolve_gap", 0.25)
+            ),
         )
 
         # MemoryRetriever: owns the full retrieval read path.
@@ -227,18 +224,12 @@ class MemoryStore:
             planner=self._planner,
             reranker=self._reranker,
             profile_mgr=self.profile_mgr,
-            rollout=self.rollout,
+            rollout_fn=lambda: self._rollout_config.rollout,
             read_events_fn=self.ingester.read_events,
             extractor=self.extractor,
             db=self.db,
             embedder=self._embedder,
         )
-
-        # Configurable auto-resolve confidence gap threshold.
-        self.conflict_auto_resolve_gap: float = float(
-            self.rollout.get("conflict_auto_resolve_gap", 0.25)
-        )
-        self.conflict_mgr.conflict_auto_resolve_gap = self.conflict_auto_resolve_gap
 
         # Evaluation / observability helper (LAN-204)
         from nanobot.eval.memory_eval import EvalRunner
@@ -293,6 +284,24 @@ class MemoryStore:
             snapshot=self.snapshot,
             memory_file=self.memory_file,
             history_file=self.history_file,
+        )
+
+    # ------------------------------------------------------------------
+    # Computed properties and internal callbacks
+    # ------------------------------------------------------------------
+
+    @property
+    def conflict_auto_resolve_gap(self) -> float:
+        """Live rollout value — never stale."""
+        return float(self._rollout_config.rollout.get("conflict_auto_resolve_gap", 0.25))
+
+    def _reindex_callback(self) -> None:
+        """Void-typed wrapper for MemoryMaintenance.reindex_fn."""
+        self.maintenance.reindex_from_structured_memory(
+            read_profile_fn=self.profile_mgr.read_profile,
+            read_events_fn=self.ingester.read_events,
+            ingester=self.ingester,
+            profile_keys=self.PROFILE_KEYS,
         )
 
     # ------------------------------------------------------------------

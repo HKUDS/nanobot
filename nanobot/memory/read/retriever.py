@@ -75,7 +75,7 @@ class MemoryRetriever:
         planner: RetrievalPlanner,
         reranker: Reranker,
         profile_mgr: ProfileManager,
-        rollout: dict[str, Any],  # live rollout dict reference
+        rollout_fn: Callable[[], dict[str, Any]],
         read_events_fn: Callable[..., list[dict[str, Any]]],
         extractor: MemoryExtractor | None = None,
         db: UnifiedMemoryDB | None = None,
@@ -85,7 +85,7 @@ class MemoryRetriever:
         self._planner = planner
         self._reranker = reranker
         self._profile_mgr = profile_mgr
-        self._rollout = rollout
+        self._rollout_fn = rollout_fn
         self._read_events_fn = read_events_fn
         self._extractor = extractor
         self._db = db
@@ -620,7 +620,7 @@ class MemoryRetriever:
         items: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         """Apply cross-encoder reranking (enabled/shadow/disabled)."""
-        reranker_mode = str(self._rollout.get("reranker_mode", "disabled")).strip().lower()
+        reranker_mode = str(self._rollout_fn().get("reranker_mode", "disabled")).strip().lower()
         if reranker_mode not in ("enabled", "shadow") or not items:
             return items
 
