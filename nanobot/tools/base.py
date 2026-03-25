@@ -171,3 +171,32 @@ class Tool(ABC):
                 "parameters": self.parameters,
             },
         }
+
+    # -- Lifecycle hooks ---------------------------------------------------
+    # Orchestration calls these on all tools each turn.  Tools that need
+    # routing context, per-turn reset, or session-scoped deps override them.
+    # The default implementations are intentional no-ops so that the
+    # orchestration layer never needs to isinstance-check concrete tools.
+
+    def set_context(
+        self,
+        channel: str = "",
+        chat_id: str = "",
+        message_id: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Receive per-turn routing context. No-op by default."""
+        return  # intentional no-op
+
+    def on_turn_start(self) -> None:
+        """Reset per-turn state. No-op by default."""
+        return  # intentional no-op
+
+    def on_session_change(self, **kwargs: Any) -> None:
+        """Receive session-scoped dependencies. No-op by default."""
+        return  # intentional no-op
+
+    @property
+    def sent_in_turn(self) -> bool:
+        """Whether this tool has sent output this turn. Override if applicable."""
+        return False

@@ -33,7 +33,9 @@ class MessageTool(Tool):
         # send to in addition to the current session context.
         self._allowed_destinations: set[tuple[str, str]] = set()
 
-    def set_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
+    def set_context(
+        self, channel: str = "", chat_id: str = "", message_id: str | None = None, **kwargs: Any
+    ) -> None:
         """Set the current message context."""
         self._default_channel = channel
         self._default_chat_id = chat_id

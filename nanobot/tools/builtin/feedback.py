@@ -35,15 +35,16 @@ class FeedbackTool(Tool):
 
     def set_context(
         self,
-        channel: str,
-        chat_id: str,
-        *,
-        session_key: str = "",
-        events_file: Path | None = None,
+        channel: str = "",
+        chat_id: str = "",
+        message_id: str | None = None,
+        **kwargs: Any,
     ) -> None:
         self._channel = channel
         self._chat_id = chat_id
+        session_key: str = kwargs.get("session_key", "")
         self._session_key = session_key or f"{channel}:{chat_id}"
+        events_file: Path | None = kwargs.get("events_file")
         if events_file is not None:
             self._events_file = events_file
 
