@@ -1,4 +1,4 @@
-.PHONY: install install-all test test-verbose test-cov lint format typecheck check ci pre-push import-check prompt-check coverage-check memory-eval live-eval clean worktree-clean pre-commit-install
+.PHONY: install install-all test test-verbose test-cov lint format typecheck check ci pre-push import-check structure-check prompt-check coverage-check memory-eval live-eval clean worktree-clean pre-commit-install
 
 PYTHON ?= $(shell python3 --version >/dev/null 2>&1 && echo python3 || echo python)
 
@@ -29,9 +29,9 @@ format:
 typecheck:
 	$(PYTHON) -m mypy nanobot/
 
-check: lint typecheck import-check prompt-check test
+check: lint typecheck import-check structure-check prompt-check test
 
-ci: lint typecheck import-check prompt-check test-cov coverage-check
+ci: lint typecheck import-check structure-check prompt-check test-cov coverage-check
 
 pre-push: ## Full CI validation + merge-readiness check (run before pushing PRs)
 	@echo "=== Syncing with origin/main ==="
@@ -47,6 +47,9 @@ pre-push: ## Full CI validation + merge-readiness check (run before pushing PRs)
 
 import-check:
 	$(PYTHON) scripts/check_imports.py
+
+structure-check:
+	$(PYTHON) scripts/check_structure.py
 
 prompt-check:
 	$(PYTHON) scripts/check_prompt_manifest.py

@@ -30,6 +30,11 @@ repos:
         entry: python scripts/check_imports.py
         language: system
         pass_filenames: false
+      - id: structure-check
+        name: structure check
+        entry: python scripts/check_structure.py
+        language: system
+        pass_filenames: false
       - id: prompt-check
         name: prompt manifest check
         entry: python scripts/check_prompt_manifest.py
