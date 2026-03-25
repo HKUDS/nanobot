@@ -249,8 +249,7 @@ class Config(BaseSettings):
         if p and p.api_base:
             return p.api_base
         # Only gateways get a default api_base here. Standard providers
-        # (like Moonshot) set their base URL via env vars in _setup_env
-        # to avoid polluting the global litellm.api_base.
+        # resolve their base URL from the registry in the provider constructor.
         if name:
             spec = find_by_name(name)
             if spec and (spec.is_gateway or spec.is_local) and spec.default_api_base:
