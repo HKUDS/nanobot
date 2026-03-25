@@ -413,7 +413,7 @@ def build_agent(
     )
 
     # 13. Construct _ProcessorServices and MessageProcessor
-    from nanobot.agent.message_processor import _ProcessorServices
+    from nanobot.agent.agent_components import _ProcessorServices
 
     services = _ProcessorServices(
         orchestrator=orchestrator,

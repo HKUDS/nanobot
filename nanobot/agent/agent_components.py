@@ -16,7 +16,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from nanobot.agent.consolidation import ConsolidationOrchestrator
     from nanobot.agent.streaming import StreamingLLMCaller
+    from nanobot.agent.turn_context import TurnContextManager
     from nanobot.agent.turn_orchestrator import TurnOrchestrator
+    from nanobot.agent.turn_types import Orchestrator, Processor
     from nanobot.agent.verifier import AnswerVerifier
     from nanobot.bus.queue import MessageBus
     from nanobot.config.schema import (
@@ -85,7 +87,24 @@ class _Subsystems:
     llm_caller: StreamingLLMCaller
     verifier: AnswerVerifier
     orchestrator: TurnOrchestrator
-    processor: Any  # MessageProcessor — avoids cyclic import with agent_components
+    processor: Processor
+
+
+@dataclass(slots=True)
+class _ProcessorServices:
+    """Subsystems consumed by MessageProcessor. Internal to agent/ package."""
+
+    orchestrator: Orchestrator
+    dispatcher: DelegationDispatcher
+    missions: MissionManager
+    context: ContextBuilder
+    sessions: SessionManager
+    tools: ToolExecutor
+    consolidator: ConsolidationOrchestrator
+    verifier: AnswerVerifier
+    bus: MessageBus
+    turn_context: TurnContextManager
+    span_module: Any = None
 
 
 @dataclass(slots=True)

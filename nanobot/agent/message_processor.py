@@ -10,53 +10,29 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from nanobot.agent.agent_components import _ProcessorServices
 from nanobot.agent.callbacks import ProgressCallback
-from nanobot.agent.consolidation import ConsolidationOrchestrator
-from nanobot.agent.turn_context import TurnContextManager
-from nanobot.agent.turn_types import Orchestrator, TurnState
+from nanobot.agent.turn_types import TurnState
 from nanobot.agent.verifier import AnswerVerifier
 from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig
-from nanobot.context.context import ContextBuilder
 from nanobot.coordination.role_switching import TurnRoleManager
 from nanobot.observability.bus_progress import make_bus_progress
 from nanobot.observability.langfuse import update_current_span
 from nanobot.observability.tracing import TraceContext, bind_trace
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import Session
 from nanobot.tools.builtin.message import MessageTool
 
 if TYPE_CHECKING:
     from nanobot.coordination.coordinator import ClassificationResult
-    from nanobot.coordination.delegation import DelegationDispatcher
-    from nanobot.coordination.mission import MissionManager
     from nanobot.providers.base import LLMProvider
-    from nanobot.tools.executor import ToolExecutor
-
-
-@dataclass(slots=True)
-class _ProcessorServices:
-    """Subsystems consumed by MessageProcessor. Internal to agent/ package."""
-
-    orchestrator: Orchestrator
-    dispatcher: DelegationDispatcher
-    missions: MissionManager
-    context: ContextBuilder
-    sessions: SessionManager
-    tools: ToolExecutor
-    consolidator: ConsolidationOrchestrator
-    verifier: AnswerVerifier
-    bus: MessageBus
-    turn_context: TurnContextManager
-    span_module: Any = None
 
 
 class MessageProcessor:
