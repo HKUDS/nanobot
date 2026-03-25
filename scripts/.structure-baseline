@@ -9,34 +9,13 @@ nanobot/cli/memory.py: 614 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/config/schema.py: 523 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/coordination/delegation.py: 508 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/memory/graph/entity_classifier.py: 543 LOC (limit 500, add '# size-exception: <reason>')
-nanobot/memory/persistence/profile_io.py: 638 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/memory/persistence/profile_io.py: 642 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/memory/read/context_assembler.py: 507 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/memory/read/retriever.py: 708 LOC (limit 500, add '# size-exception: <reason>')
-nanobot/memory/write/conflicts.py: 524 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/memory/write/conflicts.py: 526 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/memory/write/ingester.py: 832 LOC (limit 500, add '# size-exception: <reason>')
-nanobot/tools/builtin/excel.py: 949 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/tools/builtin/excel.py: 954 LOC (limit 500, add '# size-exception: <reason>')
-nanobot/tools/builtin/powerpoint.py: 555 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/tools/builtin/powerpoint.py: 559 LOC (limit 500, add '# size-exception: <reason>')
 
 # --- Catch-all filename ---
 nanobot/utils/helpers.py: prohibited catch-all filename
-
-# --- Missing crash-barrier comments ---
-nanobot/channels/retry.py:77  except Exception as exc:
-nanobot/channels/web.py:71  except (asyncio.CancelledError, Exception):  # noqa: BLE001
-nanobot/providers/openai_codex_provider.py:64  except Exception as e:  # re-raised unless SSL cert error
-nanobot/tools/builtin/cron.py:97  except (KeyError, Exception):
-nanobot/tools/builtin/excel.py:136  except Exception as exc:
-nanobot/tools/builtin/excel.py:217  except Exception as exc:
-nanobot/tools/builtin/excel.py:271  except Exception as exc:
-nanobot/tools/builtin/excel.py:747  except Exception as exc:
-nanobot/tools/builtin/excel.py:873  except Exception as exc:
-nanobot/tools/builtin/powerpoint.py:410  except Exception as e:
-nanobot/tools/builtin/powerpoint.py:544  except Exception as e:
-nanobot/tools/builtin/powerpoint.py:578  except Exception as e:
-nanobot/tools/builtin/powerpoint.py:588  except Exception as e:
-nanobot/tools/result_cache.py:100  except Exception:
-nanobot/tools/result_cache.py:323  except Exception:
