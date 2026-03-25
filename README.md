@@ -1176,14 +1176,15 @@ Global settings that apply to all channels. Configure under the `channels` secti
 |---------|---------|-------------|
 | `sendProgress` | `true` | Stream agent's text progress to the channel |
 | `sendToolHints` | `false` | Stream tool-call hints (e.g. `read_file("…")`) |
-| `sendMaxRetries` | `3` | Max retry attempts for message send failures (0-10) |
+| `sendMaxRetries` | `3` | Max delivery attempts per outbound message, including the initial send (0-10 configured, minimum 1 actual attempt) |
 
 #### Retry Behavior
 
-When a message fails to send, nanobot will automatically retry with exponential backoff:
+When a channel send operation raises an error, nanobot retries with exponential backoff:
 
-- **Attempts 1-3**: Retry delays are 1s, 2s, 4s
-- **Attempts 4+**: Retry delay caps at 4s
+- **Attempt 1**: Initial send
+- **Attempts 2-4**: Retry delays are 1s, 2s, 4s
+- **Attempts 5+**: Retry delay caps at 4s
 - **Transient failures** (network hiccups, temporary API limits): Retry usually succeeds
 - **Permanent failures** (invalid token, channel banned): All retries fail
 

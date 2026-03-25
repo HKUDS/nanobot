@@ -751,6 +751,7 @@ class WeixinChannel(BaseChannel):
                 await self._send_text(msg.chat_id, chunk, ctx_token)
         except Exception as e:
             logger.error("Error sending WeChat message: {}", e)
+            raise
 
     async def _send_text(
         self,

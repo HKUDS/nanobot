@@ -476,6 +476,7 @@ class TelegramChannel(BaseChannel):
                 )
             except Exception as e2:
                 logger.error("Error sending Telegram message: {}", e2)
+                raise
 
     async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
         """Progressive message editing: send on first delta, edit on subsequent ones."""
@@ -485,7 +486,7 @@ class TelegramChannel(BaseChannel):
         int_chat_id = int(chat_id)
 
         if meta.get("_stream_end"):
-            buf = self._stream_bufs.pop(chat_id, None)
+            buf = self._stream_bufs.get(chat_id)
             if not buf or not buf.message_id or not buf.text:
                 return
             self._stop_typing(chat_id)
@@ -504,8 +505,10 @@ class TelegramChannel(BaseChannel):
                         chat_id=int_chat_id, message_id=buf.message_id,
                         text=buf.text,
                     )
-                except Exception:
-                    pass
+                except Exception as e2:
+                    logger.warning("Final stream edit failed: {}", e2)
+                    raise  # Let ChannelManager handle retry
+            self._stream_bufs.pop(chat_id, None)
             return
 
         buf = self._stream_bufs.get(chat_id)

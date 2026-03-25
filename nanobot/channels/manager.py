@@ -142,6 +142,14 @@ class ChannelManager:
             except asyncio.CancelledError:
                 break
 
+    @staticmethod
+    async def _send_once(channel: BaseChannel, msg: OutboundMessage) -> None:
+        """Send one outbound message without retry policy."""
+        if msg.metadata.get("_stream_delta") or msg.metadata.get("_stream_end"):
+            await channel.send_delta(msg.chat_id, msg.content, msg.metadata)
+        elif not msg.metadata.get("_streamed"):
+            await channel.send(msg)
+
     async def _send_with_retry(self, channel: BaseChannel, msg: OutboundMessage) -> None:
         """Send a message with retry on failure using exponential backoff.
 
@@ -151,12 +159,7 @@ class ChannelManager:
 
         for attempt in range(max_attempts):
             try:
-                if msg.metadata.get("_stream_delta") or msg.metadata.get("_stream_end"):
-                    await channel.send_delta(msg.chat_id, msg.content, msg.metadata)
-                elif msg.metadata.get("_streamed"):
-                    pass
-                else:
-                    await channel.send(msg)
+                await self._send_once(channel, msg)
                 return  # Send succeeded
             except asyncio.CancelledError:
                 raise  # Propagate cancellation for graceful shutdown
