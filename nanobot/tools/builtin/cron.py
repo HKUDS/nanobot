@@ -94,6 +94,7 @@ class CronTool(Tool):
 
             try:
                 ZoneInfo(tz)
+            # crash-barrier: invalid timezone must return user-friendly error
             except (KeyError, Exception):
                 return ToolResult.fail(f"Error: unknown timezone '{tz}'")
 

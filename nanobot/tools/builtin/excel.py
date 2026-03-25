@@ -133,6 +133,7 @@ class ReadSpreadsheetTool(Tool):
     ) -> ToolResult:
         try:
             raw_bytes = file_path.read_bytes()
+        # crash-barrier: file I/O can fail in many ways
         except Exception as exc:
             return ToolResult.fail(f"Error reading file: {exc}")
 
@@ -214,6 +215,7 @@ class ReadSpreadsheetTool(Tool):
 
         try:
             wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
+        # crash-barrier: workbook format varies, any parse error returns friendly message
         except Exception as exc:
             return ToolResult.fail(f"Error opening workbook: {exc}")
 
@@ -268,6 +270,7 @@ class ReadSpreadsheetTool(Tool):
                 result["sheets"][sname] = _sheet_meta(sheet_data, cache_key)
 
             wb.close()
+        # crash-barrier: sheet reading can fail unpredictably, ensure workbook cleanup
         except Exception as exc:
             wb.close()
             return ToolResult.fail(f"Error reading workbook: {exc}")
@@ -744,6 +747,7 @@ class QueryDataTool(Tool):
             columns = [desc[0] for desc in result.description]
             fetched = result.fetchall()
             conn.close()
+        # crash-barrier: user-provided SQL can trigger any DuckDB error
         except Exception as exc:
             return ToolResult.fail(f"SQL error: {exc}")
 
@@ -870,6 +874,7 @@ class DescribeDataTool(Tool):
             sample_rows = [dict(zip(col_names, row)) for row in sample]
 
             conn.close()
+        # crash-barrier: data introspection can fail unpredictably
         except Exception as exc:
             return ToolResult.fail(f"Error describing data: {exc}")
 

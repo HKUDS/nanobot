@@ -68,6 +68,7 @@ class WebChannel(BaseChannel):
             self._dispatcher_task.cancel()
             try:
                 await self._dispatcher_task
+            # crash-barrier: dispatcher shutdown must not raise
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
 
