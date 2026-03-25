@@ -143,9 +143,16 @@ class MemoryStore:
         self.rollout = self._rollout_config.rollout  # backward compat dict reference
 
         # Profile manager (LAN-202) — delegates profile CRUD to ProfileManager.
-        # Subsystem references (_extractor, _ingester, _conflict_mgr, _snapshot)
-        # are wired after all subsystems are constructed (see below).
-        self.profile_mgr = ProfileStore(db=self.db)
+        # Lazy callbacks break the circular dependency: ProfileStore is constructed
+        # before conflict_mgr/snapshot exist, but callbacks resolve at call time.
+        self.profile_mgr = ProfileStore(
+            db=self.db,
+            conflict_mgr_fn=lambda: self.conflict_mgr,
+            corrector_fn=lambda: self._corrector,
+            extractor_fn=lambda: self.extractor,
+            ingester_fn=lambda: self.ingester,
+            snapshot_fn=lambda: self.snapshot,
+        )
 
         # Retrieval planner (LAN-207) — intent classification + policy + routing.
         self._planner = RetrievalPlanner()
@@ -261,13 +268,13 @@ class MemoryStore:
             db=self.db,
         )
 
-        # Wire profile_mgr subsystem dependencies (must happen after all are built).
+        # CorrectionOrchestrator — constructed after all subsystems are available.
+        # ProfileStore accesses it via the corrector_fn callback passed above.
         from .persistence.profile_correction import (
             CorrectionOrchestrator as _CorrectionOrchestrator,
         )
 
-        self.profile_mgr._conflict_mgr = self.conflict_mgr  # keep — used by delegate wrappers
-        self.profile_mgr._corrector = _CorrectionOrchestrator(
+        self._corrector = _CorrectionOrchestrator(
             profile_store=self.profile_mgr,
             extractor=self.extractor,
             ingester=self.ingester,

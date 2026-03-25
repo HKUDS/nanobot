@@ -46,3 +46,18 @@ def test_conflict_resolve_gap_follows_rollout(tmp_path):
 
     # ConflictManager must see the new value — no stale copy.
     assert store.conflict_mgr._resolve_gap_fn() == 0.5
+
+
+def test_profile_mgr_has_conflict_mgr_at_construction(tmp_path):
+    """ProfileStore._conflict_mgr_fn resolves immediately after MemoryStore construction."""
+    store = _make_store(tmp_path)
+    assert store.profile_mgr._conflict_mgr_fn is not None
+    assert store.profile_mgr._conflict_mgr_fn() is not None
+
+
+def test_profile_mgr_corrector_fn_resolves(tmp_path):
+    """ProfileStore._corrector_fn resolves to a CorrectionOrchestrator after construction."""
+    store = _make_store(tmp_path)
+    assert store.profile_mgr._corrector_fn is not None
+    corrector = store.profile_mgr._corrector_fn()
+    assert corrector is not None
