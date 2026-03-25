@@ -239,13 +239,22 @@ class ChannelManager:
                 msg = await self.bus.consume_outbound()
 
                 if msg.metadata.get("_progress"):
-                    if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
-                        continue
-                    if (
-                        not msg.metadata.get("_tool_hint")
-                        and not self.config.channels.send_progress
-                    ):
-                        continue
+                    # Messages carrying canonical events are protocol-level SSE
+                    # events required by the web UI stream decoder.  Never drop
+                    # them — the sendToolHints / sendProgress gates only apply
+                    # to legacy progress messages without canonical payloads.
+                    has_canonical = "_canonical" in msg.metadata
+                    if not has_canonical:
+                        if (
+                            msg.metadata.get("_tool_hint")
+                            and not self.config.channels.send_tool_hints
+                        ):
+                            continue
+                        if (
+                            not msg.metadata.get("_tool_hint")
+                            and not self.config.channels.send_progress
+                        ):
+                            continue
 
                 channel = self.channels.get(msg.channel)
                 if channel:

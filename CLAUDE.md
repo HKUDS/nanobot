@@ -209,10 +209,11 @@ make test-cov       # Run tests with coverage report (85% gate)
 make lint           # Ruff lint + format check
 make format         # Auto-format with ruff
 make typecheck      # mypy type checker
-make check          # Full validation: lint + typecheck + import-check + prompt-check + test
-make ci             # CI pipeline: lint + typecheck + import-check + prompt-check + test-cov
+make check          # Full validation: lint + typecheck + import-check + structure-check + prompt-check + test
+make ci             # CI pipeline: lint + typecheck + import-check + structure-check + prompt-check + test-cov
 make pre-push       # CI + merge-readiness check (run before pushing PRs)
 make import-check   # Check module boundary violations
+make structure-check # Check structural rules (file size, crash-barriers, __all__, catch-all filenames)
 make prompt-check   # Check prompt manifest consistency
 make memory-eval    # Advisory memory retrieval trend (non-gating)
 make live-eval      # Run live agent evaluation

@@ -1,7 +1,7 @@
 # Nanobot Architecture
 
 > Living document. Updated as the codebase evolves.
-> Last updated: 2026-03-24.
+> Last updated: 2026-03-25.
 
 ## Overview
 
@@ -72,6 +72,8 @@ cli/                           ← top-level entry point, imports everything
 
 ### Forbidden Imports (enforced by `scripts/check_imports.py`)
 
+**All imports (runtime + TYPE_CHECKING):**
+
 | From | Must not import |
 |------|-----------------|
 | `channels/*` | `agent/`, `tools/`, `memory/`, `coordination/` |
@@ -80,12 +82,49 @@ cli/                           ← top-level entry point, imports everything
 | `bus/*` | `agent/`, `channels/`, `providers/` |
 | `tools/*` | `channels/` |
 | `memory/*` | `channels/`, `tools/` |
+| `agent/*` | `channels/`, `cli/` |
+| `coordination/*` | `channels/`, `cli/` |
+| `context/*` | `channels/`, `cli/` |
+| `observability/*` | `channels/`, `cli/` |
+
+**Runtime-only imports (TYPE_CHECKING allowed):**
+
+| From | Must not runtime-import | Reason |
+|------|------------------------|--------|
+| `coordination/*` | `tools.builtin` | No cross-package instantiation |
+| `tools/*` | `coordination` | No cross-package instantiation |
+| `agent/*` | `tools.builtin`, `coordination` | Use composition root (`agent_factory.py`) |
+| `context/*` | `memory`, `tools.builtin` | Dependencies injected from factory |
+
+Files in COMPOSITION_ROOTS (`agent_factory.py`, `tools/setup.py`) are exempt from
+runtime-only rules — they construct and wire subsystems by design.
 
 ### Approved Exceptions
 
 | Exception | Location | Reason |
 |-----------|----------|--------|
-| `config/schema.py` imports `providers.registry` | Deferred import inside method body | Config resolves model-to-key mappings at call time |
+| `config/schema.py` → `providers.registry` | Deferred import | Config resolves model-to-key mappings |
+| `tools/builtin/mission.py` → `coordination.mission` | Data object | MissionStatus enum |
+| `coordination/delegation.py` → `tools.builtin.delegate` | Data object | DelegationResult dataclass |
+| `turn_orchestrator.py` → `coordination.task_types` | Pure function | `has_parallel_structure()` called at runtime |
+| `turn_orchestrator.py` → `coordination.delegation_advisor` | Enum | `DelegationAction` compared at runtime |
+| `turn_phases.py` → `coordination.task_types` | Pure function | Same as turn_orchestrator |
+| `turn_phases.py` → `coordination.delegation_advisor` | Enum | Same as turn_orchestrator |
+
+### Tool Lifecycle Hooks
+
+The `Tool` base class (`tools/base.py`) provides lifecycle hooks so orchestration
+can interact with tools without importing concrete types:
+
+| Hook | Purpose | Default |
+|------|---------|---------|
+| `set_context(channel, chat_id, message_id, **kwargs)` | Per-turn routing context | No-op |
+| `on_turn_start()` | Reset per-turn state | No-op |
+| `on_session_change(**kwargs)` | Session-scoped dependencies (e.g. scratchpad) | No-op |
+| `sent_in_turn` (property) | Whether tool sent output this turn | `False` |
+
+Orchestration calls hooks on all tools via `ToolExecutor.all_tools()` — no isinstance
+checks, no concrete type imports.
 
 ## Data Flow
 
@@ -185,3 +224,19 @@ memory/
     ├── ontology_types.py     # Type definitions
     └── ontology_rules.py     # Validation rules
 ```
+
+## Enforcement Scripts
+
+Architecture rules are enforced programmatically in pre-commit hooks and CI.
+
+| Script | What it enforces | Runs in |
+|--------|-----------------|---------|
+| `scripts/check_imports.py` | Import direction rules + dependency inversion (RUNTIME_RULES) | Pre-commit + CI |
+| `scripts/check_structure.py` | File size (500 LOC), package growth (15 files), `__init__.py` exports (12), crash-barriers, `__all__`, catch-all filenames, future annotations | Pre-commit + CI |
+| `scripts/check_prompt_manifest.py` | Prompt file consistency | Pre-commit + CI |
+| `scripts/check_module_coverage.py` | Per-module test coverage thresholds | CI only |
+
+`check_structure.py` uses a baseline file (`scripts/.structure-baseline`) to track
+pre-existing violations. New violations block commits; existing ones are printed as
+"tracked" but don't cause failure. As violations are fixed, entries are removed from
+the baseline.
