@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from nanobot.context.skills import CLAUDE_TOOL_MAPPING, _detect_skill_tools, _rewrite_skill_content
+from nanobot.context.skills import (
+    CLAUDE_TOOL_MAPPING,
+    _build_skill_preamble,
+    _detect_skill_tools,
+    _rewrite_skill_content,
+)
 
 
 def test_mapping_has_expected_keys():
@@ -214,3 +219,54 @@ class TestRewriteSkillContent:
         assert result.startswith("Text `exec`")
         assert result.endswith("More `exec`.")
         assert "```bash\ninner\n```" in result  # inner block preserved
+
+
+class TestBuildSkillPreamble:
+    """Tests for _build_skill_preamble()."""
+
+    def test_bash_blocks_only(self):
+        detected = {"__bash_blocks__": "use the `exec` tool"}
+        result = _build_skill_preamble(detected)
+        assert "## Tool Instructions" in result
+        assert "`exec`" in result
+        assert result.count("\n- ") == 1  # single instruction line
+
+    def test_tool_mapping_only(self):
+        detected = {"Grep": "use the `exec` tool with `grep` or `rg`"}
+        result = _build_skill_preamble(detected)
+        assert "## Tool Instructions" in result
+        assert "`Grep`" in result
+        assert "`exec`" in result
+
+    def test_bash_blocks_and_bash_tool_no_duplicate(self):
+        detected = {
+            "__bash_blocks__": "use the `exec` tool",
+            "Bash": "use the `exec` tool",
+        }
+        result = _build_skill_preamble(detected)
+        # Should not have two separate lines both saying "use exec"
+        lines = [ln for ln in result.split("\n") if ln.startswith("- ")]
+        assert len(lines) == 1
+
+    def test_multiple_tools(self):
+        detected = {
+            "__bash_blocks__": "use the `exec` tool",
+            "Grep": "use the `exec` tool with `grep` or `rg`",
+            "WebFetch": "use the `web_fetch` tool",
+        }
+        result = _build_skill_preamble(detected)
+        lines = [ln for ln in result.split("\n") if ln.startswith("- ")]
+        assert len(lines) == 3
+
+    def test_empty_detected_returns_empty(self):
+        result = _build_skill_preamble({})
+        assert result == ""
+
+    def test_preamble_uses_original_claude_names(self):
+        detected = {
+            "Grep": "use the `exec` tool with `grep` or `rg`",
+            "WebFetch": "use the `web_fetch` tool",
+        }
+        result = _build_skill_preamble(detected)
+        assert "`Grep`" in result
+        assert "`WebFetch`" in result

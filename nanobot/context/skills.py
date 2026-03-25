@@ -145,6 +145,34 @@ def _split_fenced_blocks(content: str) -> list[tuple[bool, str]]:
     return segments
 
 
+def _build_skill_preamble(detected: dict[str, str]) -> str:
+    """Build a dynamic preamble from detected tool references.
+
+    Returns an empty string if nothing was detected.
+    """
+    if not detected:
+        return ""
+
+    lines: list[str] = []
+    has_bash_blocks = "__bash_blocks__" in detected
+    has_bash_tool = "Bash" in detected
+
+    # Bash blocks / Bash tool — merge into a single line
+    if has_bash_blocks or has_bash_tool:
+        lines.append("- To run the bash/CLI commands in these instructions, use the `exec` tool")
+
+    # Other Claude Code tool mappings
+    for key, hint in detected.items():
+        if key in ("__bash_blocks__", "Bash"):
+            continue  # already handled above
+        lines.append(f"- `{key}` \u2192 {hint}")
+
+    if not lines:
+        return ""
+
+    return "## Tool Instructions\n\n" + "\n".join(lines)
+
+
 class SkillsLoader:
     """
     Loader for agent skills.
