@@ -49,6 +49,7 @@ HTML_PAGE = """<!doctype html>
       <div id="messages"></div>
       <form id="send-form">
         <textarea id="prompt" placeholder="Type a message" required></textarea>
+        <input id="image-file" type="file" accept="image/*" />
         <button type="submit" id="send-btn">Send</button>
       </form>
     </section>
@@ -102,6 +103,13 @@ HTML_PAGE = """<!doctype html>
       localStorage.setItem('endpoint_sessions', JSON.stringify(sessions));
     };
 
+    const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
+
     document.getElementById('new-chat-form').onsubmit = (e) => {
       e.preventDefault();
       const title = document.getElementById('chat-title').value;
@@ -119,11 +127,14 @@ HTML_PAGE = """<!doctype html>
       }
 
       const promptEl = document.getElementById('prompt');
+      const imageInput = document.getElementById('image-file');
+      const imageFile = imageInput.files && imageInput.files[0] ? imageInput.files[0] : null;
       const content = promptEl.value.trim();
-      if (!content) return;
+      if (!content && !imageFile) return;
 
       const sendBtn = document.getElementById('send-btn');
       promptEl.value = '';
+      imageInput.value = '';
       promptEl.disabled = true;
       sendBtn.disabled = true;
 
@@ -133,16 +144,24 @@ HTML_PAGE = """<!doctype html>
       const lastAssistantMsg = [...history].reverse().find(m => m.role === 'assistant' && m.id);
       const prevId = lastAssistantMsg ? lastAssistantMsg.id : undefined;
 
-      addMsgToUI('user', content);
-      history.push({ role: 'user', content });
+      const userLabel = imageFile ? (content ? content + " [image]" : "[image]") : content;
+      addMsgToUI('user', userLabel);
+      history.push({ role: 'user', content: userLabel });
       saveHistory(activeId, history);
 
       try {
+        const imageDataUrl = imageFile ? await readFileAsDataUrl(imageFile) : null;
+        const contentParts = [];
+        if (content) contentParts.push({ type: "text", text: content });
+        if (imageDataUrl) contentParts.push({ type: "image_url", image_url: { url: imageDataUrl } });
+        const inputPayload = [
+          { type: "message", role: "user", content: contentParts }
+        ];
         const r = await fetch(endpointUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer """ + os.getenv('NANOBOT_API_KEY', '') + """' },
           body: JSON.stringify({
-            input: content,
+            input: inputPayload,
             user: "web-test-user",
             previous_response_id: prevId
           })
