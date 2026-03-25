@@ -86,7 +86,13 @@ class MessageTool(Tool):
     ) -> str:
         channel = channel or self._default_channel
         chat_id = chat_id or self._default_chat_id
-        message_id = message_id or self._default_message_id
+        # Only use default message_id if chat_id matches the default context.
+        # If targeting a different chat, don't reply to the original message.
+        if chat_id == self._default_chat_id:
+            message_id = message_id or self._default_message_id
+        else:
+            # Targeting a different chat - don't use default message_id
+            message_id = None
 
         if not channel or not chat_id:
             return "Error: No target channel/chat specified"
@@ -101,7 +107,7 @@ class MessageTool(Tool):
             media=media or [],
             metadata={
                 "message_id": message_id,
-            },
+            } if message_id else {},
         )
 
         try:
