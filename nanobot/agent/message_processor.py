@@ -31,6 +31,7 @@ from nanobot.session.manager import Session
 if TYPE_CHECKING:
     from nanobot.coordination.coordinator import ClassificationResult
     from nanobot.coordination.role_switching import TurnRoleManager
+    from nanobot.coordination.router import MessageRouter
     from nanobot.providers.base import LLMProvider
 
 
@@ -46,6 +47,7 @@ class MessageProcessor:
         role_name: str,
         provider: LLMProvider,
         model: str,
+        router: MessageRouter | None = None,
     ) -> None:
         self.orchestrator = services.orchestrator
         self._dispatcher = services.dispatcher
@@ -72,6 +74,9 @@ class MessageProcessor:
 
         # Classification result (consumed by _run_orchestrator each turn).
         self.classification_result: ClassificationResult | None = None
+
+        # Message router (injected by composition root when routing is enabled).
+        self._router = router
 
         # Per-turn active settings (set by AgentLoop before each turn).
         self._active_model: str | None = None
