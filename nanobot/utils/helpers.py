@@ -300,3 +300,27 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         for name in added:
             Console().print(f"  [dim]Created {name}[/dim]")
     return added
+
+
+def parse_json_from_llm(text: str) -> dict[str, Any] | None:
+    """Extract a JSON object from LLM output, tolerating markdown fences."""
+    if not text:
+        return None
+    s = text.strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```(?:json)?\s*", "", s)
+        s = re.sub(r"\s*```$", "", s)
+    try:
+        obj = json.loads(s)
+        return obj if isinstance(obj, dict) else None
+    except Exception:
+        pass
+    start = s.find("{")
+    end = s.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        obj = json.loads(s[start : end + 1])
+        return obj if isinstance(obj, dict) else None
+    except Exception:
+        return None

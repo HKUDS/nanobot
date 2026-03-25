@@ -2,7 +2,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
-from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.formatted_text import ANSI, HTML
 
 from nanobot.cli import commands
 from nanobot.cli import stream as stream_mod
@@ -115,6 +115,45 @@ async def test_print_interactive_progress_line_pauses_spinner_before_printing():
             await commands._print_interactive_progress_line("tool running", thinking)
 
     assert order == ["start", "stop", "print", "start", "stop"]
+
+
+def test_print_agent_response_uses_console_without_name_error():
+    """Regression test for NameError in _print_agent_response."""
+    mock_console = MagicMock()
+    with patch("nanobot.cli.commands._make_console", return_value=mock_console):
+        commands._print_agent_response("hello", render_markdown=True)
+    assert mock_console.print.call_count == 4
+
+
+class _PromptTeamManager:
+    def has_active_team(self, _sk):
+        return True
+
+    def active_team_id(self, _sk):
+        return "nano-x"
+
+    def list_members(self, _sk):
+        return ["lead"]
+
+    def get_member_snapshot(self, _sk, _name):
+        return None
+
+    def get_board_snapshot(self, _sk):
+        return {
+            "team_id": "nano-x",
+            "status": "active",
+            "members": [{"name": "lead", "status": "active", "task": "msg -> *"}],
+            "tasks": [],
+            "approvals": [],
+            "recent_updates": [],
+        }
+
+
+def test_prompt_message_renders_team_board_when_active():
+    tm = _PromptTeamManager()
+    commands._sync_team_view(tm)
+    prompt = commands._prompt_message(tm)
+    assert isinstance(prompt, ANSI)
 
 
 def test_response_renderable_uses_text_for_explicit_plain_rendering():

@@ -13,7 +13,7 @@ from nanobot.utils.helpers import build_status_content
 
 
 async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
-    """Cancel all active tasks and subagents for the session."""
+    """Cancel all active tasks, subagents, and team workers for the session."""
     loop = ctx.loop
     msg = ctx.msg
     tasks = loop._active_tasks.pop(msg.session_key, [])
@@ -24,7 +24,12 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
         except (asyncio.CancelledError, Exception):
             pass
     sub_cancelled = await loop.subagents.cancel_by_session(msg.session_key)
-    total = cancelled + sub_cancelled
+    team_cancelled = await loop.team.cancel_by_session(msg.session_key)
+    if team_cancelled:
+        session = loop.sessions.get_or_create(msg.session_key)
+        session.metadata.pop("nano_team_active", None)
+        loop.sessions.save(session)
+    total = cancelled + sub_cancelled + team_cancelled
     content = f"Stopped {total} task(s)." if total else "No active task to stop."
     return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content)
 
@@ -72,6 +77,7 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
     snapshot = session.messages[session.last_consolidated:]
     session.clear()
+    session.metadata.pop("nano_team_active", None)
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
     if snapshot:
@@ -90,6 +96,13 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
         "/stop — Stop the current task",
         "/restart — Restart the bot",
         "/status — Show bot status",
+        "/team <goal> — Start or instruct nano team mode",
+        "/team status — Show nano team state",
+        "/team log [n] — Show detailed collaboration logs",
+        "/team approve <task_id> — Approve a pending task",
+        "/team reject <task_id> <reason> — Reject a pending task",
+        "/team manual <task_id> <instruction> — Send change request",
+        "/team stop — Stop nano team mode",
         "/help — Show available commands",
     ]
     return OutboundMessage(

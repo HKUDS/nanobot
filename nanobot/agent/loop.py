@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import os
 import time
 from contextlib import AsyncExitStack, nullcontext
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -15,17 +15,15 @@ from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryConsolidator
+from nanobot.team import TeamManager
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
-from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
-from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
+from nanobot.command import CommandContext, CommandRouter, register_builtin_commands, register_team_commands
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
@@ -60,6 +58,8 @@ class AgentLoop:
         web_search_config: WebSearchConfig | None = None,
         web_proxy: str | None = None,
         exec_config: ExecToolConfig | None = None,
+        team_max_workers: int = 5,
+        team_worker_max_iterations: int = 25,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
@@ -97,6 +97,22 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
+        self.team = TeamManager(
+            provider=provider,
+            workspace=workspace,
+            bus=bus,
+            sessions=self.sessions,
+            model=self.model,
+            temperature=provider.generation.temperature,
+            max_tokens=provider.generation.max_tokens,
+            reasoning_effort=provider.generation.reasoning_effort,
+            web_search_config=self.web_search_config,
+            web_proxy=web_proxy,
+            exec_config=self.exec_config,
+            restrict_to_workspace=restrict_to_workspace,
+            max_workers=team_max_workers,
+            worker_max_iterations=team_worker_max_iterations,
+        )
 
         self._running = False
         self._mcp_servers = mcp_servers or {}
@@ -124,9 +140,14 @@ class AgentLoop:
         self._register_default_tools()
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
+        register_team_commands(self.commands)
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
+        from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+        from nanobot.agent.tools.shell import ExecTool
+        from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+
         allowed_dir = self.workspace if self.restrict_to_workspace else None
         extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
         self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
@@ -475,6 +496,7 @@ class AgentLoop:
         if result := await self.commands.dispatch(ctx):
             return result
 
+
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
@@ -576,7 +598,6 @@ class AgentLoop:
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""
-        from datetime import datetime
         for m in messages[skip:]:
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
