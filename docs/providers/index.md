@@ -56,6 +56,7 @@ If neither of the above match, nanobot inspects the model name:
 | `qwen`, `dashscope` | DashScope (Alibaba Cloud) |
 | `moonshot`, `kimi` | Moonshot |
 | `minimax` | MiniMax |
+| `stepfun`, `step` | Step Fun |
 | `mistral` | Mistral |
 | `groq` | Groq |
 | `ollama`, `nemotron` | Ollama |
@@ -97,6 +98,7 @@ Official API endpoints from each vendor:
 | **DashScope** | Qwen series | China / global |
 | **Moonshot (Kimi)** | Kimi K2.5, moonshot-v1 | China / global |
 | **MiniMax** | MiniMax-M2.1 | China |
+| **Step Fun** | Step (阶跃星辰) models | Global / China |
 | **Mistral** | Mistral Large, Codestral | Global (Europe) |
 | **Groq** | Llama, Mixtral (ultra-fast inference) + Whisper voice | Global |
 

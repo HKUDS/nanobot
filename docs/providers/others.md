@@ -550,6 +550,42 @@ Nanobot can call Azure OpenAI directly using API version 2024-10-21.
 
 ---
 
+## Step Fun (阶跃星辰)
+
+Step Fun offers OpenAI-compatible API access to their models.
+
+### Get an API key
+
+Request one at the Step Fun developer platform.
+
+### Configuration example
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "step-2-chat"
+    }
+  },
+  "providers": {
+    "stepfun": {
+      "api_key": "your-stepfun-api-key"
+    }
+  }
+}
+```
+
+### Key models
+
+| Model ID | Description |
+|--------|------|
+| `step-2-chat` | Latest Step 2 chat model |
+| `step-2-thinking` | Step 2 reasoning model |
+
+> **Model detection:** Names containing `stepfun` or `step` route to this provider.
+
+---
+
 ## Further reading
 
 - Provider overview: [providers/index.md](./index.md)

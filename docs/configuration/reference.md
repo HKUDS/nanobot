@@ -23,6 +23,7 @@ The root node that controls agent behavior. It currently exposes the `defaults` 
 | `temperature` | float | `0.1` | Sampling temperature (`0.0` deterministic, `1.0` random) |
 | `max_tool_iterations` | integer | `40` | Maximum loop count through tools per request to prevent runaway iterations |
 | `reasoning_effort` | string \| null | `null` | Thinking mode intensity: `"low"`, `"medium"`, `"high"`. Set to `null` to disable |
+| `timezone` | string | `"UTC"` | IANA timezone for cron scheduling and runtime context timestamps (e.g. `"Asia/Shanghai"`, `"America/New_York"`) |
 
 #### workspace
 
@@ -98,6 +99,7 @@ Root node for channel configurations. Besides shared global options, each platfo
 |------|------|--------|------|
 | `send_progress` | bool | `true` | Stream the agent’s textual progress into the channel |
 | `send_tool_hints` | bool | `false` | Surface tool hints such as `read_file("…")` |
+| `send_max_retries` | integer | `3` | Max delivery attempts for message sending (initial send included); range 0-10; retry delays: 1s, 2s, 4s … |
 
 ```json
 {
@@ -585,7 +587,8 @@ Define MCP (Model Context Protocol) servers keyed by name.
       "contextWindowTokens": 65536,
       "temperature": 0.1,
       "maxToolIterations": 40,
-      "reasoningEffort": null
+      "reasoningEffort": null,
+      "timezone": "UTC"
     }
   },
   "channels": {

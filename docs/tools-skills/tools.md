@@ -286,7 +286,7 @@ tools:
 
 ## Cron tool (`cron`)
 
-Schedule reminders and periodic tasks with intervals, cron expressions, or single-run execution.
+Schedule reminders and recurring tasks with intervals, cron expressions, or single-run execution. If `tz` is omitted, cron expressions and naive ISO times default to the agent's configured timezone (UTC).
 
 ### Actions
 

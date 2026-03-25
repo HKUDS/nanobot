@@ -64,6 +64,7 @@ All enabled channels run within the same gateway process.
 |-----|---------|-------------|
 | `sendProgress` | `true` | Stream partial responses to channels while the AI is still composing |
 | `sendToolHints` | `false` | Whether to surface tool call hints (e.g., `read_file("…")`) to users |
+| `send_max_retries` | `3` | Maximum retry attempts on message send failure (0–10, 0 disables retries) |
 
 **Channel-specific settings** go inside each channel's subsection. Here is an example that combines the global options with a channel override:
 
@@ -114,6 +115,22 @@ This helps users understand what the AI is doing, but it is recommended to disab
   }
 }
 ```
+
+## Message Retry
+
+When message delivery fails, nanobot automatically retries with exponential backoff (1s, 2s, 4s). This is handled centrally by the channel manager, so all channels benefit from consistent retry behavior.
+
+The number of retry attempts is configurable:
+
+```json
+{
+  "channels": {
+    "send_max_retries": 3
+  }
+}
+```
+
+Valid range: 0-10. Set to 0 to disable retries.
 
 ---
 
