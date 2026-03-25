@@ -169,7 +169,6 @@ ALLOWLIST: set[tuple[str, str]] = {
     # ── Known violations: cross-package instantiation ──────────────────
     # Fix: move construction to agent_factory.py or inject via factories.
     ("nanobot/agent/loop.py", "nanobot.tools.builtin.mcp"),
-    ("nanobot/agent/loop.py", "nanobot.coordination.coordinator"),
     # delegation.py imports DelegationResult (data object) from tools.builtin.delegate.
     # DelegateTool construction was moved to agent_factory.py via delegate_tool_factory.
     ("nanobot/coordination/delegation.py", "nanobot.tools.builtin.delegate"),
