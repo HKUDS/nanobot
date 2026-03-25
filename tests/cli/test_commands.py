@@ -10,9 +10,8 @@ from typer.testing import CliRunner
 from nanobot.bus.events import OutboundMessage
 from nanobot.cli.commands import _make_provider, app
 from nanobot.config.schema import Config
-from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
-from nanobot.providers.registry import find_by_model, find_by_name
+from nanobot.providers.registry import find_by_name
 
 runner = CliRunner()
 
@@ -225,7 +224,7 @@ def test_config_matches_explicit_ollama_prefix_without_api_key():
     config.agents.defaults.model = "ollama/llama3.2"
 
     assert config.get_provider_name() == "ollama"
-    assert config.get_api_base() == "http://localhost:11434"
+    assert config.get_api_base() == "http://localhost:11434/v1"
 
 
 def test_config_explicit_ollama_provider_uses_default_localhost_api_base():
@@ -234,7 +233,7 @@ def test_config_explicit_ollama_provider_uses_default_localhost_api_base():
     config.agents.defaults.model = "llama3.2"
 
     assert config.get_provider_name() == "ollama"
-    assert config.get_api_base() == "http://localhost:11434"
+    assert config.get_api_base() == "http://localhost:11434/v1"
 
 
 def test_config_accepts_camel_case_explicit_provider_name_for_coding_plan():
@@ -269,12 +268,12 @@ def test_config_auto_detects_ollama_from_local_api_base():
     config = Config.model_validate(
         {
             "agents": {"defaults": {"provider": "auto", "model": "llama3.2"}},
-            "providers": {"ollama": {"apiBase": "http://localhost:11434"}},
+            "providers": {"ollama": {"apiBase": "http://localhost:11434/v1"}},
         }
     )
 
     assert config.get_provider_name() == "ollama"
-    assert config.get_api_base() == "http://localhost:11434"
+    assert config.get_api_base() == "http://localhost:11434/v1"
 
 
 def test_config_prefers_ollama_over_vllm_when_both_local_providers_configured():
@@ -283,13 +282,13 @@ def test_config_prefers_ollama_over_vllm_when_both_local_providers_configured():
             "agents": {"defaults": {"provider": "auto", "model": "llama3.2"}},
             "providers": {
                 "vllm": {"apiBase": "http://localhost:8000"},
-                "ollama": {"apiBase": "http://localhost:11434"},
+                "ollama": {"apiBase": "http://localhost:11434/v1"},
             },
         }
     )
 
     assert config.get_provider_name() == "ollama"
-    assert config.get_api_base() == "http://localhost:11434"
+    assert config.get_api_base() == "http://localhost:11434/v1"
 
 
 def test_config_falls_back_to_vllm_when_ollama_not_configured():
@@ -306,19 +305,13 @@ def test_config_falls_back_to_vllm_when_ollama_not_configured():
     assert config.get_api_base() == "http://localhost:8000"
 
 
-def test_find_by_model_prefers_explicit_prefix_over_generic_codex_keyword():
-    spec = find_by_model("github-copilot/gpt-5.3-codex")
+def test_openai_compat_provider_passes_model_through():
+    from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
-    assert spec is not None
-    assert spec.name == "github_copilot"
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider(default_model="github-copilot/gpt-5.3-codex")
 
-
-def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
-    provider = LiteLLMProvider(default_model="github-copilot/gpt-5.3-codex")
-
-    resolved = provider._resolve_model("github-copilot/gpt-5.3-codex")
-
-    assert resolved == "github_copilot/gpt-5.3-codex"
+    assert provider.get_default_model() == "github-copilot/gpt-5.3-codex"
 
 
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
@@ -343,7 +336,7 @@ def test_make_provider_passes_extra_headers_to_custom_provider():
         }
     )
 
-    with patch("nanobot.providers.custom_provider.AsyncOpenAI") as mock_async_openai:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_async_openai:
         _make_provider(config)
 
     kwargs = mock_async_openai.call_args.kwargs

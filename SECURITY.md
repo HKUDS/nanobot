@@ -120,7 +120,7 @@ npm audit fix
 ```
 
 **Important Notes:**
-- Keep `litellm` updated to the latest version for security fixes
+- `litellm` has been removed from dependencies (supply-chain risk); use pinned `openai` and `anthropic` SDKs
 - We've updated `ws` to `>=8.17.1` to fix DoS vulnerability
 - Run `pip-audit` or `npm audit` regularly
 - Subscribe to security advisories for nanobot and its dependencies
