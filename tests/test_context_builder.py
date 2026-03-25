@@ -76,12 +76,10 @@ def test_build_system_prompt_memory_failure_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ws = _workspace(tmp_path)
-    builder = ContextBuilder(ws)
+    mock_memory = MagicMock()
+    mock_memory.get_memory_context.side_effect = RuntimeError("memory down")
+    builder = ContextBuilder(ws, memory=mock_memory)
 
-    def _boom(*args, **kwargs):
-        raise RuntimeError("memory down")
-
-    monkeypatch.setattr(builder.memory, "get_memory_context", _boom)
     prompt = builder.build_system_prompt(current_message="hello")
     assert "# nanobot" in prompt
     assert "**Answer from these facts first.**" not in prompt

@@ -196,6 +196,17 @@ class TestAllowlist:
         """Basic structural check: ALLOWLIST should not be empty."""
         assert len(ALLOWLIST) > 0
 
+    def test_allowlist_size(self):
+        """ALLOWLIST should contain only legitimate exceptions (no known violations)."""
+        assert len(ALLOWLIST) == 7, f"Expected 7 allowlist entries, got {len(ALLOWLIST)}"
+
+    def test_no_known_violations_in_allowlist(self):
+        """All entries should be legitimate — no 'known violation' entries."""
+        violation_markers = {"nanobot/agent/loop.py", "nanobot/agent/message_processor.py"}
+        for filepath, module in ALLOWLIST:
+            if filepath in violation_markers and "tools.builtin" in module:
+                raise AssertionError(f"Known violation still in ALLOWLIST: {filepath} -> {module}")
+
 
 # ---------------------------------------------------------------------------
 # check() integration

@@ -18,7 +18,6 @@ from nanobot.agent.callbacks import ProgressCallback
 from nanobot.agent.reaction import classify_reaction
 from nanobot.bus.events import DeliveryResult, InboundMessage, OutboundMessage, ReactionEvent
 from nanobot.config.schema import AgentRoleConfig
-from nanobot.coordination.role_switching import TurnContext
 from nanobot.observability.langfuse import (
     flush as flush_langfuse,
 )
@@ -28,14 +27,12 @@ from nanobot.observability.langfuse import (
     update_current_span,
 )
 from nanobot.observability.tracing import TraceContext
-from nanobot.tools.builtin.email import CheckEmailTool
-from nanobot.tools.builtin.feedback import FeedbackTool
-from nanobot.tools.builtin.message import MessageTool
 
 if TYPE_CHECKING:
     from nanobot.agent.agent_components import _AgentComponents
     from nanobot.agent.message_processor import MessageProcessor
     from nanobot.coordination.coordinator import ClassificationResult, Coordinator
+    from nanobot.coordination.role_switching import TurnContext
 
 
 _DEFAULT_CONFIDENCE_THRESHOLD: float = (
@@ -99,6 +96,7 @@ class AgentLoop:
         # Routing
         self._routing_config = components.infra.routing_config
         self._mcp_servers = components.infra.mcp_servers
+        self._mcp_connector = components.infra.mcp_connector
 
         # Runtime state (not constructed)
         self._running = False
@@ -118,13 +116,13 @@ class AgentLoop:
         """Connect to configured MCP servers (one-time, lazy)."""
         if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
             return
+        if self._mcp_connector is None:
+            return
         self._mcp_connecting = True
-        from nanobot.tools.builtin.mcp import connect_mcp_servers
-
         try:
             self._mcp_stack = AsyncExitStack()
             await self._mcp_stack.__aenter__()
-            await connect_mcp_servers(
+            await self._mcp_connector(
                 self._mcp_servers,
                 self._capabilities.tool_registry,
                 self._mcp_stack,
@@ -156,7 +154,7 @@ class AgentLoop:
     ) -> None:
         """Replace the MessageTool send callback with an honest delivery path."""
         if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool):
+            if hasattr(message_tool, "set_send_callback"):
                 message_tool.set_send_callback(callback)
 
     def set_contacts_provider(
@@ -173,9 +171,8 @@ class AgentLoop:
     ) -> None:
         """Wire email fetch callbacks into the CheckEmailTool."""
         if tool := self.tools.get("check_email"):
-            if isinstance(tool, CheckEmailTool):
-                tool._fetch = fetch_callback
-                tool._fetch_unread = fetch_unread_callback
+            if hasattr(tool, "set_fetch_callbacks"):
+                tool.set_fetch_callbacks(fetch_callback, fetch_unread_callback)
 
     async def _run_agent_loop(
         self,
@@ -203,12 +200,12 @@ class AgentLoop:
             return
 
         feedback_tool = self.tools.get("feedback")
-        if not isinstance(feedback_tool, FeedbackTool):
+        if feedback_tool is None:
             return
 
         feedback_tool.set_context(
-            reaction.channel,
-            reaction.chat_id,
+            channel=reaction.channel,
+            chat_id=reaction.chat_id,
             session_key=f"{reaction.channel}:{reaction.chat_id}",
         )
         result = await feedback_tool.execute(
@@ -216,12 +213,16 @@ class AgentLoop:
             comment=f"emoji reaction: {reaction.emoji}",
             topic="",
         )
+        if isinstance(result, str):
+            outcome = result
+        else:
+            outcome = "ok" if result.success else (result.error or "error")
         logger.info(
             "Reaction {} from {}:{} → {}",
             reaction.emoji,
             reaction.channel,
             reaction.sender_id,
-            "ok" if result.success else result.error,
+            outcome,
         )
 
     async def run(self) -> None:
@@ -231,7 +232,10 @@ class AgentLoop:
         self._stop_event = asyncio.Event()
         await self._connect_mcp()
         self._wire_coordinator()
-        await self.context.memory.maintenance.ensure_health()  # LAN-101: non-blocking vector health
+        if self.context.memory is not None:
+            await (
+                self.context.memory.maintenance.ensure_health()
+            )  # LAN-101: non-blocking vector health
 
         logger.info("Agent loop started")
 

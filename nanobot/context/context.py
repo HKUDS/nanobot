@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
+from nanobot.context.feedback_context import feedback_summary
 from nanobot.context.prompt_loader import prompts
 from nanobot.context.skills import SkillsLoader
 from nanobot.errors import (
@@ -35,7 +36,6 @@ from nanobot.errors import (
     MemorySubsystemError as NanobotMemoryError,
 )
 from nanobot.observability.tracing import bind_trace
-from nanobot.tools.builtin.feedback import feedback_summary
 
 if TYPE_CHECKING:
     from nanobot.memory.store import MemoryStore
@@ -67,16 +67,10 @@ class ContextBuilder:
         memory_retrieval_k: int = 6,
         memory_token_budget: int = 900,
         memory_md_token_cap: int = 1500,
-        memory_rollout_overrides: dict[str, Any] | None = None,
         role_system_prompt: str = "",
     ):
         self.workspace = workspace
-        if memory is not None:
-            self.memory = memory
-        else:
-            from nanobot.memory.store import MemoryStore as _MemoryStore
-
-            self.memory = _MemoryStore(workspace, rollout_overrides=memory_rollout_overrides)
+        self.memory = memory
         self.skills = SkillsLoader(workspace)
         self.memory_retrieval_k = memory_retrieval_k
         self.memory_token_budget = memory_token_budget
@@ -134,24 +128,25 @@ class ContextBuilder:
             parts.append(bootstrap)
 
         # Memory context — graceful degradation if retrieval crashes
-        try:
-            memory = self.memory.get_memory_context(
-                query=current_message,
-                retrieval_k=self.memory_retrieval_k,
-                token_budget=self.memory_token_budget,
-                memory_md_token_cap=self.memory_md_token_cap,
-            )
-        except (NanobotMemoryError, MemoryRetrievalError, RuntimeError, OSError):
-            logger.warning("Memory context retrieval failed; continuing without memory")
-            memory = ""
-        if memory:
-            parts.append(prompts.render("memory_header", memory=memory))
+        if self.memory is not None:
+            try:
+                memory = self.memory.get_memory_context(
+                    query=current_message,
+                    retrieval_k=self.memory_retrieval_k,
+                    token_budget=self.memory_token_budget,
+                    memory_md_token_cap=self.memory_md_token_cap,
+                )
+            except (NanobotMemoryError, MemoryRetrievalError, RuntimeError, OSError):
+                logger.warning("Memory context retrieval failed; continuing without memory")
+                memory = ""
+            if memory:
+                parts.append(prompts.render("memory_header", memory=memory))
 
-        # Feedback summary — surface correction stats so the agent adapts
-        events_file = self.memory.events_file
-        fb_summary = feedback_summary(events_file)
-        if fb_summary:
-            parts.append(f"# Feedback\n\n{fb_summary}")
+            # Feedback summary — surface correction stats so the agent adapts
+            events_file = self.memory.events_file
+            fb_summary = feedback_summary(events_file)
+            if fb_summary:
+                parts.append(f"# Feedback\n\n{fb_summary}")
 
         # Skills - progressive loading
         # 1. Active skills: always-loaded + requested/matched for this turn

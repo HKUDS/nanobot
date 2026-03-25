@@ -61,6 +61,15 @@ class CheckEmailTool(Tool):
         "required": [],
     }
 
+    def set_fetch_callbacks(
+        self,
+        fetch: Callable[[date, date, int], list[dict[str, Any]]] | None,
+        fetch_unread: Callable[[int], list[dict[str, Any]]] | None,
+    ) -> None:
+        """Wire email fetch callbacks (called by AgentLoop after construction)."""
+        self._fetch = fetch
+        self._fetch_unread = fetch_unread
+
     # ------------------------------------------------------------------
 
     def check_available(self) -> tuple[bool, str | None]:

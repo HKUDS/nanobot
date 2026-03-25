@@ -22,6 +22,10 @@ class ScratchpadWriteTool(Tool):
         """Update the scratchpad instance for this session."""
         self._scratchpad = scratchpad
 
+    def on_session_change(self, **kwargs: Any) -> None:
+        if "scratchpad" in kwargs:
+            self._scratchpad = kwargs["scratchpad"]
+
     name = "write_scratchpad"
     description = "Write a labeled artifact to the session scratchpad for other agents to read."
     parameters: ClassVar[dict[str, Any]] = {
@@ -59,6 +63,10 @@ class ScratchpadReadTool(Tool):
     def set_scratchpad(self, scratchpad: Scratchpad) -> None:
         """Update the scratchpad instance for this session."""
         self._scratchpad = scratchpad
+
+    def on_session_change(self, **kwargs: Any) -> None:
+        if "scratchpad" in kwargs:
+            self._scratchpad = kwargs["scratchpad"]
 
     name = "read_scratchpad"
     description = "Read entries from the session scratchpad. Omit entry_id to list all entries."
