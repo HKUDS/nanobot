@@ -80,7 +80,8 @@ class ExecTool(Tool):
 
     async def execute(
         self, command: str, working_dir: str | None = None,
-        timeout: int | None = None, **kwargs: Any,
+        timeout: int | None = None, env: dict[str, str] | None = None,
+        **kwargs: Any,
     ) -> str:
         cwd = working_dir or self.working_dir or os.getcwd()
         guard_error = self._guard_command(command, cwd)
@@ -89,9 +90,11 @@ class ExecTool(Tool):
 
         effective_timeout = min(timeout or self.timeout, self._MAX_TIMEOUT)
 
-        env = os.environ.copy()
+        run_env = os.environ.copy()
         if self.path_append:
-            env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
+            run_env["PATH"] = run_env.get("PATH", "") + os.pathsep + self.path_append
+        if env:
+            run_env.update(env)
 
         try:
             process = await asyncio.create_subprocess_shell(
@@ -99,7 +102,7 @@ class ExecTool(Tool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
-                env=env,
+                env=run_env,
             )
 
             try:

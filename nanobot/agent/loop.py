@@ -202,6 +202,7 @@ class AgentLoop:
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        extra_env: dict[str, str] | None = None,
         *,
         channel: str = "cli",
         chat_id: str = "direct",
@@ -297,7 +298,7 @@ class AgentLoop:
                 # return_exceptions=True ensures all results are collected
                 # even if one tool is cancelled or raises BaseException.
                 results = await asyncio.gather(*(
-                    self.tools.execute(tc.name, tc.arguments)
+                    self.tools.execute(tc.name, tc.arguments, env=extra_env)
                     for tc in response.tool_calls
                 ), return_exceptions=True)
 
@@ -435,6 +436,8 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        extra_system_prompt: str | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -488,6 +491,7 @@ class AgentLoop:
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            extra_system_prompt=extra_system_prompt,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -505,6 +509,7 @@ class AgentLoop:
             on_stream_end=on_stream_end,
             channel=msg.channel, chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
+            extra_env=extra_env,
         )
 
         if final_content is None:
@@ -616,11 +621,18 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        extra_system_prompt: str | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
+        if extra_env:
+            env_keys = ", ".join(extra_env.keys())
+            logger.debug(f"process_direct: extra_env keys: {env_keys}")
+
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         return await self._process_message(
             msg, session_key=session_key, on_progress=on_progress,
             on_stream=on_stream, on_stream_end=on_stream_end,
+            extra_system_prompt=extra_system_prompt, extra_env=extra_env,
         )
