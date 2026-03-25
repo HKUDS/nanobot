@@ -528,6 +528,7 @@ class TelegramChannel(BaseChannel):
                 buf.last_edit = now
             except Exception as e:
                 logger.warning("Stream initial send failed: {}", e)
+                raise  # Let ChannelManager handle retry
         elif (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL:
             try:
                 await self._call_with_retry(
@@ -536,8 +537,9 @@ class TelegramChannel(BaseChannel):
                     text=buf.text,
                 )
                 buf.last_edit = now
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Stream edit failed: {}", e)
+                raise  # Let ChannelManager handle retry
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""

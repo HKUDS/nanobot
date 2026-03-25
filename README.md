@@ -1157,6 +1157,38 @@ That's it! Environment variables, model routing, config matching, and `nanobot s
 
 </details>
 
+### Channel Settings
+
+Global settings that apply to all channels. Configure under the `channels` section in `~/.nanobot/config.json`:
+
+```json
+{
+  "channels": {
+    "sendProgress": true,
+    "sendToolHints": false,
+    "sendMaxRetries": 3,
+    "telegram": { ... }
+  }
+}
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `sendProgress` | `true` | Stream agent's text progress to the channel |
+| `sendToolHints` | `false` | Stream tool-call hints (e.g. `read_file("…")`) |
+| `sendMaxRetries` | `3` | Max retry attempts for message send failures (0-10) |
+
+#### Retry Behavior
+
+When a message fails to send, nanobot will automatically retry with exponential backoff:
+
+- **Attempts 1-3**: Retry delays are 1s, 2s, 4s
+- **Attempts 4+**: Retry delay caps at 4s
+- **Transient failures** (network hiccups, temporary API limits): Retry usually succeeds
+- **Permanent failures** (invalid token, channel banned): All retries fail
+
+> [!NOTE]
+> When a channel is completely unavailable, there's no way to notify the user since we cannot reach them through that channel. Monitor logs for "Failed to send to {channel} after N attempts" to detect persistent delivery failures.
 
 ### Web Search
 
