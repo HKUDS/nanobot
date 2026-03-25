@@ -166,18 +166,7 @@ ALLOWLIST: set[tuple[str, str]] = {
     ("nanobot/config/schema.py", "nanobot.providers.registry"),
     # tools/builtin/mission.py imports MissionStatus enum (data object, not service).
     ("nanobot/tools/builtin/mission.py", "nanobot.coordination.mission"),
-    # ── Known violations: isinstance checks on concrete types ──────────
-    # Fix: replace with Protocol types or tool.name string matching.
-    ("nanobot/agent/loop.py", "nanobot.tools.builtin.email"),
-    ("nanobot/agent/loop.py", "nanobot.tools.builtin.feedback"),
-    ("nanobot/agent/loop.py", "nanobot.tools.builtin.message"),
-    ("nanobot/agent/message_processor.py", "nanobot.tools.builtin.message"),
-    # turn_context.py: isinstance checks moved from message_processor.py
-    ("nanobot/agent/turn_context.py", "nanobot.tools.builtin.message"),
-    ("nanobot/agent/turn_context.py", "nanobot.tools.builtin.scratchpad"),
-    ("nanobot/agent/turn_context.py", "nanobot.tools.builtin.cron"),
-    ("nanobot/agent/turn_context.py", "nanobot.tools.builtin.feedback"),
-    ("nanobot/agent/turn_context.py", "nanobot.tools.builtin.mission"),
+    # turn_context.py: runtime import of Scratchpad for construction
     ("nanobot/agent/turn_context.py", "nanobot.coordination.scratchpad"),
     # ── Known violations: cross-package instantiation ──────────────────
     # Fix: move construction to agent_factory.py or inject via factories.

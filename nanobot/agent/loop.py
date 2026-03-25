@@ -27,9 +27,6 @@ from nanobot.observability.langfuse import (
     update_current_span,
 )
 from nanobot.observability.tracing import TraceContext
-from nanobot.tools.builtin.email import CheckEmailTool
-from nanobot.tools.builtin.feedback import FeedbackTool
-from nanobot.tools.builtin.message import MessageTool
 
 if TYPE_CHECKING:
     from nanobot.agent.agent_components import _AgentComponents
@@ -156,7 +153,7 @@ class AgentLoop:
     ) -> None:
         """Replace the MessageTool send callback with an honest delivery path."""
         if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool):
+            if hasattr(message_tool, "set_send_callback"):
                 message_tool.set_send_callback(callback)
 
     def set_contacts_provider(
@@ -173,9 +170,8 @@ class AgentLoop:
     ) -> None:
         """Wire email fetch callbacks into the CheckEmailTool."""
         if tool := self.tools.get("check_email"):
-            if isinstance(tool, CheckEmailTool):
-                tool._fetch = fetch_callback
-                tool._fetch_unread = fetch_unread_callback
+            if hasattr(tool, "set_fetch_callbacks"):
+                tool.set_fetch_callbacks(fetch_callback, fetch_unread_callback)
 
     async def _run_agent_loop(
         self,
@@ -203,12 +199,12 @@ class AgentLoop:
             return
 
         feedback_tool = self.tools.get("feedback")
-        if not isinstance(feedback_tool, FeedbackTool):
+        if feedback_tool is None:
             return
 
         feedback_tool.set_context(
-            reaction.channel,
-            reaction.chat_id,
+            channel=reaction.channel,
+            chat_id=reaction.chat_id,
             session_key=f"{reaction.channel}:{reaction.chat_id}",
         )
         result = await feedback_tool.execute(
@@ -216,12 +212,16 @@ class AgentLoop:
             comment=f"emoji reaction: {reaction.emoji}",
             topic="",
         )
+        if isinstance(result, str):
+            outcome = result
+        else:
+            outcome = "ok" if result.success else (result.error or "error")
         logger.info(
             "Reaction {} from {}:{} → {}",
             reaction.emoji,
             reaction.channel,
             reaction.sender_id,
-            "ok" if result.success else result.error,
+            outcome,
         )
 
     async def run(self) -> None:

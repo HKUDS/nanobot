@@ -27,7 +27,6 @@ from nanobot.observability.bus_progress import make_bus_progress
 from nanobot.observability.langfuse import update_current_span
 from nanobot.observability.tracing import TraceContext, bind_trace
 from nanobot.session.manager import Session
-from nanobot.tools.builtin.message import MessageTool
 
 if TYPE_CHECKING:
     from nanobot.coordination.coordinator import ClassificationResult
@@ -211,8 +210,7 @@ class MessageProcessor:
         )
         self._turn_context.ensure_scratchpad(key, self.workspace)
         if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool):
-                message_tool.on_turn_start()
+            message_tool.on_turn_start()
 
         history = session.get_history(max_messages=self.config.memory_window)
         verify_before_answer = self.verifier.should_force_verification(msg.content)
@@ -339,8 +337,8 @@ class MessageProcessor:
         if pending_conflict_question:
             final_content += "\n\n---\n" + pending_conflict_question
 
-        if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool) and message_tool.sent_in_turn:
+        if msg_tool := self.tools.get("message"):
+            if msg_tool.sent_in_turn:
                 return None
 
         response_meta = dict(msg.metadata or {})
