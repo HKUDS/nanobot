@@ -286,6 +286,15 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://api.mistral.ai/v1",
     ),
+    # Step Fun (阶跃星辰): OpenAI-compatible API
+    ProviderSpec(
+        name="stepfun",
+        keywords=("stepfun", "step"),
+        env_key="STEPFUN_API_KEY",
+        display_name="Step Fun",
+        backend="openai_compat",
+        default_api_base="https://api.stepfun.com/v1",
+    ),
     # === Local deployment (matched by config key, NOT by api_base) =========
     # vLLM / any OpenAI-compatible local server
     ProviderSpec(
