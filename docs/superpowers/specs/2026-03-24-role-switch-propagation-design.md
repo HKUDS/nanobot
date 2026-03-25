@@ -90,39 +90,41 @@ falsy but potentially valid values:
  else self._max_iterations)
 ```
 
-### Who sets these: `_run_orchestrator()` accepts explicit parameters
+### Two-hop data flow and why both are needed
 
-`MessageProcessor._run_orchestrator()` gains keyword parameters for the active settings.
-This makes the contract explicit in the function signature — callers **cannot** forget:
+Active settings flow through `MessageProcessor` via two paths:
+
+1. **Instance fields** (`self._active_model`, etc.) — used by `MessageProcessor` itself
+   for audit logging (Section 5), consolidation calls (Section 5), and
+   `attempt_recovery()` (Section 4). These are set once per turn by `set_active_settings()`.
+
+2. **`TurnState.active_*` fields** — used by `TurnOrchestrator`, `StreamingLLMCaller`,
+   `AnswerVerifier.verify()`, and `ReflectPhase`. Populated by `_run_orchestrator()`
+   reading from the instance fields.
+
+`_run_orchestrator()` does **not** gain keyword parameters — it reads `self._active_*`
+directly. The instance fields are the single source of truth within the processor:
 
 ```python
-async def _run_orchestrator(
-    self,
-    messages: list[dict[str, Any]],
-    on_progress: ProgressCallback | None,
-    *,
-    active_model: str | None = None,
-    active_temperature: float | None = None,
-    active_max_iterations: int | None = None,
-    active_role_name: str | None = None,
-) -> tuple[str | None, list[str], list[dict[str, Any]]]:
+async def _run_orchestrator(self, messages, on_progress):
+    # ... existing user_text extraction ...
     state = TurnState(
         messages=messages,
         user_text=user_text,
         classification_result=self.classification_result,
-        active_model=active_model,
-        active_temperature=active_temperature,
-        active_max_iterations=active_max_iterations,
-        active_role_name=active_role_name,
+        active_model=self._active_model,
+        active_temperature=self._active_temperature,
+        active_max_iterations=self._active_max_iterations,
+        active_role_name=self._active_role_name,
         tools_def_cache=list(self.tools.get_definitions()),
     )
     ...
 ```
 
-### Who calls with active values: `AgentLoop`
+### Who sets the instance fields: `AgentLoop`
 
-`AgentLoop` reads its own (role-switched) fields and passes them to the processor.
-This must happen at **every call site**:
+`AgentLoop` reads its own (role-switched) fields and forwards them to the processor
+via `set_active_settings()`. This must happen at **every call site**:
 
 **Call site 1: `AgentLoop.run()` — bus-based message processing** (`loop.py:~290`):
 
@@ -200,7 +202,7 @@ async def call(
     model: str | None = None,
     temperature: float | None = None,
 ) -> LLMResponse:
-    effective_model = model or self.model
+    effective_model = model if model is not None else self.model
     effective_temperature = temperature if temperature is not None else self.temperature
     # Use effective_model and effective_temperature in chat() / stream_chat()
 ```
