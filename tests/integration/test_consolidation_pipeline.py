@@ -112,19 +112,26 @@ class TestConsolidationPipeline:
     async def test_consolidation_advances_pointer(
         self, store: MemoryStore, provider: LiteLLMProvider
     ) -> None:
-        """After consolidation, last_consolidated advances past processed messages."""
+        """After non-archive consolidation, last_consolidated advances."""
+        # Need enough messages to exceed keep_count (memory_window // 2).
+        # Default memory_window=50, keep_count=25, so we need >25 messages.
+        # Use archive_all=False with a small memory_window to trigger advancement.
         session = _make_session(
-            ("user", "My favorite IDE is VS Code"),
-            ("assistant", "VS Code is a great choice!"),
+            ("user", "I prefer Python"),
+            ("assistant", "Great choice!"),
+            ("user", "I also like Rust"),
+            ("assistant", "Rust is fast!"),
+            ("user", "And Go for microservices"),
+            ("assistant", "Go is solid for that."),
         )
         original_pointer = session.last_consolidated
-        assert original_pointer == 0, "pointer should start at 0"
+        assert original_pointer == 0
 
         ok = await store.consolidate(
             session,
             provider,
             MODEL,
-            archive_all=True,  # type: ignore[arg-type]
+            memory_window=2,  # small window so keep_count=1, old_messages=5
         )
         assert ok, "consolidation should succeed"
         assert session.last_consolidated > original_pointer, (

@@ -143,12 +143,16 @@ key by key. Components holding the same dict reference see mutations at differen
   ```
 
 **Changes to `MemoryStore`** (`store.py`):
-- `self.rollout` becomes a property that reads from `self._rollout_config.rollout`:
+- `self.rollout` becomes a read-only property that reads from `self._rollout_config.rollout`:
   ```python
   @property
   def rollout(self) -> dict[str, Any]:
       return self._rollout_config.rollout
   ```
+- **Breaking change:** Any code that writes `store.rollout = {...}` will get
+  `AttributeError`. This is intentional — mutations go through `_rollout_config`.
+  A grep confirms no external code assigns to `store.rollout`; the only assignment
+  is in `__init__` at line 143, which this change replaces.
 
 **Changes to subsystem consumers** (ingester, retriever, maintenance):
 - Hot-path components (retriever, ingester) capture a local reference at the start of
@@ -186,20 +190,27 @@ all three with None/incomplete references, then patching them afterward.
 **Fix:** Break all three edges with lazy callbacks:
 
 ```python
-# 1. Construct ProfileStore with conflict_mgr but corrector as lazy
+# 1. Construct ProfileStore with lazy callbacks for conflict_mgr and corrector
 self.profile_mgr = ProfileStore(
     db=self.db,
-    conflict_mgr=self.conflict_mgr,
-    corrector_fn=lambda: self._corrector,  # resolved at call time
+    conflict_mgr_fn=lambda: self.conflict_mgr,  # resolved at call time
+    corrector_fn=lambda: self._corrector,        # resolved at call time
 )
 
-# 2. Construct MemorySnapshot with profile_mgr (now exists)
+# 2. Construct ConflictManager with profile_mgr (now exists)
+self.conflict_mgr = ConflictManager(
+    self.profile_mgr,
+    ...,  # existing sanitize fns, db
+    resolve_gap_fn=lambda: float(self.rollout.get("conflict_auto_resolve_gap", 0.25)),
+)
+
+# 3. Construct MemorySnapshot with profile_mgr (now exists)
 self.snapshot = MemorySnapshot(
     profile_mgr=self.profile_mgr,
     ...
 )
 
-# 3. Construct corrector with all deps available
+# 4. Construct corrector with all deps available
 self._corrector = _CorrectionOrchestrator(
     profile_store=self.profile_mgr,
     extractor=self.extractor,
@@ -209,20 +220,21 @@ self._corrector = _CorrectionOrchestrator(
 )
 ```
 
-The key insight: `ProfileStore` doesn't need `corrector` at construction — it needs it
-at call time (when `apply_live_user_correction` is invoked). So `ProfileStore` receives
-a `corrector_fn: Callable` that resolves lazily. By the time any correction method is
-called, `self._corrector` is fully constructed.
+The key insight: `ProfileStore` doesn't need `conflict_mgr` or `corrector` at
+construction — it needs them at call time (when conflict/correction methods are invoked).
+So `ProfileStore` receives two lazy callbacks that resolve after their targets are built.
+By the time any conflict or correction method is called, both `self.conflict_mgr` and
+`self._corrector` are fully constructed.
 
-`_CorrectionOrchestrator` receives `profile_store` directly (not as a callback) because
-by the time `corrector` is constructed, `profile_mgr` already exists. `MemorySnapshot`
-also receives `profile_mgr` directly for the same reason.
+`ConflictManager`, `_CorrectionOrchestrator`, and `MemorySnapshot` all receive
+`profile_mgr` directly (not as callbacks) because `profile_mgr` is constructed first.
 
 **Changes to `ProfileStore`** (`persistence/profile_io.py`):
-- Add `conflict_mgr` as a required constructor parameter
+- Replace `_conflict_mgr: ... | None = None` with `conflict_mgr_fn: Callable[[], Any]`
 - Replace `_corrector: ... | None = None` with `corrector_fn: Callable[[], Any]`
+- Access conflict_mgr via `self._conflict_mgr_fn()` at call time
 - Access corrector via `self._corrector_fn()` at call time
-- Remove all defensive null-checks for `_conflict_mgr` and `_corrector`
+- Remove all defensive null-checks for these fields
 
 **Changes to `_CorrectionOrchestrator`** (`persistence/profile_correction.py`):
 - No signature change — it still receives `profile_store: ProfileStore` directly
@@ -234,8 +246,8 @@ db → embedder → rollout_config
   → extractor
   → graph (needs: db)
   → ingester (needs: db, embedder, graph, rollout_fn)
-  → conflict_mgr (needs: db, resolve_gap_fn)
-  → profile_mgr (needs: db, conflict_mgr, corrector_fn=lambda: self._corrector)
+  → profile_mgr (needs: db, conflict_mgr_fn*, corrector_fn*)
+  → conflict_mgr (needs: profile_mgr, ingester sanitize fns, db, resolve_gap_fn)
   → assembler (needs: profile_mgr, ingester, db, embedder)
   → snapshot (needs: profile_mgr, assembler, ingester, db)
   → corrector (needs: profile_mgr, extractor, ingester, conflict_mgr, snapshot)
@@ -244,8 +256,13 @@ db → embedder → rollout_config
   → consolidation_pipeline (needs: all above)
 ```
 
-One lazy callback (`corrector_fn`) breaks the three-way cycle. All other dependencies
-are direct references, fully constructed before use. No post-construction field assignment.
+*Two lazy callbacks on `ProfileStore`:
+- `conflict_mgr_fn=lambda: self.conflict_mgr` — resolved when conflict methods are called
+- `corrector_fn=lambda: self._corrector` — resolved when correction methods are called
+
+Both are constructed immediately after `profile_mgr`, so the lazy references resolve
+before any runtime call. All other dependencies are direct references, fully constructed
+before use. No post-construction field assignment.
 
 ### 3b: MemoryMaintenance._reindex_fn — pass at construction
 
@@ -352,10 +369,10 @@ Two new entries under **Prohibited Patterns > Wiring violations**:
 | `nanobot/memory/write/ingester.py` | Receive `rollout_fn` callback instead of dict reference |
 | `nanobot/memory/read/retriever.py` | Receive `rollout_fn` callback; capture snapshot at start of `retrieve()` |
 | `nanobot/memory/maintenance.py` | Receive `rollout_fn` and `reindex_deps` at construction; remove `_reindex_fn` post-wiring |
-| `nanobot/memory/persistence/profile_io.py` | `ProfileStore.__init__` gains required `conflict_mgr` param and `corrector_fn` callback; remove null-checks |
+| `nanobot/memory/persistence/profile_io.py` | `ProfileStore.__init__` gains `conflict_mgr_fn` and `corrector_fn` lazy callbacks; remove null-checks |
 | `nanobot/memory/persistence/profile_correction.py` | No signature change (receives `profile_store` directly) |
 | `CLAUDE.md` | Add 2 new prohibited patterns |
-| `tests/contract/test_memory_wiring.py` | New: 6 wiring contract tests |
+| `tests/contract/test_memory_wiring.py` | New: 7 wiring contract tests |
 
 ## Section 7: What this does NOT change
 
