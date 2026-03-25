@@ -637,12 +637,10 @@ class AgentLoop:
         if on_message and isinstance(mt, MessageTool):
             original_cb = mt._send_callback
 
-            async def _tee_callback(msg: OutboundMessage) -> None:
-                if original_cb:
-                    await original_cb(msg)
+            async def _stream_callback(msg: OutboundMessage) -> None:
                 await on_message(msg)
 
-            mt.set_send_callback(_tee_callback)
+            mt.set_send_callback(_stream_callback)
 
         try:
             msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
