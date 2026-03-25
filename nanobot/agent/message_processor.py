@@ -73,6 +73,12 @@ class MessageProcessor:
         # Classification result (consumed by _run_orchestrator each turn).
         self.classification_result: ClassificationResult | None = None
 
+        # Per-turn active settings (set by AgentLoop before each turn).
+        self._active_model: str | None = None
+        self._active_temperature: float | None = None
+        self._active_max_iterations: int | None = None
+        self._active_role_name: str | None = None
+
         # Last TurnResult from the orchestrator, used by _sync_token_counters.
         self._last_turn_result: Any | None = None
 
@@ -83,6 +89,20 @@ class MessageProcessor:
     def set_classification_result(self, result: ClassificationResult | None) -> None:
         """Forward a coordinator classification result for the next turn."""
         self.classification_result = result
+
+    def set_active_settings(
+        self,
+        *,
+        model: str,
+        temperature: float,
+        max_iterations: int,
+        role_name: str,
+    ) -> None:
+        """Forward role-switched settings for the upcoming turn."""
+        self._active_model = model
+        self._active_temperature = temperature
+        self._active_max_iterations = max_iterations
+        self._active_role_name = role_name
 
     async def process(
         self,

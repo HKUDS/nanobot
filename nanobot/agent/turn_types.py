@@ -44,6 +44,13 @@ class TurnState:
     tools_def_cache: list[dict[str, Any]] = field(default_factory=list)
     tools_def_snapshot: frozenset[str] = field(default_factory=frozenset)
 
+    # Per-turn role overrides (None = use component construction-time defaults).
+    # Set by MessageProcessor.set_active_settings() before each turn.
+    active_model: str | None = None
+    active_temperature: float | None = None
+    active_max_iterations: int | None = None
+    active_role_name: str | None = None
+
 
 @dataclass(frozen=True, slots=True)
 class TurnResult:
@@ -87,6 +94,15 @@ class Processor(Protocol):
     def set_role_manager(self, role_manager: Any) -> None: ...
 
     def set_classification_result(self, result: Any) -> None: ...
+
+    def set_active_settings(
+        self,
+        *,
+        model: str,
+        temperature: float,
+        max_iterations: int,
+        role_name: str,
+    ) -> None: ...
 
     async def process(
         self,
