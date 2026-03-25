@@ -15,7 +15,7 @@ from nanobot.memory.read.retrieval_planner import RetrievalPlanner
 def test_coerce_event_adds_normalized_metadata(tmp_path: Path) -> None:
     store = MemoryStore(tmp_path)
 
-    event = store.ingester._coerce_event(
+    event = store._coercer.coerce_event(
         {
             "type": "fact",
             "summary": "Project runs on Ubuntu servers.",

@@ -34,12 +34,15 @@ from .read.retriever import MemoryRetriever
 from .rollout import RolloutConfig
 from .token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
 from .unified_db import UnifiedMemoryDB
+from .write.classification import EventClassifier
+from .write.coercion import EventCoercer
 from .write.conflicts import (
     CONFLICT_STATUS_NEEDS_USER,
     CONFLICT_STATUS_OPEN,
     CONFLICT_STATUS_RESOLVED,
     ConflictManager,
 )
+from .write.dedup import EventDeduplicator
 from .write.extractor import MemoryExtractor
 from .write.ingester import EventIngester
 
@@ -134,9 +137,13 @@ class MemoryStore:
         # Deferred until graph is built below; placeholder here for type checkers.
         self.ingester: EventIngester  # set after graph init
 
+        # Classifier and coercer are constructed early so the extractor can use them.
+        self._classifier = EventClassifier()
+        self._coercer = EventCoercer(self._classifier)
+
         self.extractor = MemoryExtractor(
             to_str_list=_to_str_list,
-            coerce_event=lambda raw, **kw: self.ingester._coerce_event(raw, **kw),
+            coerce_event=lambda raw, **kw: self._coercer.coerce_event(raw, **kw),
             utc_now_iso=_utc_now_iso,
         )
         self._rollout_config = RolloutConfig(overrides=rollout_overrides)
@@ -203,11 +210,16 @@ class MemoryStore:
         else:
             self.graph = KnowledgeGraph()  # disabled — all methods return empty
 
-        # EventIngester: owns the full event write path.
+        # EventDeduplicator + EventIngester: own the full event write path.
+        self._dedup = EventDeduplicator(
+            coercer=self._coercer,
+            conflict_pair_fn=lambda old, new: self.profile_mgr._conflict_pair(old, new),
+        )
         self.ingester = EventIngester(
+            coercer=self._coercer,
+            dedup=self._dedup,
             graph=self.graph,
             rollout_fn=lambda: self._rollout_config.rollout,
-            conflict_pair_fn=lambda old, new: self.profile_mgr._conflict_pair(old, new),
             db=self.db,
             embedder=self._embedder,
         )
@@ -274,6 +286,7 @@ class MemoryStore:
             profile_store=self.profile_mgr,
             extractor=self.extractor,
             ingester=self.ingester,
+            coercer=self._coercer,
             conflict_mgr=self.conflict_mgr,
             snapshot=self.snapshot,
         )

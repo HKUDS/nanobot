@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.memory import MemoryStore
-from nanobot.memory.write.ingester import EventIngester
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 
@@ -317,15 +316,17 @@ class TestConsolidationWithExtraction:
 class TestStoreCoreBranchHelpers:
     def test_merge_source_span_and_provenance_without_id(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
-        assert EventIngester._merge_source_span([3, 5], [1, 4]) == [1, 5]
-        assert EventIngester._merge_source_span("bad", [2, 3]) == [0, 3]
+        from nanobot.memory.write.dedup import EventDeduplicator
+
+        assert EventDeduplicator.merge_source_span([3, 5], [1, 4]) == [1, 5]
+        assert EventDeduplicator.merge_source_span("bad", [2, 3]) == [0, 3]
 
         event = {
             "type": "fact",
             "summary": "No id event",
             "source": "chat",
         }
-        out = store.ingester._ensure_event_provenance(event)
+        out = store._coercer.ensure_event_provenance(event)
         assert out["memory_type"] in {"semantic", "episodic", "reflection"}
         assert "canonical_id" not in out
 
@@ -347,7 +348,7 @@ class TestStoreCoreBranchHelpers:
                 "memory_type": "semantic",
             }
         ]
-        idx, score = store.ingester._find_semantic_duplicate(candidate, existing)
+        idx, score = store._dedup.find_semantic_duplicate(candidate, existing)
         assert idx == 0
         assert score > 0
 
@@ -358,7 +359,7 @@ class TestStoreCoreBranchHelpers:
             "entities": ["user", "dark mode"],
             "memory_type": "semantic",
         }
-        sup_idx = store.ingester._find_semantic_supersession(candidate2, existing)
+        sup_idx = store._dedup.find_semantic_supersession(candidate2, existing)
         assert sup_idx == 0
 
     async def test_ingest_graph_triples_enabled(self, tmp_path: Path) -> None:

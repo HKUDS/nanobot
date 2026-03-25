@@ -8,10 +8,18 @@ from unittest.mock import MagicMock
 
 def test_ingester_uses_rollout_fn():
     """EventIngester reads rollout via callback, not cached dict."""
+    from nanobot.memory.write.classification import EventClassifier
+    from nanobot.memory.write.coercion import EventCoercer
+    from nanobot.memory.write.dedup import EventDeduplicator
     from nanobot.memory.write.ingester import EventIngester
 
     rollout_dict: dict[str, Any] = {"memory_fallback_max_summary_chars": 300}
+    classifier = EventClassifier()
+    coercer = EventCoercer(classifier)
+    dedup = EventDeduplicator(coercer=coercer)
     ingester = EventIngester(
+        coercer=coercer,
+        dedup=dedup,
         graph=None,
         rollout_fn=lambda: rollout_dict,
         db=None,

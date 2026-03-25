@@ -65,7 +65,7 @@ class TestMemoryStoreExtraHelpers:
     def test_type_classification_and_metadata_normalization(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
 
-        memory_type, stability, is_mixed = store.ingester._classify_memory_type(
+        memory_type, stability, is_mixed = store._classifier.classify_memory_type(
             event_type="preference",
             summary="User prefers dark mode because setup failed yesterday",
             source="chat",
@@ -74,7 +74,7 @@ class TestMemoryStoreExtraHelpers:
         assert stability in {"medium", "high"}
         assert is_mixed is True
 
-        normalized, mixed_flag = store.ingester._normalize_memory_metadata(
+        normalized, mixed_flag = store._classifier.normalize_memory_metadata(
             {"memory_type": "reflection", "confidence": 2.0, "ttl_days": -1},
             event_type="fact",
             summary="A reflection without evidence",
@@ -87,8 +87,10 @@ class TestMemoryStoreExtraHelpers:
     def test_distillation(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
 
-        assert store.ingester._distill_semantic_summary("alpha") == "alpha"
-        distilled = store.ingester._distill_semantic_summary("User prefers vim because it is fast")
+        assert store._classifier.distill_semantic_summary("alpha") == "alpha"
+        distilled = store._classifier.distill_semantic_summary(
+            "User prefers vim because it is fast"
+        )
         assert "because" not in distilled.lower() or len(distilled) < 12
 
     def test_compaction_helpers(self, tmp_path: Path) -> None:
@@ -180,11 +182,11 @@ class TestMemoryStoreExtraRetrievalAndContext:
         store = _store(tmp_path)
         left = {"summary": "User likes Python", "entities": ["user", "python"]}
         right = {"summary": "User likes Python", "entities": ["user", "python"]}
-        score, overlap = store.ingester._event_similarity(left, right)
+        score, overlap = store._dedup.event_similarity(left, right)
         assert score >= 0
         assert overlap >= 0
 
-        merged = store.ingester._merge_events(
+        merged = store._dedup.merge_events(
             {
                 "summary": "User likes Python",
                 "entities": ["user", "python"],
