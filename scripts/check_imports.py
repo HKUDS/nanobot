@@ -161,22 +161,20 @@ ROOT = Path(__file__).resolve().parent.parent
 # - Legitimate: structurally correct (data objects, deferred lookups)
 # - Known violations: tracked for future resolution
 ALLOWLIST: set[tuple[str, str]] = {
-    # ── Legitimate exceptions ──────────────────────────────────────────
+    # ── Legitimate exceptions: deferred config lookups ─────────────────
     # Config.get_provider / get_api_base need provider registry for model matching.
     ("nanobot/config/schema.py", "nanobot.providers.registry"),
-    # tools/builtin/mission.py imports MissionStatus enum (data object, not service).
+    # ── Legitimate exceptions: data object imports (enums, dataclasses) ─
+    # MissionStatus enum (data object, not service).
     ("nanobot/tools/builtin/mission.py", "nanobot.coordination.mission"),
-    # ── Known violations: cross-package instantiation ──────────────────
-    # Fix: move construction to agent_factory.py or inject via factories.
-    ("nanobot/agent/loop.py", "nanobot.tools.builtin.mcp"),
-    # delegation.py imports DelegationResult (data object) from tools.builtin.delegate.
-    # DelegateTool construction was moved to agent_factory.py via delegate_tool_factory.
+    # DelegationResult dataclass (data object, not service instantiation).
     ("nanobot/coordination/delegation.py", "nanobot.tools.builtin.delegate"),
-    # ── Known violations: runtime import of data objects / functions ───
-    # Fix: move to TYPE_CHECKING block (enums, pure functions).
+    # ── Legitimate exceptions: runtime pure functions / enums ───────────
+    # has_parallel_structure() is a pure function called at runtime.
     ("nanobot/agent/turn_orchestrator.py", "nanobot.coordination.task_types"),
+    # DelegationAction enum compared at runtime (not instantiation).
     ("nanobot/agent/turn_orchestrator.py", "nanobot.coordination.delegation_advisor"),
-    # turn_phases.py: runtime imports moved from turn_orchestrator.py
+    # Same runtime dependencies in turn_phases.py (extracted from turn_orchestrator).
     ("nanobot/agent/turn_phases.py", "nanobot.coordination.task_types"),
     ("nanobot/agent/turn_phases.py", "nanobot.coordination.delegation_advisor"),
 }
