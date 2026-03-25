@@ -39,6 +39,7 @@ class ChannelManager:
         from nanobot.channels.registry import discover_all
 
         groq_key = self.config.providers.groq.api_key
+        groq_key = self.config.providers.groq.api_key
 
         for name, cls in discover_all().items():
             section = getattr(self.config.channels, name, None)
