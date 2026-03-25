@@ -847,6 +847,8 @@ Config file: `~/.nanobot/config.json`
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **Alibaba Cloud BaiLian**: If you're using Alibaba Cloud BaiLian's OpenAI-compatible endpoint, set `"apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1"` in your dashscope provider config.
 > - **AWS Bedrock**: The Bedrock provider uses boto3's standard credential chain for authentication. AWS credentials are managed externally via `~/.aws/credentials`, environment variables (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY), IAM roles (EC2/ECS/Lambda), Bedrock bearer token or AWS SSO. **Configuration note**: Since credentials are managed externally by boto3, there is no plain token text stored in the config file. However, the auto-matching logic requires the `api_key` field to be present to detect the provider. As a workaround, we reuse the `api_key` field to specify the AWS region: `{"providers": {"bedrock": {"api_key": "us-east-1"  // AWS region, not an actual API key} } }`, Without this field, the auto-matching logic will skip bedrock (due to empty api_key check) and fall back to other providers. **Alternative** : Explicitly set `"provider": "bedrock"` to bypass auto-matching entirely—in this case, the api_key field is optional,and region can be specified via environment variables (AWS_REGION).
+> - **Step Fun (Mainland China)**: If your API key is from Step Fun's mainland China platform (stepfun.com), set `"apiBase": "https://api.stepfun.com/v1"` in your stepfun provider config.
+> - **Step Fun Step Plan**: Exclusive discount links for the nanobot community: [Overseas](https://platform.stepfun.ai/step-plan) · [Mainland China](https://platform.stepfun.com/step-plan)
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
@@ -868,6 +870,7 @@ Config file: `~/.nanobot/config.json`
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | `ollama` | LLM (local, Ollama) | — |
 | `mistral` | LLM | [docs.mistral.ai](https://docs.mistral.ai/) |
+| `stepfun` | LLM (Step Fun/阶跃星辰) | [platform.stepfun.com](https://platform.stepfun.com) |
 | `ovms` | LLM (local, OpenVINO Model Server) | [docs.openvino.ai](https://docs.openvino.ai/2026/model-server/ovms_docs_llm_quickstart.html) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
@@ -1159,6 +1162,39 @@ That's it! Environment variables, model routing, config matching, and `nanobot s
 
 </details>
 
+### Channel Settings
+
+Global settings that apply to all channels. Configure under the `channels` section in `~/.nanobot/config.json`:
+
+```json
+{
+  "channels": {
+    "sendProgress": true,
+    "sendToolHints": false,
+    "sendMaxRetries": 3,
+    "telegram": { ... }
+  }
+}
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `sendProgress` | `true` | Stream agent's text progress to the channel |
+| `sendToolHints` | `false` | Stream tool-call hints (e.g. `read_file("…")`) |
+| `sendMaxRetries` | `3` | Max delivery attempts per outbound message, including the initial send (0-10 configured, minimum 1 actual attempt) |
+
+#### Retry Behavior
+
+When a channel send operation raises an error, nanobot retries with exponential backoff:
+
+- **Attempt 1**: Initial send
+- **Attempts 2-4**: Retry delays are 1s, 2s, 4s
+- **Attempts 5+**: Retry delay caps at 4s
+- **Transient failures** (network hiccups, temporary API limits): Retry usually succeeds
+- **Permanent failures** (invalid token, channel banned): All retries fail
+
+> [!NOTE]
+> When a channel is completely unavailable, there's no way to notify the user since we cannot reach them through that channel. Monitor logs for "Failed to send to {channel} after N attempts" to detect persistent delivery failures.
 
 ### Web Search
 
