@@ -318,7 +318,7 @@ def _format_analysis_output(
                 lines.append(f"- {item}")
             lines.append("")
 
-    lines.append(f"\n---\nFull analysis saved to: {output_path}")
+    lines.append(f"\n---\nFull analysis saved to: {output_path.as_posix()}")
     lines.append("Use `read_file` on the analysis JSON for detailed per-slide data.")
     return "\n".join(lines)
 

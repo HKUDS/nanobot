@@ -177,7 +177,7 @@ class ContextBuilder:
 
     def _get_identity(self) -> str:
         """Get the core identity section."""
-        workspace_path = str(self.workspace.expanduser().resolve())
+        workspace_path = self.workspace.expanduser().resolve().as_posix()
         _sys_name, _py_ver = _PLATFORM_INFO.split(" / ", 1)
         runtime = (
             f"{'macOS' if _sys_name == 'Darwin' else _sys_name} {platform.machine()}, {_py_ver}"

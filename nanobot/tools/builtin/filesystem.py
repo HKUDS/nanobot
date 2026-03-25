@@ -125,7 +125,9 @@ class WriteFileTool(Tool):
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(content, encoding="utf-8")
-            return ToolResult.ok(f"Successfully wrote {len(content)} bytes to {file_path}")
+            return ToolResult.ok(
+                f"Successfully wrote {len(content)} bytes to {file_path.as_posix()}"
+            )
         except PermissionError as e:
             return ToolResult.fail(f"Error: {e}")
         except OSError as e:
@@ -174,7 +176,7 @@ class EditFileTool(Tool):
             new_content = content.replace(old_text, new_text, 1)
             file_path.write_text(new_content, encoding="utf-8")
 
-            return ToolResult.ok(f"Successfully edited {file_path}")
+            return ToolResult.ok(f"Successfully edited {file_path.as_posix()}")
         except PermissionError as e:
             return ToolResult.fail(f"Error: {e}")
         except (OSError, UnicodeDecodeError) as e:

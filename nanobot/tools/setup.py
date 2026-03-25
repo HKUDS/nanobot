@@ -114,7 +114,7 @@ def register_default_tools(  # noqa: PLR0913
         capabilities.register_tool(pptx_analyze)
 
     exec_tool = ExecTool(
-        working_dir=str(workspace),
+        working_dir=workspace.as_posix(),
         timeout=exec_config.timeout,
         restrict_to_workspace=restrict_to_workspace,
         shell_mode=shell_mode,
@@ -232,7 +232,7 @@ def build_delegation_tools(
     if exec_config is not None:
         tools.append(
             ExecTool(
-                working_dir=str(workspace),
+                working_dir=workspace.as_posix(),
                 timeout=exec_config.timeout,
                 restrict_to_workspace=restrict_to_workspace,
                 shell_mode=getattr(exec_config, "shell_mode", None) or "denylist",

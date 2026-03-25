@@ -89,7 +89,7 @@ class SkillsLoader:
                 skills.append(
                     {
                         "name": skill_dir.name,
-                        "path": str(skill_dir / "SKILL.md"),
+                        "path": (skill_dir / "SKILL.md").as_posix(),
                         "source": "workspace",
                     }
                 )
@@ -101,7 +101,7 @@ class SkillsLoader:
                 skills.append(
                     {
                         "name": skill_dir.name,
-                        "path": str(skill_dir / "SKILL.md"),
+                        "path": (skill_dir / "SKILL.md").as_posix(),
                         "source": "builtin",
                     }
                 )
