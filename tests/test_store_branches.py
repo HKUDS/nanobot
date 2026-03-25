@@ -438,7 +438,7 @@ class TestStoreCoreBranchHelpers:
                 }
             )
 
-        lines = store.retriever._build_graph_context_lines("alice", [], max_tokens=40)
+        lines = store._graph_aug.build_graph_context_lines("alice", [], max_tokens=40)
         assert isinstance(lines, list)
         assert len(lines) >= 1
 

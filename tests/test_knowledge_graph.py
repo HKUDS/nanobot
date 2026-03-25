@@ -571,7 +571,7 @@ class TestGraphContextBuilder:
             store.graph._db.upsert_entity("platform-team")
             store.graph._db.add_edge("carlos", "platform-team", relation="WORKS_WITH")
 
-        lines = store.retriever._build_graph_context_lines(
+        lines = store._graph_aug.build_graph_context_lines(
             query="Tell me about Carlos",
             retrieved=[{"entities": ["Carlos"]}],
         )
@@ -600,7 +600,7 @@ class TestGraphContextBuilder:
         ]
         store.ingester.append_events(events)
 
-        lines = store.retriever._build_graph_context_lines(
+        lines = store._graph_aug.build_graph_context_lines(
             query="Tell me about Carlos",
             retrieved=[],
         )

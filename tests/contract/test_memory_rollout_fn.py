@@ -28,20 +28,16 @@ def test_ingester_uses_rollout_fn():
 
 
 def test_retriever_uses_rollout_fn():
-    """MemoryRetriever reads rollout via callback, not cached dict."""
-    from nanobot.memory.read.retriever import MemoryRetriever
+    """RetrievalScorer reads rollout via callback, not cached dict."""
+    from nanobot.memory.read.scoring import RetrievalScorer
 
     rollout_dict: dict[str, Any] = {"reranker_mode": "enabled"}
-    retriever = MemoryRetriever(
-        graph=None,
-        planner=MagicMock(),
-        reranker=MagicMock(),
+    scorer = RetrievalScorer(
         profile_mgr=MagicMock(),
+        reranker=MagicMock(),
         rollout_fn=lambda: rollout_dict,
-        read_events_fn=MagicMock(),
-        db=None,
     )
-    assert retriever._rollout_fn() is rollout_dict
+    assert scorer._rollout_fn() is rollout_dict
 
 
 def test_maintenance_uses_rollout_fn():
