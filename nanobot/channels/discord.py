@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 import discord
 from discord import app_commands
+from discord.abc import Messageable
 from loguru import logger
 from pydantic import Field
 
@@ -17,9 +18,6 @@ from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.utils.helpers import safe_filename, split_message
-
-if TYPE_CHECKING:
-    from discord.abc import Messageable
 
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
@@ -149,7 +147,7 @@ class DiscordBotClient(discord.Client):
 
     async def _send_file(
         self,
-        channel: "Messageable",
+        channel: Messageable,
         file_path: str,
         *,
         reference: discord.PartialMessage | None,
@@ -188,7 +186,7 @@ class DiscordBotClient(discord.Client):
 
     @staticmethod
     def _build_reply_context(
-        channel: "Messageable",
+        channel: Messageable,
         reply_to: str | None,
     ) -> tuple[discord.PartialMessage | None, discord.AllowedMentions]:
         """Build reply context for outbound messages."""
@@ -391,7 +389,7 @@ class DiscordChannel(BaseChannel):
 
         return True
 
-    async def _start_typing(self, channel: "Messageable") -> None:
+    async def _start_typing(self, channel: Messageable) -> None:
         """Start periodic typing indicator for a channel."""
         channel_id = self._channel_key(channel)
         await self._stop_typing(channel_id)
