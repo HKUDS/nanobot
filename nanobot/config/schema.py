@@ -21,10 +21,29 @@ class ChannelsConfig(Base):
     Per-channel "streaming": true enables streaming output (requires send_delta impl).
     """
 
+class WebUIConfig(Base):
+    """Web UI channel configuration (FastAPI + WebSocket, zero npm)."""
+
+    enabled: bool = False
+    host: str = "0.0.0.0"
+    port: int = 7860
+    allow_from: list[str] = Field(default_factory=lambda: ["*"])  # ["*"] = open to all
+
+
+class ChannelsConfig(Base):
+    """Configuration for chat channels.
+
+    Built-in and plugin channel configs are stored as extra fields (dicts).
+    Each channel parses its own config in __init__.
+    """
+
     model_config = ConfigDict(extra="allow")
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
+    
+    # Explicitly define WebUI for validation and IDE autocompletion
+    webui: WebUIConfig = Field(default_factory=WebUIConfig)
 
 
 class AgentDefaults(Base):
