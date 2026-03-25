@@ -18,6 +18,9 @@ from loguru import logger
 
 from nanobot.tools.base import Tool
 
+# size-exception: skill discovery + matching + summary are tightly coupled;
+# extraction deferred until file approaches 600 LOC
+
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
 
