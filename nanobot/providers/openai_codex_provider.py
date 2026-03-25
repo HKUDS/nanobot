@@ -19,11 +19,23 @@ DEFAULT_ORIGINATOR = "nanobot"
 
 
 class OpenAICodexProvider(LLMProvider):
-    """Use Codex OAuth to call the Responses API."""
+    """Use Codex OAuth to call the Responses API.
 
-    def __init__(self, default_model: str = "openai-codex/gpt-5.1-codex"):
-        super().__init__(api_key=None, api_base=None)
+    Supports two modes:
+    1. Default OAuth mode: uses OpenAI Codex OAuth token with chatgpt.com.
+    2. Custom API mode: uses api_key + api_base to connect to any
+       Responses-API-compatible endpoint (e.g. gmncode.cn).
+    """
+
+    def __init__(
+        self,
+        default_model: str = "openai-codex/gpt-5.1-codex",
+        api_key: str | None = None,
+        api_base: str | None = None,
+    ):
+        super().__init__(api_key=api_key, api_base=api_base)
         self.default_model = default_model
+        self._custom_url = f"{api_base.rstrip('/')}/v1/responses" if api_base else None
 
     async def _call_codex(
         self,
@@ -33,13 +45,19 @@ class OpenAICodexProvider(LLMProvider):
         reasoning_effort: str | None,
         tool_choice: str | dict[str, Any] | None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        service_tier: str | None = None,
     ) -> LLMResponse:
         """Shared request logic for both chat() and chat_stream()."""
         model = model or self.default_model
         system_prompt, input_items = _convert_messages(messages)
 
-        token = await asyncio.to_thread(get_codex_token)
-        headers = _build_headers(token.account_id, token.access)
+        if self.api_key:
+            headers = _build_apikey_headers(self.api_key)
+            url = self._custom_url or DEFAULT_CODEX_URL
+        else:
+            token = await asyncio.to_thread(get_codex_token)
+            headers = _build_headers(token.account_id, token.access)
+            url = self._custom_url or DEFAULT_CODEX_URL
 
         body: dict[str, Any] = {
             "model": _strip_model_prefix(model),
@@ -55,13 +73,15 @@ class OpenAICodexProvider(LLMProvider):
         }
         if reasoning_effort:
             body["reasoning"] = {"effort": reasoning_effort}
+        if service_tier:
+            body["service_tier"] = service_tier
         if tools:
             body["tools"] = _convert_tools(tools)
 
         try:
             try:
                 content, tool_calls, finish_reason = await _request_codex(
-                    DEFAULT_CODEX_URL, headers, body, verify=True,
+                    url, headers, body, verify=True,
                     on_content_delta=on_content_delta,
                 )
             except Exception as e:
@@ -69,7 +89,7 @@ class OpenAICodexProvider(LLMProvider):
                     raise
                 logger.warning("SSL verification failed for Codex API; retrying with verify=False")
                 content, tool_calls, finish_reason = await _request_codex(
-                    DEFAULT_CODEX_URL, headers, body, verify=False,
+                    url, headers, body, verify=False,
                     on_content_delta=on_content_delta,
                 )
             return LLMResponse(content=content, tool_calls=tool_calls, finish_reason=finish_reason)
@@ -82,7 +102,8 @@ class OpenAICodexProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
-        return await self._call_codex(messages, tools, model, reasoning_effort, tool_choice)
+        return await self._call_codex(messages, tools, model, reasoning_effort, tool_choice,
+                                      service_tier=self.generation.service_tier)
 
     async def chat_stream(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
@@ -91,7 +112,8 @@ class OpenAICodexProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
-        return await self._call_codex(messages, tools, model, reasoning_effort, tool_choice, on_content_delta)
+        return await self._call_codex(messages, tools, model, reasoning_effort, tool_choice, on_content_delta,
+                                      service_tier=self.generation.service_tier)
 
     def get_default_model(self) -> str:
         return self.default_model
@@ -109,6 +131,16 @@ def _build_headers(account_id: str, token: str) -> dict[str, str]:
         "chatgpt-account-id": account_id,
         "OpenAI-Beta": "responses=experimental",
         "originator": DEFAULT_ORIGINATOR,
+        "User-Agent": "nanobot (python)",
+        "accept": "text/event-stream",
+        "content-type": "application/json",
+    }
+
+
+def _build_apikey_headers(api_key: str) -> dict[str, str]:
+    """Build headers for API-key-based Responses API endpoints (e.g. gmncode.cn)."""
+    return {
+        "Authorization": f"Bearer {api_key}",
         "User-Agent": "nanobot (python)",
         "accept": "text/event-stream",
         "content-type": "application/json",
