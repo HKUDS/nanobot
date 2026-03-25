@@ -21,7 +21,7 @@ Run this after every code change. Fix any errors before proceeding.
 Before committing:
 
 ```bash
-make check    # lint + typecheck + import-check + prompt-check + test (full validation)
+make check    # lint + typecheck + import-check + prompt-check + test + integration (full validation)
 ```
 
 Before committing, also review documentation: check that READMEs, CHANGELOG, ADRs, docstrings, and inline comments are accurate and up to date with the changes being committed.

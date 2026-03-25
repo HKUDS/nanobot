@@ -52,8 +52,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: pip install -e ".[dev]"
-      - name: Run tests with coverage
-        run: python -m pytest tests/ -x -q --cov=nanobot --cov-report=term-missing --cov-report=json --cov-fail-under=85
+      - name: Run unit tests with coverage
+        run: python -m pytest tests/ --ignore=tests/integration -x -q --cov=nanobot --cov-report=term-missing --cov-report=json --cov-fail-under=85
       - name: Check per-module coverage thresholds
         run: python scripts/check_module_coverage.py
 
