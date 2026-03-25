@@ -21,7 +21,7 @@ def mock_paths():
         patch("nanobot.config.loader.get_config_path") as mock_cp,
         patch("nanobot.config.loader.save_config") as mock_sc,
         patch("nanobot.config.loader.load_config"),
-        patch("nanobot.utils.helpers.get_workspace_path") as mock_ws,
+        patch("nanobot.utils.paths.get_workspace_path") as mock_ws,
     ):
         base_dir = Path("./test_onboard_data")
         if base_dir.exists():
