@@ -101,14 +101,10 @@ class ContextBuilder:
 
     def build_system_prompt(
         self,
-        skill_names: list[str] | None = None,
         current_message: str | None = None,
     ) -> str:
         """
         Build the system prompt from bootstrap files, memory, and skills.
-
-        Args:
-            skill_names: Optional list of skills to include.
 
         Returns:
             Complete system prompt.
@@ -148,17 +144,16 @@ class ContextBuilder:
             if fb_summary:
                 parts.append(f"# Feedback\n\n{fb_summary}")
 
-        # Skills - progressive loading
-        # 1. Always-on skills only: full content injection
+        # Skills
+        # 1. Always-on skills: full content injection
         always_skills = self.skills.get_always_skills()
         if always_skills:
             active_content = self.skills.load_skills_for_context(always_skills)
             if active_content:
                 parts.append(f"# Active Skills\n\n{active_content}")
 
-        # 2. Unified summary — matched skills highlighted, all others listed
-        matched_skills = skill_names or []
-        skills_summary = self.skills.build_skills_summary(matched=matched_skills)
+        # 2. All other skills: flat summary (agent calls load_skill on demand)
+        skills_summary = self.skills.build_skills_summary()
         if skills_summary:
             parts.append(prompts.render("skills_header", skills_summary=skills_summary))
 
@@ -237,7 +232,6 @@ class ContextBuilder:
         self,
         history: list[dict[str, Any]],
         current_message: str,
-        skill_names: list[str] | None = None,
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
@@ -249,7 +243,6 @@ class ContextBuilder:
         Args:
             history: Previous conversation messages.
             current_message: The new user message.
-            skill_names: Optional skills to include.
             media: Optional list of local file paths for images/media.
             channel: Current channel (telegram, discord, etc.).
             chat_id: Current chat/user ID.
@@ -260,7 +253,7 @@ class ContextBuilder:
         messages = []
 
         # System prompt
-        system_prompt = self.build_system_prompt(skill_names, current_message=current_message)
+        system_prompt = self.build_system_prompt(current_message=current_message)
         if verify_before_answer:
             system_prompt += "\n\n" + prompts.get("verification_required")
         messages.append({"role": "system", "content": system_prompt})
@@ -274,9 +267,8 @@ class ContextBuilder:
         messages.append({"role": "user", "content": user_content})  # type: ignore[dict-item]
 
         bind_trace().debug(
-            "context_built | history={} | skills={} | total_msgs={}",
+            "context_built | history={} | total_msgs={}",
             len(history),
-            len(skill_names or []),
             len(messages),
         )
         return messages

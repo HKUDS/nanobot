@@ -278,7 +278,6 @@ async def test_process_direct_calls_router_when_available():
     mock_context = MagicMock()
     mock_context.memory = MagicMock()  # must be non-None (asserted in processor)
     mock_context.skills = MagicMock()
-    mock_context.skills.detect_relevant_skills = MagicMock(return_value=[])
     mock_context.build_messages = AsyncMock(return_value=[])
     mock_context.add_assistant_message = MagicMock(return_value=[])
 
