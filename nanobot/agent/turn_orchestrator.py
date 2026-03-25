@@ -41,11 +41,11 @@ from nanobot.agent.verifier import AnswerVerifier
 from nanobot.context.compression import estimate_messages_tokens, summarize_and_compress
 from nanobot.context.context import ContextBuilder
 from nanobot.context.prompt_loader import PromptLoader
-from nanobot.coordination.delegation import DelegationDispatcher
 from nanobot.tools.executor import ToolExecutor
 
 if TYPE_CHECKING:
     from nanobot.config.schema import AgentConfig
+    from nanobot.coordination.delegation import DelegationDispatcher
     from nanobot.coordination.delegation_advisor import DelegationAdvisor
     from nanobot.providers.base import LLMProvider, LLMResponse
 

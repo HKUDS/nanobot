@@ -23,7 +23,6 @@ from nanobot.agent.verifier import AnswerVerifier
 from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.config.schema import AgentConfig
-from nanobot.coordination.role_switching import TurnRoleManager
 from nanobot.observability.bus_progress import make_bus_progress
 from nanobot.observability.langfuse import update_current_span
 from nanobot.observability.tracing import TraceContext, bind_trace
@@ -32,6 +31,7 @@ from nanobot.tools.builtin.message import MessageTool
 
 if TYPE_CHECKING:
     from nanobot.coordination.coordinator import ClassificationResult
+    from nanobot.coordination.role_switching import TurnRoleManager
     from nanobot.providers.base import LLMProvider
 
 

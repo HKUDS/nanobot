@@ -18,7 +18,6 @@ from nanobot.agent.callbacks import ProgressCallback
 from nanobot.agent.reaction import classify_reaction
 from nanobot.bus.events import DeliveryResult, InboundMessage, OutboundMessage, ReactionEvent
 from nanobot.config.schema import AgentRoleConfig
-from nanobot.coordination.role_switching import TurnContext
 from nanobot.observability.langfuse import (
     flush as flush_langfuse,
 )
@@ -36,6 +35,7 @@ if TYPE_CHECKING:
     from nanobot.agent.agent_components import _AgentComponents
     from nanobot.agent.message_processor import MessageProcessor
     from nanobot.coordination.coordinator import ClassificationResult, Coordinator
+    from nanobot.coordination.role_switching import TurnContext
 
 
 _DEFAULT_CONFIDENCE_THRESHOLD: float = (
