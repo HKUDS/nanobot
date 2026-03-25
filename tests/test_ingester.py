@@ -23,7 +23,7 @@ def _make_ingester(
 
     ing = EventIngester(
         graph=graph,
-        rollout=rollout or {},
+        rollout_fn=lambda: (rollout or {}),
         conflict_pair_fn=conflict_pair_fn,
         db=db,
     )
@@ -224,7 +224,7 @@ class TestAppendEventsDedup:
 
         graph = MagicMock()
         graph.enabled = False
-        ing = EventIngester(graph=graph, rollout={}, db=db)
+        ing = EventIngester(graph=graph, rollout_fn=lambda: {}, db=db)
 
         # Append a very similar event.
         new_event = {
@@ -279,13 +279,13 @@ class TestReadEvents:
         db.insert_event(
             {"id": "1", "summary": "test", "type": "fact", "timestamp": "2026-01-01T00:00:00Z"}
         )
-        ing = EventIngester(graph=MagicMock(enabled=False), rollout={}, db=db)
+        ing = EventIngester(graph=MagicMock(enabled=False), rollout_fn=lambda: {}, db=db)
         events = ing.read_events(limit=10)
         assert len(events) >= 1
         db.close()
 
     def test_read_events_no_db(self) -> None:
-        ing = EventIngester(graph=MagicMock(enabled=False), rollout={}, db=None)
+        ing = EventIngester(graph=MagicMock(enabled=False), rollout_fn=lambda: {}, db=None)
         events = ing.read_events()
         assert events == []
 
@@ -372,7 +372,7 @@ class TestIngesterWithUnifiedDB:
 
         ingester = EventIngester(
             graph=graph,
-            rollout={},
+            rollout_fn=lambda: {},
             conflict_pair_fn=lambda old, new: False,
             db=db,
             embedder=None,

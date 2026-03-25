@@ -11,7 +11,7 @@ from nanobot.memory.maintenance import MemoryMaintenance
 
 def _make_maintenance(tmp_path: Path) -> MemoryMaintenance:
     """Create a MemoryMaintenance with default config."""
-    return MemoryMaintenance(rollout={})
+    return MemoryMaintenance(rollout_fn=lambda: {})
 
 
 class TestBackendStats:

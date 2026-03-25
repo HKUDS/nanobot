@@ -140,7 +140,6 @@ class MemoryStore:
             utc_now_iso=_utc_now_iso,
         )
         self._rollout_config = RolloutConfig(overrides=rollout_overrides)
-        self.rollout = self._rollout_config.rollout  # backward compat dict reference
 
         # Profile manager (LAN-202) — delegates profile CRUD to ProfileManager.
         # Lazy callbacks break the circular dependency: ProfileStore is constructed
@@ -296,6 +295,11 @@ class MemoryStore:
     # ------------------------------------------------------------------
     # Computed properties and internal callbacks
     # ------------------------------------------------------------------
+
+    @property
+    def rollout(self) -> dict[str, Any]:
+        """Live rollout config — always returns the current dict from RolloutConfig."""
+        return self._rollout_config.rollout
 
     @property
     def conflict_auto_resolve_gap(self) -> float:
