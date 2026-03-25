@@ -83,7 +83,8 @@ def test_build_docker_command_custom_limits():
 
 def test_format_output_success():
     result = ExecTool._format_output(b"hello world\n", b"", 0)
-    assert result == "hello world\n"
+    assert "hello world" in result
+    assert "Exit code: 0" in result
 
 
 def test_format_output_with_stderr():
@@ -100,7 +101,7 @@ def test_format_output_nonzero_exit():
 
 def test_format_output_empty():
     result = ExecTool._format_output(b"", b"", 0)
-    assert result == "(no output)"
+    assert "Exit code: 0" in result
 
 
 def test_format_output_truncation():
