@@ -33,6 +33,7 @@ class OpenAICodexProvider(LLMProvider):
         reasoning_effort: str | None,
         tool_choice: str | dict[str, Any] | None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        prompt_cache_key: str | None = None,
     ) -> LLMResponse:
         """Shared request logic for both chat() and chat_stream()."""
         model = model or self.default_model
@@ -49,7 +50,7 @@ class OpenAICodexProvider(LLMProvider):
             "input": input_items,
             "text": {"verbosity": "medium"},
             "include": ["reasoning.encrypted_content"],
-            "prompt_cache_key": _prompt_cache_key(messages),
+            "prompt_cache_key": prompt_cache_key or _prompt_cache_key(messages),
             "tool_choice": tool_choice or "auto",
             "parallel_tool_calls": True,
         }
@@ -81,8 +82,12 @@ class OpenAICodexProvider(LLMProvider):
         model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        prompt_cache_key: str | None = None,
     ) -> LLMResponse:
-        return await self._call_codex(messages, tools, model, reasoning_effort, tool_choice)
+        return await self._call_codex(
+            messages, tools, model, reasoning_effort, tool_choice,
+            prompt_cache_key=prompt_cache_key,
+        )
 
     async def chat_stream(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
@@ -90,8 +95,12 @@ class OpenAICodexProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        prompt_cache_key: str | None = None,
     ) -> LLMResponse:
-        return await self._call_codex(messages, tools, model, reasoning_effort, tool_choice, on_content_delta)
+        return await self._call_codex(
+            messages, tools, model, reasoning_effort, tool_choice,
+            on_content_delta, prompt_cache_key=prompt_cache_key,
+        )
 
     def get_default_model(self) -> str:
         return self.default_model

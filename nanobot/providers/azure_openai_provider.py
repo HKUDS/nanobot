@@ -122,6 +122,7 @@ class AzureOpenAIProvider(LLMProvider):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        prompt_cache_key: str | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request to Azure OpenAI.
@@ -133,6 +134,7 @@ class AzureOpenAIProvider(LLMProvider):
             max_tokens: Maximum tokens in response (mapped to max_completion_tokens).
             temperature: Sampling temperature.
             reasoning_effort: Optional reasoning effort parameter.
+            prompt_cache_key: Optional stable key for prompt caching.
 
         Returns:
             LLMResponse with content and/or tool calls.
@@ -220,6 +222,7 @@ class AzureOpenAIProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        prompt_cache_key: str | None = None,
     ) -> LLMResponse:
         """Stream a chat completion via Azure OpenAI SSE."""
         deployment_name = model or self.default_model

@@ -174,6 +174,7 @@ class LLMProvider(ABC):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        prompt_cache_key: str | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request.
@@ -185,8 +186,9 @@ class LLMProvider(ABC):
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature.
             tool_choice: Tool selection strategy ("auto", "required", or specific tool dict).
+            prompt_cache_key: Optional stable key for prompt caching (e.g. session identifier).
         
-        Returns:
+            Returns:
             LLMResponse with content and/or tool calls.
         """
         pass
@@ -237,6 +239,7 @@ class LLMProvider(ABC):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        prompt_cache_key: str | None = None,
     ) -> LLMResponse:
         """Stream a chat completion, calling *on_content_delta* for each text chunk.
 
@@ -249,6 +252,7 @@ class LLMProvider(ABC):
             messages=messages, tools=tools, model=model,
             max_tokens=max_tokens, temperature=temperature,
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
+            prompt_cache_key=prompt_cache_key,
         )
         if on_content_delta and response.content:
             await on_content_delta(response.content)
@@ -273,6 +277,7 @@ class LLMProvider(ABC):
         reasoning_effort: object = _SENTINEL,
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        prompt_cache_key: str | None = None,
     ) -> LLMResponse:
         """Call chat_stream() with retry on transient provider failures."""
         if max_tokens is self._SENTINEL:
@@ -287,6 +292,7 @@ class LLMProvider(ABC):
             max_tokens=max_tokens, temperature=temperature,
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
             on_content_delta=on_content_delta,
+            prompt_cache_key=prompt_cache_key,
         )
 
         for attempt, delay in enumerate(self._CHAT_RETRY_DELAYS, start=1):
@@ -320,6 +326,7 @@ class LLMProvider(ABC):
         temperature: object = _SENTINEL,
         reasoning_effort: object = _SENTINEL,
         tool_choice: str | dict[str, Any] | None = None,
+        prompt_cache_key: str | None = None,
     ) -> LLMResponse:
         """Call chat() with retry on transient provider failures.
 
@@ -338,6 +345,7 @@ class LLMProvider(ABC):
             messages=messages, tools=tools, model=model,
             max_tokens=max_tokens, temperature=temperature,
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
+            prompt_cache_key=prompt_cache_key,
         )
 
         for attempt, delay in enumerate(self._CHAT_RETRY_DELAYS, start=1):
