@@ -215,6 +215,7 @@ class AgentLoop:
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        total_usage: dict[str, int] = {}
 
         # Wrap on_stream with stateful think-tag filter so downstream
         # consumers (CLI, channels) never see <think> blocks.
@@ -255,6 +256,9 @@ class AgentLoop:
                 "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
                 "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
             }
+
+            for key, val in response.usage.items():
+                total_usage[key] = total_usage.get(key, 0) + val
 
             if response.has_tool_calls:
                 if on_stream and on_stream_end:
@@ -326,6 +330,14 @@ class AgentLoop:
             final_content = (
                 f"I reached the maximum number of tool call iterations ({self.max_iterations}) "
                 "without completing the task. You can try breaking the task into smaller steps."
+            )
+
+        if total_usage:
+            logger.info(
+                "Token usage — prompt: {}, completion: {}, total: {}",
+                total_usage.get("prompt_tokens", 0),
+                total_usage.get("completion_tokens", 0),
+                total_usage.get("total_tokens", 0),
             )
 
         return final_content, tools_used, messages
