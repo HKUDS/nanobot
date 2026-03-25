@@ -57,7 +57,7 @@ def _make_retriever(
         planner=planner,
         reranker=reranker,
         profile_mgr=profile_mgr,
-        rollout_fn=lambda: (rollout or {}),
+        rollout_fn=lambda: rollout or {},
         read_events_fn=lambda **kw: events or [],
         extractor=extractor,
     )

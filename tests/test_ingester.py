@@ -23,7 +23,7 @@ def _make_ingester(
 
     ing = EventIngester(
         graph=graph,
-        rollout_fn=lambda: (rollout or {}),
+        rollout_fn=lambda: rollout or {},
         conflict_pair_fn=conflict_pair_fn,
         db=db,
     )
