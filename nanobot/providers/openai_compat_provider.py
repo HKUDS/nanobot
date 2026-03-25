@@ -19,14 +19,74 @@ if TYPE_CHECKING:
     from nanobot.providers.registry import ProviderSpec
 
 _ALLOWED_MSG_KEYS = frozenset({
-    "role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content",
+    "role", "content", "tool_calls", "tool_call_id", "name",
+    "reasoning_content", "extra_content",
 })
 _ALNUM = string.ascii_letters + string.digits
+
+_STANDARD_TC_KEYS = frozenset({"id", "type", "index", "function"})
+_STANDARD_FN_KEYS = frozenset({"name", "arguments"})
 
 
 def _short_tool_id() -> str:
     """9-char alphanumeric ID compatible with all providers (incl. Mistral)."""
     return "".join(secrets.choice(_ALNUM) for _ in range(9))
+
+
+def _get(obj: Any, key: str) -> Any:
+    """Get a value from dict or object attribute, returning None if absent."""
+    if isinstance(obj, dict):
+        return obj.get(key)
+    return getattr(obj, key, None)
+
+
+def _coerce_dict(value: Any) -> dict[str, Any] | None:
+    """Try to coerce *value* to a dict; return None if not possible or empty."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value if value else None
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump()
+        if isinstance(dumped, dict) and dumped:
+            return dumped
+    return None
+
+
+def _extract_tc_extras(tc: Any) -> tuple[
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+]:
+    """Extract (extra_content, provider_specific_fields, fn_provider_specific_fields).
+
+    Works for both SDK objects and dicts.  Captures Gemini ``extra_content``
+    verbatim and any non-standard keys on the tool-call / function.
+    """
+    extra_content = _coerce_dict(_get(tc, "extra_content"))
+
+    tc_dict = _coerce_dict(tc)
+    prov = None
+    fn_prov = None
+    if tc_dict is not None:
+        leftover = {k: v for k, v in tc_dict.items()
+                    if k not in _STANDARD_TC_KEYS and k != "extra_content" and v is not None}
+        if leftover:
+            prov = leftover
+        fn = _coerce_dict(tc_dict.get("function"))
+        if fn is not None:
+            fn_leftover = {k: v for k, v in fn.items()
+                          if k not in _STANDARD_FN_KEYS and v is not None}
+            if fn_leftover:
+                fn_prov = fn_leftover
+    else:
+        prov = _coerce_dict(_get(tc, "provider_specific_fields"))
+        fn_obj = _get(tc, "function")
+        if fn_obj is not None:
+            fn_prov = _coerce_dict(_get(fn_obj, "provider_specific_fields"))
+
+    return extra_content, prov, fn_prov
 
 
 class OpenAICompatProvider(LLMProvider):
@@ -299,10 +359,14 @@ class OpenAICompatProvider(LLMProvider):
                 args = fn.get("arguments", {})
                 if isinstance(args, str):
                     args = json_repair.loads(args)
+                ec, prov, fn_prov = _extract_tc_extras(tc)
                 parsed_tool_calls.append(ToolCallRequest(
                     id=_short_tool_id(),
                     name=str(fn.get("name") or ""),
                     arguments=args if isinstance(args, dict) else {},
+                    extra_content=ec,
+                    provider_specific_fields=prov,
+                    function_provider_specific_fields=fn_prov,
                 ))
 
             return LLMResponse(
@@ -336,10 +400,14 @@ class OpenAICompatProvider(LLMProvider):
             args = tc.function.arguments
             if isinstance(args, str):
                 args = json_repair.loads(args)
+            ec, prov, fn_prov = _extract_tc_extras(tc)
             tool_calls.append(ToolCallRequest(
                 id=_short_tool_id(),
                 name=tc.function.name,
                 arguments=args,
+                extra_content=ec,
+                provider_specific_fields=prov,
+                function_provider_specific_fields=fn_prov,
             ))
 
         return LLMResponse(
@@ -353,9 +421,35 @@ class OpenAICompatProvider(LLMProvider):
     @classmethod
     def _parse_chunks(cls, chunks: list[Any]) -> LLMResponse:
         content_parts: list[str] = []
-        tc_bufs: dict[int, dict[str, str]] = {}
+        tc_bufs: dict[int, dict[str, Any]] = {}
         finish_reason = "stop"
         usage: dict[str, int] = {}
+
+        def _accum_tc(tc: Any, idx_hint: int) -> None:
+            """Accumulate one streaming tool-call delta into *tc_bufs*."""
+            tc_index: int = _get(tc, "index") if _get(tc, "index") is not None else idx_hint
+            buf = tc_bufs.setdefault(tc_index, {
+                "id": "", "name": "", "arguments": "",
+                "extra_content": None, "prov": None, "fn_prov": None,
+            })
+            tc_id = _get(tc, "id")
+            if tc_id:
+                buf["id"] = str(tc_id)
+            fn = _get(tc, "function")
+            if fn is not None:
+                fn_name = _get(fn, "name")
+                if fn_name:
+                    buf["name"] = str(fn_name)
+                fn_args = _get(fn, "arguments")
+                if fn_args:
+                    buf["arguments"] += str(fn_args)
+            ec, prov, fn_prov = _extract_tc_extras(tc)
+            if ec:
+                buf["extra_content"] = ec
+            if prov:
+                buf["prov"] = prov
+            if fn_prov:
+                buf["fn_prov"] = fn_prov
 
         for chunk in chunks:
             if isinstance(chunk, str):
@@ -381,16 +475,7 @@ class OpenAICompatProvider(LLMProvider):
                 if text:
                     content_parts.append(text)
                 for idx, tc in enumerate(delta.get("tool_calls") or []):
-                    tc_map = cls._maybe_mapping(tc) or {}
-                    tc_index = tc_map.get("index", idx)
-                    buf = tc_bufs.setdefault(tc_index, {"id": "", "name": "", "arguments": ""})
-                    if tc_map.get("id"):
-                        buf["id"] = str(tc_map["id"])
-                    fn = cls._maybe_mapping(tc_map.get("function")) or {}
-                    if fn.get("name"):
-                        buf["name"] = str(fn["name"])
-                    if fn.get("arguments"):
-                        buf["arguments"] += str(fn["arguments"])
+                    _accum_tc(tc, idx)
                 usage = cls._extract_usage(chunk_map) or usage
                 continue
 
@@ -404,13 +489,7 @@ class OpenAICompatProvider(LLMProvider):
             if delta and delta.content:
                 content_parts.append(delta.content)
             for tc in (delta.tool_calls or []) if delta else []:
-                buf = tc_bufs.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
-                if tc.id:
-                    buf["id"] = tc.id
-                if tc.function and tc.function.name:
-                    buf["name"] = tc.function.name
-                if tc.function and tc.function.arguments:
-                    buf["arguments"] += tc.function.arguments
+                _accum_tc(tc, getattr(tc, "index", 0))
 
         return LLMResponse(
             content="".join(content_parts) or None,
@@ -419,6 +498,9 @@ class OpenAICompatProvider(LLMProvider):
                     id=b["id"] or _short_tool_id(),
                     name=b["name"],
                     arguments=json_repair.loads(b["arguments"]) if b["arguments"] else {},
+                    extra_content=b.get("extra_content"),
+                    provider_specific_fields=b.get("prov"),
+                    function_provider_specific_fields=b.get("fn_prov"),
                 )
                 for b in tc_bufs.values()
             ],
