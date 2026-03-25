@@ -6,11 +6,9 @@ import platform
 from pathlib import Path
 from typing import Any
 
-from nanobot.utils.helpers import current_time_str
-
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
-from nanobot.utils.helpers import build_assistant_message, detect_image_mime
+from nanobot.utils.helpers import build_assistant_message, current_time_str, detect_image_mime
 
 
 class ContextBuilder:
@@ -140,11 +138,25 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
-        return [
+        messages = [
             {"role": "system", "content": self.build_system_prompt(skill_names)},
             *history,
-            {"role": current_role, "content": merged},
         ]
+
+        # Prevent consecutive same-role messages that some LLM APIs reject
+        if messages and messages[-1].get("role") == current_role:
+            # If last message has same role, merge content or force to user role
+            last_msg = messages[-1]
+            if isinstance(last_msg.get("content"), str) and isinstance(merged, str):
+                # Merge string content
+                messages[-1] = {"role": current_role, "content": f"{last_msg['content']}\n\n{merged}"}
+            else:
+                # For complex content or tool calls, force current message to user role
+                messages.append({"role": "user", "content": merged})
+        else:
+            messages.append({"role": current_role, "content": merged})
+
+        return messages
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
         """Build user message content with optional base64-encoded images."""
