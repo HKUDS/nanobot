@@ -12,8 +12,9 @@ from nanobot.cron.types import CronJobState, CronSchedule
 class CronTool(Tool):
     """Tool to schedule reminders and recurring tasks."""
 
-    def __init__(self, cron_service: CronService):
+    def __init__(self, cron_service: CronService, default_timezone: str = "UTC"):
         self._cron = cron_service
+        self._default_timezone = default_timezone
         self._channel = ""
         self._chat_id = ""
         self._in_cron_context: ContextVar[bool] = ContextVar("cron_in_context", default=False)
@@ -31,13 +32,26 @@ class CronTool(Tool):
         """Restore previous cron context."""
         self._in_cron_context.reset(token)
 
+    @staticmethod
+    def _validate_timezone(tz: str) -> str | None:
+        from zoneinfo import ZoneInfo
+
+        try:
+            ZoneInfo(tz)
+        except (KeyError, Exception):
+            return f"Error: unknown timezone '{tz}'"
+        return None
+
     @property
     def name(self) -> str:
         return "cron"
 
     @property
     def description(self) -> str:
-        return "Schedule reminders and recurring tasks. Actions: add, list, remove."
+        return (
+            "Schedule reminders and recurring tasks. Actions: add, list, remove. "
+            f"If tz is omitted, cron expressions and naive ISO times default to {self._default_timezone}."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -60,11 +74,17 @@ class CronTool(Tool):
                 },
                 "tz": {
                     "type": "string",
-                    "description": "IANA timezone for cron expressions (e.g. 'America/Vancouver')",
+                    "description": (
+                        "Optional IANA timezone for cron expressions "
+                        f"(e.g. 'America/Vancouver'). Defaults to {self._default_timezone}."
+                    ),
                 },
                 "at": {
                     "type": "string",
-                    "description": "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00')",
+                    "description": (
+                        "ISO datetime for one-time execution "
+                        f"(e.g. '2026-02-12T10:30:00'). Naive values default to {self._default_timezone}."
+                    ),
                 },
                 "job_id": {"type": "string", "description": "Job ID (for remove)"},
             },
@@ -107,26 +127,29 @@ class CronTool(Tool):
         if tz and not cron_expr:
             return "Error: tz can only be used with cron_expr"
         if tz:
-            from zoneinfo import ZoneInfo
-
-            try:
-                ZoneInfo(tz)
-            except (KeyError, Exception):
-                return f"Error: unknown timezone '{tz}'"
+            if err := self._validate_timezone(tz):
+                return err
 
         # Build schedule
         delete_after = False
         if every_seconds:
             schedule = CronSchedule(kind="every", every_ms=every_seconds * 1000)
         elif cron_expr:
-            schedule = CronSchedule(kind="cron", expr=cron_expr, tz=tz)
+            effective_tz = tz or self._default_timezone
+            if err := self._validate_timezone(effective_tz):
+                return err
+            schedule = CronSchedule(kind="cron", expr=cron_expr, tz=effective_tz)
         elif at:
-            from datetime import datetime
+            from zoneinfo import ZoneInfo
 
             try:
                 dt = datetime.fromisoformat(at)
             except ValueError:
                 return f"Error: invalid ISO datetime format '{at}'. Expected format: YYYY-MM-DDTHH:MM:SS"
+            if dt.tzinfo is None:
+                if err := self._validate_timezone(self._default_timezone):
+                    return err
+                dt = dt.replace(tzinfo=ZoneInfo(self._default_timezone))
             at_ms = int(dt.timestamp() * 1000)
             schedule = CronSchedule(kind="at", at_ms=at_ms)
             delete_after = True

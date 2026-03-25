@@ -1,5 +1,7 @@
 """Tests for CronTool._list_jobs() output formatting."""
 
+from datetime import datetime, timezone
+
 from nanobot.agent.tools.cron import CronTool
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJobState, CronSchedule
@@ -8,6 +10,11 @@ from nanobot.cron.types import CronJobState, CronSchedule
 def _make_tool(tmp_path) -> CronTool:
     service = CronService(tmp_path / "cron" / "jobs.json")
     return CronTool(service)
+
+
+def _make_tool_with_tz(tmp_path, tz: str) -> CronTool:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    return CronTool(service, default_timezone=tz)
 
 
 # -- _format_timing tests --
@@ -234,6 +241,29 @@ def test_list_shows_next_run(tmp_path) -> None:
     )
     result = tool._list_jobs()
     assert "Next run:" in result
+
+
+def test_add_cron_job_defaults_to_tool_timezone(tmp_path) -> None:
+    tool = _make_tool_with_tz(tmp_path, "Asia/Shanghai")
+    tool.set_context("telegram", "chat-1")
+
+    result = tool._add_job("Morning standup", None, "0 8 * * *", None, None)
+
+    assert result.startswith("Created job")
+    job = tool._cron.list_jobs()[0]
+    assert job.schedule.tz == "Asia/Shanghai"
+
+
+def test_add_at_job_uses_default_timezone_for_naive_datetime(tmp_path) -> None:
+    tool = _make_tool_with_tz(tmp_path, "Asia/Shanghai")
+    tool.set_context("telegram", "chat-1")
+
+    result = tool._add_job("Morning reminder", None, None, None, "2026-03-25T08:00:00")
+
+    assert result.startswith("Created job")
+    job = tool._cron.list_jobs()[0]
+    expected = int(datetime(2026, 3, 25, 0, 0, 0, tzinfo=timezone.utc).timestamp() * 1000)
+    assert job.schedule.at_ms == expected
 
 
 def test_list_excludes_disabled_jobs(tmp_path) -> None:
