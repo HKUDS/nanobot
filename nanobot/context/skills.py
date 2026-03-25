@@ -35,6 +35,29 @@ def _which(binary: str) -> str | None:
     return _which_cache[binary]
 
 
+# Claude Code → nanobot tool mapping.
+# Keys: Claude Code tool names (case-sensitive, matched with word boundaries).
+# Values: (nanobot_tool, usage_hint) — tool name for text rewriting, hint for preamble.
+CLAUDE_TOOL_MAPPING: dict[str, tuple[str, str]] = {
+    "Bash": ("exec", "use the `exec` tool"),
+    "Read": ("read_file", "use the `read_file` tool"),
+    "Write": ("write_file", "use the `write_file` tool"),
+    "Edit": ("edit_file", "use the `edit_file` tool"),
+    "Glob": ("exec", "use the `exec` tool with `find` or `ls`"),
+    "Grep": ("exec", "use the `exec` tool with `grep` or `rg`"),
+    "WebFetch": ("web_fetch", "use the `web_fetch` tool"),
+    "WebSearch": ("web_search", "use the `web_search` tool"),
+    "Agent": (
+        "delegate",
+        "use the `delegate` tool (approximate — nanobot delegation, not autonomous sub-agents)",
+    ),
+    "TodoWrite": ("write_scratchpad", "use the `write_scratchpad` tool"),
+    "TodoRead": ("read_scratchpad", "use the `read_scratchpad` tool"),
+    "ListDir": ("list_dir", "use the `list_dir` tool"),
+    "AskUserQuestion": ("message", "use the `message` tool to ask the user"),
+}
+
+
 class SkillsLoader:
     """
     Loader for agent skills.
