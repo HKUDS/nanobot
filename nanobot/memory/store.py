@@ -140,12 +140,18 @@ class MemoryStore:
             utc_now_iso=_utc_now_iso,
         )
         self._rollout_config = RolloutConfig(overrides=rollout_overrides)
-        self.rollout = self._rollout_config.rollout  # backward compat dict reference
 
         # Profile manager (LAN-202) — delegates profile CRUD to ProfileManager.
-        # Subsystem references (_extractor, _ingester, _conflict_mgr, _snapshot)
-        # are wired after all subsystems are constructed (see below).
-        self.profile_mgr = ProfileStore(db=self.db)
+        # Lazy callbacks break the circular dependency: ProfileStore is constructed
+        # before conflict_mgr/snapshot exist, but callbacks resolve at call time.
+        self.profile_mgr = ProfileStore(
+            db=self.db,
+            conflict_mgr_fn=lambda: self.conflict_mgr,
+            corrector_fn=lambda: self._corrector,
+            extractor_fn=lambda: self.extractor,
+            ingester_fn=lambda: self.ingester,
+            snapshot_fn=lambda: self.snapshot,
+        )
 
         # Retrieval planner (LAN-207) — intent classification + policy + routing.
         self._planner = RetrievalPlanner()
@@ -170,15 +176,9 @@ class MemoryStore:
 
         # MemoryMaintenance: reindex, seed, health checks, backend stats.
         self.maintenance = MemoryMaintenance(
-            rollout=self.rollout,
+            rollout_fn=lambda: self._rollout_config.rollout,
             db=self.db,
-        )
-        # Wire reindex callback so health check can trigger reindex.
-        self.maintenance._reindex_fn = lambda: self.maintenance.reindex_from_structured_memory(
-            read_profile_fn=self.profile_mgr.read_profile,
-            read_events_fn=self.ingester.read_events,
-            ingester=self.ingester,
-            profile_keys=self.PROFILE_KEYS,
+            reindex_fn=self._reindex_callback,
         )
 
         # Cross-encoder re-ranker (Step 7)
@@ -206,7 +206,7 @@ class MemoryStore:
         # EventIngester: owns the full event write path.
         self.ingester = EventIngester(
             graph=self.graph,
-            rollout=self.rollout,
+            rollout_fn=lambda: self._rollout_config.rollout,
             conflict_pair_fn=lambda old, new: self.profile_mgr._conflict_pair(old, new),
             db=self.db,
             embedder=self._embedder,
@@ -219,6 +219,9 @@ class MemoryStore:
             normalize_metadata_fn=self.ingester._normalize_memory_metadata,
             sanitize_metadata_fn=EventIngester._sanitize_mem0_metadata,
             db=self.db,
+            resolve_gap_fn=lambda: float(
+                self._rollout_config.rollout.get("conflict_auto_resolve_gap", 0.25)
+            ),
         )
 
         # MemoryRetriever: owns the full retrieval read path.
@@ -227,18 +230,12 @@ class MemoryStore:
             planner=self._planner,
             reranker=self._reranker,
             profile_mgr=self.profile_mgr,
-            rollout=self.rollout,
+            rollout_fn=lambda: self._rollout_config.rollout,
             read_events_fn=self.ingester.read_events,
             extractor=self.extractor,
             db=self.db,
             embedder=self._embedder,
         )
-
-        # Configurable auto-resolve confidence gap threshold.
-        self.conflict_auto_resolve_gap: float = float(
-            self.rollout.get("conflict_auto_resolve_gap", 0.25)
-        )
-        self.conflict_mgr.conflict_auto_resolve_gap = self.conflict_auto_resolve_gap
 
         # Evaluation / observability helper (LAN-204)
         from nanobot.eval.memory_eval import EvalRunner
@@ -270,13 +267,13 @@ class MemoryStore:
             db=self.db,
         )
 
-        # Wire profile_mgr subsystem dependencies (must happen after all are built).
+        # CorrectionOrchestrator — constructed after all subsystems are available.
+        # ProfileStore accesses it via the corrector_fn callback passed above.
         from .persistence.profile_correction import (
             CorrectionOrchestrator as _CorrectionOrchestrator,
         )
 
-        self.profile_mgr._conflict_mgr = self.conflict_mgr  # keep — used by delegate wrappers
-        self.profile_mgr._corrector = _CorrectionOrchestrator(
+        self._corrector = _CorrectionOrchestrator(
             profile_store=self.profile_mgr,
             extractor=self.extractor,
             ingester=self.ingester,
@@ -293,6 +290,29 @@ class MemoryStore:
             snapshot=self.snapshot,
             memory_file=self.memory_file,
             history_file=self.history_file,
+        )
+
+    # ------------------------------------------------------------------
+    # Computed properties and internal callbacks
+    # ------------------------------------------------------------------
+
+    @property
+    def rollout(self) -> dict[str, Any]:
+        """Live rollout config — always returns the current dict from RolloutConfig."""
+        return self._rollout_config.rollout
+
+    @property
+    def conflict_auto_resolve_gap(self) -> float:
+        """Live rollout value — never stale."""
+        return float(self._rollout_config.rollout.get("conflict_auto_resolve_gap", 0.25))
+
+    def _reindex_callback(self) -> None:
+        """Void-typed wrapper for MemoryMaintenance.reindex_fn."""
+        self.maintenance.reindex_from_structured_memory(
+            read_profile_fn=self.profile_mgr.read_profile,
+            read_events_fn=self.ingester.read_events,
+            ingester=self.ingester,
+            profile_keys=self.PROFILE_KEYS,
         )
 
     # ------------------------------------------------------------------

@@ -1,3 +1,4 @@
+# size-exception: single-class module with resolution logic that shares state across methods
 """Conflict resolution extracted from MemoryStore (LAN-203).
 
 ``ConflictManager`` owns the lifecycle of profile conflicts: listing,
@@ -55,6 +56,7 @@ class ConflictManager:
         normalize_metadata_fn: Callable[..., tuple[dict, bool]] | None = None,
         sanitize_metadata_fn: Callable[[dict], dict] | None = None,
         db: UnifiedMemoryDB | None = None,
+        resolve_gap_fn: Callable[[], float] | None = None,
     ) -> None:
         # Stored as profile_mgr for backward compat with resolve_conflict_details callers.
         self.profile_mgr = profile_store
@@ -62,9 +64,9 @@ class ConflictManager:
         self._normalize_metadata = normalize_metadata_fn
         self._sanitize_metadata = sanitize_metadata_fn
         self._db = db
-        # Configurable auto-resolve confidence gap threshold — copied from
-        # MemoryStore at wiring time.
-        self.conflict_auto_resolve_gap: float = 0.25
+        # Live callback for auto-resolve confidence gap threshold — reads current
+        # rollout value instead of a stale copy captured at construction time.
+        self._resolve_gap_fn: Callable[[], float] = resolve_gap_fn or (lambda: 0.25)
 
     # -- Shared helpers imported from .helpers --------------------------------
     _norm_text = staticmethod(_norm_text)
@@ -288,7 +290,7 @@ class ConflictManager:
         old_conf = self._safe_float(conflict.get("old_confidence"), 0.0)
         new_conf = self._safe_float(conflict.get("new_confidence"), 0.0)
         gap = abs(old_conf - new_conf)
-        if gap >= self.conflict_auto_resolve_gap:
+        if gap >= self._resolve_gap_fn():
             return "keep_new" if new_conf > old_conf else "keep_old"
 
         # Temporal recency: when the confidence gap is too narrow, use

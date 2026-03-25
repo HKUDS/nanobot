@@ -57,7 +57,7 @@ def _make_retriever(
         planner=planner,
         reranker=reranker,
         profile_mgr=profile_mgr,
-        rollout=rollout or {},
+        rollout_fn=lambda: rollout or {},
         read_events_fn=lambda **kw: events or [],
         extractor=extractor,
     )
@@ -672,7 +672,7 @@ class TestGraphEntityCache:
             planner=planner,
             reranker=reranker,
             profile_mgr=profile_mgr,
-            rollout={"enabled": True},
+            rollout_fn=lambda: {"enabled": True},
             read_events_fn=lambda **kw: [],
             extractor=extractor,
         )

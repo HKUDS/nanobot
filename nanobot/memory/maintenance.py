@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from ._text import _norm_text, _to_str_list, _utc_now_iso
 
@@ -26,11 +26,13 @@ class MemoryMaintenance:
     def __init__(
         self,
         *,
-        rollout: dict[str, Any],
+        rollout_fn: Callable[[], dict[str, Any]],
         db: UnifiedMemoryDB | None = None,
+        reindex_fn: Callable[[], None] | None = None,
     ) -> None:
-        self.rollout = rollout
+        self._rollout_fn = rollout_fn
         self._db = db
+        self._reindex_fn = reindex_fn
 
     # ── backend stats ─────────────────────────────────────────────────
 
@@ -62,9 +64,6 @@ class MemoryMaintenance:
         pass
 
     # ── Compaction / reindex ──────────────────────────────────────────
-
-    # Set by MemoryStore after construction so health check can trigger reindex.
-    _reindex_fn: Any = None
 
     @staticmethod
     def _event_compaction_key(event: dict[str, Any]) -> tuple[str, str, str, str]:

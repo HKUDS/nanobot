@@ -126,7 +126,7 @@ class TestMaintenanceDBPath:
         from nanobot.memory.maintenance import MemoryMaintenance
 
         maint = MemoryMaintenance(
-            rollout={},
+            rollout_fn=lambda: {},
             db=db,
         )
 

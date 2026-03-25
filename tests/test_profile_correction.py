@@ -56,7 +56,7 @@ class TestCorrectionOrchestrator:
         store = _make_profile_store(tmp_path)
         corrector = MagicMock()
         corrector.apply_live_user_correction.return_value = {"applied": 1, "conflicts": 0}
-        store._corrector = corrector
+        store._corrector_fn = lambda: corrector
         result = store.apply_live_user_correction("I prefer tea")
         corrector.apply_live_user_correction.assert_called_once_with(
             "I prefer tea", channel="", chat_id="", enable_contradiction_check=True
