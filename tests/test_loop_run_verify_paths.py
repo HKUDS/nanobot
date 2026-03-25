@@ -8,8 +8,7 @@ from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentConfig, AgentRoleConfig
-from nanobot.coordination.coordinator import ClassificationResult
+from nanobot.config.schema import AgentConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
 
 
@@ -145,7 +144,10 @@ async def test_run_exception_path_publishes_user_friendly_error(tmp_path: Path) 
     await asyncio.wait_for(task, timeout=2.0)
 
 
-async def test_run_with_routing_low_confidence_and_none_response(tmp_path: Path) -> None:
+async def test_run_with_none_response_publishes_empty_outbound(tmp_path: Path) -> None:
+    """When _process_message returns None for a cli channel, the loop publishes
+    an empty OutboundMessage.  Routing is now handled by the processor, so this
+    test only verifies the loop's null-response path."""
     provider = _ScriptedProvider([])
     bus = MessageBus()
     cfg = AgentConfig(
@@ -159,35 +161,6 @@ async def test_run_with_routing_low_confidence_and_none_response(tmp_path: Path)
     loop = build_agent(bus=bus, provider=provider, config=cfg)
     loop._connect_mcp = lambda: asyncio.sleep(0)  # type: ignore[method-assign]
 
-    default_role = AgentRoleConfig(name="general", description="general")
-    loop._coordinator = type(
-        "_Coord",
-        (),
-        {
-            "classify": staticmethod(
-                lambda _text: asyncio.sleep(
-                    0, result=ClassificationResult(role_name="code", confidence=0.1)
-                )
-            ),
-            "route_direct": staticmethod(lambda _name: None),
-            "registry": type("_Reg", (), {"get_default": staticmethod(lambda: default_role)})(),
-        },
-    )()
-    loop._routing_config = type(
-        "_Routing",
-        (),
-        {"confidence_threshold": 0.9, "default_role": "general", "enabled": True},
-    )()
-
-    role_calls = {"applied": 0, "reset": 0}
-    loop._dispatcher.record_route_trace = lambda *a, **k: None  # type: ignore[method-assign]
-    loop._role_manager.apply = lambda _r: role_calls.__setitem__(  # type: ignore[method-assign]
-        "applied", role_calls["applied"] + 1
-    )
-    loop._role_manager.reset = lambda _ctx: role_calls.__setitem__(  # type: ignore[method-assign]
-        "reset", role_calls["reset"] + 1
-    )
-
     async def _none_response(_msg):
         return None
 
@@ -199,8 +172,6 @@ async def test_run_with_routing_low_confidence_and_none_response(tmp_path: Path)
     )
     out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.5)
     assert out.content == ""
-    assert role_calls["applied"] == 1
-    assert role_calls["reset"] == 1
 
     loop.stop()
     await asyncio.wait_for(task, timeout=2.0)
