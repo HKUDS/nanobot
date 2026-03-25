@@ -386,6 +386,26 @@ and tested before it is considered done.
 - Never add a catch-all module (`utils.py`, `helpers.py`) at the package level. If
   shared logic is needed, place it in the package that owns the concept.
 
+### Message Processing — Single Pipeline
+
+All message entry points (`run()`, `process_direct()`, future entry points) must
+converge into `MessageProcessor._process_message()` before the first processing step.
+Processing steps — routing, context building, orchestration, verification — must have
+a single code path inside the processor. Entry points must not duplicate or skip
+processing steps.
+
+**Why this rule exists:** `process_direct()` was written as a "lightweight" path that
+predated routing. When routing was added to the bus path, it was not added to
+`process_direct()`, silently disabling routing for CLI, cron, and heartbeat callers.
+The gap went undetected because each path was tested in isolation.
+
+**Detection:** Contract tests in `tests/contract/test_routing_invariant.py` verify
+that all entry points produce the same routing behavior. Run `make test` — these tests
+are not optional.
+
+**If you need a new entry point:** Route through `MessageProcessor._process_message()`.
+Do not add processing logic to the loop or the new caller.
+
 ## Architecture References
 
 - Architecture decisions: `docs/adr/` (ADR-001 through ADR-009)
@@ -490,6 +510,10 @@ These are not suggestions — they are errors. Fix immediately if detected.
   (per-call parameters, shared reference, or `TurnState` fields) — not a stale
   construction-time copy. See `tests/contract/test_role_propagation.py` for the
   pattern.
+- Processing steps (routing, context building, orchestration) implemented at the
+  entry-point level (`AgentLoop.run()`, `process_direct()`) rather than inside
+  `MessageProcessor._process_message()`. Entry points must be thin shells that
+  delegate to the processor.
 
 **Growth violations:**
 - Adding a file to a package at its file-count limit without extracting first
