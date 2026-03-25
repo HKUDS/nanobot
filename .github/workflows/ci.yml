@@ -33,6 +33,8 @@ jobs:
         run: python -m mypy nanobot/
       - name: Enforce module boundaries
         run: python scripts/check_imports.py
+      - name: Enforce structural rules
+        run: python scripts/check_structure.py
       - name: Verify prompt manifest
         run: python scripts/check_prompt_manifest.py
 
