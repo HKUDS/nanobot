@@ -11,9 +11,6 @@ def _make_mgr(profile_store=None):
     ps = profile_store or MagicMock()
     return ConflictManager(
         ps,
-        sanitize_mem0_text_fn=lambda t: t,
-        normalize_metadata_fn=lambda m, **kw: (m, False),
-        sanitize_metadata_fn=lambda m: m,
     )
 
 
@@ -100,9 +97,6 @@ class TestApplyProfileUpdates:
         store = _make_real_store(tmp_path)
         mgr = ConflictManager(
             store,
-            sanitize_mem0_text_fn=lambda t: t,
-            normalize_metadata_fn=lambda m, **kw: (m, False),
-            sanitize_metadata_fn=lambda m: m,
         )
         store._conflict_mgr = mgr
         return mgr, store

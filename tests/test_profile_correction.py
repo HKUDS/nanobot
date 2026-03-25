@@ -28,6 +28,7 @@ class TestCorrectionOrchestrator:
             profile_store=store,
             extractor=extractor,
             ingester=MagicMock(),
+            coercer=MagicMock(),
             conflict_mgr=MagicMock(),
             snapshot=MagicMock(),
         )
@@ -45,6 +46,7 @@ class TestCorrectionOrchestrator:
             profile_store=store,
             extractor=extractor,
             ingester=MagicMock(),
+            coercer=MagicMock(),
             conflict_mgr=MagicMock(),
             snapshot=MagicMock(),
         )
