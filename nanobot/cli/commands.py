@@ -418,15 +418,6 @@ def _make_provider(config: Config, agent_cfg: AgentDefaults | None = None):
         from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
         provider = OpenAICodexProvider(default_model=model)
-    elif backend == "custom" or provider_name == "custom":
-        from nanobot.providers.custom_provider import CustomProvider
-
-        provider = CustomProvider(
-            api_key=p.api_key if p else "no-key",
-            api_base=(p.api_base if p and p.api_base else config.get_api_base(model)) or "http://localhost:8000/v1",
-            default_model=model,
-            extra_headers=p.extra_headers if p else None,
-        )
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
