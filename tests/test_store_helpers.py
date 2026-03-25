@@ -11,7 +11,6 @@ from nanobot.memory import MemoryStore
 from nanobot.memory._text import _to_datetime
 from nanobot.memory.maintenance import MemoryMaintenance
 from nanobot.memory.read.retrieval_planner import RetrievalPlanner
-from nanobot.memory.write.ingester import EventIngester
 
 
 def _store(tmp_path: Path, **overrides: object) -> MemoryStore:
@@ -85,38 +84,12 @@ class TestMemoryStoreExtraHelpers:
         assert 0.0 <= normalized["confidence"] <= 1.0
         assert isinstance(mixed_flag, bool)
 
-    def test_event_write_plan_and_distillation(self, tmp_path: Path) -> None:
+    def test_distillation(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
 
         assert store.ingester._distill_semantic_summary("alpha") == "alpha"
         distilled = store.ingester._distill_semantic_summary("User prefers vim because it is fast")
         assert "because" not in distilled.lower() or len(distilled) < 12
-
-        writes = store.ingester._event_mem0_write_plan(
-            {
-                "type": "preference",
-                "summary": "User prefers vim because previous IDE failed yesterday",
-                "source": "chat",
-                "entities": ["user", "vim"],
-            }
-        )
-        assert len(writes) >= 1
-        assert all(isinstance(text, str) for text, _ in writes)
-
-    def test_sanitize_helpers(self, tmp_path: Path) -> None:
-        store = _store(tmp_path)
-        assert EventIngester._looks_blob_like_summary("```python\nprint('x')\n```") is True
-        assert EventIngester._looks_blob_like_summary("User likes cats") is False
-
-        metadata = EventIngester._sanitize_mem0_metadata(
-            {"a": "x", "b": [1, 2], "c": {"nested": True}, "d": 4}
-        )
-        assert metadata["a"] == "x"
-        assert isinstance(metadata["b"], list)
-        assert isinstance(metadata["c"], str)
-
-        assert store.ingester._sanitize_mem0_text("", allow_archival=False) == ""
-        assert store.ingester._sanitize_mem0_text("User prefers Python", allow_archival=False)
 
     def test_compaction_helpers(self, tmp_path: Path) -> None:
         event = {"summary": "hello", "type": "fact", "memory_type": "semantic", "topic": "general"}

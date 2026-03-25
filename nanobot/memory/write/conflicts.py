@@ -52,17 +52,11 @@ class ConflictManager:
         self,
         profile_store: ProfileStore | ProfileManager,
         *,
-        sanitize_mem0_text_fn: Callable[..., str] | None = None,
-        normalize_metadata_fn: Callable[..., tuple[dict, bool]] | None = None,
-        sanitize_metadata_fn: Callable[[dict], dict] | None = None,
         db: UnifiedMemoryDB | None = None,
         resolve_gap_fn: Callable[[], float] | None = None,
     ) -> None:
         # Stored as profile_mgr for backward compat with resolve_conflict_details callers.
         self.profile_mgr = profile_store
-        self._sanitize_mem0_text = sanitize_mem0_text_fn
-        self._normalize_metadata = normalize_metadata_fn
-        self._sanitize_metadata = sanitize_metadata_fn
         self._db = db
         # Live callback for auto-resolve confidence gap threshold — reads current
         # rollout value instead of a stale copy captured at construction time.

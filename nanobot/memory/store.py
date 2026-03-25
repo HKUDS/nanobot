@@ -215,9 +215,6 @@ class MemoryStore:
         # Conflict manager (LAN-203) — now that ingester is built, wire callables.
         self.conflict_mgr = ConflictManager(
             self.profile_mgr,
-            sanitize_mem0_text_fn=self.ingester._sanitize_mem0_text,
-            normalize_metadata_fn=self.ingester._normalize_memory_metadata,
-            sanitize_metadata_fn=EventIngester._sanitize_mem0_metadata,
             db=self.db,
             resolve_gap_fn=lambda: float(
                 self._rollout_config.rollout.get("conflict_auto_resolve_gap", 0.25)

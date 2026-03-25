@@ -33,30 +33,6 @@ def test_coerce_event_adds_normalized_metadata(tmp_path: Path) -> None:
     assert event["metadata"]["memory_type"] in {"semantic", "episodic", "reflection"}
 
 
-def test_event_write_plan_dual_writes_mixed_memory(tmp_path: Path) -> None:
-    store = MemoryStore(tmp_path)
-
-    plan = store.ingester._event_mem0_write_plan(
-        {
-            "id": "evt-mixed-1",
-            "type": "fact",
-            "summary": "Carlos prefers CLI tools because GUI deploy failed yesterday.",
-            "entities": ["Carlos", "CLI", "GUI"],
-            "source": "chat",
-            "source_span": [0, 1],
-        }
-    )
-
-    assert len(plan) == 2
-    texts = [text for text, _ in plan]
-    metas = [meta for _, meta in plan]
-
-    assert any(meta.get("memory_type") == "episodic" for meta in metas)
-    assert any(meta.get("memory_type") == "semantic" for meta in metas)
-    # Distilled semantic version should remove the causal tail.
-    assert any("because" not in text.lower() for text in texts)
-
-
 def test_append_events_writes_to_db(tmp_path: Path) -> None:
     """append_events writes events to UnifiedMemoryDB."""
     store = MemoryStore(tmp_path)

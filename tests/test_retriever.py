@@ -218,35 +218,6 @@ class TestRetrieveAppliesTypeBoost:
 # ======================================================================
 
 
-class TestAugmentQueryWithGraph:
-    """_augment_query_with_graph expands query with entity names."""
-
-    def test_expands_with_entity_names(self) -> None:
-        retriever = _make_retriever(graph_enabled=True)
-        retriever._graph.get_related_entity_names_sync = MagicMock(
-            return_value={"python", "fastapi", "web"}
-        )
-        augmented, extra = retriever._augment_query_with_graph("web framework")
-        # "web" is already a keyword, so extra should contain python and fastapi
-        assert "python" in augmented or "fastapi" in augmented
-        assert len(extra) > 0
-
-    def test_no_graph_returns_original(self) -> None:
-        retriever = _make_retriever(graph_enabled=False)
-        # graph is not None but disabled
-        retriever._graph.enabled = False
-        augmented, extra = retriever._augment_query_with_graph("hello world")
-        assert augmented == "hello world"
-        assert extra == set()
-
-    def test_no_graph_object_returns_original(self) -> None:
-        retriever = _make_retriever()
-        retriever._graph = None
-        augmented, extra = retriever._augment_query_with_graph("test query")
-        assert augmented == "test query"
-        assert extra == set()
-
-
 class TestFilterItemsByIntent:
     """_filter_items filters items based on routing hints and intent."""
 

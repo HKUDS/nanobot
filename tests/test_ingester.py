@@ -244,35 +244,6 @@ class TestAppendEventsDedup:
         db.close()
 
 
-class TestSanitizeMem0Text:
-    def test_strips_runtime_context(self) -> None:
-        ing, *_ = _make_ingester()
-        result = ing._sanitize_mem0_text("Hello world [Runtime Context] extra stuff")
-        assert "extra stuff" not in result
-        assert result == "Hello world"
-
-    def test_empty_string(self) -> None:
-        ing, *_ = _make_ingester()
-        assert ing._sanitize_mem0_text("") == ""
-        assert ing._sanitize_mem0_text("   ") == ""
-
-    def test_blob_like_rejected(self) -> None:
-        ing, *_ = _make_ingester()
-        assert ing._sanitize_mem0_text("{ json blob }") == ""
-
-    def test_too_long_rejected(self) -> None:
-        ing, *_ = _make_ingester(rollout={"memory_fallback_max_summary_chars": 10})
-        assert ing._sanitize_mem0_text("A very long text that exceeds the limit") == ""
-
-    def test_too_long_archival_truncated(self) -> None:
-        ing, *_ = _make_ingester(rollout={"memory_fallback_max_summary_chars": 20})
-        result = ing._sanitize_mem0_text(
-            "A very long text that exceeds the limit", allow_archival=True
-        )
-        assert result.endswith("...")
-        assert len(result) <= 23  # 20 + "..."
-
-
 class TestReadEvents:
     def test_read_events_from_db(self, tmp_path: Path) -> None:
         db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
@@ -338,30 +309,6 @@ class TestDistillSemanticSummary:
         assert EventIngester._distill_semantic_summary("") == ""
 
 
-class TestSanitizeMetadata:
-    def test_strips_none(self) -> None:
-        result = EventIngester._sanitize_mem0_metadata({"a": 1, "b": None, "c": "ok"})
-        assert result == {"a": 1, "c": "ok"}
-
-    def test_flattens_nested(self) -> None:
-        result = EventIngester._sanitize_mem0_metadata({"x": {"nested": True}})
-        assert isinstance(result["x"], str)
-
-
-class TestLooksBlobLikeSummary:
-    def test_empty_is_blob(self) -> None:
-        assert EventIngester._looks_blob_like_summary("") is True
-
-    def test_normal_text(self) -> None:
-        assert EventIngester._looks_blob_like_summary("User prefers dark mode") is False
-
-    def test_json_blob(self) -> None:
-        assert EventIngester._looks_blob_like_summary('{"key": "val"}') is True
-
-    def test_multiline_blob(self) -> None:
-        assert EventIngester._looks_blob_like_summary("a\nb\nc\nd\ne") is True
-
-
 class TestIngesterWithUnifiedDB:
     """Tests for ingester writing to UnifiedMemoryDB."""
 
@@ -410,10 +357,4 @@ class TestIngesterWithUnifiedDB:
         )
         events = ingester.read_events(limit=10)
         assert len(events) >= 1
-        db.close()
-
-    def test_sync_events_to_mem0_noop_with_db(self, tmp_path: Path) -> None:
-        ingester, db, _ = self._make_ingester_with_db(tmp_path)
-        result = ingester._sync_events_to_mem0([{"type": "fact", "summary": "ignored", "id": "x"}])
-        assert result == 0
         db.close()

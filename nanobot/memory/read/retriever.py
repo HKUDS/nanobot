@@ -9,6 +9,7 @@ Pipeline architecture (pipes and filters)::
 
     Source (vector + FTS5 + RRF) → Graph Augment → Filter → Score → Rerank → Truncate
 """
+# size-exception: decomposition in progress (memory subsystem refactor)
 
 from __future__ import annotations
 
@@ -20,7 +21,6 @@ from typing import TYPE_CHECKING, Any, Callable
 from nanobot.observability.tracing import bind_trace
 
 from .._text import _contains_any, _norm_text
-from ..graph._keywords import _extract_query_keywords
 from .retrieval_planner import RetrievalPlan, RetrievalPlanner
 
 if TYPE_CHECKING:
@@ -255,35 +255,6 @@ class MemoryRetriever:
             entry["_rrf_score"] = scores[eid]
             result.append(entry)
         return result
-
-    # ------------------------------------------------------------------
-    # Pipeline stage: graph query augmentation
-    # ------------------------------------------------------------------
-
-    def _augment_query_with_graph(self, query: str) -> tuple[str, set[str]]:
-        """Expand query with graph entity names.
-
-        Returns (augmented_query, extra_terms).
-        """
-        if self._graph is None or not self._graph.enabled:
-            return query, set()
-
-        query_keywords = _extract_query_keywords(query)
-        if not query_keywords:
-            return query, set()
-
-        graph_related = self._graph.get_related_entity_names_sync(
-            query_keywords,
-            depth=2,
-        )
-        extra_terms = graph_related - query_keywords
-        if not extra_terms:
-            return query, set()
-
-        augmented_query = (
-            query + " " + " ".join(t.replace("-", " ").replace("_", " ") for t in extra_terms)
-        )
-        return augmented_query, extra_terms
 
     # ------------------------------------------------------------------
     # Pipeline stage: load profile scoring data

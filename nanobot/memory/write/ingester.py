@@ -13,6 +13,7 @@ module.  ``EventIngester`` owns:
 All file I/O goes through ``MemoryPersistence``; all vector operations go
 through ``_Mem0Adapter``.
 """
+# size-exception: decomposition in progress (memory subsystem refactor)
 
 from __future__ import annotations
 
@@ -328,113 +329,6 @@ class EventIngester:
             "evidence_refs": evidence_refs,
             "reflection_safety_downgraded": reflection_safety_downgraded,
         }, is_mixed
-
-    def _event_mem0_write_plan(self, event: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-        """Plan mem0 writes for an event, handling mixed semantic/episodic splits."""
-        summary = str(event.get("summary", "")).strip()
-        if not summary:
-            return []
-        event_type = str(event.get("type", "fact"))
-        base_source = str(event.get("source", "chat"))
-        metadata, is_mixed = self._normalize_memory_metadata(
-            event.get("metadata") if isinstance(event.get("metadata"), dict) else None,
-            event_type=event_type,
-            summary=summary,
-            source=base_source,
-        )
-        merged = {
-            **metadata,
-            "event_type": event_type,
-            "entities": _to_str_list(event.get("entities")),
-            "source_span": event.get("source_span"),
-            "channel": str(event.get("channel", "")),
-            "chat_id": str(event.get("chat_id", "")),
-            "canonical_id": str(event.get("canonical_id") or event.get("id", "")),
-            "status": event.get("status"),
-            "supersedes_event_id": event.get("supersedes_event_id"),
-            "supersedes_at": event.get("supersedes_at"),
-        }
-        writes: list[tuple[str, dict[str, Any]]] = []
-
-        if is_mixed:
-            episodic_meta = dict(merged)
-            episodic_meta["memory_type"] = "episodic"
-            episodic_meta["stability"] = "low"
-            writes.append((summary, episodic_meta))
-
-            semantic_summary = self._distill_semantic_summary(summary)
-            if semantic_summary:
-                semantic_meta = dict(merged)
-                semantic_meta["memory_type"] = "semantic"
-                semantic_meta["stability"] = "high"
-                semantic_meta["dual_write_parent_id"] = episodic_meta.get("canonical_id")
-                writes.append((semantic_summary, semantic_meta))
-            return writes
-
-        writes.append((summary, merged))
-        return writes
-
-    @staticmethod
-    def _looks_blob_like_summary(summary: str) -> bool:
-        """Return ``True`` if *summary* looks like a data blob rather than prose."""
-        text = str(summary or "").strip()
-        if not text:
-            return True
-        lowered = text.lower()
-        blob_markers = (
-            "[runtime context]",
-            "/home/",
-            ".jsonl:",
-            "```",
-            "{",
-            "}",
-            "# memory",
-            "## ",
-        )
-        if any(marker in lowered for marker in blob_markers):
-            return True
-        if text.count("\n") >= 4:
-            return True
-        return False
-
-    @staticmethod
-    def _sanitize_mem0_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-        """Strip ``None`` values and flatten non-scalar types for mem0."""
-        clean: dict[str, Any] = {}
-        for key, value in metadata.items():
-            if value is None:
-                continue
-            if isinstance(value, str | int | float | bool):
-                clean[key] = value
-                continue
-            if isinstance(value, list):
-                items: list[str | int | float | bool] = []
-                for item in value:
-                    if isinstance(item, str | int | float | bool):
-                        items.append(item)
-                    elif item is not None:
-                        items.append(str(item))
-                clean[key] = items
-                continue
-            clean[key] = str(value)
-        return clean
-
-    def _sanitize_mem0_text(self, text: str, *, allow_archival: bool = False) -> str:
-        """Strip runtime context markers and enforce length limits."""
-        value = str(text or "")
-        if not value.strip():
-            return ""
-        if "[Runtime Context]" in value:
-            value = value.split("[Runtime Context]", 1)[0]
-        value = re.sub(r"\s+", " ", value).strip()
-        max_chars = int(self._rollout_fn().get("memory_fallback_max_summary_chars", 280) or 280)
-        if len(value) > max_chars and not allow_archival:
-            return ""
-        if len(value) > max_chars and allow_archival:
-            value = value[:max_chars].rstrip() + "..."
-        if self._looks_blob_like_summary(value):
-            return ""
-        return value
 
     # ------------------------------------------------------------------
     # Dedup & merge
@@ -905,14 +799,3 @@ class EventIngester:
                 total += len(parsed)
 
         return total
-
-    # ------------------------------------------------------------------
-    # Mem0 sync
-    # ------------------------------------------------------------------
-
-    def _sync_events_to_mem0(self, events: list[dict[str, Any]]) -> int:
-        """No-op: events are stored directly in UnifiedMemoryDB.
-
-        Legacy mem0 sync has been removed.  Returns 0.
-        """
-        return 0
