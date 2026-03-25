@@ -49,6 +49,18 @@ class BaseChannel(ABC):
             logger.warning("{}: audio transcription failed: {}", self.name, e)
             return ""
 
+    async def login(self, force: bool = False) -> bool:
+        """
+        Perform channel-specific interactive login (e.g. QR code scan).
+
+        Args:
+            force: If True, ignore existing credentials and force re-authentication.
+
+        Returns True if already authenticated or login succeeds.
+        Override in subclasses that support interactive login.
+        """
+        return True
+
     @abstractmethod
     async def start(self) -> None:
         """
@@ -73,11 +85,18 @@ class BaseChannel(ABC):
 
         Args:
             msg: The message to send.
+
+        Implementations should raise on delivery failure so the channel manager
+        can apply any retry policy in one place.
         """
         pass
 
     async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
-        """Deliver a streaming text chunk. Override in subclass to enable streaming."""
+        """Deliver a streaming text chunk.
+
+        Override in subclasses to enable streaming. Implementations should
+        raise on delivery failure so the channel manager can retry.
+        """
         pass
 
     @property

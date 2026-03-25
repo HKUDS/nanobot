@@ -4,6 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 
+# Check optional matrix dependencies before importing
+try:
+    import nh3  # noqa: F401
+except ImportError:
+    pytest.skip("Matrix dependencies not installed (nh3)", allow_module_level=True)
+
 import nanobot.channels.matrix as matrix_module
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus

@@ -3,8 +3,11 @@
 import asyncio
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any
+
+from loguru import logger
 
 from nanobot.agent.tools.base import Tool
 
@@ -107,6 +110,16 @@ class ExecTool(Tool):
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    pass
+                finally:
+                    if sys.platform != "win32":
+                        try:
+                            os.waitpid(process.pid, os.WNOHANG)
+                        except (ProcessLookupError, ChildProcessError) as e:
+                            logger.debug("Process already reaped or not found: {}", e)
                 return f"Error: Command timed out after {effective_timeout} seconds"
 
             output_parts = []
