@@ -136,6 +136,17 @@ class TurnOrchestrator:
         self._turn_tokens_completion = 0
         self._turn_llm_calls = 0
 
+        # Resolve per-turn active settings (role-switched overrides).
+        effective_model = state.active_model if state.active_model is not None else self._model
+        effective_role_name = (
+            state.active_role_name if state.active_role_name is not None else self._role_name
+        )
+        max_iterations = (
+            state.active_max_iterations
+            if state.active_max_iterations is not None
+            else self._max_iterations
+        )
+
         # Reserve ~20% of context window for the model's response
         _raw_cw = getattr(self._config, "context_window_tokens", 0)
         context_window = _raw_cw if isinstance(_raw_cw, int | float) else 0
@@ -159,7 +170,7 @@ class TurnOrchestrator:
                 # Delegation advisor plan-phase
                 cr = state.classification_result
                 plan_advice = self._delegation_advisor.advise_plan_phase(
-                    role_name=self._role_name,
+                    role_name=effective_role_name,
                     needs_orchestration=cr.needs_orchestration if cr else False,
                     relevant_roles=cr.relevant_roles if cr else [],
                     user_text=state.user_text,
@@ -178,7 +189,7 @@ class TurnOrchestrator:
         _wall_time_limit = _raw_wt if isinstance(_raw_wt, int | float) else 0
         _wall_time_start = time.monotonic()
 
-        while state.iteration < self._max_iterations:
+        while state.iteration < max_iterations:
             state.iteration += 1
 
             # Wall-time guardrail (LAN-193)
@@ -201,7 +212,7 @@ class TurnOrchestrator:
                 context_budget * 0.85
             ):
                 _raw_sm = getattr(self._config, "summary_model", None)
-                summary_model = (_raw_sm if isinstance(_raw_sm, str) else None) or self._model
+                summary_model = (_raw_sm if isinstance(_raw_sm, str) else None) or effective_model
                 preserve_n = _dynamic_preserve_recent(state.messages, state.last_tool_call_msg_idx)
                 if self._provider is not None:
                     state.messages = await summarize_and_compress(
@@ -233,6 +244,8 @@ class TurnOrchestrator:
                 state.messages,
                 active_tools,
                 on_progress,
+                model=state.active_model,
+                temperature=state.active_temperature,
             )
             # Normalise: in tests, mocks may return (content, tool_calls) tuples
             # instead of LLMResponse objects.
@@ -352,6 +365,7 @@ class TurnOrchestrator:
                     response,
                     batch.any_failed,
                     batch.failed_this_batch,
+                    role_name=effective_role_name,
                 )
 
             else:
@@ -380,10 +394,10 @@ class TurnOrchestrator:
                 )
                 break
 
-        if final_content is None and state.iteration >= self._max_iterations:
-            logger.warning("Max iterations ({}) reached", self._max_iterations)
+        if final_content is None and state.iteration >= max_iterations:
+            logger.warning("Max iterations ({}) reached", max_iterations)
             final_content = (
-                f"I reached the maximum number of tool call iterations ({self._max_iterations}) "
+                f"I reached the maximum number of tool call iterations ({max_iterations}) "
                 "without completing the task. You can try breaking the task into smaller steps."
             )
             state.messages = self._context.add_assistant_message(state.messages, final_content)
@@ -394,6 +408,8 @@ class TurnOrchestrator:
                 state.user_text,
                 final_content,
                 state.messages,
+                model=state.active_model,
+                temperature=state.active_temperature,
             )
 
         # Clear per-turn progress callback to prevent cross-turn leakage

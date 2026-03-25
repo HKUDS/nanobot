@@ -74,6 +74,9 @@ class StreamingLLMCaller:
         messages: list[dict],
         tools: list[dict[str, Any]] | None,
         on_progress: ProgressCallback | None,
+        *,
+        model: str | None = None,
+        temperature: float | None = None,
     ) -> LLMResponse:
         """Call the LLM, streaming when *on_progress* is available.
 
@@ -81,15 +84,21 @@ class StreamingLLMCaller:
         *on_progress* so that channels supporting message editing can
         show tokens incrementally.  The final ``LLMResponse`` is
         assembled from the accumulated chunks.
+
+        Optional *model* and *temperature* overrides take precedence over
+        the construction-time defaults, allowing callers (e.g. role
+        switching) to propagate per-turn values without mutating the caller.
         """
         t0 = time.monotonic()
+        effective_model = model if model is not None else self.model
+        effective_temperature = temperature if temperature is not None else self.temperature
         # Fall back to non-streaming when there's no progress callback
         if on_progress is None:
             resp = await self.provider.chat(
                 messages=messages,
                 tools=tools,
-                model=self.model,
-                temperature=self.temperature,
+                model=effective_model,
+                temperature=effective_temperature,
                 max_tokens=self.max_tokens,
                 metadata={"generation_name": "chat_completion"},
             )
@@ -97,7 +106,7 @@ class StreamingLLMCaller:
             bind_trace().debug(
                 "LLM call model={} latency_ms={:.0f} input_tokens={} output_tokens={} "
                 "tool_calls={}",
-                self.model,
+                effective_model,
                 latency_ms,
                 resp.usage.get("prompt_tokens", 0),
                 resp.usage.get("completion_tokens", 0),
@@ -115,8 +124,8 @@ class StreamingLLMCaller:
         async for chunk in self.provider.stream_chat(
             messages=messages,
             tools=tools,
-            model=self.model,
-            temperature=self.temperature,
+            model=effective_model,
+            temperature=effective_temperature,
             max_tokens=self.max_tokens,
             metadata={"generation_name": "chat_completion"},
         ):
@@ -162,7 +171,7 @@ class StreamingLLMCaller:
         bind_trace().debug(
             "LLM stream model={} latency_ms={:.0f} input_tokens={} output_tokens={} "
             "tool_calls={} chunks={}",
-            self.model,
+            effective_model,
             latency_ms,
             usage.get("prompt_tokens", 0),
             usage.get("completion_tokens", 0),
