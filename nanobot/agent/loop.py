@@ -242,12 +242,14 @@ class AgentLoop:
                     tools=tool_defs,
                     model=self.model,
                     on_content_delta=_filtered_stream,
+                    prompt_cache_key=f"{channel}:{chat_id}",
                 )
             else:
                 response = await self.provider.chat_with_retry(
                     messages=messages,
                     tools=tool_defs,
                     model=self.model,
+                    prompt_cache_key=f"{channel}:{chat_id}",
                 )
 
             usage = response.usage or {}
