@@ -310,3 +310,81 @@ class TestTransformForAgent:
         assert "## Tool Instructions" in result
         assert "`exec`" in result
         assert "`Grep`" in result.split("---", 1)[0]  # original name in preamble
+
+
+class TestRealSkillContent:
+    """Tests against realistic skill content patterns."""
+
+    def setup_method(self):
+        self.loader = SkillsLoader(workspace=Path("/tmp/fake"))
+
+    def test_obsidian_cli_pattern(self):
+        """Obsidian-cli style: bash blocks, no Claude Code tool names."""
+        content = (
+            "# Obsidian CLI\n\n"
+            "## Daily Notes\n\n"
+            "```bash\n"
+            "obsidian daily:read\n"
+            'obsidian search query="keyword"\n'
+            "```\n\n"
+            "## File Operations\n\n"
+            "```bash\n"
+            'obsidian read path="notes/todo.md"\n'
+            "```"
+        )
+        result = self.loader.transform_for_agent(content)
+        assert "## Tool Instructions" in result
+        assert "`exec`" in result
+        # "read" in the bash block should NOT be detected as Claude's Read tool
+        assert "read_file" not in result
+
+    def test_memory_skill_pattern(self):
+        """Memory skill style: already uses nanobot tool names."""
+        content = (
+            "# Memory\n\n"
+            "Use the `exec` tool to run grep.\n"
+            "Write important facts using `edit_file` or `write_file`.\n\n"
+            "```bash\n"
+            'grep -i "keyword" memory/HISTORY.md\n'
+            "```"
+        )
+        result = self.loader.transform_for_agent(content)
+        # Should only add bash block preamble, no tool name rewriting
+        assert "## Tool Instructions" in result
+        assert "To run the bash/CLI" in result
+        # Nanobot names should still be present, unchanged
+        assert "`exec`" in result
+        assert "`edit_file`" in result
+
+    def test_weather_skill_pattern(self):
+        """Weather skill style: bash blocks + nanobot-native web_fetch."""
+        content = (
+            "# Weather\n\n"
+            "```bash\n"
+            'curl -s "wttr.in/London?format=3"\n'
+            "```\n\n"
+            "When calling `web_fetch`:\n"
+            "```json\n"
+            '{"url": "https://wttr.in/Montreal?format=3"}\n'
+            "```"
+        )
+        result = self.loader.transform_for_agent(content)
+        assert "## Tool Instructions" in result
+        assert "To run the bash/CLI" in result
+        assert "`web_fetch`" in result  # preserved, not rewritten
+
+    def test_skill_with_claude_tool_names(self):
+        """Hypothetical skill using Claude Code tool names."""
+        content = (
+            "# Code Review\n\n"
+            "Use `Read` to view the source file.\n"
+            "Use `Grep` to search for patterns.\n"
+            "Then use the Edit tool to make changes.\n"
+        )
+        result = self.loader.transform_for_agent(content)
+        assert "## Tool Instructions" in result
+        # Content section should have rewritten names
+        content_section = result.split("---", 1)[-1]
+        assert "`read_file`" in content_section
+        assert "`Grep`" not in content_section or "exec" in content_section
+        assert "edit_file tool" in content_section
