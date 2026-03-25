@@ -62,7 +62,7 @@ class ProvidersConfig(Base):
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
-    aws_bedrock: ProviderConfig = Field(default_factory=ProviderConfig)  # AWS Bedrock (uses AWS credentials)
+    bedrock: ProviderConfig = Field(default_factory=ProviderConfig)  # AWS Bedrock (uses AWS credentials)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
     deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
