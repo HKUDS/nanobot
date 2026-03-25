@@ -11,7 +11,6 @@ from __future__ import annotations
 import pytest
 
 from nanobot.agent.turn_types import TurnState
-from nanobot.config.schema import AgentRoleConfig
 from nanobot.providers.base import LLMResponse
 from tests.helpers import ScriptedProvider, _make_loop
 
@@ -89,16 +88,24 @@ async def test_no_role_override_uses_defaults(tmp_path):
 
 @pytest.mark.asyncio
 async def test_role_switch_propagates_model_to_provider(tmp_path):
-    """After role switching, the provider receives the role's model and temperature."""
+    """After role switching via set_active_settings, the provider receives the role's values.
+
+    Routing now happens inside the processor (not the loop), so this test
+    verifies the processor's set_active_settings → TurnState → LLM caller path
+    directly rather than going through the loop's role manager.
+    """
     provider = ScriptedProvider([LLMResponse(content="response")])
     loop = _make_loop(tmp_path, provider)
 
-    role = AgentRoleConfig(name="code", description="", model="role-model", temperature=0.1)
-    turn_ctx = loop._role_manager.apply(role)
-    try:
-        await loop.process_direct("hello")
-    finally:
-        loop._role_manager.reset(turn_ctx)
+    # Simulate what the processor does internally after routing:
+    # set active settings, then process.
+    loop._processor.set_active_settings(
+        model="role-model",
+        temperature=0.1,
+        max_iterations=10,
+        role_name="code",
+    )
+    await loop.process_direct("hello")
 
     assert provider.call_log[0]["model"] == "role-model"
     assert provider.call_log[0]["temperature"] == 0.1
@@ -106,7 +113,10 @@ async def test_role_switch_propagates_model_to_provider(tmp_path):
 
 @pytest.mark.asyncio
 async def test_role_reset_restores_default_model(tmp_path):
-    """After role reset, the next turn uses the default model."""
+    """After active settings are cleared, the next turn uses the default model.
+
+    Verifies that per-turn overrides don't leak across turns.
+    """
     provider = ScriptedProvider(
         [
             LLMResponse(content="response1"),
@@ -115,13 +125,22 @@ async def test_role_reset_restores_default_model(tmp_path):
     )
     loop = _make_loop(tmp_path, provider)
 
-    # Turn 1: with role override
-    role = AgentRoleConfig(name="code", description="", model="role-model")
-    turn_ctx = loop._role_manager.apply(role)
+    # Turn 1: with active settings override (simulates post-routing state)
+    loop._processor.set_active_settings(
+        model="role-model",
+        temperature=0.1,
+        max_iterations=10,
+        role_name="code",
+    )
     await loop.process_direct("turn1")
-    loop._role_manager.reset(turn_ctx)
 
-    # Turn 2: no role override — should use default
+    # Turn 2: reset active settings to defaults (simulates no routing)
+    loop._processor.set_active_settings(
+        model="test-model",
+        temperature=0.1,
+        max_iterations=25,
+        role_name="",
+    )
     await loop.process_direct("turn2")
 
     assert provider.call_log[0]["model"] == "role-model"

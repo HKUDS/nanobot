@@ -380,6 +380,17 @@ def build_agent(
         dispatcher.coordinator = coordinator
         _tool_build.missions.coordinator = coordinator
 
+    # 8.6 Construct MessageRouter (if routing is enabled)
+    router = None
+    if coordinator is not None:
+        from nanobot.coordination.router import MessageRouter
+
+        router = MessageRouter(
+            coordinator=coordinator,
+            routing_config=routing_config,
+            dispatcher=dispatcher,
+        )
+
     # 9. Construct DelegationAdvisor
     delegation_advisor = DelegationAdvisor()
 
@@ -452,6 +463,7 @@ def build_agent(
         role_name=role_config.name if role_config else "",
         provider=provider,
         model=model,
+        router=router,
     )
 
     # 14. Pack _AgentComponents (nested groups)

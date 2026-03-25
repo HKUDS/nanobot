@@ -8,7 +8,6 @@ to ``TurnOrchestrator``; per-message processing to ``MessageProcessor``.
 from __future__ import annotations
 
 import asyncio
-import time
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -17,7 +16,6 @@ from loguru import logger
 from nanobot.agent.callbacks import ProgressCallback
 from nanobot.agent.reaction import classify_reaction
 from nanobot.bus.events import DeliveryResult, InboundMessage, OutboundMessage, ReactionEvent
-from nanobot.config.schema import AgentRoleConfig
 from nanobot.observability.langfuse import (
     flush as flush_langfuse,
 )
@@ -31,13 +29,7 @@ from nanobot.observability.tracing import TraceContext
 if TYPE_CHECKING:
     from nanobot.agent.agent_components import _AgentComponents
     from nanobot.agent.message_processor import MessageProcessor
-    from nanobot.coordination.coordinator import ClassificationResult, Coordinator
-    from nanobot.coordination.role_switching import TurnContext
-
-
-_DEFAULT_CONFIDENCE_THRESHOLD: float = (
-    0.6  # Fallback routing confidence threshold (no RoutingConfig)
-)
+    from nanobot.coordination.coordinator import Coordinator
 
 
 def _user_friendly_error(exc: Exception) -> str:
@@ -106,7 +98,6 @@ class AgentLoop:
         self._mcp_connecting = False
         self._coordinator: Coordinator | None = components.coordinator
         self._coordinator_wired = False
-        self._last_classification_result: ClassificationResult | None = None
         self._delegation_stack: list[str] = []
         self._turn_tokens_prompt = 0
         self._turn_tokens_completion = 0
@@ -184,7 +175,6 @@ class AgentLoop:
         Kept for backward compatibility with test callers.
         Returns ``(final_content, tools_used, messages)``.
         """
-        self._processor.set_classification_result(self._last_classification_result)
         result = await self._processor._run_orchestrator(initial_messages, on_progress)
         self._processor._sync_token_counters()
         self._turn_tokens_prompt = self._processor._turn_tokens_prompt
@@ -261,7 +251,6 @@ class AgentLoop:
                         # True timeout — no message, no stop signal
                         continue
                     msg = _consume.result()
-                    turn_ctx: TurnContext | None = None
                     # Set correlation IDs for this request
                     TraceContext.new_request(
                         session_id=msg.session_key,
@@ -274,9 +263,7 @@ class AgentLoop:
                     reset_trace_context()
 
                     try:
-                        # Route through coordinator if enabled (skip system messages)
-
-                        # Wrap entire request (classify + process) in a single trace
+                        # Wrap entire request in a single trace
                         async with trace_request(
                             name="request",
                             input=msg.content[:200],
@@ -291,16 +278,6 @@ class AgentLoop:
                                 "role": self.role_name,
                             },
                         ):
-                            turn_ctx = await self._classify_and_route(msg)
-
-                            # Propagate role-switched values to the processor
-                            self._processor.set_active_settings(
-                                model=self.model,
-                                temperature=self.temperature,
-                                max_iterations=self.max_iterations,
-                                role_name=self.role_name,
-                            )
-
                             # Wrap with timeout to prevent infinite processing
                             timeout = (
                                 self.config.message_timeout
@@ -337,8 +314,6 @@ class AgentLoop:
                                     ),
                                 )
 
-                        self._role_manager.reset(turn_ctx)
-
                         if response is not None:
                             await self.bus.publish_outbound(response)
                         elif msg.channel in {"cli", "telegram"}:
@@ -360,7 +335,6 @@ class AgentLoop:
 
                     except Exception as e:  # crash-barrier: message processing
                         logger.exception("Error processing message")
-                        self._role_manager.reset(turn_ctx)
                         await self.bus.publish_outbound(
                             OutboundMessage(
                                 channel=msg.channel,
@@ -370,44 +344,6 @@ class AgentLoop:
                         )
                 except asyncio.TimeoutError:
                     continue
-
-    async def _classify_and_route(self, msg: InboundMessage) -> TurnContext | None:
-        """Classify message via coordinator and apply role overrides."""
-        if not self._coordinator or msg.channel == "system":
-            return None
-        t0_classify = time.monotonic()
-        cls_result = await self._coordinator.classify(msg.content)
-        self._last_classification_result = cls_result
-        self._processor.set_classification_result(cls_result)
-        role_name, confidence = cls_result.role_name, cls_result.confidence
-        classify_latency_ms = (time.monotonic() - t0_classify) * 1000
-        threshold = (
-            self._routing_config.confidence_threshold
-            if self._routing_config
-            else _DEFAULT_CONFIDENCE_THRESHOLD
-        )
-        if confidence < threshold:
-            role_name = self._routing_config.default_role if self._routing_config else "general"
-            logger.info(
-                "Low confidence ({:.2f} < {:.2f}), using default role '{}'",
-                confidence,
-                threshold,
-                role_name,
-            )
-        role = (
-            self._coordinator.route_direct(role_name)
-            or self._coordinator.registry.get_default()
-            or AgentRoleConfig(name=role_name, description="General assistant")
-        )
-        self._dispatcher.record_route_trace(
-            "route",
-            role=role.name,
-            confidence=confidence,
-            latency_ms=classify_latency_ms,
-            message_excerpt=msg.content,
-        )
-        assert self._role_manager is not None
-        return self._role_manager.apply(role)
 
     def _wire_coordinator(self) -> None:
         """Wire delegate tools into the coordinator (after MCP tools are available)."""
@@ -474,45 +410,21 @@ class AgentLoop:
         assert self._role_manager is not None, "build_agent() must wire _role_manager"
         await self._connect_mcp()
         self._wire_coordinator()
-        self._last_classification_result = None
 
-        # Resolve forced role (if any) before entering the trace context so
-        # that the role name is included in the trace metadata.
-        turn_ctx: TurnContext | None = None
-        if forced_role:
-            role = self._coordinator.route_direct(forced_role) if self._coordinator else None
-            if role is None:
-                logger.warning(
-                    "Unknown forced role '{}' — available roles not matched", forced_role
-                )
-                return f"Unknown role: {forced_role}"
-            turn_ctx = self._role_manager.apply(role)
-
-        # Always sync active settings (covers no-role and forced-role paths)
-        self._processor.set_active_settings(
-            model=self.model,
-            temperature=self.temperature,
-            max_iterations=self.max_iterations,
-            role_name=self.role_name,
-        )
-
-        try:
-            async with trace_request(
-                name="request",
-                input=content[:200],
-                session_id=session_key,
-                user_id="cli",
-                tags=[channel],
-                metadata={
-                    "channel": channel,
-                    "sender": "user",
-                    "session_key": session_key,
-                    "model": self.model,
-                    "role": self.role_name,
-                },
-            ):
-                return await self._processor.process_direct(
-                    content, session_key, channel, chat_id, on_progress, forced_role
-                )
-        finally:
-            self._role_manager.reset(turn_ctx)
+        async with trace_request(
+            name="request",
+            input=content[:200],
+            session_id=session_key,
+            user_id="cli",
+            tags=[channel],
+            metadata={
+                "channel": channel,
+                "sender": "user",
+                "session_key": session_key,
+                "model": self.model,
+                "role": self.role_name,
+            },
+        ):
+            return await self._processor.process_direct(
+                content, session_key, channel, chat_id, on_progress, forced_role
+            )

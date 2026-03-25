@@ -177,6 +177,8 @@ ALLOWLIST: set[tuple[str, str]] = {
     # Same runtime dependencies in turn_phases.py (extracted from turn_orchestrator).
     ("nanobot/agent/turn_phases.py", "nanobot.coordination.task_types"),
     ("nanobot/agent/turn_phases.py", "nanobot.coordination.delegation_advisor"),
+    # UnknownRoleError exception class (data object, not service instantiation).
+    ("nanobot/agent/message_processor.py", "nanobot.coordination.router"),
 }
 
 

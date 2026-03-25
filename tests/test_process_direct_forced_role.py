@@ -1,4 +1,9 @@
-"""Tests for process_direct with the forced_role parameter (LAN-192)."""
+"""Tests for process_direct with the forced_role parameter (LAN-192).
+
+Routing is now owned by ``MessageProcessor`` via ``MessageRouter``.  These tests
+verify the end-to-end path through ``AgentLoop.process_direct()`` which delegates
+to the processor.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +16,7 @@ from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig, AgentRoleConfig
+from nanobot.coordination.router import RoutingDecision, UnknownRoleError
 from nanobot.providers.base import LLMResponse
 from tests.helpers import ScriptedProvider
 
@@ -35,10 +41,10 @@ def _make_loop(tmp_path: Path, provider: ScriptedProvider, **overrides: Any) -> 
 
 
 class TestProcessDirectForcedRole:
-    """process_direct applies forced_role via TurnRoleManager.apply."""
+    """process_direct applies forced_role via the processor's MessageRouter."""
 
     async def test_forced_role_applies_role_and_resets(self, tmp_path: Path) -> None:
-        """When forced_role is given, the named role should be applied for the turn."""
+        """When forced_role is given, the processor routes to the named role."""
         provider = ScriptedProvider(
             [
                 LLMResponse(
@@ -52,16 +58,7 @@ class TestProcessDirectForcedRole:
             name="research", description="Research role", model="test-model"
         )
 
-        # Patch _ensure_coordinator and route_direct to return our test role
-        loop._coordinator = type(
-            "FakeCoordinator",
-            (),
-            {  # type: ignore[assignment]
-                "route_direct": lambda self, name: test_role if name == "research" else None,
-            },
-        )()
-
-        # Track role application
+        # Track role application through the processor's role manager
         applied_roles: list[str] = []
         original_apply = loop._role_manager.apply
 
@@ -70,6 +67,26 @@ class TestProcessDirectForcedRole:
             return original_apply(role)
 
         loop._role_manager.apply = tracking_apply  # type: ignore[assignment]
+
+        # Wire a fake router into the processor that resolves forced_role
+        from nanobot.coordination.coordinator import ClassificationResult
+
+        async def fake_route(
+            _self: Any,
+            content: str,
+            channel: str,
+            forced_role: str | None = None,
+        ) -> RoutingDecision | None:
+            if forced_role == "research":
+                return RoutingDecision(
+                    role=test_role,
+                    classification=ClassificationResult(role_name="research", confidence=1.0),
+                )
+            return None
+
+        loop._processor._router = type(  # type: ignore[assignment]
+            "FakeRouter", (), {"route": fake_route}
+        )()
 
         # Suppress trace_request context manager
         @contextlib.asynccontextmanager
@@ -87,19 +104,26 @@ class TestProcessDirectForcedRole:
         provider = ScriptedProvider(
             [
                 LLMResponse(
-                    content="should not run", usage={"prompt_tokens": 1, "completion_tokens": 1}
+                    content="should not run",
+                    usage={"prompt_tokens": 1, "completion_tokens": 1},
                 )
             ]
         )
         loop = _make_loop(tmp_path, provider)
 
-        # Coordinator that never finds a role
-        loop._coordinator = type(
-            "FakeCoordinator",
-            (),
-            {  # type: ignore[assignment]
-                "route_direct": lambda self, name: None,
-            },
+        # Wire a router that raises UnknownRoleError for unknown roles
+        async def fake_route(
+            _self: Any,
+            content: str,
+            channel: str,
+            forced_role: str | None = None,
+        ) -> RoutingDecision | None:
+            if forced_role:
+                raise UnknownRoleError(forced_role)
+            return None
+
+        loop._processor._router = type(  # type: ignore[assignment]
+            "FakeRouter", (), {"route": fake_route}
         )()
 
         result = await loop.process_direct("test", forced_role="nonexistent")
