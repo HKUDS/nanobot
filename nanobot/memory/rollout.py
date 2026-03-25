@@ -63,21 +63,26 @@ class RolloutConfig:
     # ── overrides ───────────────────────────────────────────────────────
 
     def apply_overrides(self, overrides: dict[str, Any]) -> None:
-        """Merge *overrides* into the current rollout dict, with validation."""
+        """Merge *overrides* into the current rollout dict, with validation.
+
+        Builds a new dict and replaces ``self.rollout`` atomically so that any
+        existing references to the previous dict are never partially mutated.
+        """
         if not overrides:
             return
+        merged = dict(self.rollout)
         mode = (
             str(
                 overrides.get(
                     "memory_rollout_mode",
-                    self.rollout.get("memory_rollout_mode", "enabled"),
+                    merged.get("memory_rollout_mode", "enabled"),
                 )
             )
             .strip()
             .lower()
         )
         if mode in self.ROLLOUT_MODES:
-            self.rollout["memory_rollout_mode"] = mode
+            merged["memory_rollout_mode"] = mode
         for key in (
             "memory_type_separation_enabled",
             "memory_router_enabled",
@@ -86,11 +91,13 @@ class RolloutConfig:
             "memory_auto_reindex_on_empty_vector",
         ):
             if key in overrides:
-                self.rollout[key] = bool(overrides[key])
+                merged[key] = bool(overrides[key])
         if isinstance(overrides.get("rollout_gates"), dict):
-            gates = self.rollout.get("rollout_gates")
+            gates = merged.get("rollout_gates")
             if not isinstance(gates, dict):
                 gates = {}
+            else:
+                gates = dict(gates)  # shallow copy to avoid mutating the old dict's gates
             for key in (
                 "min_recall_at_k",
                 "min_precision_at_k",
@@ -103,21 +110,20 @@ class RolloutConfig:
                     gates[key] = float(overrides["rollout_gates"][key])
                 except (TypeError, ValueError):
                     continue
-            self.rollout["rollout_gates"] = gates
+            merged["rollout_gates"] = gates
         # Reranker overrides
         if "reranker_mode" in overrides:
             rm = str(overrides["reranker_mode"]).strip().lower()
             if rm in ("enabled", "shadow", "disabled"):
-                self.rollout["reranker_mode"] = rm
+                merged["reranker_mode"] = rm
         if "reranker_alpha" in overrides:
             try:
-                self.rollout["reranker_alpha"] = min(
-                    max(float(overrides["reranker_alpha"]), 0.0), 1.0
-                )
+                merged["reranker_alpha"] = min(max(float(overrides["reranker_alpha"]), 0.0), 1.0)
             except (TypeError, ValueError):
                 pass  # keep default on bad input
         if "reranker_model" in overrides:
-            self.rollout["reranker_model"] = str(overrides["reranker_model"]).strip()
+            merged["reranker_model"] = str(overrides["reranker_model"]).strip()
+        self.rollout = merged
 
     # ── query ───────────────────────────────────────────────────────────
 

@@ -1,3 +1,4 @@
+# size-exception: profile CRUD + belief lifecycle + metadata — single cohesive concern
 """Profile/belief management extracted from MemoryStore (LAN-202).
 
 ``ProfileStore`` owns the profile CRUD lifecycle: reading/writing
@@ -12,7 +13,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
@@ -97,21 +98,20 @@ class ProfileStore:
     def __init__(
         self,
         *,
-        extractor: Any | None = None,
-        ingester: Any | None = None,
-        conflict_mgr: Any | None = None,
-        snapshot: Any | None = None,
         db: UnifiedMemoryDB | None = None,
+        conflict_mgr_fn: Callable[[], Any] | None = None,
+        corrector_fn: Callable[[], Any] | None = None,
+        extractor_fn: Callable[[], Any] | None = None,
+        ingester_fn: Callable[[], Any] | None = None,
+        snapshot_fn: Callable[[], Any] | None = None,
     ) -> None:
         self._db = db
-        # Subsystem references — set after construction by MemoryStore.__init__
-        # (required by apply_live_user_correction).
-        self._extractor: Any = extractor
-        self._ingester: Any = ingester
-        self._conflict_mgr: Any = conflict_mgr
-        self._snapshot: Any = snapshot
+        self._conflict_mgr_fn = conflict_mgr_fn
+        self._corrector_fn = corrector_fn
+        self._extractor_fn = extractor_fn
+        self._ingester_fn = ingester_fn
+        self._snapshot_fn = snapshot_fn
         self._cache = ProfileCache()
-        self._corrector: Any = None  # wired post-construction by MemoryStore
 
     # -- Shared helpers imported from .helpers --------------------------------
     _utc_now_iso = staticmethod(_utc_now_iso)
@@ -645,7 +645,8 @@ class ProfileStore:
 
     def _conflict_pair(self, old_value: str, new_value: str) -> bool:
         """Delegate to ConflictManager._conflict_pair."""
-        return bool(self._conflict_mgr._conflict_pair(old_value, new_value))
+        assert self._conflict_mgr_fn is not None, "_conflict_mgr_fn not wired"
+        return bool(self._conflict_mgr_fn()._conflict_pair(old_value, new_value))
 
     def _apply_profile_updates(
         self,
@@ -656,7 +657,8 @@ class ProfileStore:
         source_event_ids: list[str] | None = None,
     ) -> tuple[int, int, int]:
         """Delegate to ConflictManager._apply_profile_updates."""
-        result: tuple[int, int, int] = self._conflict_mgr._apply_profile_updates(
+        assert self._conflict_mgr_fn is not None, "_conflict_mgr_fn not wired"
+        result: tuple[int, int, int] = self._conflict_mgr_fn()._apply_profile_updates(
             profile,
             updates,
             enable_contradiction_check=enable_contradiction_check,
@@ -687,7 +689,8 @@ class ProfileStore:
 
     def _has_open_conflict(self, profile: dict[str, Any], key: str) -> bool:
         """Delegating wrapper — see ConflictManager.has_open_conflict."""
-        return bool(self._conflict_mgr.has_open_conflict(profile, key))
+        assert self._conflict_mgr_fn is not None, "_conflict_mgr_fn not wired"
+        return bool(self._conflict_mgr_fn().has_open_conflict(profile, key))
 
     # ------------------------------------------------------------------
     # mem0 helpers
@@ -718,8 +721,9 @@ class ProfileStore:
         enable_contradiction_check: bool = True,
     ) -> dict[str, Any]:
         """Facade — delegates to CorrectionOrchestrator wired by MemoryStore."""
-        assert self._corrector is not None, "_corrector not wired by MemoryStore"
-        result: dict[str, Any] = self._corrector.apply_live_user_correction(
+        corrector = self._corrector_fn() if self._corrector_fn else None
+        assert corrector is not None, "_corrector_fn not wired by MemoryStore"
+        result: dict[str, Any] = corrector.apply_live_user_correction(
             content,
             channel=channel,
             chat_id=chat_id,
