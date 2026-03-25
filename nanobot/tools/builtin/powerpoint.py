@@ -407,6 +407,7 @@ class ReadPptxTool(Tool):
             slides = _extract_slides_data(file_path)
         except ImportError as e:
             return ToolResult.fail(str(e), error_type="missing_dependency")
+        # crash-barrier: pptx format varies, any parse error returns friendly message
         except Exception as e:
             return ToolResult.fail(
                 f"Error reading PowerPoint file: {e}", error_type="extraction_error"
@@ -541,6 +542,7 @@ class AnalyzePptxTool(Tool):
             slides_data = _extract_slides_data(file_path)
         except ImportError as e:
             return ToolResult.fail(str(e), error_type="missing_dependency")
+        # crash-barrier: pptx extraction can fail on malformed files
         except Exception as e:
             return ToolResult.fail(
                 f"Error reading PowerPoint file: {e}", error_type="extraction_error"
@@ -575,6 +577,7 @@ class AnalyzePptxTool(Tool):
 
         try:
             slide_analyses = list(await asyncio.gather(*[_bounded(sd) for sd in slides_data]))
+        # crash-barrier: LLM slide analysis is best-effort
         except Exception as e:
             return ToolResult.fail(f"Error during slide analysis: {e}", error_type="analysis_error")
 
@@ -585,6 +588,7 @@ class AnalyzePptxTool(Tool):
         # Level 3: Deck synthesis
         try:
             synthesis = await _synthesize_deck(slide_analyses, resolved_model)
+        # crash-barrier: LLM synthesis is best-effort
         except Exception as e:
             return ToolResult.fail(f"Error during deck synthesis: {e}", error_type="analysis_error")
 

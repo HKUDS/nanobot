@@ -74,6 +74,7 @@ async def retry_send(
             if health:
                 health.record_success()
             return
+        # crash-barrier: retry logic must catch all transient errors
         except Exception as exc:
             if health:
                 health.record_failure(exc)

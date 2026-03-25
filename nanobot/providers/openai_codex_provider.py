@@ -61,7 +61,8 @@ class OpenAICodexProvider(LLMProvider):
                 content, tool_calls, finish_reason = await _request_codex(
                     url, headers, body, verify=True
                 )
-            except Exception as e:  # re-raised unless SSL cert error
+            # crash-barrier: catches SSL cert errors to retry without verify
+            except Exception as e:
                 if "CERTIFICATE_VERIFY_FAILED" not in str(e):
                     raise
                 logger.warning(

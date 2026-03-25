@@ -97,6 +97,7 @@ async def generate_summary(
                 "LLM summary for {}(key={}) — {} chars", tool_name, cache_key, len(summary)
             )
             return summary
+    # crash-barrier: LLM summary is best-effort, failure falls back to heuristic
     except Exception:
         logger.warning("LLM summary failed for {}, using heuristic fallback", tool_name)
 
@@ -320,6 +321,7 @@ class ToolResultCache:
                 )
                 self._entries[entry.cache_key] = entry
             logger.debug("Loaded {} cached tool results from disk", len(self._entries))
+        # crash-barrier: cache loading is best-effort, corrupt file must not crash agent
         except Exception:
             logger.warning("Failed to load tool result cache from disk")
 
