@@ -70,7 +70,8 @@ class AWSBedrockProvider(AnthropicProvider):
 
     @staticmethod
     def _strip_prefix(model: str) -> str:
-        """Bedrock models must keep their prefix (global.anthropic.claude-*)."""
+        if model.startswith("bedrock/"):
+            return model[len("bedrock/"):]
         return model
 
     async def chat(
