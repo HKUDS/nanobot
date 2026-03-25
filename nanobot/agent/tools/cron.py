@@ -1,7 +1,7 @@
 """Cron tool for scheduling reminders and tasks."""
 
 from contextvars import ContextVar
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
@@ -41,6 +41,17 @@ class CronTool(Tool):
         except (KeyError, Exception):
             return f"Error: unknown timezone '{tz}'"
         return None
+
+    def _display_timezone(self, schedule: CronSchedule) -> str:
+        """Pick the most human-meaningful timezone for display."""
+        return schedule.tz or self._default_timezone
+
+    @staticmethod
+    def _format_timestamp(ms: int, tz_name: str) -> str:
+        from zoneinfo import ZoneInfo
+
+        dt = datetime.fromtimestamp(ms / 1000, tz=ZoneInfo(tz_name))
+        return f"{dt.isoformat()} ({tz_name})"
 
     @property
     def name(self) -> str:
@@ -167,8 +178,7 @@ class CronTool(Tool):
         )
         return f"Created job '{job.name}' (id: {job.id})"
 
-    @staticmethod
-    def _format_timing(schedule: CronSchedule) -> str:
+    def _format_timing(self, schedule: CronSchedule) -> str:
         """Format schedule as a human-readable timing string."""
         if schedule.kind == "cron":
             tz = f" ({schedule.tz})" if schedule.tz else ""
@@ -183,23 +193,23 @@ class CronTool(Tool):
                 return f"every {ms // 1000}s"
             return f"every {ms}ms"
         if schedule.kind == "at" and schedule.at_ms:
-            dt = datetime.fromtimestamp(schedule.at_ms / 1000, tz=timezone.utc)
-            return f"at {dt.isoformat()}"
+            return f"at {self._format_timestamp(schedule.at_ms, self._display_timezone(schedule))}"
         return schedule.kind
 
-    @staticmethod
-    def _format_state(state: CronJobState) -> list[str]:
+    def _format_state(self, state: CronJobState, schedule: CronSchedule) -> list[str]:
         """Format job run state as display lines."""
         lines: list[str] = []
+        display_tz = self._display_timezone(schedule)
         if state.last_run_at_ms:
-            last_dt = datetime.fromtimestamp(state.last_run_at_ms / 1000, tz=timezone.utc)
-            info = f"  Last run: {last_dt.isoformat()} — {state.last_status or 'unknown'}"
+            info = (
+                f"  Last run: {self._format_timestamp(state.last_run_at_ms, display_tz)}"
+                f" — {state.last_status or 'unknown'}"
+            )
             if state.last_error:
                 info += f" ({state.last_error})"
             lines.append(info)
         if state.next_run_at_ms:
-            next_dt = datetime.fromtimestamp(state.next_run_at_ms / 1000, tz=timezone.utc)
-            lines.append(f"  Next run: {next_dt.isoformat()}")
+            lines.append(f"  Next run: {self._format_timestamp(state.next_run_at_ms, display_tz)}")
         return lines
 
     def _list_jobs(self) -> str:
@@ -210,7 +220,7 @@ class CronTool(Tool):
         for j in jobs:
             timing = self._format_timing(j.schedule)
             parts = [f"- {j.name} (id: {j.id}, {timing})"]
-            parts.extend(self._format_state(j.state))
+            parts.extend(self._format_state(j.state, j.schedule))
             lines.append("\n".join(parts))
         return "Scheduled jobs:\n" + "\n".join(lines)
 

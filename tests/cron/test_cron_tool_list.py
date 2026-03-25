@@ -20,96 +20,112 @@ def _make_tool_with_tz(tmp_path, tz: str) -> CronTool:
 # -- _format_timing tests --
 
 
-def test_format_timing_cron_with_tz() -> None:
+def test_format_timing_cron_with_tz(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
     s = CronSchedule(kind="cron", expr="0 9 * * 1-5", tz="America/Denver")
-    assert CronTool._format_timing(s) == "cron: 0 9 * * 1-5 (America/Denver)"
+    assert tool._format_timing(s) == "cron: 0 9 * * 1-5 (America/Denver)"
 
 
-def test_format_timing_cron_without_tz() -> None:
+def test_format_timing_cron_without_tz(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
     s = CronSchedule(kind="cron", expr="*/5 * * * *")
-    assert CronTool._format_timing(s) == "cron: */5 * * * *"
+    assert tool._format_timing(s) == "cron: */5 * * * *"
 
 
-def test_format_timing_every_hours() -> None:
+def test_format_timing_every_hours(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
     s = CronSchedule(kind="every", every_ms=7_200_000)
-    assert CronTool._format_timing(s) == "every 2h"
+    assert tool._format_timing(s) == "every 2h"
 
 
-def test_format_timing_every_minutes() -> None:
+def test_format_timing_every_minutes(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
     s = CronSchedule(kind="every", every_ms=1_800_000)
-    assert CronTool._format_timing(s) == "every 30m"
+    assert tool._format_timing(s) == "every 30m"
 
 
-def test_format_timing_every_seconds() -> None:
+def test_format_timing_every_seconds(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
     s = CronSchedule(kind="every", every_ms=30_000)
-    assert CronTool._format_timing(s) == "every 30s"
+    assert tool._format_timing(s) == "every 30s"
 
 
-def test_format_timing_every_non_minute_seconds() -> None:
+def test_format_timing_every_non_minute_seconds(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
     s = CronSchedule(kind="every", every_ms=90_000)
-    assert CronTool._format_timing(s) == "every 90s"
+    assert tool._format_timing(s) == "every 90s"
 
 
-def test_format_timing_every_milliseconds() -> None:
+def test_format_timing_every_milliseconds(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
     s = CronSchedule(kind="every", every_ms=200)
-    assert CronTool._format_timing(s) == "every 200ms"
+    assert tool._format_timing(s) == "every 200ms"
 
 
-def test_format_timing_at() -> None:
+def test_format_timing_at(tmp_path) -> None:
+    tool = _make_tool_with_tz(tmp_path, "Asia/Shanghai")
     s = CronSchedule(kind="at", at_ms=1773684000000)
-    result = CronTool._format_timing(s)
+    result = tool._format_timing(s)
+    assert "Asia/Shanghai" in result
     assert result.startswith("at 2026-")
 
 
-def test_format_timing_fallback() -> None:
+def test_format_timing_fallback(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
     s = CronSchedule(kind="every")  # no every_ms
-    assert CronTool._format_timing(s) == "every"
+    assert tool._format_timing(s) == "every"
 
 
 # -- _format_state tests --
 
 
-def test_format_state_empty() -> None:
+def test_format_state_empty(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
     state = CronJobState()
-    assert CronTool._format_state(state) == []
+    assert tool._format_state(state, CronSchedule(kind="every")) == []
 
 
-def test_format_state_last_run_ok() -> None:
+def test_format_state_last_run_ok(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
     state = CronJobState(last_run_at_ms=1773673200000, last_status="ok")
-    lines = CronTool._format_state(state)
+    lines = tool._format_state(state, CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"))
     assert len(lines) == 1
     assert "Last run:" in lines[0]
     assert "ok" in lines[0]
 
 
-def test_format_state_last_run_with_error() -> None:
+def test_format_state_last_run_with_error(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
     state = CronJobState(last_run_at_ms=1773673200000, last_status="error", last_error="timeout")
-    lines = CronTool._format_state(state)
+    lines = tool._format_state(state, CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"))
     assert len(lines) == 1
     assert "error" in lines[0]
     assert "timeout" in lines[0]
 
 
-def test_format_state_next_run_only() -> None:
+def test_format_state_next_run_only(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
     state = CronJobState(next_run_at_ms=1773684000000)
-    lines = CronTool._format_state(state)
+    lines = tool._format_state(state, CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"))
     assert len(lines) == 1
     assert "Next run:" in lines[0]
 
 
-def test_format_state_both() -> None:
+def test_format_state_both(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
     state = CronJobState(
         last_run_at_ms=1773673200000, last_status="ok", next_run_at_ms=1773684000000
     )
-    lines = CronTool._format_state(state)
+    lines = tool._format_state(state, CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"))
     assert len(lines) == 2
     assert "Last run:" in lines[0]
     assert "Next run:" in lines[1]
 
 
-def test_format_state_unknown_status() -> None:
+def test_format_state_unknown_status(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
     state = CronJobState(last_run_at_ms=1773673200000, last_status=None)
-    lines = CronTool._format_state(state)
+    lines = tool._format_state(state, CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"))
     assert "unknown" in lines[0]
 
 
@@ -188,7 +204,7 @@ def test_list_every_job_milliseconds(tmp_path) -> None:
 
 
 def test_list_at_job_shows_iso_timestamp(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
+    tool = _make_tool_with_tz(tmp_path, "Asia/Shanghai")
     tool._cron.add_job(
         name="One-shot",
         schedule=CronSchedule(kind="at", at_ms=1773684000000),
@@ -196,6 +212,7 @@ def test_list_at_job_shows_iso_timestamp(tmp_path) -> None:
     )
     result = tool._list_jobs()
     assert "at 2026-" in result
+    assert "Asia/Shanghai" in result
 
 
 def test_list_shows_last_run_state(tmp_path) -> None:
@@ -213,6 +230,7 @@ def test_list_shows_last_run_state(tmp_path) -> None:
     result = tool._list_jobs()
     assert "Last run:" in result
     assert "ok" in result
+    assert "(UTC)" in result
 
 
 def test_list_shows_error_message(tmp_path) -> None:
@@ -241,6 +259,7 @@ def test_list_shows_next_run(tmp_path) -> None:
     )
     result = tool._list_jobs()
     assert "Next run:" in result
+    assert "(UTC)" in result
 
 
 def test_add_cron_job_defaults_to_tool_timezone(tmp_path) -> None:
