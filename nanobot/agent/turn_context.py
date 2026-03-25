@@ -30,11 +30,13 @@ class TurnContextManager:
         dispatcher: DelegationDispatcher,
         missions: MissionManager,
         context: ContextBuilder,
+        scratchpad_factory: Callable[[Path], Scratchpad] | None = None,
     ) -> None:
         self._tools = tools
         self._dispatcher = dispatcher
         self._missions = missions
         self._context = context
+        self._scratchpad_factory = scratchpad_factory
         self._scratchpad: Scratchpad | None = None
         self._contacts_provider: Callable[[], list[str]] | None = None
 
@@ -62,13 +64,13 @@ class TurnContextManager:
 
     def ensure_scratchpad(self, session_key: str, workspace: Path) -> None:
         """Create or retrieve per-session scratchpad and update tools."""
-        from nanobot.coordination.scratchpad import Scratchpad
         from nanobot.utils.helpers import safe_filename
 
         safe_key = safe_filename(session_key.replace(":", "_"))
         session_dir = workspace / "sessions" / safe_key
         session_dir.mkdir(parents=True, exist_ok=True)
-        self._scratchpad = Scratchpad(session_dir)
+        if self._scratchpad_factory:
+            self._scratchpad = self._scratchpad_factory(session_dir)
 
         # Update subsystem references via public setters
         self._dispatcher.scratchpad = self._scratchpad

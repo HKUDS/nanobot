@@ -327,6 +327,8 @@ def build_agent(
     consolidator = _wire_memory(context=context, config=config)
 
     # 8. Construct DelegationDispatcher (tools wired at construction)
+    from nanobot.tools.builtin.delegate import DelegateTool
+
     dispatcher = DelegationDispatcher(
         config=DelegationConfig(
             workspace=config.workspace_path,
@@ -343,6 +345,7 @@ def build_agent(
         tools=_tool_build.tools,
         max_delegation_depth=config.max_delegation_depth,
         delegation_tools=_tool_build.delegation_tools,
+        delegate_tool_factory=DelegateTool,
     )
 
     # 8.5 Construct Coordinator (if routing is enabled)
@@ -406,12 +409,14 @@ def build_agent(
 
     # 12.5 Construct TurnContextManager
     from nanobot.agent.turn_context import TurnContextManager
+    from nanobot.coordination.scratchpad import Scratchpad
 
     turn_context = TurnContextManager(
         tools=_tool_build.tools,
         dispatcher=dispatcher,
         missions=_tool_build.missions,
         context=context,
+        scratchpad_factory=Scratchpad,
     )
 
     # 13. Construct _ProcessorServices and MessageProcessor

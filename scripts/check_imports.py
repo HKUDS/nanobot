@@ -166,12 +166,12 @@ ALLOWLIST: set[tuple[str, str]] = {
     ("nanobot/config/schema.py", "nanobot.providers.registry"),
     # tools/builtin/mission.py imports MissionStatus enum (data object, not service).
     ("nanobot/tools/builtin/mission.py", "nanobot.coordination.mission"),
-    # turn_context.py: runtime import of Scratchpad for construction
-    ("nanobot/agent/turn_context.py", "nanobot.coordination.scratchpad"),
     # ── Known violations: cross-package instantiation ──────────────────
     # Fix: move construction to agent_factory.py or inject via factories.
     ("nanobot/agent/loop.py", "nanobot.tools.builtin.mcp"),
     ("nanobot/agent/loop.py", "nanobot.coordination.coordinator"),
+    # delegation.py imports DelegationResult (data object) from tools.builtin.delegate.
+    # DelegateTool construction was moved to agent_factory.py via delegate_tool_factory.
     ("nanobot/coordination/delegation.py", "nanobot.tools.builtin.delegate"),
     # ── Known violations: runtime import of data objects / functions ───
     # Fix: move to TYPE_CHECKING block (enums, pure functions).
