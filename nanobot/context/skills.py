@@ -18,6 +18,9 @@ from loguru import logger
 
 from nanobot.tools.base import Tool
 
+# size-exception: skill discovery + matching + summary are tightly coupled;
+# extraction deferred until file approaches 600 LOC
+
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
 
@@ -140,24 +143,49 @@ class SkillsLoader:
 
         return "\n\n---\n\n".join(parts) if parts else ""
 
-    def build_skills_summary(self) -> str:
-        """Build a compact plain-text listing of all skills (one line per skill).
+    def build_skills_summary(self, matched: list[str] | None = None) -> str:
+        """Build a compact listing of all skills with matched skills highlighted.
 
-        Used for progressive loading — the agent can read the full skill content
-        via read_file when needed.
+        Skills in *matched* are shown first with a ★ marker and their SKILL.md
+        file path so the agent can ``read_file`` them.  Always-on skills are
+        excluded (they are already fully injected into the system prompt).
+
+        When *matched* is ``None`` or empty, all skills appear in a single
+        "Other available skills" section — backward-compatible with the previous
+        format.
         """
         all_skills = self.list_skills(filter_unavailable=False)
         if not all_skills:
             return ""
 
-        lines = ["## Available Skills"]
+        matched_set = set(matched or [])
+        always_set = set(self.get_always_skills())
+
+        matched_lines: list[str] = []
+        other_lines: list[str] = []
+
         for s in all_skills:
-            skill_meta = self._get_skill_meta(s["name"])
+            name = s["name"]
+            if name in always_set:
+                continue  # already fully injected
+            desc = self._get_skill_description(name)
+            skill_meta = self._get_skill_meta(name)
             available = self._check_requirements(skill_meta)
             status = "✓" if available else "✗"
-            desc = self._get_skill_description(s["name"])
-            lines.append(f"- {status} **{s['name']}**: {desc}")
-        return "\n".join(lines)
+
+            if name in matched_set:
+                skill_path = s.get("path", "")
+                matched_lines.append(f"- ★ **{name}**: {desc}\n  Path: {skill_path}")
+            else:
+                other_lines.append(f"- {status} **{name}**: {desc}")
+
+        parts: list[str] = []
+        if matched_lines:
+            parts.append("**Matched for this message:**\n" + "\n".join(matched_lines))
+        if other_lines:
+            parts.append("**Other available skills:**\n" + "\n".join(other_lines))
+
+        return "\n\n".join(parts)
 
     def _get_missing_requirements(self, skill_meta: dict) -> str:
         """Get a description of missing requirements."""

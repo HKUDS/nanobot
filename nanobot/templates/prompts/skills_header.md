@@ -1,6 +1,7 @@
 # Skills
 
-The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
-Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
+Skills extend your capabilities. Skills marked with ★ matched this message —
+use read_file on their path to load full instructions before using them.
+Other skills are available on request.
 
 {skills_summary}
