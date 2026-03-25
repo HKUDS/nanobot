@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import sys
 
 from nanobot import __version__
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.utils.helpers import build_status_content
+
+# Pattern to match $skill-name tokens (word chars + hyphens)
+_SKILL_REF = re.compile(r"\$([A-Za-z][A-Za-z0-9_-]*)")
 
 
 async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
@@ -95,7 +99,7 @@ async def cmd_skill_list(ctx: CommandContext) -> OutboundMessage:
             chat_id=ctx.msg.chat_id,
             content="No skills found.",
         )
-    lines = ["Available skills:"]
+    lines = ["Available skills (use $<name> to activate):"]
     for s in skills:
         desc = loader._get_skill_description(s["name"])
         available = loader._check_requirements(loader._get_skill_meta(s["name"]))
@@ -109,26 +113,41 @@ async def cmd_skill_list(ctx: CommandContext) -> OutboundMessage:
     )
 
 
-async def cmd_skill_activate(ctx: CommandContext) -> OutboundMessage | None:
-    """Activate a skill by injecting its content into the user message."""
+async def intercept_skill_refs(ctx: CommandContext) -> OutboundMessage | None:
+    """Scan message for $skill-name references and inject matching skills."""
+    refs = _SKILL_REF.findall(ctx.msg.content)
+    if not refs:
+        return None
     loader = ctx.loop.context.skills
-    parts = ctx.args.strip().split(None, 1)
-    name = parts[0] if parts else ""
-    message = parts[1] if len(parts) > 1 else ""
-
-    if not name:
-        return await cmd_skill_list(ctx)
-
-    content = loader.load_skill(name)
-    if content is None:
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content=f"Skill '{name}' not found. Use /skills to see available skills.",
-        )
-
-    stripped = loader._strip_frontmatter(content)
-    injected = f'<activated-skill name="{name}">\n{stripped}\n</activated-skill>'
+    skill_names = {s["name"] for s in loader.list_skills(filter_unavailable=True)}
+    matched = []
+    for name in dict.fromkeys(refs):  # deduplicate, preserve order
+        if name in skill_names:
+            matched.append(name)
+    if not matched:
+        return None
+    # Strip matched $refs from the message
+    message = ctx.msg.content
+    for name in matched:
+        message = re.sub(rf"\${re.escape(name)}\b", "", message)
+    message = message.strip()
+    # Build injected content
+    skill_blocks = []
+    for name in matched:
+        content = loader.load_skill(name)
+        if content:
+            stripped = loader._strip_frontmatter(content)
+            skill_blocks.append(f'<skill-content name="{name}">\n{stripped}\n</skill-content>')
+    if not skill_blocks:
+        return None
+    names = ", ".join(f"'{n}'" for n in matched)
+    injected = (
+        f"<system-reminder>\n"
+        f"The user activated skill(s) {names} via $-reference. "
+        f"The following skill content was auto-appended by the system.\n"
+        + "\n".join(skill_blocks)
+        + "\n</system-reminder>"
+    )
     ctx.msg.content = f"{injected}\n\n{message}" if message else injected
     return None  # fall through to LLM
 
@@ -141,8 +160,8 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
         "/stop — Stop the current task",
         "/restart — Restart the bot",
         "/status — Show bot status",
-        "/skill <name> [message] — Activate a skill for this message",
         "/skills — List available skills",
+        "$<name> — Activate a skill inline (e.g. $weather what's the forecast)",
         "/help — Show available commands",
     ]
     return OutboundMessage(
@@ -161,6 +180,5 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/new", cmd_new)
     router.exact("/status", cmd_status)
     router.exact("/help", cmd_help)
-    router.exact("/skill", cmd_skill_list)
     router.exact("/skills", cmd_skill_list)
-    router.prefix("/skill ", cmd_skill_activate)
+    router.intercept(intercept_skill_refs)
