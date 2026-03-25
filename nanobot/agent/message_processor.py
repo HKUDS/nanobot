@@ -2,14 +2,7 @@
 
 ``MessageProcessor`` owns the per-message lifecycle: session lookup,
 slash-command handling, memory pre-checks, context assembly, canonical
-event building, progress callback wiring, turn orchestration, session
-save, and response assembly.
-
-Extracted from ``AgentLoop._process_message`` (Task 3 of the loop
-decomposition).  See ``docs/superpowers/specs/2026-03-22-loop-decomposition-design.md``,
-Section 4.
-
-Module boundary: this module must **never** import from ``nanobot.channels.*``.
+event building, turn orchestration, session save, and response assembly.
 """
 
 from __future__ import annotations
@@ -19,124 +12,77 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from nanobot.agent.agent_components import _ProcessorServices
 from nanobot.agent.callbacks import ProgressCallback
-from nanobot.agent.consolidation import ConsolidationOrchestrator
-from nanobot.agent.turn_types import Orchestrator, TurnState
+from nanobot.agent.turn_types import TurnState
 from nanobot.agent.verifier import AnswerVerifier
 from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig
-from nanobot.context.context import ContextBuilder
 from nanobot.coordination.role_switching import TurnRoleManager
 from nanobot.observability.bus_progress import make_bus_progress
 from nanobot.observability.langfuse import update_current_span
 from nanobot.observability.tracing import TraceContext, bind_trace
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import Session
 from nanobot.tools.builtin.message import MessageTool
-from nanobot.tools.builtin.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
 
 if TYPE_CHECKING:
     from nanobot.coordination.coordinator import ClassificationResult
-    from nanobot.coordination.delegation import DelegationDispatcher
-    from nanobot.coordination.mission import MissionManager
-    from nanobot.coordination.scratchpad import Scratchpad
     from nanobot.providers.base import LLMProvider
-    from nanobot.tools.executor import ToolExecutor
 
 
 class MessageProcessor:
-    """Per-message processing pipeline.
-
-    Owns everything between receiving an ``InboundMessage`` and emitting an
-    ``OutboundMessage``: session lookup, slash-command handling, memory
-    pre-checks, context assembly, canonical events, turn orchestration
-    (via the injected orchestrator), session save, and response assembly.
-
-    Consolidation is triggered per-message via the injected
-    ``ConsolidationOrchestrator`` (submit / consolidate_and_wait).
-    """
+    """Per-message processing pipeline: InboundMessage to OutboundMessage."""
 
     def __init__(
         self,
         *,
-        orchestrator: Orchestrator,
-        dispatcher: DelegationDispatcher,
-        missions: MissionManager,
-        context: ContextBuilder,
-        sessions: SessionManager,
-        tools: ToolExecutor,
-        consolidator: ConsolidationOrchestrator,
-        verifier: AnswerVerifier,
-        bus: MessageBus,
+        services: _ProcessorServices,
         config: AgentConfig,
         workspace: Path,
         role_name: str,
-        role_manager: TurnRoleManager | None,
         provider: LLMProvider,
         model: str,
-        span_module: Any = None,
     ) -> None:
-        self.orchestrator = orchestrator
-        self._dispatcher = dispatcher
-        self._missions = missions
-        self.context = context
-        self.sessions = sessions
-        self.tools = tools
-        self._consolidator = consolidator
-        self.verifier = verifier
-        self.bus = bus
+        self.orchestrator = services.orchestrator
+        self._dispatcher = services.dispatcher
+        self._missions = services.missions
+        self.context = services.context
+        self.sessions = services.sessions
+        self.tools = services.tools
+        self._consolidator = services.consolidator
+        self.verifier = services.verifier
+        self.bus = services.bus
+        self._turn_context = services.turn_context
+        self._span_module: Any | None = services.span_module
         self.config = config
         self.workspace = workspace
         self.role_name = role_name
-        self._role_manager = role_manager
+        self._role_manager: TurnRoleManager | None = None
         self.provider = provider
         self.model = model
 
-        # Per-turn token accumulators: populated from TurnResult after each
-        # orchestrator run.
+        # Per-turn token accumulators (populated from TurnResult).
         self._turn_tokens_prompt = 0
         self._turn_tokens_completion = 0
         self._turn_llm_calls = 0
 
-        # Classification result forwarded from AgentLoop for plan-phase
-        # delegation advice.  Consumed (reset to None) by _run_orchestrator.
+        # Classification result (consumed by _run_orchestrator each turn).
         self.classification_result: ClassificationResult | None = None
 
         # Last TurnResult from the orchestrator, used by _sync_token_counters.
         self._last_turn_result: Any | None = None
-
-        # Observability hook: reference to the module whose
-        # ``update_current_span`` should be called.  Passed at construction
-        # time (typically ``sys.modules["nanobot.agent.loop"]``) so that
-        # tests patching ``nanobot.agent.loop.update_current_span`` see
-        # their patches take effect at call time (the attribute is resolved late).
-        self._span_module: Any | None = span_module
-
-        # Contacts provider callback (forwarded from AgentLoop.set_contacts_provider)
-        self._contacts_provider: Callable[[], list[str]] | None = None
-
-        # Scratchpad reference (set lazily via _ensure_scratchpad)
-        self._scratchpad: Scratchpad | None = None
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def set_role_manager(self, role_manager: TurnRoleManager) -> None:
         """Set the role manager (called by the factory after construction)."""
         self._role_manager = role_manager
 
     def set_classification_result(self, result: ClassificationResult | None) -> None:
-        """Forward a coordinator classification result for the next turn.
-
-        The value is consumed (reset to ``None``) by ``_run_orchestrator``
-        when it builds the ``TurnState``.
-        """
+        """Forward a coordinator classification result for the next turn."""
         self.classification_result = result
 
     async def process(
@@ -144,11 +90,7 @@ class MessageProcessor:
         message: InboundMessage,
         on_progress: ProgressCallback | None = None,
     ) -> OutboundMessage | None:
-        """Process a single inbound message and return the response.
-
-        This is the main entry point, equivalent to the former
-        ``AgentLoop._process_message``.
-        """
+        """Process a single inbound message and return the response."""
         return await self._process_message(message, on_progress=on_progress)
 
     async def process_direct(
@@ -160,28 +102,12 @@ class MessageProcessor:
         on_progress: ProgressCallback | None = None,
         forced_role: str | None = None,
     ) -> str:
-        """Process a message directly (for CLI or cron usage).
-
-        This is the main direct-invocation entry point, equivalent to
-        the former ``AgentLoop.process_direct``.
-
-        Builds an ``InboundMessage`` and delegates to ``_process_message()``,
-        passing the explicit ``session_key`` so callers can override the
-        default ``channel:chat_id`` key.
-
-        Note: ``forced_role`` is accepted for API compatibility but is a
-        no-op at this layer.  Role switching based on ``forced_role`` is
-        resolved by the ``AgentLoop`` before calling into the processor.
-        """
+        """Process a message directly (for CLI or cron usage)."""
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         response = await self._process_message(
             msg, session_key=session_key, on_progress=on_progress
         )
         return response.content if response else ""
-
-    # ------------------------------------------------------------------
-    # Internal pipeline
-    # ------------------------------------------------------------------
 
     async def _process_message(
         self,
@@ -200,7 +126,7 @@ class MessageProcessor:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+            self._turn_context.set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=self.config.memory_window)
             skill_names = self.context.skills.detect_relevant_skills(msg.content)
             messages = await self.context.build_messages(
@@ -279,8 +205,10 @@ class MessageProcessor:
         if self.config.memory_enabled and unconsolidated >= self.config.memory_window:
             self._consolidator.submit(session.key, session, self.provider, self.model)
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
-        self._ensure_scratchpad(key)
+        self._turn_context.set_tool_context(
+            msg.channel, msg.chat_id, msg.metadata.get("message_id")
+        )
+        self._turn_context.ensure_scratchpad(key, self.workspace)
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
@@ -411,7 +339,7 @@ class MessageProcessor:
             final_content += "\n\n---\n" + pending_conflict_question
 
         if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+            if isinstance(message_tool, MessageTool) and message_tool.sent_in_turn:
                 return None
 
         response_meta = dict(msg.metadata or {})
@@ -431,19 +359,8 @@ class MessageProcessor:
             metadata=response_meta,
         )
 
-    # ------------------------------------------------------------------
-    # Token counter sync
-    # ------------------------------------------------------------------
-
     def _sync_token_counters(self) -> None:
-        """Pull token counters from the last ``TurnResult``.
-
-        ``TurnOrchestrator.run()`` returns token counts in the ``TurnResult``
-        dataclass.  This method reads them from the stored result so that
-        response metadata and audit logging have accurate values.  When no
-        result is available (e.g. in unit tests with mock orchestrators),
-        the local zeros are used.
-        """
+        """Pull token counters from the last ``TurnResult``."""
         result = self._last_turn_result
         if result is None:
             return
@@ -451,23 +368,12 @@ class MessageProcessor:
         self._turn_tokens_completion = getattr(result, "tokens_completion", 0)
         self._turn_llm_calls = getattr(result, "llm_calls", 0)
 
-    # ------------------------------------------------------------------
-    # Orchestrator interaction
-    # ------------------------------------------------------------------
-
     async def _run_orchestrator(
         self,
         messages: list[dict[str, Any]],
         on_progress: ProgressCallback | None,
     ) -> tuple[str | None, list[str], list[dict[str, Any]]]:
-        """Call the orchestrator and normalise the result.
-
-        Wraps the ``messages`` list in a ``TurnState`` for
-        ``TurnOrchestrator.run()`` and unpacks the returned ``TurnResult``
-        into the 3-tuple ``(content, tools_used, messages)`` expected by
-        the rest of the pipeline.  Also supports mock orchestrators that
-        return tuples or duck-typed result objects.
-        """
+        """Build TurnState, call orchestrator, unpack result to 3-tuple."""
         # Extract user text from the last user message (matches _run_agent_loop)
         user_text = ""
         for m in reversed(messages):
@@ -505,10 +411,6 @@ class MessageProcessor:
         all_msgs: list[dict[str, Any]] = _msgs if isinstance(_msgs, list) else messages
         return content, tools_used, all_msgs
 
-    # ------------------------------------------------------------------
-    # Slash commands
-    # ------------------------------------------------------------------
-
     async def _handle_slash_new(self, msg: InboundMessage, session: Session) -> OutboundMessage:
         """Handle the /new slash command: archive and clear the session."""
         try:
@@ -538,20 +440,12 @@ class MessageProcessor:
             channel=msg.channel, chat_id=msg.chat_id, content="New session started."
         )
 
-    # ------------------------------------------------------------------
-    # Memory pre-checks
-    # ------------------------------------------------------------------
-
     async def _pre_turn_memory(
         self,
         msg: InboundMessage,
         memory_store: Any,
     ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-        """Run memory pre-checks: conflict reply and live correction.
-
-        Runs in a thread to avoid blocking the event loop for what are
-        in-memory operations.
-        """
+        """Run memory pre-checks: conflict reply and live correction."""
         _channel = msg.channel
         _chat_id = msg.chat_id
         _content = msg.content
@@ -575,71 +469,8 @@ class MessageProcessor:
 
         return await asyncio.to_thread(_inner)
 
-    # ------------------------------------------------------------------
-    # Tool context and scratchpad
-    # ------------------------------------------------------------------
-
-    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
-        """Update context for tools that need routing info.
-
-        Delegates to the tool executor's get() method to find typed tool
-        instances and set their per-turn context.
-        """
-        from nanobot.tools.builtin.cron import CronTool
-        from nanobot.tools.builtin.feedback import FeedbackTool
-        from nanobot.tools.builtin.mission import MissionStartTool
-
-        if self._contacts_provider is not None:
-            self.context.set_contacts_context(self._contacts_provider())
-
-        msg_t = self.tools.get("message")
-        if isinstance(msg_t, MessageTool):
-            msg_t.set_context(channel, chat_id, message_id)
-        ms_t = self.tools.get("mission_start")
-        if isinstance(ms_t, MissionStartTool):
-            ms_t.set_context(channel, chat_id)
-        cr_t = self.tools.get("cron")
-        if isinstance(cr_t, CronTool):
-            cr_t.set_context(channel, chat_id)
-        fb_t = self.tools.get("feedback")
-        if isinstance(fb_t, FeedbackTool):
-            fb_t.set_context(channel, chat_id, session_key=f"{channel}:{chat_id}")
-
-    def _ensure_scratchpad(self, session_key: str) -> None:
-        """Initialise (or swap) the per-session scratchpad and update tools."""
-        from nanobot.coordination.scratchpad import Scratchpad
-        from nanobot.utils.helpers import safe_filename
-
-        safe_key = safe_filename(session_key.replace(":", "_"))
-        session_dir = self.workspace / "sessions" / safe_key
-        session_dir.mkdir(parents=True, exist_ok=True)
-        self._scratchpad = Scratchpad(session_dir)
-
-        # Update scratchpad in delegation dispatcher and mission manager
-        self._dispatcher.scratchpad = self._scratchpad
-        self._dispatcher._trace_path = session_dir / "routing_trace.jsonl"
-        self._missions.scratchpad = self._scratchpad
-
-        # Update scratchpad tool references
-        write_tool = self.tools.get("write_scratchpad")
-        if isinstance(write_tool, ScratchpadWriteTool):
-            write_tool._scratchpad = self._scratchpad
-        read_tool = self.tools.get("read_scratchpad")
-        if isinstance(read_tool, ScratchpadReadTool):
-            read_tool._scratchpad = self._scratchpad
-
-    # ------------------------------------------------------------------
-    # Session persistence
-    # ------------------------------------------------------------------
-
     def _save_turn(self, session: Session, messages: list[dict[str, Any]], skip: int) -> None:
-        """Save new-turn messages into session, truncating large tool results.
-
-        Ephemeral system messages (reflect, progress, self-check, delegation
-        nudges) injected during the tool loop are **not** persisted — they are
-        loop-control signals that would pollute conversation history and cause
-        the LLM to infer false workflow patterns on future turns.
-        """
+        """Save new-turn messages into session, skipping ephemeral system messages."""
         max_chars = self.config.tool_result_max_chars
         for m in messages[skip:]:
             if m.get("role") == "system":
@@ -652,10 +483,6 @@ class MessageProcessor:
             entry.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
             session.messages.append(entry)
         session.updated_at = datetime.now(timezone.utc)
-
-    # ------------------------------------------------------------------
-    # Consolidation
-    # ------------------------------------------------------------------
 
     async def _consolidate_memory(self, session: Session, archive_all: bool = False) -> bool:
         """Delegate to ConsolidationOrchestrator."""

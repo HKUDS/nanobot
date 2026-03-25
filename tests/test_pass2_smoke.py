@@ -156,7 +156,7 @@ class TestPhaseASmoke:
 
         contacts = ["alice@company.com", "bob@company.com"]
         loop.set_contacts_provider(lambda: contacts)
-        loop._refresh_contacts()
+        loop.context.set_contacts_context(contacts)
 
         prompt = loop.context.build_system_prompt()
         assert "Known Contacts" in prompt
@@ -170,11 +170,11 @@ class TestPhaseASmoke:
 
         state = {"contacts": ["old@x.com"]}
         loop.set_contacts_provider(lambda: state["contacts"])
-        loop._refresh_contacts()
+        loop.context.set_contacts_context(state["contacts"])
         assert "old@x.com" in loop.context.build_system_prompt()
 
         state["contacts"] = ["new@x.com"]
-        loop._refresh_contacts()
+        loop.context.set_contacts_context(state["contacts"])
         prompt = loop.context.build_system_prompt()
         assert "new@x.com" in prompt
         assert "old@x.com" not in prompt
@@ -449,7 +449,7 @@ class TestCrossPhasePipeline:
 
         loop = _make_loop(tmp_path, ScriptedProvider([]))
         loop.set_contacts_provider(lambda: ch.known_recipients)
-        loop._refresh_contacts()
+        loop.context.set_contacts_context(ch.known_recipients)
 
         prompt = loop.context.build_system_prompt()
         assert "alice@co.com" in prompt

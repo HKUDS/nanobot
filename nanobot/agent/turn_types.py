@@ -71,3 +71,35 @@ class Orchestrator(Protocol):
         on_progress: ProgressCallback | None,
     ) -> TurnResult:
         """Execute one full turn of the Plan-Act-Observe-Reflect loop."""
+
+
+class Processor(Protocol):
+    """Structural protocol for the message processor.
+
+    Defines the public contract that ``AgentLoop`` depends on.
+    Satisfied by ``MessageProcessor`` and test mocks.
+
+    Exists here (rather than in ``message_processor.py``) so that
+    ``agent_components.py`` can reference the type without importing
+    the concrete class — breaking the import cycle by construction.
+    """
+
+    def set_role_manager(self, role_manager: Any) -> None: ...
+
+    def set_classification_result(self, result: Any) -> None: ...
+
+    async def process(
+        self,
+        message: Any,
+        on_progress: ProgressCallback | None = None,
+    ) -> Any: ...
+
+    async def process_direct(
+        self,
+        content: str,
+        session_key: str = "cli:direct",
+        channel: str = "cli",
+        chat_id: str = "direct",
+        on_progress: ProgressCallback | None = None,
+        forced_role: str | None = None,
+    ) -> str: ...

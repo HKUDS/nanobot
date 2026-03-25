@@ -1,31 +1,8 @@
 """Agent loop: the core processing engine.
 
-This module implements the **Plan-Act-Observe-Reflect** cycle that drives
-every conversation turn:
-
-1. **Plan** — when ``planning_enabled`` is set, the LLM produces a numbered
-   plan of steps before tool execution begins.
-2. **Act** — the LLM selects and calls tools via the function-calling API;
-   readonly tools run in parallel, write tools run sequentially.
-3. **Observe** — tool results are appended to the message history for the
-   LLM to interpret.
-4. **Reflect** — on tool failure or stalled progress, a reflection prompt
-   asks the LLM to propose alternative strategies.
-
-The loop enforces ``max_iterations`` to prevent runaway tool-calling and
-performs context compression (via ``context.py``) when the token budget
-is exceeded.  An optional self-critique verification pass gates final
-response quality before delivery.
-
-Streaming is supported: LLM tokens are yielded incrementally to the
-channel for progressive display on platforms that support message editing.
-
-**Failure classification and turn-scoped tool suppression** — see
-``nanobot.agent.failure`` for ``ToolCallTracker``, ``FailureClass``, and
-``_build_failure_prompt``.  Permanently failing tools and tools that hit the
-``REMOVE_THRESHOLD`` count are added to a per-turn ``disabled_tools: set[str]``
-local to ``_run_agent_loop``.  The ``ToolRegistry`` is never mutated; suppressed
-tools are available again in the next turn.
+Orchestrates the Plan-Act-Observe-Reflect cycle, bus consumption, message
+routing via the coordinator, and MCP lifecycle.  Turn execution is delegated
+to ``TurnOrchestrator``; per-message processing to ``MessageProcessor``.
 """
 
 from __future__ import annotations
@@ -39,12 +16,9 @@ from loguru import logger
 
 from nanobot.agent.callbacks import ProgressCallback
 from nanobot.agent.reaction import classify_reaction
-from nanobot.agent.turn_types import TurnState
-from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import DeliveryResult, InboundMessage, OutboundMessage, ReactionEvent
 from nanobot.config.schema import AgentRoleConfig
 from nanobot.coordination.role_switching import TurnContext
-from nanobot.observability.bus_progress import make_bus_progress
 from nanobot.observability.langfuse import (
     flush as flush_langfuse,
 )
@@ -54,13 +28,13 @@ from nanobot.observability.langfuse import (
     update_current_span,
 )
 from nanobot.observability.tracing import TraceContext
-from nanobot.session.manager import Session
 from nanobot.tools.builtin.email import CheckEmailTool
 from nanobot.tools.builtin.feedback import FeedbackTool
 from nanobot.tools.builtin.message import MessageTool
 
 if TYPE_CHECKING:
     from nanobot.agent.agent_components import _AgentComponents
+    from nanobot.agent.message_processor import MessageProcessor
     from nanobot.coordination.coordinator import ClassificationResult, Coordinator
 
 
@@ -84,22 +58,8 @@ def _user_friendly_error(exc: Exception) -> str:
 class AgentLoop:
     """Core processing engine for the nanobot agent.
 
-    Orchestrates the Plan-Act-Observe-Reflect cycle for every conversation turn.
-    Key collaborators wired in ``__init__``:
-
-    - ``ToolExecutor`` / ``ToolRegistry`` — parallel-safe tool batching
-    - ``CapabilityRegistry`` — unified registry for tools, skills, and delegate roles
-    - ``DelegationDispatcher`` — multi-agent delegation with cycle/depth detection
-    - ``ContextBuilder`` — prompt assembly, token budgeting, memory retrieval
-    - ``ToolCallTracker`` — per-turn failure classification and tool suppression
-      (``disabled_tools`` set; registry never mutated)
-    - ``MissionManager`` — async background task execution
-    - ``AnswerVerifier`` — optional self-critique quality gate
-
-    Turn-scoped tool suppression: when a tool hits ``ToolCallTracker.REMOVE_THRESHOLD``
-    failures or classifies as permanently failed, it is added to a local
-    ``disabled_tools: set[str]`` inside ``_run_agent_loop``.  The registry is not
-    mutated, so the tool is available again in the next turn.
+    Receives ``_AgentComponents`` from ``build_agent()`` and orchestrates bus
+    consumption, coordinator routing, MCP lifecycle, and message processing.
     """
 
     def __init__(self, *, components: _AgentComponents) -> None:
@@ -133,7 +93,7 @@ class AgentLoop:
         self._llm_caller = components.subsystems.llm_caller
         self._verifier = components.subsystems.verifier
         self._orchestrator = components.subsystems.orchestrator
-        self._processor = components.subsystems.processor
+        self._processor: MessageProcessor = components.subsystems.processor  # type: ignore[assignment]
         self._role_manager = components.role_manager
 
         # Routing
@@ -146,22 +106,13 @@ class AgentLoop:
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
-        self._coordinator: Coordinator | None = None
+        self._coordinator: Coordinator | None = components.coordinator
+        self._coordinator_wired = False
         self._last_classification_result: ClassificationResult | None = None
         self._delegation_stack: list[str] = []
         self._turn_tokens_prompt = 0
         self._turn_tokens_completion = 0
         self._turn_llm_calls = 0
-
-        self._register_handlers()
-
-    def _register_handlers(self) -> None:
-        """Register bus message handlers.
-
-        This agent uses a pull-based bus model (consume_inbound() in run()), so
-        no pub/sub subscriptions are set up at construction time. This method
-        exists as a named seam for future extension or subclass overrides.
-        """
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -213,8 +164,7 @@ class AgentLoop:
         provider: Callable[[], list[str]],
     ) -> None:
         """Set a callback that returns known email contacts (refreshed per-turn)."""
-        self._contacts_provider = provider
-        self._processor._contacts_provider = provider  # forward to processor
+        self._processor._turn_context.set_contacts_provider(provider)
 
     def set_email_fetch(
         self,
@@ -227,70 +177,26 @@ class AgentLoop:
                 tool._fetch = fetch_callback
                 tool._fetch_unread = fetch_unread_callback
 
-    def _refresh_contacts(self) -> None:
-        """Pull latest contacts from the provider into the context builder."""
-        if hasattr(self, "_contacts_provider"):
-            self.context.set_contacts_context(self._contacts_provider())
-
-    # ------------------------------------------------------------------
-    # Agent loop delegation to TurnOrchestrator
-    # ------------------------------------------------------------------
-
     async def _run_agent_loop(
         self,
         initial_messages: list[dict[str, Any]],
         on_progress: ProgressCallback | None = None,
     ) -> tuple[str | None, list[str], list[dict[str, Any]]]:
-        """Run the Plan-Act-Observe-Reflect agent loop.
+        """Legacy shim: delegates to ``MessageProcessor._run_orchestrator``.
 
-        Delegates to ``TurnOrchestrator.run()`` and unpacks the ``TurnResult``
-        into the legacy 3-tuple format for backward compatibility with any
-        callers that still reference this method directly.
-
+        Kept for backward compatibility with test callers.
         Returns ``(final_content, tools_used, messages)``.
         """
-        # Extract the last user message (used by planning + verification)
-        user_text = ""
-        for m in reversed(initial_messages):
-            if m.get("role") == "user":
-                content = m.get("content", "")
-                if isinstance(content, str):
-                    user_text = content
-                elif isinstance(content, list):
-                    user_text = " ".join(
-                        p.get("text", "")
-                        for p in content
-                        if isinstance(p, dict) and p.get("type") == "text"
-                    )
-                break
-
-        state = TurnState(
-            messages=initial_messages,
-            user_text=user_text,
-            classification_result=self._last_classification_result,
-            tools_def_cache=list(self.tools.get_definitions()),
-        )
-
-        result = await self._orchestrator.run(state, on_progress)
-
-        # Read token counters from TurnResult
-        self._turn_tokens_prompt = result.tokens_prompt
-        self._turn_tokens_completion = result.tokens_completion
-        self._turn_llm_calls = result.llm_calls
-
-        return result.content or None, result.tools_used, result.messages
-
-    # ------------------------------------------------------------------
-    # Reaction handling (Step 8 — Feedback loop)
-    # ------------------------------------------------------------------
+        self._processor.set_classification_result(self._last_classification_result)
+        result = await self._processor._run_orchestrator(initial_messages, on_progress)
+        self._processor._sync_token_counters()
+        self._turn_tokens_prompt = self._processor._turn_tokens_prompt
+        self._turn_tokens_completion = self._processor._turn_tokens_completion
+        self._turn_llm_calls = self._processor._turn_llm_calls
+        return result
 
     async def handle_reaction(self, reaction: ReactionEvent) -> None:
-        """Translate an emoji reaction from a channel into a feedback event.
-
-        Channels can call this when a user adds a reaction to a bot message.
-        The reaction is mapped to positive/negative and persisted via the
-        feedback tool.
-        """
+        """Map an emoji reaction to a feedback event and persist it."""
         rating = classify_reaction(reaction.emoji)
         if rating is None:
             logger.debug("Ignoring unmapped reaction emoji: {}", reaction.emoji)
@@ -319,20 +225,12 @@ class AgentLoop:
         )
 
     async def run(self) -> None:
-        """Run the agent loop, processing messages from the bus.
-
-        When multi-agent routing is enabled (``routing_config.enabled``),
-        each inbound message is first classified by the coordinator.  The
-        coordinator returns an ``AgentRoleConfig`` whose overrides
-        (model, system prompt, tool filters) are applied for that turn
-        via ``TurnRoleManager.apply``.  When routing is disabled the loop
-        behaves exactly as before.
-        """
+        """Run the agent loop, consuming messages from the bus."""
         assert self._role_manager is not None, "build_agent() must wire _role_manager"
         self._running = True
         self._stop_event = asyncio.Event()
         await self._connect_mcp()
-        self._ensure_coordinator()
+        self._wire_coordinator()
         await self.context.memory.maintenance.ensure_health()  # LAN-101: non-blocking vector health
 
         logger.info("Agent loop started")
@@ -389,50 +287,7 @@ class AgentLoop:
                                 "role": self.role_name,
                             },
                         ):
-                            if self._coordinator and msg.channel != "system":
-                                t0_classify = time.monotonic()
-                                cls_result = await self._coordinator.classify(msg.content)
-                                self._last_classification_result = cls_result
-                                self._processor.set_classification_result(cls_result)
-                                role_name, confidence = (
-                                    cls_result.role_name,
-                                    cls_result.confidence,
-                                )
-                                classify_latency_ms = (time.monotonic() - t0_classify) * 1000
-                                # Confidence-aware: fall back to default on low confidence
-                                threshold = (
-                                    self._routing_config.confidence_threshold
-                                    if self._routing_config
-                                    else _DEFAULT_CONFIDENCE_THRESHOLD
-                                )
-                                if confidence < threshold:
-                                    role_name = (
-                                        self._routing_config.default_role
-                                        if self._routing_config
-                                        else "general"
-                                    )
-                                    logger.info(
-                                        "Low confidence ({:.2f} < {:.2f}), using default role '{}'",
-                                        confidence,
-                                        threshold,
-                                        role_name,
-                                    )
-                                role = (
-                                    self._coordinator.route_direct(role_name)
-                                    or self._coordinator.registry.get_default()
-                                    or AgentRoleConfig(
-                                        name=role_name,
-                                        description="General assistant",
-                                    )
-                                )
-                                self._dispatcher.record_route_trace(
-                                    "route",
-                                    role=role.name,
-                                    confidence=confidence,
-                                    latency_ms=classify_latency_ms,
-                                    message_excerpt=msg.content,
-                                )
-                                turn_ctx = self._role_manager.apply(role)
+                            turn_ctx = await self._classify_and_route(msg)
 
                             # Wrap with timeout to prevent infinite processing
                             timeout = (
@@ -504,42 +359,58 @@ class AgentLoop:
                 except asyncio.TimeoutError:
                     continue
 
-    # ------------------------------------------------------------------
-    # Delegation dispatch
-    # ------------------------------------------------------------------
-
-    def _ensure_coordinator(self) -> None:
-        """Lazy-initialise the multi-agent coordinator if routing is enabled."""
-        if not self._routing_config or not self._routing_config.enabled:
-            return
-        if self._coordinator is not None:
-            return
-
-        from nanobot.coordination.coordinator import DEFAULT_ROLES, Coordinator
-
-        for role in DEFAULT_ROLES:
-            self._capabilities.register_role(role)
-        for role_cfg in self._routing_config.roles:
-            self._capabilities.merge_register_role(role_cfg)
-        registry = self._capabilities.agent_registry
-        assert registry is not None, "agent_registry must be set before enabling routing"
-        registry._default_role = self._routing_config.default_role
-        self._coordinator = Coordinator(
-            provider=self.provider,
-            registry=registry,
-            classifier_model=self._routing_config.classifier_model,
-            default_role=self._routing_config.default_role,
-            confidence_threshold=self._routing_config.confidence_threshold,
+    async def _classify_and_route(self, msg: InboundMessage) -> TurnContext | None:
+        """Classify message via coordinator and apply role overrides."""
+        if not self._coordinator or msg.channel == "system":
+            return None
+        t0_classify = time.monotonic()
+        cls_result = await self._coordinator.classify(msg.content)
+        self._last_classification_result = cls_result
+        self._processor.set_classification_result(cls_result)
+        role_name, confidence = cls_result.role_name, cls_result.confidence
+        classify_latency_ms = (time.monotonic() - t0_classify) * 1000
+        threshold = (
+            self._routing_config.confidence_threshold
+            if self._routing_config
+            else _DEFAULT_CONFIDENCE_THRESHOLD
         )
-        self._dispatcher.coordinator = self._coordinator
-        self.missions.coordinator = self._coordinator
+        if confidence < threshold:
+            role_name = self._routing_config.default_role if self._routing_config else "general"
+            logger.info(
+                "Low confidence ({:.2f} < {:.2f}), using default role '{}'",
+                confidence,
+                threshold,
+                role_name,
+            )
+        role = (
+            self._coordinator.route_direct(role_name)
+            or self._coordinator.registry.get_default()
+            or AgentRoleConfig(name=role_name, description="General assistant")
+        )
+        self._dispatcher.record_route_trace(
+            "route",
+            role=role.name,
+            confidence=confidence,
+            latency_ms=classify_latency_ms,
+            message_excerpt=msg.content,
+        )
+        assert self._role_manager is not None
+        return self._role_manager.apply(role)
+
+    def _wire_coordinator(self) -> None:
+        """Wire delegate tools into the coordinator (after MCP tools are available)."""
+        if self._coordinator is None:
+            return
+        if self._coordinator_wired:
+            return
+        self._coordinator_wired = True
         self._dispatcher.wire_delegate_tools(
             available_roles_fn=self._capabilities.role_names,
         )
-
+        _registry = self._capabilities.agent_registry
         logger.info(
-            "Multi-agent routing enabled with {} roles",
-            len(registry),
+            "Multi-agent routing wired with {} roles",
+            len(_registry) if _registry else 0,
         )
 
     async def close_mcp(self) -> None:
@@ -567,50 +438,16 @@ class AgentLoop:
             self._stop_event.set()
         logger.info("Agent loop stopping")
 
-    def _make_bus_progress(
-        self,
-        channel: str,
-        chat_id: str,
-        base_meta: dict[str, Any],
-        canonical_builder: CanonicalEventBuilder,
-    ) -> ProgressCallback:
-        """Delegate to the standalone make_bus_progress factory."""
-        return make_bus_progress(
-            bus=self.bus,
-            channel=channel,
-            chat_id=chat_id,
-            base_meta=base_meta,
-            canonical_builder=canonical_builder,
-        )
-
     async def _process_message(
         self,
         msg: InboundMessage,
         session_key: str | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> OutboundMessage | None:
-        """Delegate to MessageProcessor.
-
-        This method is kept on ``AgentLoop`` for backward compatibility with
-        tests and callers that monkey-patch ``_process_message``.  The real
-        implementation lives in ``MessageProcessor._process_message``.
-        """
+        """Delegate to MessageProcessor."""
         return await self._processor._process_message(
             msg, session_key=session_key, on_progress=on_progress
         )
-
-    async def _consolidate_memory(self, session: Session, archive_all: bool = False) -> bool:
-        """Delegate to ConsolidationOrchestrator."""
-        if archive_all:
-            return await self._consolidator.consolidate_and_wait(
-                session.key,
-                session,
-                self.provider,
-                self.model,
-                archive_all=True,
-            )
-        self._consolidator.submit(session.key, session, self.provider, self.model)
-        return True
 
     async def process_direct(
         self,
@@ -621,16 +458,10 @@ class AgentLoop:
         on_progress: ProgressCallback | None = None,
         forced_role: str | None = None,
     ) -> str:
-        """Process a message directly (for CLI or cron usage).
-
-        When *forced_role* is provided the coordinator is initialised but
-        classification is skipped — the named role is applied directly for
-        this turn.  This is used by ``nanobot routing replay`` to re-process
-        a misrouted message under a corrected role.
-        """
+        """Process a message directly (for CLI or cron usage)."""
         assert self._role_manager is not None, "build_agent() must wire _role_manager"
         await self._connect_mcp()
-        self._ensure_coordinator()
+        self._wire_coordinator()
         self._last_classification_result = None
 
         # Resolve forced role (if any) before entering the trace context so

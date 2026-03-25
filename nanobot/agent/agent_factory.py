@@ -45,11 +45,6 @@ if TYPE_CHECKING:
     from nanobot.tools.result_cache import ToolResultCache
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
 @dataclass(slots=True)
 class _ToolBuildResult:
     """Named result struct for ``_build_tools()``."""
@@ -236,11 +231,6 @@ def _wire_memory(
     )
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
 def build_agent(
     bus: MessageBus,
     provider: LLMProvider,
@@ -353,6 +343,28 @@ def build_agent(
         delegation_tools=_tool_build.delegation_tools,
     )
 
+    # 8.5 Construct Coordinator (if routing is enabled)
+    coordinator: Coordinator | None = None
+    if routing_config and routing_config.enabled:
+        from nanobot.coordination.coordinator import DEFAULT_ROLES, Coordinator
+
+        for role in DEFAULT_ROLES:
+            _tool_build.capabilities.register_role(role)
+        for role_cfg in routing_config.roles:
+            _tool_build.capabilities.merge_register_role(role_cfg)
+        _agent_registry = _tool_build.capabilities.agent_registry
+        assert _agent_registry is not None
+        _agent_registry.set_default_role(routing_config.default_role)
+        coordinator = Coordinator(
+            provider=provider,
+            registry=_agent_registry,
+            classifier_model=routing_config.classifier_model,
+            default_role=routing_config.default_role,
+            confidence_threshold=routing_config.confidence_threshold,
+        )
+        dispatcher.coordinator = coordinator
+        _tool_build.missions.coordinator = coordinator
+
     # 9. Construct DelegationAdvisor
     delegation_advisor = DelegationAdvisor()
 
@@ -390,9 +402,20 @@ def build_agent(
         role_name=role_config.name if role_config else "",
     )
 
-    # 13. Construct MessageProcessor (role_manager wired post-construction
-    #     via set_role_manager; span_module passed at construction time)
-    processor = MessageProcessor(
+    # 12.5 Construct TurnContextManager
+    from nanobot.agent.turn_context import TurnContextManager
+
+    turn_context = TurnContextManager(
+        tools=_tool_build.tools,
+        dispatcher=dispatcher,
+        missions=_tool_build.missions,
+        context=context,
+    )
+
+    # 13. Construct _ProcessorServices and MessageProcessor
+    from nanobot.agent.agent_components import _ProcessorServices
+
+    services = _ProcessorServices(
         orchestrator=orchestrator,
         dispatcher=dispatcher,
         missions=_tool_build.missions,
@@ -402,13 +425,16 @@ def build_agent(
         consolidator=consolidator,
         verifier=verifier,
         bus=bus,
+        turn_context=turn_context,
+        span_module=sys.modules["nanobot.agent.loop"],
+    )
+    processor = MessageProcessor(
+        services=services,
         config=config,
         workspace=config.workspace_path,
         role_name=role_config.name if role_config else "",
-        role_manager=None,
         provider=provider,
         model=model,
-        span_module=sys.modules["nanobot.agent.loop"],
     )
 
     # 14. Pack _AgentComponents (nested groups)
@@ -453,6 +479,7 @@ def build_agent(
         core=_core,
         infra=_infra,
         subsystems=_subs,
+        coordinator=coordinator,
         role_manager=None,
     )
 
