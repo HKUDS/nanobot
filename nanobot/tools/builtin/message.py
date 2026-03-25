@@ -56,7 +56,7 @@ class MessageTool(Tool):
         """Whether a message was sent during this turn."""
         return self._sent_in_turn
 
-    def start_turn(self) -> None:
+    def on_turn_start(self) -> None:
         """Reset per-turn send tracking."""
         self._sent_in_turn = False
 

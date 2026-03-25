@@ -212,7 +212,7 @@ class MessageProcessor:
         self._turn_context.ensure_scratchpad(key, self.workspace)
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
-                message_tool.start_turn()
+                message_tool.on_turn_start()
 
         history = session.get_history(max_messages=self.config.memory_window)
         verify_before_answer = self.verifier.should_force_verification(msg.content)
