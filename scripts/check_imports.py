@@ -185,9 +185,6 @@ ALLOWLIST: set[tuple[str, str]] = {
     ("nanobot/agent/loop.py", "nanobot.coordination.coordinator"),
     ("nanobot/coordination/delegation.py", "nanobot.tools.builtin.delegate"),
     ("nanobot/context/context.py", "nanobot.memory.store"),
-    # ── Known violations: cross-package function import ────────────────
-    # Fix: move feedback_summary into context/ or behind a Protocol.
-    ("nanobot/context/context.py", "nanobot.tools.builtin.feedback"),
     # ── Known violations: runtime import of data objects / functions ───
     # Fix: move to TYPE_CHECKING block (enums, pure functions).
     ("nanobot/agent/turn_orchestrator.py", "nanobot.coordination.task_types"),

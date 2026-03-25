@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
+from nanobot.context.feedback_context import feedback_summary
 from nanobot.context.prompt_loader import prompts
 from nanobot.context.skills import SkillsLoader
 from nanobot.errors import (
@@ -35,7 +36,6 @@ from nanobot.errors import (
     MemorySubsystemError as NanobotMemoryError,
 )
 from nanobot.observability.tracing import bind_trace
-from nanobot.tools.builtin.feedback import feedback_summary
 
 if TYPE_CHECKING:
     from nanobot.memory.store import MemoryStore
