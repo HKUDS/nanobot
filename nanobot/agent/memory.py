@@ -224,6 +224,8 @@ class MemoryConsolidator:
 
     _MAX_CONSOLIDATION_ROUNDS = 5
 
+    _SAFETY_BUFFER = 1024  # extra headroom for tokenizer estimation drift
+
     def __init__(
         self,
         workspace: Path,
@@ -233,12 +235,14 @@ class MemoryConsolidator:
         context_window_tokens: int,
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
+        max_completion_tokens: int = 4096,
     ):
         self.store = MemoryStore(workspace)
         self.provider = provider
         self.model = model
         self.sessions = sessions
         self.context_window_tokens = context_window_tokens
+        self.max_completion_tokens = max_completion_tokens
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
@@ -300,17 +304,22 @@ class MemoryConsolidator:
         return True
 
     async def maybe_consolidate_by_tokens(self, session: Session) -> None:
-        """Loop: archive old messages until prompt fits within half the context window."""
+        """Loop: archive old messages until prompt fits within safe budget.
+
+        The budget reserves space for completion tokens and a safety buffer
+        so the LLM request never exceeds the context window.
+        """
         if not session.messages or self.context_window_tokens <= 0:
             return
 
         lock = self.get_lock(session.key)
         async with lock:
-            target = self.context_window_tokens // 2
+            budget = self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
+            target = budget // 2
             estimated, source = self.estimate_session_prompt_tokens(session)
             if estimated <= 0:
                 return
-            if estimated < self.context_window_tokens:
+            if estimated < budget:
                 logger.debug(
                     "Token consolidation idle {}: {}/{} via {}",
                     session.key,
