@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from nanobot.context.skills import (
     CLAUDE_TOOL_MAPPING,
+    SkillsLoader,
     _build_skill_preamble,
     _detect_skill_tools,
     _rewrite_skill_content,
@@ -270,3 +273,40 @@ class TestBuildSkillPreamble:
         result = _build_skill_preamble(detected)
         assert "`Grep`" in result
         assert "`WebFetch`" in result
+
+
+class TestTransformForAgent:
+    """Integration tests for SkillsLoader.transform_for_agent()."""
+
+    def setup_method(self):
+        self.loader = SkillsLoader(workspace=Path("/tmp/fake"))
+
+    def test_content_with_bash_blocks_gets_preamble(self):
+        content = "# Weather\n\n```bash\ncurl wttr.in\n```"
+        result = self.loader.transform_for_agent(content)
+        assert result.startswith("## Tool Instructions")
+        assert "`exec`" in result
+        assert "```bash\ncurl wttr.in\n```" in result
+
+    def test_content_with_claude_tool_names_gets_rewritten(self):
+        content = "Use `Bash` to run and `WebFetch` to download."
+        result = self.loader.transform_for_agent(content)
+        assert "`exec`" in result
+        assert "`web_fetch`" in result
+        assert "`Bash`" not in result.split("---", 1)[-1]  # not in rewritten content
+
+    def test_nanobot_native_content_unchanged(self):
+        content = "Use the `exec` tool to run grep.\nUse `edit_file` for changes."
+        result = self.loader.transform_for_agent(content)
+        assert result == content  # no preamble, no rewriting
+
+    def test_empty_content_unchanged(self):
+        result = self.loader.transform_for_agent("")
+        assert result == ""
+
+    def test_mixed_bash_blocks_and_tool_names(self):
+        content = "Use `Grep`:\n```bash\ngrep -r pattern .\n```"
+        result = self.loader.transform_for_agent(content)
+        assert "## Tool Instructions" in result
+        assert "`exec`" in result
+        assert "`Grep`" in result.split("---", 1)[0]  # original name in preamble

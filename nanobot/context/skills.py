@@ -262,6 +262,22 @@ class SkillsLoader:
             return (skill_dir / "SKILL.md").read_text(encoding="utf-8")
         return None
 
+    def transform_for_agent(self, content: str) -> str:
+        """Detect Claude Code tool references and transform for nanobot agent.
+
+        Rewrites Claude Code tool names to nanobot equivalents and prepends
+        a dynamic preamble listing the tool instructions.  Returns content
+        unchanged if no Claude Code references are detected.
+        """
+        detected = _detect_skill_tools(content)
+        if not detected:
+            return content
+        rewritten = _rewrite_skill_content(content, detected)
+        preamble = _build_skill_preamble(detected)
+        if not preamble:
+            return rewritten
+        return f"{preamble}\n\n---\n\n{rewritten}"
+
     def load_skills_for_context(self, skill_names: list[str]) -> str:
         """
         Load specific skills for inclusion in agent context.
@@ -277,6 +293,7 @@ class SkillsLoader:
             content = self.load_skill(name)
             if content:
                 content = self._strip_frontmatter(content)
+                content = self.transform_for_agent(content)
                 parts.append(f"### Skill: {name}\n\n{content}")
 
         return "\n\n---\n\n".join(parts) if parts else ""

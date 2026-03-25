@@ -51,7 +51,8 @@ class LoadSkillTool(Tool):
                 error_type="not_found",
             )
         stripped = self._loader._strip_frontmatter(content)
-        return ToolResult.ok(stripped)
+        transformed = self._loader.transform_for_agent(stripped)
+        return ToolResult.ok(transformed)
 
 
 __all__ = ["LoadSkillTool"]
