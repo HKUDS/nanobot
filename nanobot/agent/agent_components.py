@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from nanobot.agent.consolidation import ConsolidationOrchestrator
     from nanobot.agent.streaming import StreamingLLMCaller
     from nanobot.agent.turn_context import TurnContextManager
@@ -67,6 +69,7 @@ class _InfraConfig:
     exec_config: ExecToolConfig
     cron_service: CronService | None
     memory_rollout_overrides: dict
+    mcp_connector: Callable[..., Any] | None = None
 
 
 @dataclass(slots=True)

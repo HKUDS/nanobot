@@ -96,6 +96,7 @@ class AgentLoop:
         # Routing
         self._routing_config = components.infra.routing_config
         self._mcp_servers = components.infra.mcp_servers
+        self._mcp_connector = components.infra.mcp_connector
 
         # Runtime state (not constructed)
         self._running = False
@@ -115,13 +116,13 @@ class AgentLoop:
         """Connect to configured MCP servers (one-time, lazy)."""
         if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
             return
+        if self._mcp_connector is None:
+            return
         self._mcp_connecting = True
-        from nanobot.tools.builtin.mcp import connect_mcp_servers
-
         try:
             self._mcp_stack = AsyncExitStack()
             await self._mcp_stack.__aenter__()
-            await connect_mcp_servers(
+            await self._mcp_connector(
                 self._mcp_servers,
                 self._capabilities.tool_registry,
                 self._mcp_stack,

@@ -57,6 +57,16 @@ class _ToolBuildResult:
     delegation_tools: dict
 
 
+def _mcp_connector_fn() -> Any:
+    """Return the ``connect_mcp_servers`` function, or *None* if MCP is unavailable."""
+    try:
+        from nanobot.tools.builtin.mcp import connect_mcp_servers
+
+        return connect_mcp_servers
+    except ImportError:
+        return None
+
+
 def _build_rollout_overrides(config: AgentConfig) -> dict:
     """Extract memory rollout overrides from ``AgentConfig``."""
     return {
@@ -461,6 +471,7 @@ def build_agent(
         exec_config=resolved_exec_config,
         cron_service=cron_service,
         memory_rollout_overrides=memory_rollout_overrides,
+        mcp_connector=_mcp_connector_fn(),
     )
     _subs = _Subsystems(
         memory=memory,
