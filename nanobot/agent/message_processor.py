@@ -137,6 +137,11 @@ class MessageProcessor:
         """Process a single inbound message and return the response."""
         t0_request = time.monotonic()
 
+        effective_model = self._active_model if self._active_model is not None else self.model
+        effective_role = (
+            self._active_role_name if self._active_role_name is not None else self.role_name
+        )
+
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (
@@ -223,7 +228,7 @@ class MessageProcessor:
         # Trigger background consolidation if needed
         unconsolidated = len(session.messages) - session.last_consolidated
         if self.config.memory_enabled and unconsolidated >= self.config.memory_window:
-            self._consolidator.submit(session.key, session, self.provider, self.model)
+            self._consolidator.submit(session.key, session, self.provider, effective_model)
 
         self._turn_context.set_tool_context(
             msg.channel, msg.chat_id, msg.metadata.get("message_id")
@@ -252,7 +257,7 @@ class MessageProcessor:
             run_id=TraceContext.get()["request_id"] or key,
             session_id=key,
             turn_id=f"turn_{_turn_num:05d}",
-            actor_id=self.role_name,
+            actor_id=effective_role,
         )
 
         # Build base metadata dict once for this turn
@@ -291,6 +296,8 @@ class MessageProcessor:
                 channel=msg.channel,
                 chat_id=msg.chat_id,
                 all_msgs=all_msgs,
+                model=self._active_model,
+                temperature=self._active_temperature,
             )
             if isinstance(_recovered, str):
                 final_content = _recovered
@@ -323,8 +330,8 @@ class MessageProcessor:
             metadata={
                 "channel": msg.channel,
                 "sender": msg.sender_id,
-                "model": self.model,
-                "role": self.role_name,
+                "model": effective_model,
+                "role": effective_role,
                 "session_key": key,
                 "llm_calls": str(self._turn_llm_calls),
             },
@@ -341,7 +348,7 @@ class MessageProcessor:
             ch=msg.channel,
             cid=msg.chat_id,
             dur=duration_ms,
-            mdl=self.model,
+            mdl=effective_model,
             tc=len(tools_used),
             rlen=len(final_content),
             lc=self._turn_llm_calls,
@@ -412,6 +419,10 @@ class MessageProcessor:
             user_text=user_text,
             classification_result=self.classification_result,
             tools_def_cache=list(self.tools.get_definitions()),
+            active_model=self._active_model,
+            active_temperature=self._active_temperature,
+            active_max_iterations=self._active_max_iterations,
+            active_role_name=self._active_role_name,
         )
         self.classification_result = None  # consumed
         result = await self.orchestrator.run(state, on_progress)
@@ -505,9 +516,10 @@ class MessageProcessor:
 
     async def _consolidate_memory(self, session: Session, archive_all: bool = False) -> bool:
         """Delegate to ConsolidationOrchestrator."""
+        effective_model = self._active_model if self._active_model is not None else self.model
         if archive_all:
             return await self._consolidator.consolidate_and_wait(
-                session.key, session, self.provider, self.model, archive_all=True
+                session.key, session, self.provider, effective_model, archive_all=True
             )
-        self._consolidator.submit(session.key, session, self.provider, self.model)
+        self._consolidator.submit(session.key, session, self.provider, effective_model)
         return True
