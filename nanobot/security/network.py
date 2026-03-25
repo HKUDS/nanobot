@@ -94,10 +94,12 @@ def validate_resolved_url(url: str) -> tuple[bool, str]:
     return True, ""
 
 
-def contains_internal_url(command: str) -> bool:
+def contains_internal_url(command: str, allowed_urls: list[str] | None = None) -> bool:
     """Return True if the command string contains a URL targeting an internal/private address."""
     for m in _URL_RE.finditer(command):
         url = m.group(0)
+        if allowed_urls and any(url.startswith(prefix) for prefix in allowed_urls):
+            continue
         ok, _ = validate_url_target(url)
         if not ok:
             return True
