@@ -14,7 +14,7 @@ nanobot/memory/read/context_assembler.py: 507 LOC (limit 500, add '# size-except
 nanobot/memory/read/retriever.py: 708 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/memory/write/conflicts.py: 526 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/memory/write/ingester.py: 832 LOC (limit 500, add '# size-exception: <reason>')
-nanobot/tools/builtin/excel.py: 954 LOC (limit 500, add '# size-exception: <reason>')
+nanobot/tools/builtin/excel.py: 953 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/tools/builtin/powerpoint.py: 559 LOC (limit 500, add '# size-exception: <reason>')
 
 # --- Catch-all filename ---

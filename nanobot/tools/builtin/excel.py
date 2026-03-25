@@ -133,8 +133,7 @@ class ReadSpreadsheetTool(Tool):
     ) -> ToolResult:
         try:
             raw_bytes = file_path.read_bytes()
-        # crash-barrier: file I/O can fail in many ways
-        except Exception as exc:
+        except OSError as exc:
             return ToolResult.fail(f"Error reading file: {exc}")
 
         text = raw_bytes.decode("utf-8-sig", errors="replace")
