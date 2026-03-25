@@ -5,6 +5,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+# Check optional Telegram dependencies before running tests
+try:
+    import telegram  # noqa: F401
+except ImportError:
+    pytest.skip("Telegram dependencies not installed (python-telegram-bot)", allow_module_level=True)
+
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.telegram import TELEGRAM_REPLY_CONTEXT_MAX_LEN, TelegramChannel

@@ -380,7 +380,7 @@ class TestMemoryConsolidationTypeHandling:
         """Forced tool_choice rejected by provider -> retry with auto and succeed."""
         store = MemoryStore(tmp_path)
         error_resp = LLMResponse(
-            content="Error calling LLM: litellm.BadRequestError: "
+            content="Error calling LLM: BadRequestError: "
             "The tool_choice parameter does not support being set to required or object",
             finish_reason="error",
             tool_calls=[],

@@ -78,6 +78,11 @@ class TestReadFileTool:
         assert "not found" in result
 
     @pytest.mark.asyncio
+    async def test_missing_path_returns_clear_error(self, tool):
+        result = await tool.execute()
+        assert result == "Error reading file: Unknown path"
+
+    @pytest.mark.asyncio
     async def test_char_budget_trims(self, tool, tmp_path):
         """When the selected slice exceeds _MAX_CHARS the output is trimmed."""
         f = tmp_path / "big.txt"
@@ -200,6 +205,13 @@ class TestEditFileTool:
         assert "Error" in result
         assert "not found" in result
 
+    @pytest.mark.asyncio
+    async def test_missing_new_text_returns_clear_error(self, tool, tmp_path):
+        f = tmp_path / "a.py"
+        f.write_text("hello", encoding="utf-8")
+        result = await tool.execute(path=str(f), old_text="hello")
+        assert result == "Error editing file: Unknown new_text"
+
 
 # ---------------------------------------------------------------------------
 # ListDirTool
@@ -264,6 +276,11 @@ class TestListDirTool:
         result = await tool.execute(path=str(tmp_path / "nope"))
         assert "Error" in result
         assert "not found" in result
+
+    @pytest.mark.asyncio
+    async def test_missing_path_returns_clear_error(self, tool):
+        result = await tool.execute()
+        assert result == "Error listing directory: Unknown path"
 
 
 # ---------------------------------------------------------------------------

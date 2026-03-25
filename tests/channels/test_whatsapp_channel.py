@@ -106,3 +106,52 @@ async def test_send_when_disconnected_is_noop():
     await ch.send(msg)
 
     ch._ws.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_group_policy_mention_skips_unmentioned_group_message():
+    ch = WhatsAppChannel({"enabled": True, "groupPolicy": "mention"}, MagicMock())
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_bridge_message(
+        json.dumps(
+            {
+                "type": "message",
+                "id": "m1",
+                "sender": "12345@g.us",
+                "pn": "user@s.whatsapp.net",
+                "content": "hello group",
+                "timestamp": 1,
+                "isGroup": True,
+                "wasMentioned": False,
+            }
+        )
+    )
+
+    ch._handle_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_group_policy_mention_accepts_mentioned_group_message():
+    ch = WhatsAppChannel({"enabled": True, "groupPolicy": "mention"}, MagicMock())
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_bridge_message(
+        json.dumps(
+            {
+                "type": "message",
+                "id": "m1",
+                "sender": "12345@g.us",
+                "pn": "user@s.whatsapp.net",
+                "content": "hello @bot",
+                "timestamp": 1,
+                "isGroup": True,
+                "wasMentioned": True,
+            }
+        )
+    )
+
+    ch._handle_message.assert_awaited_once()
+    kwargs = ch._handle_message.await_args.kwargs
+    assert kwargs["chat_id"] == "12345@g.us"
+    assert kwargs["sender_id"] == "user"

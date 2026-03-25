@@ -4,7 +4,7 @@ Uses the ilinkai.weixin.qq.com API for personal WeChat messaging.
 No WebSocket, no local WeChat client needed — just HTTP requests with a
 bot token obtained via QR code login.
 
-Protocol reverse-engineered from ``@tencent-weixin/openclaw-weixin`` v1.0.2.
+Protocol reverse-engineered from ``@tencent-weixin/openclaw-weixin`` v1.0.3.
 """
 
 from __future__ import annotations
@@ -53,15 +53,18 @@ MESSAGE_TYPE_BOT = 2
 MESSAGE_STATE_FINISH = 2
 
 WEIXIN_MAX_MESSAGE_LEN = 4000
-BASE_INFO: dict[str, str] = {"channel_version": "1.0.2"}
+WEIXIN_CHANNEL_VERSION = "1.0.3"
+BASE_INFO: dict[str, str] = {"channel_version": WEIXIN_CHANNEL_VERSION}
 
 # Session-expired error code
 ERRCODE_SESSION_EXPIRED = -14
+SESSION_PAUSE_DURATION_S = 60 * 60
 
 # Retry constants (matching the reference plugin's monitor.ts)
 MAX_CONSECUTIVE_FAILURES = 3
 BACKOFF_DELAY_S = 30
 RETRY_DELAY_S = 2
+MAX_QR_REFRESH_COUNT = 3
 
 # Default long-poll timeout; overridden by server via longpolling_timeout_ms.
 DEFAULT_LONG_POLL_TIMEOUT_S = 35
@@ -83,6 +86,7 @@ class WeixinConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     base_url: str = "https://ilinkai.weixin.qq.com"
     cdn_base_url: str = "https://novac2c.cdn.weixin.qq.com/c2c"
+    route_tag: str | int | None = None
     token: str = ""  # Manually set token, or obtained via QR login
     state_dir: str = ""  # Default: ~/.nanobot/weixin/
     poll_timeout: int = DEFAULT_LONG_POLL_TIMEOUT_S  # seconds for long-poll
@@ -119,6 +123,7 @@ class WeixinChannel(BaseChannel):
         self._token: str = ""
         self._poll_task: asyncio.Task | None = None
         self._next_poll_timeout_s: int = DEFAULT_LONG_POLL_TIMEOUT_S
+        self._session_pause_until: float = 0.0
 
     # ------------------------------------------------------------------
     # State persistence
@@ -144,6 +149,15 @@ class WeixinChannel(BaseChannel):
             data = json.loads(state_file.read_text())
             self._token = data.get("token", "")
             self._get_updates_buf = data.get("get_updates_buf", "")
+            context_tokens = data.get("context_tokens", {})
+            if isinstance(context_tokens, dict):
+                self._context_tokens = {
+                    str(user_id): str(token)
+                    for user_id, token in context_tokens.items()
+                    if str(user_id).strip() and str(token).strip()
+                }
+            else:
+                self._context_tokens = {}
             base_url = data.get("base_url", "")
             if base_url:
                 self.config.base_url = base_url
@@ -158,6 +172,7 @@ class WeixinChannel(BaseChannel):
             data = {
                 "token": self._token,
                 "get_updates_buf": self._get_updates_buf,
+                "context_tokens": self._context_tokens,
                 "base_url": self.config.base_url,
             }
             state_file.write_text(json.dumps(data, ensure_ascii=False))
@@ -187,6 +202,8 @@ class WeixinChannel(BaseChannel):
         }
         if auth and self._token:
             headers["Authorization"] = f"Bearer {self._token}"
+        if self.config.route_tag is not None and str(self.config.route_tag).strip():
+            headers["SKRouteTag"] = str(self.config.route_tag).strip()
         return headers
 
     async def _api_get(
@@ -226,24 +243,25 @@ class WeixinChannel(BaseChannel):
     # QR Code Login  (matches login-qr.ts)
     # ------------------------------------------------------------------
 
+    async def _fetch_qr_code(self) -> tuple[str, str]:
+        """Fetch a fresh QR code. Returns (qrcode_id, scan_url)."""
+        data = await self._api_get(
+            "ilink/bot/get_bot_qrcode",
+            params={"bot_type": "3"},
+            auth=False,
+        )
+        qrcode_img_content = data.get("qrcode_img_content", "")
+        qrcode_id = data.get("qrcode", "")
+        if not qrcode_id:
+            raise RuntimeError(f"Failed to get QR code from WeChat API: {data}")
+        return qrcode_id, (qrcode_img_content or qrcode_id)
+
     async def _qr_login(self) -> bool:
         """Perform QR code login flow. Returns True on success."""
         try:
             logger.info("Starting WeChat QR code login...")
-
-            data = await self._api_get(
-                "ilink/bot/get_bot_qrcode",
-                params={"bot_type": "3"},
-                auth=False,
-            )
-            qrcode_img_content = data.get("qrcode_img_content", "")
-            qrcode_id = data.get("qrcode", "")
-
-            if not qrcode_id:
-                logger.error("Failed to get QR code from WeChat API: {}", data)
-                return False
-
-            scan_url = qrcode_img_content or qrcode_id
+            refresh_count = 0
+            qrcode_id, scan_url = await self._fetch_qr_code()
             self._print_qr_code(scan_url)
 
             logger.info("Waiting for QR code scan...")
@@ -283,8 +301,23 @@ class WeixinChannel(BaseChannel):
                 elif status == "scaned":
                     logger.info("QR code scanned, waiting for confirmation...")
                 elif status == "expired":
-                    logger.warning("QR code expired")
-                    return False
+                    refresh_count += 1
+                    if refresh_count > MAX_QR_REFRESH_COUNT:
+                        logger.warning(
+                            "QR code expired too many times ({}/{}), giving up.",
+                            refresh_count - 1,
+                            MAX_QR_REFRESH_COUNT,
+                        )
+                        return False
+                    logger.warning(
+                        "QR code expired, refreshing... ({}/{})",
+                        refresh_count,
+                        MAX_QR_REFRESH_COUNT,
+                    )
+                    qrcode_id, scan_url = await self._fetch_qr_code()
+                    self._print_qr_code(scan_url)
+                    logger.info("New QR code generated, waiting for scan...")
+                    continue
                 # status == "wait" — keep polling
 
                 await asyncio.sleep(1)
@@ -392,7 +425,34 @@ class WeixinChannel(BaseChannel):
     # Polling  (matches monitor.ts monitorWeixinProvider)
     # ------------------------------------------------------------------
 
+    def _pause_session(self, duration_s: int = SESSION_PAUSE_DURATION_S) -> None:
+        self._session_pause_until = time.time() + duration_s
+
+    def _session_pause_remaining_s(self) -> int:
+        remaining = int(self._session_pause_until - time.time())
+        if remaining <= 0:
+            self._session_pause_until = 0.0
+            return 0
+        return remaining
+
+    def _assert_session_active(self) -> None:
+        remaining = self._session_pause_remaining_s()
+        if remaining > 0:
+            remaining_min = max((remaining + 59) // 60, 1)
+            raise RuntimeError(
+                f"WeChat session paused, {remaining_min} min remaining (errcode {ERRCODE_SESSION_EXPIRED})"
+            )
+
     async def _poll_once(self) -> None:
+        remaining = self._session_pause_remaining_s()
+        if remaining > 0:
+            logger.warning(
+                "WeChat session paused, waiting {} min before next poll.",
+                max((remaining + 59) // 60, 1),
+            )
+            await asyncio.sleep(remaining)
+            return
+
         body: dict[str, Any] = {
             "get_updates_buf": self._get_updates_buf,
             "base_info": BASE_INFO,
@@ -411,11 +471,13 @@ class WeixinChannel(BaseChannel):
 
         if is_error:
             if errcode == ERRCODE_SESSION_EXPIRED or ret == ERRCODE_SESSION_EXPIRED:
+                self._pause_session()
+                remaining = self._session_pause_remaining_s()
                 logger.warning(
-                    "WeChat session expired (errcode {}). Pausing 60 min.",
+                    "WeChat session expired (errcode {}). Pausing {} min.",
                     errcode,
+                    max((remaining + 59) // 60, 1),
                 )
-                await asyncio.sleep(3600)
                 return
             raise RuntimeError(
                 f"getUpdates failed: ret={ret} errcode={errcode} errmsg={data.get('errmsg', '')}"
@@ -468,6 +530,7 @@ class WeixinChannel(BaseChannel):
         ctx_token = msg.get("context_token", "")
         if ctx_token:
             self._context_tokens[from_user_id] = ctx_token
+            self._save_state()
 
         # Parse item_list (WeixinMessage.item_list — types.ts:161)
         item_list: list[dict] = msg.get("item_list") or []
@@ -651,6 +714,11 @@ class WeixinChannel(BaseChannel):
         if not self._client or not self._token:
             logger.warning("WeChat client not initialized or not authenticated")
             return
+        try:
+            self._assert_session_active()
+        except RuntimeError as e:
+            logger.warning("WeChat send blocked: {}", e)
+            return
 
         content = msg.content.strip()
         ctx_token = self._context_tokens.get(msg.chat_id, "")
@@ -731,7 +799,7 @@ class WeixinChannel(BaseChannel):
     ) -> None:
         """Upload a local file to WeChat CDN and send it as a media message.
 
-        Follows the exact protocol from ``@tencent-weixin/openclaw-weixin`` v1.0.2:
+        Follows the exact protocol from ``@tencent-weixin/openclaw-weixin`` v1.0.3:
         1. Generate a random 16-byte AES key (client-side).
         2. Call ``getuploadurl`` with file metadata + hex-encoded AES key.
         3. AES-128-ECB encrypt the file and POST to CDN (``{cdnBaseUrl}/upload``).

@@ -26,6 +26,7 @@ class WhatsAppConfig(Base):
     bridge_url: str = "ws://localhost:3001"
     bridge_token: str = ""
     allow_from: list[str] = Field(default_factory=list)
+    group_policy: Literal["open", "mention"] = "open"  # "open" responds to all, "mention" only when @mentioned
 
 
 class WhatsAppChannel(BaseChannel):
@@ -187,6 +188,13 @@ class WhatsAppChannel(BaseChannel):
                     self._processed_message_ids.popitem(last=False)
 
             # Extract just the phone number or lid as chat_id
+            is_group = data.get("isGroup", False)
+            was_mentioned = data.get("wasMentioned", False)
+
+            if is_group and getattr(self.config, "group_policy", "open") == "mention":
+                if not was_mentioned:
+                    return
+
             user_id = pn if pn else sender
             sender_id = user_id.split("@")[0] if "@" in user_id else user_id
             logger.info("Sender {}", sender)

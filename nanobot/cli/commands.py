@@ -34,7 +34,7 @@ from rich.text import Text
 
 from nanobot import __logo__, __version__
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
-from nanobot.config.paths import get_workspace_path
+from nanobot.config.paths import get_workspace_path, is_default_workspace
 from nanobot.config.schema import Config
 from nanobot.utils.helpers import sync_workspace_templates
 
@@ -376,30 +376,48 @@ def _onboard_plugins(config_path: Path) -> None:
 
 
 def _make_provider(config: Config):
-    """Create the appropriate LLM provider from config."""
-    from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
+    """Create the appropriate LLM provider from config.
+
+    Routing is driven by ``ProviderSpec.backend`` in the registry.
+    """
     from nanobot.providers.base import GenerationSettings
-    from nanobot.providers.openai_codex_provider import OpenAICodexProvider
+    from nanobot.providers.registry import find_by_name
 
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
+    spec = find_by_name(provider_name) if provider_name else None
+    backend = spec.backend if spec else "openai_compat"
 
-    # Extras: dynamic custom providers
+    # --- validation ---
+    if backend == "azure_openai":
+        if not p or not p.api_key or not p.api_base:
+            console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
+            console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
+            console.print("Use the model field to specify the deployment name.")
+            raise typer.Exit(1)
+    elif backend == "openai_compat" and not model.startswith("bedrock/"):
+        needs_key = not (p and p.api_key)
+        exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
+        if needs_key and not exempt:
+            console.print("[red]Error: No API key configured.[/red]")
+            console.print("Set one in ~/.nanobot/config.json under providers section")
+            raise typer.Exit(1)
+
+    # --- instantiation by backend ---
+    # Extras: dynamic custom providers (e.g., extras:octopus)
     if provider_name and provider_name.startswith("extras:"):
         if not p or not p.api_key:
             console.print(f"[red]Error: No API key configured for extras provider '{provider_name}'.[/red]")
             raise typer.Exit(1)
         api_protocol = (p.api or "openai").lower()
-        # Strip provider prefix: "scnet/MiniMax-M2.5" → "MiniMax-M2.5"
+        # Strip provider prefix: "octopus/doubao-pro" → "doubao-pro"
         bare_model = model.split("/", 1)[1] if "/" in model else model
-        # Look up model declaration for context_window / max_tokens overrides
-        model_cfg = config.get_model_config(model)
         if api_protocol == "openai-responses":
             from nanobot.providers.openai_responses_provider import OpenAIResponsesProvider
             provider = OpenAIResponsesProvider(
                 api_key=p.api_key,
-                api_base=p.api_base or "https://api.openai.com/v1",
+                api_base=p.api_base or "http://localhost:8000/v1",
                 default_model=bare_model,
             )
         else:
@@ -408,53 +426,31 @@ def _make_provider(config: Config):
                 api_key=p.api_key,
                 api_base=p.api_base or "http://localhost:8000/v1",
                 default_model=bare_model,
+                extra_headers=p.extra_headers if p else None,
             )
-    # OpenAI Codex (OAuth)
-    elif provider_name == "openai_codex" or model.startswith("openai-codex/"):
-        provider = OpenAICodexProvider(default_model=model)
-    # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
-    elif provider_name == "custom":
-        from nanobot.providers.custom_provider import CustomProvider
-        provider = CustomProvider(
-            api_key=p.api_key if p else "no-key",
-            api_base=config.get_api_base(model) or "http://localhost:8000/v1",
-            default_model=model,
-            extra_headers=p.extra_headers if p else None,
-        )
-    # Azure OpenAI: direct Azure OpenAI endpoint with deployment name
-    elif provider_name == "azure_openai":
-        if not p or not p.api_key or not p.api_base:
-            console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
-            console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
-            console.print("Use the model field to specify the deployment name.")
-            raise typer.Exit(1)
+    elif backend == "openai_codex":
+        from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
         provider = AzureOpenAIProvider(
             api_key=p.api_key,
             api_base=p.api_base,
             default_model=model,
         )
-    # OpenVINO Model Server: direct OpenAI-compatible endpoint at /v3
-    elif provider_name == "ovms":
-        from nanobot.providers.custom_provider import CustomProvider
-        provider = CustomProvider(
-            api_key=p.api_key if p else "no-key",
-            api_base=config.get_api_base(model) or "http://localhost:8000/v3",
-            default_model=model,
-        )
-    else:
-        from nanobot.providers.litellm_provider import LiteLLMProvider
-        from nanobot.providers.registry import find_by_name
-        spec = find_by_name(provider_name)
-        if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and (spec.is_oauth or spec.is_local)):
-            console.print("[red]Error: No API key configured.[/red]")
-            console.print("Set one in ~/.nanobot/config.json under providers section")
-            raise typer.Exit(1)
-        provider = LiteLLMProvider(
+    elif backend == "anthropic":
+        from nanobot.providers.anthropic_provider import AnthropicProvider
+        provider = AnthropicProvider(
             api_key=p.api_key if p else None,
             api_base=config.get_api_base(model),
             default_model=model,
             extra_headers=p.extra_headers if p else None,
-            provider_name=provider_name,
+        )
+    else:
+        from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+        provider = OpenAICompatProvider(
+            api_key=p.api_key if p else None,
+            api_base=config.get_api_base(model),
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+            spec=spec,
         )
 
     defaults = config.agents.defaults
@@ -513,6 +509,17 @@ def _warn_deprecated_config_keys(config_path: Path | None) -> None:
         )
 
 
+def _migrate_cron_store(config: "Config") -> None:
+    """One-time migration: move legacy global cron store into the workspace."""
+    from nanobot.config.paths import get_cron_dir
+
+    legacy_path = get_cron_dir() / "jobs.json"
+    new_path = config.workspace_path / "cron" / "jobs.json"
+    if legacy_path.is_file() and not new_path.exists():
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        import shutil
+        shutil.move(str(legacy_path), str(new_path))
+
 
 # ============================================================================
 # Gateway / Server
@@ -530,7 +537,6 @@ def gateway(
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
-    from nanobot.config.paths import get_cron_dir
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
@@ -551,8 +557,12 @@ def gateway(
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
 
-    # Create cron service first (callback set after agent creation)
-    cron_store_path = get_cron_dir() / "jobs.json"
+    # Preserve existing single-workspace installs, but keep custom workspaces clean.
+    if is_default_workspace(config.workspace_path):
+        _migrate_cron_store(config)
+
+    # Create cron service with workspace-scoped store
+    cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
     # Create agent with cron service
@@ -810,7 +820,6 @@ def agent(
 
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
-    from nanobot.config.paths import get_cron_dir
     from nanobot.cron.service import CronService
 
     config = _load_runtime_config(config, workspace)
@@ -819,8 +828,12 @@ def agent(
     bus = MessageBus()
     provider = _make_provider(config)
 
-    # Create cron service for tool usage (no callback needed for CLI unless running)
-    cron_store_path = get_cron_dir() / "jobs.json"
+    # Preserve existing single-workspace installs, but keep custom workspaces clean.
+    if is_default_workspace(config.workspace_path):
+        _migrate_cron_store(config)
+
+    # Create cron service with workspace-scoped store
+    cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
     if logs:
@@ -1308,11 +1321,20 @@ def _login_openai_codex() -> None:
 def _login_github_copilot() -> None:
     import asyncio
 
+    from openai import AsyncOpenAI
+
     console.print("[cyan]Starting GitHub Copilot device flow...[/cyan]\n")
 
     async def _trigger():
-        from litellm import acompletion
-        await acompletion(model="github_copilot/gpt-4o", messages=[{"role": "user", "content": "hi"}], max_tokens=1)
+        client = AsyncOpenAI(
+            api_key="dummy",
+            base_url="https://api.githubcopilot.com",
+        )
+        await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=1,
+        )
 
     try:
         asyncio.run(_trigger())
