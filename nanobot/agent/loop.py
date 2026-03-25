@@ -231,7 +231,10 @@ class AgentLoop:
         self._stop_event = asyncio.Event()
         await self._connect_mcp()
         self._wire_coordinator()
-        await self.context.memory.maintenance.ensure_health()  # LAN-101: non-blocking vector health
+        if self.context.memory is not None:
+            await (
+                self.context.memory.maintenance.ensure_health()
+            )  # LAN-101: non-blocking vector health
 
         logger.info("Agent loop started")
 

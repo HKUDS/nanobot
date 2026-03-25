@@ -174,6 +174,7 @@ class MessageProcessor:
             )
 
         memory_store = self.context.memory
+        assert memory_store is not None  # always injected by build_agent
 
         # Run memory pre-checks (conflict resolution and live corrections).
         # These are only meaningful when the memory subsystem is wired up;
