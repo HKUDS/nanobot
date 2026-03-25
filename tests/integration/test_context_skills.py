@@ -81,7 +81,6 @@ class TestSkillsSummary:
         summary = loader.build_skills_summary()
 
         assert "summarize-me" in summary
-        assert "Other available skills" in summary
 
     def test_summary_empty_when_no_workspace_skills_and_no_builtins(self, tmp_path: Path) -> None:
         """Summary is non-empty only if skills exist (builtins always present)."""

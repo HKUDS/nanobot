@@ -143,49 +143,30 @@ class SkillsLoader:
 
         return "\n\n---\n\n".join(parts) if parts else ""
 
-    def build_skills_summary(self, matched: list[str] | None = None) -> str:
-        """Build a compact listing of all skills with matched skills highlighted.
+    def build_skills_summary(self) -> str:
+        """Build a flat listing of all available skills.
 
-        Skills in *matched* are shown first with a ★ marker and their SKILL.md
-        file path so the agent can ``read_file`` them.  Always-on skills are
-        excluded (they are already fully injected into the system prompt).
-
-        When *matched* is ``None`` or empty, all skills appear in a single
-        "Other available skills" section — backward-compatible with the previous
-        format.
+        Always-on skills are excluded (they are already fully injected).
+        The agent calls ``load_skill`` by name to get full instructions.
         """
         all_skills = self.list_skills(filter_unavailable=False)
         if not all_skills:
             return ""
 
-        matched_set = set(matched or [])
         always_set = set(self.get_always_skills())
-
-        matched_lines: list[str] = []
-        other_lines: list[str] = []
+        lines: list[str] = []
 
         for s in all_skills:
             name = s["name"]
             if name in always_set:
-                continue  # already fully injected
+                continue
             desc = self._get_skill_description(name)
             skill_meta = self._get_skill_meta(name)
             available = self._check_requirements(skill_meta)
             status = "✓" if available else "✗"
+            lines.append(f"- {status} **{name}**: {desc}")
 
-            if name in matched_set:
-                skill_path = s.get("path", "")
-                matched_lines.append(f"- ★ **{name}**: {desc}\n  Path: {skill_path}")
-            else:
-                other_lines.append(f"- {status} **{name}**: {desc}")
-
-        parts: list[str] = []
-        if matched_lines:
-            parts.append("**Matched for this message:**\n" + "\n".join(matched_lines))
-        if other_lines:
-            parts.append("**Other available skills:**\n" + "\n".join(other_lines))
-
-        return "\n\n".join(parts)
+        return "\n".join(lines)
 
     def _get_missing_requirements(self, skill_meta: dict) -> str:
         """Get a description of missing requirements."""
@@ -397,153 +378,3 @@ class SkillsLoader:
                     logger.debug("YAML frontmatter parse failed: {}", exc)
 
         return None
-
-    def detect_relevant_skills(self, message: str, max_skills: int = 4) -> list[str]:
-        """Select skills that match the user message via triggers or description."""
-        text = self._normalize_text(message)
-        if not text:
-            return []
-
-        matches: list[str] = []
-        remaining: list[dict[str, str]] = []
-
-        # Pass 1: exact trigger matching (high confidence)
-        for skill in self.list_skills(filter_unavailable=True):
-            name = skill["name"]
-            triggers = self._skill_triggers(name)
-            if any(t in text for t in triggers):
-                matches.append(name)
-                if len(matches) >= max_skills:
-                    return matches
-            else:
-                remaining.append(skill)
-
-        # Pass 2: description keyword matching (lower confidence, fills remaining slots)
-        #
-        # Scoring uses max(precision, recall) so description length does not
-        # penalise skills with detailed descriptions:
-        #   precision = hits / desc_keywords   (original metric — biased against long descs)
-        #   recall    = hits / msg_keywords    (new — how much of the query the skill covers)
-        #   score     = max(precision, recall)
-        #
-        # Both sets are stemmed before comparison so word-form variants
-        # ("summarize" / "summary", "analyze" / "analysis") match correctly.
-        if remaining and len(matches) < max_skills:
-            msg_keywords = self._description_keywords(text)
-            msg_stems = {self._stem(w) for w in msg_keywords}
-            scored: list[tuple[float, str]] = []
-            for skill in remaining:
-                name = skill["name"]
-                desc = self._get_skill_description(name)
-                keywords = self._description_keywords(desc)
-                if len(keywords) < 2:
-                    continue
-                desc_stems = {self._stem(w) for w in keywords}
-                hits = len(msg_stems & desc_stems)
-                if hits < 2:
-                    continue
-                precision = hits / len(desc_stems)
-                recall = hits / len(msg_stems) if msg_stems else 0.0
-                score = max(precision, recall)
-                if score >= 0.2:
-                    scored.append((score, name))
-            scored.sort(reverse=True)
-            for _score, name in scored:
-                matches.append(name)
-                if len(matches) >= max_skills:
-                    break
-
-        return matches
-
-    def _skill_triggers(self, name: str) -> list[str]:
-        """Build normalized trigger phrases from metadata and skill name."""
-        meta = self.get_skill_metadata(name) or {}
-        triggers: list[str] = []
-
-        raw_triggers = meta.get("triggers")
-        if isinstance(raw_triggers, list):
-            for t in raw_triggers:
-                if isinstance(t, str):
-                    triggers.append(t)
-        elif isinstance(raw_triggers, str):
-            triggers.append(raw_triggers)
-
-        triggers.append(name)
-        triggers.append(name.replace("-", " "))
-        triggers.append(name.replace("_", " "))
-
-        deduped: list[str] = []
-        for t in triggers:
-            norm = self._normalize_text(t)
-            if norm and norm not in deduped:
-                deduped.append(norm)
-        return deduped
-
-    @staticmethod
-    def _normalize_text(value: str) -> str:
-        text = value.lower()
-        text = re.sub(r"[^a-z0-9\s_-]+", " ", text)
-        text = text.replace("-", " ").replace("_", " ")
-        return re.sub(r"\s+", " ", text).strip()
-
-    # Stopwords filtered out of skill descriptions for keyword matching
-    _STOPWORDS: frozenset[str] = frozenset(
-        "a an the and or but is are was were be been being "
-        "do does did have has had will would shall should may might can could "
-        "to for of in on at by from with as it its this that these those "
-        "not no nor so if when how what which who whom whose where why "
-        "use using used any all each every some such than then also very "
-        "about into through during before after above below between out up down "
-        "own only just more most other another need needs".split()
-    )
-
-    @classmethod
-    def _description_keywords(cls, description: str) -> list[str]:
-        """Extract unique significant keywords from a skill description."""
-        text = cls._normalize_text(description)
-        seen: set[str] = set()
-        keywords: list[str] = []
-        for w in text.split():
-            if w not in cls._STOPWORDS and len(w) > 2 and w not in seen:
-                seen.add(w)
-                keywords.append(w)
-        return keywords
-
-    @staticmethod
-    def _stem(word: str) -> str:
-        """Reduce a word to an approximate stem by stripping common suffixes.
-
-        Handles the most frequent English inflections so that word-form
-        variants match during skill detection (e.g. "summarize"/"summary",
-        "analyze"/"analysis", "schedule"/"schedules", "gate"/"gates").
-        """
-        # Longest suffixes first to avoid partial stripping.
-        suffixes = (
-            "ization",
-            "isation",
-            "ization",
-            "ation",
-            "iness",
-            "iness",
-            "ness",
-            "ment",
-            "tion",
-            "ize",
-            "ise",
-            "ing",
-            "ies",
-            "ied",
-            "ers",
-            "est",
-            "ed",
-            "er",
-            "es",
-            "ly",
-        )
-        for s in suffixes:
-            if word.endswith(s) and len(word) - len(s) >= 3:
-                return word[: -len(s)]
-        # Strip a plain trailing 's' (plurals) when stem would be ≥ 3 chars.
-        if word.endswith("s") and len(word) > 3:
-            return word[:-1]
-        return word
