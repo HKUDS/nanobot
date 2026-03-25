@@ -846,6 +846,7 @@ Config file: `~/.nanobot/config.json`
 > - **VolcEngine / BytePlus Coding Plan**: Use dedicated providers `volcengineCodingPlan` or `byteplusCodingPlan` instead of the pay-per-use `volcengine` / `byteplus` providers.
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **Alibaba Cloud BaiLian**: If you're using Alibaba Cloud BaiLian's OpenAI-compatible endpoint, set `"apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1"` in your dashscope provider config.
+> - **AWS Bedrock**: The Bedrock provider uses boto3's standard credential chain for authentication. AWS credentials are managed externally via `~/.aws/credentials`, environment variables (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY), IAM roles (EC2/ECS/Lambda), Bedrock bearer token or AWS SSO. **Configuration note**: Since credentials are managed externally by boto3, there is no plain token text stored in the config file. However, the auto-matching logic requires the `api_key` field to be present to detect the provider. As a workaround, we reuse the `api_key` field to specify the AWS region: `{"providers": {"bedrock": {"api_key": "us-east-1"  // AWS region, not an actual API key} } }`, Without this field, the auto-matching logic will skip bedrock (due to empty api_key check) and fall back to other providers. **Alternative** : Explicitly set `"provider": "bedrock"` to bypass auto-matching entirely—in this case, the api_key field is optional,and region can be specified via environment variables (AWS_REGION).
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
@@ -871,6 +872,7 @@ Config file: `~/.nanobot/config.json`
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
+| `bedrock` | LLM (AWS Bedrock, Claude Only) | [console.aws.amazon.com](https://console.aws.amazon.com) |
 
 <details>
 <summary><b>OpenAI Codex (OAuth)</b></summary>
@@ -1372,7 +1374,7 @@ Edit `~/.nanobot-telegram/config.json`, `~/.nanobot-discord/config.json`, etc. w
 # Instance A - Telegram bot
 nanobot gateway --config ~/.nanobot-telegram/config.json
 
-# Instance B - Discord bot  
+# Instance B - Discord bot
 nanobot gateway --config ~/.nanobot-discord/config.json
 
 # Instance C - Feishu bot with custom port
