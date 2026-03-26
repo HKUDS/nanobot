@@ -3,10 +3,10 @@
 ``MemoryStore`` is a thin facade that composes focused subsystem modules:
 
 - ``EventIngester`` — event write path (classify, dedup, merge, append)
-- ``MemoryRetriever`` — retrieval read path (mem0, BM25, reranking)
+- ``MemoryRetriever`` — retrieval read path (vector, BM25, reranking)
 - ``ConsolidationPipeline`` — LLM-driven memory consolidation
 - ``MemoryMaintenance`` — reindex, seed, health checks
-- ``MemorySnapshot`` — rebuild and verify MEMORY.md
+- ``MemorySnapshot`` — rebuild and verify memory snapshots
 - ``RolloutConfig`` — feature flag management
 
 Cross-cutting coordination (``get_memory_context``) stays on ``MemoryStore``.
@@ -24,7 +24,6 @@ from .consolidation_pipeline import ConsolidationPipeline
 from .embedder import HashEmbedder, LocalEmbedder, OpenAIEmbedder
 from .graph.graph import KnowledgeGraph
 from .maintenance import MemoryMaintenance
-from .migration import migrate_to_sqlite
 from .persistence.profile_io import ProfileStore
 from .persistence.snapshot import MemorySnapshot
 from .ranking.reranker import CompositeReranker, Reranker
@@ -56,7 +55,7 @@ if TYPE_CHECKING:
 
 
 class MemoryStore:
-    """mem0-first memory store with structured profile/events maintenance."""
+    """SQLite-backed memory store with structured profile/events maintenance."""
 
     PROFILE_KEYS = (
         "preferences",
@@ -113,26 +112,12 @@ class MemoryStore:
 
         self.memory_dir: Path = workspace / "memory"
         self.memory_dir.mkdir(parents=True, exist_ok=True)
-        self.memory_file: Path = self.memory_dir / "MEMORY.md"
-        self.history_file: Path = self.memory_dir / "HISTORY.md"
         self.events_file: Path = self.memory_dir / "events.jsonl"
-        self.profile_file: Path = self.memory_dir / "profile.json"
         self.index_dir: Path = self.memory_dir / "index"
 
-        # Construct unified SQLite database (migrates old files if needed).
+        # Construct unified SQLite database.
         _dims = self._embedder.dims if self._embedder is not None else 384
-        _db_path = self.memory_dir / "memory.db"
-        _has_old_files = any(
-            (self.memory_dir / f).exists()
-            for f in ("events.jsonl", "profile.json", "HISTORY.md", "MEMORY.md")
-        )
-        if _db_path.exists() or _has_old_files:
-            self.db: UnifiedMemoryDB = migrate_to_sqlite(
-                self.memory_dir, dims=_dims, embedder=self._embedder
-            )
-        else:
-            # Fresh workspace — create the DB.
-            self.db = UnifiedMemoryDB(self.memory_dir / "memory.db", dims=_dims)
+        self.db: UnifiedMemoryDB = UnifiedMemoryDB(self.memory_dir / "memory.db", dims=_dims)
 
         self.retriever: MemoryRetriever  # set after graph/ingester init
         # EventIngester is constructed after graph is ready.
@@ -174,7 +159,6 @@ class MemoryStore:
             retrieve_fn=lambda *a, **kw: self.retriever.retrieve(*a, **kw),
             planner=self._planner,
             read_events_fn=lambda **kw: self.ingester.read_events(**kw),
-            read_long_term_fn=None,
             build_graph_context_lines_fn=lambda *a, **kw: self._graph_aug.build_graph_context_lines(
                 *a, **kw
             ),
@@ -266,7 +250,7 @@ class MemoryStore:
             get_backend_stats_fn=lambda: self.maintenance._backend_stats_for_eval(),
         )
 
-        # MemorySnapshot: rebuild MEMORY.md + verify memory integrity.
+        # MemorySnapshot: rebuild memory snapshots + verify integrity.
         self.snapshot = MemorySnapshot(
             profile_mgr=self.profile_mgr,
             read_events_fn=lambda **kw: self.ingester.read_events(**kw),
@@ -276,8 +260,6 @@ class MemoryStore:
             recent_unresolved_fn=lambda events, **kw: self._assembler._recent_unresolved(
                 events, **kw
             ),
-            read_long_term_fn=None,
-            write_long_term_fn=None,
             verify_beliefs_fn=lambda: self.profile_mgr.verify_beliefs(),
             write_profile_fn=lambda profile: self.profile_mgr.write_profile(profile),
             profile_keys=self.PROFILE_KEYS,
@@ -306,8 +288,6 @@ class MemoryStore:
             profile_mgr=self.profile_mgr,
             conflict_mgr=self.conflict_mgr,
             snapshot=self.snapshot,
-            memory_file=self.memory_file,
-            history_file=self.history_file,
             db=self.db,
         )
 
@@ -360,15 +340,12 @@ class MemoryStore:
             retrieve_fn=lambda *a, **kw: self.retriever.retrieve(*a, **kw),
             planner=planner,
             read_events_fn=lambda **kw: self.ingester.read_events(**kw),
-            read_long_term_fn=None,
             build_graph_context_lines_fn=lambda *a, **kw: self._graph_aug.build_graph_context_lines(
                 *a, **kw
             ),
             budget_allocator=getattr(self, "_budget_allocator", None),
-            db=getattr(self, "db", None),
-            embedder_available=(
-                getattr(self, "_embedder", None) is not None or getattr(self, "db", None) is None
-            ),
+            db=self.db,
+            embedder_available=getattr(self, "_embedder", None) is not None,
         )
         return self._assembler
 
@@ -408,7 +385,7 @@ class MemoryStore:
         memory_mode: str | None = None,
         enable_contradiction_check: bool = True,
     ) -> bool:
-        """Consolidate old messages into MEMORY.md + HISTORY.md via LLM tool call.
+        """Consolidate old messages into SQLite snapshots and history via LLM tool call.
 
         Returns True on success (including no-op), False on failure.
         """

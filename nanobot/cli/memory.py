@@ -1,3 +1,4 @@
+# size-exception: CLI command module — many small command functions
 """CLI commands for the memory subsystem."""
 
 from __future__ import annotations
@@ -143,7 +144,7 @@ def memory_metrics() -> None:
 @memory_app.command("rebuild")
 def memory_rebuild(
     max_events: int = typer.Option(
-        30, "--max-events", help="Max recent events for MEMORY.md snapshot"
+        30, "--max-events", help="Max recent events for memory snapshot"
     ),
 ) -> None:
     """Rebuild memory snapshot from structured memory profile and events."""
@@ -157,7 +158,7 @@ def memory_rebuild(
     )
     snapshot = store.snapshot.rebuild_memory_snapshot(max_events=max_events, write=True)
     line_count = len(snapshot.splitlines())
-    console.print(f"[green]✓[/green] Rebuilt MEMORY.md with {line_count} lines")
+    console.print(f"[green]✓[/green] Rebuilt memory snapshot with {line_count} lines")
 
 
 @memory_app.command("reindex")
@@ -611,77 +612,3 @@ def memory_outdated(
         console.print("[red]Memory item not found.[/red]")
         raise typer.Exit(1)
     console.print(f"[green]✓[/green] Marked memory item as outdated in '{field}'")
-
-
-@memory_app.command("migrate-graph")
-def migrate_graph(
-    neo4j_uri: str = typer.Option("bolt://localhost:7687", help="Neo4j server URI"),
-    neo4j_auth: str = typer.Option("neo4j/password", help="Neo4j auth (user/password)"),
-    neo4j_database: str = typer.Option("neo4j", help="Neo4j database name"),
-) -> None:
-    """Migrate knowledge graph from Neo4j to local networkx JSON file.
-
-    Requires neo4j package: pip install neo4j
-    """
-    try:
-        from neo4j import GraphDatabase  # type: ignore[import-untyped]
-    except ImportError:
-        console.print("[red]neo4j package not installed.[/red]")
-        console.print("Install it first: pip install neo4j")
-        raise typer.Exit(1) from None
-
-    from nanobot.config.loader import load_config
-
-    config = load_config()
-    workspace = config.workspace_path
-
-    # Parse auth
-    parts = neo4j_auth.split("/", 1)
-    user, password = parts[0], parts[1] if len(parts) > 1 else ""
-
-    console.print(f"Connecting to Neo4j at {neo4j_uri}...")
-    driver = None
-    try:
-        driver = GraphDatabase.driver(neo4j_uri, auth=(user, password))
-        with driver.session(database=neo4j_database) as session:
-            # Read all nodes
-            nodes = session.run("MATCH (n) RETURN n").data()
-            # Read all relationships
-            rels = session.run(
-                "MATCH ()-[r]->() RETURN r, type(r) as type,"
-                " startNode(r).name as src, endNode(r).name as tgt"
-            ).data()
-    except Exception as exc:  # crash-barrier: neo4j connection errors are opaque
-        console.print(f"[red]Failed to connect to Neo4j: {exc}[/red]")
-        raise typer.Exit(1) from None
-    finally:
-        if driver is not None:
-            driver.close()
-
-    # Import graph into SQLite database
-    from nanobot.memory.migration import migrate_to_sqlite
-
-    db = migrate_to_sqlite(workspace / "memory", dims=384, embedder=None)
-
-    node_count = 0
-    for record in nodes:
-        node = record["n"]
-        props = dict(node.items())
-        name = props.pop("name", str(node.id))
-        entity_type = props.pop("entity_type", "unknown")
-        db.upsert_entity(name.lower(), type=entity_type)
-        node_count += 1
-
-    edge_count = 0
-    for record in rels:
-        src = record.get("src", "").lower()
-        tgt = record.get("tgt", "").lower()
-        rel_type = record.get("type", "RELATED_TO")
-        if src and tgt:
-            db.add_edge(src, tgt, relation=rel_type)
-            edge_count += 1
-
-    console.print(
-        f"[green]Migration complete: {node_count} entities, {edge_count} relationships[/green]"
-    )
-    console.print(f"Saved to: {workspace / 'memory' / 'memory.db'}")

@@ -226,12 +226,7 @@ def _wire_memory(
             )
             text = header + "\n" + "\n".join(lines) + "\n\n"
             assert context.memory is not None  # always injected by build_agent
-            if context.memory.db is not None:
-                context.memory.db.append_history(text)
-            else:
-                # Fallback: write to HISTORY.md file directly.
-                with open(context.memory.history_file, "a", encoding="utf-8") as f:
-                    f.write(text)
+            context.memory.db.append_history(text)
 
     assert context.memory is not None  # always injected by build_agent
     return ConsolidationOrchestrator(
