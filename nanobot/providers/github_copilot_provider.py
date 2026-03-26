@@ -170,7 +170,7 @@ class GithubCopilotAuthenticator:
         Returns:
             str: The GitHub Copilot API key.
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self.get_api_key)
 
     def get_api_key(self) -> str:
