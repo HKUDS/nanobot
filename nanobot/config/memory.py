@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import Field
 
 from nanobot.config.base import Base
@@ -89,3 +91,24 @@ class MemoryConfig(Base):
     # Subsections
     reranker: RerankerConfig = Field(default_factory=RerankerConfig)
     vector: VectorConfig = Field(default_factory=VectorConfig)
+
+    def rollout_status(self) -> dict[str, Any]:
+        """Return a snapshot of rollout-relevant fields for reporting."""
+        return {
+            "rollout_mode": self.rollout_mode,
+            "type_separation_enabled": self.type_separation_enabled,
+            "router_enabled": self.router_enabled,
+            "reflection_enabled": self.reflection_enabled,
+            "vector_health_enabled": self.vector_health_enabled,
+            "auto_reindex_on_empty_vector": self.auto_reindex_on_empty_vector,
+            "graph_enabled": self.graph_enabled,
+            "reranker_mode": self.reranker.mode,
+            "reranker_alpha": self.reranker.alpha,
+            "reranker_model": self.reranker.model,
+            "rollout_gates": {
+                "min_recall_at_k": self.rollout_gate_min_recall_at_k,
+                "min_precision_at_k": self.rollout_gate_min_precision_at_k,
+                "max_avg_memory_context_tokens": self.rollout_gate_max_avg_context_tokens,
+                "max_history_fallback_ratio": self.rollout_gate_max_history_fallback_ratio,
+            },
+        }

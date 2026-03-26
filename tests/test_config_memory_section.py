@@ -81,3 +81,50 @@ class TestVectorConfig:
         assert vc.add_debug is False
         assert vc.verify_write is True
         assert vc.force_infer is False
+
+
+class TestRolloutStatus:
+    def test_rollout_status_contains_expected_keys(self):
+        """rollout_status() returns the keys that consumers expect."""
+        mc = MemoryConfig()
+        status = mc.rollout_status()
+        expected_keys = {
+            "rollout_mode",
+            "type_separation_enabled",
+            "router_enabled",
+            "reflection_enabled",
+            "vector_health_enabled",
+            "auto_reindex_on_empty_vector",
+            "graph_enabled",
+            "reranker_mode",
+            "reranker_alpha",
+            "reranker_model",
+            "rollout_gates",
+        }
+        assert expected_keys == set(status.keys())
+
+    def test_rollout_status_gates_structure(self):
+        """rollout_status() rollout_gates contains the four gate thresholds."""
+        mc = MemoryConfig()
+        gates = mc.rollout_status()["rollout_gates"]
+        assert gates == {
+            "min_recall_at_k": 0.55,
+            "min_precision_at_k": 0.25,
+            "max_avg_memory_context_tokens": 1400.0,
+            "max_history_fallback_ratio": 0.05,
+        }
+
+    def test_rollout_status_reflects_custom_values(self):
+        """rollout_status() reflects non-default config values."""
+        mc = MemoryConfig(
+            rollout_mode="shadow",
+            graph_enabled=True,
+            reranker={"mode": "disabled", "alpha": 0.8},
+            rollout_gate_min_recall_at_k=0.9,
+        )
+        status = mc.rollout_status()
+        assert status["rollout_mode"] == "shadow"
+        assert status["graph_enabled"] is True
+        assert status["reranker_mode"] == "disabled"
+        assert status["reranker_alpha"] == 0.8
+        assert status["rollout_gates"]["min_recall_at_k"] == 0.9
