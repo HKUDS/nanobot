@@ -188,6 +188,104 @@ Should show `twilio_whatsapp` as enabled.
 - Media downloads use Basic Auth with your `account_sid` and `auth_token`. Verify these are correct
 - Check that the Twilio media URL is accessible (it expires after a while)
 
+## Running with Docker
+
+The project includes a `Dockerfile` and `docker-compose.yml`. By default the image does not include the Twilio SDK, so you need to add the extra to the install step.
+
+### 1. Update the Dockerfile
+
+Change the two `uv pip install` lines to include the `twilio` extra:
+
+```dockerfile
+# In the cached dependency layer:
+RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
+    uv pip install --system --no-cache ".[twilio]" && \
+    rm -rf nanobot bridge
+
+# In the full source install:
+RUN uv pip install --system --no-cache ".[twilio]"
+```
+
+If you don't need the Baileys WhatsApp bridge (Node.js), you can also remove the Node.js installation block and the `bridge/` COPY/build steps to shrink the image.
+
+### 2. Configure nanobot
+
+Create or edit `~/.nanobot/config.json` on your host machine with the Twilio settings (see [step 3](#3-configure-nanobot) above). The docker-compose file mounts `~/.nanobot` into the container.
+
+### 3. Build and start
+
+```bash
+docker compose build
+docker compose up -d nanobot-gateway
+```
+
+Check the logs:
+
+```bash
+docker compose logs -f nanobot-gateway
+```
+
+You should see:
+
+```
+Twilio WhatsApp webhook listening on :18790/twilio/whatsapp
+```
+
+### 4. Start ngrok
+
+In a separate terminal on the host:
+
+```bash
+ngrok http 18790
+```
+
+Then set the ngrok URL in the Twilio Console as described in [step 5](#5-configure-the-twilio-webhook).
+
+### 5. Using ngrok in Docker (alternative)
+
+You can also run ngrok as a Docker service alongside nanobot. Add it to `docker-compose.yml`:
+
+```yaml
+services:
+  nanobot-gateway:
+    # ... existing config ...
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    command: http nanobot-gateway:18790
+    environment:
+      - NGROK_AUTHTOKEN=your_ngrok_auth_token
+    ports:
+      - 4040:4040  # ngrok inspection UI
+    depends_on:
+      - nanobot-gateway
+```
+
+Get your auth token from [ngrok dashboard](https://dashboard.ngrok.com/get-started/your-authtoken).
+
+After starting:
+
+```bash
+docker compose up -d
+```
+
+Visit http://localhost:4040 to find the public URL, then configure it in the Twilio Console.
+
+### Running CLI commands with Docker
+
+Use the `cli` profile to run one-off nanobot commands:
+
+```bash
+# Check status
+docker compose run --rm nanobot-cli status
+
+# List plugins
+docker compose run --rm nanobot-cli plugins list
+
+# Run onboarding
+docker compose run --rm nanobot-cli onboard
+```
+
 ## Architecture
 
 ```
