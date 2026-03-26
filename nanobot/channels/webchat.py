@@ -337,8 +337,29 @@ class WebChatChannel(BaseChannel):
         let ws = null;
         let reconnectAttempts = 0;
         let currentBotMessage = null;
-        let sessionId = localStorage.getItem('webchat_session_id') || generateSessionId();
-        localStorage.setItem('webchat_session_id', sessionId);
+
+        // Parse URL params for fixed session/agent ID
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlSessionId = urlParams.get('session_id') || urlParams.get('session') || urlParams.get('sid');
+        const agentId = urlParams.get('agent') || urlParams.get('agent_id');
+
+        // Priority: URL session_id > URL agent_id > localStorage > generate new
+        let sessionId;
+        if (urlSessionId) {
+            sessionId = urlSessionId;
+        } else if (agentId) {
+            // Map agent to a fixed session ID: agent_{agentId}
+            sessionId = 'agent_' + agentId;
+        } else {
+            sessionId = localStorage.getItem('webchat_session_id') || generateSessionId();
+            localStorage.setItem('webchat_session_id', sessionId);
+        }
+
+        // Update page title if agent specified
+        if (agentId) {
+            document.querySelector('.header h1').textContent = `🤖 ${agentId}`;
+            document.title = `${agentId} - Nanobot Chat`;
+        }
 
         function generateSessionId() {
             return 'web_' + Math.random().toString(36).substr(2, 9);
