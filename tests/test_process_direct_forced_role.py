@@ -15,7 +15,9 @@ from unittest.mock import patch
 from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentConfig, AgentRoleConfig
+from nanobot.config.agent import AgentConfig
+from nanobot.config.memory import MemoryConfig
+from nanobot.config.schema import AgentRoleConfig
 from nanobot.coordination.router import RoutingDecision, UnknownRoleError
 from nanobot.providers.base import LLMResponse
 from tests.helpers import ScriptedProvider
@@ -25,7 +27,7 @@ def _make_config(tmp_path: Path, **overrides: Any) -> AgentConfig:
     defaults: dict[str, Any] = dict(
         workspace=str(tmp_path),
         model="test-model",
-        memory_window=10,
+        memory=MemoryConfig(window=10),
         max_iterations=5,
         planning_enabled=False,
         verification_mode="off",

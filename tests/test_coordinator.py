@@ -15,7 +15,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from nanobot.config.schema import AgentConfig, AgentRoleConfig, RoutingConfig
+from nanobot.config.agent import AgentConfig
+from nanobot.config.memory import MemoryConfig
+from nanobot.config.schema import AgentRoleConfig, RoutingConfig
 from nanobot.coordination.coordinator import (
     DEFAULT_ROLES,
     ClassificationResult,
@@ -463,7 +465,7 @@ def _make_agent_config(tmp_path: Path, **overrides: Any) -> AgentConfig:
     defaults: dict[str, Any] = dict(
         workspace=str(tmp_path),
         model="test-model",
-        memory_window=10,
+        memory=MemoryConfig(window=10),
         max_iterations=5,
         planning_enabled=False,
         verification_mode="off",

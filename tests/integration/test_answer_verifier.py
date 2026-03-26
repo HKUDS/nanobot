@@ -15,7 +15,8 @@ import pytest
 from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentConfig
+from nanobot.config.agent import AgentConfig
+from nanobot.config.memory import MemoryConfig, RerankerConfig
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from tests.integration.conftest import MODEL, make_inbound
 
@@ -46,13 +47,12 @@ class TestVerificationAlways:
         config = AgentConfig(
             workspace=str(tmp_path),
             model=MODEL,
-            memory_window=10,
+            memory=MemoryConfig(window=10, reranker=RerankerConfig(mode="disabled")),
             max_iterations=5,
             planning_enabled=False,
             verification_mode="always",
             memory_enabled=False,
             graph_enabled=False,
-            reranker_mode="disabled",
         )
         bus = MessageBus()
         agent = build_agent(bus=bus, provider=provider, config=config)

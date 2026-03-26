@@ -15,7 +15,8 @@ from typing import Any
 
 from conftest import FakeProvider
 
-from nanobot.config.schema import AgentConfig
+from nanobot.config.agent import AgentConfig
+from nanobot.config.memory import MemoryConfig
 from nanobot.coordination.coordinator import Coordinator, build_default_registry
 from nanobot.tools.builtin.delegate import DelegateParallelTool, DelegationResult, _CycleError
 from nanobot.tools.registry import ToolRegistry
@@ -29,7 +30,7 @@ def _make_agent_config(tmp_path: Path, **overrides: Any) -> AgentConfig:
     defaults: dict[str, Any] = dict(
         workspace=str(tmp_path),
         model="test-model",
-        memory_window=10,
+        memory=MemoryConfig(window=10),
         max_iterations=5,
         planning_enabled=False,
         verification_mode="off",

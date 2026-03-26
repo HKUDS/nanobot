@@ -19,8 +19,9 @@ from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.config.agent import AgentConfig
 from nanobot.config.loader import load_config
-from nanobot.config.schema import AgentConfig
+from nanobot.config.memory import MemoryConfig, RerankerConfig
 from nanobot.memory.store import MemoryStore
 from nanobot.providers.litellm_provider import LiteLLMProvider
 
@@ -101,13 +102,12 @@ def config(tmp_path: Path) -> AgentConfig:
     return AgentConfig(
         workspace=str(tmp_path),
         model=MODEL,
-        memory_window=10,
+        memory=MemoryConfig(window=10, reranker=RerankerConfig(mode="disabled")),
         max_iterations=5,
         planning_enabled=False,
         verification_mode="off",
         memory_enabled=True,
         graph_enabled=False,
-        reranker_mode="disabled",
     )
 
 

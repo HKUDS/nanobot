@@ -13,11 +13,11 @@ from nanobot.memory.write.micro_extractor import _MICRO_EXTRACT_TOOL, MicroExtra
 
 def test_config_defaults():
     """Micro-extraction config fields exist with correct defaults."""
-    from nanobot.config.schema import AgentConfig
+    from nanobot.config.agent import AgentConfig
 
     config = AgentConfig()
-    assert config.micro_extraction_enabled is False
-    assert config.micro_extraction_model is None
+    assert config.memory.micro_extraction_enabled is False
+    assert config.memory.micro_extraction_model is None
 
 
 def test_tool_schema_has_required_fields():

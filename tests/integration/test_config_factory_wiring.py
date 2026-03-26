@@ -15,7 +15,7 @@ import pytest
 from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentConfig
+from nanobot.config.agent import AgentConfig
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from tests.integration.conftest import MODEL
 

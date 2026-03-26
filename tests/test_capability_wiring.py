@@ -13,7 +13,9 @@ from typing import Any
 from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentConfig, AgentRoleConfig, RoutingConfig
+from nanobot.config.agent import AgentConfig
+from nanobot.config.memory import MemoryConfig
+from nanobot.config.schema import AgentRoleConfig, RoutingConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
 from nanobot.tools.base import Tool, ToolResult
 from nanobot.tools.capability import CapabilityRegistry
@@ -65,7 +67,7 @@ def _make_loop(
     defaults: dict[str, Any] = {
         "workspace": str(tmp_path),
         "model": "stub-model",
-        "memory_window": 10,
+        "memory": MemoryConfig(window=10),
         "max_iterations": 3,
         "planning_enabled": False,
         "verification_mode": "off",
