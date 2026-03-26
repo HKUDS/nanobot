@@ -65,6 +65,8 @@ class AgentLoop:
         input_limits: InputLimitsConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
+        extra_read: list[str] | None = None,
+        extra_write: list[str] | None = None,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
@@ -85,6 +87,8 @@ class AgentLoop:
         self.input_limits = input_limits or InputLimitsConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.extra_read = extra_read or []
+        self.extra_write = extra_write or []
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
 
@@ -100,6 +104,8 @@ class AgentLoop:
             web_proxy=web_proxy,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            extra_read=self.extra_read,
+            extra_write=self.extra_write,
         )
 
         self._running = False
@@ -131,8 +137,8 @@ class AgentLoop:
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
-        allowed_dir = self.workspace if self.restrict_to_workspace else None
-        extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
+        allowed_dir: list[Path] = ([self.workspace] + ([Path(p) for p in self.extra_write] if self.extra_write else [])) if self.restrict_to_workspace else None
+        extra_read: list[Path] = ([BUILTIN_SKILLS_DIR] + ([Path(p) for p in self.extra_read] if self.extra_read else [])) if allowed_dir else None
         self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
         for cls in (WriteFileTool, EditFileTool, ListDirTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
