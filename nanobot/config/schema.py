@@ -20,7 +20,7 @@ class ChannelsConfig(Base):
     Each channel parses its own config in __init__.
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="allow")
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
@@ -44,7 +44,7 @@ class MemoryConfig(Base):
         }
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="allow")
 
 
 class AgentDefaults(Base):

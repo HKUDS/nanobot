@@ -22,7 +22,7 @@ from nanobot.agent.memory.base import BaseMemoryStore
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
-from mem0 import  Memory
+
 def _lazy_import_mem0():
     """Import the mem0ai Memory class and return it.
 
