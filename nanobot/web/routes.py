@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
 import mimetypes
 import re
 import uuid
@@ -69,14 +71,9 @@ def _strip_attachments(text: str, uploads_dir: Path) -> str:
     notes: list[str] = []
 
     def _save(m: re.Match[str]) -> str:
-        fname = Path(m.group(1)).name  # SEC-07: strip any path components to prevent traversal
-        data = m.group(2).strip()
-        dest = uploads_dir / fname
-        # Avoid overwriting — append uuid suffix when needed
-        if dest.exists():
-            stem = dest.stem
-            dest = uploads_dir / f"{stem}_{uuid.uuid4().hex[:8]}{dest.suffix}"
-        dest.write_text(data, encoding="utf-8")
+        fname = Path(m.group(1)).name  # SEC-07: strip path components
+        data = m.group(2).strip().encode("utf-8")
+        dest = _save_upload(data, fname, uploads_dir)
         notes.append(f"[Attached file saved: {dest}]")
         return ""
 
@@ -106,6 +103,60 @@ def _decode_data_uri(data_str: str) -> bytes:
     return base64.b64decode(raw)
 
 
+def _load_manifest(uploads_dir: Path) -> dict[str, str]:
+    """Load the hash-to-filename manifest from disk."""
+    manifest_path = uploads_dir / ".manifest.json"
+    if manifest_path.exists():
+        try:
+            result: dict[str, str] = json.loads(manifest_path.read_text(encoding="utf-8"))
+            return result
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("upload manifest corrupted, rebuilding: {}", exc)
+            return {}
+    return {}
+
+
+def _save_manifest(uploads_dir: Path, manifest: dict[str, str]) -> None:
+    """Persist the hash-to-filename manifest to disk."""
+    manifest_path = uploads_dir / ".manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _save_upload(data: bytes, filename: str, uploads_dir: Path) -> Path:
+    """Save upload data with content-hash deduplication.
+
+    If identical content already exists (by SHA-256), return the existing path
+    instead of writing a new copy. Path traversal in *filename* is stripped.
+    """
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+
+    content_hash = hashlib.sha256(data).hexdigest()
+    manifest = _load_manifest(uploads_dir)
+
+    # Check for existing file with same content
+    if content_hash in manifest:
+        existing = uploads_dir / manifest[content_hash]
+        if existing.exists():
+            return existing
+        # Stale manifest entry — remove it
+        del manifest[content_hash]
+
+    # Sanitise filename: strip path components (SEC-07)
+    safe_name = Path(filename).name or f"upload_{uuid.uuid4().hex[:12]}.bin"
+    dest = uploads_dir / safe_name
+    if dest.exists():
+        stem = dest.stem
+        dest = uploads_dir / f"{stem}_{uuid.uuid4().hex[:8]}{dest.suffix}"
+
+    dest.write_bytes(data)
+    manifest[content_hash] = dest.name
+    _save_manifest(uploads_dir, manifest)
+    return dest
+
+
 def _extract_images(message: ChatMessage, uploads_dir: Path) -> list[str]:
     """Extract image content parts from a multimodal message and save to disk.
 
@@ -125,8 +176,8 @@ def _extract_images(message: ChatMessage, uploads_dir: Path) -> list[str]:
 
         ext = _MIME_EXT.get(part.media_type, ".bin")
         filename = f"img_{uuid.uuid4().hex[:12]}{ext}"
-        dest = uploads_dir / filename
-        dest.write_bytes(_decode_data_uri(part.data))
+        data = _decode_data_uri(part.data)
+        dest = _save_upload(data, filename, uploads_dir)
         paths.append(str(dest))
 
     return paths
@@ -176,21 +227,15 @@ def _extract_binary_files(message: ChatMessage, uploads_dir: Path) -> list[str]:
         if name_idx < len(original_names):
             orig = original_names[name_idx]
             name_idx += 1
-            # Sanitise: keep only the filename, no path separators
             safe_name = Path(orig).name
             if not safe_name:
                 safe_name = f"upload_{uuid.uuid4().hex[:12]}{_guess_extension(part.media_type)}"
-            # Avoid overwrites
-            dest = uploads_dir / safe_name
-            if dest.exists():
-                stem = dest.stem
-                dest = uploads_dir / f"{stem}_{uuid.uuid4().hex[:8]}{dest.suffix}"
         else:
             ext = _guess_extension(part.media_type)
-            filename = f"upload_{uuid.uuid4().hex[:12]}{ext}"
-            dest = uploads_dir / filename
+            safe_name = f"upload_{uuid.uuid4().hex[:12]}{ext}"
 
-        dest.write_bytes(_decode_data_uri(part.data))
+        data = _decode_data_uri(part.data)
+        dest = _save_upload(data, safe_name, uploads_dir)
         notes.append(f"[Attached file saved: {dest}]")
 
     return notes
