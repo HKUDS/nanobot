@@ -236,10 +236,6 @@ class AgentDefaults(Base):
     # Memory section token budget weights (keyed by intent name)
     memory_section_weights: dict[str, MemorySectionWeights] = Field(default_factory=dict)
 
-    # Micro-extraction: per-turn lightweight memory extraction
-    micro_extraction_enabled: bool = False  # Feature gate (opt-in)
-    micro_extraction_model: str | None = None  # None = "gpt-4o-mini"
-
 
 class AgentConfig(Base):
     """Unified agent runtime configuration.
@@ -408,8 +404,6 @@ class AgentConfig(Base):
             "max_session_wall_time_seconds": defaults.max_session_wall_time_seconds,
             "max_delegation_depth": defaults.max_delegation_depth,
             "memory_section_weights": defaults.memory_section_weights,
-            "micro_extraction_enabled": defaults.micro_extraction_enabled,
-            "micro_extraction_model": defaults.micro_extraction_model,
         }
         data.update(overrides)
         return cls(**data)  # type: ignore[arg-type]
