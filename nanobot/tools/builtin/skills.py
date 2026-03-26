@@ -26,8 +26,9 @@ class LoadSkillTool(Tool):
     name = "load_skill"
     description = (
         "Load the full instructions for a skill by name. "
-        "The system prompt lists available skills — call this tool "
-        "to get the complete instructions before using a skill."
+        "IMPORTANT: When the user's request relates to a topic in the Skills section "
+        "of your system prompt, call this tool FIRST before taking any other action. "
+        "The skill contains specialized instructions for handling the request."
     )
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
