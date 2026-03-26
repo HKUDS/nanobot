@@ -305,6 +305,7 @@ async def test_process_direct_calls_router_when_available():
     services.bus = mock_bus
     services.turn_context = mock_turn_context
     services.span_module = None
+    services.micro_extractor = None
 
     config = MagicMock(spec=AgentConfig)
     config.memory_window = 10
@@ -354,6 +355,7 @@ async def test_unknown_forced_role_returns_error_message():
     # so only a minimal services stub is required.
     services = MagicMock(spec=_ProcessorServices)
     services.span_module = None
+    services.micro_extractor = None
 
     config = MagicMock(spec=AgentConfig)
     config.memory_window = 10

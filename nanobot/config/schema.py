@@ -1,4 +1,5 @@
 """Configuration schema using Pydantic."""
+# size-exception: data definitions — Pydantic models with many fields by nature
 
 from __future__ import annotations
 
@@ -293,6 +294,10 @@ class AgentConfig(Base):
     memory_enabled: bool = True
     skills_enabled: bool = True
     streaming_enabled: bool = True
+
+    # Micro-extraction: per-turn lightweight memory extraction
+    micro_extraction_enabled: bool = False  # Feature gate (opt-in)
+    micro_extraction_model: str | None = None  # None = "gpt-4o-mini"
 
     # Summarization-based compression (Step 3)
     summary_model: str | None = (

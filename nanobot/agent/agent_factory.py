@@ -436,7 +436,19 @@ def build_agent(
         scratchpad_factory=Scratchpad,
     )
 
-    # 13. Construct _ProcessorServices and MessageProcessor
+    # 13. Construct MicroExtractor (per-turn memory extraction)
+    from nanobot.memory.write.micro_extractor import MicroExtractor as _MicroExtractor
+
+    _micro_extractor: _MicroExtractor | None = None
+    if config.micro_extraction_enabled:
+        _micro_extractor = _MicroExtractor(
+            provider=provider,
+            ingester=memory.ingester,
+            model=config.micro_extraction_model or "gpt-4o-mini",
+            enabled=True,
+        )
+
+    # 13.5. Construct _ProcessorServices and MessageProcessor
     from nanobot.agent.agent_components import _ProcessorServices
 
     services = _ProcessorServices(
@@ -451,6 +463,7 @@ def build_agent(
         bus=bus,
         turn_context=turn_context,
         span_module=sys.modules["nanobot.agent.loop"],
+        micro_extractor=_micro_extractor,
     )
     processor = MessageProcessor(
         services=services,

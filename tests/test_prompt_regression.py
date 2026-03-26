@@ -36,6 +36,7 @@ EXPECTED_PROMPTS: dict[str, list[str]] = {
     "heartbeat": ["heartbeat", "tool"],
     "identity": ["You are", "agent"],
     "memory_header": ["memory", "knowledge"],
+    "micro_extract": ["memory", "extract", "remember"],
     "nudge_delegation_exhausted": ["delegat", "exhaust"],
     "nudge_final_answer": ["answer", "final"],
     "nudge_malformed_fallback": ["malform", "fallback"],

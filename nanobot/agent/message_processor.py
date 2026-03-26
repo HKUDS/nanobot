@@ -61,6 +61,7 @@ class MessageProcessor:
         self.bus = services.bus
         self._turn_context = services.turn_context
         self._span_module: Any | None = services.span_module
+        self._micro_extractor = services.micro_extractor
         self.config = config
         self.workspace = workspace
         self.role_name = role_name
@@ -403,6 +404,15 @@ class MessageProcessor:
             if isinstance(all_msgs, list):
                 self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
+
+            # Micro-extraction: per-turn memory extraction (async, non-blocking)
+            # Only on the primary path where agent produced a substantive response.
+            # The system-message path (~line 209) is intentionally excluded.
+            if self._micro_extractor is not None and final_content:
+                await self._micro_extractor.submit(
+                    user_message=msg.content,
+                    assistant_message=final_content,
+                )
 
             # Append deferred conflict question after answering
             if pending_conflict_question:
