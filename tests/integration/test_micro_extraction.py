@@ -1,29 +1,23 @@
-"""Integration test for micro-extraction with real LLM."""
+"""Integration test for micro-extraction with real LLM.
+
+Requires: OPENAI_API_KEY or LITELLM_API_KEY.
+Uses the shared ``provider`` and ``store`` fixtures from conftest.py.
+"""
 
 from __future__ import annotations
 
 import asyncio
-import os
-from pathlib import Path
 
 import pytest
 
 from nanobot.memory.store import MemoryStore
 from nanobot.memory.write.micro_extractor import MicroExtractor
+from nanobot.providers.litellm_provider import LiteLLMProvider
 
 
-@pytest.mark.skipif(
-    not os.environ.get("OPENAI_API_KEY"),
-    reason="OPENAI_API_KEY not set — skipping LLM integration test",
-)
 @pytest.mark.asyncio
-async def test_micro_extraction_real_llm(tmp_path: Path) -> None:
+async def test_micro_extraction_real_llm(provider: LiteLLMProvider, store: MemoryStore) -> None:
     """Micro-extraction produces valid events from a realistic exchange."""
-    from nanobot.providers.openai import OpenAIProvider
-
-    provider = OpenAIProvider(api_key=os.environ["OPENAI_API_KEY"])
-    store = MemoryStore(tmp_path)
-
     extractor = MicroExtractor(
         provider=provider,
         ingester=store.ingester,
