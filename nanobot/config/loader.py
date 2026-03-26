@@ -10,13 +10,36 @@ from loguru import logger
 from nanobot.config.schema import Config
 
 
-def _keys_to_camel(obj):
+_OPAQUE_KEYS = frozenset({"env", "headers", "extraHeaders", "extra_headers"})
+_NAMED_KEYS = frozenset({"mcp_servers", "mcpServers"})
+
+
+def _keys_to_camel(obj, _mode="convert"):
     """Recursively convert dict keys from snake_case to camelCase.
-    Env-injected values use snake_case; config file expects camelCase."""
+
+    _mode controls how dict keys at the current level are handled:
+      "convert"  – normal: keys are converted, recurse into values
+      "preserve" – keys are kept as-is, values still recurse normally
+                   (for named dicts like mcpServers whose keys are user names)
+      "opaque"   – keys are kept as-is, values are NOT recursed
+                   (for data dicts like env vars, HTTP headers)
+    """
     if isinstance(obj, dict):
-        return {to_camel(k): _keys_to_camel(v) for k, v in obj.items()}
+        if _mode == "opaque":
+            return dict(obj)
+        if _mode == "preserve":
+            return {k: _keys_to_camel(v, _mode="convert") for k, v in obj.items()}
+        return {
+            to_camel(k): _keys_to_camel(
+                v,
+                _mode="opaque" if k in _OPAQUE_KEYS
+                else "preserve" if k in _NAMED_KEYS
+                else "convert",
+            )
+            for k, v in obj.items()
+        }
     if isinstance(obj, list):
-        return [_keys_to_camel(i) for i in obj]
+        return [_keys_to_camel(i, _mode=_mode) for i in obj]
     return obj
 
 
