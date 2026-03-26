@@ -373,7 +373,9 @@ class QQChannel(BaseChannel):
             try:
                 if media_ref.startswith("file://"):
                     parsed = urlparse(media_ref)
-                    local_path = Path(unquote(parsed.path))
+                    # Windows: path in netloc; Unix: path in path
+                    raw = parsed.path or parsed.netloc
+                    local_path = Path(unquote(raw))
                 else:
                     local_path = Path(os.path.expanduser(media_ref))
 

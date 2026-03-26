@@ -3,11 +3,14 @@
 import asyncio
 import json
 import mimetypes
+import os
+import shutil
+import subprocess
 from collections import OrderedDict
+from pathlib import Path
 from typing import Any, Literal
 
 from loguru import logger
-
 from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
@@ -49,6 +52,37 @@ class WhatsAppChannel(BaseChannel):
         self._connected = False
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
 
+    async def login(self, force: bool = False) -> bool:
+        """
+        Set up and run the WhatsApp bridge for QR code login.
+
+        This spawns the Node.js bridge process which handles the WhatsApp
+        authentication flow. The process blocks until the user scans the QR code
+        or interrupts with Ctrl+C.
+        """
+        from nanobot.config.paths import get_runtime_subdir
+
+        try:
+            bridge_dir = _ensure_bridge_setup()
+        except RuntimeError as e:
+            logger.error("{}", e)
+            return False
+
+        env = {**os.environ}
+        if self.config.bridge_token:
+            env["BRIDGE_TOKEN"] = self.config.bridge_token
+        env["AUTH_DIR"] = str(get_runtime_subdir("whatsapp-auth"))
+
+        logger.info("Starting WhatsApp bridge for QR login...")
+        try:
+            subprocess.run(
+                [shutil.which("npm"), "start"], cwd=bridge_dir, check=True, env=env
+            )
+        except subprocess.CalledProcessError:
+            return False
+
+        return True
+
     async def start(self) -> None:
         """Start the WhatsApp channel by connecting to the bridge."""
         import websockets
@@ -65,7 +99,9 @@ class WhatsAppChannel(BaseChannel):
                     self._ws = ws
                     # Send auth token if configured
                     if self.config.bridge_token:
-                        await ws.send(json.dumps({"type": "auth", "token": self.config.bridge_token}))
+                        await ws.send(
+                            json.dumps({"type": "auth", "token": self.config.bridge_token})
+                        )
                     self._connected = True
                     logger.info("Connected to WhatsApp bridge")
 
@@ -102,15 +138,28 @@ class WhatsAppChannel(BaseChannel):
             logger.warning("WhatsApp bridge not connected")
             return
 
-        try:
-            payload = {
-                "type": "send",
-                "to": msg.chat_id,
-                "text": msg.content
-            }
-            await self._ws.send(json.dumps(payload, ensure_ascii=False))
-        except Exception as e:
-            logger.error("Error sending WhatsApp message: {}", e)
+        chat_id = msg.chat_id
+
+        if msg.content:
+            try:
+                payload = {"type": "send", "to": chat_id, "text": msg.content}
+                await self._ws.send(json.dumps(payload, ensure_ascii=False))
+            except Exception as e:
+                logger.error("Error sending WhatsApp message: {}", e)
+
+        for media_path in msg.media or []:
+            try:
+                mime, _ = mimetypes.guess_type(media_path)
+                payload = {
+                    "type": "send_media",
+                    "to": chat_id,
+                    "filePath": media_path,
+                    "mimetype": mime or "application/octet-stream",
+                    "fileName": media_path.rsplit("/", 1)[-1],
+                }
+                await self._ws.send(json.dumps(payload, ensure_ascii=False))
+            except Exception as e:
+                logger.error("Error sending WhatsApp media {}: {}", media_path, e)
 
     async def _handle_bridge_message(self, raw: str) -> None:
         """Handle a message from the bridge."""
@@ -152,7 +201,10 @@ class WhatsAppChannel(BaseChannel):
 
             # Handle voice transcription if it's a voice message
             if content == "[Voice Message]":
-                logger.info("Voice message received from {}, but direct download from bridge is not yet supported.", sender_id)
+                logger.info(
+                    "Voice message received from {}, but direct download from bridge is not yet supported.",
+                    sender_id,
+                )
                 content = "[Voice Message: Transcription not available for WhatsApp yet]"
 
             # Extract media paths (images/documents/videos downloaded by the bridge)
@@ -174,8 +226,8 @@ class WhatsAppChannel(BaseChannel):
                 metadata={
                     "message_id": message_id,
                     "timestamp": data.get("timestamp"),
-                    "is_group": data.get("isGroup", False)
-                }
+                    "is_group": data.get("isGroup", False),
+                },
             )
 
         elif msg_type == "status":
@@ -193,4 +245,55 @@ class WhatsAppChannel(BaseChannel):
             logger.info("Scan QR code in the bridge terminal to connect WhatsApp")
 
         elif msg_type == "error":
-            logger.error("WhatsApp bridge error: {}", data.get('error'))
+            logger.error("WhatsApp bridge error: {}", data.get("error"))
+
+
+def _ensure_bridge_setup() -> Path:
+    """
+    Ensure the WhatsApp bridge is set up and built.
+
+    Returns the bridge directory. Raises RuntimeError if npm is not found
+    or bridge cannot be built.
+    """
+    from nanobot.config.paths import get_bridge_install_dir
+
+    user_bridge = get_bridge_install_dir()
+
+    if (user_bridge / "dist" / "index.js").exists():
+        return user_bridge
+
+    npm_path = shutil.which("npm")
+    if not npm_path:
+        raise RuntimeError("npm not found. Please install Node.js >= 18.")
+
+    # Find source bridge
+    current_file = Path(__file__)
+    pkg_bridge = current_file.parent.parent / "bridge"
+    src_bridge = current_file.parent.parent.parent / "bridge"
+
+    source = None
+    if (pkg_bridge / "package.json").exists():
+        source = pkg_bridge
+    elif (src_bridge / "package.json").exists():
+        source = src_bridge
+
+    if not source:
+        raise RuntimeError(
+            "WhatsApp bridge source not found. "
+            "Try reinstalling: pip install --force-reinstall nanobot"
+        )
+
+    logger.info("Setting up WhatsApp bridge...")
+    user_bridge.parent.mkdir(parents=True, exist_ok=True)
+    if user_bridge.exists():
+        shutil.rmtree(user_bridge)
+    shutil.copytree(source, user_bridge, ignore=shutil.ignore_patterns("node_modules", "dist"))
+
+    logger.info("  Installing dependencies...")
+    subprocess.run([npm_path, "install"], cwd=user_bridge, check=True, capture_output=True)
+
+    logger.info("  Building...")
+    subprocess.run([npm_path, "run", "build"], cwd=user_bridge, check=True, capture_output=True)
+
+    logger.info("Bridge ready")
+    return user_bridge

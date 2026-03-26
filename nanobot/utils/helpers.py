@@ -1,13 +1,22 @@
 """Utility functions for nanobot."""
 
+import base64
 import json
 import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import tiktoken
+from loguru import logger
+
+
+def strip_think(text: str) -> str:
+    """Remove <think>…</think> blocks and any unclosed trailing <think> tag."""
+    text = re.sub(r"<think>[\s\S]*?</think>", "", text)
+    text = re.sub(r"<think>[\s\S]*$", "", text)
+    return text.strip()
 
 
 def detect_image_mime(data: bytes) -> str | None:
@@ -21,6 +30,19 @@ def detect_image_mime(data: bytes) -> str | None:
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "image/webp"
     return None
+
+
+def build_image_content_blocks(raw: bytes, mime: str, path: str, label: str) -> list[dict[str, Any]]:
+    """Build native image blocks plus a short text label."""
+    b64 = base64.b64encode(raw).decode()
+    return [
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:{mime};base64,{b64}"},
+            "_meta": {"path": path},
+        },
+        {"type": "text", "text": label},
+    ]
 
 
 def ensure_dir(path: Path) -> Path:
@@ -101,7 +123,11 @@ def estimate_prompt_tokens(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
 ) -> int:
-    """Estimate prompt tokens with tiktoken."""
+    """Estimate prompt tokens with tiktoken.
+
+    Counts all fields that providers send to the LLM: content, tool_calls,
+    reasoning_content, tool_call_id, name, plus per-message framing overhead.
+    """
     try:
         enc = tiktoken.get_encoding("cl100k_base")
         parts: list[str] = []
@@ -115,9 +141,25 @@ def estimate_prompt_tokens(
                         txt = part.get("text", "")
                         if txt:
                             parts.append(txt)
+
+            tc = msg.get("tool_calls")
+            if tc:
+                parts.append(json.dumps(tc, ensure_ascii=False))
+
+            rc = msg.get("reasoning_content")
+            if isinstance(rc, str) and rc:
+                parts.append(rc)
+
+            for key in ("name", "tool_call_id"):
+                value = msg.get(key)
+                if isinstance(value, str) and value:
+                    parts.append(value)
+
         if tools:
             parts.append(json.dumps(tools, ensure_ascii=False))
-        return len(enc.encode("\n".join(parts)))
+
+        per_message_overhead = len(messages) * 4
+        return len(enc.encode("\n".join(parts))) + per_message_overhead
     except Exception:
         return 0
 
@@ -146,14 +188,70 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
     if message.get("tool_calls"):
         parts.append(json.dumps(message["tool_calls"], ensure_ascii=False))
 
+    rc = message.get("reasoning_content")
+    if isinstance(rc, str) and rc:
+        parts.append(rc)
+
     payload = "\n".join(parts)
     if not payload:
-        return 1
+        return 4
     try:
         enc = tiktoken.get_encoding("cl100k_base")
-        return max(1, len(enc.encode(payload)))
+        return max(4, len(enc.encode(payload)) + 4)
     except Exception:
-        return max(1, len(payload) // 4)
+        return max(4, len(payload) // 4 + 4)
+
+
+def trim_history_for_budget(
+    messages: list[dict[str, Any]],
+    turn_start_index: int,
+    iteration: int,
+    context_budget_tokens: int,
+    find_legal_start: Callable[[list[dict[str, Any]]], int],
+) -> list[dict[str, Any]]:
+    """Trim old session history to fit within context_budget_tokens.
+
+    Returns the original list unchanged when no trimming is needed.
+    Only trims on iteration >= 2 when context_budget_tokens > 0.
+    Current-turn messages (from turn_start_index onward) are never trimmed.
+    """
+    if context_budget_tokens <= 0 or iteration <= 1:
+        return messages
+    if turn_start_index <= 1:
+        return messages  # no old history to trim
+
+    system = messages[:1]
+    old_history = messages[1:turn_start_index]
+    current_turn = messages[turn_start_index:]
+
+    # Pre-compute token counts to avoid double-estimation
+    token_counts = [estimate_message_tokens(m) for m in old_history]
+    total = sum(token_counts)
+    if total <= context_budget_tokens:
+        return messages  # fits, no trim needed
+
+    # Find cut index (O(n) scan, then single slice)
+    cut = 0
+    removed_tokens = 0
+    while cut < len(old_history) and total > context_budget_tokens:
+        removed_tokens += token_counts[cut]
+        total -= token_counts[cut]
+        cut += 1
+    old_history = old_history[cut:]
+
+    # Fix orphaned tool results after trimming
+    legal_start = find_legal_start(old_history)
+    if legal_start > 0:
+        old_history = old_history[legal_start:]
+
+    removed_count = turn_start_index - 1 - len(old_history)
+    if removed_count > 0:
+        logger.debug(
+            "Context budget: trimmed {} history messages ({} tokens) for iteration {}",
+            removed_count, removed_tokens, iteration,
+        )
+
+    return system + old_history + current_turn
 
 
 def estimate_prompt_tokens_chain(
@@ -176,6 +274,39 @@ def estimate_prompt_tokens_chain(
     if estimated > 0:
         return int(estimated), "tiktoken"
     return 0, "none"
+
+
+def build_status_content(
+    *,
+    version: str,
+    model: str,
+    start_time: float,
+    last_usage: dict[str, int],
+    context_window_tokens: int,
+    session_msg_count: int,
+    context_tokens_estimate: int,
+) -> str:
+    """Build a human-readable runtime status snapshot."""
+    uptime_s = int(time.time() - start_time)
+    uptime = (
+        f"{uptime_s // 3600}h {(uptime_s % 3600) // 60}m"
+        if uptime_s >= 3600
+        else f"{uptime_s // 60}m {uptime_s % 60}s"
+    )
+    last_in = last_usage.get("prompt_tokens", 0)
+    last_out = last_usage.get("completion_tokens", 0)
+    ctx_total = max(context_window_tokens, 0)
+    ctx_pct = int((context_tokens_estimate / ctx_total) * 100) if ctx_total > 0 else 0
+    ctx_used_str = f"{context_tokens_estimate // 1000}k" if context_tokens_estimate >= 1000 else str(context_tokens_estimate)
+    ctx_total_str = f"{ctx_total // 1024}k" if ctx_total > 0 else "n/a"
+    return "\n".join([
+        f"\U0001f408 nanobot v{version}",
+        f"\U0001f9e0 Model: {model}",
+        f"\U0001f4ca Tokens: {last_in} in / {last_out} out",
+        f"\U0001f4da Context: {ctx_used_str}/{ctx_total_str} ({ctx_pct}%)",
+        f"\U0001f4ac Session: {session_msg_count} messages",
+        f"\u23f1 Uptime: {uptime}",
+    ])
 
 
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:

@@ -3,6 +3,7 @@
 import asyncio
 import json
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -15,6 +16,7 @@ class ToolCallRequest:
     id: str
     name: str
     arguments: dict[str, Any]
+    extra_content: dict[str, Any] | None = None
     provider_specific_fields: dict[str, Any] | None = None
     function_provider_specific_fields: dict[str, Any] | None = None
 
@@ -28,6 +30,8 @@ class ToolCallRequest:
                 "arguments": json.dumps(self.arguments, ensure_ascii=False),
             },
         }
+        if self.extra_content:
+            tool_call["extra_content"] = self.extra_content
         if self.provider_specific_fields:
             tool_call["provider_specific_fields"] = self.provider_specific_fields
         if self.function_provider_specific_fields:
@@ -222,6 +226,90 @@ class LLMProvider(ABC):
             raise
         except Exception as exc:
             return LLMResponse(content=f"Error calling LLM: {exc}", finish_reason="error")
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        reasoning_effort: str | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        """Stream a chat completion, calling *on_content_delta* for each text chunk.
+
+        Returns the same ``LLMResponse`` as :meth:`chat`.  The default
+        implementation falls back to a non-streaming call and delivers the
+        full content as a single delta.  Providers that support native
+        streaming should override this method.
+        """
+        response = await self.chat(
+            messages=messages, tools=tools, model=model,
+            max_tokens=max_tokens, temperature=temperature,
+            reasoning_effort=reasoning_effort, tool_choice=tool_choice,
+        )
+        if on_content_delta and response.content:
+            await on_content_delta(response.content)
+        return response
+
+    async def _safe_chat_stream(self, **kwargs: Any) -> LLMResponse:
+        """Call chat_stream() and convert unexpected exceptions to error responses."""
+        try:
+            return await self.chat_stream(**kwargs)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            return LLMResponse(content=f"Error calling LLM: {exc}", finish_reason="error")
+
+    async def chat_stream_with_retry(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: object = _SENTINEL,
+        temperature: object = _SENTINEL,
+        reasoning_effort: object = _SENTINEL,
+        tool_choice: str | dict[str, Any] | None = None,
+        on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        """Call chat_stream() with retry on transient provider failures."""
+        if max_tokens is self._SENTINEL:
+            max_tokens = self.generation.max_tokens
+        if temperature is self._SENTINEL:
+            temperature = self.generation.temperature
+        if reasoning_effort is self._SENTINEL:
+            reasoning_effort = self.generation.reasoning_effort
+
+        kw: dict[str, Any] = dict(
+            messages=messages, tools=tools, model=model,
+            max_tokens=max_tokens, temperature=temperature,
+            reasoning_effort=reasoning_effort, tool_choice=tool_choice,
+            on_content_delta=on_content_delta,
+        )
+
+        for attempt, delay in enumerate(self._CHAT_RETRY_DELAYS, start=1):
+            response = await self._safe_chat_stream(**kw)
+
+            if response.finish_reason != "error":
+                return response
+
+            if not self._is_transient_error(response.content):
+                stripped = self._strip_image_content(messages)
+                if stripped is not None:
+                    logger.warning("Non-transient LLM error with image content, retrying without images")
+                    return await self._safe_chat_stream(**{**kw, "messages": stripped})
+                return response
+
+            logger.warning(
+                "LLM transient error (attempt {}/{}), retrying in {}s: {}",
+                attempt, len(self._CHAT_RETRY_DELAYS), delay,
+                (response.content or "")[:120].lower(),
+            )
+            await asyncio.sleep(delay)
+
+        return await self._safe_chat_stream(**kw)
 
     async def chat_with_retry(
         self,
