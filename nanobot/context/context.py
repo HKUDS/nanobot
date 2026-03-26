@@ -139,8 +139,7 @@ class ContextBuilder:
                 parts.append(prompts.render("memory_header", memory=memory))
 
             # Feedback summary — surface correction stats so the agent adapts
-            events_file = self.memory.events_file
-            fb_summary = feedback_summary(events_file)
+            fb_summary = feedback_summary(self.memory.db)
             if fb_summary:
                 parts.append(f"# Feedback\n\n{fb_summary}")
 

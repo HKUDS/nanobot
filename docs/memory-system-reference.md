@@ -21,7 +21,7 @@ All persistent memory lives in a unified SQLite database (`workspace/memory/memo
 **Written by:**
 - **Consolidation pipeline** (primary) — LLM extracts events from old conversation messages
 - **Heuristic extractor** (fallback) — regex + keyword patterns when LLM extraction fails
-- **Feedback tool** — creates feedback events in `events.jsonl` (ingested into SQLite)
+- **Feedback tool** — creates feedback events directly in SQLite `events` table
 - **Live user corrections** — profile correction pipeline extracts correction events
 
 **Read by:**
@@ -61,7 +61,7 @@ Each entry is a `BeliefRecord` with: id, text, confidence (0.05–0.99), evidenc
 
 **Read by:**
 - **Context assembler** — formats profile sections into Markdown for system prompt
-- **Snapshot builder** — renders into MEMORY.md snapshot
+- **Snapshot builder** — renders into memory snapshot
 - **Retrieval scorer** — profile alignment scoring during retrieval
 
 **In LLM context:** Yes — formatted under section headers (Preferences, Stable Facts, etc.), max 8 items per section.
@@ -76,7 +76,7 @@ Each entry is a `BeliefRecord` with: id, text, confidence (0.05–0.99), evidenc
 
 ---
 
-## 3. Memory Snapshot (MEMORY.md)
+## 3. Memory Snapshot
 
 **What it stores:** Human-readable Markdown rendering of profile + recent events. This is the agent's "long-term memory" view.
 
@@ -154,26 +154,29 @@ Token budgeted (15-19% depending on intent).
 
 **What it stores:** User ratings (positive/negative) with optional comment and topic.
 
-**Event format:**
+**Event format in SQLite `events` table:**
 ```json
 {
   "id": "fb-{uuid12}",
   "type": "feedback",
+  "summary": "negative on 'calendar' — wrong date",
   "timestamp": "ISO-8601",
-  "rating": "positive|negative",
-  "comment": "optional correction text",
-  "topic": "optional label",
-  "channel": "web|telegram|...",
-  "chat_id": "...",
-  "session_key": "channel:chat_id"
+  "metadata": {
+    "rating": "positive|negative",
+    "comment": "optional correction text",
+    "topic": "optional label",
+    "channel": "web|telegram|...",
+    "chat_id": "...",
+    "session_key": "channel:chat_id"
+  }
 }
 ```
 
-**Storage:** Written to `events.jsonl` by the feedback tool, then ingested into SQLite `events` table during next consolidation.
+**Storage:** SQLite `events` table directly. Feedback-specific fields (rating, comment, topic, channel) stored in the `metadata` JSON column.
 
-**Written by:** Agent calls `feedback` tool when user expresses satisfaction or correction. The agent is instructed to do this in the identity prompt.
+**Written by:** Agent calls `feedback` tool when user expresses satisfaction or correction. `FeedbackTool.execute()` calls `db.insert_event()` synchronously. The agent is instructed to record feedback in the identity prompt.
 
-**Read by:** `feedback_summary(events_file)` aggregates stats for system prompt:
+**Read by:** `feedback_summary(db)` queries `db.read_events(type="feedback")`, unpacks metadata, and aggregates stats for system prompt:
 ```
 User feedback: 3 positive, 2 negative (5 total).
 Recent corrections/complaints:
@@ -306,7 +309,7 @@ User message arrives
 │
 ├─ 4. TOOL EXECUTION
 │  ├─ Tool Result Cache (type 8) → cache hit/miss
-│  └─ Feedback tool → writes to events.jsonl (type 6)
+│  └─ Feedback tool → writes to SQLite events table (type 6)
 │
 └─ 5. SAVE TURN
    └─ Session (type 7) → append messages to JSONL
@@ -343,7 +346,7 @@ Trigger: unconsolidated messages >= memory_window (50)
 | Events (1) | Embeddings (9) | Each event embedded on ingestion |
 | Profile (2) | Snapshot (3) | Profile sections rendered in snapshot |
 | Profile (2) | Retrieval scoring | Profile alignment boosts/penalizes retrieved events |
-| Feedback (6) | Events (1) | Feedback events ingested into events table |
+| Feedback (6) | Events (1) | Feedback events stored directly in events table |
 | Feedback (6) | Profile (2) | Negative feedback lowers belief confidence |
 | Session (7) | Events (1) | Consolidation extracts events from session messages |
 | Session (7) | History (4) | Consolidation summarizes into history entries |
@@ -371,7 +374,7 @@ Total budget: 900 tokens (default), minimum 40 per section.
 |-----------|---------|----------|
 | `memoryRetrievalK` | 6 | Number of events retrieved per query |
 | `memoryTokenBudget` | 900 | Total tokens for memory context |
-| `memoryMdTokenCap` | 1500 | Max tokens for MEMORY.md snapshot |
+| `memoryMdTokenCap` | 1500 | Max tokens for memory snapshot |
 | `memoryWindow` | 50 | Messages before consolidation triggers |
 | `memoryEnableContradictionCheck` | true | Detect belief conflicts during consolidation |
 | `memoryConflictAutoResolveGap` | 0.25 | Min confidence gap for auto-resolving conflicts |

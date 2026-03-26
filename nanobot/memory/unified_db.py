@@ -189,18 +189,23 @@ class UnifiedMemoryDB:
         *,
         limit: int = 100,
         status: str | None = None,
+        type: str | None = None,
     ) -> list[dict[str, Any]]:
         """Read events ordered by timestamp descending."""
+        clauses: list[str] = []
+        params: list[object] = []
         if status:
-            rows = self._conn.execute(
-                "SELECT * FROM events WHERE status = ? ORDER BY timestamp DESC LIMIT ?",
-                (status, limit),
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM events ORDER BY timestamp DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+            clauses.append("status = ?")
+            params.append(status)
+        if type:
+            clauses.append("type = ?")
+            params.append(type)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT * FROM events{where} ORDER BY timestamp DESC LIMIT ?",
+            params,
+        ).fetchall()
         return [dict(row) for row in rows]
 
     # ------------------------------------------------------------------

@@ -225,7 +225,7 @@ class Triple:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], *, source_event_id: str = "") -> Triple:
-        """Deserialise from a dict (e.g. from events.jsonl)."""
+        """Deserialise from a dict (e.g. from a stored event)."""
         return cls(
             subject=str(data.get("subject", "")).strip(),
             predicate=RelationType.from_str(str(data.get("predicate", "RELATED_TO"))),
