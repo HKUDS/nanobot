@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from nanobot.config.memory import MemoryConfig
 from nanobot.memory.read.graph_augmentation import GraphAugmenter
 from nanobot.memory.read.retriever import MemoryRetriever
 from nanobot.memory.read.scoring import PROFILE_KEYS, RetrievalScorer
@@ -17,6 +18,7 @@ def _make_retriever(
     rollout: dict[str, Any] | None = None,
     events: list[dict[str, Any]] | None = None,
     graph_enabled: bool = False,
+    memory_config: MemoryConfig | None = None,
 ) -> MemoryRetriever:
     """Build a MemoryRetriever with mocked dependencies."""
     graph = MagicMock()
@@ -54,10 +56,11 @@ def _make_retriever(
     extractor = MagicMock()
     extractor._extract_entities = MagicMock(return_value=[])
 
+    _mc = memory_config or MemoryConfig()
     scorer = RetrievalScorer(
         profile_mgr=profile_mgr,
         reranker=reranker,
-        rollout_fn=lambda: rollout or {},
+        memory_config_fn=lambda: _mc,
     )
     graph_aug = GraphAugmenter(
         graph=graph,
@@ -497,7 +500,9 @@ class TestRerankItemsEnabled:
     """_rerank_items calls cross-encoder when enabled."""
 
     def test_reranker_called(self) -> None:
-        retriever = _make_retriever(rollout={"reranker_mode": "enabled"})
+        retriever = _make_retriever(
+            memory_config=MemoryConfig(reranker={"mode": "enabled"}),
+        )
         scorer = retriever._scorer
         items = [
             {"id": "a", "score": 0.5, "summary": "Item A"},
@@ -512,7 +517,9 @@ class TestRerankItemsDisabled:
     """_rerank_items passes through when disabled."""
 
     def test_passthrough(self) -> None:
-        retriever = _make_retriever(rollout={"reranker_mode": "disabled"})
+        retriever = _make_retriever(
+            memory_config=MemoryConfig(reranker={"mode": "disabled"}),
+        )
         scorer = retriever._scorer
         items = [
             {"id": "a", "score": 0.5, "summary": "Item A"},
@@ -672,7 +679,7 @@ class TestGraphEntityCache:
         scorer = RetrievalScorer(
             profile_mgr=profile_mgr,
             reranker=reranker,
-            rollout_fn=lambda: {"enabled": True},
+            memory_config_fn=lambda: MemoryConfig(),
         )
         graph_aug = GraphAugmenter(
             graph=graph,

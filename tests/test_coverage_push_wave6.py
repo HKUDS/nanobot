@@ -15,7 +15,6 @@ from nanobot.memory.write.extractor import MemoryExtractor
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.tools.base import ToolResult
 from tests.test_agent_loop import ScriptedProvider, _make_loop
-from tests.test_store_helpers import _store
 
 
 async def test_loop_process_message_system_help_new_and_conflict_paths(
@@ -293,27 +292,22 @@ async def test_loop_run_agent_loop_delegation_and_failure_reflection_paths(
     )
 
 
-def test_store_load_rollout_config_env_overrides(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    store = _store(tmp_path)
+def test_store_reads_memory_config_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from nanobot.config.memory import MemoryConfig, RerankerConfig
+    from nanobot.memory.store import MemoryStore
 
-    store._rollout_config.apply_overrides(
-        {
-            "reranker_mode": "enabled",
-        }
+    store = MemoryStore(
+        tmp_path,
+        embedding_provider="hash",
+        memory_config=MemoryConfig(
+            reranker=RerankerConfig(mode="enabled", alpha=0.7),
+            rollout_gate_min_precision_at_k=0.6,
+            graph_enabled=False,
+        ),
     )
-    assert store.rollout["reranker_mode"] == "enabled"
-
-    store._rollout_config.apply_overrides(
-        {
-            "rollout_gates": {"min_precision_at_k": 0.6},
-            "reranker_alpha": "bad",
-            "reranker_mode": "enabled",
-        }
-    )
-    assert store.rollout["reranker_mode"] == "enabled"
-    assert store.rollout["rollout_gates"]["min_precision_at_k"] == pytest.approx(0.6)
+    assert store.memory_config.reranker.mode == "enabled"
+    assert store.memory_config.reranker.alpha == 0.7
+    assert store.memory_config.rollout_gate_min_precision_at_k == pytest.approx(0.6)
 
 
 async def test_loop_run_agent_nudge_and_reaction_and_close_paths(
