@@ -22,12 +22,14 @@ from tests.integration.conftest import MODEL, make_inbound
 
 _has_api_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("LITELLM_API_KEY"))
 
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(
-        not _has_api_key, reason="No LLM API key (OPENAI_API_KEY / LITELLM_API_KEY)"
-    ),
-]
+pytestmark = [pytest.mark.integration]
+
+
+@pytest.fixture(autouse=True)
+def _require_api_key() -> None:
+    """Fail immediately if no LLM API key is available."""
+    if not _has_api_key:
+        pytest.fail("No LLM API key (OPENAI_API_KEY / LITELLM_API_KEY)")
 
 
 # ---------------------------------------------------------------------------

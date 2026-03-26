@@ -160,7 +160,7 @@ adding "just one more method."
 | Tier | Command | What runs | When to run |
 |------|---------|-----------|-------------|
 | **Unit** | `make test` | `tests/` excluding `tests/integration/` — fast, deterministic, no external deps | After every edit |
-| **Integration** | `make test-integration` | `tests/integration/` — real subsystems wired together, LLM tests skip without API key | Before push |
+| **Integration** | `make test-integration` | `tests/integration/` — real subsystems wired together, LLM tests fail without API key | Before push |
 | **Full** | `make check` | Unit + integration + lint + typecheck + boundary checks | Before commit |
 
 `make test` must stay fast (< 30s). Integration tests may do real I/O and are excluded
@@ -223,7 +223,7 @@ make install-all    # Install with optional extras (reranker, oauth) + npm bridg
 make test           # Fast unit tests only (excludes integration)
 make test-verbose   # Unit tests with verbose output
 make test-cov       # Unit tests with coverage report (85% gate)
-make test-integration # Integration tests (LLM tests skip without API key)
+make test-integration # Integration tests (LLM tests fail without API key)
 make lint           # Ruff lint + format check
 make format         # Auto-format with ruff
 make typecheck      # mypy type checker

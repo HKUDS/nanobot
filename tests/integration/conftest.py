@@ -1,7 +1,7 @@
 """Shared fixtures for integration tests.
 
 These fixtures wire real subsystems together with a real LLM provider.
-Tests are skipped when no API key is available.
+Tests fail when no API key is available.
 
 Pattern follows tests/test_memory_roundtrip.py.
 """
@@ -24,9 +24,7 @@ from nanobot.providers.litellm_provider import LiteLLMProvider
 
 _has_api_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("LITELLM_API_KEY"))
 
-_SKIP_REASON = "No LLM API key (OPENAI_API_KEY / LITELLM_API_KEY)"
-
-requires_llm = pytest.mark.skipif(not _has_api_key, reason=_SKIP_REASON)
+_FAIL_REASON = "No LLM API key (OPENAI_API_KEY / LITELLM_API_KEY)"
 
 MODEL = "gpt-4o-mini"
 
@@ -67,9 +65,9 @@ SAMPLE_EVENTS: list[dict[str, Any]] = [
 
 @pytest.fixture()
 def provider() -> LiteLLMProvider:
-    """Real LLM provider using gpt-4o-mini. Skips test if no API key."""
+    """Real LLM provider using gpt-4o-mini. Fails test if no API key."""
     if not _has_api_key:
-        pytest.skip(_SKIP_REASON)
+        pytest.fail(_FAIL_REASON)
     return LiteLLMProvider(default_model=MODEL)
 
 
