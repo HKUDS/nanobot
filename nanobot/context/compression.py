@@ -334,7 +334,7 @@ async def summarize_and_compress(
                             "model": model,
                             "before_tokens": before_tokens,
                             "summary_tokens": summary_tokens,
-                            "middle_msgs_dropped": len(middle),
+                            "middle_msgs_summarised": len(middle),
                             "compression_ratio": compression_ratio,
                         },
                     )
