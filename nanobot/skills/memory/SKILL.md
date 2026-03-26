@@ -1,43 +1,35 @@
 ---
 name: memory
-description: Two-layer memory system with grep-based recall.
+description: Automatic memory system — facts are extracted from conversations and stored in a database.
 always: true
 ---
 
 # Memory
 
-## Structure
+## How Memory Works
 
-- `memory/MEMORY.md` — Long-term facts (preferences, project context, relationships). Always loaded into your context.
-- `memory/HISTORY.md` — Append-only event log. NOT loaded into context. Search it with grep.
-- `memory/events.jsonl` — Structured episodic events used for retrieval ranking.
-- `memory/profile.json` — Canonical profile facts (`preferences`, `stable_facts`, etc.).
+Memory is managed automatically. You do NOT need to write to files manually.
 
-## Search Past Events
+- **Your memory context** is included in the system prompt (see the Memory section above).
+- **Consolidation** runs automatically after conversations grow large — it extracts facts, preferences, relationships, and events into the memory database.
+- **Profile updates** (preferences, stable facts) are extracted by the consolidation pipeline.
 
-```bash
-grep -i "keyword" memory/HISTORY.md
-```
+## Searching Past Events
 
-Use the `exec` tool to run grep. Combine patterns: `grep -iE "meeting|deadline" memory/HISTORY.md`
-
-## When to Update MEMORY.md
-
-Write important facts immediately using `edit_file` or `write_file`:
-- User preferences ("I prefer dark mode")
-- Project context ("The API uses OAuth2")
-- Relationships ("Alice is the project lead")
-
-## Auto-consolidation
-
-Old conversations are automatically summarized and appended to HISTORY.md when the session grows large. Long-term facts are extracted to MEMORY.md. You don't need to manage this.
-
-## Memory Maintenance Commands
-
-Use CLI commands when troubleshooting or auditing memory quality:
+Use the CLI to search for past events and facts:
 
 ```bash
 nanobot memory inspect --query "keyword"
-nanobot memory rebuild
-nanobot memory verify
 ```
+
+## Memory Maintenance
+
+```bash
+nanobot memory rebuild    # Rebuild memory snapshot from database
+nanobot memory verify     # Check memory integrity
+```
+
+## Important
+
+- Do NOT use `edit_file` or `write_file` on memory files — the consolidation system manages storage automatically.
+- Memory context in your prompt comes from the database, not from files on disk.

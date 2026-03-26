@@ -308,6 +308,7 @@ class MemoryStore:
             snapshot=self.snapshot,
             memory_file=self.memory_file,
             history_file=self.history_file,
+            db=self.db,
         )
 
     # ------------------------------------------------------------------

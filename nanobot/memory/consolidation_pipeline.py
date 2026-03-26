@@ -20,6 +20,9 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+if TYPE_CHECKING:
+    from nanobot.memory.unified_db import UnifiedMemoryDB
+
 from nanobot.context.prompt_loader import prompts
 from nanobot.observability.tracing import bind_trace
 
@@ -39,7 +42,7 @@ if TYPE_CHECKING:
 
 class ConsolidationPipeline:
     """Multi-stage pipeline that consolidates old conversation messages into
-    persistent memory (HISTORY.md, events.jsonl, profile.json, MEMORY.md).
+    persistent memory (SQLite database via UnifiedMemoryDB).
     """
 
     def __init__(
@@ -52,6 +55,7 @@ class ConsolidationPipeline:
         snapshot: MemorySnapshot,
         memory_file: Path,
         history_file: Path,
+        db: UnifiedMemoryDB | None = None,
         rollout: dict[str, Any] | None = None,
     ) -> None:
         self._extractor = extractor
@@ -61,6 +65,7 @@ class ConsolidationPipeline:
         self._snapshot = snapshot
         self._memory_file = memory_file
         self._history_file = history_file
+        self._db = db
         self._rollout: dict[str, Any] = rollout or {}
 
     # ------------------------------------------------------------------
@@ -175,8 +180,11 @@ class ConsolidationPipeline:
             history_entry = " ".join(lines[:3]) if lines else ""
             logger.warning("consolidate_memory: history_entry missing, generated from first lines")
         if history_entry:
-            with open(self._history_file, "a", encoding="utf-8") as _f:
-                _f.write(history_entry.rstrip() + "\n\n")
+            if self._db is not None:
+                self._db.append_history(history_entry.rstrip())
+            else:
+                with open(self._history_file, "a", encoding="utf-8") as _f:
+                    _f.write(history_entry.rstrip() + "\n\n")
 
         # -- Events (fallback: heuristic extractor) --
         raw_events = args.get("events")

@@ -58,8 +58,10 @@ class TestMemoryConsolidationTypeHandling:
         result = await store.consolidate(session, provider, "test-model", memory_window=50)
 
         assert result is True
-        assert store.history_file.exists()
-        assert "[2026-01-01] User discussed testing." in store.history_file.read_text()
+        # History is stored in SQLite, not on disk
+        assert store.db is not None
+        history_rows = store.db.read_history(limit=10)
+        assert any("[2026-01-01] User discussed testing." in r["entry"] for r in history_rows)
         # LAN-206: MEMORY.md is now a deterministic rebuild stored in UnifiedMemoryDB
         snapshot = store.db.read_snapshot("current") if store.db else ""
         assert "# Memory" in snapshot
@@ -83,7 +85,9 @@ class TestMemoryConsolidationTypeHandling:
         result = await store.consolidate(session, provider, "test-model", memory_window=50)
 
         assert result is True
-        assert store.history_file.exists()
+        # History stored in SQLite
+        assert store.db is not None
+        assert len(store.db.read_history(limit=10)) > 0
 
     async def test_no_tool_call_uses_fallback(self, tmp_path: Path) -> None:
         """When LLM doesn't use the consolidate_memory tool, fallback writes first lines."""
@@ -97,8 +101,9 @@ class TestMemoryConsolidationTypeHandling:
         result = await store.consolidate(session, provider, "test-model", memory_window=50)
 
         assert result is True
-        # Single-tool path uses heuristic fallback when no tool call is returned.
-        assert store.history_file.exists()
+        # Single-tool path uses heuristic fallback; history stored in SQLite
+        assert store.db is not None
+        assert len(store.db.read_history(limit=10)) > 0
 
     async def test_skips_when_few_messages(self, tmp_path: Path) -> None:
         """Consolidation should be a no-op when messages < keep_count."""
