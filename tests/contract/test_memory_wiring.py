@@ -65,17 +65,14 @@ def test_profile_mgr_corrector_fn_resolves(tmp_path):
 
 
 def test_rollout_override_atomic_consistency(tmp_path):
-    """After overrides, ingester and retriever see the same rollout values."""
+    """After overrides, the scorer sees the updated rollout values."""
     store = _make_store(tmp_path)
 
     store._rollout_config.apply_overrides({"reranker_mode": "disabled"})
 
-    # Both subsystems' rollout_fn should return the same dict
-    ingester_rollout = store.ingester._rollout_fn()
+    # Scorer's rollout_fn should reflect the override
     scorer_rollout = store._scorer._rollout_fn()
-
-    assert ingester_rollout is scorer_rollout
-    assert ingester_rollout.get("reranker_mode") == "disabled"
+    assert scorer_rollout.get("reranker_mode") == "disabled"
 
 
 def test_maintenance_reindex_runs_without_error(tmp_path):

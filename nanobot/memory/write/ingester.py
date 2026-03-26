@@ -13,7 +13,7 @@ and knowledge-graph triple ingestion.
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from nanobot.observability.tracing import bind_trace
 
@@ -45,14 +45,12 @@ class EventIngester:
         coercer: EventCoercer,
         dedup: EventDeduplicator,
         graph: KnowledgeGraph | None,
-        rollout_fn: Callable[[], dict[str, Any]],
         db: UnifiedMemoryDB | None = None,
         embedder: Embedder | None = None,
     ) -> None:
         self._coercer = coercer
         self._dedup = dedup
         self._graph = graph
-        self._rollout_fn = rollout_fn
         self._db = db
         self._embedder = embedder
 

@@ -168,7 +168,6 @@ class MemoryStore:
 
         # MemoryMaintenance: reindex, seed, health checks, backend stats.
         self.maintenance = MemoryMaintenance(
-            rollout_fn=lambda: self._rollout_config.rollout,
             db=self.db,
             reindex_fn=self._reindex_callback,
         )
@@ -204,7 +203,6 @@ class MemoryStore:
             coercer=self._coercer,
             dedup=self._dedup,
             graph=self.graph,
-            rollout_fn=lambda: self._rollout_config.rollout,
             db=self.db,
             embedder=self._embedder,
         )
