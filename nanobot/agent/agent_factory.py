@@ -260,7 +260,6 @@ def build_agent(
     memory = MemoryStore(
         config.workspace_path,
         memory_config=config.memory,
-        graph_enabled=config.graph_enabled,
     )
 
     # 4. Construct ContextBuilder

@@ -18,13 +18,11 @@ def _store(
     tmp_path: Path,
     *,
     memory_config: MemoryConfig | None = None,
-    graph_enabled: bool = False,
     embedding_provider: str = "hash",
 ) -> MemoryStore:
     return MemoryStore(
         tmp_path,
         memory_config=memory_config,
-        graph_enabled=graph_enabled,
         embedding_provider=embedding_provider,
     )
 

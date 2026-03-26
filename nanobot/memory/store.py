@@ -7,8 +7,6 @@
 - ``ConsolidationPipeline`` — LLM-driven memory consolidation
 - ``MemoryMaintenance`` — reindex, seed, health checks
 - ``MemorySnapshot`` — rebuild and verify memory snapshots
-- ``RolloutConfig`` — feature flag management
-
 Cross-cutting coordination (``get_memory_context``) stays on ``MemoryStore``.
 Callers access subsystems directly for specific operations:
 ``store.ingester.append_events(...)``.
@@ -17,7 +15,9 @@ Callers access subsystems directly for specific operations:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from nanobot.config.memory import MemoryConfig
 
 from ._text import _to_str_list, _utc_now_iso
 from .consolidation_pipeline import ConsolidationPipeline
@@ -32,7 +32,6 @@ from .read.graph_augmentation import GraphAugmenter
 from .read.retrieval_planner import RetrievalPlanner
 from .read.retriever import MemoryRetriever
 from .read.scoring import RetrievalScorer
-from .rollout import RolloutConfig
 from .token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
 from .unified_db import UnifiedMemoryDB
 from .write.classification import EventClassifier
@@ -48,7 +47,6 @@ from .write.extractor import MemoryExtractor
 from .write.ingester import EventIngester
 
 if TYPE_CHECKING:
-    from nanobot.config.memory import MemoryConfig
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session
 
@@ -82,11 +80,11 @@ class MemoryStore:
         workspace: Path,
         *,
         memory_config: MemoryConfig | None = None,
-        graph_enabled: bool = False,
         embedding_provider: str | None = None,
         vector_backend: str | None = None,
     ):
         self.workspace = workspace
+        self._memory_config: MemoryConfig = memory_config or MemoryConfig()
 
         # Construct embedder — try OpenAI first, fall back to HashEmbedder.
         # LocalEmbedder (ONNX, ~90MB) is only used when explicitly requested
@@ -134,10 +132,6 @@ class MemoryStore:
             coerce_event=lambda raw, **kw: self._coercer.coerce_event(raw, **kw),
             utc_now_iso=_utc_now_iso,
         )
-        self._rollout_config = RolloutConfig(memory_config=memory_config)
-        if memory_config is not None:
-            self._rollout_config.rollout["graph_enabled"] = graph_enabled
-
         # Profile manager (LAN-202) — delegates profile CRUD to ProfileManager.
         # Lazy callbacks break the circular dependency: ProfileStore is constructed
         # before conflict_mgr/snapshot exist, but callbacks resolve at call time.
@@ -172,16 +166,13 @@ class MemoryStore:
 
         # MemoryMaintenance: reindex, seed, health checks, backend stats.
         self.maintenance = MemoryMaintenance(
-            rollout_fn=lambda: self._rollout_config.rollout,
             db=self.db,
             reindex_fn=self._reindex_callback,
         )
 
         # Cross-encoder re-ranker (Step 7)
-        reranker_model = str(
-            self.rollout.get("reranker_model", "onnx:ms-marco-MiniLM-L-6-v2")
-        ).strip()
-        reranker_alpha = float(self.rollout.get("reranker_alpha", 0.5))
+        reranker_model = self._memory_config.reranker.model.strip()
+        reranker_alpha = self._memory_config.reranker.alpha
         self._reranker: Reranker
         if reranker_model.startswith("onnx:"):
             from .ranking.onnx_reranker import OnnxCrossEncoderReranker
@@ -193,7 +184,7 @@ class MemoryStore:
             self._reranker = CompositeReranker(alpha=reranker_alpha)
 
         # Knowledge graph (SQLite-backed via UnifiedMemoryDB).
-        graph_enabled = self.rollout.get("graph_enabled", True)
+        graph_enabled = self._memory_config.graph_enabled
         if graph_enabled:
             self.graph = KnowledgeGraph(db=self.db)
         else:
@@ -208,7 +199,6 @@ class MemoryStore:
             coercer=self._coercer,
             dedup=self._dedup,
             graph=self.graph,
-            rollout_fn=lambda: self._rollout_config.rollout,
             db=self.db,
             embedder=self._embedder,
         )
@@ -217,16 +207,14 @@ class MemoryStore:
         self.conflict_mgr = ConflictManager(
             self.profile_mgr,
             db=self.db,
-            resolve_gap_fn=lambda: float(
-                self._rollout_config.rollout.get("conflict_auto_resolve_gap", 0.25)
-            ),
+            resolve_gap_fn=lambda: self._memory_config.conflict_auto_resolve_gap,
         )
 
         # RetrievalScorer + GraphAugmenter + MemoryRetriever: read path.
         self._scorer = RetrievalScorer(
             profile_mgr=self.profile_mgr,
             reranker=self._reranker,
-            rollout_fn=lambda: self._rollout_config.rollout,
+            memory_config_fn=lambda: self._memory_config,
         )
         self._graph_aug = GraphAugmenter(
             graph=self.graph,
@@ -248,8 +236,7 @@ class MemoryStore:
             retrieve_fn=lambda *a, **kw: self.retriever.retrieve(*a, **kw),
             workspace=self.workspace,
             memory_dir=self.memory_dir,
-            get_rollout_status_fn=lambda: self._rollout_config.get_status(),
-            get_rollout_fn=lambda: self.rollout,
+            memory_config_fn=lambda: self._memory_config,
             get_backend_stats_fn=lambda: self.maintenance._backend_stats_for_eval(),
         )
 
@@ -299,14 +286,9 @@ class MemoryStore:
     # ------------------------------------------------------------------
 
     @property
-    def rollout(self) -> dict[str, Any]:
-        """Live rollout config — always returns the current dict from RolloutConfig."""
-        return self._rollout_config.rollout
-
-    @property
-    def conflict_auto_resolve_gap(self) -> float:
-        """Live rollout value — never stale."""
-        return float(self._rollout_config.rollout.get("conflict_auto_resolve_gap", 0.25))
+    def memory_config(self) -> MemoryConfig:
+        """Typed memory configuration."""
+        return self._memory_config
 
     def _reindex_callback(self) -> None:
         """Void-typed wrapper for MemoryMaintenance.reindex_fn."""

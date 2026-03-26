@@ -15,7 +15,6 @@ Top-level modules:
 - **event.py**      — MemoryEvent Pydantic model + shared classifiers
 - **constants.py**  — Shared constants and tool schemas
 - **_text.py**      — Text normalization, timestamp, and coercion helpers
-- **rollout.py**    — Feature flag management
 - **maintenance.py** — Reindex, seed, health checks
 - **consolidation_pipeline.py** — Consolidation orchestration
 

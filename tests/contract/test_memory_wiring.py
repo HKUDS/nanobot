@@ -4,45 +4,27 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nanobot.memory.rollout import RolloutConfig
+from nanobot.config.memory import MemoryConfig
 from nanobot.memory.store import MemoryStore
-
-
-def test_rollout_override_does_not_mutate_snapshot():
-    """After apply_overrides, a previously captured dict is unchanged."""
-    config = RolloutConfig()
-    # Grab a direct reference to the rollout dict (simulates another component
-    # holding a reference to the same dict object).
-    old_ref = config.rollout
-    old_mode = old_ref.get("reranker_mode")
-
-    config.apply_overrides({"reranker_mode": "disabled"})
-
-    # The old reference must be untouched (atomic replacement, not in-place mutation)
-    assert old_ref.get("reranker_mode") == old_mode
-    # The current rollout reflects the override
-    assert config.rollout.get("reranker_mode") == "disabled"
 
 
 def _make_store(tmp_path: Path) -> MemoryStore:
     return MemoryStore(
         tmp_path,
         embedding_provider="hash",
-        graph_enabled=False,
+        memory_config=MemoryConfig(graph_enabled=False),
     )
 
 
-def test_conflict_resolve_gap_follows_rollout(tmp_path):
-    """ConflictManager reads the current rollout value, not a stale copy."""
+def test_conflict_resolve_gap_follows_memory_config(tmp_path):
+    """ConflictManager reads the current MemoryConfig value, not a stale copy."""
     store = _make_store(tmp_path)
 
     # Default gap is 0.25
     assert store.conflict_mgr._resolve_gap_fn() == 0.25
 
-    # Simulate a rollout override by updating the rollout dict directly.
-    # (apply_overrides has an allowlist of known keys; conflict_auto_resolve_gap
-    # is a pass-through key read via dict.get, not an explicit override target.)
-    store._rollout_config.rollout["conflict_auto_resolve_gap"] = 0.5
+    # Replace the memory config with a new gap value.
+    store._memory_config = MemoryConfig(graph_enabled=False, conflict_auto_resolve_gap=0.5)
 
     # ConflictManager must see the new value — no stale copy.
     assert store.conflict_mgr._resolve_gap_fn() == 0.5
@@ -64,17 +46,15 @@ def test_profile_mgr_corrector_fn_resolves(tmp_path):
 
 
 def test_rollout_override_atomic_consistency(tmp_path):
-    """After overrides, ingester and retriever see the same rollout values."""
+    """After updating memory_config, the scorer sees the updated values."""
     store = _make_store(tmp_path)
 
-    store._rollout_config.apply_overrides({"reranker_mode": "disabled"})
+    # Replace the memory config with one that has reranker disabled
+    store._memory_config = MemoryConfig(reranker={"mode": "disabled"})
 
-    # Both subsystems' rollout_fn should return the same dict
-    ingester_rollout = store.ingester._rollout_fn()
-    scorer_rollout = store._scorer._rollout_fn()
-
-    assert ingester_rollout is scorer_rollout
-    assert ingester_rollout.get("reranker_mode") == "disabled"
+    # Scorer's memory_config_fn should reflect the update (lambda reads live attribute)
+    scorer_config = store._scorer._memory_config_fn()
+    assert scorer_config.reranker.mode == "disabled"
 
 
 def test_maintenance_reindex_runs_without_error(tmp_path):

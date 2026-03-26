@@ -22,12 +22,24 @@ def get_data_dir() -> Path:
     return get_data_path()
 
 
+def _migrate_graph_enabled(data: dict) -> None:
+    """Move ``graph_enabled`` from agents.defaults to agents.defaults.memory.
+
+    Added when graph_enabled was moved into MemoryConfig. Mutates *data*
+    in-place so validation succeeds on old config files.
+    """
+    defaults = data.get("agents", {}).get("defaults", {})
+    if "graph_enabled" in defaults:
+        memory = defaults.setdefault("memory", {})
+        memory.setdefault("graph_enabled", defaults.pop("graph_enabled"))
+
+
 def load_config(config_path: Path | None = None) -> Config:
     """Load configuration from file or create default.
 
-    The config file must conform to the current schema. No migration or
-    rewriting is performed — invalid configs abort startup with a clear
-    error message instead of silently falling back to defaults.
+    Applies minimal migrations for known field relocations, then
+    validates strictly — unknown fields abort startup with a clear
+    error message.
     """
     path = config_path or get_config_path()
 
@@ -38,6 +50,7 @@ def load_config(config_path: Path | None = None) -> Config:
         except json.JSONDecodeError as e:
             print(f"Error: invalid JSON in {path}: {e}", file=sys.stderr)
             sys.exit(1)
+        _migrate_graph_enabled(data)
         try:
             return Config.model_validate(data)
         except ValueError as e:

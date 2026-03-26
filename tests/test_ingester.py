@@ -32,7 +32,6 @@ def _make_ingester(
         coercer=coercer,
         dedup=dedup,
         graph=graph,
-        rollout_fn=lambda: rollout or {},
         db=db,
     )
     return ing, coercer, dedup, graph
@@ -235,7 +234,7 @@ class TestAppendEventsDedup:
         classifier = EventClassifier()
         coercer = EventCoercer(classifier)
         dedup = EventDeduplicator(coercer=coercer)
-        ing = EventIngester(coercer=coercer, dedup=dedup, graph=graph, rollout_fn=lambda: {}, db=db)
+        ing = EventIngester(coercer=coercer, dedup=dedup, graph=graph, db=db)
 
         # Append a very similar event.
         new_event = {
@@ -268,7 +267,6 @@ class TestReadEvents:
             coercer=coercer,
             dedup=dedup,
             graph=MagicMock(enabled=False),
-            rollout_fn=lambda: {},
             db=db,
         )
         events = ing.read_events(limit=10)
@@ -283,7 +281,6 @@ class TestReadEvents:
             coercer=coercer,
             dedup=dedup,
             graph=MagicMock(enabled=False),
-            rollout_fn=lambda: {},
             db=None,
         )
         events = ing.read_events()
@@ -353,7 +350,6 @@ class TestIngesterWithUnifiedDB:
             coercer=coercer,
             dedup=dedup,
             graph=graph,
-            rollout_fn=lambda: {},
             db=db,
             embedder=None,
         )

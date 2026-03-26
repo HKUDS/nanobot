@@ -26,11 +26,9 @@ class MemoryMaintenance:
     def __init__(
         self,
         *,
-        rollout_fn: Callable[[], dict[str, Any]],
         db: UnifiedMemoryDB | None = None,
         reindex_fn: Callable[[], None] | None = None,
     ) -> None:
-        self._rollout_fn = rollout_fn
         self._db = db
         self._reindex_fn = reindex_fn
 

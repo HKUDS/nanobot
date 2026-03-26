@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from nanobot.config.memory import MemoryConfig
 from nanobot.memory import MemoryStore
 from nanobot.memory.read.retrieval_planner import RetrievalPlanner
 
@@ -235,10 +236,10 @@ def test_memory_config_apply_from_constructor(tmp_path: Path) -> None:
             rollout_gate_min_recall_at_k=0.66,
         ),
     )
-    status = store._rollout_config.get_status()
-    assert status["memory_rollout_mode"] == "disabled"
-    assert status["memory_router_enabled"] is False
-    assert abs(float(status["rollout_gates"]["min_recall_at_k"]) - 0.66) < 1e-9
+    mc = store.memory_config
+    assert mc.rollout_mode == "disabled"
+    assert mc.router_enabled is False
+    assert abs(mc.rollout_gate_min_recall_at_k - 0.66) < 1e-9
 
 
 def test_workspace_rollout_file_is_ignored(tmp_path: Path) -> None:
@@ -255,10 +256,10 @@ def test_workspace_rollout_file_is_ignored(tmp_path: Path) -> None:
     )
 
     store = MemoryStore(tmp_path)
-    status = store._rollout_config.get_status()
+    mc = store.memory_config
     # Defaults remain active because workspace rollout files are no longer loaded.
-    assert status["memory_rollout_mode"] == "enabled"
-    assert status["memory_router_enabled"] is True
+    assert mc.rollout_mode == "enabled"
+    assert mc.router_enabled is True
 
 
 def test_infer_retrieval_intent_expanded_markers(tmp_path: Path) -> None:
@@ -360,7 +361,7 @@ def test_get_memory_context_graph_not_truncated_at_default_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Entity graph section should appear even at the default 900 token budget."""
-    store = MemoryStore(tmp_path, graph_enabled=True)
+    store = MemoryStore(tmp_path, memory_config=MemoryConfig(graph_enabled=True))
 
     # Simulate a large profile that previously consumed the whole budget.
     large_profile = {

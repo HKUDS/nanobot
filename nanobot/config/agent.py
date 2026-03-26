@@ -61,9 +61,6 @@ class AgentConfig(Base):
     # Delegation
     max_delegation_depth: int = 8
 
-    # Knowledge graph
-    graph_enabled: bool = False
-
     @property
     def workspace_path(self) -> Path:
         return Path(self.workspace).expanduser()

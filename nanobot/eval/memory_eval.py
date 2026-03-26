@@ -18,6 +18,7 @@ from nanobot.memory._text import _safe_float, _utc_now_iso
 from nanobot.utils.paths import ensure_dir
 
 if TYPE_CHECKING:
+    from nanobot.config.memory import MemoryConfig
     from nanobot.memory.unified_db import UnifiedMemoryDB
 
 
@@ -30,16 +31,14 @@ class EvalRunner:
         workspace: Path,
         memory_dir: Path,
         *,
-        get_rollout_status_fn: Callable[[], dict[str, Any]],
-        get_rollout_fn: Callable[[], dict[str, Any]],
+        memory_config_fn: Callable[[], MemoryConfig],
         get_backend_stats_fn: Callable[[], dict[str, Any]],
         db: UnifiedMemoryDB | None = None,
     ) -> None:
         self._retrieve = retrieve_fn
         self.workspace = workspace
         self.memory_dir = memory_dir
-        self._get_rollout_status = get_rollout_status_fn
-        self._get_rollout = get_rollout_fn
+        self._memory_config_fn = memory_config_fn
         self._get_backend_stats = get_backend_stats_fn
         self._db = db
 
@@ -78,7 +77,7 @@ class EvalRunner:
                 "history_rows_count": history_rows_count,
                 "vector_health_state": vector_health_state,
             },
-            "rollout": self._get_rollout_status(),
+            "rollout": self._memory_config_fn().rollout_status(),
         }
 
     def evaluate_retrieval_cases(
@@ -339,7 +338,7 @@ class EvalRunner:
             "generated_at": _utc_now_iso(),
             "evaluation": evaluation,
             "observability": observability,
-            "rollout": rollout or self._get_rollout_status(),
+            "rollout": rollout or self._memory_config_fn().rollout_status(),
         }
         import json as _json
 
@@ -351,15 +350,11 @@ class EvalRunner:
         evaluation: dict[str, Any],
         observability: dict[str, Any],
     ) -> dict[str, Any]:
-        rollout = self._get_rollout()
-        gates = rollout.get("rollout_gates", {})
-        if not isinstance(gates, dict):
-            gates = {}
-
-        min_recall = _safe_float(gates.get("min_recall_at_k"), 0.55)
-        min_precision = _safe_float(gates.get("min_precision_at_k"), 0.25)
-        max_tokens = _safe_float(gates.get("max_avg_memory_context_tokens"), 1400.0)
-        max_history_fallback_ratio = _safe_float(gates.get("max_history_fallback_ratio"), 0.05)
+        mc = self._memory_config_fn()
+        min_recall = mc.rollout_gate_min_recall_at_k
+        min_precision = mc.rollout_gate_min_precision_at_k
+        max_tokens = mc.rollout_gate_max_avg_context_tokens
+        max_history_fallback_ratio = mc.rollout_gate_max_history_fallback_ratio
 
         summary = evaluation.get("summary", {}) if isinstance(evaluation, dict) else {}
         recall = _safe_float(summary.get("recall_at_k"), 0.0)
@@ -401,5 +396,5 @@ class EvalRunner:
         return {
             "passed": all(bool(item["passed"]) for item in checks),
             "checks": checks,
-            "rollout_mode": str(rollout.get("memory_rollout_mode", "enabled")),
+            "rollout_mode": mc.rollout_mode,
         }

@@ -7,6 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from nanobot.cli.commands import app
+from nanobot.config.memory import MemoryConfig
 from nanobot.config.schema import Config
 
 runner = CliRunner()
@@ -178,11 +179,6 @@ class _FakeEvalRunner:
         return out
 
 
-class _FakeRolloutConfig:
-    def get_status(self) -> dict[str, object]:
-        return {"memory_rollout_mode": "enabled"}
-
-
 class _FakeStore:
     conflicts_open = 0
     conflict_rows: list[dict[str, object]] = []
@@ -218,7 +214,7 @@ class _FakeStore:
         self.maintenance._parent = self
         self.eval_runner = _FakeEvalRunner()
         self.eval_runner._parent = self
-        self._rollout_config = _FakeRolloutConfig()
+        self._memory_config = MemoryConfig()
 
 
 @pytest.fixture

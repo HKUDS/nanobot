@@ -18,13 +18,11 @@ def _store(
     tmp_path: Path,
     *,
     memory_config: MemoryConfig | None = None,
-    graph_enabled: bool = False,
     embedding_provider: str = "hash",
 ) -> MemoryStore:
     return MemoryStore(
         tmp_path,
         memory_config=memory_config,
-        graph_enabled=graph_enabled,
         embedding_provider=embedding_provider,
     )
 
@@ -39,22 +37,24 @@ class TestMemoryStoreExtraHelpers:
         assert _to_datetime("2026-01-01T00:00:00Z") is not None
         assert _to_datetime("invalid") is None
 
-    def test_rollout_overrides_and_status(self, tmp_path: Path) -> None:
-        store = _store(tmp_path)
-        store._rollout_config.apply_overrides(
-            {
-                "memory_rollout_mode": "shadow",
-                "rollout_gates": {"min_recall_at_k": 0.91},
-                "reranker_mode": "shadow",
-                "reranker_alpha": 0.8,
-                "reranker_model": "test-reranker",
-            }
+    def test_memory_config_from_constructor(self, tmp_path: Path) -> None:
+        from nanobot.config.memory import MemoryConfig, RerankerConfig
+
+        store = MemoryStore(
+            tmp_path,
+            embedding_provider="hash",
+            memory_config=MemoryConfig(
+                rollout_mode="shadow",
+                rollout_gate_min_recall_at_k=0.91,
+                reranker=RerankerConfig(mode="shadow", alpha=0.8, model="test-reranker"),
+                graph_enabled=False,
+            ),
         )
-        status = store._rollout_config.get_status()
-        assert status["memory_rollout_mode"] == "shadow"
-        assert status["rollout_gates"]["min_recall_at_k"] == pytest.approx(0.91)
-        assert status["reranker_mode"] == "shadow"
-        assert status["reranker_alpha"] == pytest.approx(0.8)
+        mc = store.memory_config
+        assert mc.rollout_mode == "shadow"
+        assert mc.rollout_gate_min_recall_at_k == pytest.approx(0.91)
+        assert mc.reranker.mode == "shadow"
+        assert mc.reranker.alpha == pytest.approx(0.8)
 
     @pytest.mark.parametrize(
         "query,expected",

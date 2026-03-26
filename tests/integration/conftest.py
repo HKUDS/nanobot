@@ -107,7 +107,6 @@ def config(tmp_path: Path) -> AgentConfig:
         planning_enabled=False,
         verification_mode="off",
         memory_enabled=True,
-        graph_enabled=False,
     )
 
 
