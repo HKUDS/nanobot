@@ -186,6 +186,7 @@ def _build_tools(
             result_cache=result_cache,
             skills_enabled=config.skills_enabled,
             skills_loader=context.skills,
+            feedback_db=context.memory.db if context.memory else None,
         )
 
     return _ToolBuildResult(

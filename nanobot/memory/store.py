@@ -112,7 +112,6 @@ class MemoryStore:
 
         self.memory_dir: Path = workspace / "memory"
         self.memory_dir.mkdir(parents=True, exist_ok=True)
-        self.events_file: Path = self.memory_dir / "events.jsonl"
         self.index_dir: Path = self.memory_dir / "index"
 
         # Construct unified SQLite database.

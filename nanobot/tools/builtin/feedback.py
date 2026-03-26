@@ -2,28 +2,28 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from nanobot.tools.base import Tool, ToolResult
+
+if TYPE_CHECKING:
+    from nanobot.memory.unified_db import UnifiedMemoryDB
 
 
 class FeedbackTool(Tool):
     """Tool the agent can call to record user feedback (thumbs-up/down + optional text).
 
-    Feedback events are persisted into ``events.jsonl`` so that later
+    Feedback events are persisted into the SQLite memory database so that
     memory consolidation passes can down-weight memories associated with
     corrected answers and surface correction statistics.
     """
 
     readonly = False  # mutates persistent state
 
-    def __init__(self, events_file: Path | None = None):
-        self._events_file = events_file
+    def __init__(self, db: UnifiedMemoryDB | None = None):
+        self._db = db
         # Set by the agent loop before each turn
         self._channel: str = ""
         self._chat_id: str = ""
@@ -44,17 +44,6 @@ class FeedbackTool(Tool):
         self._chat_id = chat_id
         session_key: str = kwargs.get("session_key", "")
         self._session_key = session_key or f"{channel}:{chat_id}"
-        events_file: Path | None = kwargs.get("events_file")
-        if events_file is not None:
-            self._events_file = events_file
-
-    def _write_event(self, event: dict[str, Any]) -> None:
-        """Blocking write — called via asyncio.to_thread."""
-        if self._events_file is None:
-            return
-        self._events_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._events_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
     # ------------------------------------------------------------------
     # Tool schema
@@ -100,30 +89,37 @@ class FeedbackTool(Tool):
         comment = str(kwargs.get("comment", "")).strip()
         topic = str(kwargs.get("topic", "")).strip()
 
-        event = {
-            "id": f"fb-{uuid.uuid4().hex[:12]}",
-            "type": "feedback",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+        # Build summary for the events table
+        summary = rating
+        if topic:
+            summary += f" on '{topic}'"
+        if comment:
+            summary += f" — {comment[:80]}"
+
+        metadata: dict[str, str] = {
             "rating": rating,
             "channel": self._channel,
             "chat_id": self._chat_id,
             "session_key": self._session_key,
         }
         if comment:
-            event["comment"] = comment
+            metadata["comment"] = comment
         if topic:
-            event["topic"] = topic
+            metadata["topic"] = topic
 
-        # Persist to events.jsonl (offloaded to thread to avoid blocking the event loop)
-        if self._events_file is not None:
+        event = {
+            "id": f"fb-{uuid.uuid4().hex[:12]}",
+            "type": "feedback",
+            "summary": summary,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "metadata": metadata,
+        }
+
+        # Persist to SQLite (single INSERT, fast enough for sync call)
+        if self._db is not None:
             try:
-                await asyncio.to_thread(self._write_event, event)
-            except OSError as exc:
+                self._db.insert_event(event)
+            except Exception as exc:  # crash-barrier: db write errors should not crash the agent
                 return ToolResult.fail(f"Failed to persist feedback: {exc}")
 
-        label = f"{rating}"
-        if topic:
-            label += f" on '{topic}'"
-        if comment:
-            label += f" — {comment[:80]}"
-        return ToolResult.ok(f"Feedback recorded: {label}")
+        return ToolResult.ok(f"Feedback recorded: {summary}")

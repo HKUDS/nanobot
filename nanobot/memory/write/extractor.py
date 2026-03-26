@@ -1,7 +1,7 @@
 """LLM + heuristic extraction of structured memory events.
 
 ``MemoryExtractor`` converts raw conversation messages into structured
-memory event dicts suitable for storage in ``events.jsonl``.  The pipeline:
+memory event dicts suitable for storage in the SQLite database.  The pipeline:
 
 1. **Heuristic pre-filter** — skip short/trivial messages to avoid LLM calls.
 2. **LLM extraction** — ask the provider to identify entities, facts, and

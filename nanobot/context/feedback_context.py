@@ -3,35 +3,38 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from nanobot.memory.unified_db import UnifiedMemoryDB
 
 
-def load_feedback_events(events_file: Path) -> list[dict[str, Any]]:
-    """Load all feedback-type events from the events file."""
-    if not events_file.exists():
-        return []
-    items: list[dict[str, Any]] = []
-    with open(events_file, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(obj, dict) and obj.get("type") == "feedback":
-                items.append(obj)
-    return items
+def _unpack_metadata(event: dict[str, Any]) -> dict[str, Any]:
+    """Merge metadata fields into the top-level event dict for uniform access."""
+    meta = event.get("metadata")
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except (json.JSONDecodeError, TypeError):
+            meta = {}
+    if isinstance(meta, dict):
+        # Metadata fields (rating, comment, topic, etc.) become top-level.
+        return {**event, **meta}
+    return event
 
 
-def feedback_summary(events_file: Path, *, max_recent: int = 20) -> str:
+def load_feedback_events(db: UnifiedMemoryDB) -> list[dict[str, Any]]:
+    """Load all feedback-type events from the database."""
+    rows = db.read_events(type="feedback", limit=1000)
+    return [_unpack_metadata(row) for row in rows]
+
+
+def feedback_summary(db: UnifiedMemoryDB, *, max_recent: int = 20) -> str:
     """Build a concise summary of feedback events for system-prompt injection.
 
     Returns an empty string when there is no feedback to report.
     """
-    items = load_feedback_events(events_file)
+    items = load_feedback_events(db)
     if not items:
         return ""
 
