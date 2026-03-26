@@ -19,7 +19,6 @@ Design decisions
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -280,6 +279,3 @@ AGENT_RELATION_TYPES: frozenset[RelationType] = frozenset(
         RelationType.PART_OF,
     }
 )
-
-# Pre-compiled regex for canonical name normalisation
-_CANONICAL_RE = re.compile(r"\s+")

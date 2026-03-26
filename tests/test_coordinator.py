@@ -61,7 +61,15 @@ class FailingProvider(LLMProvider):
     def get_default_model(self) -> str:
         return "fail-model"
 
-    async def chat(self, **kwargs: Any) -> LLMResponse:
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        metadata: dict[str, Any] | None = None,
+    ) -> LLMResponse:
         raise RuntimeError("LLM unavailable")
 
 
@@ -161,8 +169,16 @@ class TestClassify:
         calls: list[dict] = []
 
         class SpyProvider(FakeProvider):
-            async def chat(self, **kwargs: Any) -> LLMResponse:
-                calls.append(kwargs)
+            async def chat(
+                self,
+                messages: list[dict[str, Any]],
+                tools: list[dict[str, Any]] | None = None,
+                model: str | None = None,
+                max_tokens: int = 4096,
+                temperature: float = 0.7,
+                metadata: dict[str, Any] | None = None,
+            ) -> LLMResponse:
+                calls.append({"messages": messages, "model": model})
                 return LLMResponse(content='{"role": "general"}')
 
         provider = SpyProvider('{"role": "general"}')

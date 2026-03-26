@@ -173,7 +173,7 @@ class TestStreamingProtocol:
             events: list[str] = []
             async for ev in stream_agent_response(channel, "s1", "hi"):
                 events.append(ev)
-            await feeder
+            _ = await feeder
 
         assert any('"Hello world"' in e for e in events)
         assert any(_events_of_type(events, "finish"))
@@ -205,7 +205,7 @@ class TestStreamingProtocol:
             events: list[str] = []
             async for ev in stream_agent_response(channel, "s2", "hi"):
                 events.append(ev)
-            await feeder
+            _ = await feeder
 
         text_events = _events_of_type(events, "text-delta")
         assert len(text_events) == 3
@@ -250,7 +250,7 @@ class TestStreamingProtocol:
             events: list[str] = []
             async for ev in stream_agent_response(channel, "s3", "hi"):
                 events.append(ev)
-            await feeder
+            _ = await feeder
 
         tool_call_events = _events_of_type(events, "tool-call-start")
         tool_result_events = _events_of_type(events, "tool-result")
@@ -281,7 +281,7 @@ class TestStreamingProtocol:
             events: list[str] = []
             async for ev in stream_agent_response(channel, "s4", "hi"):
                 events.append(ev)
-            await feeder
+            _ = await feeder
 
         assert any("Thinking..." in e for e in events)
 
@@ -305,7 +305,7 @@ class TestStreamingProtocol:
             events: list[str] = []
             async for ev in stream_agent_response(channel, "s6", "hi"):
                 events.append(ev)
-            await feeder
+            _ = await feeder
 
         assert any(_events_of_type(events, "finish"))
 
@@ -318,7 +318,7 @@ class TestStreamingProtocol:
             feeder = asyncio.create_task(_feed_queue(channel, "s7", [final]))
             async for _ in stream_agent_response(channel, "s7", "hi"):
                 pass
-            await feeder
+            _ = await feeder
 
         assert "s7" not in channel._streams
 

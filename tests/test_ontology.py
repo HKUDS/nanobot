@@ -70,7 +70,7 @@ class TestEntityType:
         assert EntityType.PERSON not in AGENT_NATIVE_TYPES
 
     def test_all_values_are_strings(self) -> None:
-        for member in EntityType:
+        for member in list(EntityType):
             assert isinstance(member.value, str)
 
 
@@ -85,7 +85,7 @@ class TestRelationType:
         assert RelationType.from_str("") == RelationType.RELATED_TO
 
     def test_all_values_uppercase(self) -> None:
-        for member in RelationType:
+        for member in list(RelationType):
             assert member.value == member.value.upper()
 
     def test_agent_operational_relations_exist(self) -> None:

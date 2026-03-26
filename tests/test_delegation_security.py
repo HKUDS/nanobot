@@ -11,6 +11,7 @@ AgentRegistry.__contains__ enabled-flag check, and the delegation budget guard.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -93,7 +94,7 @@ class TestWebToolPermissions:
             captured_registry.append(tools)
             return "result", [], []
 
-        import nanobot.coordination.delegation as delegation_mod
+        delegation_mod = sys.modules["nanobot.coordination.delegation"]
 
         original = delegation_mod.run_tool_loop
         delegation_mod.run_tool_loop = fake_tool_loop  # type: ignore[assignment]
@@ -125,7 +126,7 @@ class TestWebToolPermissions:
             captured_registry.append(tools)
             return "result", [], []
 
-        import nanobot.coordination.delegation as delegation_mod
+        delegation_mod = sys.modules["nanobot.coordination.delegation"]
 
         original = delegation_mod.run_tool_loop
         delegation_mod.run_tool_loop = fake_tool_loop  # type: ignore[assignment]
@@ -157,7 +158,7 @@ class TestWebToolPermissions:
             captured_registry.append(tools)
             return "result", [], []
 
-        import nanobot.coordination.delegation as delegation_mod
+        delegation_mod = sys.modules["nanobot.coordination.delegation"]
 
         original = delegation_mod.run_tool_loop
         delegation_mod.run_tool_loop = fake_tool_loop  # type: ignore[assignment]
@@ -188,7 +189,7 @@ class TestWebToolPermissions:
             captured_registry.append(tools)
             return "result", [], []
 
-        import nanobot.coordination.delegation as delegation_mod
+        delegation_mod = sys.modules["nanobot.coordination.delegation"]
 
         original = delegation_mod.run_tool_loop
         delegation_mod.run_tool_loop = fake_tool_loop  # type: ignore[assignment]
@@ -219,7 +220,7 @@ class TestWebToolPermissions:
             captured_registry.append(tools)
             return "result", [], []
 
-        import nanobot.coordination.delegation as delegation_mod
+        delegation_mod = sys.modules["nanobot.coordination.delegation"]
 
         original = delegation_mod.run_tool_loop
         delegation_mod.run_tool_loop = fake_tool_loop  # type: ignore[assignment]

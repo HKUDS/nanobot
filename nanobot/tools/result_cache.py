@@ -24,8 +24,6 @@ from nanobot.tools.base import Tool, ToolResult
 # Summary generation
 # ---------------------------------------------------------------------------
 
-_SUMMARY_THRESHOLD = 3000  # chars — results below this pass through as-is
-
 
 def _get_summary_system() -> str:
     return prompts.get("summary_system")
@@ -364,7 +362,7 @@ def _slice_output(output: str, start: int, end: int) -> str:
             sliced = parsed[start:end]
             return json.dumps(sliced, ensure_ascii=False, indent=2, default=str)
     except (json.JSONDecodeError, TypeError):
-        pass
+        pass  # not valid JSON — fall through to line-based slicing below
 
     # Fall back to line-based slicing
     lines = output.splitlines()
@@ -412,13 +410,10 @@ class CacheGetSliceTool(Tool):
         "required": ["cache_key"],
     }
 
-    async def execute(  # type: ignore[override]
-        self,
-        cache_key: str,
-        start: int = 0,
-        end: int = 25,
-        **kwargs: Any,
-    ) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        cache_key: str = kwargs.pop("cache_key")
+        start: int = kwargs.pop("start", 0)
+        end: int = kwargs.pop("end", 25)
         result = self._cache.get_slice(cache_key, start, end)
         if result is None:
             return ToolResult.fail(

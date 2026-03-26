@@ -167,7 +167,9 @@ class WebSearchTool(Tool):
             return False, "Brave Search API key not configured"
         return True, None
 
-    async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> ToolResult:  # type: ignore[override]
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        query: str = kwargs.pop("query")
+        count: int | None = kwargs.pop("count", None)
         if not self.api_key:
             return ToolResult.fail(
                 "Error: Brave Search API key not configured. "
@@ -242,14 +244,11 @@ class WebFetchTool(Tool):
     def __init__(self, max_chars: int = 50000):
         self.max_chars = max_chars
 
-    async def execute(  # type: ignore[override]
-        self,
-        url: str,
-        extract_mode: str = "markdown",  # noqa: N803
-        max_chars: int | None = None,
-        user_agent: str = "browser",
-        **kwargs: Any,
-    ) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        url: str = kwargs.pop("url")
+        extract_mode: str = kwargs.pop("extract_mode", "markdown")
+        max_chars: int | None = kwargs.pop("max_chars", None)
+        user_agent: str = kwargs.pop("user_agent", "browser")
         # Accept camelCase from LLM tool calls
         extract_mode = kwargs.pop("extractMode", extract_mode)  # type: ignore[assignment]
         max_chars = kwargs.pop("maxChars", max_chars) or self.max_chars  # type: ignore[assignment]

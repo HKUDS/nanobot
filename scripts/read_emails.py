@@ -306,10 +306,7 @@ def _safe_subject(msg) -> str:
 def _safe_received_time(msg) -> datetime | None:
     t, _ = get_attr_with_error(msg, "ReceivedTime")
     if t:
-        try:
-            return t  # already a datetime-like from COM
-        except Exception:  # noqa: BLE001
-            pass
+        return t  # already a datetime-like from COM
     return None
 
 

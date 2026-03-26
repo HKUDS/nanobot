@@ -72,13 +72,10 @@ class MissionStartTool(Tool):
         "required": ["task"],
     }
 
-    async def execute(  # type: ignore[override]
-        self,
-        task: str,
-        label: str | None = None,
-        context: str | None = None,
-        **kwargs: Any,
-    ) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        task: str = kwargs.pop("task")
+        label: str | None = kwargs.pop("label", None)
+        context: str | None = kwargs.pop("context", None)
         """Launch the background mission and return a confirmation."""
         try:
             mission = await self._manager.start(
@@ -120,8 +117,9 @@ class MissionStatusTool(Tool):
         "required": ["mission_id"],
     }
 
-    async def execute(self, mission_id: str, **kwargs: Any) -> ToolResult:  # type: ignore[override]
+    async def execute(self, **kwargs: Any) -> ToolResult:
         """Return mission details as JSON."""
+        mission_id: str = kwargs.pop("mission_id")
         mission = self._manager.get(mission_id)
         if not mission:
             return ToolResult.fail(f"Mission [{mission_id}] not found.")
@@ -170,8 +168,9 @@ class MissionListTool(Tool):
         },
     }
 
-    async def execute(self, status_filter: str = "all", **kwargs: Any) -> ToolResult:  # type: ignore[override]
+    async def execute(self, **kwargs: Any) -> ToolResult:
         """Return a formatted list of missions."""
+        status_filter: str = kwargs.pop("status_filter", "all")
         from nanobot.coordination.mission import MissionStatus
 
         missions = self._manager.list_all()
@@ -223,8 +222,9 @@ class MissionCancelTool(Tool):
         "required": ["mission_id"],
     }
 
-    async def execute(self, mission_id: str, **kwargs: Any) -> ToolResult:  # type: ignore[override]
+    async def execute(self, **kwargs: Any) -> ToolResult:
         """Send cancellation signal to the mission."""
+        mission_id: str = kwargs.pop("mission_id")
         cancelled = self._manager.cancel(mission_id)
         if cancelled:
             return ToolResult.ok(f"Mission [{mission_id}] cancel signal sent.")

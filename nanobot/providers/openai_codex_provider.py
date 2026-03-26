@@ -121,7 +121,9 @@ async def _request_codex(
     body: dict[str, Any],
     verify: bool,
 ) -> tuple[str, list[ToolCallRequest], str]:
-    async with httpx.AsyncClient(timeout=60.0, verify=verify) as client:
+    # verify=False is only used as a fallback when CERTIFICATE_VERIFY_FAILED occurs
+    # (corporate proxies / self-signed certs); the primary call always uses verify=True.
+    async with httpx.AsyncClient(timeout=60.0, verify=verify) as client:  # noqa: S501
         async with client.stream("POST", url, headers=headers, json=body) as response:
             if response.status_code != 200:
                 text = await response.aread()

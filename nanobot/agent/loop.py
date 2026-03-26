@@ -133,7 +133,7 @@ class AgentLoop:
                 try:
                     await self._mcp_stack.aclose()
                 except (RuntimeError, OSError):
-                    pass
+                    pass  # best-effort cleanup; MCP stack may already be torn down
                 self._mcp_stack = None
         finally:
             self._mcp_connecting = False
