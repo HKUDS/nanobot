@@ -1,3 +1,5 @@
+# size-exception: single-class module covering routing, cycle detection, contract
+# construction, execution, and tracing — splitting would fragment a cohesive concern.
 """Delegation routing, contract construction, and execution.
 
 ``DelegationDispatcher`` encapsulates the multi-agent delegation sub-system
@@ -350,8 +352,17 @@ class DelegationDispatcher:
                     "from_role": from_role,
                     "depth": str(depth),
                 },
-            ):
+            ) as obs:
                 result, used_tools = await self.execute_delegated_agent(role, task, context)
+                if obs is not None:
+                    obs.update(
+                        output=(result or "")[:500],
+                        metadata={
+                            "tools_used": used_tools,
+                            "tools_used_count": len(used_tools),
+                            "success": True,
+                        },
+                    )
             latency_ms = (time.monotonic() - t0) * 1000
             delegation_total.labels(from_role=from_role, to_role=role.name, success="true").inc()
             delegation_latency_seconds.labels(to_role=role.name).observe(latency_ms / 1000)

@@ -305,11 +305,13 @@ async def summarize_and_compress(
 
         digest = "\n".join(digest_parts)
 
+        before_tokens = estimate_messages_tokens(messages)
         try:
             async with langfuse_span(
                 name="compress",
-                metadata={"middle_msgs": str(len(middle)), "model": model},
-            ):
+                input={"middle_msgs": len(middle), "total_msgs": len(messages)},
+                metadata={"model": model, "before_tokens": before_tokens},
+            ) as obs:
                 resp = await provider.chat(
                     messages=[
                         {"role": "system", "content": prompts.get("compress")},
@@ -320,7 +322,22 @@ async def summarize_and_compress(
                     temperature=0.0,
                     max_tokens=summary_max_tokens,
                 )
-            summary_text = (resp.content or "").strip()
+                summary_text = (resp.content or "").strip()
+                if obs is not None:
+                    summary_tokens = estimate_tokens(summary_text) if summary_text else 0
+                    compression_ratio = (
+                        round(summary_tokens / before_tokens, 3) if before_tokens > 0 else 0.0
+                    )
+                    obs.update(
+                        output=summary_text[:500] if summary_text else "(empty)",
+                        metadata={
+                            "model": model,
+                            "before_tokens": before_tokens,
+                            "summary_tokens": summary_tokens,
+                            "middle_msgs_summarised": len(middle),
+                            "compression_ratio": compression_ratio,
+                        },
+                    )
             if summary_text:
                 _summary_cache[cache_key] = summary_text
                 if len(_summary_cache) > _SUMMARY_CACHE_MAX:

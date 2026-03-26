@@ -289,14 +289,14 @@ class TestGenerationNameMetadata:
 
 
 # ---------------------------------------------------------------------------
-# 4. Span metadata does not include redundant token counts
+# 4. Span metadata includes token counts
 # ---------------------------------------------------------------------------
 
 
-class TestSpanMetadataNoRedundantTokens:
-    """update_current_span is called without prompt_tokens/completion_tokens/total_tokens."""
+class TestSpanMetadataWithTokenCounts:
+    """update_current_span is called with prompt_tokens/completion_tokens/duration_ms."""
 
-    async def test_span_metadata_excludes_token_counts(self, tmp_path: Path):
+    async def test_span_metadata_includes_token_counts(self, tmp_path: Path):
         provider = ScriptedProvider(
             [
                 LLMResponse(
@@ -323,18 +323,14 @@ class TestSpanMetadataNoRedundantTokens:
         # Should have been called at least once with metadata
         assert len(captured_metadata) >= 1
 
-        for meta in captured_metadata:
-            assert "prompt_tokens" not in meta, "span metadata should not have prompt_tokens"
-            assert "completion_tokens" not in meta, (
-                "span metadata should not have completion_tokens"
-            )
-            assert "total_tokens" not in meta, "span metadata should not have total_tokens"
-
         # Verify expected keys are present
         last_meta = captured_metadata[-1]
         assert "channel" in last_meta
         assert "model" in last_meta
         assert "llm_calls" in last_meta
+        assert "prompt_tokens" in last_meta, "span metadata should have prompt_tokens"
+        assert "completion_tokens" in last_meta, "span metadata should have completion_tokens"
+        assert "duration_ms" in last_meta, "span metadata should have duration_ms"
 
 
 # ---------------------------------------------------------------------------
@@ -538,4 +534,750 @@ class TestContextBuilderSpan:
         compress_spans = [s for s in captured_spans if s.get("name") == "compress"]
         assert len(compress_spans) >= 1
         assert "metadata" in compress_spans[0]
-        assert "middle_msgs" in compress_spans[0]["metadata"]
+        assert "before_tokens" in compress_spans[0]["metadata"]
+        assert "input" in compress_spans[0]
+        assert "middle_msgs" in compress_spans[0]["input"]
+
+
+# ---------------------------------------------------------------------------
+# 9. ToolRegistry tool_span captures output via obs.update()
+# ---------------------------------------------------------------------------
+
+
+class TestToolSpanOutputCaptured:
+    """ToolRegistry._execute_inner calls obs.update() with tool result output."""
+
+    async def test_successful_tool_captures_output(self):
+        from nanobot.tools.base import Tool, ToolResult
+        from nanobot.tools.registry import ToolRegistry
+
+        class EchoTool(Tool):
+            name = "echo"
+            description = "Echo tool"
+            parameters = {"type": "object", "properties": {}}
+
+            async def execute(self, **kwargs: Any) -> ToolResult:
+                return ToolResult.ok("hello world")
+
+        registry = ToolRegistry()
+        registry.register(EchoTool())
+
+        update_calls: list[dict[str, Any]] = []
+
+        class FakeObs:
+            def update(self, **kwargs: Any) -> None:
+                update_calls.append(kwargs)
+
+        @contextlib.asynccontextmanager
+        async def fake_tool_span(**kwargs: Any):
+            yield FakeObs()
+
+        with patch("nanobot.observability.langfuse.tool_span", side_effect=fake_tool_span):
+            result = await registry.execute("echo", {})
+
+        assert result.success
+        assert result.output == "hello world"
+        assert len(update_calls) == 1
+        assert "hello world" in update_calls[0]["output"]
+        assert update_calls[0]["metadata"]["success"] is True
+        assert "duration_ms" in update_calls[0]["metadata"]
+
+    async def test_validation_error_captures_output(self):
+        from nanobot.tools.base import Tool, ToolResult
+        from nanobot.tools.registry import ToolRegistry
+
+        class StrictTool(Tool):
+            name = "strict"
+            description = "Strict tool"
+            parameters = {
+                "type": "object",
+                "properties": {"x": {"type": "integer"}},
+                "required": ["x"],
+            }
+
+            async def execute(self, **kwargs: Any) -> ToolResult:
+                return ToolResult.ok("ok")
+
+        registry = ToolRegistry()
+        registry.register(StrictTool())
+
+        update_calls: list[dict[str, Any]] = []
+
+        class FakeObs:
+            def update(self, **kwargs: Any) -> None:
+                update_calls.append(kwargs)
+
+        @contextlib.asynccontextmanager
+        async def fake_tool_span(**kwargs: Any):
+            yield FakeObs()
+
+        with patch("nanobot.observability.langfuse.tool_span", side_effect=fake_tool_span):
+            result = await registry.execute("strict", {})  # missing required 'x'
+
+        assert not result.success
+        assert len(update_calls) == 1
+        assert update_calls[0]["metadata"]["success"] is False
+        assert update_calls[0]["metadata"]["error_type"] == "validation"
+
+    async def test_obs_none_does_not_crash(self):
+        """When Langfuse is disabled, obs is None — no crash."""
+        from nanobot.tools.base import Tool, ToolResult
+        from nanobot.tools.registry import ToolRegistry
+
+        class EchoTool(Tool):
+            name = "echo"
+            description = "Echo tool"
+            parameters = {"type": "object", "properties": {}}
+
+            async def execute(self, **kwargs: Any) -> ToolResult:
+                return ToolResult.ok("hello world")
+
+        registry = ToolRegistry()
+        registry.register(EchoTool())
+
+        @contextlib.asynccontextmanager
+        async def fake_tool_span(**kwargs: Any):
+            yield None
+
+        with patch("nanobot.observability.langfuse.tool_span", side_effect=fake_tool_span):
+            result = await registry.execute("echo", {})
+
+        assert result.success
+        assert result.output == "hello world"
+
+
+# ---------------------------------------------------------------------------
+# 10. Cache-hit path creates a tool_span
+# ---------------------------------------------------------------------------
+
+
+class TestToolSpanCacheHit:
+    """ToolRegistry.execute() wraps cache hits in a tool_span."""
+
+    async def test_cache_hit_creates_span_with_metadata(self):
+        from unittest.mock import MagicMock
+
+        from nanobot.tools.base import Tool, ToolResult
+        from nanobot.tools.registry import ToolRegistry
+
+        class CacheableTool(Tool):
+            name = "cached_tool"
+            description = "A cacheable tool"
+            readonly = True
+            cacheable = True
+            parameters = {"type": "object", "properties": {}}
+
+            async def execute(self, **kwargs: Any) -> ToolResult:
+                return ToolResult.ok("should not be called")
+
+        registry = ToolRegistry()
+        registry.register(CacheableTool())
+
+        # Set up mock cache that returns a hit
+        mock_cache = MagicMock()
+        mock_cache.has.return_value = "cache_key_123"
+        mock_entry = MagicMock()
+        mock_entry.summary = "cached summary text"
+        mock_cache.get.return_value = mock_entry
+
+        registry.set_cache(mock_cache)
+
+        captured_spans: list[dict[str, Any]] = []
+        update_calls: list[dict[str, Any]] = []
+
+        class FakeObs:
+            def update(self, **kwargs: Any) -> None:
+                update_calls.append(kwargs)
+
+        @contextlib.asynccontextmanager
+        async def fake_tool_span(**kwargs: Any):
+            captured_spans.append(kwargs)
+            yield FakeObs()
+
+        with patch("nanobot.observability.langfuse.tool_span", side_effect=fake_tool_span):
+            result = await registry.execute("cached_tool", {"arg": "val"})
+
+        assert result.success
+        assert result.output == "cached summary text"
+        assert result.metadata.get("cached") is True
+
+        # Verify span was created with cache metadata
+        assert len(captured_spans) == 1
+        assert captured_spans[0]["name"] == "cached_tool"
+        assert captured_spans[0]["input"] == {"arg": "val"}
+        assert captured_spans[0]["metadata"]["cache"] == "hit"
+        assert captured_spans[0]["metadata"]["cache_key"] == "cache_key_123"
+
+        # Verify obs.update was called with output
+        assert len(update_calls) == 1
+        assert "cached summary text" in update_calls[0]["output"]
+
+    async def test_cache_hit_obs_none_does_not_crash(self):
+        from unittest.mock import MagicMock
+
+        from nanobot.tools.base import Tool, ToolResult
+        from nanobot.tools.registry import ToolRegistry
+
+        class CacheableTool(Tool):
+            name = "cached_tool"
+            description = "A cacheable tool"
+            readonly = True
+            cacheable = True
+            parameters = {"type": "object", "properties": {}}
+
+            async def execute(self, **kwargs: Any) -> ToolResult:
+                return ToolResult.ok("should not be called")
+
+        registry = ToolRegistry()
+        registry.register(CacheableTool())
+
+        mock_cache = MagicMock()
+        mock_cache.has.return_value = "cache_key_456"
+        mock_entry = MagicMock()
+        mock_entry.summary = "cached text"
+        mock_cache.get.return_value = mock_entry
+
+        registry.set_cache(mock_cache)
+
+        @contextlib.asynccontextmanager
+        async def fake_tool_span(**kwargs: Any):
+            yield None
+
+        with patch("nanobot.observability.langfuse.tool_span", side_effect=fake_tool_span):
+            result = await registry.execute("cached_tool", {})
+
+        assert result.success
+        assert result.output == "cached text"
+        assert result.metadata.get("cached") is True
+
+
+# ---------------------------------------------------------------------------
+# 11. Compression span captures input, output, and enriched metadata
+# ---------------------------------------------------------------------------
+
+
+class TestCompressSpanEnriched:
+    """summarize_and_compress span includes input/output and compression metadata."""
+
+    async def test_compress_span_has_output_and_metadata(self):
+        from nanobot.context.compression import _summary_cache, summarize_and_compress
+        from nanobot.providers.base import LLMResponse
+
+        _summary_cache.clear()
+
+        provider = ScriptedProvider(
+            [
+                LLMResponse(
+                    content="Summary of conversation.",
+                    usage={"prompt_tokens": 30, "completion_tokens": 10},
+                )
+            ]
+        )
+
+        update_calls: list[dict[str, Any]] = []
+
+        class FakeObs:
+            def update(self, **kwargs: Any) -> None:
+                update_calls.append(kwargs)
+
+        @contextlib.asynccontextmanager
+        async def fake_span(**kwargs: Any):
+            yield FakeObs()
+
+        # Build messages that exceed the budget to trigger compression
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": "You are a helpful assistant."},
+        ]
+        for i in range(20):
+            messages.append({"role": "user", "content": f"Message {i} " + "x" * 200})
+            messages.append({"role": "assistant", "content": f"Reply {i} " + "y" * 200})
+
+        with patch("nanobot.context.compression.langfuse_span", side_effect=fake_span):
+            await summarize_and_compress(
+                messages=messages,
+                provider=provider,
+                model="test-model",
+                max_tokens=500,
+            )
+
+        assert len(update_calls) == 1
+        call = update_calls[0]
+        assert "Summary" in call["output"]
+        assert "compression_ratio" in call["metadata"]
+        assert "before_tokens" in call["metadata"]
+        assert call["metadata"]["model"] == "test-model"
+
+    async def test_compress_span_obs_none_no_crash(self):
+        """When Langfuse is disabled (obs is None), no crash occurs."""
+        from nanobot.context.compression import _summary_cache, summarize_and_compress
+        from nanobot.providers.base import LLMResponse
+
+        _summary_cache.clear()
+
+        provider = ScriptedProvider(
+            [
+                LLMResponse(
+                    content="Summary of conversation.",
+                    usage={"prompt_tokens": 30, "completion_tokens": 10},
+                )
+            ]
+        )
+
+        @contextlib.asynccontextmanager
+        async def fake_span(**kwargs: Any):
+            yield None
+
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": "You are a helpful assistant."},
+        ]
+        for i in range(20):
+            messages.append({"role": "user", "content": f"Message {i} " + "x" * 200})
+            messages.append({"role": "assistant", "content": f"Reply {i} " + "y" * 200})
+
+        with patch("nanobot.context.compression.langfuse_span", side_effect=fake_span):
+            result = await summarize_and_compress(
+                messages=messages,
+                provider=provider,
+                model="test-model",
+                max_tokens=500,
+            )
+
+        # Should not crash and should return valid messages
+        assert isinstance(result, list)
+        assert len(result) >= 1
+
+
+# ---------------------------------------------------------------------------
+# 9. Verify span enriched with input/output and revision sub-span
+# ---------------------------------------------------------------------------
+
+
+class TestVerifySpanEnriched:
+    """verify() enriches the verify span with input/output and wraps revision in a sub-span."""
+
+    async def test_verify_pass_updates_span_with_passed(self):
+        from unittest.mock import MagicMock
+
+        from nanobot.agent.verifier import AnswerVerifier
+        from nanobot.providers.base import LLMResponse
+
+        critique_json = json.dumps({"confidence": 8, "issues": []})
+        provider = ScriptedProvider(
+            [
+                LLMResponse(
+                    content=critique_json,
+                    usage={"prompt_tokens": 50, "completion_tokens": 20},
+                )
+            ]
+        )
+        verifier = AnswerVerifier(
+            provider=provider,
+            model="test-model",
+            temperature=0.7,
+            max_tokens=4096,
+            verification_mode="always",
+            memory_uncertainty_threshold=0.5,
+        )
+        messages = [
+            {"role": "user", "content": "What is 2+2?"},
+            {"role": "assistant", "content": "4"},
+        ]
+
+        mock_obs = MagicMock()
+        captured_span_kwargs: list[dict[str, Any]] = []
+
+        @contextlib.asynccontextmanager
+        async def fake_span(**kwargs: Any):
+            captured_span_kwargs.append(kwargs)
+            yield mock_obs
+
+        with (
+            patch("nanobot.agent.verifier.langfuse_span", side_effect=fake_span),
+            patch("nanobot.agent.verifier.score_current_trace"),
+        ):
+            result, _ = await verifier.verify("What is 2+2?", "4", messages)
+
+        assert result == "4"
+        # Span should have been created with input containing question and candidate
+        assert len(captured_span_kwargs) == 1
+        span_kw = captured_span_kwargs[0]
+        assert span_kw["name"] == "verify"
+        assert span_kw["input"]["question"] == "What is 2+2?"
+        assert span_kw["input"]["candidate"] == "4"
+
+        # obs.update should have been called with output="passed"
+        mock_obs.update.assert_called_once()
+        update_kwargs = mock_obs.update.call_args[1]
+        assert update_kwargs["output"] == "passed"
+        assert update_kwargs["metadata"]["confidence"] == 8
+        assert update_kwargs["metadata"]["passed"] is True
+
+    async def test_verify_revision_creates_sub_span(self):
+        from unittest.mock import MagicMock
+
+        from nanobot.agent.verifier import AnswerVerifier
+        from nanobot.providers.base import LLMResponse
+
+        critique_json = json.dumps({"confidence": 1, "issues": ["factual error"]})
+        provider = ScriptedProvider(
+            [
+                LLMResponse(
+                    content=critique_json,
+                    usage={"prompt_tokens": 50, "completion_tokens": 20},
+                ),
+                LLMResponse(
+                    content="Revised answer: 4",
+                    usage={"prompt_tokens": 60, "completion_tokens": 30},
+                ),
+            ]
+        )
+        verifier = AnswerVerifier(
+            provider=provider,
+            model="test-model",
+            temperature=0.7,
+            max_tokens=4096,
+            verification_mode="always",
+            memory_uncertainty_threshold=0.5,
+        )
+        messages = [
+            {"role": "user", "content": "What is 2+2?"},
+            {"role": "assistant", "content": "wrong answer"},
+        ]
+
+        mock_obs = MagicMock()
+        mock_rev_obs = MagicMock()
+        span_call_count = 0
+        captured_span_kwargs: list[dict[str, Any]] = []
+
+        @contextlib.asynccontextmanager
+        async def fake_span(**kwargs: Any):
+            nonlocal span_call_count
+            captured_span_kwargs.append(kwargs)
+            if span_call_count == 0:
+                span_call_count += 1
+                yield mock_obs
+            else:
+                yield mock_rev_obs
+
+        with (
+            patch("nanobot.agent.verifier.langfuse_span", side_effect=fake_span),
+            patch("nanobot.agent.verifier.score_current_trace"),
+        ):
+            result, _ = await verifier.verify("What is 2+2?", "wrong answer", messages)
+
+        assert result == "Revised answer: 4"
+
+        # Two spans: verify + revision
+        assert len(captured_span_kwargs) == 2
+        assert captured_span_kwargs[0]["name"] == "verify"
+        assert captured_span_kwargs[1]["name"] == "revision"
+        assert captured_span_kwargs[1]["input"]["issues"] == ["factual error"]
+        assert captured_span_kwargs[1]["input"]["confidence"] == 1
+
+        # Revision obs should have output set
+        mock_rev_obs.update.assert_called_once()
+        rev_update_kwargs = mock_rev_obs.update.call_args[1]
+        assert rev_update_kwargs["output"] == "Revised answer: 4"
+
+        # Verify obs should have output="revised"
+        mock_obs.update.assert_called_once()
+        obs_update_kwargs = mock_obs.update.call_args[1]
+        assert obs_update_kwargs["output"] == "revised"
+        assert obs_update_kwargs["metadata"]["passed"] is False
+        assert obs_update_kwargs["metadata"]["issues"] == ["factual error"]
+
+    async def test_verify_parse_error_updates_span(self):
+        """When critique JSON is unparseable, span records parse_error."""
+        from unittest.mock import MagicMock
+
+        from nanobot.agent.verifier import AnswerVerifier
+        from nanobot.providers.base import LLMResponse
+
+        provider = ScriptedProvider([LLMResponse(content="not valid json", usage={})])
+        verifier = AnswerVerifier(
+            provider=provider,
+            model="test",
+            temperature=0.0,
+            max_tokens=1000,
+            verification_mode="always",
+            memory_uncertainty_threshold=0.5,
+        )
+        mock_obs = MagicMock()
+
+        @contextlib.asynccontextmanager
+        async def fake_span(**kwargs: Any):
+            yield mock_obs
+
+        with (
+            patch("nanobot.agent.verifier.langfuse_span", side_effect=fake_span),
+            patch("nanobot.agent.verifier.score_current_trace"),
+        ):
+            result, _ = await verifier.verify("Q?", "A.", [])
+
+        assert result == "A."  # original returned on parse error
+        mock_obs.update.assert_called_once()
+        kwargs = mock_obs.update.call_args[1]
+        assert kwargs["output"] == "parse_error"
+        assert kwargs["metadata"]["skipped"] is True
+
+    async def test_verify_call_error_updates_span(self):
+        """When the critique LLM call raises, span records call_error."""
+        from unittest.mock import MagicMock
+
+        from nanobot.agent.verifier import AnswerVerifier
+
+        class FailingProvider:
+            async def chat(self, **kwargs: Any):
+                raise RuntimeError("LLM down")
+
+        verifier = AnswerVerifier(
+            provider=FailingProvider(),  # type: ignore[arg-type]
+            model="test",
+            temperature=0.0,
+            max_tokens=1000,
+            verification_mode="always",
+            memory_uncertainty_threshold=0.5,
+        )
+        mock_obs = MagicMock()
+
+        @contextlib.asynccontextmanager
+        async def fake_span(**kwargs: Any):
+            yield mock_obs
+
+        with (
+            patch("nanobot.agent.verifier.langfuse_span", side_effect=fake_span),
+            patch("nanobot.agent.verifier.score_current_trace"),
+        ):
+            result, _ = await verifier.verify("Q?", "A.", [])
+
+        assert result == "A."  # original returned on error
+        mock_obs.update.assert_called_once()
+        kwargs = mock_obs.update.call_args[1]
+        assert kwargs["output"] == "call_error"
+        assert kwargs["metadata"]["skipped"] is True
+
+
+# ---------------------------------------------------------------------------
+# 11. Delegation span captures output via obs.update()
+# ---------------------------------------------------------------------------
+
+
+class TestDelegationSpanOutput:
+    """DelegationDispatcher.dispatch() calls obs.update() on the delegate span."""
+
+    async def test_delegation_span_captures_result(self, tmp_path: Path):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from nanobot.config.schema import AgentRoleConfig
+        from nanobot.coordination.delegation import DelegationConfig, DelegationDispatcher
+
+        config = DelegationConfig(
+            workspace=tmp_path,
+            model="test-model",
+            temperature=0.7,
+            max_tokens=4096,
+            max_iterations=5,
+            restrict_to_workspace=True,
+            brave_api_key=None,
+            exec_config=None,
+            role_name="orchestrator",
+        )
+
+        # Minimal coordinator mock that returns a role
+        mock_coordinator = MagicMock()
+        target_role = AgentRoleConfig(name="researcher", system_prompt="You research.")
+        mock_coordinator.route_direct.return_value = target_role
+
+        dispatcher = DelegationDispatcher(
+            config=config,
+            provider=MagicMock(),
+            coordinator=mock_coordinator,
+        )
+
+        # Patch execute_delegated_agent to return a known result
+        dispatcher.execute_delegated_agent = AsyncMock(  # type: ignore[method-assign]
+            return_value=("Here is the research summary.", ["read_file", "web_fetch"])
+        )
+
+        # Capture obs.update() calls
+        update_calls: list[dict[str, Any]] = []
+
+        class FakeObs:
+            def update(self, **kwargs: Any) -> None:
+                update_calls.append(kwargs)
+
+        @contextlib.asynccontextmanager
+        async def fake_span(**kwargs: Any):
+            yield FakeObs()
+
+        with patch(
+            "nanobot.coordination.delegation.langfuse_span",
+            side_effect=fake_span,
+        ):
+            result = await dispatcher.dispatch("researcher", "Find the answer", None)
+
+        assert result.content == "Here is the research summary."
+        assert len(update_calls) == 1
+        assert "research summary" in update_calls[0]["output"]
+        assert update_calls[0]["metadata"]["success"] is True
+        assert update_calls[0]["metadata"]["tools_used"] == ["read_file", "web_fetch"]
+        assert update_calls[0]["metadata"]["tools_used_count"] == 2
+
+    async def test_delegation_span_truncates_long_output(self, tmp_path: Path):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from nanobot.config.schema import AgentRoleConfig
+        from nanobot.coordination.delegation import DelegationConfig, DelegationDispatcher
+
+        config = DelegationConfig(
+            workspace=tmp_path,
+            model="test-model",
+            temperature=0.7,
+            max_tokens=4096,
+            max_iterations=5,
+            restrict_to_workspace=True,
+            brave_api_key=None,
+            exec_config=None,
+            role_name="orchestrator",
+        )
+
+        mock_coordinator = MagicMock()
+        target_role = AgentRoleConfig(name="researcher", system_prompt="You research.")
+        mock_coordinator.route_direct.return_value = target_role
+
+        dispatcher = DelegationDispatcher(
+            config=config,
+            provider=MagicMock(),
+            coordinator=mock_coordinator,
+        )
+
+        long_result = "x" * 1000
+        dispatcher.execute_delegated_agent = AsyncMock(  # type: ignore[method-assign]
+            return_value=(long_result, [])
+        )
+
+        update_calls: list[dict[str, Any]] = []
+
+        class FakeObs:
+            def update(self, **kwargs: Any) -> None:
+                update_calls.append(kwargs)
+
+        @contextlib.asynccontextmanager
+        async def fake_span(**kwargs: Any):
+            yield FakeObs()
+
+        with patch(
+            "nanobot.coordination.delegation.langfuse_span",
+            side_effect=fake_span,
+        ):
+            await dispatcher.dispatch("researcher", "Do something", None)
+
+        assert len(update_calls) == 1
+        assert len(update_calls[0]["output"]) <= 500
+
+    async def test_delegation_span_obs_none_no_crash(self, tmp_path: Path):
+        """When Langfuse is disabled (obs is None), no crash occurs."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from nanobot.config.schema import AgentRoleConfig
+        from nanobot.coordination.delegation import DelegationConfig, DelegationDispatcher
+
+        config = DelegationConfig(
+            workspace=tmp_path,
+            model="test-model",
+            temperature=0.7,
+            max_tokens=4096,
+            max_iterations=5,
+            restrict_to_workspace=True,
+            brave_api_key=None,
+            exec_config=None,
+            role_name="orchestrator",
+        )
+
+        mock_coordinator = MagicMock()
+        target_role = AgentRoleConfig(name="researcher", system_prompt="You research.")
+        mock_coordinator.route_direct.return_value = target_role
+
+        dispatcher = DelegationDispatcher(
+            config=config,
+            provider=MagicMock(),
+            coordinator=mock_coordinator,
+        )
+
+        dispatcher.execute_delegated_agent = AsyncMock(  # type: ignore[method-assign]
+            return_value=("Result text", ["list_dir"])
+        )
+
+        @contextlib.asynccontextmanager
+        async def fake_span(**kwargs: Any):
+            yield None
+
+        with patch(
+            "nanobot.coordination.delegation.langfuse_span",
+            side_effect=fake_span,
+        ):
+            result = await dispatcher.dispatch("researcher", "Task", None)
+
+        assert result.content == "Result text"
+
+
+# ---------------------------------------------------------------------------
+# 12. ActPhase.execute_tools annotates root span with batch metadata
+# ---------------------------------------------------------------------------
+
+
+class TestActPhaseBatchMetadata:
+    """ActPhase.execute_tools calls update_current_span with batch metadata."""
+
+    async def test_batch_metadata_sent_to_current_span(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from nanobot.agent.turn_phases import ActPhase
+        from nanobot.agent.turn_types import TurnState
+        from nanobot.context.context import ContextBuilder
+        from nanobot.providers.base import LLMResponse, ToolCallRequest
+        from nanobot.tools.base import ToolResult
+        from nanobot.tools.executor import ToolExecutor
+
+        # Build a mock ToolExecutor that returns a successful result
+        mock_executor = AsyncMock(spec=ToolExecutor)
+        mock_executor.execute_batch.return_value = [ToolResult.ok("done")]
+
+        # Build a mock ContextBuilder
+        mock_context = MagicMock(spec=ContextBuilder)
+        mock_context.add_assistant_message.return_value = [
+            {"role": "assistant", "content": None, "tool_calls": []}
+        ]
+        mock_context.add_tool_result.return_value = [{"role": "tool", "content": "done"}]
+
+        act = ActPhase(tool_executor=mock_executor, context=mock_context)
+
+        response = LLMResponse(
+            content=None,
+            tool_calls=[
+                ToolCallRequest(id="tc1", name="list_dir", arguments={"path": "."}),
+            ],
+            usage={"prompt_tokens": 10, "completion_tokens": 5},
+        )
+
+        state = TurnState(
+            messages=[{"role": "user", "content": "Hi"}],
+            user_text="Hi",
+            disabled_tools=set(),
+        )
+
+        with patch("nanobot.agent.turn_phases.update_current_span") as mock_update:
+            await act.execute_tools(
+                state=state,
+                response=response,
+                tools_used=[],
+                on_progress=None,
+            )
+
+        mock_update.assert_called_once()
+        call_kwargs = mock_update.call_args[1]
+        meta = call_kwargs["metadata"]
+        assert meta["batch_tools"] == ["list_dir"]
+        assert meta["batch_any_failed"] is False
+        assert "batch_duration_ms" in meta
+        assert isinstance(meta["batch_duration_ms"], int | float)
