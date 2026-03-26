@@ -102,6 +102,23 @@ class GithubCopilotAuthenticator:
             follow_redirects=True,
         )
 
+    def close(self) -> None:
+        """
+        Close the underlying HTTP client to release network resources.
+        """
+        http_client = getattr(self, "http_client", None)
+        if http_client is not None:
+            http_client.close()
+
+    def __del__(self) -> None:
+        """
+        Ensure the HTTP client is closed when the authenticator is garbage-collected.
+        """
+        try:
+            self.close()
+        except Exception:
+            # Suppress all exceptions during garbage collection.
+            pass
     def get_access_token(self) -> str:
         """
         Login to Copilot with retry 3 times.
