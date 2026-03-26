@@ -50,8 +50,9 @@ class _FakeBot:
     async def set_my_commands(self, commands) -> None:
         self.commands = commands
 
-    async def send_message(self, **kwargs) -> None:
+    async def send_message(self, **kwargs):
         self.sent_messages.append(kwargs)
+        return SimpleNamespace(message_id=len(self.sent_messages))
 
     async def send_photo(self, **kwargs) -> None:
         self.sent_media.append({"kind": "photo", **kwargs})
@@ -293,6 +294,62 @@ async def test_send_delta_stream_end_raises_and_keeps_buffer_on_failure() -> Non
         await channel.send_delta("123", "", {"_stream_end": True})
 
     assert "123" in channel._stream_bufs
+
+
+@pytest.mark.asyncio
+async def test_send_delta_stream_end_treats_not_modified_as_success() -> None:
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.edit_message_text = AsyncMock(side_effect=BadRequest("Message is not modified"))
+    channel._stream_bufs["123"] = _StreamBuf(text="hello", message_id=7, last_edit=0.0, stream_id="s:0")
+
+    await channel.send_delta("123", "", {"_stream_end": True, "_stream_id": "s:0"})
+
+    assert "123" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
+async def test_send_delta_new_stream_id_replaces_stale_buffer() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._stream_bufs["123"] = _StreamBuf(
+        text="hello",
+        message_id=7,
+        last_edit=0.0,
+        stream_id="old:0",
+    )
+
+    await channel.send_delta("123", "world", {"_stream_delta": True, "_stream_id": "new:0"})
+
+    buf = channel._stream_bufs["123"]
+    assert buf.text == "world"
+    assert buf.stream_id == "new:0"
+    assert buf.message_id == 1
+
+
+@pytest.mark.asyncio
+async def test_send_delta_incremental_edit_treats_not_modified_as_success() -> None:
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._stream_bufs["123"] = _StreamBuf(text="hello", message_id=7, last_edit=0.0, stream_id="s:0")
+    channel._app.bot.edit_message_text = AsyncMock(side_effect=BadRequest("Message is not modified"))
+
+    await channel.send_delta("123", "", {"_stream_delta": True, "_stream_id": "s:0"})
+
+    assert channel._stream_bufs["123"].last_edit > 0.0
 
 
 def test_derive_topic_session_key_uses_thread_id() -> None:
