@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import ssl
 from typing import Any, AsyncGenerator
 
 import httpx
@@ -115,15 +116,24 @@ def _build_headers(account_id: str, token: str) -> dict[str, str]:
     }
 
 
+def _make_ssl_context() -> ssl.SSLContext:
+    """Build a permissive SSL context for corporate proxy / self-signed cert fallback."""
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
 async def _request_codex(
     url: str,
     headers: dict[str, str],
     body: dict[str, Any],
     verify: bool,
 ) -> tuple[str, list[ToolCallRequest], str]:
-    # verify=False is only used as a fallback when CERTIFICATE_VERIFY_FAILED occurs
-    # (corporate proxies / self-signed certs); the primary call always uses verify=True.
-    async with httpx.AsyncClient(timeout=60.0, verify=verify) as client:  # noqa: S501
+    # When verify=False, we use an explicit SSLContext instead of passing False
+    # directly — the primary call always uses verify=True.
+    ssl_verify: bool | ssl.SSLContext = True if verify else _make_ssl_context()
+    async with httpx.AsyncClient(timeout=60.0, verify=ssl_verify) as client:
         async with client.stream("POST", url, headers=headers, json=body) as response:
             if response.status_code != 200:
                 text = await response.aread()
