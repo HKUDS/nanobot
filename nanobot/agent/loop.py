@@ -110,6 +110,8 @@ class AgentLoop:
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
         self._session_locks: dict[str, asyncio.Lock] = {}
+        # Track subagents waiting for user input: session_key -> {task_id, question}
+        self._pending_ask_requests: dict[str, dict] = {}
         # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
         _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3"))
         self._concurrency_gate: asyncio.Semaphore | None = (
@@ -479,11 +481,50 @@ class AgentLoop:
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
+        key = session_key or msg.session_key
+
+        # Check if this is a reply to a pending ask request from subagent
+        if key in self._pending_ask_requests and msg.channel != "system":
+            pending = self._pending_ask_requests.pop(key)
+            task_id = pending["task_id"]
+            logger.info("User replied to subagent [{}] ask request", task_id)
+            # Resume subagent with user response
+            await self.subagents.resume_with_user_response(task_id, msg.content)
+            # Don't send any response - subagent will continue and announce result
+            return None
+
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
                                 else ("cli", msg.chat_id))
             logger.info("Processing system message from {}", msg.sender_id)
+
+            # Check if this is an ask_user request from subagent
+            if msg.metadata.get("ask_user") and msg.metadata.get("task_id"):
+                task_id = msg.metadata["task_id"]
+                subagent_label = msg.metadata.get("subagent_label", "subagent")
+                logger.info("Subagent [{}] is asking user a question", task_id)
+
+                # Store pending ask request
+                self._pending_ask_requests[key] = {
+                    "task_id": task_id,
+                    "question": msg.content,
+                    "timestamp": time.time(),
+                }
+
+                # Extract question from message content
+                question = msg.content
+                if "Question:" in question:
+                    question = question.split("Question:", 1)[1].strip()
+
+                # Send question to user
+                return OutboundMessage(
+                    channel=channel,
+                    chat_id=chat_id,
+                    content=f"🤖 **Subagent '{subagent_label}' needs your input:**\n\n{question}",
+                    metadata={"awaiting_reply": True},
+                )
+
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
