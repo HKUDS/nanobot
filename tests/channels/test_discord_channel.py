@@ -10,6 +10,7 @@ import pytest
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.discord import DiscordBotClient, DiscordChannel, DiscordConfig
+from nanobot.command.builtin import build_help_text
 
 
 # Minimal Discord client test double used to control startup/readiness behavior.
@@ -475,7 +476,7 @@ async def test_slash_new_is_blocked_for_disallowed_user() -> None:
     assert handled == []
 
 
-@pytest.mark.parametrize("slash_name", ["help", "stop", "restart", "status"])
+@pytest.mark.parametrize("slash_name", ["stop", "restart", "status"])
 @pytest.mark.asyncio
 async def test_slash_commands_forward_via_handle_message(slash_name: str) -> None:
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
@@ -499,6 +500,29 @@ async def test_slash_commands_forward_via_handle_message(slash_name: str) -> Non
     assert len(handled) == 1
     assert handled[0]["content"] == f"/{slash_name}"
     assert handled[0]["metadata"]["is_slash_command"] is True
+
+
+@pytest.mark.asyncio
+async def test_slash_help_returns_ephemeral_help_text() -> None:
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+    client = DiscordBotClient(channel, intents=discord.Intents.none())
+    interaction = _make_interaction()
+    interaction.command.qualified_name = "help"
+
+    help_cmd = client.tree.get_command("help")
+    assert help_cmd is not None
+    await help_cmd.callback(interaction)
+
+    assert interaction.response.messages == [
+        {"content": build_help_text(), "ephemeral": True}
+    ]
+    assert handled == []
 
 
 @pytest.mark.asyncio

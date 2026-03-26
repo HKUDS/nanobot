@@ -13,6 +13,7 @@ from pydantic import Field
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.command.builtin import build_help_text
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.utils.helpers import safe_filename, split_message
@@ -107,7 +108,6 @@ if DISCORD_AVAILABLE:
         def _register_app_commands(self) -> None:
             commands = (
                 ("new", "Start a new conversation", "/new"),
-                ("help", "Show available commands", "/help"),
                 ("stop", "Stop the current task", "/stop"),
                 ("restart", "Restart the bot", "/restart"),
                 ("status", "Show bot status", "/status"),
@@ -120,6 +120,14 @@ if DISCORD_AVAILABLE:
                     _command_text: str = command_text,
                 ) -> None:
                     await self._forward_slash_command(interaction, _command_text)
+
+            @self.tree.command(name="help", description="Show available commands")
+            async def help_command(interaction: discord.Interaction) -> None:
+                sender_id = str(interaction.user.id)
+                if not self._channel.is_allowed(sender_id):
+                    await self._reply_ephemeral(interaction, "You are not allowed to use this bot.")
+                    return
+                await self._reply_ephemeral(interaction, build_help_text())
 
             @self.tree.error
             async def on_app_command_error(
