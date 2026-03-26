@@ -80,9 +80,7 @@ def test_memory_disabled(tmp_path: Path) -> None:
 
     loop = build_agent(bus, provider, config)
 
-    assert loop.context.memory_retrieval_k == 0
-    assert loop.context.memory_token_budget == 0
-    assert loop.context.memory_md_token_cap == 0
+    assert loop.context._memory_config is None
 
 
 def test_delegation_disabled(tmp_path: Path) -> None:
