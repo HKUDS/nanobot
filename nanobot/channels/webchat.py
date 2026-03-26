@@ -28,6 +28,8 @@ class WebChatConfig(Base):
     allow_from: list[str] = Field(default_factory=lambda: ["*"])
     streaming: bool = True
     static_path: str | None = None  # Custom static files path
+    show_typing: bool = True  # Show "typing..." indicator while processing
+    typing_emoji: str = "🔄"  # Emoji to show while processing
 
 
 class WebChatChannel(BaseChannel):
@@ -62,6 +64,8 @@ class WebChatChannel(BaseChannel):
         self._session_chat_map: dict[str, str] = {}
         # Message buffers for streaming (chat_id -> accumulated content)
         self._stream_buffers: dict[str, str] = {}
+        # Track typing state per chat_id
+        self._typing_sent: set[str] = set()
 
     async def start(self) -> None:
         """Start the Web Chat HTTP/WebSocket server."""
@@ -111,6 +115,25 @@ class WebChatChannel(BaseChannel):
 
         logger.info("Web Chat server stopped")
 
+    async def _send_typing(self, chat_id: str, is_typing: bool = True) -> None:
+        """Send typing indicator to web clients."""
+        connections = self._connections.get(chat_id, [])
+        if not connections:
+            return
+
+        payload = {
+            "type": "typing",
+            "is_typing": is_typing,
+            "emoji": getattr(self.config, "typing_emoji", "🔄"),
+        }
+
+        for ws in connections:
+            if not ws.closed:
+                try:
+                    await ws.send_json(payload)
+                except Exception as e:
+                    logger.warning("Failed to send typing indicator: {}", e)
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message to web clients."""
         chat_id = msg.chat_id
@@ -119,6 +142,11 @@ class WebChatChannel(BaseChannel):
         if not connections:
             logger.debug("No active WebSocket connections for chat_id: {}", chat_id)
             return
+
+        # Clear typing indicator when sending actual message
+        if chat_id in self._typing_sent:
+            await self._send_typing(chat_id, is_typing=False)
+            self._typing_sent.discard(chat_id)
 
         payload = {
             "type": "message",
@@ -141,6 +169,11 @@ class WebChatChannel(BaseChannel):
 
         if not connections:
             return
+
+        # Clear typing indicator on first delta
+        if chat_id in self._typing_sent:
+            await self._send_typing(chat_id, is_typing=False)
+            self._typing_sent.discard(chat_id)
 
         # Accumulate buffer for potential re-sends
         if chat_id not in self._stream_buffers:
@@ -345,27 +378,7 @@ class WebChatChannel(BaseChannel):
             };
         }
 
-        function handleMessage(data) {
-            if (data.type === 'delta') {
-                if (!currentBotMessage) {
-                    currentBotMessage = addMessage('', 'bot');
-                    currentBotMessage.classList.add('streaming');
-                }
-                currentBotMessage.textContent = data.content;
-                scrollToBottom();
-
-                if (data.is_end) {
-                    currentBotMessage.classList.remove('streaming');
-                    currentBotMessage = null;
-                }
-            } else if (data.type === 'message') {
-                if (currentBotMessage) {
-                    currentBotMessage.classList.remove('streaming');
-                    currentBotMessage = null;
-                }
-                addMessage(data.content, 'bot');
-            }
-        }
+        // handleMessage is defined below with typing support
 
         function addMessage(text, sender) {
             const msgDiv = document.createElement('div');
@@ -389,11 +402,63 @@ class WebChatChannel(BaseChannel):
             messageInput.value = '';
             currentBotMessage = null;
         }
-
+        
         sendBtn.addEventListener('click', sendMessage);
         messageInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') sendMessage();
         });
+        
+        // Typing indicator element
+        let typingIndicator = null;
+        
+        function showTyping(emoji) {
+            if (typingIndicator) return;
+            typingIndicator = document.createElement('div');
+            typingIndicator.className = 'message bot typing-message';
+            typingIndicator.innerHTML = `<span style="margin-right: 8px;">${emoji}</span><span class="typing-indicator"><span></span><span></span><span></span></span>`;
+            chatContainer.appendChild(typingIndicator);
+            scrollToBottom();
+        }
+        
+        function hideTyping() {
+            if (typingIndicator) {
+                typingIndicator.remove();
+                typingIndicator = null;
+            }
+        }
+        
+        function handleMessage(data) {
+            if (data.type === 'typing') {
+                if (data.is_typing) {
+                    showTyping(data.emoji || '🔄');
+                } else {
+                    hideTyping();
+                }
+            } else if (data.type === 'delta') {
+                hideTyping();
+                if (!currentBotMessage) {
+                    currentBotMessage = addMessage('', 'bot');
+                    currentBotMessage.classList.add('streaming');
+                }
+                currentBotMessage.textContent = data.content;
+                scrollToBottom();
+        
+                if (data.is_end) {
+                    currentBotMessage.classList.remove('streaming');
+                    currentBotMessage = null;
+                }
+            } else if (data.type === 'message') {
+                hideTyping();
+                if (currentBotMessage) {
+                    currentBotMessage.classList.remove('streaming');
+                    currentBotMessage = null;
+                }
+                addMessage(data.content, 'bot');
+            }
+        }
+        
+        // Override previous handleMessage
+        window.handleMessage = handleMessage;
 
         // Initial connection
         connect();
@@ -425,6 +490,10 @@ class WebChatChannel(BaseChannel):
                         data = json.loads(msg.data)
                         text = data.get("text", "").strip()
                         if text:
+                            # Show typing indicator before processing
+                            if getattr(self.config, "show_typing", True):
+                                await self._send_typing(chat_id, is_typing=True)
+                                self._typing_sent.add(chat_id)
                             await self._handle_message(
                                 sender_id=session_id,
                                 chat_id=chat_id,
