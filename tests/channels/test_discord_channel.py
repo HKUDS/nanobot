@@ -172,6 +172,20 @@ async def test_start_returns_when_token_missing() -> None:
 
 
 @pytest.mark.asyncio
+async def test_start_returns_when_discord_dependency_missing(monkeypatch) -> None:
+    channel = DiscordChannel(
+        DiscordConfig(enabled=True, token="token", allow_from=["*"]),
+        MessageBus(),
+    )
+    monkeypatch.setattr("nanobot.channels.discord.DISCORD_AVAILABLE", False)
+
+    await channel.start()
+
+    assert channel.is_running is False
+    assert channel._client is None
+
+
+@pytest.mark.asyncio
 async def test_start_handles_client_construction_failure(monkeypatch) -> None:
     # Construction errors from the Discord client should be swallowed and keep state clean.
     channel = DiscordChannel(

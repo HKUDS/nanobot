@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-import discord
-from discord import app_commands
-from discord.abc import Messageable
 from loguru import logger
 from pydantic import Field
 
@@ -18,6 +16,21 @@ from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.utils.helpers import safe_filename, split_message
+
+DISCORD_AVAILABLE = importlib.util.find_spec("discord") is not None
+if TYPE_CHECKING:
+    import discord
+    from discord import app_commands
+    from discord.abc import Messageable
+
+if DISCORD_AVAILABLE:
+    import discord
+    from discord import app_commands
+    from discord.abc import Messageable
+    DiscordClientBase = discord.Client
+else:
+    Messageable = Any
+    DiscordClientBase = object
 
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
@@ -39,10 +52,12 @@ class DiscordConfig(Base):
     group_policy: Literal["mention", "open"] = "mention"
 
 
-class DiscordBotClient(discord.Client):
+class DiscordBotClient(DiscordClientBase):
     """discord.py client that forwards events to the channel."""
 
     def __init__(self, channel: DiscordChannel, *, intents: discord.Intents) -> None:
+        if not DISCORD_AVAILABLE:
+            raise RuntimeError("discord.py not installed")
         super().__init__(intents=intents)
         self._channel = channel
         self.tree = app_commands.CommandTree(self)
@@ -229,6 +244,10 @@ class DiscordChannel(BaseChannel):
 
     async def start(self) -> None:
         """Start the Discord client."""
+        if not DISCORD_AVAILABLE:
+            logger.error("discord.py not installed. Run: pip install nanobot-ai[discord]")
+            return
+
         if not self.config.token:
             logger.error("Discord bot token not configured")
             return
