@@ -27,10 +27,6 @@ if DISCORD_AVAILABLE:
     import discord
     from discord import app_commands
     from discord.abc import Messageable
-    DiscordClientBase = discord.Client
-else:
-    Messageable = Any
-    DiscordClientBase = object
 
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
@@ -52,169 +48,169 @@ class DiscordConfig(Base):
     group_policy: Literal["mention", "open"] = "mention"
 
 
-class DiscordBotClient(DiscordClientBase):
-    """discord.py client that forwards events to the channel."""
+if DISCORD_AVAILABLE:
 
-    def __init__(self, channel: DiscordChannel, *, intents: discord.Intents) -> None:
-        if not DISCORD_AVAILABLE:
-            raise RuntimeError("discord.py not installed")
-        super().__init__(intents=intents)
-        self._channel = channel
-        self.tree = app_commands.CommandTree(self)
-        self._register_app_commands()
+    class DiscordBotClient(discord.Client):
+        """discord.py client that forwards events to the channel."""
 
-    async def on_ready(self) -> None:
-        self._channel._bot_user_id = str(self.user.id) if self.user else None
-        logger.info("Discord bot connected as user {}", self._channel._bot_user_id)
-        try:
-            synced = await self.tree.sync()
-            logger.info("Discord app commands synced: {}", len(synced))
-        except Exception as e:
-            logger.warning("Discord app command sync failed: {}", e)
+        def __init__(self, channel: DiscordChannel, *, intents: discord.Intents) -> None:
+            super().__init__(intents=intents)
+            self._channel = channel
+            self.tree = app_commands.CommandTree(self)
+            self._register_app_commands()
 
-    async def on_message(self, message: discord.Message) -> None:
-        await self._channel._handle_discord_message(message)
-
-    async def _reply_ephemeral(self, interaction: discord.Interaction, text: str) -> bool:
-        """Send an ephemeral interaction response and report success."""
-        try:
-            await interaction.response.send_message(text, ephemeral=True)
-            return True
-        except Exception as e:
-            logger.warning("Discord interaction response failed: {}", e)
-            return False
-
-    def _register_app_commands(self) -> None:
-        @self.tree.command(name="new", description="Start a new conversation")
-        async def new_command(interaction: discord.Interaction) -> None:
-            user = interaction.user
-            channel_id = interaction.channel_id
-            sender_id = str(user.id)
-
-            if not self._channel.is_allowed(sender_id):
-                await self._reply_ephemeral(interaction, "You are not allowed to use this bot.")
-                return
-
-            await self._reply_ephemeral(interaction, "Starting a new session...")
-
-            await self._channel._handle_message(
-                sender_id=sender_id,
-                chat_id=str(channel_id),
-                content="/new",
-                metadata={
-                    "interaction_id": str(interaction.id),
-                    "guild_id": str(interaction.guild_id) if interaction.guild_id else None,
-                    "is_slash_command": True,
-                },
-            )
-
-        @self.tree.command(name="help", description="Show available commands")
-        async def help_command(interaction: discord.Interaction) -> None:
-            await self._reply_ephemeral(interaction, HELP_TEXT)
-
-        @self.tree.error
-        async def on_app_command_error(
-            interaction: discord.Interaction,
-            error: app_commands.AppCommandError,
-        ) -> None:
-            command_name = interaction.command.qualified_name if interaction.command else "?"
-            logger.warning(
-                "Discord app command failed user={} channel={} cmd={} error={}",
-                interaction.user.id,
-                interaction.channel_id,
-                command_name,
-                error,
-            )
-
-    async def send_outbound(self, msg: OutboundMessage) -> None:
-        """Send a nanobot outbound message using Discord transport rules."""
-        channel_id = int(msg.chat_id)
-
-        channel = self.get_channel(channel_id)
-        if channel is None:
+        async def on_ready(self) -> None:
+            self._channel._bot_user_id = str(self.user.id) if self.user else None
+            logger.info("Discord bot connected as user {}", self._channel._bot_user_id)
             try:
-                channel = await self.fetch_channel(channel_id)
+                synced = await self.tree.sync()
+                logger.info("Discord app commands synced: {}", len(synced))
             except Exception as e:
-                logger.warning("Discord channel {} unavailable: {}", msg.chat_id, e)
-                return
+                logger.warning("Discord app command sync failed: {}", e)
 
-        reference, mention_settings = self._build_reply_context(channel, msg.reply_to)
-        sent_media = False
-        failed_media: list[str] = []
+        async def on_message(self, message: discord.Message) -> None:
+            await self._channel._handle_discord_message(message)
 
-        for index, media_path in enumerate(msg.media or []):
-            if await self._send_file(
-                channel,
-                media_path,
-                reference=reference if index == 0 else None,
-                mention_settings=mention_settings,
-            ):
-                sent_media = True
-            else:
-                failed_media.append(Path(media_path).name)
+        async def _reply_ephemeral(self, interaction: discord.Interaction, text: str) -> bool:
+            """Send an ephemeral interaction response and report success."""
+            try:
+                await interaction.response.send_message(text, ephemeral=True)
+                return True
+            except Exception as e:
+                logger.warning("Discord interaction response failed: {}", e)
+                return False
 
-        for index, chunk in enumerate(self._build_chunks(msg.content or "", failed_media, sent_media)):
-            kwargs: dict[str, Any] = {"content": chunk}
-            if index == 0 and reference is not None and not sent_media:
-                kwargs["reference"] = reference
-                kwargs["allowed_mentions"] = mention_settings
-            await channel.send(**kwargs)
+        def _register_app_commands(self) -> None:
+            @self.tree.command(name="new", description="Start a new conversation")
+            async def new_command(interaction: discord.Interaction) -> None:
+                user = interaction.user
+                channel_id = interaction.channel_id
+                sender_id = str(user.id)
 
-    async def _send_file(
-        self,
-        channel: Messageable,
-        file_path: str,
-        *,
-        reference: discord.PartialMessage | None,
-        mention_settings: discord.AllowedMentions,
-    ) -> bool:
-        """Send a file attachment via discord.py."""
-        path = Path(file_path)
-        if not path.is_file():
-            logger.warning("Discord file not found, skipping: {}", file_path)
-            return False
+                if not self._channel.is_allowed(sender_id):
+                    await self._reply_ephemeral(interaction, "You are not allowed to use this bot.")
+                    return
 
-        if path.stat().st_size > MAX_ATTACHMENT_BYTES:
-            logger.warning("Discord file too large (>20MB), skipping: {}", path.name)
-            return False
+                await self._reply_ephemeral(interaction, "Starting a new session...")
 
-        try:
-            kwargs: dict[str, Any] = {"file": discord.File(path)}
-            if reference is not None:
-                kwargs["reference"] = reference
-                kwargs["allowed_mentions"] = mention_settings
-            await channel.send(**kwargs)
-            logger.info("Discord file sent: {}", path.name)
-            return True
-        except Exception as e:
-            logger.error("Error sending Discord file {}: {}", path.name, e)
-            return False
+                await self._channel._handle_message(
+                    sender_id=sender_id,
+                    chat_id=str(channel_id),
+                    content="/new",
+                    metadata={
+                        "interaction_id": str(interaction.id),
+                        "guild_id": str(interaction.guild_id) if interaction.guild_id else None,
+                        "is_slash_command": True,
+                    },
+                )
 
-    @staticmethod
-    def _build_chunks(content: str, failed_media: list[str], sent_media: bool) -> list[str]:
-        """Build outbound text chunks, including attachment-failure fallback text."""
-        chunks = split_message(content, MAX_MESSAGE_LEN)
-        if chunks or not failed_media or sent_media:
-            return chunks
-        fallback = "\n".join(f"[attachment: {name} - send failed]" for name in failed_media)
-        return split_message(fallback, MAX_MESSAGE_LEN)
+            @self.tree.command(name="help", description="Show available commands")
+            async def help_command(interaction: discord.Interaction) -> None:
+                await self._reply_ephemeral(interaction, HELP_TEXT)
 
-    @staticmethod
-    def _build_reply_context(
-        channel: Messageable,
-        reply_to: str | None,
-    ) -> tuple[discord.PartialMessage | None, discord.AllowedMentions]:
-        """Build reply context for outbound messages."""
-        mention_settings = discord.AllowedMentions(replied_user=False)
-        if not reply_to:
-            return None, mention_settings
-        try:
-            message_id = int(reply_to)
-        except ValueError:
-            logger.warning("Invalid Discord reply target: {}", reply_to)
-            return None, mention_settings
+            @self.tree.error
+            async def on_app_command_error(
+                interaction: discord.Interaction,
+                error: app_commands.AppCommandError,
+            ) -> None:
+                command_name = interaction.command.qualified_name if interaction.command else "?"
+                logger.warning(
+                    "Discord app command failed user={} channel={} cmd={} error={}",
+                    interaction.user.id,
+                    interaction.channel_id,
+                    command_name,
+                    error,
+                )
 
-        return channel.get_partial_message(message_id), mention_settings
+        async def send_outbound(self, msg: OutboundMessage) -> None:
+            """Send a nanobot outbound message using Discord transport rules."""
+            channel_id = int(msg.chat_id)
+
+            channel = self.get_channel(channel_id)
+            if channel is None:
+                try:
+                    channel = await self.fetch_channel(channel_id)
+                except Exception as e:
+                    logger.warning("Discord channel {} unavailable: {}", msg.chat_id, e)
+                    return
+
+            reference, mention_settings = self._build_reply_context(channel, msg.reply_to)
+            sent_media = False
+            failed_media: list[str] = []
+
+            for index, media_path in enumerate(msg.media or []):
+                if await self._send_file(
+                    channel,
+                    media_path,
+                    reference=reference if index == 0 else None,
+                    mention_settings=mention_settings,
+                ):
+                    sent_media = True
+                else:
+                    failed_media.append(Path(media_path).name)
+
+            for index, chunk in enumerate(self._build_chunks(msg.content or "", failed_media, sent_media)):
+                kwargs: dict[str, Any] = {"content": chunk}
+                if index == 0 and reference is not None and not sent_media:
+                    kwargs["reference"] = reference
+                    kwargs["allowed_mentions"] = mention_settings
+                await channel.send(**kwargs)
+
+        async def _send_file(
+            self,
+            channel: Messageable,
+            file_path: str,
+            *,
+            reference: discord.PartialMessage | None,
+            mention_settings: discord.AllowedMentions,
+        ) -> bool:
+            """Send a file attachment via discord.py."""
+            path = Path(file_path)
+            if not path.is_file():
+                logger.warning("Discord file not found, skipping: {}", file_path)
+                return False
+
+            if path.stat().st_size > MAX_ATTACHMENT_BYTES:
+                logger.warning("Discord file too large (>20MB), skipping: {}", path.name)
+                return False
+
+            try:
+                kwargs: dict[str, Any] = {"file": discord.File(path)}
+                if reference is not None:
+                    kwargs["reference"] = reference
+                    kwargs["allowed_mentions"] = mention_settings
+                await channel.send(**kwargs)
+                logger.info("Discord file sent: {}", path.name)
+                return True
+            except Exception as e:
+                logger.error("Error sending Discord file {}: {}", path.name, e)
+                return False
+
+        @staticmethod
+        def _build_chunks(content: str, failed_media: list[str], sent_media: bool) -> list[str]:
+            """Build outbound text chunks, including attachment-failure fallback text."""
+            chunks = split_message(content, MAX_MESSAGE_LEN)
+            if chunks or not failed_media or sent_media:
+                return chunks
+            fallback = "\n".join(f"[attachment: {name} - send failed]" for name in failed_media)
+            return split_message(fallback, MAX_MESSAGE_LEN)
+
+        @staticmethod
+        def _build_reply_context(
+            channel: Messageable,
+            reply_to: str | None,
+        ) -> tuple[discord.PartialMessage | None, discord.AllowedMentions]:
+            """Build reply context for outbound messages."""
+            mention_settings = discord.AllowedMentions(replied_user=False)
+            if not reply_to:
+                return None, mention_settings
+            try:
+                message_id = int(reply_to)
+            except ValueError:
+                logger.warning("Invalid Discord reply target: {}", reply_to)
+                return None, mention_settings
+
+            return channel.get_partial_message(message_id), mention_settings
 
 
 class DiscordChannel(BaseChannel):
