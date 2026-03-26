@@ -287,15 +287,11 @@ async def _consume_sse(
                     continue
                 buf = tool_call_buffers.get(call_id) or {}
                 args_raw = buf.get("arguments") or item.get("arguments") or "{}"
-                try:
-                    args = json.loads(args_raw)
-                except Exception:
-                    args = {"raw": args_raw}
                 tool_calls.append(
                     ToolCallRequest(
                         id=f"{call_id}|{buf.get('id') or item.get('id') or 'fc_0'}",
                         name=buf.get("name") or item.get("name"),
-                        arguments=args,
+                        arguments=args_raw,
                     )
                 )
         elif event_type == "response.completed":
