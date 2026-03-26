@@ -1219,3 +1219,65 @@ class TestDelegationSpanOutput:
             result = await dispatcher.dispatch("researcher", "Task", None)
 
         assert result.content == "Result text"
+
+
+# ---------------------------------------------------------------------------
+# 12. ActPhase.execute_tools annotates root span with batch metadata
+# ---------------------------------------------------------------------------
+
+
+class TestActPhaseBatchMetadata:
+    """ActPhase.execute_tools calls update_current_span with batch metadata."""
+
+    async def test_batch_metadata_sent_to_current_span(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from nanobot.agent.turn_phases import ActPhase
+        from nanobot.agent.turn_types import TurnState
+        from nanobot.context.context import ContextBuilder
+        from nanobot.providers.base import LLMResponse, ToolCallRequest
+        from nanobot.tools.base import ToolResult
+        from nanobot.tools.executor import ToolExecutor
+
+        # Build a mock ToolExecutor that returns a successful result
+        mock_executor = AsyncMock(spec=ToolExecutor)
+        mock_executor.execute_batch.return_value = [ToolResult.ok("done")]
+
+        # Build a mock ContextBuilder
+        mock_context = MagicMock(spec=ContextBuilder)
+        mock_context.add_assistant_message.return_value = [
+            {"role": "assistant", "content": None, "tool_calls": []}
+        ]
+        mock_context.add_tool_result.return_value = [{"role": "tool", "content": "done"}]
+
+        act = ActPhase(tool_executor=mock_executor, context=mock_context)
+
+        response = LLMResponse(
+            content=None,
+            tool_calls=[
+                ToolCallRequest(id="tc1", name="list_dir", arguments={"path": "."}),
+            ],
+            usage={"prompt_tokens": 10, "completion_tokens": 5},
+        )
+
+        state = TurnState(
+            messages=[{"role": "user", "content": "Hi"}],
+            user_text="Hi",
+            disabled_tools=set(),
+        )
+
+        with patch("nanobot.agent.turn_phases.update_current_span") as mock_update:
+            await act.execute_tools(
+                state=state,
+                response=response,
+                tools_used=[],
+                on_progress=None,
+            )
+
+        mock_update.assert_called_once()
+        call_kwargs = mock_update.call_args[1]
+        meta = call_kwargs["metadata"]
+        assert meta["batch_tools"] == ["list_dir"]
+        assert meta["batch_any_failed"] is False
+        assert "batch_duration_ms" in meta
+        assert isinstance(meta["batch_duration_ms"], int | float)

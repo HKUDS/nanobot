@@ -20,6 +20,7 @@ from nanobot.agent.failure import FailureClass, ToolCallTracker, _build_failure_
 from nanobot.agent.turn_types import TurnState
 from nanobot.context.context import ContextBuilder
 from nanobot.coordination.task_types import has_parallel_structure
+from nanobot.observability.langfuse import update_current_span
 from nanobot.observability.tracing import bind_trace
 from nanobot.tools.executor import ToolExecutor
 
@@ -319,6 +320,14 @@ class ActPhase:
                 }
             )
             nudged_for_final = True
+
+        update_current_span(
+            metadata={
+                "batch_tools": [tc.name for tc in response.tool_calls],
+                "batch_any_failed": any_failed,
+                "batch_duration_ms": round(tools_elapsed_ms),
+            }
+        )
 
         return ToolBatchResult(
             any_failed=any_failed,
