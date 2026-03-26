@@ -224,14 +224,16 @@ def test_evaluate_rollout_gates_returns_checks(tmp_path: Path) -> None:
     assert gates.get("passed") is True
 
 
-def test_rollout_overrides_apply_from_constructor(tmp_path: Path) -> None:
+def test_memory_config_apply_from_constructor(tmp_path: Path) -> None:
+    from nanobot.config.memory import MemoryConfig
+
     store = MemoryStore(
         tmp_path,
-        rollout_overrides={
-            "memory_rollout_mode": "disabled",
-            "memory_router_enabled": False,
-            "rollout_gates": {"min_recall_at_k": 0.66},
-        },
+        memory_config=MemoryConfig(
+            rollout_mode="disabled",
+            router_enabled=False,
+            rollout_gate_min_recall_at_k=0.66,
+        ),
     )
     status = store._rollout_config.get_status()
     assert status["memory_rollout_mode"] == "disabled"
@@ -358,7 +360,7 @@ def test_get_memory_context_graph_not_truncated_at_default_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Entity graph section should appear even at the default 900 token budget."""
-    store = MemoryStore(tmp_path, rollout_overrides={"graph_enabled": True})
+    store = MemoryStore(tmp_path, graph_enabled=True)
 
     # Simulate a large profile that previously consumed the whole budget.
     large_profile = {

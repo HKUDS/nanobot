@@ -9,12 +9,24 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.config.memory import MemoryConfig
 from nanobot.memory import MemoryStore
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 
-def _store(tmp_path: Path, **overrides: object) -> MemoryStore:
-    return MemoryStore(tmp_path, rollout_overrides=overrides or None, embedding_provider="hash")
+def _store(
+    tmp_path: Path,
+    *,
+    memory_config: MemoryConfig | None = None,
+    graph_enabled: bool = False,
+    embedding_provider: str = "hash",
+) -> MemoryStore:
+    return MemoryStore(
+        tmp_path,
+        memory_config=memory_config,
+        graph_enabled=graph_enabled,
+        embedding_provider=embedding_provider,
+    )
 
 
 class TestReindexBranches:

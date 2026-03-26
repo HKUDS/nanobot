@@ -45,7 +45,7 @@ def _make_store(tmp_path: Path) -> MemoryStore:
     return MemoryStore(
         tmp_path,
         embedding_provider="hash",
-        rollout_overrides={"graph_enabled": True},
+        graph_enabled=True,
     )
 
 
@@ -88,7 +88,7 @@ class TestKnowledgeGraphIngestion:
         store = MemoryStore(
             tmp_path,
             embedding_provider="hash",
-            rollout_overrides={"graph_enabled": False},
+            graph_enabled=False,
         )
         # Graph is constructed but disabled — methods return empty results
         assert store.graph is not None
