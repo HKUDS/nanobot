@@ -146,7 +146,7 @@ def memory_rebuild(
         30, "--max-events", help="Max recent events for MEMORY.md snapshot"
     ),
 ) -> None:
-    """Rebuild memory/MEMORY.md from structured memory profile and events."""
+    """Rebuild memory snapshot from structured memory profile and events."""
     from nanobot.config.loader import load_config
     from nanobot.memory import MemoryStore
 
