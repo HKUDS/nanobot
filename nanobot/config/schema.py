@@ -1,16 +1,18 @@
 """Configuration schema using Pydantic."""
-# size-exception: data definitions — Pydantic models with many fields by nature
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from nanobot.config.providers_registry import PROVIDERS, find_by_name
+
+if TYPE_CHECKING:
+    from nanobot.config.agent import AgentConfig
 
 
 class Base(BaseModel):
@@ -133,292 +135,17 @@ class ChannelsConfig(Base):
     web: WebChannelConfig = Field(default_factory=WebChannelConfig)
 
 
-class VectorSyncConfig(Base):
-    """Vector sync adapter tuning (legacy mem0, now SQLite-backed)."""
+def _default_agent_config() -> AgentConfig:
+    """Lazy import to avoid circular dependency (schema -> agent -> schema)."""
+    from nanobot.config import agent as _agent_mod
 
-    user_id: str = "nanobot"  # Vector user namespace (was MEM0_USER_ID)
-    add_debug: bool = False  # Log add_text diagnostics (was MEM0_ADD_DEBUG)
-    verify_write: bool = True  # Verify vector writes via count (was MEM0_VERIFY_WRITE)
-    force_infer: bool = False  # Force infer=True mode (was MEM0_FORCE_INFER_TRUE)
-
-
-class RerankerConfig(Base):
-    """Cross-encoder re-ranker tuning."""
-
-    mode: str = "enabled"  # enabled | shadow | disabled (was NANOBOT_RERANKER_MODE)
-    alpha: float = 0.5  # Blend weight 0.0–1.0 (was NANOBOT_RERANKER_ALPHA)
-    model: str = "onnx:ms-marco-MiniLM-L-6-v2"  # Model name (was NANOBOT_RERANKER_MODEL)
-
-
-class MissionConfig(Base):
-    """Background mission tuning."""
-
-    max_concurrent: int = 3
-    max_iterations: int = 15
-    result_max_chars: int = 4000
-
-
-class MemorySectionWeights(Base):
-    """Per-section token budget weights for one retrieval intent.
-
-    Values are normalised to sum to 1.0 at allocation time — only relative
-    ratios matter. An empty dict means 'use DEFAULT_SECTION_WEIGHTS'.
-    """
-
-    long_term: float = Field(default=0.0, ge=0.0)
-    profile: float = Field(default=0.0, ge=0.0)
-    semantic: float = Field(default=0.0, ge=0.0)
-    episodic: float = Field(default=0.0, ge=0.0)
-    reflection: float = Field(default=0.0, ge=0.0)
-    graph: float = Field(default=0.0, ge=0.0)
-    unresolved: float = Field(default=0.0, ge=0.0)
-
-
-class AgentDefaults(Base):
-    """Default agent configuration."""
-
-    workspace: str = "~/.nanobot/workspace"
-    model: str = "anthropic/claude-opus-4-5"
-    max_tokens: int = 8192
-    temperature: float = 0.1
-    max_tool_iterations: int = 40
-    memory_window: int = 100
-    memory_retrieval_k: int = 6
-    memory_token_budget: int = 900
-    memory_uncertainty_threshold: float = 0.6
-    memory_enable_contradiction_check: bool = True
-    memory_conflict_auto_resolve_gap: float = 0.25
-    memory_rollout_mode: str = "enabled"  # enabled|shadow|disabled
-    memory_type_separation_enabled: bool = True
-    memory_router_enabled: bool = True
-    memory_reflection_enabled: bool = True
-    memory_shadow_mode: bool = False
-    memory_shadow_sample_rate: float = 0.2
-    memory_vector_health_enabled: bool = True
-    memory_auto_reindex_on_empty_vector: bool = True
-    memory_history_fallback_enabled: bool = False
-    memory_fallback_allowed_sources: list[str] = Field(
-        default_factory=lambda: ["profile", "events", "vector_search"]
-    )
-    memory_fallback_max_summary_chars: int = 280
-    memory_rollout_gate_min_recall_at_k: float = 0.55
-    memory_rollout_gate_min_precision_at_k: float = 0.25
-    memory_rollout_gate_max_avg_memory_context_tokens: float = 1400.0
-    memory_rollout_gate_max_history_fallback_ratio: float = 0.05
-
-    # Tool-result truncation
-    tool_result_max_chars: int = 2000
-    tool_result_context_tokens: int = 500
-
-    # Vision / multimodal
-    vision_model: str = "gpt-4o-mini"
-
-    # Knowledge graph (networkx + JSON persistence)
-    graph_enabled: bool = False
-
-    # Reranker
-    reranker: RerankerConfig = Field(default_factory=RerankerConfig)
-
-    # Reranker / vector sync
-    vector_sync: VectorSyncConfig = Field(default_factory=VectorSyncConfig)
-    vector_raw_turn_ingestion: bool = True  # LAN-208: gate raw conversation turn ingestion
-
-    # Missions
-    mission: MissionConfig = Field(default_factory=MissionConfig)
-
-    # Cost guardrails
-    max_session_cost_usd: float = 0.0  # 0 = disabled; >0 raises BudgetExceededError when exceeded
-    max_session_wall_time_seconds: int = 0  # 0 = disabled; >0 terminates session after N seconds
-
-    # Delegation cost guard (LAN-83)
-    max_delegation_depth: int = 8  # Max total delegations per turn (0 = unlimited)
-
-    # Memory section token budget weights (keyed by intent name)
-    memory_section_weights: dict[str, MemorySectionWeights] = Field(default_factory=dict)
-
-
-class AgentConfig(Base):
-    """Unified agent runtime configuration.
-
-    Passed directly to ``AgentLoop.__init__`` so that callers no longer need
-    to forward 30+ keyword arguments individually.  Build one from an
-    ``AgentDefaults`` instance with ``AgentConfig.from_defaults()``.
-    """
-
-    workspace: str = "~/.nanobot/workspace"
-    model: str = "anthropic/claude-opus-4-5"
-    max_tokens: int = 8192
-    temperature: float = 0.1
-    max_iterations: int = 40
-    context_window_tokens: int = 128_000
-
-    # Memory
-    memory_window: int = 100
-    memory_retrieval_k: int = 6
-    memory_token_budget: int = 900
-    memory_md_token_cap: int = 1500  # max tokens for memory snapshot injection; 0 = unlimited
-    memory_uncertainty_threshold: float = 0.6
-    memory_enable_contradiction_check: bool = True
-    memory_conflict_auto_resolve_gap: float = 0.25
-    memory_rollout_mode: str = "enabled"
-    memory_type_separation_enabled: bool = True
-    memory_router_enabled: bool = True
-    memory_reflection_enabled: bool = True
-    memory_shadow_mode: bool = False
-    memory_shadow_sample_rate: float = 0.2
-    memory_vector_health_enabled: bool = True
-    memory_auto_reindex_on_empty_vector: bool = True
-    memory_history_fallback_enabled: bool = False
-    memory_fallback_allowed_sources: list[str] = Field(
-        default_factory=lambda: ["profile", "events", "vector_search"]
-    )
-    memory_fallback_max_summary_chars: int = 280
-    memory_rollout_gate_min_recall_at_k: float = 0.55
-    memory_rollout_gate_min_precision_at_k: float = 0.25
-    memory_rollout_gate_max_avg_memory_context_tokens: float = 1400.0
-    memory_rollout_gate_max_history_fallback_ratio: float = 0.05
-
-    # Tool-result truncation
-    tool_result_max_chars: int = 2000
-    tool_result_context_tokens: int = 500
-
-    # Tool-result cache & summary
-    tool_summary_model: str = ""  # LLM for summarising large tool results; empty = main model
-
-    # Planning & verification (Step 1 & 2)
-    planning_enabled: bool = True
-    verification_mode: str = "on_uncertainty"  # always | on_uncertainty | off
-
-    # Feature flags (can be overridden by root FeaturesConfig kill-switches)
-    delegation_enabled: bool = True
-    memory_enabled: bool = True
-    skills_enabled: bool = True
-    streaming_enabled: bool = True
-
-    # Micro-extraction: per-turn lightweight memory extraction
-    micro_extraction_enabled: bool = False  # Feature gate (opt-in)
-    micro_extraction_model: str | None = None  # None = "gpt-4o-mini"
-
-    # Summarization-based compression (Step 3)
-    summary_model: str | None = (
-        None  # None = use main model; set e.g. "gpt-4o-mini" for cheaper compression
-    )
-
-    # Shell security (Step 11)
-    shell_mode: str = "denylist"  # allowlist | denylist
-
-    # Per-message timeout (seconds); 0 = no timeout
-    message_timeout: int = 300
-
-    # Knowledge graph (networkx + JSON persistence)
-    graph_enabled: bool = False
-
-    # Reranker / vector sync
-    reranker_mode: str = "enabled"
-    reranker_alpha: float = 0.5
-    reranker_model: str = "onnx:ms-marco-MiniLM-L-6-v2"
-    vector_user_id: str = "nanobot"
-    vector_add_debug: bool = False
-    vector_verify_write: bool = True
-    vector_force_infer: bool = False
-    vector_raw_turn_ingestion: bool = True  # LAN-208: gate raw conversation turn ingestion
-
-    # Vision / multimodal
-    vision_model: str = "gpt-4o-mini"
-
-    # Tools
-    restrict_to_workspace: bool = True
-
-    # Missions
-    mission_max_concurrent: int = 3
-    mission_max_iterations: int = 15
-    mission_result_max_chars: int = 4000
-
-    # Cost guardrails
-    max_session_cost_usd: float = 0.0  # 0 = disabled; >0 raises BudgetExceededError when exceeded
-    max_session_wall_time_seconds: int = 0  # 0 = disabled; >0 terminates session after N seconds
-
-    # Delegation cost guard (LAN-83)
-    max_delegation_depth: int = 8  # Max total delegations per turn (0 = unlimited)
-
-    # Memory section token budget weights (keyed by intent name)
-    memory_section_weights: dict[str, MemorySectionWeights] = Field(default_factory=dict)
-
-    @classmethod
-    def from_defaults(cls, defaults: "AgentDefaults", **overrides: Any) -> "AgentConfig":
-        """Build an ``AgentConfig`` from the ``AgentDefaults`` section of the config file.
-
-        .. warning:: Adding a new config field requires **three** coordinated steps:
-
-            1. Add the field to :class:`AgentDefaults` with its default value.
-            2. Add the corresponding mapping entry in the ``data`` dict below
-               (``"agent_config_key": defaults.agent_defaults_key``).
-            3. Add the field to :class:`AgentConfig` with a matching type.
-
-            Skipping any step causes silent misconfiguration — the field will
-            silently use the ``AgentConfig`` default instead of the user's value.
-        """
-        data = {
-            "workspace": defaults.workspace,
-            "model": defaults.model,
-            "max_tokens": defaults.max_tokens,
-            "temperature": defaults.temperature,
-            "max_iterations": defaults.max_tool_iterations,
-            "memory_window": defaults.memory_window,
-            "memory_retrieval_k": defaults.memory_retrieval_k,
-            "memory_token_budget": defaults.memory_token_budget,
-            "memory_uncertainty_threshold": defaults.memory_uncertainty_threshold,
-            "memory_enable_contradiction_check": defaults.memory_enable_contradiction_check,
-            "memory_conflict_auto_resolve_gap": defaults.memory_conflict_auto_resolve_gap,
-            "memory_rollout_mode": defaults.memory_rollout_mode,
-            "memory_type_separation_enabled": defaults.memory_type_separation_enabled,
-            "memory_router_enabled": defaults.memory_router_enabled,
-            "memory_reflection_enabled": defaults.memory_reflection_enabled,
-            "memory_shadow_mode": defaults.memory_shadow_mode,
-            "memory_shadow_sample_rate": defaults.memory_shadow_sample_rate,
-            "memory_vector_health_enabled": defaults.memory_vector_health_enabled,
-            "memory_auto_reindex_on_empty_vector": defaults.memory_auto_reindex_on_empty_vector,
-            "memory_history_fallback_enabled": defaults.memory_history_fallback_enabled,
-            "memory_fallback_allowed_sources": defaults.memory_fallback_allowed_sources,
-            "memory_fallback_max_summary_chars": defaults.memory_fallback_max_summary_chars,
-            "memory_rollout_gate_min_recall_at_k": defaults.memory_rollout_gate_min_recall_at_k,
-            "memory_rollout_gate_min_precision_at_k": defaults.memory_rollout_gate_min_precision_at_k,
-            "memory_rollout_gate_max_avg_memory_context_tokens": defaults.memory_rollout_gate_max_avg_memory_context_tokens,
-            "memory_rollout_gate_max_history_fallback_ratio": defaults.memory_rollout_gate_max_history_fallback_ratio,
-            "tool_result_max_chars": defaults.tool_result_max_chars,
-            "tool_result_context_tokens": defaults.tool_result_context_tokens,
-            "graph_enabled": defaults.graph_enabled,
-            "reranker_mode": defaults.reranker.mode,
-            "reranker_alpha": defaults.reranker.alpha,
-            "reranker_model": defaults.reranker.model,
-            "vector_user_id": defaults.vector_sync.user_id,
-            "vector_add_debug": defaults.vector_sync.add_debug,
-            "vector_verify_write": defaults.vector_sync.verify_write,
-            "vector_force_infer": defaults.vector_sync.force_infer,
-            "vector_raw_turn_ingestion": defaults.vector_raw_turn_ingestion,
-            "vision_model": defaults.vision_model,
-            "mission_max_concurrent": defaults.mission.max_concurrent,
-            "mission_max_iterations": defaults.mission.max_iterations,
-            "mission_result_max_chars": defaults.mission.result_max_chars,
-            "max_session_cost_usd": defaults.max_session_cost_usd,
-            "max_session_wall_time_seconds": defaults.max_session_wall_time_seconds,
-            "max_delegation_depth": defaults.max_delegation_depth,
-            "memory_section_weights": defaults.memory_section_weights,
-        }
-        data.update(overrides)
-        return cls(**data)  # type: ignore[arg-type]
-
-    @property
-    def workspace_path(self) -> "Path":
-        from pathlib import Path
-
-        return Path(self.workspace).expanduser()
+    return _agent_mod.AgentConfig()
 
 
 class AgentsConfig(Base):
     """Agent configuration."""
 
-    defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    defaults: "AgentConfig" = Field(default_factory=_default_agent_config)
     routing: "RoutingConfig" = Field(default_factory=lambda: RoutingConfig())
 
 
@@ -675,3 +402,17 @@ class Config(BaseSettings):
         env_ignore_empty=True,
         extra="ignore",
     )
+
+
+# Re-exports for backward compatibility during refactor
+from nanobot.config.agent import AgentConfig  # noqa: E402, F401
+from nanobot.config.memory import (  # noqa: E402, F401
+    MemoryConfig,
+    MemorySectionWeights,
+    RerankerConfig,
+    VectorConfig,
+)
+from nanobot.config.mission import MissionConfig  # noqa: E402, F401
+
+# Backward-compat alias
+VectorSyncConfig = VectorConfig  # noqa: F841
