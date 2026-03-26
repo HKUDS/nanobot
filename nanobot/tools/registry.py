@@ -124,13 +124,23 @@ class ToolRegistry:
             if hit_key:
                 entry = self._cache.get(hit_key)
                 if entry:
+                    from nanobot.observability.langfuse import tool_span
+
                     logger.info("Cache HIT for {}(…) → {}", name, hit_key)
-                    return ToolResult.ok(
-                        entry.summary,
-                        cache_key=hit_key,
-                        cached=True,
-                        summary=entry.summary,
-                    )
+                    async with tool_span(
+                        name=name,
+                        input=params,
+                        metadata={"cache": "hit", "cache_key": hit_key},
+                    ) as obs:
+                        result = ToolResult.ok(
+                            entry.summary,
+                            cache_key=hit_key,
+                            cached=True,
+                            summary=entry.summary,
+                        )
+                        if obs is not None:
+                            obs.update(output=entry.summary[:500])
+                    return result
 
         if tool.readonly:
             return await self._execute_inner(name, tool, params)

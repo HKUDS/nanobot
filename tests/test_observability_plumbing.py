@@ -647,7 +647,112 @@ class TestToolSpanOutputCaptured:
 
 
 # ---------------------------------------------------------------------------
-# 10. Compression span captures input, output, and enriched metadata
+# 10. Cache-hit path creates a tool_span
+# ---------------------------------------------------------------------------
+
+
+class TestToolSpanCacheHit:
+    """ToolRegistry.execute() wraps cache hits in a tool_span."""
+
+    async def test_cache_hit_creates_span_with_metadata(self):
+        from unittest.mock import MagicMock
+
+        from nanobot.tools.base import Tool, ToolResult
+        from nanobot.tools.registry import ToolRegistry
+
+        class CacheableTool(Tool):
+            name = "cached_tool"
+            description = "A cacheable tool"
+            readonly = True
+            cacheable = True
+            parameters = {"type": "object", "properties": {}}
+
+            async def execute(self, **kwargs: Any) -> ToolResult:
+                return ToolResult.ok("should not be called")
+
+        registry = ToolRegistry()
+        registry.register(CacheableTool())
+
+        # Set up mock cache that returns a hit
+        mock_cache = MagicMock()
+        mock_cache.has.return_value = "cache_key_123"
+        mock_entry = MagicMock()
+        mock_entry.summary = "cached summary text"
+        mock_cache.get.return_value = mock_entry
+
+        registry.set_cache(mock_cache)
+
+        captured_spans: list[dict[str, Any]] = []
+        update_calls: list[dict[str, Any]] = []
+
+        class FakeObs:
+            def update(self, **kwargs: Any) -> None:
+                update_calls.append(kwargs)
+
+        @contextlib.asynccontextmanager
+        async def fake_tool_span(**kwargs: Any):
+            captured_spans.append(kwargs)
+            yield FakeObs()
+
+        with patch("nanobot.observability.langfuse.tool_span", side_effect=fake_tool_span):
+            result = await registry.execute("cached_tool", {"arg": "val"})
+
+        assert result.success
+        assert result.output == "cached summary text"
+        assert result.metadata.get("cached") is True
+
+        # Verify span was created with cache metadata
+        assert len(captured_spans) == 1
+        assert captured_spans[0]["name"] == "cached_tool"
+        assert captured_spans[0]["input"] == {"arg": "val"}
+        assert captured_spans[0]["metadata"]["cache"] == "hit"
+        assert captured_spans[0]["metadata"]["cache_key"] == "cache_key_123"
+
+        # Verify obs.update was called with output
+        assert len(update_calls) == 1
+        assert "cached summary text" in update_calls[0]["output"]
+
+    async def test_cache_hit_obs_none_does_not_crash(self):
+        from unittest.mock import MagicMock
+
+        from nanobot.tools.base import Tool, ToolResult
+        from nanobot.tools.registry import ToolRegistry
+
+        class CacheableTool(Tool):
+            name = "cached_tool"
+            description = "A cacheable tool"
+            readonly = True
+            cacheable = True
+            parameters = {"type": "object", "properties": {}}
+
+            async def execute(self, **kwargs: Any) -> ToolResult:
+                return ToolResult.ok("should not be called")
+
+        registry = ToolRegistry()
+        registry.register(CacheableTool())
+
+        mock_cache = MagicMock()
+        mock_cache.has.return_value = "cache_key_456"
+        mock_entry = MagicMock()
+        mock_entry.summary = "cached text"
+        mock_cache.get.return_value = mock_entry
+
+        registry.set_cache(mock_cache)
+
+        @contextlib.asynccontextmanager
+        async def fake_tool_span(**kwargs: Any):
+            yield None
+
+        with patch("nanobot.observability.langfuse.tool_span", side_effect=fake_tool_span):
+            result = await registry.execute("cached_tool", {})
+
+        assert result.success
+        assert result.output == "cached text"
+        assert result.metadata.get("cached") is True
+
+
+# ---------------------------------------------------------------------------
+# 11. Compression span captures input, output, and enriched metadata
 # ---------------------------------------------------------------------------
 
 
