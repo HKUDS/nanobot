@@ -27,6 +27,16 @@ class ChannelsConfig(Base):
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
 
 
+class ConnectorsConfig(Base):
+    """Configuration for external connector runtimes.
+
+    Connector definitions are stored as extra fields (dicts).
+    Each connector validates its own config at runtime.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -138,6 +148,23 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # seconds before a tool call is cancelled
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
+
+class DockerConnectorConfig(Base):
+    """Docker Compose-backed connector configuration."""
+
+    enabled: bool = False
+    type: Literal["docker"] = "docker"
+    compose_file: str = ""
+    project_name: str = ""
+    services: list[str] = Field(default_factory=list)
+    working_dir: str = ""
+    env: dict[str, str] = Field(default_factory=dict)
+    up_args: list[str] = Field(default_factory=list)
+    down_args: list[str] = Field(default_factory=list)
+    stop_on_exit: bool = False
+    wait_for_seconds: float = 0.0
+    mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
@@ -152,6 +179,7 @@ class Config(BaseSettings):
 
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+    connectors: ConnectorsConfig = Field(default_factory=ConnectorsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)

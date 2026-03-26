@@ -479,6 +479,13 @@ def _warn_deprecated_config_keys(config_path: Path | None) -> None:
         )
 
 
+def _build_connector_manager(config: Config):
+    """Create a connector manager for the active runtime config."""
+    from nanobot.connectors import ConnectorManager
+
+    return ConnectorManager(config)
+
+
 def _migrate_cron_store(config: "Config") -> None:
     """One-time migration: move legacy global cron store into the workspace."""
     from nanobot.config.paths import get_cron_dir
@@ -521,6 +528,7 @@ def gateway(
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
     sync_workspace_templates(config.workspace_path)
+    connectors = _build_connector_manager(config)
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
@@ -547,8 +555,9 @@ def gateway(
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
-        mcp_servers=config.tools.mcp_servers,
+        mcp_servers=connectors.merged_mcp_servers(config.tools.mcp_servers),
         channels_config=config.channels,
+        config=config,
     )
 
     # Set cron callback (needs agent)
@@ -665,6 +674,8 @@ def gateway(
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
         console.print("[yellow]Warning: No channels enabled[/yellow]")
+    if connectors.enabled_connectors:
+        console.print(f"[green]✓[/green] Connectors enabled: {', '.join(connectors.enabled_connectors)}")
 
     cron_status = cron.status()
     if cron_status["jobs"] > 0:
@@ -674,6 +685,7 @@ def gateway(
 
     async def run():
         try:
+            await connectors.start_all()
             await cron.start()
             await heartbeat.start()
             await asyncio.gather(
@@ -692,6 +704,7 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
+            await connectors.stop_all()
 
     asyncio.run(run())
 
@@ -721,6 +734,7 @@ def agent(
 
     config = _load_runtime_config(config, workspace)
     sync_workspace_templates(config.workspace_path)
+    connectors = _build_connector_manager(config)
 
     bus = MessageBus()
     provider = _make_provider(config)
@@ -750,8 +764,9 @@ def agent(
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
-        mcp_servers=config.tools.mcp_servers,
+        mcp_servers=connectors.merged_mcp_servers(config.tools.mcp_servers),
         channels_config=config.channels,
+        config=config,
     )
 
     # Shared reference for progress callbacks
@@ -768,21 +783,25 @@ def agent(
     if message:
         # Single message mode — direct call, no bus needed
         async def run_once():
-            renderer = StreamRenderer(render_markdown=markdown)
-            response = await agent_loop.process_direct(
-                message, session_id,
-                on_progress=_cli_progress,
-                on_stream=renderer.on_delta,
-                on_stream_end=renderer.on_end,
-            )
-            if not renderer.streamed:
-                await renderer.close()
-                _print_agent_response(
-                    response.content if response else "",
-                    render_markdown=markdown,
-                    metadata=response.metadata if response else None,
+            await connectors.start_all()
+            try:
+                renderer = StreamRenderer(render_markdown=markdown)
+                response = await agent_loop.process_direct(
+                    message, session_id,
+                    on_progress=_cli_progress,
+                    on_stream=renderer.on_delta,
+                    on_stream_end=renderer.on_end,
                 )
-            await agent_loop.close_mcp()
+                if not renderer.streamed:
+                    await renderer.close()
+                    _print_agent_response(
+                        response.content if response else "",
+                        render_markdown=markdown,
+                        metadata=response.metadata if response else None,
+                    )
+            finally:
+                await agent_loop.close_mcp()
+                await connectors.stop_all()
 
         asyncio.run(run_once())
     else:
@@ -813,6 +832,7 @@ def agent(
             signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
         async def run_interactive():
+            await connectors.start_all()
             bus_task = asyncio.create_task(agent_loop.run())
             turn_done = asyncio.Event()
             turn_done.set()
@@ -918,6 +938,7 @@ def agent(
                 outbound_task.cancel()
                 await asyncio.gather(bus_task, outbound_task, return_exceptions=True)
                 await agent_loop.close_mcp()
+                await connectors.stop_all()
 
         asyncio.run(run_interactive())
 
@@ -1093,6 +1114,87 @@ def plugins_list():
 
 
 # ============================================================================
+# Connector Commands
+# ============================================================================
+
+
+connectors_app = typer.Typer(help="Manage Docker-backed connectors")
+app.add_typer(connectors_app, name="connectors")
+
+
+@connectors_app.command("status")
+def connectors_status():
+    """Show configured connector status."""
+    config = _load_runtime_config()
+    manager = _build_connector_manager(config)
+
+    table = Table(title="Connector Status")
+    table.add_column("Connector", style="cyan")
+    table.add_column("Type", style="magenta")
+    table.add_column("Running", style="green")
+    table.add_column("Services", style="white")
+    table.add_column("MCP", style="yellow")
+
+    statuses = manager.status()
+    if not statuses:
+        console.print("[yellow]No connectors enabled[/yellow]")
+        return
+
+    for name, status in sorted(statuses.items()):
+        mcp_names = manager.connectors[name].mcp_servers().keys()
+        table.add_row(
+            name,
+            str(status.get("type", "")),
+            "[green]yes[/green]" if status.get("running") else "[dim]no[/dim]",
+            ", ".join(status.get("services", [])) or "(auto)",
+            ", ".join(mcp_names) or "[dim]none[/dim]",
+        )
+    console.print(table)
+
+
+@connectors_app.command("up")
+def connectors_up(
+    name: str | None = typer.Argument(None, help="Connector name. Omit to start all."),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Start one connector or all enabled connectors."""
+    loaded = _load_runtime_config(config)
+    manager = _build_connector_manager(loaded)
+    if name:
+        connector = manager.connectors.get(name)
+        if connector is None:
+            console.print(f"[red]Unknown connector: {name}[/red]")
+            raise typer.Exit(1)
+        asyncio.run(asyncio.to_thread(connector.start))
+        console.print(f"[green]✓[/green] Connector started: {name}")
+        return
+
+    asyncio.run(manager.start_all())
+    console.print("[green]✓[/green] Connectors started")
+
+
+@connectors_app.command("down")
+def connectors_down(
+    name: str | None = typer.Argument(None, help="Connector name. Omit to stop all enabled connectors."),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Stop one connector or all enabled connectors."""
+    loaded = _load_runtime_config(config)
+    manager = _build_connector_manager(loaded)
+    if name:
+        connector = manager.connectors.get(name)
+        if connector is None:
+            console.print(f"[red]Unknown connector: {name}[/red]")
+            raise typer.Exit(1)
+        asyncio.run(asyncio.to_thread(connector.stop, True))
+        console.print(f"[green]✓[/green] Connector stopped: {name}")
+        return
+
+    asyncio.run(manager.stop_all(force=True))
+    console.print("[green]✓[/green] Connector shutdown complete")
+
+
+# ============================================================================
 # Status Commands
 # ============================================================================
 
@@ -1110,6 +1212,9 @@ def status():
 
     console.print(f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}")
     console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
+    connector_manager = _build_connector_manager(config)
+    if connector_manager.enabled_connectors:
+        console.print(f"Connectors: {', '.join(connector_manager.enabled_connectors)}")
 
     if config_path.exists():
         from nanobot.providers.registry import PROVIDERS

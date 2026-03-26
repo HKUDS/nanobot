@@ -1515,6 +1515,21 @@ docker compose logs -f nanobot-gateway                   # view logs
 docker compose down                                      # stop
 ```
 
+### Docker Connectors
+
+nanobot can also start Docker Compose sidecars and consume their MCP tools automatically. This is useful for pluggable local capabilities such as media pipelines, LAN bridges, or domain-specific helper services.
+
+Configure them under `connectors` in `config.json`, then manage them with:
+
+```bash
+nanobot connectors status
+nanobot connectors up
+nanobot connectors down
+```
+
+Full guide:
+- [`docs/DOCKER_CONNECTORS.md`](docs/DOCKER_CONNECTORS.md)
+
 ### Docker
 
 ```bash
