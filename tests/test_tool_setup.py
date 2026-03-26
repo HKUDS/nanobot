@@ -16,13 +16,9 @@ from nanobot.tools.setup import register_default_tools
 
 
 class FakeSkillsLoader:
-    """Stub that returns no skill tools by default."""
+    """Stub for SkillsLoader in tool setup tests."""
 
-    def __init__(self, tools: list[Any] | None = None) -> None:
-        self._tools = tools or []
-
-    def discover_tools(self, skill_names: list[str] | None = None) -> list[Any]:
-        return self._tools
+    pass
 
 
 async def _noop_publish(**kwargs: Any) -> None:
@@ -148,26 +144,3 @@ class TestRegisterDefaultTools:
     def test_cron_registered_when_service_provided(self, tmp_workspace: Path) -> None:
         capabilities = _register(tmp_workspace, cron_service=Mock())
         assert "cron" in capabilities.tool_registry.tool_names
-
-    def test_skills_tools_discovered(self, tmp_workspace: Path) -> None:
-        from nanobot.tools.base import Tool, ToolResult
-
-        class FakeSkillTool(Tool):
-            @property
-            def name(self) -> str:
-                return "fake_skill_tool"
-
-            @property
-            def description(self) -> str:
-                return "A skill-provided tool"
-
-            @property
-            def parameters(self) -> dict[str, Any]:
-                return {"type": "object", "properties": {}}
-
-            async def execute(self, **kwargs: Any) -> ToolResult:
-                return ToolResult.ok("ok")
-
-        loader = FakeSkillsLoader(tools=[FakeSkillTool()])
-        capabilities = _register(tmp_workspace, skills_loader=loader)
-        assert "fake_skill_tool" in capabilities.tool_registry.tool_names
