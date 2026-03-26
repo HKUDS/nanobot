@@ -69,9 +69,18 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
 
 def _migrate_config(data: dict) -> dict:
     """Migrate old config formats to current."""
-    # Move tools.exec.restrictToWorkspace → tools.restrictToWorkspace
+    # Move tools.exec.restrictToWorkspace → tools.restrictToWorkspace.enabled
     tools = data.get("tools", {})
     exec_cfg = tools.get("exec", {})
+    
+    # 1 tools.exec.restrictToWorkspace (bool) → tools.restrictToWorkspace.enabled
     if "restrictToWorkspace" in exec_cfg and "restrictToWorkspace" not in tools:
-        tools["restrictToWorkspace"] = exec_cfg.pop("restrictToWorkspace")
+        old_value = exec_cfg.pop("restrictToWorkspace")
+        tools["restrictToWorkspace"] = {"enabled": old_value}
+    
+    # 2 tools.restrictToWorkspace (bool) → tools.restrictToWorkspace.enabled
+    restrict_cfg = tools.get("restrictToWorkspace", {})
+    if isinstance(restrict_cfg, bool):
+        tools["restrictToWorkspace"] = {"enabled": restrict_cfg}
+    
     return data
