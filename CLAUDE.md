@@ -26,6 +26,35 @@ make check    # lint + typecheck + import-check + prompt-check + test + integrat
 
 Before committing, also review documentation: check that READMEs, CHANGELOG, ADRs, docstrings, and inline comments are accurate and up to date with the changes being committed.
 
+## Commit Message Convention
+
+**All commits MUST use [Conventional Commits](https://www.conventionalcommits.org/) format.**
+`python-semantic-release` reads these to determine version bumps automatically.
+
+```
+<type>(<scope>): <description>
+
+<optional body>
+```
+
+| Type | Version bump | When to use |
+|------|-------------|-------------|
+| `feat` | **MINOR** (0.2.0 → 0.3.0) | New feature or capability |
+| `fix` | **PATCH** (0.2.0 → 0.2.1) | Bug fix |
+| `perf` | **PATCH** | Performance improvement |
+| `feat!` or `BREAKING CHANGE:` | **MAJOR** (0.2.0 → 1.0.0) | Breaking change |
+| `refactor` | no bump | Code restructuring (no behavior change) |
+| `docs` | no bump | Documentation only |
+| `test` | no bump | Adding or fixing tests |
+| `chore` | no bump | Maintenance (deps, CI, config) |
+| `ci` | no bump | CI/CD changes |
+
+**Rules:**
+- Scope is optional but encouraged: `feat(memory):`, `fix(routing):`
+- The `!` suffix denotes a breaking change: `feat!: remove legacy API`
+- Never manually edit `__version__` or `pyproject.toml` version — `python-semantic-release` manages both
+- Version bumps happen automatically on merge to main via GitHub Actions
+
 ## Python Conventions
 
 - **Target**: Python 3.10+ (use `|` union syntax, not `Union[X, Y]`)

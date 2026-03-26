@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# Only one release at a time
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # create tags, commits, releases
+  id-token: write   # trusted publishing (if needed later)
+
+jobs:
+  release:
+    name: Semantic Release
+    runs-on: ubuntu-latest
+    # Skip release on commits made by semantic-release itself
+    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0           # full history for commit analysis
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install python-semantic-release
+        run: pip install python-semantic-release>=9.0.0
+
+      - name: Run semantic-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: semantic-release version --no-vcs-release || true
+
+      - name: Push version bump (if any)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push origin main --follow-tags 2>/dev/null || echo "Nothing to push"
+
+      - name: Create GitHub Release (if tagged)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: semantic-release publish 2>/dev/null || echo "No new release to publish"

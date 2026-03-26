@@ -1,7 +1,7 @@
 [project]
 name = "nanobot-ai"
-version = "0.1.4.post2"
-description = "A lightweight personal AI assistant framework"
+version = "0.2.0"
+description = "A personal AI assistant framework"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
@@ -153,3 +153,23 @@ omit = ["nanobot/templates/*"]
 fail_under = 85
 show_missing = true
 skip_empty = true
+
+# ---------------------------------------------------------------------------
+# Semantic Release — automated versioning from conventional commits
+# ---------------------------------------------------------------------------
+
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+version_variables = ["nanobot/__init__.py:__version__"]
+branch = "main"
+commit_message = "chore(release): v{version}"
+build_command = false
+tag_format = "v{version}"
+
+[tool.semantic_release.changelog]
+changelog_file = "CHANGELOG.md"
+
+[tool.semantic_release.commit_parser_options]
+allowed_tags = ["feat", "fix", "perf", "refactor", "docs", "style", "test", "build", "ci", "chore"]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf"]
