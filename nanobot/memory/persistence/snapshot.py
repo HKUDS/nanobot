@@ -1,4 +1,4 @@
-"""Memory snapshot: rebuild MEMORY.md and verify memory integrity.
+"""Memory snapshot: rebuild and verify memory integrity.
 
 Extracted from ``MemoryStore`` (Task 6) to isolate snapshot-related
 operations from the main store orchestration.
@@ -29,7 +29,7 @@ CONFLICT_STATUS_NEEDS_USER = "needs_user"
 
 
 class MemorySnapshot:
-    """Rebuild MEMORY.md snapshots and verify memory integrity.
+    """Rebuild memory snapshots and verify memory integrity.
 
     Constructor takes collaborators that are already initialised in
     ``MemoryStore.__init__``.
@@ -45,19 +45,15 @@ class MemorySnapshot:
         read_events_fn: Callable[..., list[dict[str, Any]]],
         profile_section_lines_fn: Callable[..., list[str]],
         recent_unresolved_fn: Callable[..., list[dict[str, Any]]],
-        read_long_term_fn: Callable[[], str] | None = None,
-        write_long_term_fn: Callable[[str], None] | None = None,
         verify_beliefs_fn: Callable[[], dict[str, Any]],
         write_profile_fn: Callable[[dict[str, Any]], None],
         profile_keys: tuple[str, ...] = PROFILE_KEYS,
-        db: UnifiedMemoryDB | None = None,
+        db: UnifiedMemoryDB,
     ) -> None:
         self.profile_mgr = profile_mgr
         self._read_events = read_events_fn
         self._profile_section_lines = profile_section_lines_fn
         self._recent_unresolved = recent_unresolved_fn
-        self._read_long_term = read_long_term_fn
-        self._write_long_term = write_long_term_fn
         self._verify_beliefs = verify_beliefs_fn
         self._write_profile = write_profile_fn
         self._profile_keys = profile_keys
@@ -65,7 +61,7 @@ class MemorySnapshot:
 
     @classmethod
     def _extract_pinned_section(cls, text: str) -> str | None:
-        """Extract user-pinned content from MEMORY.md, if present."""
+        """Extract user-pinned content from a memory snapshot, if present."""
         start = text.find(cls._PINNED_START)
         end = text.find(cls._PINNED_END)
         if start == -1 or end == -1 or end <= start:
@@ -74,7 +70,7 @@ class MemorySnapshot:
 
     @classmethod
     def _restore_pinned_section(cls, new_text: str, pinned: str) -> str:
-        """Re-insert a pinned section into new MEMORY.md content.
+        """Re-insert a pinned section into new snapshot content.
 
         If the new text already contains a pinned fence, replace it.
         Otherwise insert the pinned block after the first heading.
@@ -93,18 +89,12 @@ class MemorySnapshot:
         return "\n".join(lines)
 
     def rebuild_memory_snapshot(self, *, max_events: int = 30, write: bool = True) -> str:
-        """Rebuild MEMORY.md from profile + events."""
+        """Rebuild memory snapshot from profile + events."""
         profile = self.profile_mgr.read_profile()
-        if self._db is not None:
-            events = self._db.read_events(limit=max_events)
-        else:
-            events = self._read_events(limit=max_events) or []
+        events = self._db.read_events(limit=max_events)
 
         # Preserve user-pinned sections across rebuilds (LAN-199 / LAN-206).
-        if self._db is not None:
-            existing_memory = self._db.read_snapshot("current")
-        else:
-            existing_memory = self._read_long_term() if self._read_long_term is not None else ""
+        existing_memory = self._db.read_snapshot("current")
         pinned = self._extract_pinned_section(existing_memory) if existing_memory else None
 
         parts: list[str] = ["# Memory", ""]
@@ -131,10 +121,7 @@ class MemorySnapshot:
             snapshot = self._restore_pinned_section(snapshot, pinned)
 
         if write:
-            if self._db is not None:
-                self._db.write_snapshot("current", snapshot)
-            elif self._write_long_term is not None:
-                self._write_long_term(snapshot)
+            self._db.write_snapshot("current", snapshot)
         return snapshot
 
     def verify_memory(
@@ -142,10 +129,7 @@ class MemorySnapshot:
     ) -> dict[str, Any]:
         """Produce a verification report on memory health."""
         profile = self.profile_mgr.read_profile()
-        if self._db is not None:
-            events = self._db.read_events(limit=1000)
-        else:
-            events = self._read_events() if self._read_events is not None else []
+        events = self._db.read_events(limit=1000)
         now = datetime.now(timezone.utc)
         stale = 0
         total_ttl = 0

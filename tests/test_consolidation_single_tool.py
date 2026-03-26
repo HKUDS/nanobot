@@ -41,8 +41,7 @@ def _make_pipeline(
         "profile_mgr": MagicMock(),
         "conflict_mgr": MagicMock(),
         "snapshot": MagicMock(),
-        "memory_file": _base / "MEMORY.md",
-        "history_file": _base / "HISTORY.md",
+        "db": MagicMock(),
         "rollout": rollout,
     }
     defaults.update(overrides)
@@ -383,9 +382,8 @@ class TestHistoryEntryExtraction:
             mock_prompts.get.return_value = "system prompt"
             await pipeline.consolidate(session, provider, "gpt-4")
 
-        history_file = tmp_path / "HISTORY.md"
-        assert history_file.exists()
-        written = history_file.read_text(encoding="utf-8")
+        pipeline._db.append_history.assert_called_once()
+        written = pipeline._db.append_history.call_args[0][0]
         assert "Discussed Python preferences" in written
 
     @pytest.mark.asyncio
@@ -422,9 +420,8 @@ class TestHistoryEntryExtraction:
             mock_prompts.get.return_value = "system prompt"
             await pipeline.consolidate(session, provider, "gpt-4")
 
-        # History file should still be written with fallback content
-        history_file = tmp_path / "HISTORY.md"
-        assert history_file.exists()
+        # History should still be written with fallback content
+        pipeline._db.append_history.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_no_tool_calls_still_generates_history(self, tmp_path: Path) -> None:
@@ -467,6 +464,5 @@ class TestHistoryEntryExtraction:
 
         # Should still succeed -- the fallback chain handles missing data
         assert result is True
-        # History file should have the fallback content from first lines
-        history_file = tmp_path / "HISTORY.md"
-        assert history_file.exists()
+        # History should have the fallback content from first lines
+        pipeline._db.append_history.assert_called_once()

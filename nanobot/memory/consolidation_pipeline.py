@@ -7,7 +7,7 @@ previously spread across six methods on ``MemoryStore``.  The pipeline:
 2. Formats them as text lines (``_format_conversation_lines``).
 3. Calls the LLM with a ``save_memory`` tool to produce a history entry.
 4. Runs structured extraction (events + profile updates).
-5. Rebuilds MEMORY.md and updates the session pointer.
+5. Rebuilds memory snapshot and updates the session pointer.
 
 ``MemoryStore`` delegates to this class via a one-line wrapper.
 """
@@ -15,7 +15,6 @@ previously spread across six methods on ``MemoryStore``.  The pipeline:
 from __future__ import annotations
 
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -53,9 +52,7 @@ class ConsolidationPipeline:
         profile_mgr: ProfileManager,
         conflict_mgr: ConflictManager,
         snapshot: MemorySnapshot,
-        memory_file: Path,
-        history_file: Path,
-        db: UnifiedMemoryDB | None = None,
+        db: UnifiedMemoryDB,
         rollout: dict[str, Any] | None = None,
     ) -> None:
         self._extractor = extractor
@@ -63,8 +60,6 @@ class ConsolidationPipeline:
         self._profile_mgr = profile_mgr
         self._conflict_mgr = conflict_mgr
         self._snapshot = snapshot
-        self._memory_file = memory_file
-        self._history_file = history_file
         self._db = db
         self._rollout: dict[str, Any] = rollout or {}
 
@@ -180,11 +175,7 @@ class ConsolidationPipeline:
             history_entry = " ".join(lines[:3]) if lines else ""
             logger.warning("consolidate_memory: history_entry missing, generated from first lines")
         if history_entry:
-            if self._db is not None:
-                self._db.append_history(history_entry.rstrip())
-            else:
-                with open(self._history_file, "a", encoding="utf-8") as _f:
-                    _f.write(history_entry.rstrip() + "\n\n")
+            self._db.append_history(history_entry.rstrip())
 
         # -- Events (fallback: heuristic extractor) --
         raw_events = args.get("events")
@@ -268,7 +259,7 @@ class ConsolidationPipeline:
         memory_mode: str | None = None,
         enable_contradiction_check: bool = True,
     ) -> bool:
-        """Consolidate old messages into MEMORY.md + HISTORY.md via LLM tool call.
+        """Consolidate old messages into persistent memory via LLM tool call.
 
         Returns True on success (including no-op), False on failure.
         """
@@ -284,10 +275,7 @@ class ConsolidationPipeline:
 
         lines = self._format_conversation_lines(old_messages)
 
-        try:
-            current_memory = self._memory_file.read_text(encoding="utf-8")
-        except (FileNotFoundError, OSError):
-            current_memory = ""
+        current_memory = self._db.read_snapshot("current") or ""
 
         try:
             result = await self._consolidate_single_tool(

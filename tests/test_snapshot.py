@@ -4,9 +4,23 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 from nanobot.memory.persistence.profile_io import ProfileStore as ProfileManager
 from nanobot.memory.persistence.snapshot import MemorySnapshot
+
+
+def _make_db_mock(events: list[dict[str, Any]] | None = None) -> MagicMock:
+    """Create a mock UnifiedMemoryDB for snapshot tests."""
+    db = MagicMock()
+    _events = events or []
+    _snapshot: dict[str, str] = {"current": ""}
+    db.read_events = MagicMock(side_effect=lambda limit=None: _events[:limit] if limit else _events)
+    db.read_snapshot = MagicMock(side_effect=lambda key: _snapshot.get(key, ""))
+    db.write_snapshot = MagicMock(
+        side_effect=lambda key, content: _snapshot.__setitem__(key, content)
+    )
+    return db
 
 
 def _make_snapshot(
@@ -19,7 +33,6 @@ def _make_snapshot(
     profile_mgr = ProfileManager()
 
     _events = events or []
-    _long_term: dict[str, str] = {"content": ""}
 
     return MemorySnapshot(
         profile_mgr=profile_mgr,
@@ -30,10 +43,9 @@ def _make_snapshot(
         recent_unresolved_fn=lambda evts, **kw: [e for e in evts if e.get("status") == "open"][
             : kw.get("max_items", 8)
         ],
-        read_long_term_fn=lambda: _long_term["content"],
-        write_long_term_fn=lambda content: _long_term.__setitem__("content", content),
         verify_beliefs_fn=lambda: {"summary": {"total": 0, "well_supported": 0}},
         write_profile_fn=lambda p: None,
+        db=_make_db_mock(_events),
     )
 
 

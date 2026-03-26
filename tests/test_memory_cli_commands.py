@@ -247,7 +247,7 @@ def test_memory_metrics_shows_backend_health(_patched: Config, tmp_path: Path) -
 def test_memory_rebuild_reindex_compact(_patched: Config) -> None:
     rebuild = runner.invoke(app, ["memory", "rebuild", "--max-events", "10"])
     assert rebuild.exit_code == 0
-    assert "Rebuilt MEMORY.md" in rebuild.stdout
+    assert "Rebuilt memory snapshot" in rebuild.stdout
 
     reindex = runner.invoke(app, ["memory", "reindex", "--max-events", "5", "--no-reset"])
     assert reindex.exit_code == 0
