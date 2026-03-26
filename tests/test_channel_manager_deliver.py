@@ -20,6 +20,7 @@ class _FakeChannel(BaseChannel):
     """Minimal channel stub for testing delivery paths."""
 
     def __init__(self, *, fail_count: int = 0, error: Exception | None = None):
+        super().__init__(config=None, bus=MessageBus())
         self._fail_count = fail_count
         self._error = error or RuntimeError("send error")
         self._attempts = 0

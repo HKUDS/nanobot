@@ -683,7 +683,6 @@ class TestDelegationDepthLimit:
 
     def test_depth_blocks_at_limit(self, tmp_path: Path):
         """dispatch() raises _CycleError when ancestry depth == MAX_DELEGATION_DEPTH."""
-        import asyncio
         from unittest.mock import MagicMock
 
         from nanobot.config.schema import AgentRoleConfig, ExecToolConfig

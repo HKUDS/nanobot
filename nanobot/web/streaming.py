@@ -61,6 +61,29 @@ def _sse_keepalive() -> str:
     return ": keepalive\n\n"
 
 
+def _emit_text_delta(
+    text: str,
+    streamed_text_len: int,
+    text_started: bool,
+    text_state: dict[str, object],
+) -> tuple[list[str], int, bool]:
+    """Compute SSE events for a text delta and return updated tracking state.
+
+    Returns (events, new_streamed_text_len, new_text_started).
+    """
+    events: list[str] = []
+    if len(text) > streamed_text_len:
+        delta = text[streamed_text_len:]
+        streamed_text_len = len(text)
+        text_state["streamed_text"] = text
+        if not text_started:
+            events.append(_sse({"type": "text-start"}))
+            text_state["text_started"] = True
+            text_started = True
+        events.append(_sse({"type": "text-delta", "textDelta": delta}))
+    return events, streamed_text_len, text_started
+
+
 # ---------------------------------------------------------------------------
 # Stream generator
 # ---------------------------------------------------------------------------
@@ -256,32 +279,22 @@ async def stream_agent_response(
                     streamed_text_len = 0
                     streamed_text = ""
                     text_state["streamed_text"] = ""
-                if len(text) > streamed_text_len:
-                    delta = text[streamed_text_len:]
-                    streamed_text_len = len(text)
-                    streamed_text = text
-                    text_state["streamed_text"] = text
-                    if not text_started:
-                        yield _sse({"type": "text-start"})
-                        text_state["text_started"] = True
-                        text_started = True
-                    yield _sse({"type": "text-delta", "textDelta": delta})
+                events, streamed_text_len, text_started = _emit_text_delta(
+                    text, streamed_text_len, text_started, text_state
+                )
+                for ev in events:
+                    yield ev
 
             elif is_progress and text:
                 # The agent loop may re-send already-streamed text as a
                 # non-streaming progress flush (e.g. before a tool call).
                 # Deduplicate against what was already streamed.
                 if streamed_text and text.startswith(streamed_text):
-                    if len(text) > streamed_text_len:
-                        delta = text[streamed_text_len:]
-                        streamed_text_len = len(text)
-                        streamed_text = text
-                        text_state["streamed_text"] = text
-                        if not text_started:
-                            yield _sse({"type": "text-start"})
-                            text_state["text_started"] = True
-                            text_started = True
-                        yield _sse({"type": "text-delta", "textDelta": delta})
+                    events, streamed_text_len, text_started = _emit_text_delta(
+                        text, streamed_text_len, text_started, text_state
+                    )
+                    for ev in events:
+                        yield ev
                 elif streamed_text and streamed_text.startswith(text):
                     pass  # subset of already-streamed content
                 else:

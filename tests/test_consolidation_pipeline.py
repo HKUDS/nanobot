@@ -12,7 +12,6 @@ from nanobot.memory.consolidation_pipeline import ConsolidationPipeline
 
 def _make_pipeline(tmp_path: Path | None = None, **overrides: object) -> ConsolidationPipeline:
     """Build a ``ConsolidationPipeline`` with all dependencies mocked."""
-    _base = tmp_path or Path("/tmp/test")
     defaults: dict[str, object] = {
         "extractor": MagicMock(),
         "ingester": MagicMock(),

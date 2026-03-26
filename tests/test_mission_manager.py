@@ -111,7 +111,7 @@ async def test_mission_completes_with_result() -> None:
     mission = await mgr.start("check health")
     # Await the background task directly (Pattern A)
     for task in list(mgr._running_tasks.values()):
-        await task
+        _ = await task
 
     assert mission.status == MissionStatus.COMPLETED
     assert mission.result is not None
@@ -142,7 +142,7 @@ async def test_mission_delivers_on_failure() -> None:
     mission = await mgr.start("some task")
     # Await the background task directly (Pattern A)
     for task in list(mgr._running_tasks.values()):
-        await task
+        _ = await task
 
     assert mission.status == MissionStatus.FAILED
     assert "failed" in (mission.result or "").lower()
@@ -171,7 +171,7 @@ async def test_mission_grounded_when_tools_used() -> None:
     mission = await mgr.start("echo test")
     # Await the background task directly (Pattern A)
     for task in list(mgr._running_tasks.values()):
-        await task
+        _ = await task
 
     assert mission.grounded is True
     assert "echo" in mission.tools_used
@@ -285,9 +285,9 @@ async def test_cancel_sets_cancelled_status() -> None:
     # Wait for cancellation to propagate by awaiting the task directly (Pattern A)
     for task in list(mgr._running_tasks.values()):
         try:
-            await task
+            _ = await task
         except asyncio.CancelledError:
-            pass
+            pass  # Expected when mission is cancelled; safe to ignore
 
     assert mission.status == MissionStatus.CANCELLED
     assert mission.result == "Mission cancelled by user."
@@ -336,7 +336,7 @@ async def test_concurrent_missions_complete_independently() -> None:
     missions = [await mgr.start(f"task {i}", label=f"t{i}") for i in range(3)]
     # Await all background tasks directly (Pattern A)
     for task in list(mgr._running_tasks.values()):
-        await task
+        _ = await task
 
     for m in missions:
         assert m.status == MissionStatus.COMPLETED
@@ -359,7 +359,7 @@ async def test_result_truncation_in_delivery() -> None:
     mission = await mgr.start("long task")
     # Await the background task directly (Pattern A)
     for task in list(mgr._running_tasks.values()):
-        await task
+        _ = await task
 
     assert mission.status == MissionStatus.COMPLETED
     # Full result stored on mission
@@ -387,7 +387,7 @@ async def test_bus_delivery_failure_does_not_crash() -> None:
     mission = await mgr.start("test")
     # Await the background task directly (Pattern A)
     for task in list(mgr._running_tasks.values()):
-        await task
+        _ = await task
 
     assert mission.status == MissionStatus.COMPLETED
     assert mission.result == "ok"
@@ -418,7 +418,7 @@ async def test_retry_when_no_tools_used() -> None:
     mission = await mgr.start("investigate something")
     # Await the background task directly (Pattern A)
     for task in list(mgr._running_tasks.values()):
-        await task
+        _ = await task
 
     assert mission.grounded is True
     assert "echo" in mission.tools_used
@@ -577,9 +577,9 @@ async def test_mission_cancel_tool_success() -> None:
     # Cleanup by awaiting the task directly (Pattern A)
     for task in list(mgr._running_tasks.values()):
         try:
-            await task
+            _ = await task
         except asyncio.CancelledError:
-            pass
+            pass  # Expected when mission is cancelled; safe to ignore
 
 
 async def test_mission_cancel_tool_not_found() -> None:
@@ -606,10 +606,10 @@ async def test_mission_emits_langfuse_span() -> None:
         ctx.__aexit__ = AsyncMock(return_value=False)
         mock_span.return_value = ctx
 
-        _mission = await mgr.start(task="test span")
+        await mgr.start(task="test span")
         # Await the background task directly (Pattern A)
         for task in list(mgr._running_tasks.values()):
-            await task
+            _ = await task
 
         mock_span.assert_called_once()
         call_kwargs = mock_span.call_args.kwargs
@@ -630,10 +630,10 @@ async def test_mission_scores_grounding() -> None:
     )
 
     with patch("nanobot.coordination.mission.score_current_trace") as mock_score:
-        _mission = await mgr.start(task="grounding test")
+        await mgr.start(task="grounding test")
         # Await the background task directly (Pattern A)
         for task in list(mgr._running_tasks.values()):
-            await task
+            _ = await task
 
         mock_score.assert_called_once()
         call_kwargs = mock_score.call_args.kwargs
@@ -649,7 +649,7 @@ async def test_mission_sets_trace_context() -> None:
         mission = await mgr.start(task="trace test")
         # Await the background task directly (Pattern A)
         for task in list(mgr._running_tasks.values()):
-            await task
+            _ = await task
 
         mock_tc.set.assert_called_once()
         call_kwargs = mock_tc.set.call_args.kwargs
@@ -756,7 +756,7 @@ async def test_max_concurrent_allows_after_completion() -> None:
     # Await the background task so the slot is freed (Pattern A)
     bg_task = mgr._running_tasks.get(first_mission.id)
     if bg_task is not None:
-        await bg_task
+        _ = await bg_task
 
     # Slot should be open now
     mission = await mgr.start(task="second")

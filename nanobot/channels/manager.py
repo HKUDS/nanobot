@@ -168,7 +168,7 @@ class ChannelManager:
             try:
                 await self._dispatch_task
             except asyncio.CancelledError:
-                pass
+                pass  # expected during shutdown — task was intentionally cancelled
 
         # Stop all channels
         for name, channel in self.channels.items():

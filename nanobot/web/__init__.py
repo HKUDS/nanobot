@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from nanobot.web.app import create_app as create_app  # noqa: F401
+
 __all__ = ["create_app"]
 
 

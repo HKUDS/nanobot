@@ -557,7 +557,7 @@ class TelegramChannel(BaseChannel):
                 await self._app.bot.send_chat_action(chat_id=int(chat_id), action="typing")
                 await asyncio.sleep(4)
         except asyncio.CancelledError:
-            pass
+            pass  # expected — typing loop is cancelled when the agent responds
         except Exception as e:  # crash-barrier: Telegram API
             logger.debug("Typing indicator stopped for {}: {}", chat_id, e)
 

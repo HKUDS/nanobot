@@ -327,7 +327,7 @@ class Coordinator:
                 ]
                 return role, min(max(confidence, 0.0), 1.0), needs_orch, relevant, True
         except (json.JSONDecodeError, ValueError):
-            pass
+            pass  # LLM returned non-JSON; fall through to regex-based role scan below
         # Fallback: word-boundary regex scan to avoid false positives (e.g. "code" in "decode")
         for name in self._registry.role_names():
             if self._get_role_pattern(name).search(raw):

@@ -1,3 +1,4 @@
+# size-exception: multi-tool module — 5 related spreadsheet tools sharing helper code
 """Spreadsheet reader and analytics tools (Excel + CSV)."""
 
 from __future__ import annotations
@@ -92,14 +93,11 @@ class ReadSpreadsheetTool(Tool):
         "required": ["path"],
     }
 
-    async def execute(  # type: ignore[override]
-        self,
-        path: str,
-        sheet: str | None = None,
-        max_rows: int | None = None,
-        columns: list[str] | None = None,
-        **kwargs: Any,
-    ) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        path: str = kwargs.pop("path")
+        sheet: str | None = kwargs.pop("sheet", None)
+        max_rows: int | None = kwargs.pop("max_rows", None)
+        columns: list[str] | None = kwargs.pop("columns", None)
         try:
             file_path = _resolve_path(str(path), self._workspace, self._allowed_dir)
         except PermissionError as exc:
@@ -723,13 +721,10 @@ class QueryDataTool(Tool):
         "required": ["cache_key", "query"],
     }
 
-    async def execute(  # type: ignore[override]
-        self,
-        cache_key: str,
-        query: str,
-        sheet: str | None = None,
-        **kwargs: Any,
-    ) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        cache_key: str = kwargs.pop("cache_key")
+        query: str = kwargs.pop("query")
+        sheet: str | None = kwargs.pop("sheet", None)
         # Validate SQL safety
         error = _validate_select_only(query)
         if error:
@@ -830,12 +825,9 @@ class DescribeDataTool(Tool):
         "required": ["cache_key"],
     }
 
-    async def execute(  # type: ignore[override]
-        self,
-        cache_key: str,
-        sheet: str | None = None,
-        **kwargs: Any,
-    ) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        cache_key: str = kwargs.pop("cache_key")
+        sheet: str | None = kwargs.pop("sheet", None)
         rows, sname, err = _get_cached_sheet_rows(self._cache, cache_key, sheet)
         if err:
             return ToolResult.fail(err, error_type="not_found")
@@ -943,14 +935,11 @@ class ExcelGetRowsTool(Tool):
         "required": ["cache_key"],
     }
 
-    async def execute(  # type: ignore[override]
-        self,
-        cache_key: str,
-        sheet: str | None = None,
-        start_row: int = 0,
-        end_row: int = 25,
-        **kwargs: Any,
-    ) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        cache_key: str = kwargs.pop("cache_key")
+        sheet: str | None = kwargs.pop("sheet", None)
+        start_row: int = kwargs.pop("start_row", 0)
+        end_row: int = kwargs.pop("end_row", 25)
         rows, _sname, err = _get_cached_sheet_rows(self._cache, cache_key, sheet)
         if err:
             return ToolResult.fail(err, error_type="not_found")
@@ -1034,14 +1023,11 @@ class ExcelFindTool(Tool):
         "required": ["cache_key", "query"],
     }
 
-    async def execute(  # type: ignore[override]
-        self,
-        cache_key: str,
-        query: str,
-        column: str | None = None,
-        sheet: str | None = None,
-        **kwargs: Any,
-    ) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        cache_key: str = kwargs.pop("cache_key")
+        query: str = kwargs.pop("query")
+        column: str | None = kwargs.pop("column", None)
+        sheet: str | None = kwargs.pop("sheet", None)
         rows, _sname, err = _get_cached_sheet_rows(self._cache, cache_key, sheet)
         if err:
             return ToolResult.fail(err, error_type="not_found")

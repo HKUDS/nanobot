@@ -139,7 +139,7 @@ def create_app(
         metrics_app = make_asgi_app()
         app.mount("/metrics", metrics_app)
     except ImportError:
-        pass
+        pass  # prometheus_client is an optional dependency; /metrics disabled when absent
 
     # Serve built frontend if available
     if static_dir and static_dir.is_dir():

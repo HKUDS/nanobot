@@ -86,15 +86,12 @@ class MessageTool(Tool):
         "required": ["content"],
     }
 
-    async def execute(  # type: ignore[override]
-        self,
-        content: str,
-        channel: str | None = None,
-        chat_id: str | None = None,
-        message_id: str | None = None,
-        media: list[str] | None = None,
-        **kwargs: Any,
-    ) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        content: str = kwargs.pop("content")
+        channel: str | None = kwargs.pop("channel", None)
+        chat_id: str | None = kwargs.pop("chat_id", None)
+        message_id: str | None = kwargs.pop("message_id", None)
+        media: list[str] | None = kwargs.pop("media", None)
         channel = channel or self._default_channel
         chat_id = chat_id or self._default_chat_id
         message_id = message_id or self._default_message_id

@@ -56,17 +56,14 @@ class CronTool(Tool):
         self._channel = channel
         self._chat_id = chat_id
 
-    async def execute(  # type: ignore[override]
-        self,
-        action: str,
-        message: str = "",
-        every_seconds: int | None = None,
-        cron_expr: str | None = None,
-        tz: str | None = None,
-        at: str | None = None,
-        job_id: str | None = None,
-        **kwargs: Any,
-    ) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        action: str = kwargs.pop("action")
+        message: str = kwargs.pop("message", "")
+        every_seconds: int | None = kwargs.pop("every_seconds", None)
+        cron_expr: str | None = kwargs.pop("cron_expr", None)
+        tz: str | None = kwargs.pop("tz", None)
+        at: str | None = kwargs.pop("at", None)
+        job_id: str | None = kwargs.pop("job_id", None)
         if action == "add":
             return self._add_job(message, every_seconds, cron_expr, tz, at)
         elif action == "list":

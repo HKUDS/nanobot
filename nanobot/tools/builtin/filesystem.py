@@ -84,7 +84,8 @@ class ReadFileTool(Tool):
         "required": ["path"],
     }
 
-    async def execute(self, path: str, **kwargs: Any) -> ToolResult:  # type: ignore[override]
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        path: str = kwargs.pop("path")
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
             if not file_path.exists():
@@ -120,7 +121,9 @@ class WriteFileTool(Tool):
         "required": ["path", "content"],
     }
 
-    async def execute(self, path: str, content: str, **kwargs: Any) -> ToolResult:  # type: ignore[override]
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        path: str = kwargs.pop("path")
+        content: str = kwargs.pop("content")
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
             file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -155,7 +158,10 @@ class EditFileTool(Tool):
         "required": ["path", "old_text", "new_text"],
     }
 
-    async def execute(self, path: str, old_text: str, new_text: str, **kwargs: Any) -> ToolResult:  # type: ignore[override]
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        path: str = kwargs.pop("path")
+        old_text: str = kwargs.pop("old_text")
+        new_text: str = kwargs.pop("new_text")
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
             if not file_path.exists():
@@ -229,7 +235,8 @@ class ListDirTool(Tool):
         "required": ["path"],
     }
 
-    async def execute(self, path: str, **kwargs: Any) -> ToolResult:  # type: ignore[override]
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        path: str = kwargs.pop("path")
         try:
             dir_path = _resolve_path(path, self._workspace, self._allowed_dir)
             if not dir_path.exists():

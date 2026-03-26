@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
+import sys
 from types import SimpleNamespace
 
 import pytest
 
-import nanobot.tools.builtin.web as _web_mod
 from nanobot.tools.builtin.web import (
     WebFetchTool,
     WebSearchTool,
@@ -17,6 +17,9 @@ from nanobot.tools.builtin.web import (
     _url_cache,
     _validate_url,
 )
+
+# Module reference for resetting module-level state (_http_client) in fixtures.
+_web_mod = sys.modules["nanobot.tools.builtin.web"]
 
 
 @pytest.fixture(autouse=True)
@@ -70,7 +73,7 @@ async def test_web_search_uses_configured_api_key(monkeypatch) -> None:
     monkeypatch.setattr("nanobot.tools.builtin.web.httpx.AsyncClient", lambda: FakeClient())
 
     tool = WebSearchTool(api_key="test-token")
-    output = await tool.execute("nanobot", count=1)
+    output = await tool.execute(query="nanobot", count=1)
 
     assert output.success
     assert "Results for: nanobot" in output.output
@@ -83,7 +86,7 @@ async def test_web_search_uses_configured_api_key(monkeypatch) -> None:
 
 async def test_web_search_no_key_and_error(monkeypatch: pytest.MonkeyPatch) -> None:
     tool = WebSearchTool(api_key="")
-    no_key = await tool.execute("nanobot")
+    no_key = await tool.execute(query="nanobot")
     assert not no_key.success
 
     class _ErrClient:
@@ -98,7 +101,7 @@ async def test_web_search_no_key_and_error(monkeypatch: pytest.MonkeyPatch) -> N
 
     tool2 = WebSearchTool(api_key="token")
     monkeypatch.setattr("nanobot.tools.builtin.web.httpx.AsyncClient", lambda: _ErrClient())
-    err = await tool2.execute("nanobot")
+    err = await tool2.execute(query="nanobot")
     assert not err.success
 
 
@@ -122,7 +125,7 @@ async def test_web_search_empty_results(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr("nanobot.tools.builtin.web.httpx.AsyncClient", lambda: _Client())
     tool = WebSearchTool(api_key="token")
-    out = await tool.execute("nanobot")
+    out = await tool.execute(query="nanobot")
     assert out.success
     assert "No results" in out.output
 
