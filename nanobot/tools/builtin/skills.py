@@ -42,7 +42,13 @@ class LoadSkillTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> ToolResult:
-        """Load skill content by name."""
+        """Load skill content by name.
+
+        Returns a short confirmation as the tool result output (visible to
+        the LLM as a tool message) and stores the full skill content in
+        ``metadata["skill_content"]``.  The turn loop injects the content
+        as a system message so it carries system-level authority.
+        """
         name: str = kwargs["name"]
         content = self._loader.load_skill(name)
         if content is None:
@@ -53,7 +59,11 @@ class LoadSkillTool(Tool):
             )
         stripped = self._loader._strip_frontmatter(content)
         transformed = self._loader.transform_for_agent(stripped)
-        return ToolResult.ok(transformed)
+        return ToolResult.ok(
+            f"Skill '{name}' loaded. Follow the skill instructions below.",
+            skill_content=transformed,
+            skill_name=name,
+        )
 
 
 __all__ = ["LoadSkillTool"]

@@ -70,10 +70,12 @@ async def test_load_skill_tool_returns_content(tmp_path: Path) -> None:
     result = await tool.execute(name="test-skill")
 
     assert result.success
-    assert "Full content" in result.output
-    assert "Instructions here" in result.output
-    # Frontmatter should be stripped
-    assert "---" not in result.output
+    # Output is a short confirmation; full content is in metadata
+    assert "test-skill" in result.output
+    assert "skill_content" in result.metadata
+    skill_content = result.metadata["skill_content"]
+    assert "Full content" in skill_content
+    assert "Instructions here" in skill_content
 
 
 @pytest.mark.asyncio
@@ -96,5 +98,6 @@ async def test_load_skill_strips_frontmatter(tmp_path: Path) -> None:
     result = await tool.execute(name="fm-skill")
 
     assert result.success
-    assert "name: fm-skill" not in result.output  # frontmatter stripped
-    assert "Full content" in result.output
+    skill_content = result.metadata["skill_content"]
+    assert "name: fm-skill" not in skill_content  # frontmatter stripped
+    assert "Full content" in skill_content

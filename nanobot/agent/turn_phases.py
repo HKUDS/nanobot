@@ -237,6 +237,21 @@ class ActPhase:
             state.messages[:] = self._context.add_tool_result(
                 state.messages, tool_call.id, tool_call.name, result.to_llm_string()
             )
+            # Skill content injection: deliver as a system message so it
+            # carries the same authority as the identity prompt.
+            _skill_content = result.metadata.get("skill_content")
+            if _skill_content:
+                _skill_name = result.metadata.get("skill_name", "unknown")
+                state.messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            f"# Skill: {_skill_name}\n\n"
+                            "Follow these instructions to handle the user's request.\n\n"
+                            f"{_skill_content}"
+                        ),
+                    }
+                )
             if not result.success:
                 any_failed = True
                 count, fc = state.tracker.record_failure(
