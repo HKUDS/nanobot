@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
-from pydantic.alias_generators import to_camel
 
 
 class Base(BaseModel):
-    """Base model that accepts both camelCase and snake_case keys.
+    """Base model for all config sections.
 
     Uses ``extra="forbid"`` so stale or mistyped fields in the config file
     cause an immediate validation error instead of being silently ignored.
+    Config files use snake_case keys, matching Python field names.
     """
 
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
+    model_config = ConfigDict(extra="forbid")
