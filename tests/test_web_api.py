@@ -371,7 +371,7 @@ class TestStripAttachments:
         assert not (tmp_path / "../../etc/cron.d/evil").exists()
         assert not (tmp_path.parent.parent / "etc/cron.d/evil").exists()
         # The safe basename should be saved within uploads_dir
-        saved = list(tmp_path.iterdir())
+        saved = [f for f in tmp_path.iterdir() if f.name != ".manifest.json"]
         assert len(saved) == 1
         # Should be saved as just "evil" (basename only)
         assert saved[0].name == "evil"
@@ -386,9 +386,20 @@ class TestStripAttachments:
         # /etc/passwd must not be touched
         assert not (tmp_path / "etc" / "passwd").exists()
         # Should be saved as just "passwd"
-        saved = list(tmp_path.iterdir())
+        saved = [f for f in tmp_path.iterdir() if f.name != ".manifest.json"]
         assert len(saved) == 1
         assert saved[0].name == "passwd"
+
+    def test_identical_content_deduplicates(self, tmp_path):
+        from nanobot.web.routes import _strip_attachments
+
+        text1 = '<attachment name="data.csv">col1,col2\n1,2</attachment>'
+        text2 = '<attachment name="data_copy.csv">col1,col2\n1,2</attachment>'
+        _strip_attachments(text1, tmp_path)
+        _strip_attachments(text2, tmp_path)
+        # Only one data file on disk (plus manifest)
+        data_files = [f for f in tmp_path.iterdir() if f.name != ".manifest.json"]
+        assert len(data_files) == 1
 
 
 class TestUploadDedup:

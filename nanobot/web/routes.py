@@ -71,14 +71,9 @@ def _strip_attachments(text: str, uploads_dir: Path) -> str:
     notes: list[str] = []
 
     def _save(m: re.Match[str]) -> str:
-        fname = Path(m.group(1)).name  # SEC-07: strip any path components to prevent traversal
-        data = m.group(2).strip()
-        dest = uploads_dir / fname
-        # Avoid overwriting — append uuid suffix when needed
-        if dest.exists():
-            stem = dest.stem
-            dest = uploads_dir / f"{stem}_{uuid.uuid4().hex[:8]}{dest.suffix}"
-        dest.write_text(data, encoding="utf-8")
+        fname = Path(m.group(1)).name  # SEC-07: strip path components
+        data = m.group(2).strip().encode("utf-8")
+        dest = _save_upload(data, fname, uploads_dir)
         notes.append(f"[Attached file saved: {dest}]")
         return ""
 
@@ -115,7 +110,8 @@ def _load_manifest(uploads_dir: Path) -> dict[str, str]:
         try:
             result: dict[str, str] = json.loads(manifest_path.read_text(encoding="utf-8"))
             return result
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("upload manifest corrupted, rebuilding: {}", exc)
             return {}
     return {}
 
@@ -180,8 +176,8 @@ def _extract_images(message: ChatMessage, uploads_dir: Path) -> list[str]:
 
         ext = _MIME_EXT.get(part.media_type, ".bin")
         filename = f"img_{uuid.uuid4().hex[:12]}{ext}"
-        dest = uploads_dir / filename
-        dest.write_bytes(_decode_data_uri(part.data))
+        data = _decode_data_uri(part.data)
+        dest = _save_upload(data, filename, uploads_dir)
         paths.append(str(dest))
 
     return paths
@@ -231,21 +227,15 @@ def _extract_binary_files(message: ChatMessage, uploads_dir: Path) -> list[str]:
         if name_idx < len(original_names):
             orig = original_names[name_idx]
             name_idx += 1
-            # Sanitise: keep only the filename, no path separators
             safe_name = Path(orig).name
             if not safe_name:
                 safe_name = f"upload_{uuid.uuid4().hex[:12]}{_guess_extension(part.media_type)}"
-            # Avoid overwrites
-            dest = uploads_dir / safe_name
-            if dest.exists():
-                stem = dest.stem
-                dest = uploads_dir / f"{stem}_{uuid.uuid4().hex[:8]}{dest.suffix}"
         else:
             ext = _guess_extension(part.media_type)
-            filename = f"upload_{uuid.uuid4().hex[:12]}{ext}"
-            dest = uploads_dir / filename
+            safe_name = f"upload_{uuid.uuid4().hex[:12]}{ext}"
 
-        dest.write_bytes(_decode_data_uri(part.data))
+        data = _decode_data_uri(part.data)
+        dest = _save_upload(data, safe_name, uploads_dir)
         notes.append(f"[Attached file saved: {dest}]")
 
     return notes
