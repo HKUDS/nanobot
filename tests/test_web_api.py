@@ -391,6 +391,47 @@ class TestStripAttachments:
         assert saved[0].name == "passwd"
 
 
+class TestUploadDedup:
+    """Tests for content-hash based upload deduplication."""
+
+    def test_identical_content_reuses_existing_file(self, tmp_path):
+        from nanobot.web.routes import _save_upload
+
+        data = b"hello world"
+        path1 = _save_upload(data, "file_a.txt", tmp_path)
+        path2 = _save_upload(data, "file_b.txt", tmp_path)
+        assert path1 == path2
+        # Only one file on disk (plus the manifest)
+        assert len([f for f in tmp_path.iterdir() if f.name != ".manifest.json"]) == 1
+
+    def test_different_content_creates_separate_files(self, tmp_path):
+        from nanobot.web.routes import _save_upload
+
+        path1 = _save_upload(b"content A", "file.txt", tmp_path)
+        path2 = _save_upload(b"content B", "file.txt", tmp_path)
+        assert path1 != path2
+        assert len([f for f in tmp_path.iterdir() if f.name != ".manifest.json"]) == 2
+
+    def test_manifest_tracks_hash_to_path(self, tmp_path):
+        import json
+
+        from nanobot.web.routes import _save_upload
+
+        _save_upload(b"test data", "doc.txt", tmp_path)
+        manifest = json.loads((tmp_path / ".manifest.json").read_text())
+        assert len(manifest) == 1
+        # Value should be a filename that exists
+        for _hash, fname in manifest.items():
+            assert (tmp_path / fname).exists()
+
+    def test_save_upload_sanitizes_path_traversal(self, tmp_path):
+        from nanobot.web.routes import _save_upload
+
+        path = _save_upload(b"evil", "../../etc/passwd", tmp_path)
+        assert path.parent == tmp_path
+        assert path.name == "passwd"
+
+
 class TestRateLimitMiddleware:
     """Tests for the per-IP sliding-window rate limiter."""
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
 import mimetypes
 import re
 import uuid
@@ -104,6 +106,59 @@ def _decode_data_uri(data_str: str) -> bytes:
     else:
         raw = data_str
     return base64.b64decode(raw)
+
+
+def _load_manifest(uploads_dir: Path) -> dict[str, str]:
+    """Load the hash-to-filename manifest from disk."""
+    manifest_path = uploads_dir / ".manifest.json"
+    if manifest_path.exists():
+        try:
+            result: dict[str, str] = json.loads(manifest_path.read_text(encoding="utf-8"))
+            return result
+        except (json.JSONDecodeError, OSError):
+            return {}
+    return {}
+
+
+def _save_manifest(uploads_dir: Path, manifest: dict[str, str]) -> None:
+    """Persist the hash-to-filename manifest to disk."""
+    manifest_path = uploads_dir / ".manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _save_upload(data: bytes, filename: str, uploads_dir: Path) -> Path:
+    """Save upload data with content-hash deduplication.
+
+    If identical content already exists (by SHA-256), return the existing path
+    instead of writing a new copy. Path traversal in *filename* is stripped.
+    """
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+
+    content_hash = hashlib.sha256(data).hexdigest()
+    manifest = _load_manifest(uploads_dir)
+
+    # Check for existing file with same content
+    if content_hash in manifest:
+        existing = uploads_dir / manifest[content_hash]
+        if existing.exists():
+            return existing
+        # Stale manifest entry — remove it
+        del manifest[content_hash]
+
+    # Sanitise filename: strip path components (SEC-07)
+    safe_name = Path(filename).name or f"upload_{uuid.uuid4().hex[:12]}.bin"
+    dest = uploads_dir / safe_name
+    if dest.exists():
+        stem = dest.stem
+        dest = uploads_dir / f"{stem}_{uuid.uuid4().hex[:8]}{dest.suffix}"
+
+    dest.write_bytes(data)
+    manifest[content_hash] = dest.name
+    _save_manifest(uploads_dir, manifest)
+    return dest
 
 
 def _extract_images(message: ChatMessage, uploads_dir: Path) -> list[str]:
