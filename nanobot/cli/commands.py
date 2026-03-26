@@ -628,6 +628,8 @@ def gateway(
         # truncate due to a context-length crash or timeout.
         session = agent.sessions.get_or_create("heartbeat")
         session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+        # Budget-aware pruning: heartbeat context should be concise.
+        session.prune_by_content_length(4000)
         agent.sessions.save(session)
 
         async def _silent(*_args, **_kwargs):
@@ -644,6 +646,7 @@ def gateway(
         # Post-cleanup: truncate again with the new turn's data.
         session = agent.sessions.get_or_create("heartbeat")
         session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+        session.prune_by_content_length(4000)
         agent.sessions.save(session)
 
         return resp.content if resp else ""

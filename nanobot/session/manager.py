@@ -124,6 +124,20 @@ class Session:
         self.last_consolidated = max(0, self.last_consolidated - dropped)
         self.updated_at = datetime.now()
 
+    def prune_by_content_length(self, max_chars_per_message: int) -> None:
+        """Aggressively truncate large message content to stay within a budget."""
+        for msg in self.messages:
+            content = msg.get("content")
+            if isinstance(content, str) and len(content) > max_chars_per_message:
+                msg["content"] = content[:max_chars_per_message] + "\n... (truncated for budget)"
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text = block.get("text", "")
+                        if len(text) > max_chars_per_message:
+                            block["text"] = text[:max_chars_per_message] + "\n... (truncated for budget)"
+        self.updated_at = datetime.now()
+
 
 class SessionManager:
     """

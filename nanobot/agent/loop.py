@@ -507,7 +507,9 @@ class AgentLoop:
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        self._save_turn(session, all_msgs, 1 + len(history))
+        # Save the new turn messages (user prompt + assistant response).
+        # We start from len(history) to include the new user message.
+        self._save_turn(session, all_msgs, len(history))
         self.sessions.save(session)
         self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
 
