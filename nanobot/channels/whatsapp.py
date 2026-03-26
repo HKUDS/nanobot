@@ -142,7 +142,16 @@ class WhatsAppChannel(BaseChannel):
 
         if msg.content:
             try:
-                payload = {"type": "send", "to": chat_id, "text": msg.content}
+                content = msg.content
+                # Auto-mention the sender in group replies so the @mention is
+                # tappable.  The bridge's extractMentionJids() turns @<digits>
+                # into the correct JID (LID or phone).
+                meta = msg.metadata or {}
+                sender_id = meta.get("sender_id")
+                if meta.get("is_group") and sender_id and f"@{sender_id}" not in content:
+                    content = f"@{sender_id} {content}"
+
+                payload = {"type": "send", "to": chat_id, "text": content}
                 await self._ws.send(json.dumps(payload, ensure_ascii=False))
             except Exception as e:
                 logger.error("Error sending WhatsApp message: {}", e)
@@ -220,6 +229,8 @@ class WhatsAppChannel(BaseChannel):
                     media_tag = f"[{media_type}: {p}]"
                     content = f"{content}\n{media_tag}" if content else media_tag
 
+            push_name = data.get("pushName", "")
+
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=sender,  # Use full LID for replies
@@ -229,6 +240,8 @@ class WhatsAppChannel(BaseChannel):
                     "message_id": message_id,
                     "timestamp": data.get("timestamp"),
                     "is_group": data.get("isGroup", False),
+                    "sender_id": sender_id,
+                    "sender_name": push_name,
                 },
             )
 

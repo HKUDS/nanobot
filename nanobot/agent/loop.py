@@ -506,6 +506,8 @@ class AgentLoop:
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            sender_id=msg.metadata.get("sender_id"),
+            sender_name=msg.metadata.get("sender_name"),
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -539,6 +541,8 @@ class AgentLoop:
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         meta = dict(msg.metadata or {})
+        if msg.sender_id:
+            meta["sender_id"] = msg.sender_id
         if on_stream is not None:
             meta["_streamed"] = True
         return OutboundMessage(
