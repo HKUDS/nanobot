@@ -22,15 +22,12 @@ class RolloutConfig:
 
     def __init__(
         self,
-        overrides: dict[str, Any] | None = None,
         *,
         memory_config: MemoryConfig | None = None,
     ) -> None:
         self.rollout = self._load_defaults()
         if memory_config is not None:
             self.apply_overrides(self._config_to_overrides(memory_config))
-        elif isinstance(overrides, dict):
-            self.apply_overrides(overrides)
 
     @staticmethod
     def _config_to_overrides(mc: MemoryConfig) -> dict[str, Any]:

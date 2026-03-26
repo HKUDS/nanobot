@@ -80,7 +80,6 @@ class MemoryStore:
     def __init__(
         self,
         workspace: Path,
-        rollout_overrides: dict[str, Any] | None = None,
         *,
         memory_config: MemoryConfig | None = None,
         graph_enabled: bool = False,
@@ -135,11 +134,7 @@ class MemoryStore:
             coerce_event=lambda raw, **kw: self._coercer.coerce_event(raw, **kw),
             utc_now_iso=_utc_now_iso,
         )
-        self._rollout_config = RolloutConfig(
-            overrides=rollout_overrides,
-            memory_config=memory_config,
-        )
-        # Apply graph_enabled when using memory_config path
+        self._rollout_config = RolloutConfig(memory_config=memory_config)
         if memory_config is not None:
             self._rollout_config.rollout["graph_enabled"] = graph_enabled
 
