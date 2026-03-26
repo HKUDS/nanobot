@@ -539,3 +539,109 @@ class TestContextBuilderSpan:
         assert len(compress_spans) >= 1
         assert "metadata" in compress_spans[0]
         assert "middle_msgs" in compress_spans[0]["metadata"]
+
+
+# ---------------------------------------------------------------------------
+# 9. ToolRegistry tool_span captures output via obs.update()
+# ---------------------------------------------------------------------------
+
+
+class TestToolSpanOutputCaptured:
+    """ToolRegistry._execute_inner calls obs.update() with tool result output."""
+
+    async def test_successful_tool_captures_output(self):
+        from nanobot.tools.base import Tool, ToolResult
+        from nanobot.tools.registry import ToolRegistry
+
+        class EchoTool(Tool):
+            name = "echo"
+            description = "Echo tool"
+            parameters = {"type": "object", "properties": {}}
+
+            async def execute(self, **kwargs: Any) -> ToolResult:
+                return ToolResult.ok("hello world")
+
+        registry = ToolRegistry()
+        registry.register(EchoTool())
+
+        update_calls: list[dict[str, Any]] = []
+
+        class FakeObs:
+            def update(self, **kwargs: Any) -> None:
+                update_calls.append(kwargs)
+
+        @contextlib.asynccontextmanager
+        async def fake_tool_span(**kwargs: Any):
+            yield FakeObs()
+
+        with patch("nanobot.observability.langfuse.tool_span", side_effect=fake_tool_span):
+            result = await registry.execute("echo", {})
+
+        assert result.success
+        assert result.output == "hello world"
+        assert len(update_calls) == 1
+        assert "hello world" in update_calls[0]["output"]
+        assert update_calls[0]["metadata"]["success"] is True
+        assert "duration_ms" in update_calls[0]["metadata"]
+
+    async def test_validation_error_captures_output(self):
+        from nanobot.tools.base import Tool, ToolResult
+        from nanobot.tools.registry import ToolRegistry
+
+        class StrictTool(Tool):
+            name = "strict"
+            description = "Strict tool"
+            parameters = {
+                "type": "object",
+                "properties": {"x": {"type": "integer"}},
+                "required": ["x"],
+            }
+
+            async def execute(self, **kwargs: Any) -> ToolResult:
+                return ToolResult.ok("ok")
+
+        registry = ToolRegistry()
+        registry.register(StrictTool())
+
+        update_calls: list[dict[str, Any]] = []
+
+        class FakeObs:
+            def update(self, **kwargs: Any) -> None:
+                update_calls.append(kwargs)
+
+        @contextlib.asynccontextmanager
+        async def fake_tool_span(**kwargs: Any):
+            yield FakeObs()
+
+        with patch("nanobot.observability.langfuse.tool_span", side_effect=fake_tool_span):
+            result = await registry.execute("strict", {})  # missing required 'x'
+
+        assert not result.success
+        assert len(update_calls) == 1
+        assert update_calls[0]["metadata"]["success"] is False
+
+    async def test_obs_none_does_not_crash(self):
+        """When Langfuse is disabled, obs is None — no crash."""
+        from nanobot.tools.base import Tool, ToolResult
+        from nanobot.tools.registry import ToolRegistry
+
+        class EchoTool(Tool):
+            name = "echo"
+            description = "Echo tool"
+            parameters = {"type": "object", "properties": {}}
+
+            async def execute(self, **kwargs: Any) -> ToolResult:
+                return ToolResult.ok("hello world")
+
+        registry = ToolRegistry()
+        registry.register(EchoTool())
+
+        @contextlib.asynccontextmanager
+        async def fake_tool_span(**kwargs: Any):
+            yield None
+
+        with patch("nanobot.observability.langfuse.tool_span", side_effect=fake_tool_span):
+            result = await registry.execute("echo", {})
+
+        assert result.success
+        assert result.output == "hello world"

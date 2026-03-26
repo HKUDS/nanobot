@@ -146,7 +146,7 @@ class ToolRegistry:
 
         t0 = time.monotonic()
 
-        async with tool_span(name=name, input=params):
+        async with tool_span(name=name, input=params) as obs:
             try:
                 errors = tool.validate_params(params)
                 if errors:
@@ -156,9 +156,15 @@ class ToolRegistry:
                         name,
                         (time.monotonic() - t0) * 1000,
                     )
-                    return ToolResult.fail(
+                    result = ToolResult.fail(
                         str(validation_err) + self._HINT, error_type="validation"
                     )
+                    if obs is not None:
+                        obs.update(
+                            output=result.output[:500],
+                            metadata={"success": False},
+                        )
+                    return result
 
                 raw = await tool.execute(**params)
 
@@ -192,6 +198,12 @@ class ToolRegistry:
                 tool_calls_total.labels(tool_name=name, success=str(result.success)).inc()
                 tool_latency_seconds.labels(tool_name=name).observe(elapsed)
 
+                if obs is not None:
+                    obs.update(
+                        output=result.output[:500],
+                        metadata={"success": result.success, "duration_ms": round(duration_ms)},
+                    )
+
                 # Cache large successful results and generate summary
                 if (
                     result.success
@@ -222,7 +234,13 @@ class ToolRegistry:
                 )
                 tool_calls_total.labels(tool_name=name, success="False").inc()
                 tool_latency_seconds.labels(tool_name=name).observe(elapsed)
-                return ToolResult.fail(str(e) + self._HINT, error_type=e.error_type)
+                result = ToolResult.fail(str(e) + self._HINT, error_type=e.error_type)
+                if obs is not None:
+                    obs.update(
+                        output=result.output[:500],
+                        metadata={"success": False, "error_type": e.error_type},
+                    )
+                return result
             except Exception as e:  # crash-barrier: user-provided tool execution
                 elapsed = time.monotonic() - t0
                 bind_trace().exception(
@@ -232,9 +250,15 @@ class ToolRegistry:
                 )
                 tool_calls_total.labels(tool_name=name, success="False").inc()
                 tool_latency_seconds.labels(tool_name=name).observe(elapsed)
-                return ToolResult.fail(
+                result = ToolResult.fail(
                     f"Error executing {name}: {str(e)}" + self._HINT, error_type="unknown"
                 )
+                if obs is not None:
+                    obs.update(
+                        output=result.output[:500],
+                        metadata={"success": False, "error_type": "unknown"},
+                    )
+                return result
 
     @property
     def tool_names(self) -> list[str]:
