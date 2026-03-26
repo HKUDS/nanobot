@@ -33,7 +33,6 @@ dependencies = [
     "croniter>=6.0.0,<7.0.0",
     "dingtalk-stream>=0.24.0,<1.0.0",
     "python-telegram-bot[socks]>=22.6,<23.0",
-    "discord.py>=2.5.2,<3.0.0",
     "lark-oapi>=1.5.0,<2.0.0",
     "socksio>=1.0.0,<2.0.0",
     "python-socketio>=5.16.0,<6.0.0",
@@ -66,6 +65,9 @@ matrix = [
     "matrix-nio[e2e]>=0.25.2",
     "mistune>=3.0.0,<4.0.0",
     "nh3>=0.2.17,<1.0.0",
+]
+discord = [
+    "discord.py>=2.5.2,<3.0.0",
 ]
 langsmith = [
     "langsmith>=0.1.0",
