@@ -538,7 +538,9 @@ class TestContextBuilderSpan:
         compress_spans = [s for s in captured_spans if s.get("name") == "compress"]
         assert len(compress_spans) >= 1
         assert "metadata" in compress_spans[0]
-        assert "middle_msgs" in compress_spans[0]["metadata"]
+        assert "before_tokens" in compress_spans[0]["metadata"]
+        assert "input" in compress_spans[0]
+        assert "middle_msgs" in compress_spans[0]["input"]
 
 
 # ---------------------------------------------------------------------------
@@ -646,3 +648,99 @@ class TestToolSpanOutputCaptured:
 
         assert result.success
         assert result.output == "hello world"
+
+
+# ---------------------------------------------------------------------------
+# 10. Compression span captures input, output, and enriched metadata
+# ---------------------------------------------------------------------------
+
+
+class TestCompressSpanEnriched:
+    """summarize_and_compress span includes input/output and compression metadata."""
+
+    async def test_compress_span_has_output_and_metadata(self):
+        from nanobot.context.compression import _summary_cache, summarize_and_compress
+        from nanobot.providers.base import LLMResponse
+
+        _summary_cache.clear()
+
+        provider = ScriptedProvider(
+            [
+                LLMResponse(
+                    content="Summary of conversation.",
+                    usage={"prompt_tokens": 30, "completion_tokens": 10},
+                )
+            ]
+        )
+
+        update_calls: list[dict[str, Any]] = []
+
+        class FakeObs:
+            def update(self, **kwargs: Any) -> None:
+                update_calls.append(kwargs)
+
+        @contextlib.asynccontextmanager
+        async def fake_span(**kwargs: Any):
+            yield FakeObs()
+
+        # Build messages that exceed the budget to trigger compression
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": "You are a helpful assistant."},
+        ]
+        for i in range(20):
+            messages.append({"role": "user", "content": f"Message {i} " + "x" * 200})
+            messages.append({"role": "assistant", "content": f"Reply {i} " + "y" * 200})
+
+        with patch("nanobot.context.compression.langfuse_span", side_effect=fake_span):
+            await summarize_and_compress(
+                messages=messages,
+                provider=provider,
+                model="test-model",
+                max_tokens=500,
+            )
+
+        assert len(update_calls) == 1
+        call = update_calls[0]
+        assert "Summary" in call["output"]
+        assert "compression_ratio" in call["metadata"]
+        assert "before_tokens" in call["metadata"]
+        assert call["metadata"]["model"] == "test-model"
+
+    async def test_compress_span_obs_none_no_crash(self):
+        """When Langfuse is disabled (obs is None), no crash occurs."""
+        from nanobot.context.compression import _summary_cache, summarize_and_compress
+        from nanobot.providers.base import LLMResponse
+
+        _summary_cache.clear()
+
+        provider = ScriptedProvider(
+            [
+                LLMResponse(
+                    content="Summary of conversation.",
+                    usage={"prompt_tokens": 30, "completion_tokens": 10},
+                )
+            ]
+        )
+
+        @contextlib.asynccontextmanager
+        async def fake_span(**kwargs: Any):
+            yield None
+
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": "You are a helpful assistant."},
+        ]
+        for i in range(20):
+            messages.append({"role": "user", "content": f"Message {i} " + "x" * 200})
+            messages.append({"role": "assistant", "content": f"Reply {i} " + "y" * 200})
+
+        with patch("nanobot.context.compression.langfuse_span", side_effect=fake_span):
+            result = await summarize_and_compress(
+                messages=messages,
+                provider=provider,
+                model="test-model",
+                max_tokens=500,
+            )
+
+        # Should not crash and should return valid messages
+        assert isinstance(result, list)
+        assert len(result) >= 1
