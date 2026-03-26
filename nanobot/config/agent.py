@@ -7,9 +7,9 @@ from typing import Any
 
 from pydantic import Field
 
+from nanobot.config.base import Base
 from nanobot.config.memory import MemoryConfig
 from nanobot.config.mission import MissionConfig
-from nanobot.config.schema import Base
 
 
 class AgentConfig(Base):

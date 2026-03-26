@@ -5,20 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, Field
-from pydantic.alias_generators import to_camel
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from nanobot.config.base import Base  # noqa: F401 — re-exported for consumers
 from nanobot.config.providers_registry import PROVIDERS, find_by_name
 
 if TYPE_CHECKING:
     from nanobot.config.agent import AgentConfig
-
-
-class Base(BaseModel):
-    """Base model that accepts both camelCase and snake_case keys."""
-
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
 class WhatsAppConfig(Base):
@@ -404,15 +398,7 @@ class Config(BaseSettings):
     )
 
 
-# Re-exports for backward compatibility during refactor
-from nanobot.config.agent import AgentConfig  # noqa: E402, F401
-from nanobot.config.memory import (  # noqa: E402, F401
-    MemoryConfig,
-    MemorySectionWeights,
-    RerankerConfig,
-    VectorConfig,
-)
-from nanobot.config.mission import MissionConfig  # noqa: E402, F401
+# Resolve forward references now that all submodules import Base from base.py (no cycle).
+from nanobot.config.agent import AgentConfig  # noqa: E402
 
-# Backward-compat alias
-VectorSyncConfig = VectorConfig  # noqa: F841
+AgentsConfig.model_rebuild(_types_namespace={"AgentConfig": AgentConfig})

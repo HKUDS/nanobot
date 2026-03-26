@@ -789,7 +789,7 @@ async def test_result_max_chars_configurable() -> None:
 
 def test_mission_config_defaults() -> None:
     """MissionConfig should have the expected default values."""
-    from nanobot.config.schema import MissionConfig
+    from nanobot.config.mission import MissionConfig
 
     cfg = MissionConfig()
     assert cfg.max_concurrent == 3

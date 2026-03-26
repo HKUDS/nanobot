@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nanobot.config.schema import Base
+from nanobot.config.base import Base
 
 
 class MissionConfig(Base):

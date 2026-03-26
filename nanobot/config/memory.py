@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import Field
 
-from nanobot.config.schema import Base
+from nanobot.config.base import Base
 
 
 class MemorySectionWeights(Base):
