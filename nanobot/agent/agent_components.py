@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from nanobot.coordination.role_switching import TurnRoleManager
     from nanobot.cron.service import CronService
     from nanobot.memory import MemoryStore
+    from nanobot.memory.write.micro_extractor import MicroExtractor
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import SessionManager
     from nanobot.tools.capability import CapabilityRegistry
@@ -108,6 +109,7 @@ class _ProcessorServices:
     bus: MessageBus
     turn_context: TurnContextManager
     span_module: Any = None
+    micro_extractor: MicroExtractor | None = None
 
 
 @dataclass(slots=True)
