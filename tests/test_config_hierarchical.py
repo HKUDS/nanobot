@@ -79,3 +79,229 @@ class TestAgentConfigHierarchical:
         )
         assert ac.max_tokens == 16384
         assert ac.memory.token_budget == 500
+
+
+class TestConfigRoundTrip:
+    """Verify JSON → AgentConfig → JSON loses no data."""
+
+    def test_round_trip_preserves_all_fields(self):
+        """model_validate → model_dump round-trip is lossless."""
+        original = {
+            "workspace": "/test/ws",
+            "model": "test-model",
+            "max_tokens": 4096,
+            "temperature": 0.5,
+            "max_iterations": 20,
+            "context_window_tokens": 64_000,
+            "planning_enabled": False,
+            "verification_mode": "always",
+            "delegation_enabled": False,
+            "memory_enabled": False,
+            "skills_enabled": False,
+            "streaming_enabled": False,
+            "shell_mode": "allowlist",
+            "restrict_to_workspace": False,
+            "tool_result_max_chars": 500,
+            "tool_result_context_tokens": 100,
+            "tool_summary_model": "gpt-4o-mini",
+            "vision_model": "gpt-4o",
+            "summary_model": "gpt-4o-mini",
+            "message_timeout": 60,
+            "max_session_cost_usd": 1.5,
+            "max_session_wall_time_seconds": 600,
+            "max_delegation_depth": 3,
+            "graph_enabled": True,
+            "memory": {
+                "window": 50,
+                "retrieval_k": 10,
+                "token_budget": 500,
+                "rollout_mode": "shadow",
+                "micro_extraction_enabled": True,
+                "micro_extraction_model": "gpt-4o-mini",
+                "reranker": {"mode": "shadow", "alpha": 0.8, "model": "custom/m"},
+                "vector": {"user_id": "custom", "add_debug": True},
+            },
+            "mission": {"max_concurrent": 5, "max_iterations": 30},
+        }
+        ac = AgentConfig(**original)
+        dumped = ac.model_dump()
+
+        # Every key in the original must be present with the same value
+        for key, value in original.items():
+            if isinstance(value, dict):
+                for sub_key, sub_value in value.items():
+                    if isinstance(sub_value, dict):
+                        for sub_sub_key, sub_sub_value in sub_value.items():
+                            assert dumped[key][sub_key][sub_sub_key] == sub_sub_value, (
+                                f"{key}.{sub_key}.{sub_sub_key}"
+                            )
+                    else:
+                        assert dumped[key][sub_key] == sub_value, f"{key}.{sub_key}"
+            else:
+                assert dumped[key] == value, key
+
+    def test_camel_case_round_trip(self):
+        """camelCase JSON → AgentConfig → camelCase JSON preserves keys."""
+        camel_json = {
+            "workspace": "/tmp/t",
+            "model": "test",
+            "maxTokens": 16384,
+            "memory": {"tokenBudget": 500, "reranker": {"mode": "shadow"}},
+            "mission": {"maxConcurrent": 5},
+        }
+        ac = AgentConfig.model_validate(camel_json)
+        dumped = ac.model_dump(by_alias=True)
+        assert dumped["maxTokens"] == 16384
+        assert dumped["memory"]["tokenBudget"] == 500
+        assert dumped["memory"]["reranker"]["mode"] == "shadow"
+        assert dumped["mission"]["maxConcurrent"] == 5
+
+
+class TestConfigCompleteness:
+    """Verify every AgentConfig field is reachable from JSON config data."""
+
+    def test_all_top_level_fields_settable(self):
+        """Every top-level field on AgentConfig can be set via from_raw()."""
+        data = {
+            "workspace": "/test/ws",
+            "model": "test-model",
+            "maxTokens": 4096,
+            "temperature": 0.5,
+            "maxIterations": 20,
+            "contextWindowTokens": 64_000,
+            "planningEnabled": False,
+            "verificationMode": "always",
+            "delegationEnabled": False,
+            "memoryEnabled": False,
+            "skillsEnabled": False,
+            "streamingEnabled": False,
+            "shellMode": "allowlist",
+            "restrictToWorkspace": False,
+            "toolResultMaxChars": 500,
+            "toolResultContextTokens": 100,
+            "toolSummaryModel": "gpt-4o-mini",
+            "visionModel": "gpt-4o",
+            "summaryModel": "gpt-4o-mini",
+            "messageTimeout": 60,
+            "maxSessionCostUsd": 1.5,
+            "maxSessionWallTimeSeconds": 600,
+            "maxDelegationDepth": 3,
+            "graphEnabled": True,
+        }
+        ac = AgentConfig.from_raw(data)
+        assert ac.workspace == "/test/ws"
+        assert ac.model == "test-model"
+        assert ac.max_tokens == 4096
+        assert ac.temperature == 0.5
+        assert ac.max_iterations == 20
+        assert ac.context_window_tokens == 64_000
+        assert ac.planning_enabled is False
+        assert ac.verification_mode == "always"
+        assert ac.delegation_enabled is False
+        assert ac.memory_enabled is False
+        assert ac.skills_enabled is False
+        assert ac.streaming_enabled is False
+        assert ac.shell_mode == "allowlist"
+        assert ac.restrict_to_workspace is False
+        assert ac.tool_result_max_chars == 500
+        assert ac.tool_result_context_tokens == 100
+        assert ac.tool_summary_model == "gpt-4o-mini"
+        assert ac.vision_model == "gpt-4o"
+        assert ac.summary_model == "gpt-4o-mini"
+        assert ac.message_timeout == 60
+        assert ac.max_session_cost_usd == 1.5
+        assert ac.max_session_wall_time_seconds == 600
+        assert ac.max_delegation_depth == 3
+        assert ac.graph_enabled is True
+
+    def test_all_memory_fields_settable(self):
+        """Every MemoryConfig field is reachable via nested JSON."""
+        data = {
+            "workspace": "/tmp/t",
+            "model": "test",
+            "memory": {
+                "window": 50,
+                "retrievalK": 10,
+                "tokenBudget": 500,
+                "mdTokenCap": 800,
+                "uncertaintyThreshold": 0.3,
+                "enableContradictionCheck": False,
+                "conflictAutoResolveGap": 0.5,
+                "rolloutMode": "shadow",
+                "typeSeparationEnabled": False,
+                "routerEnabled": False,
+                "reflectionEnabled": False,
+                "shadowMode": True,
+                "shadowSampleRate": 0.5,
+                "vectorHealthEnabled": False,
+                "autoReindexOnEmptyVector": False,
+                "historyFallbackEnabled": True,
+                "fallbackAllowedSources": ["profile"],
+                "fallbackMaxSummaryChars": 100,
+                "rolloutGateMinRecallAtK": 0.7,
+                "rolloutGateMinPrecisionAtK": 0.4,
+                "rolloutGateMaxAvgContextTokens": 2000.0,
+                "rolloutGateMaxHistoryFallbackRatio": 0.1,
+                "sectionWeights": {},
+                "microExtractionEnabled": True,
+                "microExtractionModel": "gpt-4o-mini",
+                "rawTurnIngestion": False,
+                "reranker": {"mode": "shadow", "alpha": 0.8, "model": "custom/model"},
+                "vector": {
+                    "userId": "custom",
+                    "addDebug": True,
+                    "verifyWrite": False,
+                    "forceInfer": True,
+                },
+            },
+        }
+        ac = AgentConfig.from_raw(data)
+        m = ac.memory
+        assert m.window == 50
+        assert m.retrieval_k == 10
+        assert m.token_budget == 500
+        assert m.md_token_cap == 800
+        assert m.uncertainty_threshold == 0.3
+        assert m.enable_contradiction_check is False
+        assert m.conflict_auto_resolve_gap == 0.5
+        assert m.rollout_mode == "shadow"
+        assert m.type_separation_enabled is False
+        assert m.router_enabled is False
+        assert m.reflection_enabled is False
+        assert m.shadow_mode is True
+        assert m.shadow_sample_rate == 0.5
+        assert m.vector_health_enabled is False
+        assert m.auto_reindex_on_empty_vector is False
+        assert m.history_fallback_enabled is True
+        assert m.fallback_allowed_sources == ["profile"]
+        assert m.fallback_max_summary_chars == 100
+        assert m.rollout_gate_min_recall_at_k == 0.7
+        assert m.rollout_gate_min_precision_at_k == 0.4
+        assert m.rollout_gate_max_avg_context_tokens == 2000.0
+        assert m.rollout_gate_max_history_fallback_ratio == 0.1
+        assert m.micro_extraction_enabled is True
+        assert m.micro_extraction_model == "gpt-4o-mini"
+        assert m.raw_turn_ingestion is False
+        assert m.reranker.mode == "shadow"
+        assert m.reranker.alpha == 0.8
+        assert m.reranker.model == "custom/model"
+        assert m.vector.user_id == "custom"
+        assert m.vector.add_debug is True
+        assert m.vector.verify_write is False
+        assert m.vector.force_infer is True
+
+    def test_all_mission_fields_settable(self):
+        """Every MissionConfig field is reachable via nested JSON."""
+        data = {
+            "workspace": "/tmp/t",
+            "model": "test",
+            "mission": {
+                "maxConcurrent": 5,
+                "maxIterations": 30,
+                "resultMaxChars": 8000,
+            },
+        }
+        ac = AgentConfig.from_raw(data)
+        assert ac.mission.max_concurrent == 5
+        assert ac.mission.max_iterations == 30
+        assert ac.mission.result_max_chars == 8000
