@@ -38,6 +38,7 @@ from nanobot.errors import (
 from nanobot.observability.tracing import bind_trace
 
 if TYPE_CHECKING:
+    from nanobot.config.memory import MemoryConfig
     from nanobot.memory.store import MemoryStore
 
 # ---------------------------------------------------------------------------
@@ -64,17 +65,13 @@ class ContextBuilder:
         workspace: Path,
         *,
         memory: MemoryStore | None = None,
-        memory_retrieval_k: int = 6,
-        memory_token_budget: int = 900,
-        memory_md_token_cap: int = 1500,
+        memory_config: MemoryConfig | None = None,
         role_system_prompt: str = "",
     ):
         self.workspace = workspace
         self.memory = memory
+        self._memory_config = memory_config
         self.skills = SkillsLoader(workspace)
-        self.memory_retrieval_k = memory_retrieval_k
-        self.memory_token_budget = memory_token_budget
-        self.memory_md_token_cap = memory_md_token_cap
         self.role_system_prompt = role_system_prompt
         self._contacts_context: str = ""
         self._unavailable_tools_fn: Callable[[], str] | None = None
@@ -124,13 +121,13 @@ class ContextBuilder:
             parts.append(bootstrap)
 
         # Memory context — graceful degradation if retrieval crashes
-        if self.memory is not None:
+        if self.memory is not None and self._memory_config is not None:
             try:
                 memory = self.memory.get_memory_context(
                     query=current_message,
-                    retrieval_k=self.memory_retrieval_k,
-                    token_budget=self.memory_token_budget,
-                    memory_md_token_cap=self.memory_md_token_cap,
+                    retrieval_k=self._memory_config.retrieval_k,
+                    token_budget=self._memory_config.token_budget,
+                    memory_md_token_cap=self._memory_config.md_token_cap,
                 )
             except (NanobotMemoryError, MemoryRetrievalError, RuntimeError, OSError):
                 logger.warning("Memory context retrieval failed; continuing without memory")

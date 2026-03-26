@@ -266,9 +266,7 @@ def build_agent(
     context = ContextBuilder(
         config.workspace_path,
         memory=memory,
-        memory_retrieval_k=config.memory.retrieval_k if config.memory_enabled else 0,
-        memory_token_budget=config.memory.token_budget if config.memory_enabled else 0,
-        memory_md_token_cap=config.memory.md_token_cap if config.memory_enabled else 0,
+        memory_config=config.memory if config.memory_enabled else None,
         role_system_prompt=role_config.system_prompt if role_config else "",
     )
 
