@@ -66,7 +66,6 @@ class AgentLoop:
         self.brave_api_key = components.infra.brave_api_key
         self.exec_config = components.infra.exec_config
         self.cron_service = components.infra.cron_service
-        self.memory_rollout_overrides = components.infra.memory_rollout_overrides
 
         # Subsystems
         self.memory = components.subsystems.memory

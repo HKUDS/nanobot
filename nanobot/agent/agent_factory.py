@@ -27,8 +27,8 @@ if TYPE_CHECKING:
     from nanobot.agent.consolidation import ConsolidationOrchestrator
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
+    from nanobot.config.agent import AgentConfig
     from nanobot.config.schema import (
-        AgentConfig,
         AgentRoleConfig,
         ChannelsConfig,
         ExecToolConfig,
@@ -65,41 +65,6 @@ def _mcp_connector_fn() -> Any:
         return connect_mcp_servers
     except ImportError:
         return None
-
-
-def _build_rollout_overrides(config: AgentConfig) -> dict:
-    """Extract memory rollout overrides from ``AgentConfig``."""
-    return {
-        "memory_rollout_mode": config.memory_rollout_mode,
-        "memory_type_separation_enabled": config.memory_type_separation_enabled,
-        "memory_router_enabled": config.memory_router_enabled,
-        "memory_reflection_enabled": config.memory_reflection_enabled,
-        "memory_shadow_mode": config.memory_shadow_mode,
-        "memory_shadow_sample_rate": config.memory_shadow_sample_rate,
-        "memory_vector_health_enabled": config.memory_vector_health_enabled,
-        "memory_auto_reindex_on_empty_vector": config.memory_auto_reindex_on_empty_vector,
-        "memory_history_fallback_enabled": config.memory_history_fallback_enabled,
-        "conflict_auto_resolve_gap": config.memory_conflict_auto_resolve_gap,
-        "memory_fallback_allowed_sources": config.memory_fallback_allowed_sources
-        or ["profile", "events", "vector_search"],
-        "memory_fallback_max_summary_chars": config.memory_fallback_max_summary_chars,
-        "rollout_gates": {
-            "min_recall_at_k": config.memory_rollout_gate_min_recall_at_k,
-            "min_precision_at_k": config.memory_rollout_gate_min_precision_at_k,
-            "max_avg_memory_context_tokens": (
-                config.memory_rollout_gate_max_avg_memory_context_tokens
-            ),
-            "max_history_fallback_ratio": config.memory_rollout_gate_max_history_fallback_ratio,
-        },
-        "graph_enabled": config.graph_enabled,
-        "reranker_mode": config.reranker_mode,
-        "reranker_alpha": config.reranker_alpha,
-        "reranker_model": config.reranker_model,
-        "vector_user_id": config.vector_user_id,
-        "vector_add_debug": config.vector_add_debug,
-        "vector_verify_write": config.vector_verify_write,
-        "vector_force_infer": config.vector_force_infer,
-    }
 
 
 def _build_tools(
@@ -161,9 +126,9 @@ def _build_tools(
         model=model,
         temperature=temperature,
         max_tokens=config.max_tokens,
-        max_iterations=config.mission_max_iterations,
-        max_concurrent=config.mission_max_concurrent,
-        result_max_chars=config.mission_result_max_chars,
+        max_iterations=config.mission.max_iterations,
+        max_concurrent=config.mission.max_concurrent,
+        result_max_chars=config.mission.result_max_chars,
         brave_api_key=brave_api_key,
         exec_config=exec_config,
         restrict_to_workspace=config.restrict_to_workspace,
@@ -234,8 +199,8 @@ def _wire_memory(
         memory=context.memory,
         archive_fn=_archive,
         max_concurrent=3,
-        memory_window=config.memory_window,
-        enable_contradiction_check=config.memory_enable_contradiction_check,
+        memory_window=config.memory.window,
+        enable_contradiction_check=config.memory.enable_contradiction_check,
     )
 
 
@@ -291,22 +256,20 @@ def build_agent(
     )
     resolved_exec_config = exec_config or _ExecToolConfig()
 
-    # 2. Build rollout overrides
-    memory_rollout_overrides = _build_rollout_overrides(config)
-
-    # 3. Construct MemoryStore
+    # 2. Construct MemoryStore
     memory = MemoryStore(
         config.workspace_path,
-        rollout_overrides=memory_rollout_overrides,
+        memory_config=config.memory,
+        graph_enabled=config.graph_enabled,
     )
 
     # 4. Construct ContextBuilder
     context = ContextBuilder(
         config.workspace_path,
         memory=memory,
-        memory_retrieval_k=config.memory_retrieval_k if config.memory_enabled else 0,
-        memory_token_budget=config.memory_token_budget if config.memory_enabled else 0,
-        memory_md_token_cap=config.memory_md_token_cap if config.memory_enabled else 0,
+        memory_retrieval_k=config.memory.retrieval_k if config.memory_enabled else 0,
+        memory_token_budget=config.memory.token_budget if config.memory_enabled else 0,
+        memory_md_token_cap=config.memory.md_token_cap if config.memory_enabled else 0,
         role_system_prompt=role_config.system_prompt if role_config else "",
     )
 
@@ -405,7 +368,7 @@ def build_agent(
         temperature=temperature,
         max_tokens=config.max_tokens,
         verification_mode=config.verification_mode,
-        memory_uncertainty_threshold=config.memory_uncertainty_threshold,
+        memory_uncertainty_threshold=config.memory.uncertainty_threshold,
         memory_store=context.memory,
     )
 
@@ -440,11 +403,11 @@ def build_agent(
     from nanobot.memory.write.micro_extractor import MicroExtractor as _MicroExtractor
 
     _micro_extractor: _MicroExtractor | None = None
-    if config.micro_extraction_enabled:
+    if config.memory.micro_extraction_enabled:
         _micro_extractor = _MicroExtractor(
             provider=provider,
             ingester=memory.ingester,
-            model=config.micro_extraction_model or "gpt-4o-mini",
+            model=config.memory.micro_extraction_model or "gpt-4o-mini",
             enabled=True,
         )
 
@@ -491,7 +454,6 @@ def build_agent(
         brave_api_key=brave_api_key,
         exec_config=resolved_exec_config,
         cron_service=cron_service,
-        memory_rollout_overrides=memory_rollout_overrides,
         mcp_connector=_mcp_connector_fn(),
     )
     _subs = _Subsystems(
