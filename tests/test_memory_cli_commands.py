@@ -199,7 +199,11 @@ class _FakeStore:
     )
 
     def __init__(
-        self, workspace: Path, rollout_overrides: dict[str, object] | None = None, **kw: object
+        self,
+        workspace: Path,
+        memory_config: object = None,
+        graph_enabled: bool = False,
+        **kw: object,
     ):
         self.workspace = workspace
         self.profile_mgr = _FakeProfileMgr()

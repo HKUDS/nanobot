@@ -78,14 +78,15 @@ class TestRerankerRolloutGating:
     """Verify the rollout gating logic in MemoryStore.retrieve."""
 
     def _make_store(self, tmp_path, reranker_mode: str = "disabled"):
+        from nanobot.config.memory import MemoryConfig, RerankerConfig
         from nanobot.memory.store import MemoryStore
 
         store = MemoryStore(
             tmp_path,
-            rollout_overrides={
-                "memory_rollout_mode": "enabled",
-                "reranker_mode": reranker_mode,
-            },
+            memory_config=MemoryConfig(
+                rollout_mode="enabled",
+                reranker=RerankerConfig(mode=reranker_mode),
+            ),
         )
         return store
 
@@ -106,29 +107,42 @@ class TestRerankerRolloutGating:
         assert isinstance(store._reranker, OnnxCrossEncoderReranker)
 
     def test_env_override_reranker_mode(self, tmp_path, monkeypatch) -> None:
-        from nanobot.memory.store import MemoryStore
-
-        store = MemoryStore(tmp_path, rollout_overrides={"reranker_mode": "shadow"})
-        assert store.rollout["reranker_mode"] == "shadow"
-
-    def test_env_override_reranker_alpha(self, tmp_path, monkeypatch) -> None:
-        from nanobot.memory.store import MemoryStore
-
-        store = MemoryStore(tmp_path, rollout_overrides={"reranker_alpha": 0.8})
-        assert store.rollout["reranker_alpha"] == 0.8
-
-    def test_env_override_reranker_model(self, tmp_path, monkeypatch) -> None:
-        from nanobot.memory.store import MemoryStore
-
-        store = MemoryStore(tmp_path, rollout_overrides={"reranker_model": "custom/model"})
-        assert store.rollout["reranker_model"] == "custom/model"
-
-    def test_composite_reranker_for_non_onnx_model(self, tmp_path) -> None:
+        from nanobot.config.memory import MemoryConfig, RerankerConfig
         from nanobot.memory.store import MemoryStore
 
         store = MemoryStore(
             tmp_path,
-            rollout_overrides={"reranker_model": "custom/model"},
+            memory_config=MemoryConfig(reranker=RerankerConfig(mode="shadow")),
+        )
+        assert store.rollout["reranker_mode"] == "shadow"
+
+    def test_env_override_reranker_alpha(self, tmp_path, monkeypatch) -> None:
+        from nanobot.config.memory import MemoryConfig, RerankerConfig
+        from nanobot.memory.store import MemoryStore
+
+        store = MemoryStore(
+            tmp_path,
+            memory_config=MemoryConfig(reranker=RerankerConfig(alpha=0.8)),
+        )
+        assert store.rollout["reranker_alpha"] == 0.8
+
+    def test_env_override_reranker_model(self, tmp_path, monkeypatch) -> None:
+        from nanobot.config.memory import MemoryConfig, RerankerConfig
+        from nanobot.memory.store import MemoryStore
+
+        store = MemoryStore(
+            tmp_path,
+            memory_config=MemoryConfig(reranker=RerankerConfig(model="custom/model")),
+        )
+        assert store.rollout["reranker_model"] == "custom/model"
+
+    def test_composite_reranker_for_non_onnx_model(self, tmp_path) -> None:
+        from nanobot.config.memory import MemoryConfig, RerankerConfig
+        from nanobot.memory.store import MemoryStore
+
+        store = MemoryStore(
+            tmp_path,
+            memory_config=MemoryConfig(reranker=RerankerConfig(model="custom/model")),
         )
         assert isinstance(store._reranker, CompositeReranker)
 

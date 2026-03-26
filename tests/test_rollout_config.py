@@ -36,41 +36,50 @@ class TestRolloutConfigDefaults:
 
 
 class TestRolloutConfigOverrides:
-    """Overrides merge properly."""
+    """Overrides merge properly via apply_overrides()."""
 
     def test_override_mode(self) -> None:
-        cfg = RolloutConfig(overrides={"memory_rollout_mode": "shadow"})
+        cfg = RolloutConfig()
+        cfg.apply_overrides({"memory_rollout_mode": "shadow"})
         assert cfg.rollout["memory_rollout_mode"] == "shadow"
 
     def test_invalid_mode_ignored(self) -> None:
-        cfg = RolloutConfig(overrides={"memory_rollout_mode": "bogus"})
+        cfg = RolloutConfig()
+        cfg.apply_overrides({"memory_rollout_mode": "bogus"})
         assert cfg.rollout["memory_rollout_mode"] == "enabled"
 
     def test_override_boolean_flag(self) -> None:
-        cfg = RolloutConfig(overrides={"memory_router_enabled": False})
+        cfg = RolloutConfig()
+        cfg.apply_overrides({"memory_router_enabled": False})
         assert cfg.rollout["memory_router_enabled"] is False
 
     def test_override_rollout_gates_partial(self) -> None:
-        cfg = RolloutConfig(overrides={"rollout_gates": {"min_recall_at_k": 0.9}})
+        cfg = RolloutConfig()
+        cfg.apply_overrides({"rollout_gates": {"min_recall_at_k": 0.9}})
         assert cfg.rollout["rollout_gates"]["min_recall_at_k"] == 0.9
         # Other gates should stay at defaults
         assert cfg.rollout["rollout_gates"]["min_precision_at_k"] == 0.25
 
     def test_override_reranker_mode(self) -> None:
-        cfg = RolloutConfig(overrides={"reranker_mode": "disabled"})
+        cfg = RolloutConfig()
+        cfg.apply_overrides({"reranker_mode": "disabled"})
         assert cfg.rollout["reranker_mode"] == "disabled"
 
     def test_override_reranker_alpha_clamped(self) -> None:
-        cfg = RolloutConfig(overrides={"reranker_alpha": 2.0})
+        cfg = RolloutConfig()
+        cfg.apply_overrides({"reranker_alpha": 2.0})
         assert cfg.rollout["reranker_alpha"] == 1.0
 
     def test_empty_overrides_no_change(self) -> None:
-        cfg = RolloutConfig(overrides={})
+        cfg = RolloutConfig()
+        cfg.apply_overrides({})
         default = RolloutConfig()
         assert cfg.rollout == default.rollout
 
     def test_none_overrides_no_change(self) -> None:
-        cfg = RolloutConfig(overrides=None)
+        # apply_overrides is a no-op for empty dict; verify defaults are unchanged
+        cfg = RolloutConfig()
+        cfg.apply_overrides({})
         default = RolloutConfig()
         assert cfg.rollout == default.rollout
 

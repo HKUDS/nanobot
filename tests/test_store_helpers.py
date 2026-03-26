@@ -7,14 +7,26 @@ from pathlib import Path
 
 import pytest
 
+from nanobot.config.memory import MemoryConfig
 from nanobot.memory import MemoryStore
 from nanobot.memory._text import _to_datetime
 from nanobot.memory.maintenance import MemoryMaintenance
 from nanobot.memory.read.retrieval_planner import RetrievalPlanner
 
 
-def _store(tmp_path: Path, **overrides: object) -> MemoryStore:
-    return MemoryStore(tmp_path, rollout_overrides=overrides or None, embedding_provider="hash")
+def _store(
+    tmp_path: Path,
+    *,
+    memory_config: MemoryConfig | None = None,
+    graph_enabled: bool = False,
+    embedding_provider: str = "hash",
+) -> MemoryStore:
+    return MemoryStore(
+        tmp_path,
+        memory_config=memory_config,
+        graph_enabled=graph_enabled,
+        embedding_provider=embedding_provider,
+    )
 
 
 def _seed_events(store: MemoryStore, events: list[dict[str, object]]) -> None:

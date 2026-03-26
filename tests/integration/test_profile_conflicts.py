@@ -24,7 +24,7 @@ def _make_store(tmp_path: Path) -> MemoryStore:
     return MemoryStore(
         tmp_path,
         embedding_provider="hash",
-        rollout_overrides={"graph_enabled": False},
+        graph_enabled=False,
     )
 
 
