@@ -10,32 +10,8 @@ from rich.table import Table
 
 from nanobot import __logo__
 from nanobot.cli._shared import console
-from nanobot.config.schema import Config
 
 memory_app = typer.Typer(help="Manage memory system")
-
-
-def _memory_rollout_overrides(config: Config) -> dict[str, object]:
-    defaults = config.agents.defaults
-    return {
-        "memory_rollout_mode": defaults.memory_rollout_mode,
-        "memory_type_separation_enabled": defaults.memory_type_separation_enabled,
-        "memory_router_enabled": defaults.memory_router_enabled,
-        "memory_reflection_enabled": defaults.memory_reflection_enabled,
-        "memory_shadow_mode": defaults.memory_shadow_mode,
-        "memory_shadow_sample_rate": defaults.memory_shadow_sample_rate,
-        "memory_vector_health_enabled": defaults.memory_vector_health_enabled,
-        "memory_auto_reindex_on_empty_vector": defaults.memory_auto_reindex_on_empty_vector,
-        "memory_history_fallback_enabled": defaults.memory_history_fallback_enabled,
-        "memory_fallback_allowed_sources": defaults.memory_fallback_allowed_sources,
-        "memory_fallback_max_summary_chars": defaults.memory_fallback_max_summary_chars,
-        "rollout_gates": {
-            "min_recall_at_k": defaults.memory_rollout_gate_min_recall_at_k,
-            "min_precision_at_k": defaults.memory_rollout_gate_min_precision_at_k,
-            "max_avg_memory_context_tokens": defaults.memory_rollout_gate_max_avg_memory_context_tokens,
-            "max_history_fallback_ratio": defaults.memory_rollout_gate_max_history_fallback_ratio,
-        },
-    }
 
 
 @memory_app.command("inspect")
@@ -48,9 +24,11 @@ def memory_inspect(
     from nanobot.memory import MemoryStore
 
     config = load_config()
+    ac = config.agents.defaults
     store = MemoryStore(
         config.workspace_path,
-        rollout_overrides=_memory_rollout_overrides(config),
+        memory_config=ac.memory,
+        graph_enabled=ac.graph_enabled,
     )
 
     observability = store.eval_runner.get_observability_report()
@@ -115,9 +93,11 @@ def memory_metrics() -> None:
     from nanobot.memory import MemoryStore
 
     config = load_config()
+    ac = config.agents.defaults
     store = MemoryStore(
         config.workspace_path,
-        rollout_overrides=_memory_rollout_overrides(config),
+        memory_config=ac.memory,
+        graph_enabled=ac.graph_enabled,
     )
     observability = store.eval_runner.get_observability_report()
     backend = observability.get("backend", {}) if isinstance(observability, dict) else {}
@@ -152,9 +132,11 @@ def memory_rebuild(
     from nanobot.memory import MemoryStore
 
     config = load_config()
+    ac = config.agents.defaults
     store = MemoryStore(
         config.workspace_path,
-        rollout_overrides=_memory_rollout_overrides(config),
+        memory_config=ac.memory,
+        graph_enabled=ac.graph_enabled,
     )
     snapshot = store.snapshot.rebuild_memory_snapshot(max_events=max_events, write=True)
     line_count = len(snapshot.splitlines())
@@ -177,9 +159,11 @@ def memory_reindex(
     from nanobot.memory import MemoryStore
 
     config = load_config()
+    ac = config.agents.defaults
     store = MemoryStore(
         config.workspace_path,
-        rollout_overrides=_memory_rollout_overrides(config),
+        memory_config=ac.memory,
+        graph_enabled=ac.graph_enabled,
     )
     result = store.maintenance.reindex_from_structured_memory(
         max_events=max_events if max_events > 0 else None,
@@ -224,9 +208,11 @@ def memory_compact(
     from nanobot.memory import MemoryStore
 
     config = load_config()
+    ac = config.agents.defaults
     store = MemoryStore(
         config.workspace_path,
-        rollout_overrides=_memory_rollout_overrides(config),
+        memory_config=ac.memory,
+        graph_enabled=ac.graph_enabled,
     )
     result = store.maintenance.reindex_from_structured_memory(
         max_events=max_events if max_events > 0 else None,
@@ -270,9 +256,11 @@ def memory_verify(
     from nanobot.memory import MemoryStore
 
     config = load_config()
+    ac = config.agents.defaults
     store = MemoryStore(
         config.workspace_path,
-        rollout_overrides=_memory_rollout_overrides(config),
+        memory_config=ac.memory,
+        graph_enabled=ac.graph_enabled,
     )
     report = store.snapshot.verify_memory(stale_days=stale_days, update_profile=True)
 
@@ -321,9 +309,11 @@ def memory_eval(
     from nanobot.memory import MemoryStore
 
     config = load_config()
+    ac = config.agents.defaults
     store = MemoryStore(
         config.workspace_path,
-        rollout_overrides=_memory_rollout_overrides(config),
+        memory_config=ac.memory,
+        graph_enabled=ac.graph_enabled,
     )
 
     if seeded_profile or seeded_events:
@@ -473,9 +463,11 @@ def memory_conflicts(
     from nanobot.memory import MemoryStore
 
     config = load_config()
+    ac = config.agents.defaults
     store = MemoryStore(
         config.workspace_path,
-        rollout_overrides=_memory_rollout_overrides(config),
+        memory_config=ac.memory,
+        graph_enabled=ac.graph_enabled,
     )
     rows = store.conflict_mgr.list_conflicts(include_closed=all)
     if not rows:
@@ -515,9 +507,11 @@ def memory_resolve(
     from nanobot.memory import MemoryStore
 
     config = load_config()
+    ac = config.agents.defaults
     store = MemoryStore(
         config.workspace_path,
-        rollout_overrides=_memory_rollout_overrides(config),
+        memory_config=ac.memory,
+        graph_enabled=ac.graph_enabled,
     )
     details = store.conflict_mgr.resolve_conflict_details(index=index, action=action)
     if not details.get("ok"):
@@ -551,9 +545,11 @@ def memory_pin(
     from nanobot.memory import MemoryStore
 
     config = load_config()
+    ac = config.agents.defaults
     store = MemoryStore(
         config.workspace_path,
-        rollout_overrides=_memory_rollout_overrides(config),
+        memory_config=ac.memory,
+        graph_enabled=ac.graph_enabled,
     )
     try:
         ok = store.profile_mgr.set_item_pin(field, text, pinned=True)
@@ -575,9 +571,11 @@ def memory_unpin(
     from nanobot.memory import MemoryStore
 
     config = load_config()
+    ac = config.agents.defaults
     store = MemoryStore(
         config.workspace_path,
-        rollout_overrides=_memory_rollout_overrides(config),
+        memory_config=ac.memory,
+        graph_enabled=ac.graph_enabled,
     )
     try:
         ok = store.profile_mgr.set_item_pin(field, text, pinned=False)
@@ -599,9 +597,11 @@ def memory_outdated(
     from nanobot.memory import MemoryStore
 
     config = load_config()
+    ac = config.agents.defaults
     store = MemoryStore(
         config.workspace_path,
-        rollout_overrides=_memory_rollout_overrides(config),
+        memory_config=ac.memory,
+        graph_enabled=ac.graph_enabled,
     )
     try:
         ok = store.profile_mgr.mark_item_outdated(field, text)

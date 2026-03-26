@@ -9,7 +9,10 @@ Extracted from ``store.py`` as part of the store-decomposition effort.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
+
+if TYPE_CHECKING:
+    from nanobot.config.memory import MemoryConfig
 
 
 class RolloutConfig:
@@ -17,10 +20,49 @@ class RolloutConfig:
 
     ROLLOUT_MODES: ClassVar[set[str]] = {"enabled", "shadow", "disabled"}
 
-    def __init__(self, overrides: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        overrides: dict[str, Any] | None = None,
+        *,
+        memory_config: MemoryConfig | None = None,
+    ) -> None:
         self.rollout = self._load_defaults()
-        if isinstance(overrides, dict):
+        if memory_config is not None:
+            self.apply_overrides(self._config_to_overrides(memory_config))
+        elif isinstance(overrides, dict):
             self.apply_overrides(overrides)
+
+    @staticmethod
+    def _config_to_overrides(mc: MemoryConfig) -> dict[str, Any]:
+        """Convert a MemoryConfig to the rollout overrides dict format."""
+        return {
+            "memory_rollout_mode": mc.rollout_mode,
+            "memory_type_separation_enabled": mc.type_separation_enabled,
+            "memory_router_enabled": mc.router_enabled,
+            "memory_reflection_enabled": mc.reflection_enabled,
+            "memory_shadow_mode": mc.shadow_mode,
+            "memory_shadow_sample_rate": mc.shadow_sample_rate,
+            "memory_vector_health_enabled": mc.vector_health_enabled,
+            "memory_auto_reindex_on_empty_vector": mc.auto_reindex_on_empty_vector,
+            "memory_history_fallback_enabled": mc.history_fallback_enabled,
+            "conflict_auto_resolve_gap": mc.conflict_auto_resolve_gap,
+            "memory_fallback_allowed_sources": mc.fallback_allowed_sources
+            or ["profile", "events", "vector_search"],
+            "memory_fallback_max_summary_chars": mc.fallback_max_summary_chars,
+            "rollout_gates": {
+                "min_recall_at_k": mc.rollout_gate_min_recall_at_k,
+                "min_precision_at_k": mc.rollout_gate_min_precision_at_k,
+                "max_avg_memory_context_tokens": mc.rollout_gate_max_avg_context_tokens,
+                "max_history_fallback_ratio": mc.rollout_gate_max_history_fallback_ratio,
+            },
+            "reranker_mode": mc.reranker.mode,
+            "reranker_alpha": mc.reranker.alpha,
+            "reranker_model": mc.reranker.model,
+            "vector_user_id": mc.vector.user_id,
+            "vector_add_debug": mc.vector.add_debug,
+            "vector_verify_write": mc.vector.verify_write,
+            "vector_force_infer": mc.vector.force_infer,
+        }
 
     # ── defaults ────────────────────────────────────────────────────────
 
