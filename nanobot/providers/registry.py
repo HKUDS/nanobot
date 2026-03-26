@@ -217,8 +217,9 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("github_copilot", "copilot"),
         env_key="",
         display_name="Github Copilot",
-        backend="openai_compat",
+        backend="github_copilot",
         default_api_base="https://api.githubcopilot.com",
+        strip_model_prefix=True,
         is_oauth=True,
     ),
     # DeepSeek: OpenAI-compatible at api.deepseek.com

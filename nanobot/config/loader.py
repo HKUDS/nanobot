@@ -24,6 +24,9 @@ def get_config_path() -> Path:
         return _current_config_path
     return Path.home() / ".nanobot" / "config.json"
 
+def get_credentials_dir() -> Path:
+    """Get the directory for storing credentials."""
+    return Path.home() / ".nanobot" / ".credentials"
 
 def load_config(config_path: Path | None = None) -> Config:
     """

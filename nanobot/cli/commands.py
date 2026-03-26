@@ -423,6 +423,13 @@ def _make_provider(config: Config):
             default_model=model,
             extra_headers=p.extra_headers if p else None,
         )
+    elif backend == "github_copilot":
+        from nanobot.providers.github_copilot_provider import GithubCopilotProvider
+        provider = GithubCopilotProvider(
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+            spec=spec,
+        )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
         provider = OpenAICompatProvider(
@@ -1211,18 +1218,23 @@ def _login_github_copilot() -> None:
 
     console.print("[cyan]Starting GitHub Copilot device flow...[/cyan]\n")
 
-    async def _trigger():
-        client = AsyncOpenAI(
-            api_key="dummy",
-            base_url="https://api.githubcopilot.com",
-        )
-        await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=1,
-        )
-
+    from nanobot.providers.github_copilot_provider import GithubCopilotAuthenticator, get_copilot_default_headers, GITHUB_COPILOT_API_BASE
     try:
+        authenticator = GithubCopilotAuthenticator(authorize_login=True)
+        api_key = authenticator.get_api_key()
+        headers = get_copilot_default_headers(api_key)
+        async def _trigger():
+            client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=GITHUB_COPILOT_API_BASE,
+                default_headers=headers,
+            )
+            await client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=1,
+            )
+
         asyncio.run(_trigger())
         console.print("[green]✓ Authenticated with GitHub Copilot[/green]")
     except Exception as e:
