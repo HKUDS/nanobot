@@ -83,6 +83,8 @@ async def test_openrouter_keeps_model_name_intact() -> None:
 
     call_kwargs = mock_create.call_args.kwargs
     assert call_kwargs["model"] == "anthropic/claude-sonnet-4-5"
+    assert call_kwargs["max_completion_tokens"] == 4096
+    assert "max_tokens" not in call_kwargs
 
 
 @pytest.mark.asyncio
@@ -108,6 +110,8 @@ async def test_aihubmix_strips_model_prefix() -> None:
 
     call_kwargs = mock_create.call_args.kwargs
     assert call_kwargs["model"] == "claude-sonnet-4-5"
+    assert call_kwargs["max_completion_tokens"] == 4096
+    assert "max_tokens" not in call_kwargs
 
 
 @pytest.mark.asyncio
@@ -132,6 +136,8 @@ async def test_standard_provider_passes_model_through() -> None:
 
     call_kwargs = mock_create.call_args.kwargs
     assert call_kwargs["model"] == "deepseek-chat"
+    assert call_kwargs["max_completion_tokens"] == 4096
+    assert "max_tokens" not in call_kwargs
 
 
 @pytest.mark.asyncio
