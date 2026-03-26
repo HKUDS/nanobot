@@ -15,6 +15,29 @@ class Base(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
+class SoftTrimConfig(Base):
+    """softTrim：对超长 tool result 保留头尾，中间截断。"""
+    max_chars: int = 4000       # content 超过此长度才 softTrim
+    head_chars: int = 1500      # 保留头部字符数
+    tail_chars: int = 1500      # 保留尾部字符数
+
+
+class HardClearConfig(Base):
+    """hardClear：对占比过大的 tool result 整块替换为 placeholder。"""
+    enabled: bool = True
+    placeholder: str = "[Old tool result content cleared]"
+    ratio: float = 0.5          # tool result chars / context_window_chars 超过此比例触发
+
+
+class ContextPruningConfig(Base):
+    """每次 LLM call 前对 context 中过大的 tool result 做 transient 修剪。"""
+    enabled: bool = False
+    keep_last_assistants: int = 3
+    min_prunable_tool_chars: int = 50_000
+    soft_trim: SoftTrimConfig = Field(default_factory=SoftTrimConfig)
+    hard_clear: HardClearConfig = Field(default_factory=HardClearConfig)
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels.
 
@@ -77,6 +100,7 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     dream: DreamConfig = Field(default_factory=DreamConfig)
+    context_pruning: ContextPruningConfig = Field(default_factory=ContextPruningConfig)
 
 
 class AgentsConfig(Base):
