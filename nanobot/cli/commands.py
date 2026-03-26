@@ -623,6 +623,13 @@ def gateway(
         """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
 
+        # Pre-cleanup: ensure the heartbeat session is bounded before processing.
+        # This prevents an unrecoverable failure loop if a prior run failed to
+        # truncate due to a context-length crash or timeout.
+        session = agent.sessions.get_or_create("heartbeat")
+        session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+        agent.sessions.save(session)
+
         async def _silent(*_args, **_kwargs):
             pass
 
@@ -634,8 +641,7 @@ def gateway(
             on_progress=_silent,
         )
 
-        # Keep a small tail of heartbeat history so the loop stays bounded
-        # without losing all short-term context between runs.
+        # Post-cleanup: truncate again with the new turn's data.
         session = agent.sessions.get_or_create("heartbeat")
         session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
         agent.sessions.save(session)
