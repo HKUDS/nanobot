@@ -12,18 +12,22 @@ from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.utils.helpers import build_assistant_message, detect_image_mime
 
-
 class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
 
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
 
-    def __init__(self, workspace: Path, timezone: str | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        timezone: str | None = None,
+        skill_discovery_threshold: int = 50,
+    ):
         self.workspace = workspace
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
-        self.skills = SkillsLoader(workspace)
+        self.skills = SkillsLoader(workspace, discovery_threshold=skill_discovery_threshold)
 
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
@@ -43,7 +47,10 @@ class ContextBuilder:
             if always_content:
                 parts.append(f"# Active Skills\n\n{always_content}")
 
-        skills_summary = self.skills.build_skills_summary()
+        # Skills section: full summary or discovery mode
+        skills_summary = self.skills.build_skills_summary(
+            source="builtin" if self.skills.should_use_discovery_mode() else None
+        )
         if skills_summary:
             parts.append(f"""# Skills
 
