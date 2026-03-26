@@ -397,11 +397,15 @@ def _make_provider(config: Config):
             console.print("Use the model field to specify the deployment name.")
             raise typer.Exit(1)
     elif backend == "openai_compat" and not model.startswith("bedrock/"):
-        needs_key = not (p and p.api_key)
+        # Check for API key in config or OPENAI_API_KEY environment variable
+        has_key = p and p.api_key
+        has_env_key = bool(os.environ.get("OPENAI_API_KEY"))
+        needs_key = not (has_key or has_env_key)
         exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
         if needs_key and not exempt:
             console.print("[red]Error: No API key configured.[/red]")
             console.print("Set one in ~/.nanobot/config.json under providers section")
+            console.print("Or set OPENAI_API_KEY environment variable.")
             raise typer.Exit(1)
 
     # --- instantiation by backend ---
@@ -425,9 +429,14 @@ def _make_provider(config: Config):
         )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+        # Fall back to OPENAI_API_KEY and OPENAI_API_BASE environment variables
+        api_key = p.api_key if p else os.environ.get("OPENAI_API_KEY")
+        api_base = config.get_api_base(model)
+        if not api_base:
+            api_base = os.environ.get("OPENAI_API_BASE")
         provider = OpenAICompatProvider(
-            api_key=p.api_key if p else None,
-            api_base=config.get_api_base(model),
+            api_key=api_key,
+            api_base=api_base,
             default_model=model,
             extra_headers=p.extra_headers if p else None,
             spec=spec,

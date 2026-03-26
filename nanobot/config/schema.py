@@ -1,5 +1,6 @@
 """Configuration schema using Pydantic."""
 
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -50,11 +51,27 @@ class AgentsConfig(Base):
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
 
 
+def _get_openai_api_key() -> str:
+    """Get API key from environment variables."""
+    return os.environ.get("OPENAI_API_KEY", "")
+
+
+def _get_openai_api_base() -> str | None:
+    """Get API base URL from environment variables."""
+    return os.environ.get("OPENAI_API_BASE") or None
+
+
 class ProviderConfig(Base):
     """LLM provider configuration."""
 
-    api_key: str = ""
-    api_base: str | None = None
+    api_key: str = Field(
+        default_factory=_get_openai_api_key,
+        description="API key for the provider. Can also be set via OPENAI_API_KEY env var for custom provider.",
+    )
+    api_base: str | None = Field(
+        default_factory=_get_openai_api_base,
+        description="API base URL. Can also be set via OPENAI_API_BASE env var for custom provider.",
+    )
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
 
 
@@ -221,11 +238,12 @@ class Config(BaseSettings):
 
         # Fallback: gateways first, then others (follows registry order)
         # OAuth providers are NOT valid fallbacks — they require explicit model selection
+        env_api_key = os.environ.get("OPENAI_API_KEY")
         for spec in PROVIDERS:
             if spec.is_oauth:
                 continue
             p = getattr(self.providers, spec.name, None)
-            if p and p.api_key:
+            if p and (p.api_key or (spec.name == "custom" and env_api_key)):
                 return p, spec.name
         return None, None
 

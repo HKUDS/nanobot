@@ -11,6 +11,11 @@ from contextlib import AsyncExitStack, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
+try:
+    from builtins import BaseExceptionGroup
+except ImportError:
+    BaseExceptionGroup = Exception  # Python < 3.11
+
 from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
