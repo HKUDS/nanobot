@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from nanobot.config.memory import MemoryConfig
 from nanobot.memory import MemoryStore
 from nanobot.memory.read.retrieval_planner import RetrievalPlanner
 
@@ -360,7 +361,7 @@ def test_get_memory_context_graph_not_truncated_at_default_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Entity graph section should appear even at the default 900 token budget."""
-    store = MemoryStore(tmp_path, graph_enabled=True)
+    store = MemoryStore(tmp_path, memory_config=MemoryConfig(graph_enabled=True))
 
     # Simulate a large profile that previously consumed the whole budget.
     large_profile = {

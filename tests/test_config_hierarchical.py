@@ -110,7 +110,6 @@ class TestConfigRoundTrip:
             "max_session_cost_usd": 1.5,
             "max_session_wall_time_seconds": 600,
             "max_delegation_depth": 3,
-            "graph_enabled": True,
             "memory": {
                 "window": 50,
                 "retrieval_k": 10,
@@ -118,6 +117,7 @@ class TestConfigRoundTrip:
                 "rollout_mode": "shadow",
                 "micro_extraction_enabled": True,
                 "micro_extraction_model": "gpt-4o-mini",
+                "graph_enabled": True,
                 "reranker": {"mode": "shadow", "alpha": 0.8, "model": "custom/m"},
                 "vector": {"user_id": "custom", "add_debug": True},
             },
@@ -186,7 +186,7 @@ class TestConfigCompleteness:
             "max_session_cost_usd": 1.5,
             "max_session_wall_time_seconds": 600,
             "max_delegation_depth": 3,
-            "graph_enabled": True,
+            "memory": {"graph_enabled": True},
         }
         ac = AgentConfig.from_raw(data)
         assert ac.workspace == "/test/ws"
@@ -212,7 +212,7 @@ class TestConfigCompleteness:
         assert ac.max_session_cost_usd == 1.5
         assert ac.max_session_wall_time_seconds == 600
         assert ac.max_delegation_depth == 3
-        assert ac.graph_enabled is True
+        assert ac.memory.graph_enabled is True
 
     def test_all_memory_fields_settable(self):
         """Every MemoryConfig field is reachable via nested JSON."""

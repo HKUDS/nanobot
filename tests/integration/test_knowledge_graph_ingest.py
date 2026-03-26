@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from nanobot.config.memory import MemoryConfig
 from nanobot.memory.store import MemoryStore
 
 pytestmark = pytest.mark.integration
@@ -45,7 +46,7 @@ def _make_store(tmp_path: Path) -> MemoryStore:
     return MemoryStore(
         tmp_path,
         embedding_provider="hash",
-        graph_enabled=True,
+        memory_config=MemoryConfig(graph_enabled=True),
     )
 
 
@@ -88,7 +89,7 @@ class TestKnowledgeGraphIngestion:
         store = MemoryStore(
             tmp_path,
             embedding_provider="hash",
-            graph_enabled=False,
+            memory_config=MemoryConfig(graph_enabled=False),
         )
         # Graph is constructed but disabled — methods return empty results
         assert store.graph is not None

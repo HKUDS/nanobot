@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from nanobot.config.memory import MemoryConfig
 from nanobot.memory.store import MemoryStore
 
 pytestmark = pytest.mark.integration
@@ -24,7 +25,7 @@ def _make_store(tmp_path: Path) -> MemoryStore:
     return MemoryStore(
         tmp_path,
         embedding_provider="hash",
-        graph_enabled=False,
+        memory_config=MemoryConfig(graph_enabled=False),
     )
 
 

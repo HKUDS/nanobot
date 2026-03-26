@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from nanobot.config.memory import MemoryConfig
 from nanobot.memory.rollout import RolloutConfig
 from nanobot.memory.store import MemoryStore
 
@@ -28,7 +29,7 @@ def _make_store(tmp_path: Path) -> MemoryStore:
     return MemoryStore(
         tmp_path,
         embedding_provider="hash",
-        graph_enabled=False,
+        memory_config=MemoryConfig(graph_enabled=False),
     )
 
 
