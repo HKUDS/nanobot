@@ -26,6 +26,7 @@ from nanobot.cli.gateway import ui as _ui_impl
 from nanobot.cli.memory import memory_app
 from nanobot.cli.provider import provider_app
 from nanobot.cli.routing import replay_deadletters, routing_app
+from nanobot.cli.workspace import workspace_app
 
 app = typer.Typer(
     name="nanobot",
@@ -82,6 +83,7 @@ app.add_typer(cron_app, name="cron")
 app.add_typer(routing_app, name="routing")
 app.add_typer(memory_app, name="memory")
 app.add_typer(provider_app, name="provider")
+app.add_typer(workspace_app, name="workspace")
 
 app.command("replay-deadletters")(replay_deadletters)
 
