@@ -53,12 +53,22 @@ def test_config_loader_roundtrip(tmp_path: Path) -> None:
     assert saved["tools"]["restrictToWorkspace"] is False
 
 
-def test_load_config_invalid_json_falls_back(tmp_path: Path) -> None:
+def test_load_config_invalid_json_exits(tmp_path: Path) -> None:
     bad = tmp_path / "bad.json"
     bad.write_text("{invalid", encoding="utf-8")
 
-    cfg = load_config(bad)
-    assert cfg.agents.defaults.model
+    with pytest.raises(SystemExit) as exc_info:
+        load_config(bad)
+    assert exc_info.value.code == 1
+
+
+def test_load_config_invalid_schema_exits(tmp_path: Path) -> None:
+    bad = tmp_path / "bad_schema.json"
+    bad.write_text('{"agents": {"defaults": {"bogusField": true}}}', encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        load_config(bad)
+    assert exc_info.value.code == 1
 
 
 def test_get_config_path_points_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
