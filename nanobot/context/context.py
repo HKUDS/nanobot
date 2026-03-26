@@ -4,7 +4,7 @@ This module is responsible for constructing the complete message array
 sent to the LLM on each iteration.  Key responsibilities:
 
 - **System prompt assembly** — combines base personality, skill
-  instructions, memory context (``MEMORY.md`` excerpt + retrieved events),
+  instructions, memory context (snapshot excerpt + retrieved events),
   tool schemas, and session metadata into a single system message.
 - **Token budgeting** — estimates token usage and ensures the assembled
   context fits within the model's context window.

@@ -1,3 +1,4 @@
+# size-exception: single assembler class with rendering helpers
 """Context assembler — renders memory context for LLM prompt injection.
 
 Extracted from ``MemoryStore`` (LAN-210) to isolate the ~350-line prompt
@@ -67,7 +68,6 @@ class ContextAssembler:
         planner: RetrievalPlanner,
         *,
         read_events_fn: Callable[..., list[dict[str, Any]]] | None = None,
-        read_long_term_fn: Callable[[], str] | None = None,
         build_graph_context_lines_fn: (
             Callable[[str, list[dict[str, Any]], int], list[str]] | None
         ) = None,
@@ -75,14 +75,13 @@ class ContextAssembler:
         profile_section_lines_fn: Callable[[dict[str, Any]], list[str]] | None = None,
         read_profile_fn: Callable[[], dict[str, Any]] | None = None,
         budget_allocator: TokenBudgetAllocator | None = None,
-        db: UnifiedMemoryDB | None = None,
+        db: UnifiedMemoryDB,
         embedder_available: bool = True,
     ) -> None:
         self._profile_mgr = profile_mgr
         self._retrieve_fn = retrieve_fn
         self._planner = planner
         self._read_events_fn = read_events_fn
-        self._read_long_term_fn = read_long_term_fn
         self._build_graph_context_lines_fn = build_graph_context_lines_fn
         self._cap_long_term_text_fn = cap_long_term_text_fn
         self._profile_section_lines_fn = profile_section_lines_fn
@@ -311,11 +310,7 @@ class ContextAssembler:
     # ------------------------------------------------------------------
 
     def _read_long_term(self) -> str:
-        if self._db is not None:
-            return self._db.read_snapshot("current")
-        if self._read_long_term_fn is not None:
-            return self._read_long_term_fn()
-        return ""
+        return self._db.read_snapshot("current")
 
     def _read_events(self, limit: int | None = None) -> list[dict[str, Any]]:
         if self._read_events_fn is not None:
@@ -402,7 +397,7 @@ class ContextAssembler:
         )
 
     # ------------------------------------------------------------------
-    # MEMORY.md capping (Step 5)
+    # Memory snapshot capping (Step 5)
     # ------------------------------------------------------------------
 
     @staticmethod

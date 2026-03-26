@@ -255,7 +255,7 @@ class AgentConfig(Base):
     memory_window: int = 100
     memory_retrieval_k: int = 6
     memory_token_budget: int = 900
-    memory_md_token_cap: int = 1500  # max tokens for MEMORY.md injection; 0 = unlimited
+    memory_md_token_cap: int = 1500  # max tokens for memory snapshot injection; 0 = unlimited
     memory_uncertainty_threshold: float = 0.6
     memory_enable_contradiction_check: bool = True
     memory_conflict_auto_resolve_gap: float = 0.25

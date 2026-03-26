@@ -19,8 +19,7 @@ def _make_pipeline(tmp_path: Path | None = None, **overrides: object) -> Consoli
         "profile_mgr": MagicMock(),
         "conflict_mgr": MagicMock(),
         "snapshot": MagicMock(),
-        "memory_file": _base / "MEMORY.md",
-        "history_file": _base / "HISTORY.md",
+        "db": MagicMock(),
         "rollout": {"consolidation_single_tool": True},
     }
     defaults.update(overrides)
@@ -237,8 +236,8 @@ class TestConsolidate:
             result = await pipeline.consolidate(session, provider, "gpt-4")
 
         assert result is True
-        # History entry should have been written to history_file
-        assert (tmp_path / "HISTORY.md").exists()
+        # History entry should have been written to the database
+        pipeline._db.append_history.assert_called_once()
         pipeline._snapshot.rebuild_memory_snapshot.assert_called_once_with(write=True)
 
     @pytest.mark.asyncio

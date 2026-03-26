@@ -1,8 +1,7 @@
 """Unified SQLite storage for the memory subsystem.
 
-Replaces events.jsonl + profile.json + mem0/Qdrant + HISTORY.md + MEMORY.md
-with a single SQLite database (memory.db). Uses FTS5 for keyword search
-and sqlite-vec for vector search.
+Single SQLite database (memory.db) for all memory storage. Uses FTS5 for
+keyword search and sqlite-vec for vector search.
 
 All public methods are synchronous. Callers that need async compatibility
 wrap calls with asyncio.to_thread().

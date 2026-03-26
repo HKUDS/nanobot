@@ -199,7 +199,7 @@ class CorrectionOrchestrator:
             if needs_user > 0:
                 question = self._conflict_mgr.ask_user_for_conflict()
 
-        # Keep LLM-managed MEMORY.md content stable; snapshot can be generated on-demand.
+        # Keep LLM-managed memory snapshot stable; can be regenerated on-demand.
         self._snapshot.rebuild_memory_snapshot(write=False)
         return {
             "applied": applied,
