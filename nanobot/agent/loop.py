@@ -178,10 +178,10 @@ class AgentLoop:
         for name in ("message", "spawn", "cron"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
-                    if name == "message":
-                        tool.set_context(channel, chat_id, metadata)
-                    else:
+                    if name == "spawn":
                         tool.set_context(channel, chat_id)
+                    else:
+                        tool.set_context(channel, chat_id, metadata)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -576,13 +576,17 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
+        metadata: dict | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+        msg = InboundMessage(
+            channel=channel, sender_id="user", chat_id=chat_id, content=content,
+            metadata=metadata or {},
+        )
         return await self._process_message(
             msg, session_key=session_key, on_progress=on_progress,
             on_stream=on_stream, on_stream_end=on_stream_end,

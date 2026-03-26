@@ -565,6 +565,10 @@ def gateway(
             f"Scheduled instruction: {job.payload.message}"
         )
 
+        cron_meta = {}
+        if job.payload.message_thread_id is not None:
+            cron_meta["message_thread_id"] = job.payload.message_thread_id
+
         cron_tool = agent.tools.get("cron")
         cron_token = None
         if isinstance(cron_tool, CronTool):
@@ -575,6 +579,7 @@ def gateway(
                 session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
+                metadata=cron_meta,
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
@@ -596,6 +601,7 @@ def gateway(
                     channel=job.payload.channel or "cli",
                     chat_id=job.payload.to,
                     content=response,
+                    metadata=cron_meta,
                 ))
         return response
     cron.on_job = on_cron_job
