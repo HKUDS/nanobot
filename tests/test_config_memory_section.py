@@ -41,8 +41,8 @@ class TestMemoryConfigDefaults:
         assert mc.reranker.mode == "shadow"
         assert mc.reranker.alpha == 0.8
 
-    def test_camel_case_alias(self):
-        mc = MemoryConfig.model_validate({"retrievalK": 10, "tokenBudget": 500})
+    def test_snake_case_keys(self):
+        mc = MemoryConfig.model_validate({"retrieval_k": 10, "token_budget": 500})
         assert mc.retrieval_k == 10
         assert mc.token_budget == 500
 

@@ -41,7 +41,7 @@ class _TestChannel(BaseChannel):
 
 def test_config_loader_roundtrip(tmp_path: Path) -> None:
     path = tmp_path / "config.json"
-    data = {"tools": {"restrictToWorkspace": True}}
+    data = {"tools": {"restrict_to_workspace": True}}
     path.write_text(json.dumps(data), encoding="utf-8")
 
     cfg = load_config(path)
@@ -50,7 +50,7 @@ def test_config_loader_roundtrip(tmp_path: Path) -> None:
     cfg.tools.restrict_to_workspace = False
     save_config(cfg, path)
     saved = json.loads(path.read_text(encoding="utf-8"))
-    assert saved["tools"]["restrictToWorkspace"] is False
+    assert saved["tools"]["restrict_to_workspace"] is False
 
 
 def test_load_config_invalid_json_exits(tmp_path: Path) -> None:
