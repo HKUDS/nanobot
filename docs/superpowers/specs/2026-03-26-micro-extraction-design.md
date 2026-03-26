@@ -71,14 +71,18 @@ class MicroExtractor:
 **`submit()` method:**
 1. Returns immediately if `enabled is False`
 2. Submits `_extract_and_ingest()` as a background `asyncio.Task`
-3. Returns immediately (non-blocking)
+3. Stores the task reference in `self._pending_tasks: set[asyncio.Task]` to prevent GC
+4. Task auto-removes itself from the set on completion via `task.add_done_callback`
+5. Returns immediately (non-blocking)
 
 **`_extract_and_ingest()` internal method:**
 1. Calls `provider.chat()` with micro-extraction prompt + tool schema
 2. Parses tool call arguments (events array)
 3. If empty array or no tool call → return (nothing worth extracting)
-4. Calls `ingester.append_events(events)`
+4. Calls `await asyncio.to_thread(ingester.append_events, events)` — `append_events` is synchronous (reads/writes SQLite), so it must run in a thread to avoid blocking the event loop
 5. On any exception → log warning, return (silent drop — consolidation is the safety net)
+
+**Concurrency note:** If rapid successive turns both trigger extraction, both background tasks run concurrently. `append_events` deduplication reads existing events at the start of each call, so there is a brief window where two tasks may both insert similar events. This is acceptable — full consolidation's supersession logic will clean up any duplicates. No locking is added to avoid introducing contention on the main turn path.
 
 ### Extraction Prompt
 
@@ -157,10 +161,10 @@ _MICRO_EXTRACT_TOOL = [{
 
 ### Integration Point
 
-**Where:** `MessageProcessor._process_message()`, after `_save_turn()` and session save.
+**Where:** `MessageProcessor._process_message()`, after `_save_turn()` and session save. There are two `_save_turn` call sites in the method — the primary path (line ~404, after the orchestrator completes) and the system-message path (line ~209, for non-orchestrated messages). Micro-extraction runs only on the **primary path** where the agent has produced a substantive response. The system-message path handles internal routing and does not produce user-facing exchanges worth extracting.
 
 ```python
-if self._micro_extractor is not None:
+if self._micro_extractor is not None and final_content:
     await self._micro_extractor.submit(
         user_message=msg.content,
         assistant_message=final_content,
@@ -247,7 +251,7 @@ Silent drop on any failure. The extraction runs in a background task — excepti
 - MicroExtractor in `memory/write/` — memory's bounded context, write subdirectory
 - Receives `LLMProvider` and `EventIngester` via dependency injection — no cross-package instantiation
 - Construction in `agent_factory.py` (composition root)
-- `memory/write/` grows from 3 to 4 files — well under 15-file limit
+- `memory/write/` — adding one file, well under 15-file limit
 
 ---
 
