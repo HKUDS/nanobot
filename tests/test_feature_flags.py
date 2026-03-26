@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from nanobot.config.agent import AgentConfig
+from nanobot.config.memory import MemoryConfig
 from nanobot.config.schema import Config, FeaturesConfig, LogConfig
 
 # ---------------------------------------------------------------------------
@@ -117,8 +118,12 @@ class TestDirectConstruction:
         assert ac.delegation_enabled is True
 
     def test_graph_enabled(self):
-        ac = AgentConfig(workspace="/tmp/test", model="test", graph_enabled=True)
-        assert ac.graph_enabled is True
+        ac = AgentConfig(
+            workspace="/tmp/test",
+            model="test",
+            memory=MemoryConfig(graph_enabled=True),
+        )
+        assert ac.memory.graph_enabled is True
 
 
 # ---------------------------------------------------------------------------

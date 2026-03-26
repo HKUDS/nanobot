@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.config.agent import AgentConfig
-from nanobot.config.memory import RerankerConfig, VectorConfig
+from nanobot.config.memory import MemoryConfig, RerankerConfig, VectorConfig
 from nanobot.config.schema import Config
 
 # ---------------------------------------------------------------------------
@@ -119,10 +119,10 @@ class TestSubModelWiring:
         ac = AgentConfig(
             model="test-model",
             workspace="/tmp/ws",
-            graph_enabled=True,
+            memory=MemoryConfig(graph_enabled=True),
         )
         assert ac.model == "test-model"
-        assert ac.graph_enabled is True
+        assert ac.memory.graph_enabled is True
         assert ac.memory.reranker.mode == "enabled"
         assert ac.memory.vector.user_id == "nanobot"
 

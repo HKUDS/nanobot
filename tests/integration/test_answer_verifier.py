@@ -52,7 +52,6 @@ class TestVerificationAlways:
             planning_enabled=False,
             verification_mode="always",
             memory_enabled=False,
-            graph_enabled=False,
         )
         bus = MessageBus()
         agent = build_agent(bus=bus, provider=provider, config=config)

@@ -83,6 +83,9 @@ class MemoryConfig(Base):
     # Raw turn ingestion
     raw_turn_ingestion: bool = True
 
+    # Knowledge graph
+    graph_enabled: bool = False
+
     # Subsections
     reranker: RerankerConfig = Field(default_factory=RerankerConfig)
     vector: VectorConfig = Field(default_factory=VectorConfig)

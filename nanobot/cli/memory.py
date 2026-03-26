@@ -28,7 +28,7 @@ def memory_inspect(
     store = MemoryStore(
         config.workspace_path,
         memory_config=ac.memory,
-        graph_enabled=ac.graph_enabled,
+        graph_enabled=ac.memory.graph_enabled,
     )
 
     observability = store.eval_runner.get_observability_report()
@@ -97,7 +97,7 @@ def memory_metrics() -> None:
     store = MemoryStore(
         config.workspace_path,
         memory_config=ac.memory,
-        graph_enabled=ac.graph_enabled,
+        graph_enabled=ac.memory.graph_enabled,
     )
     observability = store.eval_runner.get_observability_report()
     backend = observability.get("backend", {}) if isinstance(observability, dict) else {}
@@ -136,7 +136,7 @@ def memory_rebuild(
     store = MemoryStore(
         config.workspace_path,
         memory_config=ac.memory,
-        graph_enabled=ac.graph_enabled,
+        graph_enabled=ac.memory.graph_enabled,
     )
     snapshot = store.snapshot.rebuild_memory_snapshot(max_events=max_events, write=True)
     line_count = len(snapshot.splitlines())
@@ -163,7 +163,7 @@ def memory_reindex(
     store = MemoryStore(
         config.workspace_path,
         memory_config=ac.memory,
-        graph_enabled=ac.graph_enabled,
+        graph_enabled=ac.memory.graph_enabled,
     )
     result = store.maintenance.reindex_from_structured_memory(
         max_events=max_events if max_events > 0 else None,
@@ -212,7 +212,7 @@ def memory_compact(
     store = MemoryStore(
         config.workspace_path,
         memory_config=ac.memory,
-        graph_enabled=ac.graph_enabled,
+        graph_enabled=ac.memory.graph_enabled,
     )
     result = store.maintenance.reindex_from_structured_memory(
         max_events=max_events if max_events > 0 else None,
@@ -260,7 +260,7 @@ def memory_verify(
     store = MemoryStore(
         config.workspace_path,
         memory_config=ac.memory,
-        graph_enabled=ac.graph_enabled,
+        graph_enabled=ac.memory.graph_enabled,
     )
     report = store.snapshot.verify_memory(stale_days=stale_days, update_profile=True)
 
@@ -313,7 +313,7 @@ def memory_eval(
     store = MemoryStore(
         config.workspace_path,
         memory_config=ac.memory,
-        graph_enabled=ac.graph_enabled,
+        graph_enabled=ac.memory.graph_enabled,
     )
 
     if seeded_profile or seeded_events:
@@ -467,7 +467,7 @@ def memory_conflicts(
     store = MemoryStore(
         config.workspace_path,
         memory_config=ac.memory,
-        graph_enabled=ac.graph_enabled,
+        graph_enabled=ac.memory.graph_enabled,
     )
     rows = store.conflict_mgr.list_conflicts(include_closed=all)
     if not rows:
@@ -511,7 +511,7 @@ def memory_resolve(
     store = MemoryStore(
         config.workspace_path,
         memory_config=ac.memory,
-        graph_enabled=ac.graph_enabled,
+        graph_enabled=ac.memory.graph_enabled,
     )
     details = store.conflict_mgr.resolve_conflict_details(index=index, action=action)
     if not details.get("ok"):
@@ -549,7 +549,7 @@ def memory_pin(
     store = MemoryStore(
         config.workspace_path,
         memory_config=ac.memory,
-        graph_enabled=ac.graph_enabled,
+        graph_enabled=ac.memory.graph_enabled,
     )
     try:
         ok = store.profile_mgr.set_item_pin(field, text, pinned=True)
@@ -575,7 +575,7 @@ def memory_unpin(
     store = MemoryStore(
         config.workspace_path,
         memory_config=ac.memory,
-        graph_enabled=ac.graph_enabled,
+        graph_enabled=ac.memory.graph_enabled,
     )
     try:
         ok = store.profile_mgr.set_item_pin(field, text, pinned=False)
@@ -601,7 +601,7 @@ def memory_outdated(
     store = MemoryStore(
         config.workspace_path,
         memory_config=ac.memory,
-        graph_enabled=ac.graph_enabled,
+        graph_enabled=ac.memory.graph_enabled,
     )
     try:
         ok = store.profile_mgr.mark_item_outdated(field, text)

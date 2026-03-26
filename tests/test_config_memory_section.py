@@ -18,6 +18,7 @@ class TestMemoryConfigDefaults:
         assert mc.micro_extraction_enabled is False
         assert mc.micro_extraction_model is None
         assert mc.raw_turn_ingestion is True
+        assert mc.graph_enabled is False
 
     def test_nested_reranker(self):
         mc = MemoryConfig()
@@ -51,6 +52,18 @@ class TestMemoryConfigDefaults:
             section_weights={"chat": MemorySectionWeights(long_term=0.5, profile=0.3)}
         )
         assert mc.section_weights["chat"].long_term == 0.5
+
+
+class TestGraphEnabled:
+    def test_graph_enabled_default_false(self):
+        """graph_enabled defaults to False in MemoryConfig."""
+        mc = MemoryConfig()
+        assert mc.graph_enabled is False
+
+    def test_graph_enabled_from_json(self):
+        """graph_enabled can be set via JSON config."""
+        mc = MemoryConfig.model_validate({"graph_enabled": True})
+        assert mc.graph_enabled is True
 
 
 class TestRerankerConfig:
