@@ -19,6 +19,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from nanobot.config.memory import MemoryConfig
+
 from ._text import _to_str_list, _utc_now_iso
 from .consolidation_pipeline import ConsolidationPipeline
 from .embedder import HashEmbedder, LocalEmbedder, OpenAIEmbedder
@@ -48,7 +50,6 @@ from .write.extractor import MemoryExtractor
 from .write.ingester import EventIngester
 
 if TYPE_CHECKING:
-    from nanobot.config.memory import MemoryConfig
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session
 
@@ -86,6 +87,7 @@ class MemoryStore:
         vector_backend: str | None = None,
     ):
         self.workspace = workspace
+        self._memory_config: MemoryConfig = memory_config or MemoryConfig()
 
         # Construct embedder — try OpenAI first, fall back to HashEmbedder.
         # LocalEmbedder (ONNX, ~90MB) is only used when explicitly requested
@@ -220,7 +222,7 @@ class MemoryStore:
         self._scorer = RetrievalScorer(
             profile_mgr=self.profile_mgr,
             reranker=self._reranker,
-            rollout_fn=lambda: self._rollout_config.rollout,
+            memory_config_fn=lambda: self._memory_config,
         )
         self._graph_aug = GraphAugmenter(
             graph=self.graph,

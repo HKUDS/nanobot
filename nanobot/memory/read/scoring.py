@@ -14,6 +14,8 @@ from .._text import _contains_any, _norm_text
 from .retrieval_planner import RetrievalPlan, RetrievalPlanner
 
 if TYPE_CHECKING:
+    from nanobot.config.memory import MemoryConfig
+
     from ..persistence.profile_io import ProfileStore as ProfileManager
     from ..ranking.reranker import Reranker
 
@@ -71,11 +73,11 @@ class RetrievalScorer:
         *,
         profile_mgr: ProfileManager,
         reranker: Reranker,
-        rollout_fn: Callable[[], dict[str, Any]],
+        memory_config_fn: Callable[[], MemoryConfig],
     ) -> None:
         self._profile_mgr = profile_mgr
         self._reranker = reranker
-        self._rollout_fn = rollout_fn
+        self._memory_config_fn = memory_config_fn
 
     # ------------------------------------------------------------------
     # Pipeline stage: load profile scoring data
@@ -403,7 +405,7 @@ class RetrievalScorer:
         items: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         """Apply cross-encoder reranking (enabled/shadow/disabled)."""
-        reranker_mode = str(self._rollout_fn().get("reranker_mode", "disabled")).strip().lower()
+        reranker_mode = self._memory_config_fn().reranker.mode
         if reranker_mode not in ("enabled", "shadow") or not items:
             return items
 

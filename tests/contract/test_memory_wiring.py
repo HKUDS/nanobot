@@ -65,14 +65,15 @@ def test_profile_mgr_corrector_fn_resolves(tmp_path):
 
 
 def test_rollout_override_atomic_consistency(tmp_path):
-    """After overrides, the scorer sees the updated rollout values."""
+    """After updating memory_config, the scorer sees the updated values."""
     store = _make_store(tmp_path)
 
-    store._rollout_config.apply_overrides({"reranker_mode": "disabled"})
+    # Replace the memory config with one that has reranker disabled
+    store._memory_config = MemoryConfig(reranker={"mode": "disabled"})
 
-    # Scorer's rollout_fn should reflect the override
-    scorer_rollout = store._scorer._rollout_fn()
-    assert scorer_rollout.get("reranker_mode") == "disabled"
+    # Scorer's memory_config_fn should reflect the update (lambda reads live attribute)
+    scorer_config = store._scorer._memory_config_fn()
+    assert scorer_config.reranker.mode == "disabled"
 
 
 def test_maintenance_reindex_runs_without_error(tmp_path):

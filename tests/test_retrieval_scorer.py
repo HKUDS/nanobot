@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
+from nanobot.config.memory import MemoryConfig
 from nanobot.memory.read.scoring import (
     PROFILE_KEYS,
     RetrievalScorer,
@@ -13,7 +14,7 @@ from nanobot.memory.read.scoring import (
 
 def _make_scorer(
     *,
-    rollout: dict[str, Any] | None = None,
+    memory_config: MemoryConfig | None = None,
 ) -> RetrievalScorer:
     """Build a RetrievalScorer with mocked dependencies."""
     profile_mgr = MagicMock()
@@ -23,10 +24,11 @@ def _make_scorer(
     reranker = MagicMock()
     reranker.rerank = MagicMock(side_effect=lambda q, items: items)
 
+    mc = memory_config or MemoryConfig()
     return RetrievalScorer(
         profile_mgr=profile_mgr,
         reranker=reranker,
-        rollout_fn=lambda: rollout or {},
+        memory_config_fn=lambda: mc,
     )
 
 
@@ -206,20 +208,20 @@ class TestRerankItems:
     """rerank_items delegates to reranker based on rollout mode."""
 
     def test_enabled_calls_reranker(self) -> None:
-        scorer = _make_scorer(rollout={"reranker_mode": "enabled"})
+        scorer = _make_scorer(memory_config=MemoryConfig(reranker={"mode": "enabled"}))
         items = [{"id": "a", "score": 0.5, "summary": "A"}]
         scorer.rerank_items("query", items)
         scorer._reranker.rerank.assert_called_once()
 
     def test_disabled_passthrough(self) -> None:
-        scorer = _make_scorer(rollout={"reranker_mode": "disabled"})
+        scorer = _make_scorer(memory_config=MemoryConfig(reranker={"mode": "disabled"}))
         items = [{"id": "a", "score": 0.5, "summary": "A"}]
         result = scorer.rerank_items("query", items)
         scorer._reranker.rerank.assert_not_called()
         assert result is items
 
     def test_empty_items_passthrough(self) -> None:
-        scorer = _make_scorer(rollout={"reranker_mode": "enabled"})
+        scorer = _make_scorer(memory_config=MemoryConfig(reranker={"mode": "enabled"}))
         result = scorer.rerank_items("query", [])
         scorer._reranker.rerank.assert_not_called()
         assert result == []
