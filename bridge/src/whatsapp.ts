@@ -250,12 +250,40 @@ export class WhatsAppClient {
     return null;
   }
 
-  async sendMessage(to: string, text: string): Promise<void> {
+  /**
+   * Extract mention JIDs from text containing @<digits> patterns.
+   *
+   * WhatsApp requires an explicit `mentions` array in the message payload
+   * for @mentions to be tappable. This method parses @-prefixed digit
+   * sequences and constructs the appropriate JID:
+   * - 14+ digits → LID domain (@lid)
+   * - Fewer digits → phone domain (@s.whatsapp.net)
+   *
+   * WhatsApp LIDs are typically 14-digit identifiers, whereas phone-number
+   * JIDs are typically 10–13 digits (country code + number).
+   */
+  static extractMentionJids(text: string): string[] {
+    const jids: string[] = [];
+    const pattern = /@(\d+)/g;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(text)) !== null) {
+      const digits = match[1];
+      const domain = digits.length >= 14 ? 'lid' : 's.whatsapp.net';
+      jids.push(`${digits}@${domain}`);
+    }
+    return jids;
+  }
+
+  async sendMessage(to: string, text: string, mentions?: string[]): Promise<void> {
     if (!this.sock) {
       throw new Error('Not connected');
     }
 
-    await this.sock.sendMessage(to, { text });
+    const effectiveMentions = mentions ?? WhatsAppClient.extractMentionJids(text);
+    await this.sock.sendMessage(to, {
+      text,
+      ...(effectiveMentions.length ? { mentions: effectiveMentions } : {}),
+    });
   }
 
   async sendMedia(
