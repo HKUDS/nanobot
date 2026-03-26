@@ -1,0 +1,60 @@
+# Koyeb configuration for nanobot
+# Deploy with: koyeb app init --git --git-builder
+# Or update existing service: koyeb service update <service-name> --git
+
+services:
+  - name: nanobot-gateway
+    # Git configuration
+    git:
+      repository: HKUDS/nanobot
+      branch: koyeb
+      builder: dockerfile
+      dockerfile: Dockerfile
+    
+    # Instance configuration
+    instance_type: nano
+    regions:
+      - fra  # Frankfurt (change to your preferred region)
+      # - syd  # Sydney
+      # - iad  # Washington DC
+      # - sin  # Singapore
+    
+    # Port configuration
+    ports:
+      - port: 18790
+        protocol: http
+        routes:
+          - path: /
+    
+    # Environment variables
+    env:
+      - key: PORT
+        value: "18790"
+      # Add your API keys and configuration here or via Koyeb CLI
+      # - key: OPENAI_API_KEY
+      #   scope: run
+      #   type: secret
+      # - key: ANTHROPIC_API_KEY
+      #   scope: run
+      #   type: secret
+    
+    # Health checks
+    health_checks:
+      - port: 18790
+        path: /health
+        interval: 30s
+        timeout: 5s
+        grace_period: 60s
+    
+    # Scaling (optional - scale to zero when idle)
+    scale:
+      min: 0  # Scale to zero to save costs when not in use
+      max: 1
+    
+    # Resource limits
+    resources:
+      cpu: "1"
+      memory: "1g"
+    
+    # Auto-deploy on push to branch
+    auto_deploy: true

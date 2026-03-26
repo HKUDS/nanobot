@@ -35,8 +35,9 @@ WORKDIR /app
 # Create config directory
 RUN mkdir -p /root/.nanobot
 
-# Gateway default port
+# Gateway default port (can be overridden by PORT env var)
+ENV PORT=18790
 EXPOSE 18790
 
 ENTRYPOINT ["nanobot"]
-CMD ["status"]
+CMD ["gateway", "--port", "$PORT"]

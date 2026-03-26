@@ -1,0 +1,34 @@
+# This file is auto-generated from pyproject.toml
+# Run: uv pip compile pyproject.toml --output-file requirements.txt
+# For Koyeb deployment, install with: pip install -r requirements.txt
+
+anthropic==0.45.0
+chardet==5.2.0
+croniter==6.0.0
+ddgs==9.5.5
+dingtalk-stream==0.24.0
+httpx==0.28.0
+json-repair==0.57.0
+lark-oapi==1.5.0
+loguru==0.7.3
+mcp==1.26.0
+msgpack==1.1.0
+oauth-cli-kit==0.1.3
+openai==2.8.0
+prompt-toolkit==3.0.50
+pydantic==2.12.0
+pydantic-settings==2.12.0
+python-socketio==5.16.0
+python-socks==2.8.0
+python-telegram-bot==22.6
+qq-botpy==1.2.0
+questionary==2.0.0
+readability-lxml==0.8.4
+rich==14.0.0
+slack-sdk==3.39.0
+slackify-markdown==0.2.0
+socksio==1.0.0
+tiktoken==0.12.0
+typer==0.20.0
+websocket-client==1.9.0
+websockets==16.0
