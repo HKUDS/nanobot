@@ -23,7 +23,7 @@ from nanobot.agent.turn_types import TurnState
 from nanobot.agent.verifier import AnswerVerifier
 from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.config.schema import AgentConfig
+from nanobot.config.agent import AgentConfig
 from nanobot.observability.bus_progress import make_bus_progress
 from nanobot.observability.langfuse import update_current_span
 from nanobot.observability.tracing import TraceContext, bind_trace
@@ -197,7 +197,7 @@ class MessageProcessor:
                 self._turn_context.set_tool_context(
                     channel, chat_id, msg.metadata.get("message_id")
                 )
-                history = session.get_history(max_messages=self.config.memory_window)
+                history = session.get_history(max_messages=self.config.memory.window)
                 messages = await self.context.build_messages(
                     history=history,
                     current_message=msg.content,
@@ -271,7 +271,7 @@ class MessageProcessor:
 
             # Trigger background consolidation if needed
             unconsolidated = len(session.messages) - session.last_consolidated
-            if self.config.memory_enabled and unconsolidated >= self.config.memory_window:
+            if self.config.memory_enabled and unconsolidated >= self.config.memory.window:
                 self._consolidator.submit(session.key, session, self.provider, effective_model)
 
             self._turn_context.set_tool_context(
@@ -281,7 +281,7 @@ class MessageProcessor:
             if message_tool := self.tools.get("message"):
                 message_tool.on_turn_start()
 
-            history = session.get_history(max_messages=self.config.memory_window)
+            history = session.get_history(max_messages=self.config.memory.window)
             verify_before_answer = self.verifier.should_force_verification(msg.content)
             initial_messages = await self.context.build_messages(
                 history=history,
@@ -536,7 +536,7 @@ class MessageProcessor:
         _channel = msg.channel
         _chat_id = msg.chat_id
         _content = msg.content
-        _enable_cc = self.config.memory_enable_contradiction_check
+        _enable_cc = self.config.memory.enable_contradiction_check
 
         def _inner() -> tuple[dict[str, Any], dict[str, Any] | None]:
             cr = memory_store.conflict_mgr.handle_user_conflict_reply(_content)

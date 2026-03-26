@@ -15,7 +15,7 @@ from rich.markdown import Markdown
 from rich.text import Text
 
 from nanobot import __logo__, __version__
-from nanobot.config.schema import AgentConfig
+from nanobot.config.agent import AgentConfig
 
 if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
@@ -160,7 +160,12 @@ def _make_agent_config(config: Config) -> AgentConfig:
     if not feat.streaming_enabled:
         overrides["streaming_enabled"] = False
 
-    return AgentConfig.from_defaults(config.agents.defaults, **overrides)
+    # config.agents.defaults is already an AgentConfig
+    ac = config.agents.defaults
+
+    if overrides:
+        ac = ac.model_copy(update=overrides)
+    return ac
 
 
 def _make_agent_loop(

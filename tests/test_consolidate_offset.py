@@ -489,13 +489,16 @@ class TestConsolidationDeduplicationGuard:
         from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
-        from nanobot.config.schema import AgentConfig
+        from nanobot.config.agent import AgentConfig
+        from nanobot.config.memory import MemoryConfig
         from nanobot.providers.base import LLMResponse
 
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        cfg = AgentConfig(workspace=str(tmp_path), model="test-model", memory_window=10)
+        cfg = AgentConfig(
+            workspace=str(tmp_path), model="test-model", memory=MemoryConfig(window=10)
+        )
         loop = build_agent(bus=bus, provider=provider, config=cfg)
 
         loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
@@ -533,13 +536,16 @@ class TestConsolidationDeduplicationGuard:
         from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
-        from nanobot.config.schema import AgentConfig
+        from nanobot.config.agent import AgentConfig
+        from nanobot.config.memory import MemoryConfig
         from nanobot.providers.base import LLMResponse
 
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        cfg = AgentConfig(workspace=str(tmp_path), model="test-model", memory_window=10)
+        cfg = AgentConfig(
+            workspace=str(tmp_path), model="test-model", memory=MemoryConfig(window=10)
+        )
         loop = build_agent(bus=bus, provider=provider, config=cfg)
 
         loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
@@ -589,13 +595,16 @@ class TestConsolidationDeduplicationGuard:
         from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
-        from nanobot.config.schema import AgentConfig
+        from nanobot.config.agent import AgentConfig
+        from nanobot.config.memory import MemoryConfig
         from nanobot.providers.base import LLMResponse
 
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        cfg = AgentConfig(workspace=str(tmp_path), model="test-model", memory_window=10)
+        cfg = AgentConfig(
+            workspace=str(tmp_path), model="test-model", memory=MemoryConfig(window=10)
+        )
         loop = build_agent(bus=bus, provider=provider, config=cfg)
 
         loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
@@ -651,13 +660,16 @@ class TestConsolidationDeduplicationGuard:
         from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
-        from nanobot.config.schema import AgentConfig
+        from nanobot.config.agent import AgentConfig
+        from nanobot.config.memory import MemoryConfig
         from nanobot.providers.base import LLMResponse
 
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        cfg = AgentConfig(workspace=str(tmp_path), model="test-model", memory_window=10)
+        cfg = AgentConfig(
+            workspace=str(tmp_path), model="test-model", memory=MemoryConfig(window=10)
+        )
         loop = build_agent(bus=bus, provider=provider, config=cfg)
 
         loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
@@ -697,13 +709,16 @@ class TestConsolidationDeduplicationGuard:
         from nanobot.agent.agent_factory import build_agent
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
-        from nanobot.config.schema import AgentConfig
+        from nanobot.config.agent import AgentConfig
+        from nanobot.config.memory import MemoryConfig
         from nanobot.providers.base import LLMResponse
 
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        cfg = AgentConfig(workspace=str(tmp_path), model="test-model", memory_window=10)
+        cfg = AgentConfig(
+            workspace=str(tmp_path), model="test-model", memory=MemoryConfig(window=10)
+        )
         loop = build_agent(bus=bus, provider=provider, config=cfg)
 
         loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))

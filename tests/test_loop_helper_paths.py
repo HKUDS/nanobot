@@ -195,13 +195,14 @@ def _make_loop_via_init(
 ) -> AgentLoop:
     """Build an AgentLoop through its real __init__ with minimal config."""
     from nanobot.bus.queue import MessageBus
-    from nanobot.config.schema import AgentConfig
+    from nanobot.config.agent import AgentConfig
+    from nanobot.config.memory import MemoryConfig
 
     bus = MessageBus()
     config = AgentConfig(
         workspace=str(tmp_path),
         model="test-model",
-        memory_window=10,
+        memory=MemoryConfig(window=10),
         max_iterations=5,
         planning_enabled=False,
         verification_mode="off",

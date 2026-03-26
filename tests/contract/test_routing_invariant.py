@@ -241,7 +241,7 @@ async def test_process_direct_calls_router_when_available():
 
     from nanobot.agent.agent_components import _ProcessorServices
     from nanobot.agent.message_processor import MessageProcessor
-    from nanobot.config.schema import AgentConfig
+    from nanobot.config.agent import AgentConfig
     from nanobot.coordination.router import MessageRouter
     from nanobot.providers.base import LLMResponse
     from tests.helpers import ScriptedProvider
@@ -308,7 +308,9 @@ async def test_process_direct_calls_router_when_available():
     services.micro_extractor = None
 
     config = MagicMock(spec=AgentConfig)
-    config.memory_window = 10
+    config.memory = MagicMock()
+    config.memory.window = 10
+    config.memory.enable_contradiction_check = True
     config.memory_enabled = False
     config.streaming_enabled = False
     config.tool_result_max_chars = 2000
@@ -340,7 +342,7 @@ async def test_unknown_forced_role_returns_error_message():
 
     from nanobot.agent.agent_components import _ProcessorServices
     from nanobot.agent.message_processor import MessageProcessor
-    from nanobot.config.schema import AgentConfig
+    from nanobot.config.agent import AgentConfig
     from nanobot.coordination.router import MessageRouter, UnknownRoleError
     from nanobot.providers.base import LLMResponse
     from tests.helpers import ScriptedProvider
@@ -358,7 +360,8 @@ async def test_unknown_forced_role_returns_error_message():
     services.micro_extractor = None
 
     config = MagicMock(spec=AgentConfig)
-    config.memory_window = 10
+    config.memory = MagicMock()
+    config.memory.window = 10
     config.memory_enabled = False
 
     processor = MessageProcessor(

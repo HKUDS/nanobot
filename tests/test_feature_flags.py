@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from nanobot.config.schema import AgentConfig, AgentDefaults, Config, FeaturesConfig, LogConfig
+from nanobot.config.agent import AgentConfig
+from nanobot.config.schema import Config, FeaturesConfig, LogConfig
 
 # ---------------------------------------------------------------------------
 # FeaturesConfig defaults
@@ -84,45 +85,39 @@ class TestAgentConfigFlags:
 
 
 # ---------------------------------------------------------------------------
-# from_defaults propagation
+# Direct construction (replaces from_defaults tests)
 # ---------------------------------------------------------------------------
 
 
-class TestFromDefaults:
-    def test_from_defaults_basic(self):
-        defaults = AgentDefaults(model="gpt-4o", workspace="/tmp/ws")
-        ac = AgentConfig.from_defaults(defaults)
+class TestDirectConstruction:
+    def test_basic_construction(self):
+        ac = AgentConfig(model="gpt-4o", workspace="/tmp/ws")
         assert ac.model == "gpt-4o"
         assert ac.workspace == "/tmp/ws"
 
-    def test_from_defaults_reranker(self):
-        defaults = AgentDefaults()
-        ac = AgentConfig.from_defaults(defaults)
-        assert ac.reranker_mode == "enabled"
-        assert ac.reranker_alpha == 0.5
+    def test_reranker_defaults(self):
+        ac = AgentConfig(workspace="/tmp/test", model="test")
+        assert ac.memory.reranker.mode == "enabled"
+        assert ac.memory.reranker.alpha == 0.5
 
-    def test_from_defaults_vector_sync(self):
-        defaults = AgentDefaults()
-        ac = AgentConfig.from_defaults(defaults)
-        assert ac.vector_user_id == "nanobot"
-        assert ac.vector_verify_write is True
-        assert ac.vector_force_infer is False
+    def test_vector_defaults(self):
+        ac = AgentConfig(workspace="/tmp/test", model="test")
+        assert ac.memory.vector.user_id == "nanobot"
+        assert ac.memory.vector.verify_write is True
+        assert ac.memory.vector.force_infer is False
 
-    def test_from_defaults_override(self):
-        defaults = AgentDefaults(model="gpt-4o")
-        ac = AgentConfig.from_defaults(defaults, model="gpt-3.5")
+    def test_override_via_constructor(self):
+        ac = AgentConfig(model="gpt-3.5", workspace="/tmp/ws")
         assert ac.model == "gpt-3.5"
 
-    def test_from_defaults_feature_flags(self):
-        """Feature flags in AgentConfig are populated from AgentDefaults."""
-        defaults = AgentDefaults()
-        ac = AgentConfig.from_defaults(defaults)
+    def test_feature_flags_default(self):
+        """Feature flags have correct defaults."""
+        ac = AgentConfig(workspace="/tmp/test", model="test")
         assert ac.planning_enabled is True
         assert ac.delegation_enabled is True
 
-    def test_from_defaults_graph_fields(self):
-        defaults = AgentDefaults(graph_enabled=True)
-        ac = AgentConfig.from_defaults(defaults)
+    def test_graph_enabled(self):
+        ac = AgentConfig(workspace="/tmp/test", model="test", graph_enabled=True)
         assert ac.graph_enabled is True
 
 

@@ -789,7 +789,7 @@ async def test_result_max_chars_configurable() -> None:
 
 def test_mission_config_defaults() -> None:
     """MissionConfig should have the expected default values."""
-    from nanobot.config.schema import MissionConfig
+    from nanobot.config.mission import MissionConfig
 
     cfg = MissionConfig()
     assert cfg.max_concurrent == 3
@@ -797,14 +797,16 @@ def test_mission_config_defaults() -> None:
     assert cfg.result_max_chars == 4000
 
 
-def test_config_from_defaults_propagates_mission() -> None:
-    """AgentConfig.from_defaults should propagate mission config fields."""
-    from nanobot.config.schema import AgentConfig, AgentDefaults, MissionConfig
+def test_config_propagates_mission() -> None:
+    """AgentConfig should propagate nested mission config fields."""
+    from nanobot.config.agent import AgentConfig
+    from nanobot.config.mission import MissionConfig
 
-    defaults = AgentDefaults(
-        mission=MissionConfig(max_concurrent=5, max_iterations=20, result_max_chars=8000)
+    config = AgentConfig(
+        workspace="/tmp/test",
+        model="test",
+        mission=MissionConfig(max_concurrent=5, max_iterations=20, result_max_chars=8000),
     )
-    config = AgentConfig.from_defaults(defaults)
-    assert config.mission_max_concurrent == 5
-    assert config.mission_max_iterations == 20
-    assert config.mission_result_max_chars == 8000
+    assert config.mission.max_concurrent == 5
+    assert config.mission.max_iterations == 20
+    assert config.mission.result_max_chars == 8000

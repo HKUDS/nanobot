@@ -44,7 +44,7 @@ from nanobot.context.prompt_loader import PromptLoader
 from nanobot.tools.executor import ToolExecutor
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import AgentConfig
+    from nanobot.config.agent import AgentConfig
     from nanobot.coordination.delegation import DelegationDispatcher
     from nanobot.coordination.delegation_advisor import DelegationAdvisor
     from nanobot.providers.base import LLMProvider, LLMResponse

@@ -64,6 +64,36 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
     os.chmod(path, 0o600)
 
 
+# Mapping from flat camelCase keys under agents.defaults to their nested memory keys.
+_MEMORY_FLAT_KEYS: dict[str, str] = {
+    "memoryWindow": "window",
+    "memoryRetrievalK": "retrievalK",
+    "memoryTokenBudget": "tokenBudget",
+    "memoryMdTokenCap": "mdTokenCap",
+    "memoryUncertaintyThreshold": "uncertaintyThreshold",
+    "memoryEnableContradictionCheck": "enableContradictionCheck",
+    "memoryConflictAutoResolveGap": "conflictAutoResolveGap",
+    "memoryRolloutMode": "rolloutMode",
+    "memoryTypeSeparationEnabled": "typeSeparationEnabled",
+    "memoryRouterEnabled": "routerEnabled",
+    "memoryReflectionEnabled": "reflectionEnabled",
+    "memoryShadowMode": "shadowMode",
+    "memoryShadowSampleRate": "shadowSampleRate",
+    "memoryVectorHealthEnabled": "vectorHealthEnabled",
+    "memoryAutoReindexOnEmptyVector": "autoReindexOnEmptyVector",
+    "memoryHistoryFallbackEnabled": "historyFallbackEnabled",
+    "memoryFallbackAllowedSources": "fallbackAllowedSources",
+    "memoryFallbackMaxSummaryChars": "fallbackMaxSummaryChars",
+    "memoryRolloutGateMinRecallAtK": "rolloutGateMinRecallAtK",
+    "memoryRolloutGateMinPrecisionAtK": "rolloutGateMinPrecisionAtK",
+    "memoryRolloutGateMaxAvgMemoryContextTokens": "rolloutGateMaxAvgContextTokens",
+    "memoryRolloutGateMaxHistoryFallbackRatio": "rolloutGateMaxHistoryFallbackRatio",
+    "memorySectionWeights": "sectionWeights",
+    "microExtractionEnabled": "microExtractionEnabled",
+    "microExtractionModel": "microExtractionModel",
+}
+
+
 def _migrate_config(data: dict) -> dict:
     """Migrate old config formats to current."""
     # Move tools.exec.restrictToWorkspace → tools.restrictToWorkspace
@@ -80,9 +110,39 @@ def _migrate_config(data: dict) -> dict:
         if "mem0RawTurnIngestion" in defaults and "vectorRawTurnIngestion" not in defaults:
             defaults["vectorRawTurnIngestion"] = defaults.pop("mem0RawTurnIngestion")
         sources = defaults.get("memoryFallbackAllowedSources")
-        if isinstance(sources, list):
+        if isinstance(sources, list) and "memory" not in defaults:
+            # Only rewrite source names before flat-to-nested migration runs;
+            # after migration memoryFallbackAllowedSources won't exist at this level.
             defaults["memoryFallbackAllowedSources"] = [
                 "vector_search" if s == "mem0_get_all" else s for s in sources
             ]
+
+    # Flat-to-nested migration: only run when the nested "memory" key is absent.
+    if defaults and "memory" not in defaults:
+        memory: dict = {}
+
+        # Migrate flat memory* keys into the nested memory dict.
+        for flat_key, nested_key in _MEMORY_FLAT_KEYS.items():
+            if flat_key in defaults:
+                memory[nested_key] = defaults.pop(flat_key)
+
+        # Move reranker from defaults into memory.reranker.
+        if "reranker" in defaults:
+            memory["reranker"] = defaults.pop("reranker")
+
+        # Move vectorSync (already renamed from mem0) into memory.vector.
+        if "vectorSync" in defaults:
+            memory["vector"] = defaults.pop("vectorSync")
+
+        # Move vectorRawTurnIngestion into memory.rawTurnIngestion.
+        if "vectorRawTurnIngestion" in defaults:
+            memory["rawTurnIngestion"] = defaults.pop("vectorRawTurnIngestion")
+
+        if memory:
+            defaults["memory"] = memory
+
+    # Rename maxToolIterations → maxIterations at the defaults level.
+    if defaults and "maxToolIterations" in defaults and "maxIterations" not in defaults:
+        defaults["maxIterations"] = defaults.pop("maxToolIterations")
 
     return data

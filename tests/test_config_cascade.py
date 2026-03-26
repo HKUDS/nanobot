@@ -7,13 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.config.schema import (
-    AgentConfig,
-    AgentDefaults,
-    Config,
-    RerankerConfig,
-    VectorSyncConfig,
-)
+from nanobot.config.agent import AgentConfig
+from nanobot.config.memory import RerankerConfig, VectorConfig
+from nanobot.config.schema import Config
 
 # ---------------------------------------------------------------------------
 # Schema defaults
@@ -40,19 +36,19 @@ class TestSchemaDefaults:
         assert rc.alpha == 0.5
         assert rc.model == "onnx:ms-marco-MiniLM-L-6-v2"
 
-    def test_vector_sync_defaults(self):
-        mc = VectorSyncConfig()
-        assert mc.user_id == "nanobot"
-        assert mc.add_debug is False
-        assert mc.verify_write is True
-        assert mc.force_infer is False
+    def test_vector_config_defaults(self):
+        vc = VectorConfig()
+        assert vc.user_id == "nanobot"
+        assert vc.add_debug is False
+        assert vc.verify_write is True
+        assert vc.force_infer is False
 
-    def test_agent_defaults_nested(self):
-        ad = AgentDefaults()
-        assert isinstance(ad.reranker, RerankerConfig)
-        assert isinstance(ad.vector_sync, VectorSyncConfig)
-        assert ad.reranker.mode == "enabled"
-        assert ad.vector_sync.user_id == "nanobot"
+    def test_agent_config_nested_sections(self):
+        ac = AgentConfig(workspace="/tmp/test", model="test")
+        assert isinstance(ac.memory.reranker, RerankerConfig)
+        assert isinstance(ac.memory.vector, VectorConfig)
+        assert ac.memory.reranker.mode == "enabled"
+        assert ac.memory.vector.user_id == "nanobot"
 
 
 # ---------------------------------------------------------------------------
@@ -119,24 +115,21 @@ class TestJsonConfig:
 
 
 class TestSubModelWiring:
-    def test_agent_config_from_defaults_all_fields(self):
-        defaults = AgentDefaults(
+    def test_agent_config_all_fields(self):
+        ac = AgentConfig(
             model="test-model",
             workspace="/tmp/ws",
             graph_enabled=True,
         )
-        ac = AgentConfig.from_defaults(defaults)
         assert ac.model == "test-model"
         assert ac.graph_enabled is True
-        assert ac.reranker_mode == "enabled"
-        assert ac.vector_user_id == "nanobot"
+        assert ac.memory.reranker.mode == "enabled"
+        assert ac.memory.vector.user_id == "nanobot"
 
-    def test_overrides_applied_after_defaults(self):
-        defaults = AgentDefaults(model="base-model")
-        ac = AgentConfig.from_defaults(
-            defaults,
+    def test_from_raw_overrides(self):
+        ac = AgentConfig.from_raw(
+            {"model": "base-model", "workspace": "/tmp/ws"},
             model="override-model",
-            reranker_mode="enabled",
         )
         assert ac.model == "override-model"
-        assert ac.reranker_mode == "enabled"
+        assert ac.memory.reranker.mode == "enabled"

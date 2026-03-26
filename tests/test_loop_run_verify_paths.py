@@ -8,7 +8,8 @@ from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentConfig
+from nanobot.config.agent import AgentConfig
+from nanobot.config.memory import MemoryConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
 
 
@@ -41,7 +42,7 @@ def _make_loop(tmp_path: Path, provider: LLMProvider, verification_mode: str) ->
     cfg = AgentConfig(
         workspace=str(tmp_path),
         model="test-model",
-        memory_window=10,
+        memory=MemoryConfig(window=10),
         max_iterations=4,
         planning_enabled=False,
         verification_mode=verification_mode,
@@ -89,7 +90,7 @@ async def test_run_timeout_and_none_response_paths(tmp_path: Path) -> None:
     cfg = AgentConfig(
         workspace=str(tmp_path),
         model="test-model",
-        memory_window=10,
+        memory=MemoryConfig(window=10),
         max_iterations=2,
         planning_enabled=False,
         verification_mode="off",
@@ -121,7 +122,7 @@ async def test_run_exception_path_publishes_user_friendly_error(tmp_path: Path) 
     cfg = AgentConfig(
         workspace=str(tmp_path),
         model="test-model",
-        memory_window=10,
+        memory=MemoryConfig(window=10),
         max_iterations=2,
         planning_enabled=False,
         verification_mode="off",
@@ -153,7 +154,7 @@ async def test_run_with_none_response_publishes_empty_outbound(tmp_path: Path) -
     cfg = AgentConfig(
         workspace=str(tmp_path),
         model="test-model",
-        memory_window=10,
+        memory=MemoryConfig(window=10),
         max_iterations=2,
         planning_enabled=False,
         verification_mode="off",

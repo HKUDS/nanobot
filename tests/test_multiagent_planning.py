@@ -26,7 +26,8 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.agent.turn_orchestrator import _needs_planning
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentConfig
+from nanobot.config.agent import AgentConfig
+from nanobot.config.memory import MemoryConfig
 from nanobot.coordination.coordinator import Coordinator, build_default_registry
 from nanobot.coordination.delegation import _delegation_ancestry
 from nanobot.coordination.task_types import has_parallel_structure
@@ -42,7 +43,7 @@ def _cfg(tmp_path: Path, **overrides: Any) -> AgentConfig:
     defaults: dict[str, Any] = dict(
         workspace=str(tmp_path),
         model="test-model",
-        memory_window=10,
+        memory=MemoryConfig(window=10),
         max_iterations=10,
         planning_enabled=True,
         verification_mode="off",

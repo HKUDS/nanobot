@@ -306,19 +306,19 @@ class TestTimeoutConfig:
     """Tests for message_timeout in AgentConfig."""
 
     def test_default_timeout(self):
-        from nanobot.config.schema import AgentConfig
+        from nanobot.config.agent import AgentConfig
 
         config = AgentConfig()
         assert config.message_timeout == 300
 
     def test_custom_timeout(self):
-        from nanobot.config.schema import AgentConfig
+        from nanobot.config.agent import AgentConfig
 
         config = AgentConfig(message_timeout=60)
         assert config.message_timeout == 60
 
     def test_zero_timeout_means_no_limit(self):
-        from nanobot.config.schema import AgentConfig
+        from nanobot.config.agent import AgentConfig
 
         config = AgentConfig(message_timeout=0)
         assert config.message_timeout == 0

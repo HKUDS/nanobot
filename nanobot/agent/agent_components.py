@@ -23,8 +23,8 @@ if TYPE_CHECKING:
     from nanobot.agent.turn_types import Orchestrator, Processor
     from nanobot.agent.verifier import AnswerVerifier
     from nanobot.bus.queue import MessageBus
+    from nanobot.config.agent import AgentConfig
     from nanobot.config.schema import (
-        AgentConfig,
         AgentRoleConfig,
         ChannelsConfig,
         ExecToolConfig,
@@ -69,7 +69,6 @@ class _InfraConfig:
     brave_api_key: str | None
     exec_config: ExecToolConfig
     cron_service: CronService | None
-    memory_rollout_overrides: dict
     mcp_connector: Callable[..., Any] | None = None
 
 

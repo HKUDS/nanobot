@@ -16,7 +16,9 @@ from nanobot.agent.turn_orchestrator import _dynamic_preserve_recent
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.email import EmailChannel
-from nanobot.config.schema import AgentConfig, EmailConfig
+from nanobot.config.agent import AgentConfig
+from nanobot.config.memory import MemoryConfig
+from nanobot.config.schema import EmailConfig
 from nanobot.context.compression import (
     compress_context,
     estimate_messages_tokens,
@@ -53,7 +55,7 @@ def _agent_config(tmp_path: Path, **overrides) -> AgentConfig:
     defaults = dict(
         workspace=str(tmp_path),
         model="smoke-model",
-        memory_window=10,
+        memory=MemoryConfig(window=10),
         max_iterations=3,
         planning_enabled=False,
         verification_mode="off",
