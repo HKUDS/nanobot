@@ -162,7 +162,7 @@ class ToolRegistry:
                     if obs is not None:
                         obs.update(
                             output=result.output[:500],
-                            metadata={"success": False},
+                            metadata={"success": False, "error_type": "validation"},
                         )
                     return result
 

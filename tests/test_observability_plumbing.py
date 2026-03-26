@@ -619,6 +619,7 @@ class TestToolSpanOutputCaptured:
         assert not result.success
         assert len(update_calls) == 1
         assert update_calls[0]["metadata"]["success"] is False
+        assert update_calls[0]["metadata"]["error_type"] == "validation"
 
     async def test_obs_none_does_not_crash(self):
         """When Langfuse is disabled, obs is None — no crash."""
