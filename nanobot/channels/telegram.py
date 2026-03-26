@@ -164,6 +164,7 @@ class _StreamBuf:
     message_id: int | None = None
     last_edit: float = 0.0
     stream_id: str | None = None
+    message_thread_id: int | None = None
 
 
 class TelegramConfig(Base):
@@ -529,7 +530,7 @@ class TelegramChannel(BaseChannel):
 
         buf = self._stream_bufs.get(chat_id)
         if buf is None or (stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id):
-            buf = _StreamBuf(stream_id=stream_id)
+            buf = _StreamBuf(stream_id=stream_id, message_thread_id=meta.get("message_thread_id"))
             self._stream_bufs[chat_id] = buf
         elif buf.stream_id is None:
             buf.stream_id = stream_id
@@ -538,12 +539,16 @@ class TelegramChannel(BaseChannel):
         if not buf.text.strip():
             return
 
+        thread_kwargs = {}
+        if buf.message_thread_id is not None:
+            thread_kwargs["message_thread_id"] = buf.message_thread_id
+
         now = time.monotonic()
         if buf.message_id is None:
             try:
                 sent = await self._call_with_retry(
                     self._app.bot.send_message,
-                    chat_id=int_chat_id, text=buf.text,
+                    chat_id=int_chat_id, text=buf.text, **thread_kwargs,
                 )
                 buf.message_id = sent.message_id
                 buf.last_edit = now
