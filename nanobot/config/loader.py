@@ -71,4 +71,18 @@ def _migrate_config(data: dict) -> dict:
     exec_cfg = tools.get("exec", {})
     if "restrictToWorkspace" in exec_cfg and "restrictToWorkspace" not in tools:
         tools["restrictToWorkspace"] = exec_cfg.pop("restrictToWorkspace")
+
+    # Rename mem0 config keys → vector sync equivalents
+    defaults = data.get("agents", {}).get("defaults", {})
+    if defaults:
+        if "mem0" in defaults and "vectorSync" not in defaults:
+            defaults["vectorSync"] = defaults.pop("mem0")
+        if "mem0RawTurnIngestion" in defaults and "vectorRawTurnIngestion" not in defaults:
+            defaults["vectorRawTurnIngestion"] = defaults.pop("mem0RawTurnIngestion")
+        sources = defaults.get("memoryFallbackAllowedSources")
+        if isinstance(sources, list):
+            defaults["memoryFallbackAllowedSources"] = [
+                "vector_search" if s == "mem0_get_all" else s for s in sources
+            ]
+
     return data

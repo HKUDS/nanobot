@@ -87,7 +87,7 @@ class EventIngester:
         return []
 
     def append_events(self, events: list[dict[str, Any]]) -> int:
-        """Main ingestion entry point: dedup, merge, persist, and sync to mem0."""
+        """Main ingestion entry point: dedup, merge, persist, and sync to vector store."""
         if not events:
             return 0
         t0_append = time.monotonic()

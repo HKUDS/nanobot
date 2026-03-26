@@ -138,7 +138,7 @@ class TestMaintenanceDBPath:
 
 
 class TestConflictsDBPath:
-    def test_resolve_conflict_skips_mem0_with_db(self, db: UnifiedMemoryDB, tmp_path: Path) -> None:
+    def test_resolve_conflict_uses_db(self, db: UnifiedMemoryDB, tmp_path: Path) -> None:
         from nanobot.memory.write.conflicts import ConflictManager
 
         profile_mgr = MagicMock()
@@ -156,7 +156,7 @@ class TestConflictsDBPath:
         profile_mgr._meta_entry = MagicMock(
             return_value={"id": "bf-123", "confidence": 0.7, "status": "active"}
         )
-        profile_mgr._find_mem0_id_for_text = MagicMock(return_value=None)
+        profile_mgr._find_belief_id_for_text = MagicMock(return_value=None)
         profile_mgr._update_belief_in_profile = MagicMock()
         profile_mgr.read_profile.return_value = {
             "preferences": ["old value", "new value"],
@@ -183,9 +183,9 @@ class TestConflictsDBPath:
 
         result = mgr.resolve_conflict_details(0, "keep_old")
         assert result["ok"] is True
-        assert result["mem0_operation"] == "none_db"
+        assert result["db_operation"] == "none_db"
 
-    def test_resolve_keep_new_skips_mem0_with_db(self, db: UnifiedMemoryDB, tmp_path: Path) -> None:
+    def test_resolve_keep_new_uses_db(self, db: UnifiedMemoryDB, tmp_path: Path) -> None:
         from nanobot.memory.write.conflicts import ConflictManager
 
         profile_mgr = MagicMock()
@@ -203,7 +203,7 @@ class TestConflictsDBPath:
         profile_mgr._meta_entry = MagicMock(
             return_value={"id": "bf-456", "confidence": 0.7, "status": "active"}
         )
-        profile_mgr._find_mem0_id_for_text = MagicMock(return_value=None)
+        profile_mgr._find_belief_id_for_text = MagicMock(return_value=None)
         profile_mgr._update_belief_in_profile = MagicMock()
         profile_mgr.read_profile.return_value = {
             "preferences": ["old value", "new value"],
@@ -230,7 +230,7 @@ class TestConflictsDBPath:
 
         result = mgr.resolve_conflict_details(0, "keep_new")
         assert result["ok"] is True
-        assert result["mem0_operation"] == "none_db"
+        assert result["db_operation"] == "none_db"
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +288,7 @@ class TestProfileIODBPath:
         assert stored is not None
         assert "tea" in stored["preferences"]
 
-    def test_find_mem0_id_uses_db_fts(self, db: UnifiedMemoryDB, tmp_path: Path) -> None:
+    def test_find_belief_id_uses_db_fts(self, db: UnifiedMemoryDB, tmp_path: Path) -> None:
         from nanobot.memory.persistence.profile_io import ProfileStore
 
         store = ProfileStore(db=db)
@@ -304,17 +304,17 @@ class TestProfileIODBPath:
             }
         )
 
-        result = store._find_mem0_id_for_text("coffee")
+        result = store._find_belief_id_for_text("coffee")
         assert result == "evt-fts-1"
 
-    def test_find_mem0_id_returns_none_for_no_match(
+    def test_find_belief_id_returns_none_for_no_match(
         self, db: UnifiedMemoryDB, tmp_path: Path
     ) -> None:
         from nanobot.memory.persistence.profile_io import ProfileStore
 
         store = ProfileStore(db=db)
 
-        result = store._find_mem0_id_for_text("nonexistent")
+        result = store._find_belief_id_for_text("nonexistent")
         assert result is None
 
 
@@ -335,10 +335,10 @@ class TestEvalDBPath:
             get_rollout_fn=lambda: {},
             get_backend_stats_fn=lambda: {
                 "vector_points_count": 0,
-                "mem0_get_all_count": 0,
+                "vector_search_count": 0,
                 "history_rows_count": 0,
-                "mem0_enabled": False,
-                "mem0_mode": "disabled",
+                "vector_enabled": False,
+                "vector_mode": "disabled",
             },
             db=db,
         )

@@ -132,10 +132,10 @@ class CorrectionOrchestrator:
                             "field": field,
                             "old": by_norm[old_norm],
                             "new": by_norm[new_norm],
-                            "old_memory_id": self._profile_store._find_mem0_id_for_text(
+                            "old_memory_id": self._profile_store._find_belief_id_for_text(
                                 by_norm[old_norm]
                             ),
-                            "new_memory_id": self._profile_store._find_mem0_id_for_text(
+                            "new_memory_id": self._profile_store._find_belief_id_for_text(
                                 by_norm[new_norm]
                             ),
                             "status": self._profile_store.CONFLICT_STATUS_OPEN,

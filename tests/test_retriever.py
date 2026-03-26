@@ -425,7 +425,7 @@ class TestScoreItemsTypeBoost:
 
 
 class TestScoreItemsUnified:
-    """_score_items applies the same formula for BM25 and mem0 candidates."""
+    """_score_items applies the same formula for BM25 and vector candidates."""
 
     def test_same_adjustments_different_bases(self) -> None:
         retriever = _make_retriever()
@@ -455,11 +455,11 @@ class TestScoreItemsUnified:
             "entities": [],
             "retrieval_reason": {"score": 0.6},
         }
-        # mem0 candidate: base from score field
-        mem0_item = {
-            "id": "mem0",
+        # vector candidate: base from score field
+        vector_item = {
+            "id": "vector",
             "type": "fact",
-            "summary": "mem0 result",
+            "summary": "vector result",
             "memory_type": "semantic",
             "timestamp": "2025-01-01T00:00:00Z",
             "score": 0.7,
@@ -475,8 +475,8 @@ class TestScoreItemsUnified:
             router_enabled=True,
             type_separation_enabled=True,
         )
-        mem0_scored = scorer.score_items(
-            [mem0_item],
+        vector_scored = scorer.score_items(
+            [vector_item],
             plan,
             profile_data,
             set(),
@@ -486,11 +486,11 @@ class TestScoreItemsUnified:
         )
         # Both should have type_boost=0.1 and stability_boost=0.03
         bm25_reason = bm25_scored[0]["retrieval_reason"]
-        mem0_reason = mem0_scored[0]["retrieval_reason"]
+        vector_reason = vector_scored[0]["retrieval_reason"]
         assert bm25_reason["type_boost"] == pytest.approx(0.1)
-        assert mem0_reason["type_boost"] == pytest.approx(0.1)
+        assert vector_reason["type_boost"] == pytest.approx(0.1)
         assert bm25_reason["stability_boost"] == pytest.approx(0.03)
-        assert mem0_reason["stability_boost"] == pytest.approx(0.03)
+        assert vector_reason["stability_boost"] == pytest.approx(0.03)
 
 
 class TestRerankItemsEnabled:

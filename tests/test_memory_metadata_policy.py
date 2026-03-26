@@ -73,14 +73,14 @@ def test_get_memory_context_fact_lookup_includes_episodic_softly(tmp_path: Path)
                 "summary": "Carlos prefers CLI tools.",
                 "type": "fact",
                 "memory_type": "semantic",
-                "retrieval_reason": {"semantic": 0.9, "recency": 0.2, "provider": "mem0"},
+                "retrieval_reason": {"semantic": 0.9, "recency": 0.2, "provider": "vector"},
             },
             {
                 "id": "e1",
                 "summary": "Deploy failed yesterday due to port conflict.",
                 "type": "task",
                 "memory_type": "episodic",
-                "retrieval_reason": {"semantic": 0.6, "recency": 0.8, "provider": "mem0"},
+                "retrieval_reason": {"semantic": 0.6, "recency": 0.8, "provider": "vector"},
             },
         ]
     )
@@ -104,14 +104,14 @@ def test_get_memory_context_debug_includes_episodic(tmp_path: Path) -> None:
                 "summary": "Carlos prefers CLI tools.",
                 "type": "fact",
                 "memory_type": "semantic",
-                "retrieval_reason": {"semantic": 0.9, "recency": 0.2, "provider": "mem0"},
+                "retrieval_reason": {"semantic": 0.9, "recency": 0.2, "provider": "vector"},
             },
             {
                 "id": "e1",
                 "summary": "Deploy failed yesterday due to port conflict.",
                 "type": "task",
                 "memory_type": "episodic",
-                "retrieval_reason": {"semantic": 0.6, "recency": 0.8, "provider": "mem0"},
+                "retrieval_reason": {"semantic": 0.6, "recency": 0.8, "provider": "vector"},
             },
         ]
     )
@@ -133,7 +133,7 @@ def test_get_memory_context_reflection_includes_reflection_section(tmp_path: Pat
                 "summary": "Reflection: incidents are usually caused by stale config drift.",
                 "type": "fact",
                 "memory_type": "reflection",
-                "retrieval_reason": {"semantic": 0.7, "recency": 0.5, "provider": "mem0"},
+                "retrieval_reason": {"semantic": 0.7, "recency": 0.5, "provider": "vector"},
             }
         ]
     )

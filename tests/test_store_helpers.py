@@ -277,7 +277,7 @@ class TestMemoryStoreExtraRetrievalAndContext:
 
 
 class TestMemoryStoreExtraCorpusAndEvaluation:
-    def test_seed_corpus_and_reindex_no_mem0(self, tmp_path: Path) -> None:
+    def test_seed_corpus_and_reindex_no_vector(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         profile_path = tmp_path / "seed_profile.json"
         events_path = tmp_path / "seed_events.jsonl"

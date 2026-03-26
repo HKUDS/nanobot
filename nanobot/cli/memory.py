@@ -60,11 +60,11 @@ def memory_inspect(
     events = store.ingester.read_events()
 
     console.print(f"{__logo__} Memory Inspect\n")
-    console.print("Mode: [cyan]mem0[/cyan]")
-    console.print(f"mem0 enabled: [cyan]{backend.get('mem0_enabled', False)}[/cyan]")
-    console.print(f"mem0 mode: [cyan]{backend.get('mem0_mode', 'disabled')}[/cyan]")
+    console.print("Mode: [cyan]vector[/cyan]")
+    console.print(f"vector enabled: [cyan]{backend.get('vector_enabled', False)}[/cyan]")
+    console.print(f"vector mode: [cyan]{backend.get('vector_mode', 'disabled')}[/cyan]")
     console.print(f"vector points: [cyan]{backend.get('vector_points_count', 0)}[/cyan]")
-    console.print(f"mem0 get_all count: [cyan]{backend.get('mem0_get_all_count', 0)}[/cyan]")
+    console.print(f"vector search count: [cyan]{backend.get('vector_search_count', 0)}[/cyan]")
     console.print(f"history rows: [cyan]{backend.get('history_rows_count', 0)}[/cyan]")
     console.print(f"vector health: [cyan]{backend.get('vector_health_state', 'unknown')}[/cyan]")
     console.print(f"Events: [green]{len(events)}[/green]")
@@ -126,10 +126,10 @@ def memory_metrics() -> None:
     table.add_column("Key", style="cyan")
     table.add_column("Value", style="green")
     for key in (
-        "mem0_enabled",
-        "mem0_mode",
+        "vector_enabled",
+        "vector_mode",
         "vector_points_count",
-        "mem0_get_all_count",
+        "vector_search_count",
         "history_rows_count",
         "vector_health_state",
     ):
@@ -169,10 +169,10 @@ def memory_reindex(
     reset: bool = typer.Option(
         True,
         "--reset/--no-reset",
-        help="Reset mem0 user memories before rebuilding from structured memory.",
+        help="Reset vector memories before rebuilding from structured memory.",
     ),
 ) -> None:
-    """Reindex mem0 vectors from structured profile/events only."""
+    """Reindex vectors from structured profile/events only."""
     from nanobot.config.loader import load_config
     from nanobot.memory import MemoryStore
 
@@ -190,7 +190,7 @@ def memory_reindex(
         ingester=store.ingester,
         profile_keys=store.PROFILE_KEYS,
         vector_points_count_fn=None,
-        mem0_get_all_rows_fn=None,
+        vector_rows_fn=None,
     )
     table = Table(title="Memory Reindex")
     table.add_column("Field", style="cyan")
@@ -216,10 +216,10 @@ def memory_compact(
     reset: bool = typer.Option(
         True,
         "--reset/--no-reset",
-        help="Reset mem0 user memories before compact rebuild.",
+        help="Reset vector memories before compact rebuild.",
     ),
 ) -> None:
-    """Compact backend memory (dedup/drop superseded) and rebuild mem0 from structured sources."""
+    """Compact backend memory (dedup/drop superseded) and rebuild vectors from structured sources."""
     from nanobot.config.loader import load_config
     from nanobot.memory import MemoryStore
 
@@ -237,7 +237,7 @@ def memory_compact(
         ingester=store.ingester,
         profile_keys=store.PROFILE_KEYS,
         vector_points_count_fn=None,
-        mem0_get_all_rows_fn=None,
+        vector_rows_fn=None,
     )
     table = Table(title="Memory Compaction")
     table.add_column("Field", style="cyan")
@@ -341,7 +341,7 @@ def memory_eval(
             ingester=store.ingester,
             profile_keys=store.PROFILE_KEYS,
             vector_points_count_fn=None,
-            mem0_get_all_rows_fn=None,
+            vector_rows_fn=None,
         )
         seed_table = Table(title="Seeded Corpus")
         seed_table.add_column("Field", style="cyan")
@@ -486,9 +486,9 @@ def memory_conflicts(
     table.add_column("Index", style="cyan")
     table.add_column("Field")
     table.add_column("Old")
-    table.add_column("Old Mem0 ID", style="dim")
+    table.add_column("Old Memory ID", style="dim")
     table.add_column("New")
-    table.add_column("New Mem0 ID", style="dim")
+    table.add_column("New Memory ID", style="dim")
     table.add_column("Status", style="yellow")
     for item in rows:
         table.add_row(
@@ -525,13 +525,13 @@ def memory_resolve(
         raise typer.Exit(1)
     console.print(f"[green]✓[/green] Conflict {index} resolved with action '{action}'")
     console.print(
-        "mem0 operation: "
-        f"[cyan]{details.get('mem0_operation', 'none')}[/cyan], "
-        f"ok=[cyan]{details.get('mem0_ok', False)}[/cyan]"
+        "db operation: "
+        f"[cyan]{details.get('db_operation', 'none')}[/cyan], "
+        f"ok=[cyan]{details.get('db_ok', False)}[/cyan]"
     )
     if details.get("old_memory_id") or details.get("new_memory_id"):
         console.print(
-            "mem0 ids: "
+            "memory ids: "
             f"old=[dim]{details.get('old_memory_id', '')}[/dim] "
             f"new=[dim]{details.get('new_memory_id', '')}[/dim]"
         )

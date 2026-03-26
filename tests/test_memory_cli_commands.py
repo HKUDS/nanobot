@@ -39,8 +39,8 @@ class _FakeConflictMgr:
             return {"ok": False}
         return {
             "ok": True,
-            "mem0_operation": "none",
-            "mem0_ok": True,
+            "db_operation": "none",
+            "db_ok": True,
             "old_memory_id": "",
             "new_memory_id": "",
         }
@@ -112,7 +112,7 @@ class _FakeMaintenance:
     def _vector_points_count(self) -> int:
         return 0
 
-    def _mem0_get_all_rows(self, limit: int = 200) -> list[dict[str, object]]:
+    def _vector_rows_fn(self, limit: int = 200) -> list[dict[str, object]]:
         return []
 
 
@@ -120,13 +120,13 @@ class _FakeEvalRunner:
     def get_observability_report(self) -> dict[str, object]:
         return {
             "backend": {
-                "mem0_enabled": True,
-                "mem0_mode": "history",
+                "vector_enabled": True,
+                "vector_mode": "history",
                 "vector_points_count": 3,
-                "mem0_get_all_count": 2,
+                "vector_search_count": 2,
                 "history_rows_count": 6,
                 "vector_health_state": "healthy",
-                "mem0_add_mode": "history",
+                "vector_add_mode": "history",
             },
             "metrics": {},
             "kpis": {},

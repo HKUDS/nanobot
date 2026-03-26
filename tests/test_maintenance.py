@@ -20,7 +20,7 @@ class TestBackendStats:
         stats = maint._backend_stats_for_eval()
         assert isinstance(stats, dict)
         assert "vector_points_count" in stats
-        assert "mem0_enabled" in stats
+        assert "vector_enabled" in stats
 
 
 class TestEnsureHealth:
