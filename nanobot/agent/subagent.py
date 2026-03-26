@@ -124,7 +124,10 @@ class SubagentManager:
                 model=self.model,
                 max_iterations=15,
                 before_execute_tools=_log_tool_calls,
-                max_iterations_message="Task completed but no final response was generated.",
+                max_iterations_message=(
+                    "Subagent reached the maximum number of tool call iterations "
+                    "({max_iterations}) without completing the task."
+                ),
                 error_message=None,
                 fail_on_tool_error=True,
             ))
@@ -134,6 +137,19 @@ class SubagentManager:
                     label,
                     task,
                     self._format_partial_progress(result),
+                    origin,
+                    "error",
+                )
+                return
+            if result.stop_reason == "max_iterations":
+                await self._announce_result(
+                    task_id,
+                    label,
+                    task,
+                    result.final_content or (
+                        "Subagent reached the maximum number of tool call "
+                        "iterations without completing the task."
+                    ),
                     origin,
                     "error",
                 )
@@ -148,7 +164,7 @@ class SubagentManager:
                     "error",
                 )
                 return
-            final_result = result.final_content or "Task completed but no final response was generated."
+            final_result = result.final_content or "Task completed."
 
             logger.info("Subagent [{}] completed successfully", task_id)
             await self._announce_result(task_id, label, task, final_result, origin, "ok")

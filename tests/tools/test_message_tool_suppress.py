@@ -23,7 +23,32 @@ class TestMessageToolSuppressLogic:
     """Final reply suppressed only when message tool sends to the same target."""
 
     @pytest.mark.asyncio
-    async def test_suppress_when_sent_to_same_target(self, tmp_path: Path) -> None:
+    async def test_suppress_when_sent_to_same_target_with_duplicate_final(self, tmp_path: Path) -> None:
+        loop = _make_loop(tmp_path)
+        tool_call = ToolCallRequest(
+            id="call1", name="message",
+            arguments={"content": "Hello", "channel": "feishu", "chat_id": "chat123"},
+        )
+        calls = iter([
+            LLMResponse(content="", tool_calls=[tool_call]),
+            LLMResponse(content="Hello", tool_calls=[]),
+        ])
+        loop.provider.chat_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.tools.get_definitions = MagicMock(return_value=[])
+
+        sent: list[OutboundMessage] = []
+        mt = loop.tools.get("message")
+        if isinstance(mt, MessageTool):
+            mt.set_send_callback(AsyncMock(side_effect=lambda m: sent.append(m)))
+
+        msg = InboundMessage(channel="feishu", sender_id="user1", chat_id="chat123", content="Send")
+        result = await loop._process_message(msg)
+
+        assert len(sent) == 1
+        assert result is None  # suppressed
+
+    @pytest.mark.asyncio
+    async def test_not_suppress_when_sent_to_same_target_with_different_final(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
         tool_call = ToolCallRequest(
             id="call1", name="message",
@@ -45,7 +70,8 @@ class TestMessageToolSuppressLogic:
         result = await loop._process_message(msg)
 
         assert len(sent) == 1
-        assert result is None  # suppressed
+        assert result is not None
+        assert result.content == "Done"
 
     @pytest.mark.asyncio
     async def test_not_suppress_when_sent_to_different_target(self, tmp_path: Path) -> None:
@@ -111,7 +137,6 @@ class TestMessageToolSuppressLogic:
 
         assert final_content == "Done"
         assert progress == [
-            ("Visible", False),
             ('read_file("foo.txt")', True),
         ]
 
@@ -128,5 +153,7 @@ class TestMessageToolTurnTracking:
     def test_start_turn_resets(self) -> None:
         tool = MessageTool()
         tool._sent_in_turn = True
+        tool._last_same_target_content = "hello"
         tool.start_turn()
         assert not tool._sent_in_turn
+        assert tool._last_same_target_content is None

@@ -21,6 +21,7 @@ class MessageTool(Tool):
         self._default_chat_id = default_chat_id
         self._default_message_id = default_message_id
         self._sent_in_turn: bool = False
+        self._last_same_target_content: str | None = None
 
     def set_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Set the current message context."""
@@ -35,6 +36,21 @@ class MessageTool(Tool):
     def start_turn(self) -> None:
         """Reset per-turn send tracking."""
         self._sent_in_turn = False
+        self._last_same_target_content = None
+
+    @staticmethod
+    def _normalize_content(content: str | None) -> str:
+        if not content:
+            return ""
+        return content.strip()
+
+    def should_suppress_final(self, final_content: str | None) -> bool:
+        """Suppress only when final content duplicates same-target message output."""
+        if not self._sent_in_turn:
+            return False
+        sent = self._normalize_content(self._last_same_target_content)
+        final = self._normalize_content(final_content)
+        return bool(sent and final and sent == final)
 
     @property
     def name(self) -> str:
@@ -108,6 +124,7 @@ class MessageTool(Tool):
             await self._send_callback(msg)
             if channel == self._default_channel and chat_id == self._default_chat_id:
                 self._sent_in_turn = True
+                self._last_same_target_content = content
             media_info = f" with {len(media)} attachments" if media else ""
             return f"Message sent to {channel}:{chat_id}{media_info}"
         except Exception as e:

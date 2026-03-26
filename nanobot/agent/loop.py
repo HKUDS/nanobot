@@ -240,12 +240,9 @@ class AgentLoop:
         async def _handle_tool_calls(response) -> None:
             if not on_progress:
                 return
-            if not on_stream:
-                thought = self._strip_think(response.content)
-                if thought:
-                    await on_progress(thought)
             tool_hint = self._strip_think(self._tool_hint(response.tool_calls))
-            await on_progress(tool_hint, tool_hint=True)
+            if tool_hint:
+                await on_progress(tool_hint, tool_hint=True)
 
         async def _prepare_tools(tool_calls) -> None:
             for tc in tool_calls:
@@ -472,8 +469,9 @@ class AgentLoop:
         self.sessions.save(session)
         self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
 
-        if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
-            return None
+        if (mt := self.tools.get("message")) and isinstance(mt, MessageTool):
+            if mt.should_suppress_final(final_content):
+                return None
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
