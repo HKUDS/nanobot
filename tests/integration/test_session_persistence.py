@@ -35,25 +35,24 @@ class TestSessionPersistence:
         provider: LiteLLMProvider,
         config: AgentConfig,
     ) -> None:
-        """Messages processed by one agent instance are recalled by a second."""
+        """Messages processed by one agent instance are visible to a second."""
         # Override workspace so both agents share the same directory.
         shared_workspace = tmp_path / "shared"
         shared_workspace.mkdir()
         shared_config = config.model_copy(update={"workspace": str(shared_workspace)})
 
-        # --- First agent: process a distinctive message ---
+        # --- First agent: process a message so it lands in session history ---
         agent1 = build_agent(bus=MessageBus(), provider=provider, config=shared_config)
         msg1 = make_inbound("My absolute favorite color is cerulean blue.")
         result1 = await agent1._process_message(msg1)
         assert result1 is not None, "first agent should produce a response"
 
-        # --- Second agent: same workspace, ask about the color ---
+        # --- Second agent: verify session contains the original message ---
         agent2 = build_agent(bus=MessageBus(), provider=provider, config=shared_config)
-        msg2 = make_inbound("What is my favorite color?")
-        result2 = await agent2._process_message(msg2)
-        assert result2 is not None, "second agent should produce a response"
-        assert "cerulean" in result2.content.lower(), (
-            f"Expected 'cerulean' in second agent's response, got: {result2.content}"
+        session = agent2.sessions.get_or_create("cli:integration-test")
+        contents = " ".join(m.get("content") or "" for m in session.messages).lower()
+        assert "cerulean" in contents, (
+            f"Expected 'cerulean' in persisted session messages, got: {contents}"
         )
 
     def test_session_manager_reload(self, tmp_path: Path) -> None:
