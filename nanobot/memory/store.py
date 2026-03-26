@@ -82,7 +82,6 @@ class MemoryStore:
         workspace: Path,
         *,
         memory_config: MemoryConfig | None = None,
-        graph_enabled: bool = False,
         embedding_provider: str | None = None,
         vector_backend: str | None = None,
     ):
@@ -135,9 +134,6 @@ class MemoryStore:
             utc_now_iso=_utc_now_iso,
         )
         self._rollout_config = RolloutConfig(memory_config=memory_config)
-        if memory_config is not None:
-            self._rollout_config.rollout["graph_enabled"] = graph_enabled
-
         # Profile manager (LAN-202) — delegates profile CRUD to ProfileManager.
         # Lazy callbacks break the circular dependency: ProfileStore is constructed
         # before conflict_mgr/snapshot exist, but callbacks resolve at call time.

@@ -52,6 +52,7 @@ class RolloutConfig:
                 "max_avg_memory_context_tokens": mc.rollout_gate_max_avg_context_tokens,
                 "max_history_fallback_ratio": mc.rollout_gate_max_history_fallback_ratio,
             },
+            "graph_enabled": mc.graph_enabled,
             "reranker_mode": mc.reranker.mode,
             "reranker_alpha": mc.reranker.alpha,
             "reranker_model": mc.reranker.model,
