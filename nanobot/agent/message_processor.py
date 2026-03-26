@@ -377,7 +377,10 @@ class MessageProcessor:
                     "model": effective_model,
                     "role": effective_role,
                     "session_key": key,
-                    "llm_calls": str(self._turn_llm_calls),
+                    "llm_calls": self._turn_llm_calls,
+                    "prompt_tokens": self._turn_tokens_prompt,
+                    "completion_tokens": self._turn_tokens_completion,
+                    "duration_ms": round((time.monotonic() - t0_request) * 1000),
                 },
             )
 

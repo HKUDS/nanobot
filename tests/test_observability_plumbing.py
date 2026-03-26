@@ -289,14 +289,14 @@ class TestGenerationNameMetadata:
 
 
 # ---------------------------------------------------------------------------
-# 4. Span metadata does not include redundant token counts
+# 4. Span metadata includes token counts
 # ---------------------------------------------------------------------------
 
 
-class TestSpanMetadataNoRedundantTokens:
-    """update_current_span is called without prompt_tokens/completion_tokens/total_tokens."""
+class TestSpanMetadataWithTokenCounts:
+    """update_current_span is called with prompt_tokens/completion_tokens/duration_ms."""
 
-    async def test_span_metadata_excludes_token_counts(self, tmp_path: Path):
+    async def test_span_metadata_includes_token_counts(self, tmp_path: Path):
         provider = ScriptedProvider(
             [
                 LLMResponse(
@@ -323,18 +323,14 @@ class TestSpanMetadataNoRedundantTokens:
         # Should have been called at least once with metadata
         assert len(captured_metadata) >= 1
 
-        for meta in captured_metadata:
-            assert "prompt_tokens" not in meta, "span metadata should not have prompt_tokens"
-            assert "completion_tokens" not in meta, (
-                "span metadata should not have completion_tokens"
-            )
-            assert "total_tokens" not in meta, "span metadata should not have total_tokens"
-
         # Verify expected keys are present
         last_meta = captured_metadata[-1]
         assert "channel" in last_meta
         assert "model" in last_meta
         assert "llm_calls" in last_meta
+        assert "prompt_tokens" in last_meta, "span metadata should have prompt_tokens"
+        assert "completion_tokens" in last_meta, "span metadata should have completion_tokens"
+        assert "duration_ms" in last_meta, "span metadata should have duration_ms"
 
 
 # ---------------------------------------------------------------------------
