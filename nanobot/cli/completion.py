@@ -25,9 +25,18 @@ class SlashCommandCompleter(Completer):
         """Return completions matching the current word being typed."""
         word = document.get_word_before_cursor()
 
-        # Only show completions when user has typed a slash
+        # Only show completions when word starts with slash
         if not word.startswith("/"):
             return []
+
+        # Only show completions when slash is truly at line start
+        # (no non-whitespace content before the first /)
+        stripped = document.text_before_cursor.rstrip()
+        if "/" in stripped:
+            before_slash = stripped[:stripped.index("/")]
+            if before_slash.strip() != "":
+                # There is content before / → not at line start
+                return []
 
         # Collect all registered commands
         commands: list[tuple[str, str]] = []
