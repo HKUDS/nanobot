@@ -199,12 +199,15 @@ The memory subsystem (`nanobot/memory/`) uses a **unified SQLite storage** strat
    ---
    name: your-skill
    description: What it does
-   tools: [tool_name]  # optional custom tools
    ---
    ```
 2. Optionally add `tools.py` with `Tool` subclasses
 3. Auto-discovered by `SkillsLoader` (`nanobot/context/skills.py`)
 4. Template: `nanobot/skills/weather/`
+5. **Tool mapping**: Skills written for Claude Code are automatically transformed
+   at load time — Claude Code tool names (Bash, Read, Write, etc.) are rewritten to
+   nanobot equivalents and a tool-instruction preamble is prepended. No skill-side
+   changes needed. See `docs/superpowers/specs/2026-03-25-skill-tool-mapping-design.md`.
 
 ## Security Rules
 

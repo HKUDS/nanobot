@@ -35,6 +35,144 @@ def _which(binary: str) -> str | None:
     return _which_cache[binary]
 
 
+# Claude Code → nanobot tool mapping.
+# Keys: Claude Code tool names (case-sensitive, matched with word boundaries).
+# Values: (nanobot_tool, usage_hint) — tool name for text rewriting, hint for preamble.
+CLAUDE_TOOL_MAPPING: dict[str, tuple[str, str]] = {
+    "Bash": ("exec", "use the `exec` tool"),
+    "Read": ("read_file", "use the `read_file` tool"),
+    "Write": ("write_file", "use the `write_file` tool"),
+    "Edit": ("edit_file", "use the `edit_file` tool"),
+    "Glob": ("exec", "use the `exec` tool with `find` or `ls`"),
+    "Grep": ("exec", "use the `exec` tool with `grep` or `rg`"),
+    "WebFetch": ("web_fetch", "use the `web_fetch` tool"),
+    "WebSearch": ("web_search", "use the `web_search` tool"),
+    "Agent": (
+        "delegate",
+        "use the `delegate` tool (approximate — nanobot delegation, not autonomous sub-agents)",
+    ),
+    "TodoWrite": ("write_scratchpad", "use the `write_scratchpad` tool"),
+    "TodoRead": ("read_scratchpad", "use the `read_scratchpad` tool"),
+    "ListDir": ("list_dir", "use the `list_dir` tool"),
+    "AskUserQuestion": ("message", "use the `message` tool to ask the user"),
+}
+
+
+def _detect_skill_tools(content: str) -> dict[str, str]:
+    """Scan skill content for Claude Code tool references and bash code blocks.
+
+    Returns a dict mapping detected source → preamble hint string.
+    The synthetic key ``__bash_blocks__`` indicates bash/shell/sh fenced blocks.
+    """
+    detected: dict[str, str] = {}
+
+    # 1. Bash code blocks
+    if re.search(r"```(?:bash|shell|sh)\b", content):
+        detected["__bash_blocks__"] = "use the `exec` tool"
+
+    # 2. Claude Code tool names — detection uses the SAME patterns as rewrite
+    # to avoid detecting names we can't reliably rewrite (e.g., bare "Bash" in prose).
+    for tool_name, (_nanobot_name, hint) in CLAUDE_TOOL_MAPPING.items():
+        # Both safe and ambiguous names use contextual matching:
+        # backtick-wrapped, "the X tool", or "X tool".
+        pattern = rf"`{tool_name}`|the\s+{tool_name}\s+tool|\b{tool_name}\s+tool\b"
+        if re.search(pattern, content):
+            detected[tool_name] = hint
+
+    return detected
+
+
+def _rewrite_skill_content(content: str, detected: dict[str, str]) -> str:
+    """Replace Claude Code tool names with nanobot equivalents in prose sections.
+
+    Fenced code blocks are preserved — only prose outside fences is rewritten.
+    The synthetic ``__bash_blocks__`` key is skipped (it drives the preamble, not rewrites).
+    """
+    # Filter to only Claude Code tool names (skip __bash_blocks__ and other synthetic keys)
+    tool_names = [k for k in detected if k in CLAUDE_TOOL_MAPPING]
+    if not tool_names:
+        return content
+
+    # Split into prose and code-block segments using a state machine.
+    segments = _split_fenced_blocks(content)
+
+    # Rewrite only prose segments.
+    for i, (is_code, text) in enumerate(segments):
+        if is_code:
+            continue
+        for tool_name in tool_names:
+            nanobot_name = CLAUDE_TOOL_MAPPING[tool_name][0]
+            # Same contextual patterns for all tool names (safe and ambiguous):
+            # backtick-wrapped, "the X tool", or "X tool".
+            text = re.sub(rf"`{tool_name}`", f"`{nanobot_name}`", text)
+            text = re.sub(rf"\bthe\s+{tool_name}\s+tool\b", f"the {nanobot_name} tool", text)
+            text = re.sub(rf"\b{tool_name}\s+tool\b", f"{nanobot_name} tool", text)
+        segments[i] = (False, text)
+
+    return "".join(text for _, text in segments)
+
+
+def _split_fenced_blocks(content: str) -> list[tuple[bool, str]]:
+    """Split markdown content into (is_code, text) segments.
+
+    Uses a state machine to track fenced code blocks (3+ backticks).
+    Handles nested fences by matching fence length on close.
+    """
+    segments: list[tuple[bool, str]] = []
+    fence_pattern = re.compile(r"^(`{3,})\s*(\w*)\s*$", re.MULTILINE)
+    pos = 0
+    open_fence: str | None = None  # The backtick string that opened the current block
+
+    for match in fence_pattern.finditer(content):
+        backticks = match.group(1)
+        if open_fence is None:
+            # Opening a code block — flush prose before it
+            if match.start() > pos:
+                segments.append((False, content[pos : match.start()]))
+            open_fence = backticks
+            pos = match.start()
+        elif len(backticks) >= len(open_fence) and not match.group(2):
+            # Closing a code block — fence length must match or exceed opener,
+            # and closing fence must have no info string.
+            segments.append((True, content[pos : match.end()]))
+            pos = match.end()
+            open_fence = None
+
+    # Remaining content
+    if pos < len(content):
+        segments.append((open_fence is not None, content[pos:]))
+
+    return segments
+
+
+def _build_skill_preamble(detected: dict[str, str]) -> str:
+    """Build a dynamic preamble from detected tool references.
+
+    Returns an empty string if nothing was detected.
+    """
+    if not detected:
+        return ""
+
+    lines: list[str] = []
+    has_bash_blocks = "__bash_blocks__" in detected
+    has_bash_tool = "Bash" in detected
+
+    # Bash blocks / Bash tool — merge into a single line
+    if has_bash_blocks or has_bash_tool:
+        lines.append("- To run the bash/CLI commands in these instructions, use the `exec` tool")
+
+    # Other Claude Code tool mappings
+    for key, hint in detected.items():
+        if key in ("__bash_blocks__", "Bash"):
+            continue  # already handled above
+        lines.append(f"- `{key}` \u2192 {hint}")
+
+    if not lines:
+        return ""
+
+    return "## Tool Instructions\n\n" + "\n".join(lines)
+
+
 class SkillsLoader:
     """
     Loader for agent skills.
@@ -124,6 +262,22 @@ class SkillsLoader:
             return (skill_dir / "SKILL.md").read_text(encoding="utf-8")
         return None
 
+    def transform_for_agent(self, content: str) -> str:
+        """Detect Claude Code tool references and transform for nanobot agent.
+
+        Rewrites Claude Code tool names to nanobot equivalents and prepends
+        a dynamic preamble listing the tool instructions.  Returns content
+        unchanged if no Claude Code references are detected.
+        """
+        detected = _detect_skill_tools(content)
+        if not detected:
+            return content
+        rewritten = _rewrite_skill_content(content, detected)
+        preamble = _build_skill_preamble(detected)
+        if not preamble:
+            return rewritten
+        return f"{preamble}\n\n---\n\n{rewritten}"
+
     def load_skills_for_context(self, skill_names: list[str]) -> str:
         """
         Load specific skills for inclusion in agent context.
@@ -139,6 +293,7 @@ class SkillsLoader:
             content = self.load_skill(name)
             if content:
                 content = self._strip_frontmatter(content)
+                content = self.transform_for_agent(content)
                 parts.append(f"### Skill: {name}\n\n{content}")
 
         return "\n\n---\n\n".join(parts) if parts else ""

@@ -26,8 +26,9 @@ class LoadSkillTool(Tool):
     name = "load_skill"
     description = (
         "Load the full instructions for a skill by name. "
-        "The system prompt lists available skills — call this tool "
-        "to get the complete instructions before using a skill."
+        "IMPORTANT: When the user's request relates to a topic in the Skills section "
+        "of your system prompt, call this tool FIRST before taking any other action. "
+        "The skill contains specialized instructions for handling the request."
     )
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
@@ -51,7 +52,8 @@ class LoadSkillTool(Tool):
                 error_type="not_found",
             )
         stripped = self._loader._strip_frontmatter(content)
-        return ToolResult.ok(stripped)
+        transformed = self._loader.transform_for_agent(stripped)
+        return ToolResult.ok(transformed)
 
 
 __all__ = ["LoadSkillTool"]
