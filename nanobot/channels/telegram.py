@@ -6,7 +6,7 @@ import asyncio
 import re
 import time
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from loguru import logger
@@ -26,6 +26,8 @@ from nanobot.utils.helpers import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
 TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message
+
+FORWARD_DEBOUNCE_MS = 80  # ms to wait for user's text to arrive after a forward
 
 
 def _strip_md(s: str) -> str:
@@ -207,6 +209,22 @@ class TelegramChannel(BaseChannel):
 
     _STREAM_EDIT_INTERVAL = 0.6  # min seconds between edit_message_text calls
 
+    @staticmethod
+    def _resolve_debounce_lane(message) -> str:
+        """Return 'forward' if message is a forward, else 'text'."""
+        if message is None:
+            return 'text'
+        if getattr(message, 'forward_origin', None) or getattr(message, 'forward_from', None) or getattr(message, 'forward_from_chat', None):
+            return 'forward'
+        return 'text'
+
+    @staticmethod
+    def _get_thread_id(message) -> int | None:
+        """Return forum topic thread id, or None for regular chats."""
+        if message is None:
+            return None
+        return getattr(message, 'message_thread_id', None)
+
     def __init__(self, config: Any, bus: MessageBus):
         if isinstance(config, dict):
             config = TelegramConfig.model_validate(config)
@@ -221,6 +239,8 @@ class TelegramChannel(BaseChannel):
         self._bot_user_id: int | None = None
         self._bot_username: str | None = None
         self._stream_bufs: dict[str, _StreamBuf] = {}  # chat_id -> streaming state
+        self._debounce_buffers: dict[str, dict] = {}
+        self._debounce_tasks: dict[str, asyncio.Task] = {}
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -332,6 +352,11 @@ class TelegramChannel(BaseChannel):
             task.cancel()
         self._media_group_tasks.clear()
         self._media_group_buffers.clear()
+
+        for task in self._debounce_tasks.values():
+            task.cancel()
+        self._debounce_tasks.clear()
+        self._debounce_buffers.clear()
 
         if self._app:
             logger.info("Stopping Telegram bot...")
@@ -832,11 +857,14 @@ class TelegramChannel(BaseChannel):
         if media_group_id := getattr(message, "media_group_id", None):
             key = f"{str_chat_id}:{media_group_id}"
             if key not in self._media_group_buffers:
+                thread_id = self._get_thread_id(message)
                 self._media_group_buffers[key] = {
                     "sender_id": sender_id, "chat_id": str_chat_id,
                     "contents": [], "media": [],
                     "metadata": metadata,
                     "session_key": session_key,
+                    "thread_id": thread_id,
+                    "lane": self._resolve_debounce_lane(message),
                 }
                 self._start_typing(str_chat_id)
                 await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
@@ -848,18 +876,24 @@ class TelegramChannel(BaseChannel):
                 self._media_group_tasks[key] = asyncio.create_task(self._flush_media_group(key))
             return
 
-        # Start typing indicator before processing
-        self._start_typing(str_chat_id)
-        await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
+        # Companion text for media_group: text arriving alongside an album joins its buffer.
+        if not media_paths and not getattr(message, 'forward_origin', None) and not getattr(message, 'forward_from', None) and not getattr(message, 'forward_from_chat', None):
+            mg_key_prefix = f"{str_chat_id}:"
+            for mg_key, mg_buf in self._media_group_buffers.items():
+                if mg_key.startswith(mg_key_prefix) and mg_buf.get('sender_id') == sender_id:
+                    if content and content != '[empty message]':
+                        mg_buf['contents'].append(content)
+                    return
 
-        # Forward to the message bus
-        await self._handle_message(
+        # Forward to the message bus via debounce
+        await self._enqueue_debounce(
             sender_id=sender_id,
             chat_id=str_chat_id,
             content=content,
             media=media_paths,
             metadata=metadata,
             session_key=session_key,
+            message=message,
         )
 
     async def _flush_media_group(self, key: str) -> None:
@@ -868,15 +902,114 @@ class TelegramChannel(BaseChannel):
             await asyncio.sleep(0.6)
             if not (buf := self._media_group_buffers.pop(key, None)):
                 return
-            content = "\n".join(buf["contents"]) or "[empty message]"
-            await self._handle_message(
-                sender_id=buf["sender_id"], chat_id=buf["chat_id"],
-                content=content, media=list(dict.fromkeys(buf["media"])),
-                metadata=buf["metadata"],
-                session_key=buf.get("session_key"),
+            content = '\n'.join(buf['contents']) or '[empty message]'
+            await self._enqueue_debounce(
+                sender_id=buf['sender_id'], chat_id=buf['chat_id'],
+                content=content, media=list(dict.fromkeys(buf['media'])),
+                metadata=buf['metadata'],
+                session_key=buf.get('session_key'),
+                message=None,
+                lane_override=buf.get('lane'),
+                thread_id_override=buf.get('thread_id'),
             )
         finally:
             self._media_group_tasks.pop(key, None)
+
+    async def _enqueue_debounce(
+        self, *, sender_id, chat_id, content, media, metadata, session_key,
+        message, lane_override=None, thread_id_override=...,
+    ) -> None:
+        """Buffer message with 80ms debounce for forward coalescing."""
+        lane = lane_override if lane_override is not None else self._resolve_debounce_lane(message)
+        thread_id = thread_id_override if thread_id_override is not ... else self._get_thread_id(message)
+
+        # Reverse companion: forward absorbs active text buffer
+        if lane == 'forward':
+            text_key = f'{chat_id}:{sender_id}:{thread_id or 0}:text'
+            if text_key in self._debounce_buffers:
+                text_buf = self._debounce_buffers.pop(text_key)
+                old_task = self._debounce_tasks.pop(text_key, None)
+                if old_task and not old_task.done():
+                    old_task.cancel()
+                # Merge: text content arrived first, forward content after
+                merged_contents = text_buf['contents']
+                if content and content != '[empty message]':
+                    merged_contents.append(content)
+                content = '\n'.join(merged_contents) if merged_contents else content
+                media = text_buf['media'] + media
+
+        # Forward-companion: text joins active forward buffer
+        if lane != 'forward':
+            forward_key = f'{chat_id}:{sender_id}:{thread_id or 0}:forward'
+            if forward_key in self._debounce_buffers:
+                buf = self._debounce_buffers[forward_key]
+                if content and content != '[empty message]':
+                    buf['contents'].append(content)
+                buf['media'].extend(media)
+                # Reset forward timer
+                old_task = self._debounce_tasks.pop(forward_key, None)
+                if old_task and not old_task.done():
+                    old_task.cancel()
+                self._debounce_tasks[forward_key] = asyncio.create_task(
+                    self._flush_debounce(forward_key, FORWARD_DEBOUNCE_MS / 1000)
+                )
+                return
+
+        # Non-forward messages with media: send immediately (no buffering)
+        if lane != 'forward' and media:
+            await self._handle_message(
+                sender_id=sender_id, chat_id=chat_id, content=content,
+                media=media, metadata=metadata, session_key=session_key,
+            )
+            return
+
+        # Buffer the message with fixed 80ms timeout.
+        # For forward messages: wait for user's text to arrive.
+        # For text-only non-forward: wait for a forward to arrive (reverse companion window).
+        key_lane = 'forward' if lane == 'forward' else 'text'
+        key = f'{chat_id}:{sender_id}:{thread_id or 0}:{key_lane}'
+
+        if key not in self._debounce_buffers:
+            self._debounce_buffers[key] = {
+                'sender_id': sender_id, 'chat_id': chat_id,
+                'contents': [], 'media': [],
+                'metadata': metadata, 'session_key': session_key,
+            }
+            self._start_typing(chat_id)
+            if message is not None:
+                await self._add_reaction(chat_id, message.message_id, self.config.react_emoji)
+
+        buf = self._debounce_buffers[key]
+        if content and content != '[empty message]':
+            buf['contents'].append(content)
+        buf['media'].extend(media)
+
+        # Fixed 80ms timer (no sliding window — just one timer per buffer)
+        if key not in self._debounce_tasks:
+            self._debounce_tasks[key] = asyncio.create_task(
+                self._flush_debounce(key, FORWARD_DEBOUNCE_MS / 1000)
+            )
+
+    async def _flush_debounce(self, key: str, delay: float) -> None:
+        """Sleep delay then flush the debounce buffer for key."""
+        try:
+            if delay > 0:
+                await asyncio.sleep(delay)
+            if self._debounce_tasks.get(key) is not asyncio.current_task():
+                return
+            if not (buf := self._debounce_buffers.pop(key, None)):
+                return
+            content = '\n'.join(buf['contents']) or '[empty message]'
+            await self._handle_message(
+                sender_id=buf['sender_id'], chat_id=buf['chat_id'],
+                content=content, media=list(dict.fromkeys(buf['media'])),
+                metadata=buf['metadata'],
+                session_key=buf.get('session_key'),
+            )
+        finally:
+            if self._debounce_tasks.get(key) is asyncio.current_task():
+                self._debounce_tasks.pop(key, None)
+                self._debounce_buffers.pop(key, None)
 
     def _start_typing(self, chat_id: str) -> None:
         """Start sending 'typing...' indicator for a chat."""
