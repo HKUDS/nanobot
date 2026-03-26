@@ -133,13 +133,13 @@ class ChannelsConfig(Base):
     web: WebChannelConfig = Field(default_factory=WebChannelConfig)
 
 
-class Mem0Config(Base):
-    """mem0 vector store adapter tuning."""
+class VectorSyncConfig(Base):
+    """Vector sync adapter tuning (legacy mem0, now SQLite-backed)."""
 
-    user_id: str = "nanobot"  # mem0 user namespace (was MEM0_USER_ID)
+    user_id: str = "nanobot"  # Vector user namespace (was MEM0_USER_ID)
     add_debug: bool = False  # Log add_text diagnostics (was MEM0_ADD_DEBUG)
-    verify_write: bool = True  # Verify mem0 writes via count (was MEM0_VERIFY_WRITE)
-    force_infer_true: bool = False  # Force infer=True mode (was MEM0_FORCE_INFER_TRUE)
+    verify_write: bool = True  # Verify vector writes via count (was MEM0_VERIFY_WRITE)
+    force_infer: bool = False  # Force infer=True mode (was MEM0_FORCE_INFER_TRUE)
 
 
 class RerankerConfig(Base):
@@ -198,7 +198,7 @@ class AgentDefaults(Base):
     memory_auto_reindex_on_empty_vector: bool = True
     memory_history_fallback_enabled: bool = False
     memory_fallback_allowed_sources: list[str] = Field(
-        default_factory=lambda: ["profile", "events", "mem0_get_all"]
+        default_factory=lambda: ["profile", "events", "vector_search"]
     )
     memory_fallback_max_summary_chars: int = 280
     memory_rollout_gate_min_recall_at_k: float = 0.55
@@ -219,9 +219,9 @@ class AgentDefaults(Base):
     # Reranker
     reranker: RerankerConfig = Field(default_factory=RerankerConfig)
 
-    # mem0
-    mem0: Mem0Config = Field(default_factory=Mem0Config)
-    mem0_raw_turn_ingestion: bool = True  # LAN-208: gate raw conversation turn ingestion
+    # Reranker / vector sync
+    vector_sync: VectorSyncConfig = Field(default_factory=VectorSyncConfig)
+    vector_raw_turn_ingestion: bool = True  # LAN-208: gate raw conversation turn ingestion
 
     # Missions
     mission: MissionConfig = Field(default_factory=MissionConfig)
@@ -270,7 +270,7 @@ class AgentConfig(Base):
     memory_auto_reindex_on_empty_vector: bool = True
     memory_history_fallback_enabled: bool = False
     memory_fallback_allowed_sources: list[str] = Field(
-        default_factory=lambda: ["profile", "events", "mem0_get_all"]
+        default_factory=lambda: ["profile", "events", "vector_search"]
     )
     memory_fallback_max_summary_chars: int = 280
     memory_rollout_gate_min_recall_at_k: float = 0.55
@@ -313,15 +313,15 @@ class AgentConfig(Base):
     # Knowledge graph (networkx + JSON persistence)
     graph_enabled: bool = False
 
-    # Reranker / mem0
+    # Reranker / vector sync
     reranker_mode: str = "enabled"
     reranker_alpha: float = 0.5
     reranker_model: str = "onnx:ms-marco-MiniLM-L-6-v2"
-    mem0_user_id: str = "nanobot"
-    mem0_add_debug: bool = False
-    mem0_verify_write: bool = True
-    mem0_force_infer_true: bool = False
-    mem0_raw_turn_ingestion: bool = True  # LAN-208: gate raw conversation turn ingestion
+    vector_user_id: str = "nanobot"
+    vector_add_debug: bool = False
+    vector_verify_write: bool = True
+    vector_force_infer: bool = False
+    vector_raw_turn_ingestion: bool = True  # LAN-208: gate raw conversation turn ingestion
 
     # Vision / multimodal
     vision_model: str = "gpt-4o-mini"
@@ -391,11 +391,11 @@ class AgentConfig(Base):
             "reranker_mode": defaults.reranker.mode,
             "reranker_alpha": defaults.reranker.alpha,
             "reranker_model": defaults.reranker.model,
-            "mem0_user_id": defaults.mem0.user_id,
-            "mem0_add_debug": defaults.mem0.add_debug,
-            "mem0_verify_write": defaults.mem0.verify_write,
-            "mem0_force_infer_true": defaults.mem0.force_infer_true,
-            "mem0_raw_turn_ingestion": defaults.mem0_raw_turn_ingestion,
+            "vector_user_id": defaults.vector_sync.user_id,
+            "vector_add_debug": defaults.vector_sync.add_debug,
+            "vector_verify_write": defaults.vector_sync.verify_write,
+            "vector_force_infer": defaults.vector_sync.force_infer,
+            "vector_raw_turn_ingestion": defaults.vector_raw_turn_ingestion,
             "vision_model": defaults.vision_model,
             "mission_max_concurrent": defaults.mission.max_concurrent,
             "mission_max_iterations": defaults.mission.max_iterations,

@@ -44,10 +44,10 @@ class MemoryMaintenance:
             event_count = 0
         return {
             "vector_points_count": 0,
-            "mem0_get_all_count": 0,
+            "vector_search_count": 0,
             "history_rows_count": 0,
-            "mem0_enabled": False,
-            "mem0_mode": "disabled",
+            "vector_enabled": False,
+            "vector_mode": "disabled",
             "db_event_count": event_count,
         }
 
@@ -133,12 +133,12 @@ class MemoryMaintenance:
             "constraints",
         ),
         vector_points_count_fn: Any = None,
-        mem0_get_all_rows_fn: Any = None,
+        vector_rows_fn: Any = None,
     ) -> dict[str, Any]:
         """Full reindex from structured memory.
 
         With UnifiedMemoryDB, events are already in SQLite; return a no-op
-        success result.  Legacy mem0 reindex has been removed.
+        success result.  Legacy vector reindex has been removed.
         """
         return {
             "ok": True,
@@ -164,7 +164,7 @@ class MemoryMaintenance:
             "constraints",
         ),
         vector_points_count_fn: Any = None,
-        mem0_get_all_rows_fn: Any = None,
+        vector_rows_fn: Any = None,
     ) -> dict[str, Any]:
         """Seed with sample data from external profile + events files."""
         try:

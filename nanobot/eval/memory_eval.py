@@ -56,14 +56,14 @@ class EvalRunner:
         """
         stats = self._get_backend_stats()
         vector_points_count = stats["vector_points_count"]
-        mem0_get_all_count = stats["mem0_get_all_count"]
+        vector_search_count = stats["vector_search_count"]
         history_rows_count = stats["history_rows_count"]
-        mem0_enabled = stats["mem0_enabled"]
-        mem0_mode = stats["mem0_mode"]
+        vector_enabled = stats["vector_enabled"]
+        vector_mode = stats["vector_mode"]
 
         vector_health_state = (
             "degraded"
-            if (history_rows_count > 0 and vector_points_count == 0 and mem0_get_all_count == 0)
+            if (history_rows_count > 0 and vector_points_count == 0 and vector_search_count == 0)
             else "healthy"
         )
 
@@ -71,10 +71,10 @@ class EvalRunner:
             "metrics": {},
             "kpis": {},
             "backend": {
-                "mem0_enabled": mem0_enabled,
-                "mem0_mode": mem0_mode,
+                "vector_enabled": vector_enabled,
+                "vector_mode": vector_mode,
                 "vector_points_count": vector_points_count,
-                "mem0_get_all_count": mem0_get_all_count,
+                "vector_search_count": vector_search_count,
                 "history_rows_count": history_rows_count,
                 "vector_health_state": vector_health_state,
             },

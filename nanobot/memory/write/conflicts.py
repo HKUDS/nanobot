@@ -2,11 +2,11 @@
 """Conflict resolution extracted from MemoryStore (LAN-203).
 
 ``ConflictManager`` owns the lifecycle of profile conflicts: listing,
-auto-resolution, user-facing prompts, and final resolution with mem0
+auto-resolution, user-facing prompts, and final resolution with database
 synchronisation.
 
 All profile access is delegated to ``ProfileManager``; vector operations
-go through ``_Mem0Adapter``.
+go through ``UnifiedMemoryDB``.
 """
 
 from __future__ import annotations
@@ -184,10 +184,10 @@ class ConflictManager:
                                     "field": key,
                                     "old": existing,
                                     "new": candidate,
-                                    "old_memory_id": self.profile_mgr._find_mem0_id_for_text(
+                                    "old_memory_id": self.profile_mgr._find_belief_id_for_text(
                                         existing
                                     ),
-                                    "new_memory_id": self.profile_mgr._find_mem0_id_for_text(
+                                    "new_memory_id": self.profile_mgr._find_belief_id_for_text(
                                         candidate
                                     ),
                                     "belief_id_old": old_entry.get("id", ""),
@@ -453,7 +453,7 @@ class ConflictManager:
             "ok": True,
             "message": (
                 f"Resolved conflict #{idx} with action `{selected}` "
-                f"(mem0 op: {details.get('mem0_operation', 'none')})."
+                f"(db op: {details.get('db_operation', 'none')})."
             ),
         }
 
@@ -467,8 +467,8 @@ class ConflictManager:
             "new": "",
             "old_memory_id": "",
             "new_memory_id": "",
-            "mem0_operation": "none",
-            "mem0_ok": False,
+            "db_operation": "none",
+            "db_ok": False,
         }
         profile = self.profile_mgr.read_profile()
         conflicts = profile.get("conflicts", [])
@@ -498,10 +498,10 @@ class ConflictManager:
         values = self.profile_mgr._to_str_list(profile.get(key))
         old_memory_id = str(
             conflict.get("old_memory_id", "")
-        ).strip() or self.profile_mgr._find_mem0_id_for_text(old_value)
+        ).strip() or self.profile_mgr._find_belief_id_for_text(old_value)
         new_memory_id = str(
             conflict.get("new_memory_id", "")
-        ).strip() or self.profile_mgr._find_mem0_id_for_text(new_value)
+        ).strip() or self.profile_mgr._find_belief_id_for_text(new_value)
         if old_memory_id:
             conflict["old_memory_id"] = old_memory_id
         if new_memory_id:
@@ -515,7 +515,7 @@ class ConflictManager:
             return [v for v in values_in if self._norm_text(v) != target_norm]
 
         selected = str(action or "").strip().lower()
-        mem0_ok = False
+        db_ok = False
 
         # Look up belief IDs for the old and new values.
         old_entry = self.profile_mgr._meta_entry(profile, key, old_value)
@@ -524,8 +524,8 @@ class ConflictManager:
         new_belief_id = new_entry.get("id", "")
 
         if selected == "keep_old":
-            mem0_ok = True
-            result["mem0_operation"] = "none_db"
+            db_ok = True
+            result["db_operation"] = "none_db"
             values = _remove_value(values, new_value)
             # Boost winner confidence via update_belief.
             self.profile_mgr._update_belief_in_profile(
@@ -542,8 +542,8 @@ class ConflictManager:
                 new_entry["superseded_by_id"] = old_belief_id
                 old_entry.setdefault("supersedes_id", new_belief_id)
         elif selected == "keep_new":
-            mem0_ok = True
-            result["mem0_operation"] = "none_db"
+            db_ok = True
+            result["db_operation"] = "none_db"
             values = _remove_value(values, old_value)
             # Boost winner confidence via update_belief.
             self.profile_mgr._update_belief_in_profile(
@@ -560,8 +560,8 @@ class ConflictManager:
                 old_entry["superseded_by_id"] = new_belief_id
                 new_entry.setdefault("supersedes_id", old_belief_id)
         elif selected == "dismiss":
-            mem0_ok = True
-            result["mem0_operation"] = "none"
+            db_ok = True
+            result["db_operation"] = "none"
             self.profile_mgr._update_belief_in_profile(
                 profile,
                 old_belief_id,
@@ -575,8 +575,8 @@ class ConflictManager:
         else:
             return result
 
-        result["mem0_ok"] = mem0_ok
-        if not mem0_ok:
+        result["db_ok"] = db_ok
+        if not db_ok:
             return result
 
         profile[key] = values

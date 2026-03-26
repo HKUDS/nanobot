@@ -11,8 +11,8 @@ from nanobot.config.schema import (
     AgentConfig,
     AgentDefaults,
     Config,
-    Mem0Config,
     RerankerConfig,
+    VectorSyncConfig,
 )
 
 # ---------------------------------------------------------------------------
@@ -40,19 +40,19 @@ class TestSchemaDefaults:
         assert rc.alpha == 0.5
         assert rc.model == "onnx:ms-marco-MiniLM-L-6-v2"
 
-    def test_mem0_defaults(self):
-        mc = Mem0Config()
+    def test_vector_sync_defaults(self):
+        mc = VectorSyncConfig()
         assert mc.user_id == "nanobot"
         assert mc.add_debug is False
         assert mc.verify_write is True
-        assert mc.force_infer_true is False
+        assert mc.force_infer is False
 
     def test_agent_defaults_nested(self):
         ad = AgentDefaults()
         assert isinstance(ad.reranker, RerankerConfig)
-        assert isinstance(ad.mem0, Mem0Config)
+        assert isinstance(ad.vector_sync, VectorSyncConfig)
         assert ad.reranker.mode == "enabled"
-        assert ad.mem0.user_id == "nanobot"
+        assert ad.vector_sync.user_id == "nanobot"
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +129,7 @@ class TestSubModelWiring:
         assert ac.model == "test-model"
         assert ac.graph_enabled is True
         assert ac.reranker_mode == "enabled"
-        assert ac.mem0_user_id == "nanobot"
+        assert ac.vector_user_id == "nanobot"
 
     def test_overrides_applied_after_defaults(self):
         defaults = AgentDefaults(model="base-model")

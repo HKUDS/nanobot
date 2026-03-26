@@ -6,7 +6,7 @@
 pin/stale management, contradiction detection, and live user corrections.
 
 All file I/O is delegated to ``MemoryPersistence``; vector lookups go
-through ``_Mem0Adapter``.
+through ``UnifiedMemoryDB``.
 """
 
 from __future__ import annotations
@@ -693,10 +693,10 @@ class ProfileStore:
         return bool(self._conflict_mgr_fn().has_open_conflict(profile, key))
 
     # ------------------------------------------------------------------
-    # mem0 helpers
+    # belief lookup helpers
     # ------------------------------------------------------------------
 
-    def _find_mem0_id_for_text(self, text: str, *, top_k: int = 8) -> str | None:
+    def _find_belief_id_for_text(self, text: str, *, top_k: int = 8) -> str | None:
         target = self._norm_text(text)
         if not target:
             return None

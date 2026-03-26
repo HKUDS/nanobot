@@ -460,7 +460,7 @@ class TestHybridMemoryStore:
 
     def test_conflict_list_and_resolve(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        # mem0 removed — local-only path is the default
+        # vector store removed — local-only path is the default
         profile = store.profile_mgr.read_profile()
         profile["constraints"] = ["Use dark mode"]
 
@@ -568,7 +568,7 @@ class TestHybridMemoryStore:
 
     def test_retrieval_prefers_keep_new_resolved_fact(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        # mem0 removed — local-only path is the default
+        # vector store removed — local-only path is the default
         events = [
             {
                 "id": "region-old",
@@ -630,7 +630,7 @@ class TestHybridMemoryStore:
 
     def test_semantic_dedup_merges_events_and_keeps_provenance(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        # mem0 removed — local dedup is the only path
+        # vector store removed — local dedup is the only path
 
         written_1 = store.ingester.append_events(
             [
@@ -722,10 +722,10 @@ class TestHybridMemoryStore:
         ids = {str(e.get("id")) for e in events}
         assert {"nd-1", "nd-2"}.issubset(ids)
 
-    def test_local_keyword_retrieval_without_mem0(self, tmp_path: Path) -> None:
-        """When mem0 is unavailable, retrieve() uses local keyword matching."""
+    def test_local_keyword_retrieval_without_vector(self, tmp_path: Path) -> None:
+        """When vector store is unavailable, retrieve() uses local keyword matching."""
         store = MemoryStore(tmp_path, embedding_provider="hash", vector_backend="sqlite")
-        # mem0 removed — local path is the default
+        # vector store removed — local path is the default
         store.ingester.append_events(
             [
                 {
@@ -754,7 +754,7 @@ class TestHybridMemoryStore:
     def test_keyword_retrieval_with_recency(self, tmp_path: Path) -> None:
         """Recency weighting should boost recent events of same type over old ones."""
         store = MemoryStore(tmp_path, embedding_provider="hash", vector_backend="faiss")
-        # mem0 removed — local recency scoring is the only path
+        # vector store removed — local recency scoring is the only path
         store.ingester.append_events(
             [
                 {
@@ -804,7 +804,7 @@ class TestHybridMemoryStore:
         retrieval path internally calls read_events() multiple times.
         """
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        # mem0 removed — BM25 path is the default
+        # vector store removed — BM25 path is the default
 
         store.ingester.append_events(
             [

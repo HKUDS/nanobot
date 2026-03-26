@@ -393,7 +393,7 @@ class ContextAssembler:
             f"- [{timestamp}] ({event_type}) {summary} "
             f"[sem={reason.get('semantic', 0):.2f}, "
             f"rec={reason.get('recency', 0):.2f}, "
-            f"src={reason.get('provider', 'mem0')}]"
+            f"src={reason.get('provider', 'vector')}]"
         )
 
     # ------------------------------------------------------------------

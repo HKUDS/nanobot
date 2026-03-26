@@ -81,7 +81,7 @@ def _build_rollout_overrides(config: AgentConfig) -> dict:
         "memory_history_fallback_enabled": config.memory_history_fallback_enabled,
         "conflict_auto_resolve_gap": config.memory_conflict_auto_resolve_gap,
         "memory_fallback_allowed_sources": config.memory_fallback_allowed_sources
-        or ["profile", "events", "mem0_get_all"],
+        or ["profile", "events", "vector_search"],
         "memory_fallback_max_summary_chars": config.memory_fallback_max_summary_chars,
         "rollout_gates": {
             "min_recall_at_k": config.memory_rollout_gate_min_recall_at_k,
@@ -95,10 +95,10 @@ def _build_rollout_overrides(config: AgentConfig) -> dict:
         "reranker_mode": config.reranker_mode,
         "reranker_alpha": config.reranker_alpha,
         "reranker_model": config.reranker_model,
-        "mem0_user_id": config.mem0_user_id,
-        "mem0_add_debug": config.mem0_add_debug,
-        "mem0_verify_write": config.mem0_verify_write,
-        "mem0_force_infer_true": config.mem0_force_infer_true,
+        "vector_user_id": config.vector_user_id,
+        "vector_add_debug": config.vector_add_debug,
+        "vector_verify_write": config.vector_verify_write,
+        "vector_force_infer": config.vector_force_infer,
     }
 
 

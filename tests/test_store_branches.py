@@ -378,8 +378,8 @@ class TestStoreCoreBranchHelpers:
         )
         assert total == 1
 
-    def test_find_mem0_id_for_text_via_fts(self, tmp_path: Path) -> None:
-        """_find_mem0_id_for_text searches FTS via UnifiedMemoryDB."""
+    def test_find_belief_id_for_text_via_fts(self, tmp_path: Path) -> None:
+        """_find_belief_id_for_text searches FTS via UnifiedMemoryDB."""
         store = _store(tmp_path)
         # Insert an event so FTS has something to search
         if store.db:
@@ -391,7 +391,7 @@ class TestStoreCoreBranchHelpers:
                     "timestamp": "2026-01-01T00:00:00+00:00",
                 }
             )
-        out = store.profile_mgr._find_mem0_id_for_text("target fact")
+        out = store.profile_mgr._find_belief_id_for_text("target fact")
         # With FTS data, should find a match
         if store.db:
             assert out is not None

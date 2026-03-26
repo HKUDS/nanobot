@@ -101,12 +101,12 @@ class TestFromDefaults:
         assert ac.reranker_mode == "enabled"
         assert ac.reranker_alpha == 0.5
 
-    def test_from_defaults_mem0(self):
+    def test_from_defaults_vector_sync(self):
         defaults = AgentDefaults()
         ac = AgentConfig.from_defaults(defaults)
-        assert ac.mem0_user_id == "nanobot"
-        assert ac.mem0_verify_write is True
-        assert ac.mem0_force_infer_true is False
+        assert ac.vector_user_id == "nanobot"
+        assert ac.vector_verify_write is True
+        assert ac.vector_force_infer is False
 
     def test_from_defaults_override(self):
         defaults = AgentDefaults(model="gpt-4o")
