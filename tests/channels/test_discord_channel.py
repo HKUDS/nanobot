@@ -443,7 +443,7 @@ async def test_slash_new_forwards_when_user_is_allowlisted() -> None:
     await new_cmd.callback(interaction)
 
     assert interaction.response.messages == [
-        {"content": "Starting a new session...", "ephemeral": True}
+        {"content": "Processing /new...", "ephemeral": True}
     ]
     assert len(handled) == 1
     assert handled[0]["content"] == "/new"
@@ -475,22 +475,30 @@ async def test_slash_new_is_blocked_for_disallowed_user() -> None:
     assert handled == []
 
 
+@pytest.mark.parametrize("slash_name", ["help", "stop", "restart", "status"])
 @pytest.mark.asyncio
-async def test_slash_help_returns_command_list() -> None:
-    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
-    client = DiscordBotClient(owner, intents=discord.Intents.none())
+async def test_slash_commands_forward_via_handle_message(slash_name: str) -> None:
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+    client = DiscordBotClient(channel, intents=discord.Intents.none())
     interaction = _make_interaction()
-    interaction.command.qualified_name = "help"
+    interaction.command.qualified_name = slash_name
 
-    help_cmd = client.tree.get_command("help")
-    assert help_cmd is not None
-    await help_cmd.callback(interaction)
+    cmd = client.tree.get_command(slash_name)
+    assert cmd is not None
+    await cmd.callback(interaction)
 
-    assert len(interaction.response.messages) == 1
-    help_text = interaction.response.messages[0]["content"]
-    assert "/new" in help_text
-    assert "/help" in help_text
-    assert "/restart" not in help_text
+    assert interaction.response.messages == [
+        {"content": f"Processing /{slash_name}...", "ephemeral": True}
+    ]
+    assert len(handled) == 1
+    assert handled[0]["content"] == f"/{slash_name}"
+    assert handled[0]["metadata"]["is_slash_command"] is True
 
 
 @pytest.mark.asyncio

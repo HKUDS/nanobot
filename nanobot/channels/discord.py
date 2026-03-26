@@ -31,11 +31,6 @@ if DISCORD_AVAILABLE:
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
 TYPING_INTERVAL_S = 8
-HELP_TEXT = (
-    "nanobot commands:\n"
-    "/new - Start a new conversation\n"
-    "/help - Show available commands"
-)
 
 
 class DiscordConfig(Base):
@@ -80,33 +75,51 @@ if DISCORD_AVAILABLE:
                 logger.warning("Discord interaction response failed: {}", e)
                 return False
 
+        async def _forward_slash_command(
+            self,
+            interaction: discord.Interaction,
+            command_text: str,
+        ) -> None:
+            sender_id = str(interaction.user.id)
+            channel_id = interaction.channel_id
+
+            if channel_id is None:
+                logger.warning("Discord slash command missing channel_id: {}", command_text)
+                return
+
+            if not self._channel.is_allowed(sender_id):
+                await self._reply_ephemeral(interaction, "You are not allowed to use this bot.")
+                return
+
+            await self._reply_ephemeral(interaction, f"Processing {command_text}...")
+
+            await self._channel._handle_message(
+                sender_id=sender_id,
+                chat_id=str(channel_id),
+                content=command_text,
+                metadata={
+                    "interaction_id": str(interaction.id),
+                    "guild_id": str(interaction.guild_id) if interaction.guild_id else None,
+                    "is_slash_command": True,
+                },
+            )
+
         def _register_app_commands(self) -> None:
-            @self.tree.command(name="new", description="Start a new conversation")
-            async def new_command(interaction: discord.Interaction) -> None:
-                user = interaction.user
-                channel_id = interaction.channel_id
-                sender_id = str(user.id)
+            commands = (
+                ("new", "Start a new conversation", "/new"),
+                ("help", "Show available commands", "/help"),
+                ("stop", "Stop the current task", "/stop"),
+                ("restart", "Restart the bot", "/restart"),
+                ("status", "Show bot status", "/status"),
+            )
 
-                if not self._channel.is_allowed(sender_id):
-                    await self._reply_ephemeral(interaction, "You are not allowed to use this bot.")
-                    return
-
-                await self._reply_ephemeral(interaction, "Starting a new session...")
-
-                await self._channel._handle_message(
-                    sender_id=sender_id,
-                    chat_id=str(channel_id),
-                    content="/new",
-                    metadata={
-                        "interaction_id": str(interaction.id),
-                        "guild_id": str(interaction.guild_id) if interaction.guild_id else None,
-                        "is_slash_command": True,
-                    },
-                )
-
-            @self.tree.command(name="help", description="Show available commands")
-            async def help_command(interaction: discord.Interaction) -> None:
-                await self._reply_ephemeral(interaction, HELP_TEXT)
+            for name, description, command_text in commands:
+                @self.tree.command(name=name, description=description)
+                async def command_handler(
+                    interaction: discord.Interaction,
+                    _command_text: str = command_text,
+                ) -> None:
+                    await self._forward_slash_command(interaction, _command_text)
 
             @self.tree.error
             async def on_app_command_error(
