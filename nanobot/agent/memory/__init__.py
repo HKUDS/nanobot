@@ -158,6 +158,7 @@ class MemoryConsolidator:
     """
 
     _MAX_CONSOLIDATION_ROUNDS = 5
+    _SAFETY_BUFFER = 1024
 
     def __init__(
         self,
@@ -170,12 +171,14 @@ class MemoryConsolidator:
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
         *,
         store: BaseMemoryStore | None = None,
+        max_completion_tokens: int = 4096,
     ):
         self.store = store or LongTermMemoryStore(workspace)
         self.provider = provider
         self.model = model
         self.sessions = sessions
         self.context_window_tokens = context_window_tokens
+        self.max_completion_tokens = max_completion_tokens
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
@@ -283,11 +286,12 @@ class MemoryConsolidator:
 
         lock = self.get_lock(session.key)
         async with lock:
-            target = self.context_window_tokens // 2
+            budget = self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
+            target = budget // 2
             estimated, source = self.estimate_session_prompt_tokens(session)
             if estimated <= 0:
                 return
-            if estimated < self.context_window_tokens:
+            if estimated < budget:
                 logger.debug(
                     "Token consolidation idle {}: {}/{} via {}",
                     session.key,

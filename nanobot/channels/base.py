@@ -49,6 +49,18 @@ class BaseChannel(ABC):
             logger.warning("{}: audio transcription failed: {}", self.name, e)
             return ""
 
+    async def login(self, force: bool = False) -> bool:
+        """
+        Perform channel-specific interactive login (e.g. QR code scan).
+
+        Args:
+            force: If True, ignore existing credentials and force re-authentication.
+
+        Returns True if already authenticated or login succeeds.
+        Override in subclasses that support interactive login.
+        """
+        return True
+
     @abstractmethod
     async def start(self) -> None:
         """
@@ -73,8 +85,30 @@ class BaseChannel(ABC):
 
         Args:
             msg: The message to send.
+
+        Implementations should raise on delivery failure so the channel manager
+        can apply any retry policy in one place.
         """
         pass
+
+    async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
+        """Deliver a streaming text chunk.
+
+        Override in subclasses to enable streaming. Implementations should
+        raise on delivery failure so the channel manager can retry.
+
+        Streaming contract: ``_stream_delta`` is a chunk, ``_stream_end`` ends
+        the current segment, and stateful implementations must key buffers by
+        ``_stream_id`` rather than only by ``chat_id``.
+        """
+        pass
+
+    @property
+    def supports_streaming(self) -> bool:
+        """True when config enables streaming AND this subclass implements send_delta."""
+        cfg = self.config
+        streaming = cfg.get("streaming", False) if isinstance(cfg, dict) else getattr(cfg, "streaming", False)
+        return bool(streaming) and type(self).send_delta is not BaseChannel.send_delta
 
     def is_allowed(self, sender_id: str) -> bool:
         """Check if *sender_id* is permitted.  Empty list → deny all; ``"*"`` → allow all."""
@@ -116,13 +150,17 @@ class BaseChannel(ABC):
             )
             return
 
+        meta = metadata or {}
+        if self.supports_streaming:
+            meta = {**meta, "_wants_stream": True}
+
         msg = InboundMessage(
             channel=self.name,
             sender_id=str(sender_id),
             chat_id=str(chat_id),
             content=content,
             media=media or [],
-            metadata=metadata or {},
+            metadata=meta,
             session_key_override=session_key,
         )
 
