@@ -37,7 +37,8 @@ This guide covers deploying nanobot to Koyeb using Git-based deployment.
    - **Region**: Choose your preferred region
    - **Port**: 18790
    - **Routes**: `/:18790`
-8. Add environment variables for your API keys:
+8. Add environment variables for your API keys and port:
+   - `PORT`: `18790` (required for port binding)
    - `OPENAI_API_KEY` (or your preferred provider)
    - `ANTHROPIC_API_KEY` (if using Claude)
 9. Click **Deploy**
@@ -158,6 +159,21 @@ koyeb service update nanobot-gateway \
 1. Check logs: `koyeb service logs nanobot-gateway`
 2. Verify API keys are set correctly
 3. Ensure the config file exists at `~/.nanobot/config.json`
+
+### Port Binding Error: `'$PORT' is not a valid integer`
+
+If you see this error, the `PORT` environment variable is not being set correctly:
+
+```bash
+# Solution 1: Set PORT via Koyeb CLI
+koyeb service update nanobot-gateway --env PORT=18790
+
+# Solution 2: Set in Koyeb Control Panel
+# Go to Service > Environment variables and add:
+# PORT = 18790
+```
+
+Make sure you're using the latest version of the Dockerfile which properly expands the `$PORT` variable.
 
 ### Port Binding Issues
 

@@ -39,5 +39,6 @@ RUN mkdir -p /root/.nanobot
 ENV PORT=18790
 EXPOSE 18790
 
-ENTRYPOINT ["nanobot"]
-CMD ["gateway", "--port", "$PORT"]
+# Use shell form to allow environment variable expansion
+# The shell form ensures $PORT is expanded at runtime
+CMD exec nanobot gateway --port "$PORT"
