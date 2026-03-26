@@ -3,12 +3,11 @@
 Tests that verification_mode controls answer verification behavior
 with a real LLM provider.
 
-Requires: OPENAI_API_KEY or LITELLM_API_KEY.
+Requires: LLM API key in ~/.nanobot/config.json or env var.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -20,16 +19,7 @@ from nanobot.config.schema import AgentConfig
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from tests.integration.conftest import MODEL, make_inbound
 
-_has_api_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("LITELLM_API_KEY"))
-
 pytestmark = [pytest.mark.integration]
-
-
-@pytest.fixture(autouse=True)
-def _require_api_key() -> None:
-    """Fail immediately if no LLM API key is available."""
-    if not _has_api_key:
-        pytest.fail("No LLM API key (OPENAI_API_KEY / LITELLM_API_KEY)")
 
 
 # ---------------------------------------------------------------------------

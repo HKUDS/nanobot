@@ -1,6 +1,7 @@
 """Shared fixtures for integration tests.
 
 These fixtures wire real subsystems together with a real LLM provider.
+API key is resolved from nanobot config (primary) with env var fallback.
 Tests fail when no API key is available.
 
 Pattern follows tests/test_memory_roundtrip.py.
@@ -18,15 +19,32 @@ from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.config.loader import load_config
 from nanobot.config.schema import AgentConfig
 from nanobot.memory.store import MemoryStore
 from nanobot.providers.litellm_provider import LiteLLMProvider
 
-_has_api_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("LITELLM_API_KEY"))
-
-_FAIL_REASON = "No LLM API key (OPENAI_API_KEY / LITELLM_API_KEY)"
-
 MODEL = "gpt-4o-mini"
+
+
+def _resolve_api_key() -> str | None:
+    """Resolve LLM API key: nanobot config (primary), env var (fallback)."""
+    try:
+        cfg = load_config()
+        key = cfg.get_api_key(MODEL)
+        if key:
+            return key
+    except Exception:  # crash-barrier: config load must not break test collection
+        pass
+    return os.environ.get("OPENAI_API_KEY") or os.environ.get("LITELLM_API_KEY") or None
+
+
+_api_key = _resolve_api_key()
+
+_FAIL_REASON = (
+    "No LLM API key found. Configure in ~/.nanobot/config.json "
+    "or set OPENAI_API_KEY / LITELLM_API_KEY env var."
+)
 
 SAMPLE_EVENTS: list[dict[str, Any]] = [
     {
@@ -66,9 +84,9 @@ SAMPLE_EVENTS: list[dict[str, Any]] = [
 @pytest.fixture()
 def provider() -> LiteLLMProvider:
     """Real LLM provider using gpt-4o-mini. Fails test if no API key."""
-    if not _has_api_key:
+    if not _api_key:
         pytest.fail(_FAIL_REASON)
-    return LiteLLMProvider(default_model=MODEL)
+    return LiteLLMProvider(api_key=_api_key, default_model=MODEL)
 
 
 @pytest.fixture()
