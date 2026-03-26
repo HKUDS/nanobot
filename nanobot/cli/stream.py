@@ -102,7 +102,7 @@ class StreamRenderer:
             self._live = Live(self._render(), console=c, auto_refresh=False)
             self._live.start()
         now = time.monotonic()
-        if "\n" in delta or (now - self._t) > 0.05:
+        if "\n" in delta or (now - self._t) > 0.1:
             self._live.update(self._render())
             self._live.refresh()
             self._t = now
