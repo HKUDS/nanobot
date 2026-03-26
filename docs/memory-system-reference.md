@@ -368,6 +368,20 @@ Total budget: 900 tokens (default), minimum 40 per section.
 
 ---
 
+## Micro-Extraction (Per-Turn)
+
+When `micro_extraction_enabled: true`, a lightweight extraction runs after every agent turn:
+
+1. User message + assistant response sent to `gpt-4o-mini` (configurable via `micro_extraction_model`)
+2. Model extracts structured events (facts, preferences, decisions, etc.) or returns empty array
+3. Events ingested via `EventIngester` — dedup, embed, graph all happen automatically
+4. Runs as async background task — zero latency impact on response
+
+This ensures short sessions (< 50 messages) persist learned information. Full consolidation
+remains the authoritative pipeline for profile updates, history, and snapshot rebuilds.
+
+---
+
 ## Configuration Parameters
 
 | Parameter | Default | Controls |
@@ -383,3 +397,5 @@ Total budget: 900 tokens (default), minimum 40 per section.
 | `graphEnabled` | false | Enable knowledge graph features |
 | `rerankerMode` | "enabled" | Cross-encoder reranking |
 | `rerankerAlpha` | 0.5 | Reranker score blending weight |
+| `micro_extraction_enabled` | `false` | Feature gate for per-turn extraction |
+| `micro_extraction_model` | `null` (= gpt-4o-mini) | Model for micro-extraction |
