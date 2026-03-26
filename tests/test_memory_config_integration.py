@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 from nanobot.config.memory import MemoryConfig
@@ -32,3 +33,25 @@ def test_scorer_reranker_mode_enabled():
     items = [{"id": "1", "content": "test", "score": 1.0}]
     scorer.rerank_items("query", items)
     mock_reranker.rerank.assert_called_once()
+
+
+def test_eval_runner_reads_gates_from_memory_config() -> None:
+    mc = MemoryConfig(
+        rollout_gate_min_recall_at_k=0.7,
+        rollout_gate_min_precision_at_k=0.3,
+    )
+    from nanobot.eval.memory_eval import EvalRunner
+
+    runner = EvalRunner(
+        retrieve_fn=lambda *a, **kw: [],
+        workspace=Path("/tmp"),
+        memory_dir=Path("/tmp"),
+        memory_config_fn=lambda: mc,
+        get_backend_stats_fn=lambda: {},
+    )
+    result = runner.evaluate_rollout_gates(
+        evaluation={"summary": {"recall_at_k": 0.8, "precision_at_k": 0.4}},
+        observability={"kpis": {}},
+    )
+    assert result["checks"][0]["threshold"] == 0.7
+    assert result["checks"][1]["threshold"] == 0.3

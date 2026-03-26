@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from nanobot.config.memory import MemoryConfig
 from nanobot.memory.unified_db import UnifiedMemoryDB
 
 # ---------------------------------------------------------------------------
@@ -122,7 +123,6 @@ class TestMaintenanceDBPath:
         from nanobot.memory.maintenance import MemoryMaintenance
 
         maint = MemoryMaintenance(
-            rollout_fn=lambda: {},
             db=db,
         )
 
@@ -331,8 +331,7 @@ class TestEvalDBPath:
             retrieve_fn=MagicMock(return_value=[]),
             workspace=tmp_path,
             memory_dir=tmp_path / "memory",
-            get_rollout_status_fn=lambda: {"mode": "enabled"},
-            get_rollout_fn=lambda: {},
+            memory_config_fn=lambda: MemoryConfig(),
             get_backend_stats_fn=lambda: {
                 "vector_points_count": 0,
                 "vector_search_count": 0,

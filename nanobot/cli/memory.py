@@ -439,7 +439,7 @@ def memory_eval(
             evaluation,
             obs,
             rollout={
-                "status": store._rollout_config.get_status(),
+                "status": store._memory_config.rollout_status(),
                 "gates": rollout_gate,
             },
             output_file=output_file or None,
