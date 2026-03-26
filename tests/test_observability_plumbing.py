@@ -884,3 +884,73 @@ class TestVerifySpanEnriched:
         assert obs_update_kwargs["output"] == "revised"
         assert obs_update_kwargs["metadata"]["passed"] is False
         assert obs_update_kwargs["metadata"]["issues"] == ["factual error"]
+
+    async def test_verify_parse_error_updates_span(self):
+        """When critique JSON is unparseable, span records parse_error."""
+        from unittest.mock import MagicMock
+
+        from nanobot.agent.verifier import AnswerVerifier
+        from nanobot.providers.base import LLMResponse
+
+        provider = ScriptedProvider([LLMResponse(content="not valid json", usage={})])
+        verifier = AnswerVerifier(
+            provider=provider,
+            model="test",
+            temperature=0.0,
+            max_tokens=1000,
+            verification_mode="always",
+            memory_uncertainty_threshold=0.5,
+        )
+        mock_obs = MagicMock()
+
+        @contextlib.asynccontextmanager
+        async def fake_span(**kwargs: Any):
+            yield mock_obs
+
+        with (
+            patch("nanobot.agent.verifier.langfuse_span", side_effect=fake_span),
+            patch("nanobot.agent.verifier.score_current_trace"),
+        ):
+            result, _ = await verifier.verify("Q?", "A.", [])
+
+        assert result == "A."  # original returned on parse error
+        mock_obs.update.assert_called_once()
+        kwargs = mock_obs.update.call_args[1]
+        assert kwargs["output"] == "parse_error"
+        assert kwargs["metadata"]["skipped"] is True
+
+    async def test_verify_call_error_updates_span(self):
+        """When the critique LLM call raises, span records call_error."""
+        from unittest.mock import MagicMock
+
+        from nanobot.agent.verifier import AnswerVerifier
+
+        class FailingProvider:
+            async def chat(self, **kwargs: Any):
+                raise RuntimeError("LLM down")
+
+        verifier = AnswerVerifier(
+            provider=FailingProvider(),  # type: ignore[arg-type]
+            model="test",
+            temperature=0.0,
+            max_tokens=1000,
+            verification_mode="always",
+            memory_uncertainty_threshold=0.5,
+        )
+        mock_obs = MagicMock()
+
+        @contextlib.asynccontextmanager
+        async def fake_span(**kwargs: Any):
+            yield mock_obs
+
+        with (
+            patch("nanobot.agent.verifier.langfuse_span", side_effect=fake_span),
+            patch("nanobot.agent.verifier.score_current_trace"),
+        ):
+            result, _ = await verifier.verify("Q?", "A.", [])
+
+        assert result == "A."  # original returned on error
+        mock_obs.update.assert_called_once()
+        kwargs = mock_obs.update.call_args[1]
+        assert kwargs["output"] == "call_error"
+        assert kwargs["metadata"]["skipped"] is True

@@ -172,12 +172,12 @@ class AnswerVerifier:
             except (json.JSONDecodeError, KeyError, ValueError):
                 logger.debug("Verification response not parseable, skipping")
                 if obs is not None:
-                    obs.update(output="parse_error", metadata={"passed": True})
+                    obs.update(output="parse_error", metadata={"skipped": True})
                 return candidate, messages
             except Exception:  # crash-barrier: LLM verification call
                 logger.debug("Verification call failed, returning original answer")
                 if obs is not None:
-                    obs.update(output="call_error", metadata={"passed": True})
+                    obs.update(output="call_error", metadata={"skipped": True})
                 return candidate, messages
 
     def should_force_verification(self, text: str) -> bool:
