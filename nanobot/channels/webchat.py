@@ -22,7 +22,7 @@ from nanobot.config.schema import Base
 class WebChatConfig(Base):
     """Web Chat channel configuration."""
 
-    enabled: bool = False
+    enabled: bool = True  # Enabled by default for easy local development
     host: str = "0.0.0.0"
     port: int = 8080
     allow_from: list[str] = Field(default_factory=lambda: ["*"])
