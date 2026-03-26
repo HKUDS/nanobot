@@ -45,11 +45,15 @@ class ExecTool(Tool):
         sandbox: str = "",
         extra_allowed_paths: list[str] | None = None,
         path_append: str = "",
+        rtk_enabled: bool = False,
+        rtk_verbose: bool = False,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
         self.sandbox = sandbox
         self.extra_allowed_paths = [Path(p).expanduser().resolve() for p in (extra_allowed_paths or [])]
+        self.rtk_enabled = rtk_enabled
+        self.rtk_verbose = rtk_verbose
         self.deny_patterns = deny_patterns or [
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
             r"\bdel\s+/[fq]\b",              # del /f, del /q
@@ -80,10 +84,32 @@ class ExecTool(Tool):
     def exclusive(self) -> bool:
         return True
 
+    async def _rtk_rewrite(self, command: str) -> str:
+        """通过 `rtk rewrite <cmd>` 获取 token 优化后的等效命令。
+        若 rtk 不可用或调用失败，原样返回原命令（fail-safe）。"""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "rtk", "rewrite", command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5.0)
+            if proc.returncode == 0 and stdout:
+                rewritten = stdout.decode().strip()
+                if self.rtk_verbose and rewritten != command:
+                    logger.debug("rtk rewrite: {} → {}", command, rewritten)
+                return rewritten
+        except Exception as e:
+            logger.debug("rtk rewrite failed (passthrough): {}", e)
+        return command
+
     async def execute(
         self, command: str, working_dir: str | None = None,
         timeout: int | None = None, **kwargs: Any,
     ) -> str:
+        if self.rtk_enabled:
+            command = await self._rtk_rewrite(command)
+
         cwd = working_dir or self.working_dir or os.getcwd()
         guard_error = self._guard_command(command, cwd)
         if guard_error:

@@ -281,6 +281,8 @@ class AgentLoop:
                 sandbox=self.exec_config.sandbox,
                 extra_allowed_paths=[str(p) for p in self.extra_allowed_paths],
                 path_append=self.exec_config.path_append,
+                rtk_enabled=self.exec_config.rtk_enabled,
+                rtk_verbose=self.exec_config.rtk_verbose,
             ))
         if self.web_config.enable:
             self.tools.register(WebSearchTool(config=self.web_config.search, proxy=self.web_config.proxy))
