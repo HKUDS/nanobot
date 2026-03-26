@@ -92,8 +92,9 @@ class AnswerVerifier:
 
         async with langfuse_span(
             name="verify",
+            input={"question": user_text[:200], "candidate": candidate[:300]},
             metadata={"mode": self.verification_mode, "model": effective_model},
-        ):
+        ) as obs:
             try:
                 critique_response = await self.provider.chat(
                     messages=critique_messages,
@@ -116,6 +117,11 @@ class AnswerVerifier:
 
                 if confidence >= 3 and not issues:
                     logger.debug("Verification passed (confidence={})", confidence)
+                    if obs is not None:
+                        obs.update(
+                            output="passed",
+                            metadata={"confidence": confidence, "passed": True},
+                        )
                     return candidate, messages
 
                 logger.info(
@@ -131,26 +137,47 @@ class AnswerVerifier:
                     }
                 )
 
-                revision = await self.provider.chat(
-                    messages=messages,
-                    tools=None,
-                    model=effective_model,
-                    temperature=effective_temperature,
-                    max_tokens=self.max_tokens,
-                )
-                revised = strip_think(revision.content) or candidate
+                async with langfuse_span(
+                    name="revision",
+                    input={"issues": issues, "confidence": confidence},
+                    metadata={"model": effective_model},
+                ) as rev_obs:
+                    revision = await self.provider.chat(
+                        messages=messages,
+                        tools=None,
+                        model=effective_model,
+                        temperature=effective_temperature,
+                        max_tokens=self.max_tokens,
+                    )
+                    revised = strip_think(revision.content) or candidate
+                    if rev_obs is not None:
+                        rev_obs.update(output=revised[:500])
+
                 for i in range(len(messages) - 1, -1, -1):
                     if messages[i].get("role") == "assistant":
                         messages[i]["content"] = revised
                         break
                 logger.info("Answer revised after verification")
+                if obs is not None:
+                    obs.update(
+                        output="revised",
+                        metadata={
+                            "confidence": confidence,
+                            "passed": False,
+                            "issues": issues[:5],
+                        },
+                    )
                 return revised, messages
 
             except (json.JSONDecodeError, KeyError, ValueError):
                 logger.debug("Verification response not parseable, skipping")
+                if obs is not None:
+                    obs.update(output="parse_error", metadata={"passed": True})
                 return candidate, messages
             except Exception:  # crash-barrier: LLM verification call
                 logger.debug("Verification call failed, returning original answer")
+                if obs is not None:
+                    obs.update(output="call_error", metadata={"passed": True})
                 return candidate, messages
 
     def should_force_verification(self, text: str) -> bool:

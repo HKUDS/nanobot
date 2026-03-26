@@ -744,3 +744,143 @@ class TestCompressSpanEnriched:
         # Should not crash and should return valid messages
         assert isinstance(result, list)
         assert len(result) >= 1
+
+
+# ---------------------------------------------------------------------------
+# 9. Verify span enriched with input/output and revision sub-span
+# ---------------------------------------------------------------------------
+
+
+class TestVerifySpanEnriched:
+    """verify() enriches the verify span with input/output and wraps revision in a sub-span."""
+
+    async def test_verify_pass_updates_span_with_passed(self):
+        from unittest.mock import MagicMock
+
+        from nanobot.agent.verifier import AnswerVerifier
+        from nanobot.providers.base import LLMResponse
+
+        critique_json = json.dumps({"confidence": 8, "issues": []})
+        provider = ScriptedProvider(
+            [
+                LLMResponse(
+                    content=critique_json,
+                    usage={"prompt_tokens": 50, "completion_tokens": 20},
+                )
+            ]
+        )
+        verifier = AnswerVerifier(
+            provider=provider,
+            model="test-model",
+            temperature=0.7,
+            max_tokens=4096,
+            verification_mode="always",
+            memory_uncertainty_threshold=0.5,
+        )
+        messages = [
+            {"role": "user", "content": "What is 2+2?"},
+            {"role": "assistant", "content": "4"},
+        ]
+
+        mock_obs = MagicMock()
+        captured_span_kwargs: list[dict[str, Any]] = []
+
+        @contextlib.asynccontextmanager
+        async def fake_span(**kwargs: Any):
+            captured_span_kwargs.append(kwargs)
+            yield mock_obs
+
+        with (
+            patch("nanobot.agent.verifier.langfuse_span", side_effect=fake_span),
+            patch("nanobot.agent.verifier.score_current_trace"),
+        ):
+            result, _ = await verifier.verify("What is 2+2?", "4", messages)
+
+        assert result == "4"
+        # Span should have been created with input containing question and candidate
+        assert len(captured_span_kwargs) == 1
+        span_kw = captured_span_kwargs[0]
+        assert span_kw["name"] == "verify"
+        assert span_kw["input"]["question"] == "What is 2+2?"
+        assert span_kw["input"]["candidate"] == "4"
+
+        # obs.update should have been called with output="passed"
+        mock_obs.update.assert_called_once()
+        update_kwargs = mock_obs.update.call_args[1]
+        assert update_kwargs["output"] == "passed"
+        assert update_kwargs["metadata"]["confidence"] == 8
+        assert update_kwargs["metadata"]["passed"] is True
+
+    async def test_verify_revision_creates_sub_span(self):
+        from unittest.mock import MagicMock
+
+        from nanobot.agent.verifier import AnswerVerifier
+        from nanobot.providers.base import LLMResponse
+
+        critique_json = json.dumps({"confidence": 1, "issues": ["factual error"]})
+        provider = ScriptedProvider(
+            [
+                LLMResponse(
+                    content=critique_json,
+                    usage={"prompt_tokens": 50, "completion_tokens": 20},
+                ),
+                LLMResponse(
+                    content="Revised answer: 4",
+                    usage={"prompt_tokens": 60, "completion_tokens": 30},
+                ),
+            ]
+        )
+        verifier = AnswerVerifier(
+            provider=provider,
+            model="test-model",
+            temperature=0.7,
+            max_tokens=4096,
+            verification_mode="always",
+            memory_uncertainty_threshold=0.5,
+        )
+        messages = [
+            {"role": "user", "content": "What is 2+2?"},
+            {"role": "assistant", "content": "wrong answer"},
+        ]
+
+        mock_obs = MagicMock()
+        mock_rev_obs = MagicMock()
+        span_call_count = 0
+        captured_span_kwargs: list[dict[str, Any]] = []
+
+        @contextlib.asynccontextmanager
+        async def fake_span(**kwargs: Any):
+            nonlocal span_call_count
+            captured_span_kwargs.append(kwargs)
+            if span_call_count == 0:
+                span_call_count += 1
+                yield mock_obs
+            else:
+                yield mock_rev_obs
+
+        with (
+            patch("nanobot.agent.verifier.langfuse_span", side_effect=fake_span),
+            patch("nanobot.agent.verifier.score_current_trace"),
+        ):
+            result, _ = await verifier.verify("What is 2+2?", "wrong answer", messages)
+
+        assert result == "Revised answer: 4"
+
+        # Two spans: verify + revision
+        assert len(captured_span_kwargs) == 2
+        assert captured_span_kwargs[0]["name"] == "verify"
+        assert captured_span_kwargs[1]["name"] == "revision"
+        assert captured_span_kwargs[1]["input"]["issues"] == ["factual error"]
+        assert captured_span_kwargs[1]["input"]["confidence"] == 1
+
+        # Revision obs should have output set
+        mock_rev_obs.update.assert_called_once()
+        rev_update_kwargs = mock_rev_obs.update.call_args[1]
+        assert rev_update_kwargs["output"] == "Revised answer: 4"
+
+        # Verify obs should have output="revised"
+        mock_obs.update.assert_called_once()
+        obs_update_kwargs = mock_obs.update.call_args[1]
+        assert obs_update_kwargs["output"] == "revised"
+        assert obs_update_kwargs["metadata"]["passed"] is False
+        assert obs_update_kwargs["metadata"]["issues"] == ["factual error"]
