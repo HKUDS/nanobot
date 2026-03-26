@@ -96,6 +96,10 @@ class BaseChannel(ABC):
 
         Override in subclasses to enable streaming. Implementations should
         raise on delivery failure so the channel manager can retry.
+
+        Streaming contract: ``_stream_delta`` is a chunk, ``_stream_end`` ends
+        the current segment, and stateful implementations must key buffers by
+        ``_stream_id`` rather than only by ``chat_id``.
         """
         pass
 
