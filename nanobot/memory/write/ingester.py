@@ -110,7 +110,7 @@ class EventIngester:
                 event_type = str(raw.get("type", "fact"))
                 ts = str(raw.get("timestamp", _utc_now_iso()))
                 event_id = self._coercer.build_event_id(event_type, summary, ts)
-                raw = {**raw, "id": event_id}
+                raw = {**raw, "id": event_id, "timestamp": ts}
             candidate = self._coercer.ensure_event_provenance(raw)
 
             if event_id in existing_ids:

@@ -119,7 +119,7 @@ class MicroExtractor:
             events = self._parse_events(response)
             if not events:
                 return
-            await asyncio.to_thread(self._ingester.append_events, events)
+            self._ingester.append_events(events)
             logger.info("Micro-extraction: {} event(s) ingested", len(events))
         except Exception:  # crash-barrier: best-effort background extraction
             logger.warning("Micro-extraction failed (will be caught by consolidation)")
