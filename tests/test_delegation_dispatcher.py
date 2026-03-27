@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import sys
 from pathlib import Path
 from typing import Any
@@ -399,67 +398,6 @@ class TestCapScratchpadForInjection:
         assert result.startswith("hello")
         assert "truncated" in result
         assert "6 chars omitted" in result
-
-
-# ---------------------------------------------------------------------------
-# Delegation ID uniqueness under asyncio.gather (LAN-155)
-# ---------------------------------------------------------------------------
-
-
-class TestDelegationIdUniqueness:
-    async def test_parallel_dispatches_produce_unique_ids(self, tmp_path: Path):
-        """Fires 5+ parallel dispatches and verifies all delegation_id values are unique."""
-        from nanobot.coordination.coordinator import Coordinator, build_default_registry
-        from nanobot.providers.base import LLMProvider, LLMResponse
-
-        class StubProvider(LLMProvider):
-            def get_default_model(self) -> str:
-                return "stub"
-
-            async def chat(
-                self,
-                messages: Any,
-                tools: Any = None,
-                model: Any = None,
-                max_tokens: int = 4096,
-                temperature: float = 0.7,
-                metadata: Any = None,
-            ) -> LLMResponse:
-                return LLMResponse(content='{"role": "general"}')
-
-        provider = StubProvider()
-        registry = build_default_registry("general")
-        coordinator = Coordinator(provider, registry, default_role="general")
-
-        d = _make_dispatcher(tmp_path, provider=provider)
-        d.coordinator = coordinator
-
-        # Patch execute_delegated_agent to avoid full agent execution
-        async def fake_execute(role: Any, task: str, context: Any) -> tuple[str, list[str]]:
-            await asyncio.sleep(0.01)
-            return f"done:{task}", ["read_file"]
-
-        d.execute_delegated_agent = fake_execute  # type: ignore[assignment]
-
-        # Fire 6 parallel dispatches
-        results = await asyncio.gather(
-            *[d.dispatch("general", f"task_{i}", None) for i in range(6)]
-        )
-
-        assert len(results) == 6
-        assert d.delegation_count == 6
-
-        # Collect all delegation_ids from the routing trace
-        delegation_ids = [
-            entry.get("event") for entry in d.routing_trace if entry["event"] == "delegate_complete"
-        ]
-        # All 6 dispatches should have completed
-        assert len(delegation_ids) == 6
-
-        # Each dispatch incremented delegation_count before awaiting,
-        # so all IDs should be unique — verify via the count itself.
-        # The IDs are del_001 through del_006 based on delegation_count.
-        assert d.delegation_count == 6
 
 
 # ---------------------------------------------------------------------------

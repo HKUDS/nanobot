@@ -169,16 +169,6 @@ ALLOWLIST: set[tuple[str, str]] = {
     ("nanobot/tools/builtin/mission.py", "nanobot.coordination.mission"),
     # DelegationResult dataclass (data object, not service instantiation).
     ("nanobot/coordination/delegation.py", "nanobot.tools.builtin.delegate"),
-    # ── Legitimate exceptions: runtime pure functions / enums ───────────
-    # has_parallel_structure() is a pure function called at runtime.
-    ("nanobot/agent/turn_orchestrator.py", "nanobot.coordination.task_types"),
-    # DelegationAction enum compared at runtime (not instantiation).
-    ("nanobot/agent/turn_orchestrator.py", "nanobot.coordination.delegation_advisor"),
-    # Same runtime dependencies in turn_phases.py (extracted from turn_orchestrator).
-    ("nanobot/agent/turn_phases.py", "nanobot.coordination.task_types"),
-    ("nanobot/agent/turn_phases.py", "nanobot.coordination.delegation_advisor"),
-    # UnknownRoleError exception class (data object, not service instantiation).
-    ("nanobot/agent/message_processor.py", "nanobot.coordination.router"),
 }
 
 

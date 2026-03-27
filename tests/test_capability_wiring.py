@@ -15,7 +15,7 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.config.agent import AgentConfig
 from nanobot.config.memory import MemoryConfig
-from nanobot.config.schema import AgentRoleConfig, RoutingConfig
+from nanobot.config.schema import RoutingConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
 from nanobot.tools.base import Tool, ToolResult
 from nanobot.tools.capability import CapabilityRegistry
@@ -105,13 +105,6 @@ class TestCapabilityRegistryWiring:
         loop = _make_loop(tmp_path)
         assert loop._capabilities.skills_loader is loop.context.skills
 
-    def test_agent_registry_always_present(self, tmp_path: Path) -> None:
-        """agent_registry is always set (never None) — LAN-150."""
-        from nanobot.coordination.registry import AgentRegistry
-
-        loop = _make_loop(tmp_path)
-        assert isinstance(loop._capabilities.agent_registry, AgentRegistry)
-
 
 # ---------------------------------------------------------------------------
 # Tests: tools registered in ToolExecutor visible through CapabilityRegistry
@@ -170,70 +163,6 @@ class TestUnavailableToolsCallback:
 # ---------------------------------------------------------------------------
 # Tests: coordinator wiring populates CapabilityRegistry roles
 # ---------------------------------------------------------------------------
-
-
-class TestCoordinatorRoleWiring:
-    """When build_agent() is called with a routing_config, roles are registered in CapabilityRegistry."""
-
-    def test_build_agent_with_routing_populates_roles(self, tmp_path: Path) -> None:
-        roles = [
-            AgentRoleConfig(
-                name="coder",
-                description="Writes code",
-                enabled=True,
-            ),
-            AgentRoleConfig(
-                name="researcher",
-                description="Does research",
-                enabled=True,
-            ),
-        ]
-        routing = RoutingConfig(enabled=True, roles=roles, default_role="general")
-        loop = _make_loop(tmp_path, routing_config=routing)
-
-        # AgentRegistry should be wired
-        assert loop._capabilities.agent_registry is not None
-        # Roles should be in CapabilityRegistry (registered at factory time)
-        assert "coder" in loop._capabilities
-        assert "researcher" in loop._capabilities
-        cap = loop._capabilities.get("coder")
-        assert cap is not None
-        assert cap.kind == "delegate_role"
-        assert cap.description == "Writes code"
-        assert cap.health == "healthy"
-
-    def test_build_agent_with_disabled_role(self, tmp_path: Path) -> None:
-        roles = [
-            AgentRoleConfig(
-                name="disabled_role",
-                description="Not active",
-                enabled=False,
-            ),
-        ]
-        routing = RoutingConfig(enabled=True, roles=roles, default_role="general")
-        loop = _make_loop(tmp_path, routing_config=routing)
-
-        # AgentRegistry should be wired even with disabled roles
-        assert loop._capabilities.agent_registry is not None
-
-    def test_wire_coordinator_is_idempotent(self, tmp_path: Path) -> None:
-        roles = [
-            AgentRoleConfig(name="coder", description="Writes code", enabled=True),
-        ]
-        routing = RoutingConfig(enabled=True, roles=roles, default_role="general")
-        loop = _make_loop(tmp_path, routing_config=routing)
-        cap_count_1 = len(loop._capabilities)
-        loop._wire_coordinator()
-        cap_count_2 = len(loop._capabilities)
-        assert cap_count_1 == cap_count_2
-
-    def test_no_routing_config_leaves_agent_registry_empty(self, tmp_path: Path) -> None:
-        """Without routing, agent_registry exists but has no roles — LAN-150."""
-        from nanobot.coordination.registry import AgentRegistry
-
-        loop = _make_loop(tmp_path, routing_config=None)
-        assert isinstance(loop._capabilities.agent_registry, AgentRegistry)
-        assert len(loop._capabilities.agent_registry) == 0
 
 
 # ---------------------------------------------------------------------------

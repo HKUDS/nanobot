@@ -1,7 +1,7 @@
 """Agent loop: the core processing engine.
 
-Orchestrates the Plan-Act-Observe-Reflect cycle, bus consumption, message
-routing via the coordinator, and MCP lifecycle.  Turn execution is delegated
+Orchestrates the Plan-Act-Observe-Reflect cycle, bus consumption,
+and MCP lifecycle.  Turn execution is delegated
 to ``TurnOrchestrator``; per-message processing to ``MessageProcessor``.
 """
 
@@ -29,7 +29,6 @@ from nanobot.observability.tracing import TraceContext
 if TYPE_CHECKING:
     from nanobot.agent.agent_components import _AgentComponents
     from nanobot.agent.message_processor import MessageProcessor
-    from nanobot.coordination.coordinator import Coordinator
 
 
 def _user_friendly_error(exc: Exception) -> str:
@@ -48,7 +47,7 @@ class AgentLoop:
     """Core processing engine for the nanobot agent.
 
     Receives ``_AgentComponents`` from ``build_agent()`` and orchestrates bus
-    consumption, coordinator routing, MCP lifecycle, and message processing.
+    consumption, MCP lifecycle, and message processing.
     """
 
     def __init__(self, *, components: _AgentComponents) -> None:
@@ -77,15 +76,12 @@ class AgentLoop:
         self.missions = components.subsystems.missions
         self._consolidator = components.subsystems.consolidator
         self._dispatcher = components.subsystems.dispatcher
-        self._delegation_advisor = components.subsystems.delegation_advisor
         self._llm_caller = components.subsystems.llm_caller
         self._verifier = components.subsystems.verifier
         self._orchestrator = components.subsystems.orchestrator
         self._processor: MessageProcessor = components.subsystems.processor  # type: ignore[assignment]
-        self._role_manager = components.role_manager
 
-        # Routing
-        self._routing_config = components.infra.routing_config
+        # MCP / infra
         self._mcp_servers = components.infra.mcp_servers
         self._mcp_connector = components.infra.mcp_connector
 
@@ -95,8 +91,6 @@ class AgentLoop:
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
-        self._coordinator: Coordinator | None = components.coordinator
-        self._coordinator_wired = False
         self._delegation_stack: list[str] = []
         self._turn_tokens_prompt = 0
         self._turn_tokens_completion = 0
@@ -216,11 +210,9 @@ class AgentLoop:
 
     async def run(self) -> None:
         """Run the agent loop, consuming messages from the bus."""
-        assert self._role_manager is not None, "build_agent() must wire _role_manager"
         self._running = True
         self._stop_event = asyncio.Event()
         await self._connect_mcp()
-        self._wire_coordinator()
         if self.context.memory is not None:
             await (
                 self.context.memory.maintenance.ensure_health()
@@ -344,22 +336,6 @@ class AgentLoop:
                 except asyncio.TimeoutError:
                     continue
 
-    def _wire_coordinator(self) -> None:
-        """Wire delegate tools into the coordinator (after MCP tools are available)."""
-        if self._coordinator is None:
-            return
-        if self._coordinator_wired:
-            return
-        self._coordinator_wired = True
-        self._dispatcher.wire_delegate_tools(
-            available_roles_fn=self._capabilities.role_names,
-        )
-        _registry = self._capabilities.agent_registry
-        logger.info(
-            "Multi-agent routing wired with {} roles",
-            len(_registry) if _registry else 0,
-        )
-
     async def close_mcp(self) -> None:
         """Close MCP connections and other async resources."""
         if self._mcp_stack:
@@ -406,9 +382,7 @@ class AgentLoop:
         forced_role: str | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
-        assert self._role_manager is not None, "build_agent() must wire _role_manager"
         await self._connect_mcp()
-        self._wire_coordinator()
 
         async with trace_request(
             name="request",

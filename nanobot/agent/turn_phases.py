@@ -1,8 +1,7 @@
-"""ACT and REFLECT phase handlers for the PAOR loop.
+"""ACT phase handler for the PAOR loop.
 
 Extracted from ``turn_orchestrator.py`` to keep both files under 500 LOC.
-``ActPhase`` owns tool execution and result processing; ``ReflectPhase``
-owns post-batch progress evaluation and delegation nudges.
+``ActPhase`` owns tool execution and result processing.
 
 Module boundary: this module must **never** import from ``nanobot.channels.*``,
 ``nanobot.bus.*``, or ``nanobot.session.*``.
@@ -16,18 +15,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.callbacks import ProgressCallback, ToolResultEvent
-from nanobot.agent.failure import FailureClass, ToolCallTracker, _build_failure_prompt
+from nanobot.agent.failure import FailureClass, ToolCallTracker
 from nanobot.agent.turn_types import TurnState
 from nanobot.context.context import ContextBuilder
-from nanobot.coordination.task_types import has_parallel_structure
 from nanobot.observability.langfuse import update_current_span
 from nanobot.observability.tracing import bind_trace
 from nanobot.tools.executor import ToolExecutor
 
 if TYPE_CHECKING:
-    from nanobot.context.prompt_loader import PromptLoader
-    from nanobot.coordination.delegation import DelegationDispatcher
-    from nanobot.coordination.delegation_advisor import DelegationAdvisor
     from nanobot.providers.base import LLMResponse
 
 # ---------------------------------------------------------------------------
@@ -41,42 +36,9 @@ _ARGS_REDACT_TOOLS: frozenset[str] = frozenset(
     {"write_file", "edit_file", "exec", "web_fetch", "web_search"}
 )
 
-# Delegation tool names -- hoisted here to avoid rebuilding the set each iteration.
-_DELEGATION_TOOL_NAMES: frozenset[str] = frozenset({"delegate", "delegate_parallel"})
-
 # Named constants for magic numbers used across the agent loop (CQ-L6).
-_GREETING_MAX_LEN: int = 20  # Messages shorter than this are treated as greetings / simple Qs
 _CONTEXT_RESERVE_RATIO: float = (
     0.80  # Fraction of context window reserved for prompt; ~20% for reply
-)
-
-# Multi-step planning signal substrings for _needs_planning().
-# Defined at module level so the tuple is allocated once, not per call.
-_PLANNING_SIGNALS: tuple[str, ...] = (
-    " and ",
-    " then ",
-    " after that",
-    " also ",
-    " steps",
-    " first ",
-    " second ",
-    " finally ",
-    "\n-",
-    "\n*",
-    "\n1.",
-    "\n2.",
-    " research ",
-    " analyze ",
-    " compare ",
-    " investigate ",
-    " create ",
-    " build ",
-    " implement ",
-    " set up ",
-    " configure ",
-    " plan ",
-    " schedule ",
-    " organize ",
 )
 
 
@@ -89,23 +51,6 @@ def _safe_int(obj: Any, attr: str, default: int) -> int:
     """Safely extract an integer attribute, returning *default* when the value is not numeric."""
     val = getattr(obj, attr, default)
     return int(val) if isinstance(val, int | float) else default
-
-
-def _needs_planning(text: str) -> bool:
-    """Heuristic: does this message benefit from explicit planning?
-
-    Short greetings, simple questions, or single-action requests don't
-    need a plan. Multi-step tasks, research queries, and complex
-    instructions do.
-    """
-    if not text:
-        return False
-    text_lower = text.strip().lower()
-    # Very short messages (< 20 chars) are usually greetings or simple Qs
-    if len(text_lower) < _GREETING_MAX_LEN:
-        return False
-    # Explicit multi-step indicators
-    return any(signal in text_lower for signal in _PLANNING_SIGNALS)
 
 
 def _dynamic_preserve_recent(
@@ -336,141 +281,3 @@ class ActPhase:
             last_tool_call_msg_idx=last_tool_call_msg_idx,
             tool_calls_this_batch=tool_calls_this_batch,
         )
-
-
-# ---------------------------------------------------------------------------
-# ReflectPhase
-# ---------------------------------------------------------------------------
-
-
-class ReflectPhase:
-    """Evaluate progress and inject REFLECT-phase guidance."""
-
-    def __init__(
-        self,
-        *,
-        dispatcher: DelegationDispatcher,
-        delegation_advisor: DelegationAdvisor,
-        prompts: PromptLoader,
-        role_name: str,
-    ) -> None:
-        self._dispatcher = dispatcher
-        self._delegation_advisor = delegation_advisor
-        self._prompts = prompts
-        self._role_name = role_name
-
-    def evaluate(
-        self,
-        state: TurnState,
-        response: LLMResponse,
-        any_failed: bool,
-        failed_this_batch: list[tuple[str, FailureClass]],
-        *,
-        role_name: str | None = None,
-    ) -> None:
-        """Append REFLECT-phase system messages based on the current turn state.
-
-        Mutates ``state`` in-place: updates ``last_delegation_advice`` and may
-        filter ``tools_def_cache`` when delegate tools are removed.
-
-        Parameters
-        ----------
-        role_name:
-            Optional per-call override for the active role.  When provided,
-            takes precedence over the construction-time ``_role_name``.
-        """
-        from nanobot.coordination.delegation_advisor import DelegationAction
-
-        effective_role = role_name if role_name is not None else self._role_name
-
-        had_delegations = any(tc.name in _DELEGATION_TOOL_NAMES for tc in response.tool_calls)
-
-        # --- Delegation advisor (replaces 3 independent triggers) ---
-        delegation_advice = self._delegation_advisor.advise_reflect_phase(
-            role_name=effective_role,
-            turn_tool_calls=state.turn_tool_calls,
-            delegation_count=self._dispatcher.delegation_count,
-            max_delegations=self._dispatcher.max_delegations,
-            had_delegations_this_batch=had_delegations,
-            used_sequential_delegate=had_delegations
-            and not any(tc.name == "delegate_parallel" for tc in response.tool_calls),
-            has_parallel_structure=has_parallel_structure(state.user_text),
-            any_ungrounded=any(
-                "grounded=False" in (m.get("content") or "")
-                for m in state.messages[-len(response.tool_calls) :]
-                if m.get("role") == "tool"
-            ),
-            any_failed=any_failed,
-            iteration=state.iteration,
-            previous_advice=state.last_delegation_advice,
-        )
-        state.last_delegation_advice = delegation_advice.action
-
-        # --- Render delegation advice OR fall through to other nudges ---
-        if delegation_advice.action == DelegationAction.HARD_GATE:
-            state.messages.append(
-                {
-                    "role": "system",
-                    "content": self._prompts.get("nudge_delegation_exhausted"),
-                }
-            )
-        elif delegation_advice.action == DelegationAction.SYNTHESIZE:
-            nudge = self._prompts.get("nudge_post_delegation")
-            if delegation_advice.warn_ungrounded:
-                nudge += "\n\n" + self._prompts.get("nudge_ungrounded_warning")
-            state.messages.append({"role": "system", "content": nudge})
-        elif delegation_advice.action in (
-            DelegationAction.SOFT_NUDGE,
-            DelegationAction.HARD_NUDGE,
-        ):
-            if delegation_advice.suggested_mode == "delegate_parallel":
-                state.messages.append(
-                    {
-                        "role": "system",
-                        "content": self._prompts.get("nudge_use_parallel"),
-                    }
-                )
-            else:
-                state.messages.append({"role": "system", "content": delegation_advice.reason})
-        elif any_failed:
-            # PRESERVED: failure handling (advisor returns NONE when any_failed=True)
-            _permanent = state.tracker.permanent_failures
-            _available = [
-                t["function"]["name"]
-                for t in state.tools_def_cache
-                if t["function"]["name"] not in _permanent
-            ]
-            state.messages.append(
-                {
-                    "role": "system",
-                    "content": _build_failure_prompt(
-                        failed_this_batch,
-                        _permanent,
-                        _available,
-                    ),
-                }
-            )
-        elif state.has_plan and len(response.tool_calls) >= 1:
-            # PRESERVED: progress nudge (not delegation-related)
-            state.messages.append(
-                {
-                    "role": "system",
-                    "content": self._prompts.get("progress"),
-                }
-            )
-        elif len(response.tool_calls) >= 3:
-            # PRESERVED: reflect nudge (not delegation-related)
-            state.messages.append(
-                {
-                    "role": "system",
-                    "content": self._prompts.get("reflect"),
-                }
-            )
-
-        # Remove delegate tools when advisor says budget is exhausted
-        if delegation_advice.remove_delegate_tools:
-            state.tools_def_cache = [
-                t
-                for t in state.tools_def_cache
-                if t["function"]["name"] not in _DELEGATION_TOOL_NAMES
-            ]

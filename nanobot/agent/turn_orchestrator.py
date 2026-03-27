@@ -28,11 +28,8 @@ from nanobot.agent.callbacks import (
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
 from nanobot.agent.turn_phases import (
     _CONTEXT_RESERVE_RATIO,
-    _DELEGATION_TOOL_NAMES,
     ActPhase,
-    ReflectPhase,
     _dynamic_preserve_recent,
-    _needs_planning,
     _safe_int,
 )
 from nanobot.agent.turn_types import TurnResult as TurnResult  # re-export
@@ -45,8 +42,6 @@ from nanobot.tools.executor import ToolExecutor
 
 if TYPE_CHECKING:
     from nanobot.config.agent import AgentConfig
-    from nanobot.coordination.delegation import DelegationDispatcher
-    from nanobot.coordination.delegation_advisor import DelegationAdvisor
     from nanobot.providers.base import LLMProvider, LLMResponse
 
 
@@ -69,15 +64,9 @@ class TurnOrchestrator:
         llm_caller: StreamingLLMCaller,
         tool_executor: ToolExecutor,
         verifier: AnswerVerifier,
-        dispatcher: DelegationDispatcher,
-        delegation_advisor: DelegationAdvisor,
         config: AgentConfig,
         prompts: PromptLoader,
         context: ContextBuilder,
-        # Note: spec Section 3 defines 8 keyword-only params. Three additional params
-        # (provider, model, role_name) are needed for context compression and delegation
-        # routing. Eliminating them would require changes to ContextBuilder or
-        # DelegationAdvisor — explicitly out-of-scope per design spec Section 6.
         provider: LLMProvider | None = None,
         model: str = "",
         role_name: str = "",
@@ -85,8 +74,6 @@ class TurnOrchestrator:
         self._llm_caller = llm_caller
         self._tool_executor = tool_executor
         self._verifier = verifier
-        self._dispatcher = dispatcher
-        self._delegation_advisor = delegation_advisor
         self._config = config
         self._prompts = prompts
         self._context = context
@@ -97,19 +84,11 @@ class TurnOrchestrator:
 
         # Phase handlers (extracted to turn_phases.py)
         self._act = ActPhase(tool_executor=tool_executor, context=context)
-        self._reflect = ReflectPhase(
-            dispatcher=dispatcher,
-            delegation_advisor=delegation_advisor,
-            prompts=prompts,
-            role_name=role_name,
-        )
 
         # Per-turn token accumulators (reset at start of each run)
         self._turn_tokens_prompt = 0
         self._turn_tokens_completion = 0
         self._turn_llm_calls = 0
-
-        # _last_classification_result removed: now passed via TurnState.classification_result
 
     # ------------------------------------------------------------------
     # Public API
@@ -125,9 +104,6 @@ class TurnOrchestrator:
         Returns a ``TurnResult`` with the final content, tool names used,
         and the conversation message list after the turn.
         """
-        self._dispatcher.on_progress = on_progress
-        self._dispatcher.active_messages = state.messages
-        self._dispatcher.delegation_count = 0
         final_content: str | None = None
         tools_used: list[str] = []
 
@@ -136,60 +112,16 @@ class TurnOrchestrator:
         self._turn_tokens_completion = 0
         self._turn_llm_calls = 0
 
-        # Resolve per-turn active settings (role-switched overrides).
-        effective_model = state.active_model if state.active_model is not None else self._model
-        effective_role_name = (
-            state.active_role_name if state.active_role_name is not None else self._role_name
-        )
-        max_iterations = (
-            state.active_max_iterations
-            if state.active_max_iterations is not None
-            else self._max_iterations
-        )
-
         # Reserve ~20% of context window for the model's response
         _raw_cw = getattr(self._config, "context_window_tokens", 0)
         context_window = _raw_cw if isinstance(_raw_cw, int | float) else 0
         context_budget = int(context_window * _CONTEXT_RESERVE_RATIO) if context_window else 0
 
-        # --- PLAN phase: inject planning prompt for complex tasks ----------
-        from nanobot.coordination.delegation_advisor import DelegationAction
-
-        _raw_pe = getattr(self._config, "planning_enabled", False)
-        planning_enabled = _raw_pe if isinstance(_raw_pe, bool) else False
-        if planning_enabled:
-            if _needs_planning(state.user_text):
-                state.messages.append(
-                    {
-                        "role": "system",
-                        "content": self._prompts.get("plan"),
-                    }
-                )
-                state.has_plan = True
-                logger.debug("Planning prompt injected for: {}...", state.user_text[:60])
-                # Delegation advisor plan-phase
-                cr = state.classification_result
-                plan_advice = self._delegation_advisor.advise_plan_phase(
-                    role_name=effective_role_name,
-                    needs_orchestration=cr.needs_orchestration if cr else False,
-                    relevant_roles=cr.relevant_roles if cr else [],
-                    user_text=state.user_text,
-                    delegate_tools_available=bool(self._tool_executor.get("delegate_parallel")),
-                )
-                if plan_advice.action != DelegationAction.NONE:
-                    state.messages.append(
-                        {
-                            "role": "system",
-                            "content": self._prompts.get("nudge_parallel_structure"),
-                        }
-                    )
-                    logger.debug("Delegation advisor plan-phase: {}", plan_advice.reason)
-
         _raw_wt = getattr(self._config, "max_session_wall_time_seconds", 0)
         _wall_time_limit = _raw_wt if isinstance(_raw_wt, int | float) else 0
         _wall_time_start = time.monotonic()
 
-        while state.iteration < max_iterations:
+        while state.iteration < self._max_iterations:
             state.iteration += 1
 
             # Wall-time guardrail (LAN-193)
@@ -212,7 +144,7 @@ class TurnOrchestrator:
                 context_budget * 0.85
             ):
                 _raw_sm = getattr(self._config, "summary_model", None)
-                summary_model = (_raw_sm if isinstance(_raw_sm, str) else None) or effective_model
+                summary_model = (_raw_sm if isinstance(_raw_sm, str) else None) or self._model
                 preserve_n = _dynamic_preserve_recent(state.messages, state.last_tool_call_msg_idx)
                 if self._provider is not None:
                     state.messages = await summarize_and_compress(
@@ -244,8 +176,6 @@ class TurnOrchestrator:
                 state.messages,
                 active_tools,
                 on_progress,
-                model=state.active_model,
-                temperature=state.active_temperature,
             )
             # Normalise: in tests, mocks may return (content, tool_calls) tuples
             # instead of LLMResponse objects.
@@ -273,26 +203,6 @@ class TurnOrchestrator:
 
             # --- ACT: execute tool calls -----------------------------------
             if response.has_tool_calls:
-                # Plan enforcement: if planning was requested but model jumped
-                # straight to tools without producing a plan, nudge it once.
-                is_delegation = all(tc.name in _DELEGATION_TOOL_NAMES for tc in response.tool_calls)
-                if (
-                    state.has_plan
-                    and not state.plan_enforced
-                    and state.turn_tool_calls == 0
-                    and not response.content
-                    and not is_delegation
-                ):
-                    state.plan_enforced = True
-                    state.messages.append(
-                        {
-                            "role": "system",
-                            "content": self._prompts.get("nudge_plan_enforcement"),
-                        }
-                    )
-                    logger.debug("Plan enforcement: nudging model to produce plan first")
-                    continue
-
                 # Filter out malformed tool calls (empty name or empty arguments)
                 valid_calls = [
                     tc for tc in response.tool_calls if tc.name and tc.name.strip() and tc.arguments
@@ -359,15 +269,6 @@ class TurnOrchestrator:
                 state.nudged_for_final = batch.nudged_for_final
                 state.last_tool_call_msg_idx = batch.last_tool_call_msg_idx
 
-                # --- REFLECT: evaluate progress and inject guidance ---------
-                self._reflect.evaluate(
-                    state,
-                    response,
-                    batch.any_failed,
-                    batch.failed_this_batch,
-                    role_name=effective_role_name,
-                )
-
             else:
                 # --- No tool calls: the model is producing a text answer ---
                 if (
@@ -394,10 +295,10 @@ class TurnOrchestrator:
                 )
                 break
 
-        if final_content is None and state.iteration >= max_iterations:
-            logger.warning("Max iterations ({}) reached", max_iterations)
+        if final_content is None and state.iteration >= self._max_iterations:
+            logger.warning("Max iterations ({}) reached", self._max_iterations)
             final_content = (
-                f"I reached the maximum number of tool call iterations ({max_iterations}) "
+                f"I reached the maximum number of tool call iterations ({self._max_iterations}) "
                 "without completing the task. You can try breaking the task into smaller steps."
             )
             state.messages = self._context.add_assistant_message(state.messages, final_content)
@@ -408,12 +309,7 @@ class TurnOrchestrator:
                 state.user_text,
                 final_content,
                 state.messages,
-                model=state.active_model,
-                temperature=state.active_temperature,
             )
-
-        # Clear per-turn progress callback to prevent cross-turn leakage
-        self._dispatcher.on_progress = None
 
         return TurnResult(
             content=final_content or "",

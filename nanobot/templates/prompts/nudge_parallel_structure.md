@@ -1,1 +1,0 @@
-The user's request lists multiple INDEPENDENT sub-tasks or areas. Use `delegate_parallel` (NOT sequential `delegate`) to fan them out concurrently. Sequential `delegate` is only appropriate when task B depends on task A's output.
