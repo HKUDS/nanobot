@@ -163,10 +163,9 @@ version_toml = ["pyproject.toml:project.version"]
 version_variables = ["nanobot/__init__.py:__version__"]
 branch = "main"
 commit_message = "chore(release): v{version}"
-build_command = false
 tag_format = "v{version}"
 
-[tool.semantic_release.changelog]
+[tool.semantic_release.changelog.default_templates]
 changelog_file = "CHANGELOG.md"
 
 [tool.semantic_release.commit_parser_options]
