@@ -311,9 +311,12 @@ class AgentLoop:
                         thought = self._strip_think(response.content)
                         if thought:
                             await on_progress(thought)
-                    tool_hint = self._tool_hint(response.tool_calls)
-                    tool_hint = self._strip_think(tool_hint)
-                    await on_progress(tool_hint, tool_hint=True)
+                    hint_calls = [tc for tc in response.tool_calls if tc.name != "message"]
+                    if hint_calls:
+                        tool_hint = self._tool_hint(hint_calls)
+                        tool_hint = self._strip_think(tool_hint)
+                        if tool_hint:
+                            await on_progress(tool_hint, tool_hint=True)
 
                 tool_call_dicts = [
                     tc.to_openai_tool_call()
