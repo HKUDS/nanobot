@@ -103,13 +103,46 @@ class GatewayConfig(Base):
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
+class OpenAIWebSearchLocationConfig(Base):
+    """Approximate location for OpenAI native web search."""
+
+    country: str = ""
+    city: str = ""
+    region: str = ""
+    timezone: str = ""
+
+
 class WebSearchConfig(Base):
     """Web search tool configuration."""
 
-    provider: str = "brave"  # brave, tavily, duckduckgo, searxng, jina
+    provider: str = "brave"  # brave, tavily, duckduckgo, searxng, jina, openai_native
     api_key: str = ""
     base_url: str = ""  # SearXNG base URL
     max_results: int = 5
+    user_location: OpenAIWebSearchLocationConfig = Field(default_factory=OpenAIWebSearchLocationConfig)
+
+    def uses_openai_native(self) -> bool:
+        """Whether nanobot should defer web search to OpenAI native search."""
+        return self.provider.strip().lower() == "openai_native"
+
+    def openai_web_search_tool(self) -> dict[str, object] | None:
+        """Build an OpenAI Responses API web_search tool config."""
+        if not self.uses_openai_native():
+            return None
+
+        location = {
+            "type": "approximate",
+            "country": self.user_location.country,
+            "city": self.user_location.city,
+            "region": self.user_location.region,
+            "timezone": self.user_location.timezone,
+        }
+        location = {key: value for key, value in location.items() if value}
+
+        tool: dict[str, object] = {"type": "web_search"}
+        if len(location) > 1:
+            tool["user_location"] = location
+        return tool
 
 
 class WebToolsConfig(Base):

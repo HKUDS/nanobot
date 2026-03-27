@@ -1,5 +1,6 @@
 import json
 import re
+import shutil
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -17,11 +18,6 @@ runner = CliRunner()
 
 class _StopGatewayError(RuntimeError):
     pass
-
-
-import shutil
-
-import pytest
 
 
 @pytest.fixture
@@ -260,6 +256,38 @@ def test_config_accepts_camel_case_explicit_provider_name_for_coding_plan():
     assert config.get_api_base() == "https://ark.cn-beijing.volces.com/api/coding/v3"
 
 
+def test_config_builds_openai_native_web_search_tool():
+    config = Config.model_validate(
+        {
+            "tools": {
+                "web": {
+                    "search": {
+                        "provider": "openai_native",
+                        "userLocation": {
+                            "country": "US",
+                            "city": "San Francisco",
+                            "region": "CA",
+                            "timezone": "America/Los_Angeles",
+                        },
+                    }
+                }
+            }
+        }
+    )
+
+    assert config.tools.web.search.uses_openai_native() is True
+    assert config.tools.web.search.openai_web_search_tool() == {
+        "type": "web_search",
+        "user_location": {
+            "type": "approximate",
+            "country": "US",
+            "city": "San Francisco",
+            "region": "CA",
+            "timezone": "America/Los_Angeles",
+        },
+    }
+
+
 def test_find_by_name_accepts_camel_case_and_hyphen_aliases():
     assert find_by_name("volcengineCodingPlan") is not None
     assert find_by_name("volcengineCodingPlan").name == "volcengine_coding_plan"
@@ -320,6 +348,71 @@ def test_openai_compat_provider_passes_model_through():
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+
+
+def test_make_provider_passes_native_web_search_to_openai_codex():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "openai_codex",
+                    "model": "openai-codex/gpt-5.1-codex",
+                }
+            },
+            "tools": {
+                "web": {
+                    "search": {
+                        "provider": "openai_native",
+                        "userLocation": {"country": "US"},
+                    }
+                }
+            },
+        }
+    )
+
+    with patch("nanobot.providers.openai_codex_provider.OpenAICodexProvider") as mock_provider_cls:
+        _make_provider(config)
+
+    kwargs = mock_provider_cls.call_args.kwargs
+    assert kwargs["default_model"] == "openai-codex/gpt-5.1-codex"
+    assert kwargs["native_web_search_tool"] == {
+        "type": "web_search",
+        "user_location": {"type": "approximate", "country": "US"},
+    }
+
+
+def test_make_provider_falls_back_when_openai_native_search_is_used_without_codex():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "openai",
+                    "model": "gpt-5.4",
+                }
+            },
+            "providers": {
+                "openai": {
+                    "apiKey": "test-key",
+                }
+            },
+            "tools": {
+                "web": {
+                    "search": {
+                        "provider": "openai_native",
+                        "userLocation": {"country": "US"},
+                    }
+                }
+            },
+        }
+    )
+
+    with patch("nanobot.cli.commands.console.print") as mock_print:
+        provider = _make_provider(config)
+
+    assert provider.__class__.__name__ == "OpenAICompatProvider"
+    assert config.tools.web.search.provider == "duckduckgo"
+    assert config.tools.web.search.openai_web_search_tool() is None
+    mock_print.assert_called()
 
 
 def test_make_provider_passes_extra_headers_to_custom_provider():

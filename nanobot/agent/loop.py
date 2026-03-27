@@ -15,9 +15,9 @@ from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryConsolidator
+from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -25,11 +25,11 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.utils.helpers import build_status_content, trim_history_for_budget
-from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.bus.queue import MessageBus
+from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
+from nanobot.utils.helpers import build_status_content, trim_history_for_budget
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, InputLimitsConfig, WebSearchConfig
@@ -143,7 +143,8 @@ class AgentLoop:
                 restrict_to_workspace=self.restrict_to_workspace,
                 path_append=self.exec_config.path_append,
             ))
-        self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
+        if not self.provider.uses_native_web_search():
+            self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
@@ -190,10 +191,10 @@ class AgentLoop:
     def _tool_hint(self, tool_calls: list) -> str:
         """Format tool calls as concise hint, e.g. 'web_search("query")'."""
         workspace_str = str(self.workspace)
-        
+
         def _fmt(tc):
             args = (tc.arguments[0] if isinstance(tc.arguments, list) else tc.arguments) or {}
-            
+
             val = None
             if isinstance(args, dict):
                 # Iterate through all string values to find the first meaningful one
@@ -201,10 +202,10 @@ class AgentLoop:
                     if isinstance(v, str):
                         val = v
                         break
-                            
+
             if not isinstance(val, str):
                 return tc.name
-                
+
             if self.restrict_to_workspace:
                 import os
                 # If it looks like an absolute path, normalize it to resolve '..' and '.'
@@ -213,9 +214,9 @@ class AgentLoop:
                 # Replace workspace path with empty string to hide it
                 if workspace_str in val:
                     val = val.replace(workspace_str, "").lstrip("\\/")
-                
+
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
-            
+
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
     def _trim_history_for_budget(
@@ -266,6 +267,7 @@ class AgentLoop:
         async def _filtered_stream(delta: str) -> None:
             nonlocal _stream_buf
             from nanobot.utils.helpers import strip_think
+
             prev_clean = strip_think(_stream_buf)
             _stream_buf += delta
             new_clean = strip_think(_stream_buf)
@@ -277,7 +279,6 @@ class AgentLoop:
             iteration += 1
 
             tool_defs = self.tools.get_definitions()
-
             send_messages = self._trim_history_for_budget(
                 messages, turn_start_index, iteration,
             )
@@ -295,6 +296,7 @@ class AgentLoop:
                     tools=tool_defs,
                     model=self.model,
                 )
+
             usage = response.usage or {}
             self._last_usage = {
                 "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
@@ -349,22 +351,26 @@ class AgentLoop:
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
-            else:
-                if on_stream and on_stream_end:
-                    await on_stream_end(resuming=False)
-                    _stream_buf = ""
+                continue
 
-                clean = self._strip_think(response.content)
-                if response.finish_reason == "error":
-                    logger.error("LLM returned error: {}", (clean or "")[:200])
-                    final_content = clean or "Sorry, I encountered an error calling the AI model."
-                    break
-                messages = self.context.add_assistant_message(
-                    messages, clean, reasoning_content=response.reasoning_content,
-                    thinking_blocks=response.thinking_blocks,
-                )
-                final_content = clean
+            if on_stream and on_stream_end:
+                await on_stream_end(resuming=False)
+                _stream_buf = ""
+
+            clean = self._strip_think(response.content)
+            if response.finish_reason == "error":
+                logger.error("LLM returned error: {}", (clean or "")[:200])
+                final_content = clean or "Sorry, I encountered an error calling the AI model."
                 break
+
+            messages = self.context.add_assistant_message(
+                messages,
+                clean,
+                reasoning_content=response.reasoning_content,
+                thinking_blocks=response.thinking_blocks,
+            )
+            final_content = clean
+            break
 
         if final_content is None and iteration >= self.max_iterations:
             logger.warning("Max iterations ({}) reached", self.max_iterations)
@@ -415,17 +421,35 @@ class AgentLoop:
             try:
                 on_stream = on_stream_end = None
                 if msg.metadata.get("_wants_stream"):
+                    # Split one answer into distinct stream segments.
+                    stream_base_id = f"{msg.session_key}:{time.time_ns()}"
+                    stream_segment = 0
+
+                    def _current_stream_id() -> str:
+                        return f"{stream_base_id}:{stream_segment}"
+
                     async def on_stream(delta: str) -> None:
                         await self.bus.publish_outbound(OutboundMessage(
                             channel=msg.channel, chat_id=msg.chat_id,
-                            content=delta, metadata={"_stream_delta": True},
+                            content=delta,
+                            metadata={
+                                "_stream_delta": True,
+                                "_stream_id": _current_stream_id(),
+                            },
                         ))
 
                     async def on_stream_end(*, resuming: bool = False) -> None:
+                        nonlocal stream_segment
                         await self.bus.publish_outbound(OutboundMessage(
                             channel=msg.channel, chat_id=msg.chat_id,
-                            content="", metadata={"_stream_end": True, "_resuming": resuming},
+                            content="",
+                            metadata={
+                                "_stream_end": True,
+                                "_resuming": resuming,
+                                "_stream_id": _current_stream_id(),
+                            },
                         ))
+                        stream_segment += 1
 
                 response = await self._process_message(
                     msg, on_stream=on_stream, on_stream_end=on_stream_end,

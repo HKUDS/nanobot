@@ -21,9 +21,18 @@ DEFAULT_ORIGINATOR = "nanobot"
 class OpenAICodexProvider(LLMProvider):
     """Use Codex OAuth to call the Responses API."""
 
-    def __init__(self, default_model: str = "openai-codex/gpt-5.1-codex"):
+    def __init__(
+        self,
+        default_model: str = "openai-codex/gpt-5.4",
+        native_web_search_tool: dict[str, Any] | None = None,
+    ):
         super().__init__(api_key=None, api_base=None)
         self.default_model = default_model
+        self.native_web_search_tool = native_web_search_tool
+
+    def uses_native_web_search(self) -> bool:
+        """Whether Codex should rely on the Responses API web_search tool."""
+        return bool(self.native_web_search_tool)
 
     async def _call_codex(
         self,
@@ -55,8 +64,9 @@ class OpenAICodexProvider(LLMProvider):
         }
         if reasoning_effort:
             body["reasoning"] = {"effort": reasoning_effort}
-        if tools:
-            body["tools"] = _convert_tools(tools)
+        converted_tools = _convert_tools(tools, self.native_web_search_tool)
+        if converted_tools:
+            body["tools"] = converted_tools
 
         try:
             try:
@@ -130,10 +140,13 @@ async def _request_codex(
             return await _consume_sse(response, on_content_delta)
 
 
-def _convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _convert_tools(
+    tools: list[dict[str, Any]] | None,
+    native_web_search_tool: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     """Convert OpenAI function-calling schema to Codex flat format."""
     converted: list[dict[str, Any]] = []
-    for tool in tools:
+    for tool in tools or []:
         fn = (tool.get("function") or {}) if tool.get("type") == "function" else tool
         name = fn.get("name")
         if not name:
@@ -145,6 +158,8 @@ def _convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "description": fn.get("description") or "",
             "parameters": params if isinstance(params, dict) else {},
         })
+    if native_web_search_tool:
+        converted.append(dict(native_web_search_tool))
     return converted
 
 
@@ -193,7 +208,7 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[st
 
 def _convert_user_message(content: Any) -> dict[str, Any]:
     if isinstance(content, str):
-        return {"role": "user", "content": [{"type": "input_text", "text": content}]}
+        return {"type": "message", "role": "user", "content": [{"type": "input_text", "text": content}]}
     if isinstance(content, list):
         converted: list[dict[str, Any]] = []
         for item in content:
@@ -206,8 +221,8 @@ def _convert_user_message(content: Any) -> dict[str, Any]:
                 if url:
                     converted.append({"type": "input_image", "image_url": url, "detail": "auto"})
         if converted:
-            return {"role": "user", "content": converted}
-    return {"role": "user", "content": [{"type": "input_text", "text": ""}]}
+            return {"type": "message", "role": "user", "content": converted}
+    return {"type": "message", "role": "user", "content": [{"type": "input_text", "text": ""}]}
 
 
 def _split_tool_call_id(tool_call_id: Any) -> tuple[str, str | None]:
@@ -229,7 +244,7 @@ async def _iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], 
     async for line in response.aiter_lines():
         if line == "":
             if buffer:
-                data_lines = [l[5:].strip() for l in buffer if l.startswith("data:")]
+                data_lines = [item[5:].strip() for item in buffer if item.startswith("data:")]
                 buffer = []
                 if not data_lines:
                     continue

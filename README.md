@@ -1305,6 +1305,7 @@ nanobot supports multiple web search providers. Configure in `~/.nanobot/config.
 | `jina` | `apiKey` | `JINA_API_KEY` | Free tier (10M tokens) |
 | `searxng` | `baseUrl` | `SEARXNG_BASE_URL` | Yes (self-hosted) |
 | `duckduckgo` | — | — | Yes |
+| `openai_native` | `userLocation` | — | No |
 
 When credentials are missing, nanobot automatically falls back to DuckDuckGo.
 
@@ -1377,12 +1378,40 @@ When credentials are missing, nanobot automatically falls back to DuckDuckGo.
 }
 ```
 
+**OpenAI native search via Codex API**:
+```json
+{
+  "agents": {
+    "defaults": {
+      "provider": "openai_codex",
+      "model": "openai-codex/gpt-5.1-codex"
+    }
+  },
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "openai_native",
+        "userLocation": {
+          "country": "US",
+          "city": "San Francisco",
+          "region": "CA",
+          "timezone": "America/Los_Angeles"
+        }
+      }
+    }
+  }
+}
+```
+
+When `provider` is `openai_native` and the active LLM provider is `openai_codex`, nanobot disables its built-in `web_search` tool and lets the Codex Responses API use OpenAI's native `web_search` tool instead.
+
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `provider` | string | `"brave"` | Search backend: `brave`, `tavily`, `jina`, `searxng`, `duckduckgo` |
+| `provider` | string | `"brave"` | Search backend: `brave`, `tavily`, `jina`, `searxng`, `duckduckgo`, `openai_native` |
 | `apiKey` | string | `""` | API key for Brave or Tavily |
 | `baseUrl` | string | `""` | Base URL for SearXNG |
 | `maxResults` | integer | `5` | Results per search (1–10) |
+| `userLocation` | object | `{}` | Approximate location for `openai_native` (`country`, `city`, `region`, `timezone`) |
 
 ### MCP (Model Context Protocol)
 

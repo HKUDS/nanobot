@@ -1,12 +1,12 @@
 """CLI commands for nanobot."""
 
 import asyncio
-from contextlib import contextmanager, nullcontext
-
+import json
 import os
 import select
 import signal
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -388,6 +388,14 @@ def _make_provider(config: Config):
     p = config.get_provider(model)
     spec = find_by_name(provider_name) if provider_name else None
     backend = spec.backend if spec else "openai_compat"
+    search_config = config.tools.web.search
+
+    if search_config.uses_openai_native() and backend != "openai_codex":
+        console.print(
+            "[yellow]Warning: tools.web.search.provider=openai_native requires "
+            "agents.defaults.provider=openai_codex; falling back to duckduckgo.[/yellow]"
+        )
+        search_config.provider = "duckduckgo"
 
     # --- validation ---
     if backend == "azure_openai":
@@ -407,7 +415,10 @@ def _make_provider(config: Config):
     # --- instantiation by backend ---
     if backend == "openai_codex":
         from nanobot.providers.openai_codex_provider import OpenAICodexProvider
-        provider = OpenAICodexProvider(default_model=model)
+        provider = OpenAICodexProvider(
+            default_model=model,
+            native_web_search_tool=search_config.openai_web_search_tool(),
+        )
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
         provider = AzureOpenAIProvider(
@@ -464,7 +475,6 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
 
 def _warn_deprecated_config_keys(config_path: Path | None) -> None:
     """Hint users to remove obsolete keys from their config file."""
-    import json
     from nanobot.config.loader import get_config_path
 
     path = config_path or get_config_path()
