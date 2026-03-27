@@ -11,6 +11,7 @@ Pipeline architecture (pipes and filters)::
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -52,7 +53,7 @@ class MemoryRetriever:
     # Public entry point
     # ------------------------------------------------------------------
 
-    def retrieve(
+    async def retrieve(
         self,
         query: str,
         *,
@@ -65,7 +66,7 @@ class MemoryRetriever:
 
         # Unified path: vector + FTS5 + RRF when db and embedder are injected
         if self._db is not None and self._embedder is not None:
-            return self._retrieve_unified(
+            return await self._retrieve_unified(
                 query,
                 top_k=top_k,
                 recency_half_life_days=recency_half_life_days,
@@ -78,7 +79,7 @@ class MemoryRetriever:
     # Unified path (vector + FTS5 + RRF)
     # ------------------------------------------------------------------
 
-    def _retrieve_unified(
+    async def _retrieve_unified(
         self,
         query: str,
         *,
@@ -92,36 +93,27 @@ class MemoryRetriever:
         embedding and dual-source search (vector KNN + FTS5), fuses via
         Reciprocal Rank Fusion, then applies the standard scoring pipeline.
         """
-        import asyncio
-
         assert self._db is not None  # noqa: S101 — guarded by caller
         assert self._embedder is not None  # noqa: S101
-        embedder = self._embedder  # local ref for lambda closure (mypy narrowing)
 
         plan = self._planner.plan(query)
         policy = plan.policy
         candidate_k = max(1, min(top_k * int(policy.get("candidate_multiplier", 3)), 60))
 
-        # 1. Embed query (async → sync bridge)
-        coro = embedder.embed(query)
-        try:
-            query_vec = asyncio.run(coro)
-        except RuntimeError:
-            coro.close()
-            import concurrent.futures
+        # 1. Embed query
+        query_vec = await self._embedder.embed(query)
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                query_vec = pool.submit(lambda: asyncio.run(embedder.embed(query))).result()
-
-        # 2. Dual source — DB methods are synchronous
-        vec_results = self._db.search_vector(query_vec, candidate_k)
-        fts_results = self._db.search_fts(query, candidate_k)
+        # 2. Dual source — DB methods are synchronous; run concurrently via to_thread
+        vec_results, fts_results = await asyncio.gather(
+            asyncio.to_thread(self._db.search_vector, query_vec, candidate_k),
+            asyncio.to_thread(self._db.search_fts, query, candidate_k),
+        )
 
         # 3. Fuse via RRF
         candidates = self._fuse_results(vec_results, fts_results, vector_weight=0.7)
 
         if not candidates:
-            candidates = self._db.read_events(limit=candidate_k)
+            candidates = await asyncio.to_thread(self._db.read_events, limit=candidate_k)
             if not candidates:
                 bind_trace().debug(
                     "Memory retrieve source=unified results=0 duration_ms={:.0f}",

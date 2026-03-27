@@ -153,7 +153,7 @@ class MemoryStore:
         # Context assembler (LAN-210) — prompt rendering extracted from MemoryStore.
         self._assembler = ContextAssembler(
             profile_mgr=self.profile_mgr,
-            retrieve_fn=lambda *a, **kw: self.retriever.retrieve(*a, **kw),
+            retrieve_fn=lambda *a, **kw: self.retriever.retrieve(*a, **kw),  # type: ignore[arg-type]  # async — Task 2 will update ContextAssembler
             planner=self._planner,
             read_events_fn=lambda **kw: self.ingester.read_events(**kw),
             build_graph_context_lines_fn=lambda *a, **kw: self._graph_aug.build_graph_context_lines(
@@ -233,7 +233,7 @@ class MemoryStore:
         from nanobot.eval.memory_eval import EvalRunner
 
         self.eval_runner = EvalRunner(
-            retrieve_fn=lambda *a, **kw: self.retriever.retrieve(*a, **kw),
+            retrieve_fn=lambda *a, **kw: self.retriever.retrieve(*a, **kw),  # type: ignore[arg-type]  # async — Task 6 will update EvalRunner
             workspace=self.workspace,
             memory_dir=self.memory_dir,
             memory_config_fn=lambda: self._memory_config,
@@ -322,7 +322,7 @@ class MemoryStore:
 
         self._assembler = ContextAssembler(
             profile_mgr=profile_mgr,  # type: ignore[arg-type]
-            retrieve_fn=lambda *a, **kw: self.retriever.retrieve(*a, **kw),
+            retrieve_fn=lambda *a, **kw: self.retriever.retrieve(*a, **kw),  # type: ignore[arg-type]  # async — Task 2 will update ContextAssembler
             planner=planner,
             read_events_fn=lambda **kw: self.ingester.read_events(**kw),
             build_graph_context_lines_fn=lambda *a, **kw: self._graph_aug.build_graph_context_lines(

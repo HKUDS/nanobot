@@ -113,9 +113,9 @@ def _make_plan(
 class TestRetrieveWithoutDB:
     """When neither db nor embedder is available, retrieve returns empty."""
 
-    def test_returns_empty_without_db(self) -> None:
+    async def test_returns_empty_without_db(self) -> None:
         retriever = _make_retriever()
-        results = retriever.retrieve("Python", top_k=3)
+        results = await retriever.retrieve("Python", top_k=3)
         assert results == []
 
 
@@ -593,7 +593,7 @@ class TestRRFFusion:
 class TestUnifiedRetrievePath:
     """Tests for the unified retrieval path (db + embedder injected)."""
 
-    def test_unified_path_dispatched_when_db_and_embedder_set(self) -> None:
+    async def test_unified_path_dispatched_when_db_and_embedder_set(self) -> None:
         """When db and embedder are provided, retrieve uses unified path."""
         retriever = _make_retriever()
 
@@ -633,25 +633,25 @@ class TestUnifiedRetrievePath:
         retriever._db = mock_db
         retriever._embedder = mock_embedder
 
-        results = retriever.retrieve("test query", top_k=5)
+        results = await retriever.retrieve("test query", top_k=5)
         mock_db.search_vector.assert_called_once()
         mock_db.search_fts.assert_called_once()
         assert len(results) >= 1
 
-    def test_unified_path_skipped_when_db_is_none(self) -> None:
+    async def test_unified_path_skipped_when_db_is_none(self) -> None:
         """Without db, returns empty list."""
         retriever = _make_retriever()
         retriever._db = None
         retriever._embedder = MagicMock()
-        results = retriever.retrieve("test", top_k=3)
+        results = await retriever.retrieve("test", top_k=3)
         assert results == []
 
-    def test_unified_path_skipped_when_embedder_is_none(self) -> None:
+    async def test_unified_path_skipped_when_embedder_is_none(self) -> None:
         """Without embedder, returns empty list."""
         retriever = _make_retriever()
         retriever._db = MagicMock()
         retriever._embedder = None
-        results = retriever.retrieve("test", top_k=3)
+        results = await retriever.retrieve("test", top_k=3)
         assert results == []
 
 
@@ -721,7 +721,7 @@ class TestGraphEntityCache:
         # get_related_entity_names_sync called twice: once before reset, once after
         assert graph_aug._graph.get_related_entity_names_sync.call_count == 2
 
-    def test_retrieve_resets_cache_between_calls(self):
+    async def test_retrieve_resets_cache_between_calls(self):
         """retrieve() resets _graph_cache so each call gets a fresh traversal."""
         r = self._make_retriever_with_graph()
         graph_aug = r._graph_aug
@@ -731,7 +731,65 @@ class TestGraphEntityCache:
         assert len(graph_aug._graph_cache) == 1
 
         # retrieve() should reset _graph_cache at the start (even without db/embedder)
-        r.retrieve(query="coffee query", top_k=3)
+        await r.retrieve(query="coffee query", top_k=3)
         assert graph_aug._graph_cache == {}, (
             "Expected _graph_cache to be reset at the start of retrieve()"
         )
+
+
+# ======================================================================
+# Async retrieve tests
+# ======================================================================
+
+
+class TestAsyncRetrieve:
+    """Tests for async retrieve() — verifies the method is a proper coroutine."""
+
+    async def test_async_retrieve_returns_results(self) -> None:
+        """Mocked DB + HashEmbedder, awaits retrieve(), asserts results."""
+        from nanobot.memory.embedder import HashEmbedder
+
+        embedder = HashEmbedder(dims=384)
+
+        mock_db = MagicMock()
+        mock_db.search_vector = MagicMock(
+            return_value=[
+                {
+                    "id": "v1",
+                    "type": "fact",
+                    "summary": "Python programming language",
+                    "timestamp": "2025-06-01T00:00:00Z",
+                    "entities": [],
+                    "status": "active",
+                },
+            ]
+        )
+        mock_db.search_fts = MagicMock(
+            return_value=[
+                {
+                    "id": "v1",
+                    "type": "fact",
+                    "summary": "Python programming language",
+                    "timestamp": "2025-06-01T00:00:00Z",
+                    "entities": [],
+                    "status": "active",
+                },
+            ]
+        )
+
+        retriever = _make_retriever()
+        retriever._db = mock_db
+        retriever._embedder = embedder
+
+        results = await retriever.retrieve("Python", top_k=3)
+        assert len(results) >= 1
+        assert any("Python" in r.get("summary", "") for r in results)
+        mock_db.search_vector.assert_called_once()
+        mock_db.search_fts.assert_called_once()
+
+    async def test_async_retrieve_no_db_returns_empty(self) -> None:
+        """Without DB injected, retrieve() returns empty list."""
+        retriever = _make_retriever()
+        # Neither db nor embedder set — should return []
+        results = await retriever.retrieve("anything", top_k=3)
+        assert results == []

@@ -219,7 +219,7 @@ class AnswerVerifier:
         if not self._memory:
             return 0.0
         try:
-            items = self._memory.retriever.retrieve(query, top_k=1)
+            items: list[dict[str, Any]] = self._memory.retriever.retrieve(query, top_k=1)  # type: ignore[assignment]  # async — Task 5 will await this
         except Exception:  # crash-barrier: memory subsystem
             return 0.0
         if not items:

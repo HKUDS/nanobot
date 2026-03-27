@@ -54,7 +54,7 @@ def memory_inspect(
     )
 
     if query.strip():
-        retrieved = store.retriever.retrieve(
+        retrieved: list[dict] = store.retriever.retrieve(  # type: ignore[assignment]  # async — Task 6 will await this
             query,
             top_k=top_k,
         )
