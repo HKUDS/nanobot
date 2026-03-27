@@ -457,6 +457,8 @@ class TelegramChannel(BaseChannel):
         thread_kwargs: dict | None = None,
     ) -> None:
         """Send a plain text message with HTML fallback."""
+        if not text or not text.strip():
+            return
         try:
             html = _markdown_to_telegram_html(text)
             await self._call_with_retry(
