@@ -82,6 +82,17 @@ class TestCreateStreamingCard:
         ch._client.cardkit.v1.card.create.side_effect = RuntimeError("network")
         assert ch._create_streaming_card_sync("chat_id", "oc_chat1") is None
 
+    def test_returns_none_when_card_send_fails(self):
+        ch = _make_channel()
+        ch._client.cardkit.v1.card.create.return_value = _mock_create_card_response("card_123")
+        resp = MagicMock()
+        resp.success.return_value = False
+        resp.code = 99999
+        resp.msg = "error"
+        resp.get_log_id.return_value = "log1"
+        ch._client.im.v1.message.create.return_value = resp
+        assert ch._create_streaming_card_sync("chat_id", "oc_chat1") is None
+
 
 class TestCloseStreamingMode:
     def test_returns_true_on_success(self):
