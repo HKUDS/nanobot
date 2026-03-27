@@ -198,13 +198,11 @@ async def test_resolve_role_falls_back_to_general() -> None:
     assert role.name == "general"
 
 
-async def test_resolve_role_uses_coordinator_when_available() -> None:
-    """When a coordinator is set, _resolve_role should call it."""
+async def test_resolve_role_always_returns_general() -> None:
+    """With coordinator removed, _resolve_role always returns 'general'."""
     mgr = _make_manager()
-    code_role = AgentRoleConfig(name="code", description="Code specialist")
-    mgr.coordinator = SimpleNamespace(route=AsyncMock(return_value=code_role))  # type: ignore[assignment]
     role = await mgr._resolve_role("fix a bug")
-    assert role.name == "code"
+    assert role.name == "general"
 
 
 # ---------------------------------------------------------------------------
