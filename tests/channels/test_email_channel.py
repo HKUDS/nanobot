@@ -481,3 +481,123 @@ def test_fetch_messages_between_dates_uses_imap_since_before_without_mark_seen(m
     assert fake.search_args is not None
     assert fake.search_args[1:] == ("SINCE", "06-Feb-2026", "BEFORE", "07-Feb-2026")
     assert fake.store_calls == []
+
+
+def test_parse_authentication_results_spf_dkim_pass() -> None:
+    """Test parsing Authentication-Results header with SPF and DKIM pass."""
+    header = "mx.google.com; spf=pass (google.com: domain of sender@example.com designates 203.0.113.1 as permitted sender) smtp.mailfrom=sender@example.com; dkim=pass header.d=example.com"
+    result = EmailChannel._parse_authentication_results(header)
+    assert result["spf_status"] == "pass"
+    assert result["dkim_status"] == "pass"
+    assert result["authserv_id"] == "mx.google.com"
+    assert result["verified"] is True
+
+
+def test_parse_authentication_results_spf_fail_dkim_pass() -> None:
+    """Test parsing Authentication-Results with SPF fail but DKIM pass."""
+    header = "mx.google.com; spf=fail (google.com: domain of sender@example.com does not designate 203.0.113.1 as permitted sender) smtp.mailfrom=sender@example.com; dkim=pass header.d=example.com"
+    result = EmailChannel._parse_authentication_results(header)
+    assert result["spf_status"] == "fail"
+    assert result["dkim_status"] == "pass"
+    assert result["verified"] is False
+
+
+def test_parse_authentication_results_no_header() -> None:
+    """Test parsing when no Authentication-Results header exists."""
+    result = EmailChannel._parse_authentication_results(None)
+    assert result["spf_status"] == "none"
+    assert result["dkim_status"] == "none"
+    assert result["verified"] is False
+
+
+def test_parse_authentication_results_empty_header() -> None:
+    """Test parsing when Authentication-Results header is empty."""
+    result = EmailChannel._parse_authentication_results("")
+    assert result["spf_status"] == "none"
+    assert result["dkim_status"] == "none"
+    assert result["verified"] is False
+
+
+def test_fetch_new_messages_includes_auth_metadata(monkeypatch) -> None:
+    """Test that email messages include authentication verification metadata."""
+    raw = _make_raw_email(subject="Test", body="Body content")
+    
+    class FakeIMAP:
+        def __init__(self) -> None:
+            self.store_calls: list[tuple[bytes, str, str]] = []
+
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"1"]
+
+        def search(self, *_args):
+            return "OK", [b"1"]
+
+        def fetch(self, _imap_id: bytes, _parts: str):
+            return "OK", [(b"1 (UID 123 BODY[] {200})", raw), b")"]
+
+        def store(self, imap_id: bytes, op: str, flags: str):
+            self.store_calls.append((imap_id, op, flags))
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    fake = FakeIMAP()
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(), MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["metadata"]["channel_origin"] == "email"
+    assert "auth_verified" in items[0]["metadata"]
+    assert "spf_status" in items[0]["metadata"]
+    assert "dkim_status" in items[0]["metadata"]
+
+
+def test_fetch_new_messages_with_auth_results_header(monkeypatch) -> None:
+    """Test that Authentication-Results header is parsed correctly."""
+    msg = EmailMessage()
+    msg["From"] = "alice@example.com"
+    msg["To"] = "bot@example.com"
+    msg["Subject"] = "Test"
+    msg["Message-ID"] = "<m1@example.com>"
+    msg["Authentication-Results"] = "mx.google.com; spf=pass; dkim=pass"
+    msg.set_content("Test body")
+    raw = msg.as_bytes()
+
+    class FakeIMAP:
+        def __init__(self) -> None:
+            pass
+
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"1"]
+
+        def search(self, *_args):
+            return "OK", [b"1"]
+
+        def fetch(self, _imap_id: bytes, _parts: str):
+            return "OK", [(b"1 (UID 123 BODY[] {200})", raw), b")"]
+
+        def store(self, imap_id: bytes, op: str, flags: str):
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    fake = FakeIMAP()
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(), MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["metadata"]["spf_status"] == "pass"
+    assert items[0]["metadata"]["dkim_status"] == "pass"
+    assert items[0]["metadata"]["auth_verified"] is True

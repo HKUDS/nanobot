@@ -118,7 +118,8 @@ class BaseChannel(ABC):
             return False
         if "*" in allow_list:
             return True
-        return str(sender_id) in allow_list
+        sender_lower = str(sender_id).lower()
+        return any(entry.lower() == sender_lower for entry in allow_list)
 
     async def _handle_message(
         self,

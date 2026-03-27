@@ -19,10 +19,11 @@ class CronTool(Tool):
         self._chat_id = ""
         self._in_cron_context: ContextVar[bool] = ContextVar("cron_in_context", default=False)
 
-    def set_context(self, channel: str, chat_id: str) -> None:
+    def set_context(self, channel: str, chat_id: str, metadata: dict[str, Any] | None = None) -> None:
         """Set the current session context for delivery."""
         self._channel = channel
         self._chat_id = chat_id
+        self._metadata = metadata or {}
 
     def set_cron_context(self, active: bool):
         """Mark whether the tool is executing inside a cron job callback."""

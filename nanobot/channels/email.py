@@ -360,6 +360,8 @@ class EmailChannel(BaseChannel):
                 if not sender:
                     continue
 
+                auth_results = self._parse_authentication_results(parsed.get("Authentication-Results"))
+
                 subject = self._decode_header_value(parsed.get("Subject", ""))
                 date_value = parsed.get("Date", "")
                 message_id = parsed.get("Message-ID", "").strip()
@@ -383,6 +385,11 @@ class EmailChannel(BaseChannel):
                     "date": date_value,
                     "sender_email": sender,
                     "uid": uid,
+                    "channel_origin": "email",
+                    "auth_verified": auth_results["verified"],
+                    "spf_status": auth_results["spf_status"],
+                    "dkim_status": auth_results["dkim_status"],
+                    "authserv_id": auth_results["authserv_id"],
                 }
                 messages.append(
                     {
@@ -426,6 +433,47 @@ class EmailChannel(BaseChannel):
         """Format date for IMAP search (always English month abbreviations)."""
         month = cls._IMAP_MONTHS[value.month - 1]
         return f"{value.day:02d}-{month}-{value.year}"
+
+    @staticmethod
+    def _parse_authentication_results(header_value: str | None) -> dict[str, Any]:
+        """Parse Authentication-Results header to extract SPF/DKIM verification status.
+
+        Returns a dict with:
+            - spf_status: 'pass' | 'fail' | 'none' | 'neutral' | 'softfail' | 'permerror' | 'temperror'
+            - dkim_status: 'pass' | 'fail' | 'none' | 'neutral' | 'permerror' | 'temperror'
+            - authserv_id: the mail server that added this header
+            - verified: True if both SPF and DKIM pass
+
+        The Authentication-Results header is added by upstream mail servers (Gmail, Microsoft 365, etc.)
+        and contains the verification results of SPF and DKIM checks.
+        """
+        if not header_value:
+            return {"spf_status": "none", "dkim_status": "none", "authserv_id": "", "verified": False}
+
+        result = {
+            "spf_status": "none",
+            "dkim_status": "none",
+            "authserv_id": "",
+            "verified": False,
+        }
+
+        header = header_value.strip()
+
+        authserv_id_match = re.match(r"^([^;]+)", header)
+        if authserv_id_match:
+            result["authserv_id"] = authserv_id_match.group(1).strip()
+
+        spf_match = re.search(r"spf=(\w+)", header, re.IGNORECASE)
+        if spf_match:
+            result["spf_status"] = spf_match.group(1).lower()
+
+        dkim_match = re.search(r"dkim=(\w+)", header, re.IGNORECASE)
+        if dkim_match:
+            result["dkim_status"] = dkim_match.group(1).lower()
+
+        result["verified"] = result["spf_status"] == "pass" and result["dkim_status"] == "pass"
+
+        return result
 
     @staticmethod
     def _extract_message_bytes(fetched: list[Any]) -> bytes | None:

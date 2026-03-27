@@ -47,6 +47,17 @@ class _FsTool(Tool):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
         self._extra_allowed_dirs = extra_allowed_dirs
+        self._metadata: dict[str, Any] = {}
+
+    def set_context(self, channel: str, chat_id: str, metadata: dict[str, Any] | None = None) -> None:
+        """Set the current context for security checks."""
+        self._metadata = metadata or {}
+
+    def _is_untrusted_email_origin(self) -> bool:
+        """Check if the message originates from an untrusted email source."""
+        if self._metadata.get("channel_origin") != "email":
+            return False
+        return not self._metadata.get("auth_verified", False)
 
     def _resolve(self, path: str) -> Path:
         return _resolve_path(path, self._workspace, self._allowed_dir, self._extra_allowed_dirs)
@@ -94,6 +105,9 @@ class ReadFileTool(_FsTool):
         }
 
     async def execute(self, path: str | None = None, offset: int = 1, limit: int | None = None, **kwargs: Any) -> Any:
+        if self._is_untrusted_email_origin():
+            return "Error: File reading is disabled for untrusted email origins. The email source could not be verified via SPF/DKIM."
+
         try:
             if not path:
                 return "Error reading file: Unknown path"

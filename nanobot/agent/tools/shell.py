@@ -40,6 +40,17 @@ class ExecTool(Tool):
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
+        self._metadata: dict[str, Any] = {}
+
+    def set_context(self, channel: str, chat_id: str, metadata: dict[str, Any] | None = None) -> None:
+        """Set the current context for security checks."""
+        self._metadata = metadata or {}
+
+    def _is_untrusted_email_origin(self) -> bool:
+        """Check if the message originates from an untrusted email source."""
+        if self._metadata.get("channel_origin") != "email":
+            return False
+        return not self._metadata.get("auth_verified", False)
 
     @property
     def name(self) -> str:
@@ -82,6 +93,9 @@ class ExecTool(Tool):
         self, command: str, working_dir: str | None = None,
         timeout: int | None = None, **kwargs: Any,
     ) -> str:
+        if self._is_untrusted_email_origin():
+            return "Error: Command execution is disabled for untrusted email origins. The email source could not be verified via SPF/DKIM."
+
         cwd = working_dir or self.working_dir or os.getcwd()
         guard_error = self._guard_command(command, cwd)
         if guard_error:
