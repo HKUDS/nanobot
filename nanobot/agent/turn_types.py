@@ -37,6 +37,8 @@ class TurnState:
     iteration: int = 0
     tools_def_cache: list[dict[str, Any]] = field(default_factory=list)
     tools_def_snapshot: frozenset[str] = field(default_factory=frozenset)
+    tool_results_log: list[ToolAttempt] = field(default_factory=list)
+    guardrail_activations: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
