@@ -72,7 +72,7 @@ class AnswerVerifier:
         if self.verification_mode == "off":
             return candidate, messages
 
-        if self.verification_mode == "on_uncertainty" and not self.should_force_verification(
+        if self.verification_mode == "on_uncertainty" and not await self.should_force_verification(
             user_text
         ):
             return candidate, messages
@@ -180,11 +180,11 @@ class AnswerVerifier:
                     obs.update(output="call_error", metadata={"skipped": True})
                 return candidate, messages
 
-    def should_force_verification(self, text: str) -> bool:
+    async def should_force_verification(self, text: str) -> bool:
         """Return True when the text is a question with low memory grounding."""
         if not self._looks_like_question(text):
             return False
-        confidence = self._estimate_grounding_confidence(text)
+        confidence = await self._estimate_grounding_confidence(text)
         return confidence < self.memory_uncertainty_threshold
 
     @staticmethod
@@ -215,11 +215,11 @@ class AnswerVerifier:
         )
         return content.startswith(starters)
 
-    def _estimate_grounding_confidence(self, query: str) -> float:
+    async def _estimate_grounding_confidence(self, query: str) -> float:
         if not self._memory:
             return 0.0
         try:
-            items: list[dict[str, Any]] = self._memory.retriever.retrieve(query, top_k=1)  # type: ignore[assignment]  # async — Task 5 will await this
+            items: list[dict[str, Any]] = await self._memory.retriever.retrieve(query, top_k=1)
         except Exception:  # crash-barrier: memory subsystem
             return 0.0
         if not items:

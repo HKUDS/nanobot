@@ -10,6 +10,7 @@ it into a single Markdown string suitable for inclusion in the system prompt.
 from __future__ import annotations
 
 import re
+from collections.abc import Awaitable
 from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
@@ -64,7 +65,7 @@ class ContextAssembler:
     def __init__(
         self,
         profile_mgr: ProfileManager,
-        retrieve_fn: Callable[..., list[dict[str, Any]]],
+        retrieve_fn: Callable[..., Awaitable[list[dict[str, Any]]]],
         planner: RetrievalPlanner,
         *,
         read_events_fn: Callable[..., list[dict[str, Any]]] | None = None,
@@ -94,7 +95,7 @@ class ContextAssembler:
     # Public API
     # ------------------------------------------------------------------
 
-    def build(
+    async def build(
         self,
         *,
         query: str | None = None,
@@ -125,7 +126,7 @@ class ContextAssembler:
         )
 
         try:
-            retrieved = self._retrieve_fn(
+            retrieved = await self._retrieve_fn(
                 query or "",
                 top_k=retrieval_k,
                 recency_half_life_days=recency_half_life_days,

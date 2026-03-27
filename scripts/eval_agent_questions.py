@@ -5,6 +5,7 @@ This script bypasses the Rich CLI to get clean text output.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -94,14 +95,16 @@ def run_retrieval_eval() -> None:
         print(f"\n--- Q{i}: {query}")
 
         # Run retrieval
-        retrieved = store.retriever.retrieve(query, top_k=6)
+        retrieved = asyncio.run(store.retriever.retrieve(query, top_k=6))
 
         # Build memory context (budget must be large enough to include
         # profile + BM25 events + entity graph section).
-        context = store.get_memory_context(
-            query=query,
-            retrieval_k=6,
-            token_budget=2000,
+        context = asyncio.run(
+            store.get_memory_context(
+                query=query,
+                retrieval_k=6,
+                token_budget=2000,
+            )
         )
 
         # Check keyword recall (normalize hyphens ↔ spaces for fuzzy match)

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import typer
@@ -54,9 +55,11 @@ def memory_inspect(
     )
 
     if query.strip():
-        retrieved: list[dict] = store.retriever.retrieve(  # type: ignore[assignment]  # async — Task 6 will await this
-            query,
-            top_k=top_k,
+        retrieved: list[dict] = asyncio.run(
+            store.retriever.retrieve(
+                query,
+                top_k=top_k,
+            )
         )
         if not retrieved:
             console.print("\n[dim]No memory retrieved for query.[/dim]")
@@ -378,9 +381,11 @@ def memory_eval(
         console.print("[red]Benchmark file must contain a JSON array or {'cases': [...]}[/red]")
         raise typer.Exit(1)
 
-    evaluation = store.eval_runner.evaluate_retrieval_cases(
-        raw_cases,
-        default_top_k=top_k,
+    evaluation = asyncio.run(
+        store.eval_runner.evaluate_retrieval_cases(
+            raw_cases,
+            default_top_k=top_k,
+        )
     )
     obs = store.eval_runner.get_observability_report()
     rollout_gate = store.eval_runner.evaluate_rollout_gates(evaluation, obs)

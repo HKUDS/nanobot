@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -97,37 +97,38 @@ class TestEstimateGroundingConfidence:
             memory_store=memory,
         )
 
-    def test_no_memory_returns_zero(self) -> None:
+    async def test_no_memory_returns_zero(self) -> None:
         v = self._make_verifier(memory=None)
-        assert v._estimate_grounding_confidence("anything") == 0.0
+        assert await v._estimate_grounding_confidence("anything") == 0.0
 
     @staticmethod
-    def _fake_memory(retrieve_fn):
-        retriever = type("FakeRetriever", (), {"retrieve": retrieve_fn})()
+    def _fake_memory(retrieve_fn: Any) -> Any:
+        mock_retrieve = AsyncMock(side_effect=retrieve_fn)
+        retriever = type("FakeRetriever", (), {"retrieve": mock_retrieve})()
         return type("FakeMemory", (), {"retriever": retriever})()
 
-    def test_empty_results_returns_zero(self) -> None:
-        memory = self._fake_memory(lambda self, q, top_k=1: [])
+    async def test_empty_results_returns_zero(self) -> None:
+        memory = self._fake_memory(lambda q, top_k=1: [])
         v = self._make_verifier(memory=memory)
-        assert v._estimate_grounding_confidence("anything") == 0.0
+        assert await v._estimate_grounding_confidence("anything") == 0.0
 
-    def test_score_clamped_to_unit_interval(self) -> None:
-        memory = self._fake_memory(lambda self, q, top_k=1: [{"score": 1.5}])
+    async def test_score_clamped_to_unit_interval(self) -> None:
+        memory = self._fake_memory(lambda q, top_k=1: [{"score": 1.5}])
         v = self._make_verifier(memory=memory)
-        assert v._estimate_grounding_confidence("anything") == 1.0
+        assert await v._estimate_grounding_confidence("anything") == 1.0
 
-    def test_memory_exception_returns_zero(self) -> None:
-        def _explode(q, top_k=1):
+    async def test_memory_exception_returns_zero(self) -> None:
+        def _explode(q: str, top_k: int = 1) -> list:
             raise RuntimeError("boom")
 
         memory = self._fake_memory(_explode)
         v = self._make_verifier(memory=memory)
-        assert v._estimate_grounding_confidence("anything") == 0.0
+        assert await v._estimate_grounding_confidence("anything") == 0.0
 
-    def test_normal_score_returned(self) -> None:
-        memory = self._fake_memory(lambda self, q, top_k=1: [{"score": 0.75}])
+    async def test_normal_score_returned(self) -> None:
+        memory = self._fake_memory(lambda q, top_k=1: [{"score": 0.75}])
         v = self._make_verifier(memory=memory)
-        assert v._estimate_grounding_confidence("anything") == 0.75
+        assert await v._estimate_grounding_confidence("anything") == 0.75
 
 
 @patch("nanobot.agent.verifier.score_current_trace", new=lambda **kw: None)

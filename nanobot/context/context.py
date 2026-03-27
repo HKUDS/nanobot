@@ -96,7 +96,7 @@ class ContextBuilder:
         else:
             self._contacts_context = ""
 
-    def build_system_prompt(
+    async def build_system_prompt(
         self,
         current_message: str | None = None,
     ) -> str:
@@ -123,7 +123,7 @@ class ContextBuilder:
         # Memory context — graceful degradation if retrieval crashes
         if self.memory is not None and self._memory_config is not None:
             try:
-                memory = self.memory.get_memory_context(
+                memory = await self.memory.get_memory_context(
                     query=current_message,
                     retrieval_k=self._memory_config.retrieval_k,
                     token_budget=self._memory_config.token_budget,
@@ -249,7 +249,7 @@ class ContextBuilder:
         messages = []
 
         # System prompt
-        system_prompt = self.build_system_prompt(current_message=current_message)
+        system_prompt = await self.build_system_prompt(current_message=current_message)
         if verify_before_answer:
             system_prompt += "\n\n" + prompts.get("verification_required")
         messages.append({"role": "system", "content": system_prompt})

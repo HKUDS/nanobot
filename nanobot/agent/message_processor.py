@@ -282,7 +282,7 @@ class MessageProcessor:
                 message_tool.on_turn_start()
 
             history = session.get_history(max_messages=self.config.memory.window)
-            verify_before_answer = self.verifier.should_force_verification(msg.content)
+            verify_before_answer = await self.verifier.should_force_verification(msg.content)
             initial_messages = await self.context.build_messages(
                 history=history,
                 current_message=msg.content,
