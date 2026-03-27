@@ -51,6 +51,22 @@ class TurnResult:
     llm_calls: int = 0
 
 
+@dataclass(slots=True, frozen=True)
+class ToolAttempt:
+    """Record of a single tool call for working memory.
+
+    Enables guardrails to detect patterns like repeated empty results,
+    strategy loops, and skill tunnel vision.
+    """
+
+    tool_name: str
+    arguments: dict[str, Any]
+    success: bool
+    output_empty: bool  # True when success=True but no meaningful data returned
+    output_snippet: str  # First 200 chars of output for pattern detection
+    iteration: int
+
+
 class Orchestrator(Protocol):
     """Structural protocol for the turn orchestrator.
 
