@@ -559,26 +559,39 @@ def gateway(
         from nanobot.agent.tools.message import MessageTool
         from nanobot.utils.evaluator import evaluate_response
 
+        target_channel = job.payload.channel or "cli"
+        target_chat_id = job.payload.to or "direct"
+
         reminder_note = (
             "[Scheduled Task] Timer finished.\n\n"
             f"Task '{job.name}' has been triggered.\n"
-            f"Scheduled instruction: {job.payload.message}"
+            f"Scheduled instruction: {job.payload.message}\n\n"
+            f"Deliver the response to channel='{target_channel}' chat_id='{target_chat_id}'."
         )
 
         cron_tool = agent.tools.get("cron")
         cron_token = None
         if isinstance(cron_tool, CronTool):
             cron_token = cron_tool.set_cron_context(True)
+
+        # Lock the recipient so the agent cannot redirect the message
+        # to a different user (e.g. the system owner read from memory).
+        message_tool = agent.tools.get("message")
+        if isinstance(message_tool, MessageTool):
+            message_tool.lock_recipient(target_channel, target_chat_id)
+
         try:
             resp = await agent.process_direct(
                 reminder_note,
                 session_key=f"cron:{job.id}",
-                channel=job.payload.channel or "cli",
-                chat_id=job.payload.to or "direct",
+                channel=target_channel,
+                chat_id=target_chat_id,
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
                 cron_tool.reset_cron_context(cron_token)
+            if isinstance(message_tool, MessageTool):
+                message_tool.unlock_recipient()
 
         response = resp.content if resp else ""
 

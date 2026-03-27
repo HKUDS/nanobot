@@ -21,6 +21,23 @@ class MessageTool(Tool):
         self._default_chat_id = default_chat_id
         self._default_message_id = default_message_id
         self._sent_in_turn: bool = False
+        self._locked_channel: str | None = None
+        self._locked_chat_id: str | None = None
+
+    def lock_recipient(self, channel: str, chat_id: str) -> None:
+        """Lock delivery to this channel:chat_id (e.g. for cron job execution).
+
+        While locked, any attempt to send to a different recipient is silently
+        redirected to the locked target. This is a code-level guarantee that
+        cannot be overridden by the agent's reasoning or memory.
+        """
+        self._locked_channel = channel
+        self._locked_chat_id = chat_id
+
+    def unlock_recipient(self) -> None:
+        """Remove the recipient lock after the cron job finishes."""
+        self._locked_channel = None
+        self._locked_chat_id = None
 
     def set_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Set the current message context."""
@@ -87,6 +104,12 @@ class MessageTool(Tool):
         channel = channel or self._default_channel
         chat_id = chat_id or self._default_chat_id
         message_id = message_id or self._default_message_id
+
+        # If a recipient lock is active, force delivery to the locked target
+        # regardless of what the agent decided. Code-level guarantee.
+        if self._locked_channel and self._locked_chat_id:
+            channel = self._locked_channel
+            chat_id = self._locked_chat_id
 
         if not channel or not chat_id:
             return "Error: No target channel/chat specified"
