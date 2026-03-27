@@ -111,3 +111,131 @@ class TestExtractEvidenceToolResults:
         assert "[tool:load_skill]" in evidence
         assert "[tool:exec]" in evidence
         assert "obsidian search query=DS10540" in evidence
+
+
+class TestExtractEvidenceTruncation:
+    def test_long_tool_output_truncated(self) -> None:
+        v = _make_verifier()
+        long_output = "x" * 1000
+        messages = [
+            {"role": "system", "content": "No memory."},
+            {"role": "user", "content": "Read file"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": '{"path": "/tmp/big.txt"}',
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "name": "read_file",
+                "content": f"<tool_result>\n{long_output}\n</tool_result>",
+            },
+            {"role": "assistant", "content": "The file contains many x characters."},
+        ]
+        evidence = v._extract_evidence(messages)
+        assert "..." in evidence
+        assert long_output not in evidence
+
+    def test_tool_budget_drops_oldest(self) -> None:
+        v = _make_verifier()
+        messages: list[dict] = [
+            {"role": "system", "content": "No memory."},
+            {"role": "user", "content": "Do many things"},
+        ]
+        for i in range(20):
+            output = f"result_{'y' * 300}_{i}"
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": f"call_{i}",
+                            "type": "function",
+                            "function": {
+                                "name": "exec",
+                                "arguments": f'{{"command": "cmd_{i}"}}',
+                            },
+                        }
+                    ],
+                }
+            )
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": f"call_{i}",
+                    "name": "exec",
+                    "content": f"<tool_result>\n{output}\n</tool_result>",
+                }
+            )
+        messages.append({"role": "assistant", "content": "Done."})
+
+        evidence = v._extract_evidence(messages)
+        tool_lines = [line for line in evidence.split("\n") if line.startswith("[tool:")]
+        total = sum(len(line) for line in tool_lines)
+        assert total <= v._TOOL_BUDGET + 500  # allow one line overshoot
+
+    def test_current_turn_only(self) -> None:
+        v = _make_verifier()
+        messages = [
+            {"role": "system", "content": "No memory."},
+            {"role": "user", "content": "Old question"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "old_call",
+                        "type": "function",
+                        "function": {
+                            "name": "exec",
+                            "arguments": '{"command": "old_command"}',
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "old_call",
+                "name": "exec",
+                "content": "<tool_result>\nold_output\n</tool_result>",
+            },
+            {"role": "assistant", "content": "Old answer"},
+            {"role": "user", "content": "New question"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "new_call",
+                        "type": "function",
+                        "function": {
+                            "name": "exec",
+                            "arguments": '{"command": "new_command"}',
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "new_call",
+                "name": "exec",
+                "content": "<tool_result>\nnew_output\n</tool_result>",
+            },
+            {"role": "assistant", "content": "New answer"},
+        ]
+        evidence = v._extract_evidence(messages)
+        assert "new_command" in evidence
+        assert "new_output" in evidence
+        assert "old_command" not in evidence
+        assert "old_output" not in evidence
