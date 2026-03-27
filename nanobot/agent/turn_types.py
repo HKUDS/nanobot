@@ -35,8 +35,6 @@ class TurnState:
     nudged_for_final: bool = False
     turn_tool_calls: int = 0
     last_tool_call_msg_idx: int = -1
-    has_plan: bool = False
-    plan_enforced: bool = False
     consecutive_errors: int = 0
     iteration: int = 0
     tools_def_cache: list[dict[str, Any]] = field(default_factory=list)

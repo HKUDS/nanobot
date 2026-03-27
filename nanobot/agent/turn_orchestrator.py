@@ -30,7 +30,6 @@ from nanobot.agent.turn_phases import (
     _CONTEXT_RESERVE_RATIO,
     ActPhase,
     _dynamic_preserve_recent,
-    _needs_planning,
     _safe_int,
 )
 from nanobot.agent.turn_types import TurnResult as TurnResult  # re-export
@@ -127,20 +126,6 @@ class TurnOrchestrator:
         _raw_cw = getattr(self._config, "context_window_tokens", 0)
         context_window = _raw_cw if isinstance(_raw_cw, int | float) else 0
         context_budget = int(context_window * _CONTEXT_RESERVE_RATIO) if context_window else 0
-
-        # --- PLAN phase: inject planning prompt for complex tasks ----------
-        _raw_pe = getattr(self._config, "planning_enabled", False)
-        planning_enabled = _raw_pe if isinstance(_raw_pe, bool) else False
-        if planning_enabled:
-            if _needs_planning(state.user_text):
-                state.messages.append(
-                    {
-                        "role": "system",
-                        "content": self._prompts.get("plan"),
-                    }
-                )
-                state.has_plan = True
-                logger.debug("Planning prompt injected for: {}...", state.user_text[:60])
 
         _raw_wt = getattr(self._config, "max_session_wall_time_seconds", 0)
         _wall_time_limit = _raw_wt if isinstance(_raw_wt, int | float) else 0

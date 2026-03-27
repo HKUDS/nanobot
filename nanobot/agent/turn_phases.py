@@ -37,38 +37,8 @@ _ARGS_REDACT_TOOLS: frozenset[str] = frozenset(
 )
 
 # Named constants for magic numbers used across the agent loop (CQ-L6).
-_GREETING_MAX_LEN: int = 20  # Messages shorter than this are treated as greetings / simple Qs
 _CONTEXT_RESERVE_RATIO: float = (
     0.80  # Fraction of context window reserved for prompt; ~20% for reply
-)
-
-# Multi-step planning signal substrings for _needs_planning().
-# Defined at module level so the tuple is allocated once, not per call.
-_PLANNING_SIGNALS: tuple[str, ...] = (
-    " and ",
-    " then ",
-    " after that",
-    " also ",
-    " steps",
-    " first ",
-    " second ",
-    " finally ",
-    "\n-",
-    "\n*",
-    "\n1.",
-    "\n2.",
-    " research ",
-    " analyze ",
-    " compare ",
-    " investigate ",
-    " create ",
-    " build ",
-    " implement ",
-    " set up ",
-    " configure ",
-    " plan ",
-    " schedule ",
-    " organize ",
 )
 
 
@@ -81,23 +51,6 @@ def _safe_int(obj: Any, attr: str, default: int) -> int:
     """Safely extract an integer attribute, returning *default* when the value is not numeric."""
     val = getattr(obj, attr, default)
     return int(val) if isinstance(val, int | float) else default
-
-
-def _needs_planning(text: str) -> bool:
-    """Heuristic: does this message benefit from explicit planning?
-
-    Short greetings, simple questions, or single-action requests don't
-    need a plan. Multi-step tasks, research queries, and complex
-    instructions do.
-    """
-    if not text:
-        return False
-    text_lower = text.strip().lower()
-    # Very short messages (< 20 chars) are usually greetings or simple Qs
-    if len(text_lower) < _GREETING_MAX_LEN:
-        return False
-    # Explicit multi-step indicators
-    return any(signal in text_lower for signal in _PLANNING_SIGNALS)
 
 
 def _dynamic_preserve_recent(
