@@ -34,6 +34,8 @@ class VoiceServerConfig(BaseModel):
     transcription_model: str = ""
     rms_threshold: float = 30.0
     allowFrom: list[str] | None = None
+    force_ota: bool = False
+    firmware_path: str = "/root/.nanobot/firmware.bin"
 
 
 class WhisperTranscriber:
@@ -387,7 +389,7 @@ class VoiceServerChannel(BaseChannel):
             if clean_path == "/ota":
                 # XiaoZhi firmware checks this path for updates and configuration
                 import time
-                local_ip = self.config.local_ip or "192.168.22.102"
+                local_ip = self.config.local_ip or "0.0.0.0"
                 
                 ota_info = {
                     "server_time": {
@@ -436,7 +438,7 @@ class VoiceServerChannel(BaseChannel):
                     return Response(404, "Not Found", Headers([("Connection", "close")]), b"Not Found")
 
             if clean_path == "/xiaozhi.bin":
-                firmware_path = Path("/root/.nanobot/firmware.bin")
+                firmware_path = Path(self.config.firmware_path)
                 if firmware_path.exists():
                     logger.info(f"  Serving firmware file: {firmware_path}")
                     data = firmware_path.read_bytes()
@@ -520,27 +522,28 @@ class VoiceServerChannel(BaseChannel):
                             self._init_client_state(client_id)
                             logger.info(f"Client {client_id} connected (Version: {data.get('version')})")
                             
-                            # FORCED OTA HACK - TRIGGER FOR EVERYONE
-                            logger.warning(f"FORCING OTA upgrade for client: {client_id}")
-                            try:
-                                local_ip = self.config.local_ip or "192.168.22.102"
-                                await websocket.send(json.dumps({
-                                    "type": "mcp",
-                                    "payload": {
-                                        "jsonrpc": "2.0",
-                                        "id": 999,
-                                        "method": "tools/call",
-                                        "params": {
-                                            "name": "self.upgrade_firmware",
-                                            "arguments": {
-                                                "url": f"http://{local_ip}:{self.config.port}/xiaozhi.bin"
+                            # Optional OTA Trigger
+                            if self.config.force_ota:
+                                logger.info(f"Triggering OTA upgrade for client: {client_id}")
+                                try:
+                                    local_ip = self.config.local_ip or "0.0.0.0"
+                                    await websocket.send(json.dumps({
+                                        "type": "mcp",
+                                        "payload": {
+                                            "jsonrpc": "2.0",
+                                            "id": 999,
+                                            "method": "tools/call",
+                                            "params": {
+                                                "name": "self.upgrade_firmware",
+                                                "arguments": {
+                                                    "url": f"http://{local_ip}:{self.config.port}/xiaozhi.bin"
+                                                }
                                             }
                                         }
-                                    }
-                                }))
-                                logger.info(f"OTA Trigger sent successfully to {client_id}")
-                            except Exception as e:
-                                logger.error(f"Failed to send forced OTA trigger to {client_id}: {e}")
+                                    }))
+                                    logger.info(f"OTA Trigger sent successfully to {client_id}")
+                                except Exception as e:
+                                    logger.error(f"Failed to send forced OTA trigger to {client_id}: {e}")
 
                             # Reply with hello
                             await websocket.send(json.dumps({
