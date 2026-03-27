@@ -236,6 +236,49 @@ nanobot agent
 
 That's it! You have a working AI assistant in 2 minutes.
 
+## 🌐 Web UI
+
+nanobot now includes a **web-based interface** for easier configuration and chat interaction, perfect for cloud deployments like Koyeb.
+
+### Quick Start
+
+**1. Install web dependencies**:
+```bash
+pip install nanobot-ai[web]
+# Or with uv
+uv pip install nanobot-ai[web]
+```
+
+**2. Start the web UI**:
+```bash
+nanobot web
+```
+
+**3. Open your browser**:
+Navigate to http://localhost:18790
+
+### Features
+
+- **Dashboard**: System overview and quick actions
+- **Chat**: Real-time conversation with your AI assistant
+- **Configuration**: Manage providers, models, and settings via web form
+- **Channels**: Configure Telegram, Discord, WhatsApp, etc.
+- **Status**: Monitor system health and configuration
+
+### Koyeb Deployment
+
+The Web UI is the default mode for Koyeb deployments:
+
+```bash
+# Set environment variables in Koyeb
+koyeb service update nanobot-gateway \
+  --env PORT=18790 \
+  --env MODE=web \
+  --env NANOBOT_WEB_AUTH_TOKEN=your-secret-token  # Recommended for security
+```
+
+For detailed Web UI documentation, see [docs/web-ui.md](docs/web-ui.md).
+
 ## 💬 Chat Apps
 
 Connect nanobot to your favorite chat platform. Want to build your own? See the [Channel Plugin Guide](./docs/CHANNEL_PLUGIN_GUIDE.md).
@@ -1535,6 +1578,9 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 | `nanobot agent --no-markdown` | Show plain-text replies |
 | `nanobot agent --logs` | Show runtime logs during chat |
 | `nanobot gateway` | Start the gateway |
+| `nanobot web` | Start the web UI |
+| `nanobot web --port 8080` | Start web UI on custom port |
+| `nanobot web --auth-token xxx` | Start web UI with authentication |
 | `nanobot status` | Show status |
 | `nanobot provider login openai-codex` | OAuth login for providers |
 | `nanobot channels login <channel>` | Authenticate a channel interactively |

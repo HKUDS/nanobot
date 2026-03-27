@@ -1,0 +1,318 @@
+{% extends "base.html" %}
+
+{% block title %}Chat{% endblock %}
+{% block active_page %}chat{% endblock %}
+
+{% block content %}
+<div class="row h-100">
+    <div class="col-12 h-100">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-chat-dots me-2"></i>Chat with nanobot</h5>
+                <div>
+                    <select class="form-select form-select-sm d-inline-block w-auto" id="sessionSelect">
+                        <option value="web:default">Default Session</option>
+                    </select>
+                    <button class="btn btn-outline-secondary btn-sm ms-2" onclick="clearChat()" title="Clear chat">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body p-0 d-flex flex-column">
+                <!-- Chat Messages -->
+                <div id="chatMessages" class="flex-grow-1 p-4 overflow-auto" style="min-height: 400px;">
+                    <div class="text-center text-muted py-5" id="welcomeMessage">
+                        <i class="bi bi-robot display-1 mb-3"></i>
+                        <h4>Welcome to nanobot Chat</h4>
+                        <p>Start a conversation with your AI assistant</p>
+                    </div>
+                    <!-- Messages will be added here -->
+                </div>
+                
+                <!-- Input Area -->
+                <div class="border-top p-3 bg-light">
+                    <div class="input-group">
+                        <textarea class="form-control" id="chatInput" rows="2" 
+                                  placeholder="Type your message here... (Press Enter to send, Shift+Enter for new line)"
+                                  onkeypress="handleChatKeyPress(event)"></textarea>
+                        <button class="btn btn-primary" type="button" id="sendButton" onclick="sendMessage()">
+                            <i class="bi bi-send me-1"></i>Send
+                        </button>
+                        <button class="btn btn-outline-secondary" type="button" id="stopButton" onclick="stopGeneration()" style="display: none;">
+                            <i class="bi bi-stop-circle me-1"></i>Stop
+                        </button>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mt-2">
+                        <small class="text-muted">
+                            <i class="bi bi-info-circle me-1"></i>
+                            Markdown supported • Session: <span id="currentSession">web:default</span>
+                        </small>
+                        <div id="typingIndicator" style="display: none;">
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                            <span>nanobot is thinking...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Session Management Modal -->
+<div class="modal fade" id="sessionModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Manage Sessions</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Session management coming soon...</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let isGenerating = false;
+let currentAbortController = null;
+
+// Load on page ready
+document.addEventListener('DOMContentLoaded', function() {
+    loadChatHistory();
+});
+
+function handleChatKeyPress(event) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendMessage();
+    }
+}
+
+async function sendMessage() {
+    const input = document.getElementById('chatInput');
+    const message = input.value.trim();
+    
+    if (!message || isGenerating) return;
+    
+    // Hide welcome message
+    const welcomeMsg = document.getElementById('welcomeMessage');
+    if (welcomeMsg) {
+        welcomeMsg.style.display = 'none';
+    }
+    
+    // Add user message
+    addMessage('user', message);
+    input.value = '';
+    
+    // Show typing indicator
+    setGenerating(true);
+    
+    const sessionId = document.getElementById('sessionSelect').value;
+    
+    try {
+        // Use streaming if available, otherwise use regular API
+        const useStreaming = false; // Set to true when streaming is fully implemented
+        
+        if (useStreaming) {
+            await streamMessage(message, sessionId);
+        } else {
+            const result = await api.post('/api/chat', { 
+                message: message, 
+                session_id: sessionId 
+            });
+            
+            // Add assistant response
+            addMessage('assistant', result.response, result.metadata);
+        }
+    } catch (error) {
+        console.error('Chat error:', error);
+        addMessage('error', `Error: ${error.message}`);
+    } finally {
+        setGenerating(false);
+    }
+}
+
+async function streamMessage(message, sessionId) {
+    currentAbortController = new AbortController();
+    
+    try {
+        const response = await fetch('/api/chat/stream', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Auth-Token': api.getToken() || ''
+            },
+            body: JSON.stringify({ message, session_id: sessionId }),
+            signal: currentAbortController.signal
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        
+        // Create placeholder for assistant message
+        const assistantMsgDiv = addMessage('assistant', '', {}, true);
+        let fullContent = '';
+        
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value);
+            const lines = chunk.split('\n');
+            
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    if (data === '[DONE]') {
+                        break;
+                    }
+                    fullContent += data;
+                    assistantMsgDiv.innerHTML = marked.parse(fullContent);
+                    scrollToBottom();
+                }
+            }
+        }
+        
+        // Finalize message
+        assistantMsgDiv.setAttribute('data-complete', 'true');
+        
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            addMessage('info', 'Generation stopped by user');
+        } else {
+            throw error;
+        }
+    } finally {
+        currentAbortController = null;
+    }
+}
+
+function stopGeneration() {
+    if (currentAbortController) {
+        currentAbortController.abort();
+        setGenerating(false);
+    }
+}
+
+function addMessage(role, content, metadata = {}, isStreaming = false) {
+    const chatMessages = document.getElementById('chatMessages');
+    
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${role}-message mb-3`;
+    
+    const isUser = role === 'user';
+    const isError = role === 'error';
+    const isInfo = role === 'info';
+    
+    let contentHtml = '';
+    if (isUser) {
+        contentHtml = `<div class="text-break">${escapeHtml(content)}</div>`;
+    } else if (isError) {
+        contentHtml = `<div class="alert alert-danger mb-0">${escapeHtml(content)}</div>`;
+    } else if (isInfo) {
+        contentHtml = `<div class="alert alert-info mb-0">${escapeHtml(content)}</div>`;
+    } else {
+        // Assistant message with Markdown
+        contentHtml = content ? marked.parse(content) : '<span class="text-muted">Thinking...</span>';
+    }
+    
+    messageDiv.innerHTML = `
+        <div class="d-flex align-items-start ${isUser ? 'flex-row-reverse' : ''}">
+            <div class="avatar ${isUser ? 'bg-primary' : 'bg-success'} text-white rounded-circle d-flex align-items-center justify-content-center me-2 flex-shrink-0" 
+                 style="width: 36px; height: 36px;">
+                <i class="bi ${isUser ? 'bi-person' : 'bi-robot'}"></i>
+            </div>
+            <div class="${isUser ? 'text-end' : ''} flex-grow-1">
+                <div class="fw-bold mb-1 ${isUser ? 'text-primary' : 'text-success'}">
+                    ${isUser ? 'You' : 'nanobot'}
+                    ${metadata && metadata.model ? `<small class="text-muted ms-2">${metadata.model}</small>` : ''}
+                </div>
+                <div class="message-content ${isUser ? 'bg-primary text-white' : isError || isInfo ? '' : 'bg-light'} rounded p-3 d-inline-block">
+                    ${contentHtml}
+                </div>
+                ${!isUser && !isError && !isInfo && !isStreaming ? `
+                <div class="mt-2">
+                    <button class="btn btn-sm btn-link" onclick="copyMessage(this)" title="Copy">
+                        <i class="bi bi-clipboard"></i>
+                    </button>
+                </div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+    
+    chatMessages.appendChild(messageDiv);
+    scrollToBottom();
+    
+    return messageDiv.querySelector('.message-content');
+}
+
+function setGenerating(generating) {
+    isGenerating = generating;
+    const sendButton = document.getElementById('sendButton');
+    const stopButton = document.getElementById('stopButton');
+    const typingIndicator = document.getElementById('typingIndicator');
+    const input = document.getElementById('chatInput');
+    
+    if (generating) {
+        sendButton.style.display = 'none';
+        stopButton.style.display = 'inline-block';
+        typingIndicator.style.display = 'block';
+        input.disabled = true;
+    } else {
+        sendButton.style.display = 'inline-block';
+        stopButton.style.display = 'none';
+        typingIndicator.style.display = 'none';
+        input.disabled = false;
+        input.focus();
+    }
+}
+
+function scrollToBottom() {
+    const chatMessages = document.getElementById('chatMessages');
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function clearChat() {
+    if (!confirm('Clear all chat messages?')) return;
+    
+    const chatMessages = document.getElementById('chatMessages');
+    chatMessages.innerHTML = `
+        <div class="text-center text-muted py-5" id="welcomeMessage">
+            <i class="bi bi-robot display-1 mb-3"></i>
+            <h4>Welcome to nanobot Chat</h4>
+            <p>Start a conversation with your AI assistant</p>
+        </div>
+    `;
+}
+
+function copyMessage(button) {
+    const content = button.closest('.message').querySelector('.message-content').innerText;
+    navigator.clipboard.writeText(content).then(() => {
+        showToast('Message copied', 'success');
+        button.innerHTML = '<i class="bi bi-check"></i>';
+        setTimeout(() => {
+            button.innerHTML = '<i class="bi bi-clipboard"></i>';
+        }, 2000);
+    });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function loadChatHistory() {
+    // Chat history loading - can be implemented later with session storage
+    console.log('Chat history loading not yet implemented');
+}
+</script>
+{% endblock %}

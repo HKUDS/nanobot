@@ -1,0 +1,456 @@
+{% extends "base.html" %}
+
+{% block title %}Status{% endblock %}
+{% block active_page %}status{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h1><i class="bi bi-activity me-2"></i>System Status</h1>
+        <p class="text-muted">Monitor your nanobot instance health and configuration</p>
+    </div>
+</div>
+
+<!-- Status Overview -->
+<div class="row g-4 mb-4">
+    <div class="col-md-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body text-center">
+                <i class="bi bi-file-earmark-check display-4 text-success mb-3"></i>
+                <h5>Configuration</h5>
+                <div id="configStatus" class="badge bg-secondary">Loading...</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body text-center">
+                <i class="bi bi-folder display-4 text-primary mb-3"></i>
+                <h5>Workspace</h5>
+                <div id="workspaceStatus" class="badge bg-secondary">Loading...</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body text-center">
+                <i class="bi bi-cloud display-4 text-info mb-3"></i>
+                <h5>Providers</h5>
+                <div id="providersStatus" class="badge bg-secondary">Loading...</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body text-center">
+                <i class="bi bi-plug display-4 text-warning mb-3"></i>
+                <h5>Channels</h5>
+                <div id="channelsStatus" class="badge bg-secondary">Loading...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Detailed Status -->
+<div class="row g-4">
+    <!-- Model & Agent Info -->
+    <div class="col-md-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-robot me-2"></i>Agent Configuration</h5>
+            </div>
+            <div class="card-body">
+                <ul class="list-group list-group-flush" id="agentInfo">
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span>Model</span>
+                        <strong id="agentModel" class="text-primary">-</strong>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span>Provider</span>
+                        <strong id="agentProvider">-</strong>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span>Max Tokens</span>
+                        <strong id="agentMaxTokens">-</strong>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span>Context Window</span>
+                        <strong id="agentContextWindow">-</strong>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span>Temperature</span>
+                        <strong id="agentTemperature">-</strong>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Gateway Info -->
+    <div class="col-md-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-server me-2"></i>Gateway Status</h5>
+            </div>
+            <div class="card-body">
+                <ul class="list-group list-group-flush" id="gatewayInfo">
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span>Port</span>
+                        <strong id="gatewayPort">-</strong>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span>Heartbeat</span>
+                        <strong id="gatewayHeartbeat">-</strong>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span>Heartbeat Interval</span>
+                        <strong id="gatewayHeartbeatInterval">-</strong>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Providers Status -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-cloud me-2"></i>Configured Providers</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Provider</th>
+                                <th>Type</th>
+                                <th>Status</th>
+                                <th>Details</th>
+                            </tr>
+                        </thead>
+                        <tbody id="providersTable">
+                            <tr>
+                                <td colspan="4" class="text-center py-4">
+                                    <div class="spinner-border text-primary" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Channels Status -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-plug me-2"></i>Chat Channels</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Channel</th>
+                                <th>Status</th>
+                                <th>Configuration</th>
+                            </tr>
+                        </thead>
+                        <tbody id="channelsTable">
+                            <tr>
+                                <td colspan="3" class="text-center py-4">
+                                    <div class="spinner-border text-primary" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tools Status -->
+<div class="row mt-4">
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-search me-2"></i>Web Search</h5>
+            </div>
+            <div class="card-body">
+                <ul class="list-group list-group-flush" id="webSearchInfo">
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span>Provider</span>
+                        <strong id="searchProvider">-</strong>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span>Max Results</span>
+                        <strong id="searchMaxResults">-</strong>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span>API Key</span>
+                        <strong id="searchApiKeyStatus">-</strong>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-terminal me-2"></i>Shell Execution</h5>
+            </div>
+            <div class="card-body">
+                <ul class="list-group list-group-flush" id="execInfo">
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span>Status</span>
+                        <strong id="execStatus">-</strong>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span>Timeout</span>
+                        <strong id="execTimeout">-</strong>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span>Workspace Restriction</span>
+                        <strong id="execRestriction">-</strong>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Refresh Button -->
+<div class="row mt-4">
+    <div class="col-12 text-center">
+        <button class="btn btn-primary" onclick="loadStatus()">
+            <i class="bi bi-arrow-clockwise me-2"></i>Refresh Status
+        </button>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Load on page ready
+document.addEventListener('DOMContentLoaded', function() {
+    loadStatus();
+});
+
+async function loadStatus() {
+    try {
+        const status = await api.get('/api/status');
+        
+        // Update overview cards
+        updateOverview(status);
+        
+        // Update agent info
+        updateAgentInfo(status);
+        
+        // Update gateway info
+        updateGatewayInfo(status);
+        
+        // Update providers table
+        updateProvidersTable(status.providers);
+        
+        // Update channels table
+        updateChannelsTable(status.channels);
+        
+        // Update tools info
+        updateToolsInfo(status.tools);
+        
+        showToast('Status refreshed', 'success');
+    } catch (error) {
+        console.error('Failed to load status:', error);
+        showToast('Failed to load status', 'danger');
+    }
+}
+
+function updateOverview(status) {
+    document.getElementById('configStatus').className = 
+        `badge ${status.config_exists ? 'bg-success' : 'bg-danger'}`;
+    document.getElementById('configStatus').textContent = 
+        status.config_exists ? '✓ Configured' : '✗ Missing';
+    
+    document.getElementById('workspaceStatus').className = 
+        `badge ${status.workspace_exists ? 'bg-success' : 'bg-danger'}`;
+    document.getElementById('workspaceStatus').textContent = 
+        status.workspace_exists ? '✓ Active' : '✗ Missing';
+    
+    const configuredProviders = Object.values(status.providers || {}).filter(p => p.configured).length;
+    const totalProviders = Object.keys(status.providers || {}).length;
+    document.getElementById('providersStatus').className = 'badge bg-info';
+    document.getElementById('providersStatus').textContent = 
+        `${configuredProviders}/${totalProviders} Configured`;
+    
+    const enabledChannels = Object.values(status.channels || {}).filter(c => c.enabled).length;
+    const totalChannels = Object.keys(status.channels || {}).length;
+    document.getElementById('channelsStatus').className = 'badge bg-warning';
+    document.getElementById('channelsStatus').textContent = 
+        `${enabledChannels}/${totalChannels} Enabled`;
+}
+
+function updateAgentInfo(status) {
+    const config = window.currentConfig || {};
+    if (config.agents?.defaults) {
+        const defaults = config.agents.defaults;
+        document.getElementById('agentModel').textContent = defaults.model || 'Not set';
+        document.getElementById('agentProvider').textContent = defaults.provider || 'Auto';
+        document.getElementById('agentMaxTokens').textContent = defaults.max_tokens || '8192';
+        document.getElementById('agentContextWindow').textContent = 
+            (defaults.context_window_tokens || 65536).toLocaleString();
+        document.getElementById('agentTemperature').textContent = defaults.temperature || '0.1';
+    }
+}
+
+function updateGatewayInfo(status) {
+    document.getElementById('gatewayPort').textContent = status.gateway?.port || '18790';
+    document.getElementById('gatewayHeartbeat').textContent = 
+        status.gateway?.heartbeat_enabled ? '✓ Enabled' : '✗ Disabled';
+    document.getElementById('gatewayHeartbeat').className = 
+        status.gateway?.heartbeat_enabled ? 'text-success' : 'text-muted';
+    document.getElementById('gatewayHeartbeatInterval').textContent = 
+        `${status.gateway?.heartbeat_interval || 1800}s (${Math.round((status.gateway?.heartbeat_interval || 1800) / 60)}m)`;
+}
+
+function updateProvidersTable(providers) {
+    const tbody = document.getElementById('providersTable');
+    tbody.innerHTML = '';
+    
+    const providerNames = {
+        'custom': 'Custom/OpenAI Compatible',
+        'azure_openai': 'Azure OpenAI',
+        'anthropic': 'Anthropic',
+        'openai': 'OpenAI',
+        'openrouter': 'OpenRouter',
+        'deepseek': 'DeepSeek',
+        'groq': 'Groq',
+        'zhipu': 'Zhipu',
+        'dashscope': 'DashScope',
+        'vllm': 'vLLM',
+        'ollama': 'Ollama',
+        'ovms': 'OVMS',
+        'gemini': 'Gemini',
+        'moonshot': 'Moonshot',
+        'minimax': 'MiniMax',
+        'mistral': 'Mistral',
+        'stepfun': 'StepFun',
+        'aihubmix': 'AiHubMix',
+        'siliconflow': 'SiliconFlow',
+        'volcengine': 'VolcEngine',
+    };
+    
+    if (Object.keys(providers).length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-muted">No providers configured</td></tr>';
+        return;
+    }
+    
+    for (const [name, info] of Object.entries(providers)) {
+        const tr = document.createElement('tr');
+        
+        let typeBadge = '';
+        if (info.status === 'oauth') {
+            typeBadge = '<span class="badge bg-warning">OAuth</span>';
+        } else if (info.status === 'local') {
+            typeBadge = '<span class="badge bg-info">Local</span>';
+        } else {
+            typeBadge = '<span class="badge bg-primary">API Key</span>';
+        }
+        
+        let statusBadge = '';
+        if (info.configured) {
+            statusBadge = '<span class="badge bg-success">✓ Configured</span>';
+        } else {
+            statusBadge = '<span class="badge bg-danger">✗ Not Configured</span>';
+        }
+        
+        let details = '';
+        if (info.status === 'local' && info.api_base) {
+            details = `<small class="text-muted">${info.api_base}</small>`;
+        }
+        
+        tr.innerHTML = `
+            <td><strong>${providerNames[name] || name}</strong></td>
+            <td>${typeBadge}</td>
+            <td>${statusBadge}</td>
+            <td>${details}</td>
+        `;
+        
+        tbody.appendChild(tr);
+    }
+}
+
+function updateChannelsTable(channels) {
+    const tbody = document.getElementById('channelsTable');
+    tbody.innerHTML = '';
+    
+    const channelNames = {
+        'telegram': 'Telegram',
+        'discord': 'Discord',
+        'whatsapp': 'WhatsApp',
+        'weixin': 'WeChat',
+        'feishu': 'Feishu',
+        'dingtalk': 'DingTalk',
+        'slack': 'Slack',
+        'matrix': 'Matrix',
+        'email': 'Email',
+        'qq': 'QQ',
+        'wecom': 'WeCom',
+        'mochat': 'MoChat',
+    };
+    
+    if (Object.keys(channels).length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center py-4 text-muted">No channels configured</td></tr>';
+        return;
+    }
+    
+    for (const [name, info] of Object.entries(channels)) {
+        const tr = document.createElement('tr');
+        
+        let statusBadge = '';
+        if (info.enabled) {
+            statusBadge = '<span class="badge bg-success">✓ Enabled</span>';
+        } else {
+            statusBadge = '<span class="badge bg-secondary">✗ Disabled</span>';
+        }
+        
+        tr.innerHTML = `
+            <td><strong>${channelNames[name] || name}</strong></td>
+            <td>${statusBadge}</td>
+            <td><a href="/channels" class="btn btn-sm btn-outline-primary">Configure</a></td>
+        `;
+        
+        tbody.appendChild(tr);
+    }
+}
+
+function updateToolsInfo(tools) {
+    if (tools?.web_search_provider) {
+        document.getElementById('searchProvider').textContent = tools.web_search_provider;
+        document.getElementById('searchMaxResults').textContent = tools.max_results || '5';
+        document.getElementById('searchApiKeyStatus').textContent = '✓ Configured';
+        document.getElementById('searchApiKeyStatus').className = 'text-success';
+    }
+    
+    if (tools?.exec_enabled !== undefined) {
+        document.getElementById('execStatus').textContent = tools.exec_enabled ? '✓ Enabled' : '✗ Disabled';
+        document.getElementById('execStatus').className = tools.exec_enabled ? 'text-success' : 'text-muted';
+        document.getElementById('execTimeout').textContent = `${tools.timeout || 60}s`;
+        document.getElementById('execRestriction').textContent = tools.restrict_to_workspace ? '✓ Enabled' : '✗ Disabled';
+    }
+}
+</script>
+{% endblock %}
