@@ -82,11 +82,17 @@ class AnswerVerifier:
 
         logger.debug("Running verification pass (mode={})", self.verification_mode)
 
+        evidence = self._extract_evidence(messages)
+
+        critique_content = f"User's question: {user_text}\n\nAssistant's answer: {candidate}"
+        if evidence:
+            critique_content += f"\n\nEvidence retrieved:\n{evidence}"
+
         critique_messages = [
             {"role": "system", "content": prompts.get("critique")},
             {
                 "role": "user",
-                "content": f"User's question: {user_text}\n\nAssistant's answer: {candidate}",
+                "content": critique_content,
             },
         ]
 

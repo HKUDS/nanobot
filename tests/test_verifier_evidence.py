@@ -2,8 +2,18 @@
 
 from __future__ import annotations
 
+import contextlib
+from typing import Any
+from unittest.mock import patch
+
 from nanobot.agent.verifier import AnswerVerifier
+from nanobot.providers.base import LLMResponse
 from tests.helpers import ScriptedProvider
+
+
+@contextlib.asynccontextmanager
+async def _noop_span_cm(**kwargs: Any):
+    yield None
 
 
 def _make_verifier() -> AnswerVerifier:
@@ -319,3 +329,79 @@ class TestExtractEvidenceMemory:
         assert tool_pos < memory_pos
         assert "obsidian vault path" in evidence
         assert "vault named Project Management" in evidence
+
+
+@patch("nanobot.agent.verifier.score_current_trace", new=lambda **kw: None)
+@patch("nanobot.agent.verifier.langfuse_span", new=_noop_span_cm)
+class TestVerifyWithEvidence:
+    async def test_evidence_passed_to_critique(self) -> None:
+        """When tool results exist, the critique call should include evidence."""
+        provider = ScriptedProvider([LLMResponse(content='{"confidence": 5, "issues": []}')])
+        v = AnswerVerifier(
+            provider=provider,
+            model="test-model",
+            temperature=0.7,
+            max_tokens=4096,
+            verification_mode="always",
+            memory_uncertainty_threshold=0.5,
+        )
+        messages = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "What is the vault?"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "exec",
+                            "arguments": '{"command": "obsidian vault path"}',
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "name": "exec",
+                "content": "<tool_result>\nProject Management\n</tool_result>",
+            },
+            {"role": "assistant", "content": "Your vault is Project Management"},
+        ]
+        result, _ = await v.verify(
+            "What is the vault?", "Your vault is Project Management", messages
+        )
+        assert result == "Your vault is Project Management"
+
+        # Check the critique call included evidence
+        assert len(provider.call_log) == 1
+        critique_msgs = provider.call_log[0]["messages"]
+        user_content = critique_msgs[1]["content"]
+        assert "Evidence retrieved:" in user_content
+        assert "[tool:exec]" in user_content
+        assert "obsidian vault path" in user_content
+
+    async def test_no_evidence_no_section(self) -> None:
+        """When no tools or memory, critique should not have evidence section."""
+        provider = ScriptedProvider([LLMResponse(content='{"confidence": 5, "issues": []}')])
+        v = AnswerVerifier(
+            provider=provider,
+            model="test-model",
+            temperature=0.7,
+            max_tokens=4096,
+            verification_mode="always",
+            memory_uncertainty_threshold=0.5,
+        )
+        messages = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "What is 2+2?"},
+            {"role": "assistant", "content": "4"},
+        ]
+        result, _ = await v.verify("What is 2+2?", "4", messages)
+        assert result == "4"
+
+        critique_msgs = provider.call_log[0]["messages"]
+        user_content = critique_msgs[1]["content"]
+        assert "Evidence retrieved:" not in user_content
