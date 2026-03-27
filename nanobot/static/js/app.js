@@ -149,18 +149,31 @@ async function checkAuth() {
     try {
         const response = await api.get('/api/auth/check');
         
-        if (response.auth_required && !response.authenticated) {
-            // Show auth modal or redirect
+        // If auth is required and we don't have a token, prompt for it
+        if (response.auth_required && !api.getToken()) {
             showAuthPrompt();
         }
+        // If auth is required and we have a token, verify it silently
+        else if (response.auth_required && api.getToken()) {
+            const storedToken = api.getToken();
+            const verifyResponse = await api.post('/api/auth/verify', { token: storedToken });
+            
+            if (!verifyResponse.authenticated) {
+                // Token is invalid, clear it and prompt again
+                api.setToken(null);
+                showAuthPrompt();
+            }
+        }
+        // If auth is not required, we're good
     } catch (error) {
         console.error('Auth check failed:', error);
+        // Don't prompt on network errors - might be temporary
     }
 }
 
 // Show Authentication Prompt
 function showAuthPrompt() {
-    const token = prompt('Please enter your authentication token:');
+    const token = prompt('Please enter your authentication token:\n\nThis token will be saved in your browser for future visits.');
     if (token) {
         api.setToken(token);
         verifyAuth(token);
@@ -171,17 +184,22 @@ function showAuthPrompt() {
 async function verifyAuth(token) {
     try {
         const response = await api.post('/api/auth/verify', { token });
-        
+
         if (response.authenticated) {
-            showToast('Authentication successful', 'success');
+            showToast('Authentication successful. Token saved.', 'success');
             updateConnectionStatus();
+            // Reload page to refresh all data
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
         } else {
             showToast('Invalid authentication token', 'danger');
             api.setToken(null);
-            setTimeout(showAuthPrompt, 1000);
+            setTimeout(() => showAuthPrompt(), 1500);
         }
     } catch (error) {
-        showToast('Authentication failed', 'danger');
+        console.error('Auth verification failed:', error);
+        showToast('Authentication failed: ' + error.message, 'danger');
         api.setToken(null);
     }
 }

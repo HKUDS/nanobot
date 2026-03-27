@@ -181,63 +181,74 @@ def register_api_routes(app):
         try:
             config_path = app.config["CONFIG_PATH"]
             config = load_config(config_path)
-            
+
             status = {
                 "config_exists": config_path.exists(),
-                "workspace_exists": config.workspace_path.exists(),
-                "model": config.agents.defaults.model,
+                "workspace_exists": config.workspace_path.exists() if config.workspace_path else False,
+                "model": config.agents.defaults.model if config.agents.defaults else "Not configured",
                 "providers": {},
                 "channels": {},
                 "gateway": {
-                    "port": config.gateway.port,
-                    "heartbeat_enabled": config.gateway.heartbeat.enabled,
-                    "heartbeat_interval": config.gateway.heartbeat.interval_s,
+                    "port": config.gateway.port if config.gateway else 18790,
+                    "heartbeat_enabled": config.gateway.heartbeat.enabled if config.gateway and config.gateway.heartbeat else True,
+                    "heartbeat_interval": config.gateway.heartbeat.interval_s if config.gateway and config.gateway.heartbeat else 1800,
                 },
                 "tools": {
-                    "web_search_provider": config.tools.web.search.provider,
-                    "exec_enabled": config.tools.exec.enable,
-                    "restrict_to_workspace": config.tools.restrict_to_workspace,
+                    "web_search_provider": config.tools.web.search.provider if config.tools and config.tools.web and config.tools.web.search else "brave",
+                    "exec_enabled": config.tools.exec.enable if config.tools and config.tools.exec else True,
+                    "restrict_to_workspace": config.tools.restrict_to_workspace if config.tools else False,
                 }
             }
-            
+
             # Check provider status
-            from nanobot.providers.registry import PROVIDERS
-            for spec in PROVIDERS:
-                p = getattr(config.providers, spec.name, None)
-                if p is None:
-                    continue
-                if spec.is_oauth:
-                    status["providers"][spec.name] = {"status": "oauth", "configured": True}
-                elif spec.is_local:
-                    status["providers"][spec.name] = {
-                        "status": "local",
-                        "configured": bool(p.api_base),
-                        "api_base": p.api_base
-                    }
-                else:
-                    status["providers"][spec.name] = {
-                        "status": "api_key",
-                        "configured": bool(p.api_key)
-                    }
-            
+            try:
+                from nanobot.providers.registry import PROVIDERS
+                for spec in PROVIDERS:
+                    p = getattr(config.providers, spec.name, None)
+                    if p is None:
+                        continue
+                    if spec.is_oauth:
+                        status["providers"][spec.name] = {"status": "oauth", "configured": True}
+                    elif spec.is_local:
+                        status["providers"][spec.name] = {
+                            "status": "local",
+                            "configured": bool(p.api_base),
+                            "api_base": p.api_base
+                        }
+                    else:
+                        status["providers"][spec.name] = {
+                            "status": "api_key",
+                            "configured": bool(p.api_key)
+                        }
+            except Exception as e:
+                print(f"Warning: Could not load providers: {e}")
+                status["providers"] = {"error": "Could not load providers"}
+
             # Check channel status
-            from nanobot.channels.registry import discover_all
-            all_channels = discover_all()
-            for name, cls in all_channels.items():
-                section = getattr(config.channels, name, None)
-                if section is None:
-                    enabled = False
-                elif isinstance(section, dict):
-                    enabled = section.get("enabled", False)
-                else:
-                    enabled = getattr(section, "enabled", False)
-                status["channels"][name] = {
-                    "display_name": cls.display_name,
-                    "enabled": enabled
-                }
-            
+            try:
+                from nanobot.channels.registry import discover_all
+                all_channels = discover_all()
+                for name, cls in all_channels.items():
+                    section = getattr(config.channels, name, None)
+                    if section is None:
+                        enabled = False
+                    elif isinstance(section, dict):
+                        enabled = section.get("enabled", False)
+                    else:
+                        enabled = getattr(section, "enabled", False)
+                    status["channels"][name] = {
+                        "display_name": cls.display_name,
+                        "enabled": enabled
+                    }
+            except Exception as e:
+                print(f"Warning: Could not load channels: {e}")
+                status["channels"] = {"error": "Could not load channels"}
+
             return jsonify(status)
         except Exception as e:
+            print(f"Error in /api/status: {e}")
+            import traceback
+            traceback.print_exc()
             return jsonify({"error": str(e)}), 500
     
     @app.route("/api/providers", methods=["GET"])
