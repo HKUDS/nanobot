@@ -208,6 +208,7 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        sender_id: str | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop.
 
@@ -251,6 +252,18 @@ class AgentLoop:
             for tc in tool_calls:
                 args_str = json.dumps(tc.arguments, ensure_ascii=False)
                 logger.info("Tool call: {}({})", tc.name, args_str[:200])
+                # Check per-MCP-server allow_from restriction
+                tool_obj = self.tools.get(tc.name)
+                if (
+                    tool_obj is not None
+                    and hasattr(tool_obj, "allow_from")
+                    and tool_obj.allow_from
+                    and sender_id not in tool_obj.allow_from
+                ):
+                    logger.warning(
+                        "Tool call '{}' denied for sender '{}' (not in allow_from)",
+                        tc.name, sender_id,
+                    )
             self._set_tool_context(channel, chat_id, message_id)
 
         result = await self.runner.run(AgentRunSpec(
