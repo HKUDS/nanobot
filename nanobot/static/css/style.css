@@ -351,12 +351,23 @@ body {
     #sidebar-wrapper {
         margin-left: calc(-1 * var(--sidebar-width));
     }
-    
+
     #page-content-wrapper {
         margin-left: 0;
     }
-    
+
     #wrapper.sidebar-toggled #sidebar-wrapper {
+        margin-left: 0;
+    }
+}
+
+/* Desktop Sidebar Toggle */
+@media (min-width: 769px) {
+    #wrapper.sidebar-toggled #sidebar-wrapper {
+        margin-left: calc(-1 * var(--sidebar-width));
+    }
+
+    #wrapper.sidebar-toggled #page-content-wrapper {
         margin-left: 0;
     }
 }
@@ -410,10 +421,6 @@ body {
         transform: translateX(0);
         opacity: 1;
     }
-}
-
-.sidebar-toggled #sidebar-wrapper {
-    animation: slideIn 0.3s ease;
 }
 
 /* Status Indicators */
