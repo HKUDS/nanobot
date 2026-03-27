@@ -21,7 +21,6 @@ from nanobot.agent.failure import ToolCallTracker
 if TYPE_CHECKING:
     from nanobot.agent.callbacks import ProgressCallback
     from nanobot.coordination.coordinator import ClassificationResult
-    from nanobot.coordination.delegation_advisor import DelegationAction
 
 
 @dataclass(slots=True)
@@ -36,7 +35,6 @@ class TurnState:
     nudged_for_final: bool = False
     turn_tool_calls: int = 0
     last_tool_call_msg_idx: int = -1
-    last_delegation_advice: DelegationAction | None = None
     has_plan: bool = False
     plan_enforced: bool = False
     consecutive_errors: int = 0

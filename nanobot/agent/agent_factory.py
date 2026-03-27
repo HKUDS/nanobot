@@ -373,8 +373,6 @@ def build_agent(
         llm_caller=llm_caller,
         tool_executor=_tool_build.tools,
         verifier=verifier,
-        dispatcher=dispatcher,
-        delegation_advisor=delegation_advisor,
         config=config,
         prompts=prompts,
         context=context,
