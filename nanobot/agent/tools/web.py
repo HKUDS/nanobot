@@ -106,6 +106,8 @@ class WebSearchTool(Tool):
             return await self._search_jina(query, n)
         elif provider == "brave":
             return await self._search_brave(query, n)
+        elif provider == "serper":
+            return await self._search_serper(query, n)
         else:
             return f"Error: unknown search provider '{provider}'"
 
@@ -262,6 +264,30 @@ class WebFetchTool(Tool):
         if result is None:
             result = await self._fetch_readability(url, extractMode, max_chars)
         return result
+
+    async def _search_serper(self, query: str, n: int) -> str:
+        api_key = self.config.api_key or os.environ.get("SERPER_API_KEY", "")
+        if not api_key:
+            logger.warning("SERPER_API_KEY not set, falling back to DuckDuckGo")
+            return await self._search_duckduckgo(query, n)
+        try:
+            async with httpx.AsyncClient(proxy=self.proxy) as client:
+                r = await client.post(
+                    "https://google.serper.dev/search",
+                    headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+                    json={"q": query, "num": n},
+                    timeout=10.0,
+                )
+                r.raise_for_status()
+            data = r.json()
+            items = [
+                {"title": x.get("title", ""), "url": x.get("link", ""), "content": x.get("snippet", "")}
+                for x in data.get("organic", [])
+            ]
+            return _format_results(query, items, n)
+        except Exception as e:
+            logger.warning("Serper search failed: {}", e)
+            return f"Error: Serper search failed ({e})"
 
     async def _fetch_jina(self, url: str, max_chars: int) -> str | None:
         """Try fetching via Jina Reader API. Returns None on failure."""
