@@ -82,6 +82,7 @@ class LLMProvider(ABC):
     _TRANSIENT_ERROR_MARKERS = (
         "429",
         "rate limit",
+        "ratelimit",
         "500",
         "502",
         "503",
