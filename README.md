@@ -110,6 +110,8 @@
 - [🌐 Agent Social Network](#-agent-social-network)
 - [⚙️ Configuration](#️-configuration)
   - [Providers](#providers)
+  - [Channel Settings](#channel-settings)
+    - [Retry Behavior](#retry-behavior)
   - [Web Search](#web-search)
   - [MCP (Model Context Protocol)](#mcp-model-context-protocol)
   - [Security](#security)
@@ -1248,6 +1250,7 @@ That's it! Environment variables, model routing, config matching, and `nanobot s
 | `detect_by_key_prefix` | Detect gateway by API key prefix | `"sk-or-"` |
 | `detect_by_base_keyword` | Detect gateway by API base URL | `"openrouter"` |
 | `strip_model_prefix` | Strip provider prefix before sending to gateway | `True` (for AiHubMix) |
+| `supports_max_completion_tokens` | Use `max_completion_tokens` instead of `max_tokens`; required for providers that reject both being set simultaneously (e.g. VolcEngine) | `True` |
 
 </details>
 
