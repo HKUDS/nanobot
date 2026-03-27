@@ -248,9 +248,9 @@ class TestVerifyAndContextBranches:
         report = store.snapshot.verify_memory(stale_days=30, update_profile=True)
         assert report["stale_events"] >= 1
 
-    def test_get_memory_context_minimal_and_empty_query(self, tmp_path: Path) -> None:
+    async def test_get_memory_context_minimal_and_empty_query(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
-        text = store.get_memory_context(query="", token_budget=200)
+        text = await store.get_memory_context(query="", token_budget=200)
         assert isinstance(text, str)
 
     def test_apply_live_user_correction_no_match(self, tmp_path: Path) -> None:
@@ -454,7 +454,7 @@ class TestStoreCoreBranchHelpers:
 
 
 class TestRetrieveAndContextBranches:
-    def test_get_memory_context_with_sections(self, tmp_path: Path) -> None:
+    async def test_get_memory_context_with_sections(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         if store.db:
             store.db.write_snapshot("current", "## Long\nProject memory details")
@@ -481,7 +481,9 @@ class TestRetrieveAndContextBranches:
                     "entities": ["project", "oauth2"],
                 }
             )
-        context = store.get_memory_context(query="open tasks", retrieval_k=4, token_budget=300)
+        context = await store.get_memory_context(
+            query="open tasks", retrieval_k=4, token_budget=300
+        )
         assert isinstance(context, str)
         assert len(context) > 0
 

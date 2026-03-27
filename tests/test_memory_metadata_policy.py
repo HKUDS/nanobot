@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -62,12 +62,12 @@ def test_append_events_writes_to_db(tmp_path: Path) -> None:
     assert any(e.get("summary") == "Carlos prefers CLI tooling." for e in events)
 
 
-def test_get_memory_context_fact_lookup_includes_episodic_softly(tmp_path: Path) -> None:
+async def test_get_memory_context_fact_lookup_includes_episodic_softly(tmp_path: Path) -> None:
     """fact_lookup now soft-includes episodic with a small budget weight."""
     store = MemoryStore(tmp_path)
     if store.db:
         store.db.write_snapshot("current", "# Memory\nCore facts")
-    store.retriever.retrieve = MagicMock(
+    store.retriever.retrieve = AsyncMock(
         return_value=[
             {
                 "id": "s1",
@@ -86,7 +86,7 @@ def test_get_memory_context_fact_lookup_includes_episodic_softly(tmp_path: Path)
         ]
     )
 
-    context = store.get_memory_context(
+    context = await store.get_memory_context(
         query="preferences and setup", retrieval_k=4, token_budget=220
     )
 
@@ -96,9 +96,9 @@ def test_get_memory_context_fact_lookup_includes_episodic_softly(tmp_path: Path)
     # so it may appear if budget allows.
 
 
-def test_get_memory_context_debug_includes_episodic(tmp_path: Path) -> None:
+async def test_get_memory_context_debug_includes_episodic(tmp_path: Path) -> None:
     store = MemoryStore(tmp_path)
-    store.retriever.retrieve = MagicMock(
+    store.retriever.retrieve = AsyncMock(
         return_value=[
             {
                 "id": "s1",
@@ -117,7 +117,7 @@ def test_get_memory_context_debug_includes_episodic(tmp_path: Path) -> None:
         ]
     )
 
-    context = store.get_memory_context(
+    context = await store.get_memory_context(
         query="what happened last time deploy failed?", retrieval_k=4, token_budget=220
     )
 
@@ -125,9 +125,9 @@ def test_get_memory_context_debug_includes_episodic(tmp_path: Path) -> None:
     assert "Deploy failed yesterday due to port conflict." in context
 
 
-def test_get_memory_context_reflection_includes_reflection_section(tmp_path: Path) -> None:
+async def test_get_memory_context_reflection_includes_reflection_section(tmp_path: Path) -> None:
     store = MemoryStore(tmp_path)
-    store.retriever.retrieve = MagicMock(
+    store.retriever.retrieve = AsyncMock(
         return_value=[
             {
                 "id": "r1",
@@ -139,7 +139,7 @@ def test_get_memory_context_reflection_includes_reflection_section(tmp_path: Pat
         ]
     )
 
-    context = store.get_memory_context(
+    context = await store.get_memory_context(
         query="reflect on lessons learned", retrieval_k=4, token_budget=220
     )
 
@@ -279,9 +279,11 @@ def test_infer_retrieval_intent_expanded_markers(tmp_path: Path) -> None:
     )
 
 
-def test_evaluate_retrieval_cases_balanced_mode_supports_structural_hits(tmp_path: Path) -> None:
+async def test_evaluate_retrieval_cases_balanced_mode_supports_structural_hits(
+    tmp_path: Path,
+) -> None:
     store = MemoryStore(tmp_path)
-    store.retriever.retrieve = MagicMock(
+    store.retriever.retrieve = AsyncMock(
         return_value=[
             {
                 "id": "x1",
@@ -293,7 +295,7 @@ def test_evaluate_retrieval_cases_balanced_mode_supports_structural_hits(tmp_pat
         ]
     )
 
-    evaluation = store.eval_runner.evaluate_retrieval_cases(
+    evaluation = await store.eval_runner.evaluate_retrieval_cases(
         [
             {
                 "query": "What constraints should be applied before running commands?",
@@ -356,7 +358,7 @@ def test_allocate_proportional_respects_zero_weight() -> None:
     assert result.reflection == 0
 
 
-def test_get_memory_context_graph_not_truncated_at_default_budget(
+async def test_get_memory_context_graph_not_truncated_at_default_budget(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -391,9 +393,9 @@ def test_get_memory_context_graph_not_truncated_at_default_budget(
     store.ingester.append_events(events)
 
     # Mock retrieve to return the events we just stored.
-    store.retriever.retrieve = MagicMock(return_value=events)  # type: ignore[method-assign]
+    store.retriever.retrieve = AsyncMock(return_value=events)  # type: ignore[method-assign]
 
-    context = store.get_memory_context(
+    context = await store.get_memory_context(
         query="What databases does the project use?",
         retrieval_k=6,
         token_budget=1200,

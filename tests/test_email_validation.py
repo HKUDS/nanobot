@@ -268,30 +268,30 @@ class TestKnownRecipients:
 
 
 class TestContactsContext:
-    def test_set_contacts_populates_prompt_section(self) -> None:
+    async def test_set_contacts_populates_prompt_section(self) -> None:
         from pathlib import Path
 
         from nanobot.context.context import ContextBuilder
 
         cb = ContextBuilder(workspace=Path("/tmp/test"))
         cb.set_contacts_context(["alice@x.com", "bob@x.com"])
-        prompt = cb.build_system_prompt()
+        prompt = await cb.build_system_prompt()
         assert "Known Contacts" in prompt
         assert "alice@x.com" in prompt
         assert "bob@x.com" in prompt
         assert "Do NOT invent" in prompt
 
-    def test_empty_contacts_not_in_prompt(self) -> None:
+    async def test_empty_contacts_not_in_prompt(self) -> None:
         from pathlib import Path
 
         from nanobot.context.context import ContextBuilder
 
         cb = ContextBuilder(workspace=Path("/tmp/test"))
         cb.set_contacts_context([])
-        prompt = cb.build_system_prompt()
+        prompt = await cb.build_system_prompt()
         assert "Known Contacts" not in prompt
 
-    def test_set_contacts_clears_previous(self) -> None:
+    async def test_set_contacts_clears_previous(self) -> None:
         from pathlib import Path
 
         from nanobot.context.context import ContextBuilder
@@ -299,5 +299,5 @@ class TestContactsContext:
         cb = ContextBuilder(workspace=Path("/tmp/test"))
         cb.set_contacts_context(["old@x.com"])
         cb.set_contacts_context([])
-        prompt = cb.build_system_prompt()
+        prompt = await cb.build_system_prompt()
         assert "old@x.com" not in prompt

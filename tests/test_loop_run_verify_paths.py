@@ -79,7 +79,11 @@ async def test_verify_answer_revise_and_parse_fallback(tmp_path: Path) -> None:
 async def test_verify_answer_on_uncertainty_skip(tmp_path: Path) -> None:
     provider = _ScriptedProvider([LLMResponse(content='{"confidence": 5, "issues": []}')])
     loop = _make_loop(tmp_path, provider, verification_mode="on_uncertainty")
-    loop._verifier.should_force_verification = lambda _text: False  # type: ignore[method-assign]
+
+    async def _no_force(_text: str) -> bool:
+        return False
+
+    loop._verifier.should_force_verification = _no_force  # type: ignore[method-assign]
     out, _ = await loop._verifier.verify("hi", "candidate", [])
     assert out == "candidate"
 

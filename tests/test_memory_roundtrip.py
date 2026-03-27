@@ -110,7 +110,7 @@ async def test_preference_consolidation(store: MemoryStore, provider: LiteLLMPro
     )
     assert ok, "consolidation should succeed"
 
-    context = store.get_memory_context(query="How should I format responses?")
+    context = await store.get_memory_context(query="How should I format responses?")
     assert "bullet" in context.lower(), f"Expected 'bullet' in memory context, got:\n{context}"
 
 
@@ -133,7 +133,7 @@ async def test_fact_storage(store: MemoryStore, provider: LiteLLMProvider) -> No
     )
     assert ok, "consolidation should succeed"
 
-    context = store.get_memory_context(query="Where does the user work?")
+    context = await store.get_memory_context(query="Where does the user work?")
     assert "globex" in context.lower(), f"Expected 'globex' in memory context, got:\n{context}"
 
 
@@ -165,7 +165,7 @@ async def test_multi_turn_accumulation(store: MemoryStore, provider: LiteLLMProv
         )
         assert ok, "consolidation should succeed"
 
-    context = store.get_memory_context(query="Tell me about the user").lower()
+    context = (await store.get_memory_context(query="Tell me about the user")).lower()
 
     hits = sum(
         [
@@ -210,7 +210,7 @@ async def test_context_assembly_after_consolidation(
     )
     assert ok, "consolidation should succeed"
 
-    context = store.get_memory_context(query="What programming languages does the user know?")
+    context = await store.get_memory_context(query="What programming languages does the user know?")
     assert len(context) > 50, (
         f"Expected substantial context (>50 chars), got {len(context)} chars:\n{context}"
     )
@@ -254,7 +254,7 @@ async def test_fact_correction(store: MemoryStore, provider: LiteLLMProvider) ->
     )
     assert ok, "correction consolidation should succeed"
 
-    context = store.get_memory_context(query="Where does the user work?")
+    context = await store.get_memory_context(query="Where does the user work?")
     assert "globex" in context.lower(), (
         f"Expected 'globex' in memory context after correction, got:\n{context}"
     )

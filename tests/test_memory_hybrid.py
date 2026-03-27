@@ -83,7 +83,7 @@ class TestHybridMemoryStore:
         assert "User prefers concise responses." in profile["preferences"]
         assert "Never use dark mode." in profile["constraints"]
 
-    def test_retrieve_and_verify_report(self, tmp_path: Path) -> None:
+    async def test_retrieve_and_verify_report(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
         store.ingester.append_events(
             [
@@ -120,7 +120,7 @@ class TestHybridMemoryStore:
         profile["stable_facts"] = ["Project uses OAuth2 for API authentication."]
         store.profile_mgr.write_profile(profile)
 
-        retrieved = store.retriever.retrieve(
+        retrieved = await store.retriever.retrieve(
             "oauth2 api",
             top_k=2,
             recency_half_life_days=30.0,
@@ -333,7 +333,7 @@ class TestHybridMemoryStore:
         )
         assert ok is True
 
-        _ = store.get_memory_context(
+        _ = await store.get_memory_context(
             mode="hybrid",
             query="dark mode",
             retrieval_k=4,
@@ -345,7 +345,7 @@ class TestHybridMemoryStore:
         report = store.eval_runner.get_observability_report()
         assert "backend" in report
 
-    def test_evaluate_retrieval_cases_metrics(self, tmp_path: Path) -> None:
+    async def test_evaluate_retrieval_cases_metrics(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
         store.ingester.append_events(
             [
@@ -378,7 +378,7 @@ class TestHybridMemoryStore:
             ]
         )
 
-        report = store.eval_runner.evaluate_retrieval_cases(
+        report = await store.eval_runner.evaluate_retrieval_cases(
             [
                 {
                     "query": "oauth2 auth",
@@ -402,9 +402,9 @@ class TestHybridMemoryStore:
         assert report["summary"]["precision_at_k"] > 0.0
         assert len(report["evaluated"]) == 2
 
-    def test_evaluate_retrieval_cases_empty_input(self, tmp_path: Path) -> None:
+    async def test_evaluate_retrieval_cases_empty_input(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        report = store.eval_runner.evaluate_retrieval_cases(
+        report = await store.eval_runner.evaluate_retrieval_cases(
             [], default_top_k=6, embedding_provider="hash"
         )
         assert report["cases"] == 0
@@ -566,7 +566,7 @@ class TestHybridMemoryStore:
         events = store.ingester.read_events()
         assert any("corrected fact" in str(e.get("summary", "")).lower() for e in events)
 
-    def test_retrieval_prefers_keep_new_resolved_fact(self, tmp_path: Path) -> None:
+    async def test_retrieval_prefers_keep_new_resolved_fact(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
         # vector store removed — local-only path is the default
         events = [
@@ -619,7 +619,7 @@ class TestHybridMemoryStore:
         idx = int(open_conflicts[0]["index"])
         assert store.conflict_mgr.resolve_conflict(idx, "keep_new") is True
 
-        retrieved = store.retriever.retrieve(
+        retrieved = await store.retriever.retrieve(
             "deployment region us-east-1 eu-west-1",
             top_k=2,
             recency_half_life_days=30.0,
@@ -628,7 +628,7 @@ class TestHybridMemoryStore:
         assert retrieved
         assert "us-east-1" in str(retrieved[0].get("summary", "")).lower()
 
-    def test_semantic_dedup_merges_events_and_keeps_provenance(self, tmp_path: Path) -> None:
+    async def test_semantic_dedup_merges_events_and_keeps_provenance(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
         # vector store removed — local dedup is the only path
 
@@ -678,7 +678,9 @@ class TestHybridMemoryStore:
         assert len(event.get("aliases", [])) >= 2
         assert len(event.get("evidence", [])) >= 2
 
-        retrieved = store.retriever.retrieve("oauth2 tokens", top_k=2, embedding_provider="hash")
+        retrieved = await store.retriever.retrieve(
+            "oauth2 tokens", top_k=2, embedding_provider="hash"
+        )
         assert retrieved
         # Storage redesign: provenance is now embedded in the event's extra fields
         assert retrieved[0].get("canonical_id") == "dup-1"
@@ -722,7 +724,7 @@ class TestHybridMemoryStore:
         ids = {str(e.get("id")) for e in events}
         assert {"nd-1", "nd-2"}.issubset(ids)
 
-    def test_local_keyword_retrieval_without_vector(self, tmp_path: Path) -> None:
+    async def test_local_keyword_retrieval_without_vector(self, tmp_path: Path) -> None:
         """When vector store is unavailable, retrieve() uses local keyword matching."""
         store = MemoryStore(tmp_path, embedding_provider="hash", vector_backend="sqlite")
         # vector store removed — local path is the default
@@ -744,14 +746,14 @@ class TestHybridMemoryStore:
             ]
         )
 
-        retrieved = store.retriever.retrieve(
+        retrieved = await store.retriever.retrieve(
             "postgresql database", top_k=2, embedding_provider="hash"
         )
         assert retrieved
         # Storage redesign: unified pipeline replaces provider/backend fields
         assert "retrieval_reason" in retrieved[0]
 
-    def test_keyword_retrieval_with_recency(self, tmp_path: Path) -> None:
+    async def test_keyword_retrieval_with_recency(self, tmp_path: Path) -> None:
         """Recency weighting should boost recent events of same type over old ones."""
         store = MemoryStore(tmp_path, embedding_provider="hash", vector_backend="faiss")
         # vector store removed — local recency scoring is the only path
@@ -786,7 +788,7 @@ class TestHybridMemoryStore:
             ]
         )
 
-        retrieved = store.retriever.retrieve(
+        retrieved = await store.retriever.retrieve(
             "postgresql",
             top_k=2,
             recency_half_life_days=30.0,
@@ -796,7 +798,7 @@ class TestHybridMemoryStore:
         # The more recent event should rank first due to recency boost
         assert retrieved[0]["id"] == "new-ev"
 
-    def test_retrieve_reads_events_file_at_most_once(self, tmp_path: Path) -> None:
+    async def test_retrieve_reads_events_file_at_most_once(self, tmp_path: Path) -> None:
         """retrieve() must not issue more than one events.jsonl read per call (LAN-67).
 
         The MemoryStore uses an mtime-based cache so a single retrieve() call
@@ -826,4 +828,4 @@ class TestHybridMemoryStore:
 
         # With UnifiedMemoryDB, events are read directly from SQLite.
         # Just verify retrieve doesn't crash.
-        store.retriever.retrieve("test event", top_k=3, embedding_provider="hash")
+        await store.retriever.retrieve("test event", top_k=3, embedding_provider="hash")

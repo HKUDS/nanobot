@@ -34,7 +34,7 @@ class TestExtractionToRetrieval:
         events, _updates = store.extractor.heuristic_extract_events(msg_dicts, source_start=0)
         return store.ingester.append_events(events)
 
-    def test_preference_roundtrip(self, tmp_path: Path) -> None:
+    async def test_preference_roundtrip(self, tmp_path: Path) -> None:
         """A preference message should be extractable and retrievable."""
         store = self._make_store(tmp_path)
         written = self._extract_and_store(
@@ -45,11 +45,11 @@ class TestExtractionToRetrieval:
         )
         assert written >= 1
 
-        results = store.retriever.retrieve("dark mode preference", top_k=5)
+        results = await store.retriever.retrieve("dark mode preference", top_k=5)
         summaries = [r.get("summary", "").lower() for r in results]
         assert any("dark mode" in s for s in summaries), f"Expected dark mode in {summaries}"
 
-    def test_constraint_roundtrip(self, tmp_path: Path) -> None:
+    async def test_constraint_roundtrip(self, tmp_path: Path) -> None:
         """A constraint message should be typed correctly and retrievable."""
         store = self._make_store(tmp_path)
         written = self._extract_and_store(
@@ -64,7 +64,7 @@ class TestExtractionToRetrieval:
         constraint_events = [e for e in events if e.get("type") == "constraint"]
         assert len(constraint_events) >= 1
 
-        results = store.retriever.retrieve("deployment constraints", top_k=5)
+        results = await store.retriever.retrieve("deployment constraints", top_k=5)
         assert len(results) >= 1
 
     def test_entity_extraction_heuristic(self, tmp_path: Path) -> None:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -72,20 +72,20 @@ def test_add_assistant_and_tool_messages(tmp_path: Path) -> None:
     assert messages[-1]["name"] == "read_file"
 
 
-def test_build_system_prompt_memory_failure_fallback(
+async def test_build_system_prompt_memory_failure_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ws = _workspace(tmp_path)
     mock_memory = MagicMock()
-    mock_memory.get_memory_context.side_effect = RuntimeError("memory down")
+    mock_memory.get_memory_context = AsyncMock(side_effect=RuntimeError("memory down"))
     builder = ContextBuilder(ws, memory=mock_memory)
 
-    prompt = builder.build_system_prompt(current_message="hello")
+    prompt = await builder.build_system_prompt(current_message="hello")
     assert "# nanobot" in prompt
     assert "**Answer from these facts first.**" not in prompt
 
 
-def test_bootstrap_files_cached_across_calls(
+async def test_bootstrap_files_cached_across_calls(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """T-L1 (LAN-93): bootstrap files must be read at most once when mtime hasn't changed."""
@@ -105,9 +105,9 @@ def test_bootstrap_files_cached_across_calls(
     monkeypatch.setattr(Path, "read_text", counting_read_text)
 
     # Call build_system_prompt three times — SOUL.md should only be read once
-    builder.build_system_prompt(current_message="first")
-    builder.build_system_prompt(current_message="second")
-    builder.build_system_prompt(current_message="third")
+    await builder.build_system_prompt(current_message="first")
+    await builder.build_system_prompt(current_message="second")
+    await builder.build_system_prompt(current_message="third")
 
     assert read_count == 1, f"SOUL.md read {read_count} times; expected 1 (cache miss only)"
 

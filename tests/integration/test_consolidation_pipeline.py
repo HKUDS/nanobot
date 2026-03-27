@@ -85,7 +85,7 @@ class TestConsolidationPipeline:
         )
         assert ok, "consolidation should succeed"
 
-        context = store.get_memory_context(query="How should I format responses?")
+        context = await store.get_memory_context(query="How should I format responses?")
         assert "bullet" in context.lower(), f"Expected 'bullet' in memory context, got:\n{context}"
 
     async def test_fact_consolidation(self, store: MemoryStore, provider: LiteLLMProvider) -> None:
@@ -106,7 +106,7 @@ class TestConsolidationPipeline:
         )
         assert ok, "consolidation should succeed"
 
-        context = store.get_memory_context(query="Where does the user work?")
+        context = await store.get_memory_context(query="Where does the user work?")
         assert "globex" in context.lower(), f"Expected 'globex' in memory context, got:\n{context}"
 
     async def test_consolidation_advances_pointer(

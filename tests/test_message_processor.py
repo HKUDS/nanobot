@@ -37,6 +37,7 @@ def _make_processor(tmp_path: Path) -> MessageProcessor:
     tools = MagicMock()
     consolidator = MagicMock()
     verifier = MagicMock()
+    verifier.should_force_verification = AsyncMock(return_value=False)
     verifier.attempt_recovery = AsyncMock(return_value=None)
     bus = MagicMock()
     bus.publish = AsyncMock()
@@ -159,7 +160,7 @@ class TestMessageProcessorContract:
         """
         processor = _make_processor(tmp_path)
         # Configure verifier to report that forced verification is needed
-        processor.verifier.should_force_verification = MagicMock(return_value=True)
+        processor.verifier.should_force_verification = AsyncMock(return_value=True)
 
         result = await processor.process_direct("remind me about our last meeting")
 

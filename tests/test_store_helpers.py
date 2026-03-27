@@ -216,7 +216,7 @@ class TestMemoryStoreExtraRetrievalAndContext:
         assert "entities" in merged
         assert merged["confidence"] >= 0.5
 
-    def test_retrieve_and_memory_context(self, tmp_path: Path) -> None:
+    async def test_retrieve_and_memory_context(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         _seed_events(
             store,
@@ -236,10 +236,10 @@ class TestMemoryStoreExtraRetrievalAndContext:
                 },
             ],
         )
-        results = store.retriever.retrieve("oauth2", top_k=3)
+        results = await store.retriever.retrieve("oauth2", top_k=3)
         assert len(results) >= 1
 
-        context = store.get_memory_context(query="open tasks", token_budget=500)
+        context = await store.get_memory_context(query="open tasks", token_budget=500)
         assert isinstance(context, str)
 
     def test_split_and_cap_long_term_text(self, tmp_path: Path) -> None:
@@ -337,10 +337,10 @@ class TestMemoryStoreExtraCorpusAndEvaluation:
         )
         assert isinstance(reindexed, dict)
 
-    def test_evaluation_and_gate_helpers(self, tmp_path: Path) -> None:
+    async def test_evaluation_and_gate_helpers(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         cases = [{"query": "oauth2", "expected": ["oauth2"]}]
-        eval_report = store.eval_runner.evaluate_retrieval_cases(cases)
+        eval_report = await store.eval_runner.evaluate_retrieval_cases(cases)
         assert isinstance(eval_report, dict)
 
         observability = store.eval_runner.get_observability_report()
