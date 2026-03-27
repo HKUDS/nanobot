@@ -22,12 +22,17 @@ class ContextBuilder:
         self,
         workspace: Path,
         timezone: str | None = None,
+        skill_discovery_enabled: bool = False,
         skill_discovery_threshold: int = 50,
     ):
         self.workspace = workspace
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
-        self.skills = SkillsLoader(workspace, discovery_threshold=skill_discovery_threshold)
+        self.skills = SkillsLoader(
+            workspace,
+            discovery_enabled=skill_discovery_enabled,
+            discovery_threshold=skill_discovery_threshold,
+        )
 
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""

@@ -550,6 +550,7 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        skill_discovery_enabled=config.agents.defaults.skill_discovery_enabled,
         skill_discovery_threshold=config.agents.defaults.skill_discovery_threshold,
     )
 
@@ -756,6 +757,7 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        skill_discovery_enabled=config.agents.defaults.skill_discovery_enabled,
         skill_discovery_threshold=config.agents.defaults.skill_discovery_threshold,
     )
 

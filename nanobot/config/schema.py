@@ -42,6 +42,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
+    skill_discovery_enabled: bool = False  # Enable skill discovery mode for large skill sets
     skill_discovery_threshold: int = 50  # Switch to discovery mode when workspace skills exceed this
 
 

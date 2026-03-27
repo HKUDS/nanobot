@@ -22,11 +22,13 @@ class SkillsLoader:
         self,
         workspace: Path,
         builtin_skills_dir: Path | None = None,
+        discovery_enabled: bool = False,
         discovery_threshold: int = 50,
     ):
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
+        self._discovery_enabled = discovery_enabled
         self._discovery_threshold = discovery_threshold
         self._workspace_skill_count: int | None = None  # cache
 
@@ -245,8 +247,11 @@ class SkillsLoader:
         return self._workspace_skill_count
 
     def should_use_discovery_mode(self) -> bool:
-        """Check if should use discovery mode (too many workspace skills)."""
-        return self.get_workspace_skill_count() > self._discovery_threshold
+        """Check if should use discovery mode (enabled + threshold exceeded)."""
+        return (
+            self._discovery_enabled
+            and self.get_workspace_skill_count() > self._discovery_threshold
+        )
 
     def get_skill_metadata(self, name: str) -> dict | None:
         """
