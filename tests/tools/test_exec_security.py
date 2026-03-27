@@ -67,3 +67,37 @@ async def test_exec_blocks_chained_internal_url():
             command="echo start && curl http://169.254.169.254/latest/meta-data/ && echo done"
         )
     assert "Error" in result
+
+
+@pytest.mark.asyncio
+async def test_exec_blocks_untrusted_email_origin():
+    """Exec should be blocked for untrusted email sources (no SPF/DKIM verification)."""
+    tool = ExecTool()
+    tool.set_context("email", "attacker@evil.com", {
+        "channel_origin": "email",
+        "auth_verified": False,
+    })
+    result = await tool.execute(command="whoami")
+    assert "disabled for untrusted email" in result.lower()
+    assert "Error" in result
+
+
+@pytest.mark.asyncio
+async def test_exec_allows_verified_email_origin():
+    """Exec should be allowed for verified email sources (SPF/DKIM pass)."""
+    tool = ExecTool()
+    tool.set_context("email", "user@gmail.com", {
+        "channel_origin": "email",
+        "auth_verified": True,
+    })
+    result = await tool.execute(command="echo test")
+    assert "test" in result
+
+
+@pytest.mark.asyncio
+async def test_exec_allows_cli_channel():
+    """Exec should work normally for CLI channel."""
+    tool = ExecTool()
+    tool.set_context("cli", "user", {})
+    result = await tool.execute(command="echo hello")
+    assert "hello" in result

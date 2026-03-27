@@ -392,3 +392,43 @@ class TestWorkspaceRestriction:
         assert "Error" in result
         assert "outside" in result.lower()
         assert skill_file.read_text() == "# Weather\nOriginal content."
+
+
+@pytest.mark.asyncio
+async def test_read_file_blocks_untrusted_email_origin(tmp_path):
+    """read_file should be blocked for untrusted email sources (no SPF/DKIM verification)."""
+    tool = ReadFileTool()
+    tool.set_context("email", "attacker@evil.com", {
+        "channel_origin": "email",
+        "auth_verified": False,
+    })
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("secret data")
+    result = await tool.execute(path=str(test_file))
+    assert "disabled for untrusted email" in result.lower()
+    assert "Error" in result
+
+
+@pytest.mark.asyncio
+async def test_read_file_allows_verified_email_origin(tmp_path):
+    """read_file should be allowed for verified email sources (SPF/DKIM pass)."""
+    tool = ReadFileTool()
+    tool.set_context("email", "user@gmail.com", {
+        "channel_origin": "email",
+        "auth_verified": True,
+    })
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("hello world")
+    result = await tool.execute(path=str(test_file))
+    assert "hello world" in result
+
+
+@pytest.mark.asyncio
+async def test_read_file_allows_cli_channel(tmp_path):
+    """read_file should work normally for CLI channel."""
+    tool = ReadFileTool()
+    tool.set_context("cli", "user", {})
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("hello")
+    result = await tool.execute(path=str(test_file))
+    assert "hello" in result

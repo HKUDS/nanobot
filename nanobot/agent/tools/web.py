@@ -233,8 +233,22 @@ class WebFetchTool(Tool):
     def __init__(self, max_chars: int = 50000, proxy: str | None = None):
         self.max_chars = max_chars
         self.proxy = proxy
+        self._metadata: dict[str, Any] = {}
+
+    def set_context(self, channel: str, chat_id: str, metadata: dict[str, Any] | None = None) -> None:
+        """Set the current context for security checks."""
+        self._metadata = metadata or {}
+
+    def _is_untrusted_email_origin(self) -> bool:
+        """Check if the message originates from an untrusted email source."""
+        if self._metadata.get("channel_origin") != "email":
+            return False
+        return not self._metadata.get("auth_verified", False)
 
     async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> Any:
+        if self._is_untrusted_email_origin():
+            return json.dumps({"error": "Web fetch is disabled for untrusted email origins. The email source could not be verified via SPF/DKIM.", "url": url}, ensure_ascii=False)
+
         max_chars = maxChars or self.max_chars
         is_valid, error_msg = _validate_url_safe(url)
         if not is_valid:
