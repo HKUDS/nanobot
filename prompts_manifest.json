@@ -17,13 +17,16 @@
     "nudge_malformed_fallback.md": "da1966a28075703d0289124b88b6563cffa3bfa751c79e11e243ecbb58834096",
     "plan.md": "cfbae37111ca95da41a5e565581afffeb813e3c232070f6322c5ceee9a11bdb0",
     "progress.md": "c65ba12625cd535ac3a1be840f9cb7e0017504221b9a932f51b873a5a8650eaf",
+    "reasoning.md": "531798ad33c62c0cb1886c137d1c4ec7dffd41300a56cb1b27a1ca379874d16b",
     "recovery.md": "046f4cd6665edefed227516a21e0b879f1d32e5581b1c32937e375ece6855c77",
     "reflect.md": "1c90450003d8d16172185d0bb5cfc4fad969c86026661ca945dcd0b739af3257",
     "revision_request.md": "d89e9936a55bd84c72eac76808c7edf5fef6c05318d34c8bf1632bd8aaaac040",
     "security_advisory.md": "0843f2fe3f7610583091eac7d061e6aa7ed363e8797371f1bbe6461335603c60",
+    "self_check.md": "65ead600907e774a216375887ce2044cb31e6f5214bb39ce299959dab8bf1125",
     "skills_header.md": "1790e03feca7a6f56981a4d40cd50b69eebc1f718746ab61a33d93d5f41bafb2",
     "slide_analysis.md": "3a4b678ff6e4c5c1b3bda90f476f4112398e6cdd9c5937ef3d0d75ae2a3e6d8a",
     "summary_system.md": "914f8d73db5f3bd254273e219972b1855e510935764d96330a4daf8db331d519",
+    "tool_guide.md": "54f9b9c6fcf091e175c748fbca4081eb9c66562cc6e354511f865b4a0bc51a54",
     "unavailable_tools.md": "144eab4976f8a115299b468bd6a13417f613487f937149238c06b7afe64a7759",
     "verification_required.md": "334fe23013247bf4db2aaa84216c3c1fe2256522913cb3c980328ccf182a9ba5"
   }
