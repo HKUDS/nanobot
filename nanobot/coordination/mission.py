@@ -95,6 +95,7 @@ class MissionManager:
         result_max_chars: int = 4000,
         delegation_tools: dict[str, Any] | None = None,
     ) -> None:
+        self.sub_agent_config = sub_agent_config
         self.provider = provider
         self.bus = bus
         # Unpack config fields for concise access throughout the class body.

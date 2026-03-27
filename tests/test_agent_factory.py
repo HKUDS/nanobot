@@ -110,3 +110,20 @@ def test_role_config_override(tmp_path: Path) -> None:
 
     assert loop.model == "role-model-v2"
     assert loop.temperature == 0.2
+
+
+def test_shared_sub_agent_config(tmp_path: Path) -> None:
+    """MissionManager and DelegationDispatcher share the same SubAgentConfig instance."""
+    bus = MessageBus()
+    provider = _provider()
+    config = _config(tmp_path)
+
+    loop = build_agent(bus, provider, config)
+
+    # Both subsystems should reference the same SubAgentConfig
+    mission_cfg = loop.missions.sub_agent_config
+    delegation_cfg = loop._dispatcher.config.sub_agent
+    assert mission_cfg is delegation_cfg
+    # And the values should match the resolved config
+    assert mission_cfg.model == config.model
+    assert mission_cfg.max_tokens == config.max_tokens
