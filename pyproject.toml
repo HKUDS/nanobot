@@ -19,7 +19,7 @@ classifiers = [
 
 dependencies = [
     "typer>=0.20.0,<1.0.0",
-    "litellm>=1.82.1,<2.0.0",
+    "anthropic>=0.45.0,<1.0.0",
     "pydantic>=2.12.0,<3.0.0",
     "pydantic-settings>=2.12.0,<3.0.0",
     "websockets>=16.0,<17.0",
@@ -72,10 +72,8 @@ langsmith = [
 dev = [
     "pytest>=9.0.0,<10.0.0",
     "pytest-asyncio>=1.3.0,<2.0.0",
+    "pytest-cov>=6.0.0,<7.0.0",
     "ruff>=0.1.0",
-    "matrix-nio[e2e]>=0.25.2",
-    "mistune>=3.0.0,<4.0.0",
-    "nh3>=0.2.17,<1.0.0",
 ]
 
 [project.scripts]
@@ -124,3 +122,16 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["nanobot"]
+omit = ["tests/*", "**/tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]

@@ -24,7 +24,8 @@ class ChannelsConfig(Base):
     model_config = ConfigDict(extra="allow")
 
     send_progress: bool = True  # stream agent's text progress to the channel
-    send_tool_hints: bool = True  # enable tool hints globally (backward compatible)
+    send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
+    send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
     tool_hint_channels: dict[str, list[str]] = Field(default_factory=dict)  # channel -> list of user_id/group_id
 
 
@@ -92,6 +93,7 @@ class HeartbeatConfig(Base):
 
     enabled: bool = True
     interval_s: int = 30 * 60  # 30 minutes
+    keep_recent_messages: int = 8
 
 
 class GatewayConfig(Base):
@@ -175,12 +177,15 @@ class Config(BaseSettings):
         self, model: str | None = None
     ) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
-        from nanobot.providers.registry import PROVIDERS
+        from nanobot.providers.registry import PROVIDERS, find_by_name
 
         forced = self.agents.defaults.provider
         if forced != "auto":
-            p = getattr(self.providers, forced, None)
-            return (p, forced) if p else (None, None)
+            spec = find_by_name(forced)
+            if spec:
+                p = getattr(self.providers, spec.name, None)
+                return (p, spec.name) if p else (None, None)
+            return None, None
 
         model_lower = (model or self.agents.defaults.model).lower()
         model_normalized = model_lower.replace("-", "_")
@@ -256,8 +261,7 @@ class Config(BaseSettings):
         if p and p.api_base:
             return p.api_base
         # Only gateways get a default api_base here. Standard providers
-        # (like Moonshot) set their base URL via env vars in _setup_env
-        # to avoid polluting the global litellm.api_base.
+        # resolve their base URL from the registry in the provider constructor.
         if name:
             spec = find_by_name(name)
             if spec and (spec.is_gateway or spec.is_local) and spec.default_api_base:

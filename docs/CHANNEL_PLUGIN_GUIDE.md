@@ -2,6 +2,8 @@
 
 Build a custom nanobot channel in three steps: subclass, package, install.
 
+> **Note:** We recommend developing channel plugins against a source checkout of nanobot (`pip install -e .`) rather than a PyPI release, so you always have access to the latest base-channel features and APIs.
+
 ## How It Works
 
 nanobot discovers channel plugins via Python [entry points](https://packaging.python.org/en/latest/specifications/entry-points/). When `nanobot gateway` starts, it scans:
