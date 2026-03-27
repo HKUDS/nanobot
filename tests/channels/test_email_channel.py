@@ -10,8 +10,8 @@ from nanobot.channels.email import EmailChannel
 from nanobot.channels.email import EmailConfig
 
 
-def _make_config() -> EmailConfig:
-    return EmailConfig(
+def _make_config(**overrides) -> EmailConfig:
+    defaults = dict(
         enabled=True,
         consent_granted=True,
         imap_host="imap.example.com",
@@ -23,19 +23,27 @@ def _make_config() -> EmailConfig:
         smtp_username="bot@example.com",
         smtp_password="secret",
         mark_seen=True,
+        # Disable auth verification by default so existing tests are unaffected
+        verify_dkim=False,
+        verify_spf=False,
     )
+    defaults.update(overrides)
+    return EmailConfig(**defaults)
 
 
 def _make_raw_email(
     from_addr: str = "alice@example.com",
     subject: str = "Hello",
     body: str = "This is the body.",
+    auth_results: str | None = None,
 ) -> bytes:
     msg = EmailMessage()
     msg["From"] = from_addr
     msg["To"] = "bot@example.com"
     msg["Subject"] = subject
     msg["Message-ID"] = "<m1@example.com>"
+    if auth_results:
+        msg["Authentication-Results"] = auth_results
     msg.set_content(body)
     return msg.as_bytes()
 
@@ -522,6 +530,12 @@ def test_fetch_new_messages_includes_auth_metadata(monkeypatch) -> None:
     """Test that email messages include authentication verification metadata."""
     raw = _make_raw_email(subject="Test", body="Body content")
     
+# ---------------------------------------------------------------------------
+# Security: Anti-spoofing tests for Authentication-Results verification
+# ---------------------------------------------------------------------------
+
+def _make_fake_imap(raw: bytes):
+    """Return a FakeIMAP class pre-loaded with the given raw email."""
     class FakeIMAP:
         def __init__(self) -> None:
             self.store_calls: list[tuple[bytes, str, str]] = []
@@ -537,6 +551,7 @@ def test_fetch_new_messages_includes_auth_metadata(monkeypatch) -> None:
 
         def fetch(self, _imap_id: bytes, _parts: str):
             return "OK", [(b"1 (UID 123 BODY[] {200})", raw), b")"]
+            return "OK", [(b"1 (UID 500 BODY[] {200})", raw), b")"]
 
         def store(self, imap_id: bytes, op: str, flags: str):
             self.store_calls.append((imap_id, op, flags))
@@ -601,3 +616,133 @@ def test_fetch_new_messages_with_auth_results_header(monkeypatch) -> None:
     assert items[0]["metadata"]["spf_status"] == "pass"
     assert items[0]["metadata"]["dkim_status"] == "pass"
     assert items[0]["metadata"]["auth_verified"] is True
+    return FakeIMAP()
+
+
+def test_spoofed_email_rejected_when_verify_enabled(monkeypatch) -> None:
+    """An email without Authentication-Results should be rejected when verify_dkim=True."""
+    raw = _make_raw_email(subject="Spoofed", body="Malicious payload")
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(verify_dkim=True, verify_spf=True)
+    channel = EmailChannel(cfg, MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 0, "Spoofed email without auth headers should be rejected"
+
+
+def test_email_with_valid_auth_results_accepted(monkeypatch) -> None:
+    """An email with spf=pass and dkim=pass should be accepted."""
+    raw = _make_raw_email(
+        subject="Legit",
+        body="Hello from verified sender",
+        auth_results="mx.example.com; spf=pass smtp.mailfrom=alice@example.com; dkim=pass header.d=example.com",
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(verify_dkim=True, verify_spf=True)
+    channel = EmailChannel(cfg, MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["sender"] == "alice@example.com"
+    assert items[0]["subject"] == "Legit"
+
+
+def test_email_with_partial_auth_rejected(monkeypatch) -> None:
+    """An email with only spf=pass but no dkim=pass should be rejected when verify_dkim=True."""
+    raw = _make_raw_email(
+        subject="Partial",
+        body="Only SPF passes",
+        auth_results="mx.example.com; spf=pass smtp.mailfrom=alice@example.com; dkim=fail",
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(verify_dkim=True, verify_spf=True)
+    channel = EmailChannel(cfg, MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 0, "Email with dkim=fail should be rejected"
+
+
+def test_backward_compat_verify_disabled(monkeypatch) -> None:
+    """When verify_dkim=False and verify_spf=False, emails without auth headers are accepted."""
+    raw = _make_raw_email(subject="NoAuth", body="No auth headers present")
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(verify_dkim=False, verify_spf=False)
+    channel = EmailChannel(cfg, MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1, "With verification disabled, emails should be accepted as before"
+
+
+def test_email_content_tagged_with_email_context(monkeypatch) -> None:
+    """Email content should be prefixed with [EMAIL-CONTEXT] for LLM isolation."""
+    raw = _make_raw_email(subject="Tagged", body="Check the tag")
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(verify_dkim=False, verify_spf=False)
+    channel = EmailChannel(cfg, MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["content"].startswith("[EMAIL-CONTEXT]"), (
+        "Email content must be tagged with [EMAIL-CONTEXT]"
+    )
+
+
+def test_check_authentication_results_method() -> None:
+    """Unit test for the _check_authentication_results static method."""
+    from email.parser import BytesParser
+    from email import policy
+
+    # No Authentication-Results header
+    msg_no_auth = EmailMessage()
+    msg_no_auth["From"] = "alice@example.com"
+    msg_no_auth.set_content("test")
+    parsed = BytesParser(policy=policy.default).parsebytes(msg_no_auth.as_bytes())
+    spf, dkim = EmailChannel._check_authentication_results(parsed)
+    assert spf is False
+    assert dkim is False
+
+    # Both pass
+    msg_both = EmailMessage()
+    msg_both["From"] = "alice@example.com"
+    msg_both["Authentication-Results"] = (
+        "mx.google.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com"
+    )
+    msg_both.set_content("test")
+    parsed = BytesParser(policy=policy.default).parsebytes(msg_both.as_bytes())
+    spf, dkim = EmailChannel._check_authentication_results(parsed)
+    assert spf is True
+    assert dkim is True
+
+    # SPF pass, DKIM fail
+    msg_spf_only = EmailMessage()
+    msg_spf_only["From"] = "alice@example.com"
+    msg_spf_only["Authentication-Results"] = (
+        "mx.google.com; spf=pass smtp.mailfrom=example.com; dkim=fail"
+    )
+    msg_spf_only.set_content("test")
+    parsed = BytesParser(policy=policy.default).parsebytes(msg_spf_only.as_bytes())
+    spf, dkim = EmailChannel._check_authentication_results(parsed)
+    assert spf is True
+    assert dkim is False
+
+    # DKIM pass, SPF fail
+    msg_dkim_only = EmailMessage()
+    msg_dkim_only["From"] = "alice@example.com"
+    msg_dkim_only["Authentication-Results"] = (
+        "mx.google.com; spf=fail smtp.mailfrom=example.com; dkim=pass header.d=example.com"
+    )
+    msg_dkim_only.set_content("test")
+    parsed = BytesParser(policy=policy.default).parsebytes(msg_dkim_only.as_bytes())
+    spf, dkim = EmailChannel._check_authentication_results(parsed)
+    assert spf is False
+    assert dkim is True
