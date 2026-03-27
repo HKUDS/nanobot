@@ -161,13 +161,17 @@ Be selective - not every conversation needs personality updates. Only update whe
 
 Be selective about personality updates - only update when there's genuinely new information."""
             
-            response = await provider.chat(
+            from nanobot.providers.tracked import tracked_chat
+
+            response = await tracked_chat(
+                provider,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt},
                 ],
                 tools=tools,
                 model=model,
+                source="memory",
             )
 
             if not response.has_tool_calls:

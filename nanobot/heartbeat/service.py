@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from loguru import logger
 
+from nanobot.providers.tracked import tracked_chat
+
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
@@ -87,7 +89,8 @@ class HeartbeatService:
 
         Returns (action, tasks) where action is 'skip' or 'run'.
         """
-        response = await self.provider.chat(
+        response = await tracked_chat(
+            self.provider,
             messages=[
                 {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
                 {"role": "user", "content": (
@@ -97,6 +100,7 @@ class HeartbeatService:
             ],
             tools=_HEARTBEAT_TOOL,
             model=self.model,
+            source="heartbeat",
         )
 
         if not response.has_tool_calls:

@@ -29,6 +29,7 @@ from nanobot.agent.tools.web import WebFetchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
+from nanobot.providers.tracked import tracked_chat
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -266,13 +267,15 @@ class AgentLoop:
             iteration += 1
             logger.debug("=== Agent iteration {} ===", iteration)
 
-            response = await self.provider.chat(
+            response = await tracked_chat(
+                self.provider,
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=self.model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 reasoning_effort=self.reasoning_effort,
+                source="agent_loop",
             )
 
             # Log reasoning content and thinking blocks

@@ -11,6 +11,7 @@ from loguru import logger
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
+from nanobot.providers.tracked import tracked_chat
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
 # from nanobot.agent.tools.shell import ExecTool
@@ -119,15 +120,17 @@ class SubagentManager:
             while iteration < max_iterations:
                 iteration += 1
                 
-                response = await self.provider.chat(
+                response = await tracked_chat(
+                    self.provider,
                     messages=messages,
                     tools=tools.get_definitions(),
                     model=self.model,
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
                     reasoning_effort=self.reasoning_effort,
+                    source="subagent",
                 )
-                
+
                 if response.has_tool_calls:
                     # Add assistant message with tool calls
                     tool_call_dicts = [

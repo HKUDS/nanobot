@@ -53,6 +53,39 @@ async def post(url: str, payload: dict[str, Any], timeout: float = 30) -> str:
     return f"Error (HTTP {resp.status_code}): {detail}"
 
 
+async def report_usage(
+    prompt_tokens: int,
+    completion_tokens: int,
+    model: str,
+    source: str = "agent_loop",
+    timeout: float = 5,
+) -> None:
+    """Report token usage to the coordinator (fire-and-forget).
+
+    Silently swallows all errors so token tracking never disrupts the agent.
+    """
+    coordinator_url = os.environ.get("COORDINATOR_URL", "")
+    bot_id = os.environ.get("BOT_ID", "")
+    if not coordinator_url or not bot_id:
+        return
+    if prompt_tokens <= 0 and completion_tokens <= 0:
+        return
+
+    url = f"{coordinator_url}/internal/usage"
+    payload = {
+        "bot_id": bot_id,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "model": model,
+        "source": source,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            await client.post(url, json=payload, headers=auth_headers())
+    except Exception as exc:
+        logger.debug("Failed to report token usage: {}", exc)
+
+
 async def fetch_scopes(timeout: float = 10) -> tuple[list[str], list[str]]:
     """Fetch the OAuth scopes granted for this bot's owner.
 
