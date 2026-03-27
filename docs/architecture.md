@@ -234,7 +234,6 @@ Architecture rules are enforced programmatically in pre-commit hooks and CI.
 | `scripts/check_imports.py` | Import direction rules + dependency inversion (RUNTIME_RULES) | Pre-commit + CI |
 | `scripts/check_structure.py` | File size (500 LOC), package growth (15 files), `__init__.py` exports (12), crash-barriers, `__all__`, catch-all filenames, future annotations | Pre-commit + CI |
 | `scripts/check_prompt_manifest.py` | Prompt file consistency | Pre-commit + CI |
-| `scripts/check_module_coverage.py` | Per-module test coverage thresholds | CI only |
 
 `check_structure.py` uses a baseline file (`scripts/.structure-baseline`) to track
 pre-existing violations. New violations block commits; existing ones are printed as
