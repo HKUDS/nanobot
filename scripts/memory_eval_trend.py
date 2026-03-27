@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import shutil
 import sys
@@ -254,11 +255,13 @@ def main() -> int:
 
     store.ingester.append_events(seed_events)
 
-    evaluation = store.eval_runner.evaluate_retrieval_cases(
-        cases,
-        default_top_k=max(1, int(args.top_k)),
-        recency_half_life_days=30.0,
-        embedding_provider=args.embedding_provider,
+    evaluation = asyncio.run(
+        store.eval_runner.evaluate_retrieval_cases(
+            cases,
+            default_top_k=max(1, int(args.top_k)),
+            recency_half_life_days=30.0,
+            embedding_provider=args.embedding_provider,
+        )
     )
     observability = store.eval_runner.get_observability_report()
 
