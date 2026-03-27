@@ -34,6 +34,7 @@ from nanobot.agent.callbacks import (
 )
 from nanobot.agent.failure import _CycleError
 from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
+from nanobot.config.sub_agent import SubAgentConfig
 from nanobot.context.prompt_loader import prompts
 from nanobot.coordination.delegation_contract import (
     _cap_scratchpad_for_injection,
@@ -76,7 +77,12 @@ MAX_DELEGATION_DEPTH: int = 3
 
 @dataclass(slots=True, frozen=True)
 class DelegationConfig:
-    """Immutable delegation settings (LAN-144).
+    """Delegation settings: sub-agent execution config + delegation-specific fields.
+
+    Composes ``SubAgentConfig`` (workspace, model, temperature, max_tokens)
+    with delegation-specific parameters.  ``__getattr__`` proxies attribute
+    access to ``sub_agent`` so existing code that reads ``config.workspace``,
+    ``config.model``, etc. continues to work without changes.
 
     Groups parameters that are set once at startup and never mutated
     during a session.  Mutable per-session wiring (provider, coordinator,
@@ -84,15 +90,18 @@ class DelegationConfig:
     parameters.
     """
 
-    workspace: Path
-    model: str
-    temperature: float
-    max_tokens: int
+    sub_agent: SubAgentConfig
+    role_name: str
     max_iterations: int
     restrict_to_workspace: bool
     brave_api_key: str | None
     exec_config: ExecToolConfig | None
-    role_name: str
+
+    def __getattr__(self, name: str) -> Any:
+        """Proxy attribute access to sub_agent for backward compat."""
+        if name in ("workspace", "model", "temperature", "max_tokens"):
+            return getattr(self.sub_agent, name)
+        raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
 
 
 class DelegationDispatcher:

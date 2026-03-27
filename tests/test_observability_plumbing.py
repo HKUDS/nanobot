@@ -1069,13 +1069,16 @@ class TestDelegationSpanOutput:
         from unittest.mock import AsyncMock, MagicMock
 
         from nanobot.config.schema import AgentRoleConfig
+        from nanobot.config.sub_agent import SubAgentConfig
         from nanobot.coordination.delegation import DelegationConfig, DelegationDispatcher
 
         config = DelegationConfig(
-            workspace=tmp_path,
-            model="test-model",
-            temperature=0.7,
-            max_tokens=4096,
+            sub_agent=SubAgentConfig(
+                workspace=tmp_path,
+                model="test-model",
+                temperature=0.7,
+                max_tokens=4096,
+            ),
             max_iterations=5,
             restrict_to_workspace=True,
             brave_api_key=None,
@@ -1127,13 +1130,16 @@ class TestDelegationSpanOutput:
         from unittest.mock import AsyncMock, MagicMock
 
         from nanobot.config.schema import AgentRoleConfig
+        from nanobot.config.sub_agent import SubAgentConfig
         from nanobot.coordination.delegation import DelegationConfig, DelegationDispatcher
 
         config = DelegationConfig(
-            workspace=tmp_path,
-            model="test-model",
-            temperature=0.7,
-            max_tokens=4096,
+            sub_agent=SubAgentConfig(
+                workspace=tmp_path,
+                model="test-model",
+                temperature=0.7,
+                max_tokens=4096,
+            ),
             max_iterations=5,
             restrict_to_workspace=True,
             brave_api_key=None,
@@ -1180,13 +1186,16 @@ class TestDelegationSpanOutput:
         from unittest.mock import AsyncMock, MagicMock
 
         from nanobot.config.schema import AgentRoleConfig
+        from nanobot.config.sub_agent import SubAgentConfig
         from nanobot.coordination.delegation import DelegationConfig, DelegationDispatcher
 
         config = DelegationConfig(
-            workspace=tmp_path,
-            model="test-model",
-            temperature=0.7,
-            max_tokens=4096,
+            sub_agent=SubAgentConfig(
+                workspace=tmp_path,
+                model="test-model",
+                temperature=0.7,
+                max_tokens=4096,
+            ),
             max_iterations=5,
             restrict_to_workspace=True,
             brave_api_key=None,

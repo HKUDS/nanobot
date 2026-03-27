@@ -299,15 +299,12 @@ def build_agent(
 
     dispatcher = DelegationDispatcher(
         config=DelegationConfig(
-            workspace=config.workspace_path,
-            model=model,
-            temperature=temperature,
-            max_tokens=config.max_tokens,
+            sub_agent=sub_agent_config,
+            role_name=role_config.name if role_config else "",
             max_iterations=max_iterations,
             restrict_to_workspace=config.restrict_to_workspace,
             brave_api_key=brave_api_key,
             exec_config=resolved_exec_config,
-            role_name=role_config.name if role_config else "",
         ),
         provider=provider,
         tools=_tool_build.tools,
