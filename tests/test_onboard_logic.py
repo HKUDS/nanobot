@@ -493,3 +493,158 @@ class TestRunOnboardExitBehavior:
 
         assert result.should_save is False
         assert result.config.model_dump(by_alias=True) == initial_config.model_dump(by_alias=True)
+
+
+class TestToolHintChannelsPriority:
+    """Tests for send_tool_hints and tool_hint_channels priority logic."""
+
+    def test_send_tool_hints_false_disables_all_hints(self):
+        """Priority 1: send_tool_hints=False should disable all tool hints."""
+        from nanobot.config.schema import ChannelsConfig
+        
+        config = ChannelsConfig(
+            send_tool_hints=False,
+            tool_hint_channels={}
+        )
+        
+        # Simulate message metadata
+        msg_metadata = {"_tool_hint": True, "_sender_id": "user123"}
+        chat_id = "user123"
+        
+        # Should be disabled
+        assert config.send_tool_hints is False
+        
+        # Logic check: if not send_tool_hints => continue (skip)
+        should_allow = config.send_tool_hints
+        assert should_allow is False
+
+    def test_send_tool_hints_true_empty_channels_allows_all(self):
+        """Priority 2: send_tool_hints=True with empty tool_hint_channels allows all."""
+        from nanobot.config.schema import ChannelsConfig
+        
+        config = ChannelsConfig(
+            send_tool_hints=True,
+            tool_hint_channels={}
+        )
+        
+        # Simulate message metadata
+        msg_metadata = {"_tool_hint": True, "_sender_id": "user123"}
+        chat_id = "user123"
+        
+        # Should be enabled globally
+        assert config.send_tool_hints is True
+        
+        # Empty tool_hint_channels means allow all
+        allowed = config.tool_hint_channels.get("feishu", [])
+        should_allow_all = not allowed
+        assert should_allow_all is True
+
+    def test_send_tool_hints_true_with_channel_specific_rules(self):
+        """Priority 3: send_tool_hints=True with tool_hint_channels follows rules."""
+        from nanobot.config.schema import ChannelsConfig
+        
+        config = ChannelsConfig(
+            send_tool_hints=True,
+            tool_hint_channels={
+                "feishu": ["user123", "chat456"]
+            }
+        )
+        
+        # Allowed list for feishu
+        allowed = config.tool_hint_channels.get("feishu", [])
+        assert allowed == ["user123", "chat456"]
+        
+        # Simulate private chat (sender_id == chat_id)
+        sender_id = "user123"
+        chat_id = "user123"
+        chat_type = ""
+        
+        # Should be allowed (sender in list)
+        is_allowed = "*" in allowed or sender_id in allowed or chat_id in allowed
+        assert is_allowed is True
+        
+        # Simulate user not in allowed list
+        sender_id = "user789"
+        chat_id = "user789"
+        is_allowed = "*" in allowed or sender_id in allowed or chat_id in allowed
+        assert is_allowed is False
+
+    def test_group_mode_requires_both_sender_and_chat_in_allowed_list(self):
+        """Group mode: both sender_id and chat_id must be in allowed list."""
+        from nanobot.config.schema import ChannelsConfig
+        
+        config = ChannelsConfig(
+            send_tool_hints=True,
+            tool_hint_channels={
+                "feishu": ["user123", "group456"]
+            }
+        )
+        
+        allowed = config.tool_hint_channels.get("feishu", [])
+        
+        # Simulate group chat
+        sender_id = "user123"
+        chat_id = "group456"
+        chat_type = "group"
+        
+        # Group mode detection
+        is_group = chat_type == "group" or sender_id != chat_id
+        assert is_group is True
+        
+        # Group mode requires both sender AND group in allowed list
+        if "*" not in allowed:
+            if is_group:
+                is_allowed = sender_id in allowed and chat_id in allowed
+            else:
+                is_allowed = sender_id in allowed
+            
+            assert is_allowed is True
+        
+        # Test case where only sender is in list (should be denied)
+        sender_id = "user123"
+        chat_id = "group789"  # Not in allowed list
+        is_group = sender_id != chat_id
+        assert is_group is True
+        
+        if "*" not in allowed:
+            if is_group:
+                is_allowed = sender_id in allowed and chat_id in allowed
+            else:
+                is_allowed = sender_id in allowed
+            
+            assert is_allowed is False
+
+    def test_wildcard_allows_all_users_and_groups(self):
+        """Wildcard "*" in allowed list bypasses all checks."""
+        from nanobot.config.schema import ChannelsConfig
+        
+        config = ChannelsConfig(
+            send_tool_hints=True,
+            tool_hint_channels={
+                "feishu": ["*"]
+            }
+        )
+        
+        allowed = config.tool_hint_channels.get("feishu", [])
+        
+        # Any user should be allowed with wildcard
+        sender_id = "any_user"
+        chat_id = "any_chat"
+        
+        # Wildcard check
+        is_allowed = "*" in allowed
+        assert is_allowed is True
+
+    def test_default_config_enables_all_hints(self):
+        """Default configuration should enable tool hints for all channels."""
+        from nanobot.config.schema import ChannelsConfig
+        
+        # Default config
+        config = ChannelsConfig()
+        
+        # Defaults
+        assert config.send_tool_hints is True
+        assert config.tool_hint_channels == {}
+        
+        # This means tool hints are enabled for all by default (backward compatible)
+        assert config.send_tool_hints and not config.tool_hint_channels

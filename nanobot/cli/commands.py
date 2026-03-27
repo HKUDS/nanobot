@@ -859,17 +859,23 @@ def agent(
                             ch = agent_loop.channels_config
                             if ch:
                                 if is_tool_hint:
-                                    # Check tool_hint_channels: empty = disabled, ["*"] or ["user"] = enabled
-                                    allowed = ch.tool_hint_channels.get(msg.channel, [])
-                                    if not allowed:
+                                    if not ch.send_tool_hints:
+                                        # Disabled globally, skip tool hint
                                         pass
                                     else:
+                                        allowed = ch.tool_hint_channels.get(msg.channel, [])
                                         sender_id = msg.metadata.get("_sender_id", "")
                                         chat_id = msg.chat_id
-                                        if "*" not in allowed and sender_id not in allowed and chat_id not in allowed:
-                                            pass
-                                        else:
+                                        
+                                        # If tool_hint_channels is empty/undefined, allow all (priority 2)
+                                        if not allowed:
                                             await _print_interactive_progress_line(msg.content, _thinking)
+                                        else:
+                                            # Follow tool_hint_channels rules (priority 3)
+                                            if "*" not in allowed and sender_id not in allowed and chat_id not in allowed:
+                                                pass  # Not in allowed list, don't print
+                                            else:
+                                                await _print_interactive_progress_line(msg.content, _thinking)
                                 elif not ch.send_progress:
                                     pass
                                 else:
