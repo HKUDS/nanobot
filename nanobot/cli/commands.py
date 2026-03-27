@@ -1,7 +1,7 @@
 """CLI commands for nanobot."""
 
 import asyncio
-from contextlib import contextmanager, nullcontext
+from contextlib import nullcontext
 
 import os
 import select
@@ -499,12 +499,7 @@ def _configured_notify_target(channel: str, chat_id: str, config_key: str) -> tu
     if ch and cid:
         return ch, cid
     if ch or cid:
-        logger.warning(
-            "{} is partially configured (channel='{}', chatId='{}'); ignoring override",
-            config_key,
-            ch,
-            cid,
-        )
+        logger.warning("{} is partially configured (channel='{}', chatId='{}'); ignoring override", config_key, ch, cid)
     return None
 
 
