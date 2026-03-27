@@ -47,10 +47,8 @@ class ContextBuilder:
             if always_content:
                 parts.append(f"# Active Skills\n\n{always_content}")
 
-        # Skills section: full summary or discovery mode
-        skills_summary = self.skills.build_skills_summary(
-            source="builtin" if self.skills.should_use_discovery_mode() else None
-        )
+        # Skills section: full summary or discovery mode (auto-selected)
+        skills_summary = self.skills.build_skills_summary()
         if skills_summary:
             parts.append(f"""# Skills
 

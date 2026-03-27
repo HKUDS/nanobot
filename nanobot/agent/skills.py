@@ -128,15 +128,20 @@ class SkillsLoader:
         """
         Build a summary of skills (name, description, path, availability).
 
+        When workspace skills exceed threshold, automatically filters to builtin only
+        (discovery mode) unless source is explicitly specified.
+
         Args:
-            source: Filter by source ("workspace" or "builtin"). None for all.
+            source: Filter by source ("workspace" or "builtin"). None for auto.
 
         Returns:
             XML-formatted skills summary.
         """
-        all_skills = self.list_skills(filter_unavailable=False)
+        # Auto-select source based on discovery mode
+        if source is None and self.should_use_discovery_mode():
+            source = "builtin"
 
-        # Filter by source if specified
+        all_skills = self.list_skills(filter_unavailable=False)
         if source:
             all_skills = [s for s in all_skills if s.get("source") == source]
 
@@ -159,7 +164,6 @@ class SkillsLoader:
             lines.append(f"    <description>{desc}</description>")
             lines.append(f"    <location>{path}</location>")
 
-            # Show missing requirements for unavailable skills
             if not available:
                 missing = self._get_missing_requirements(skill_meta)
                 if missing:
