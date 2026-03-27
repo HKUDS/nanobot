@@ -581,6 +581,32 @@ def gateway(
         "gateway.cron.notify",
     )
 
+    # Create channel manager
+    channels = ChannelManager(config, bus)
+
+    def _pick_heartbeat_target() -> tuple[str, str]:
+        """Pick a routable channel/chat target for heartbeat-triggered messages."""
+        if hb_override_target is not None:
+            return hb_override_target
+
+        enabled = set(channels.enabled_channels)
+        # Prefer the most recently updated non-internal session on an enabled channel.
+        for item in session_manager.list_sessions():
+            key = item.get("key") or ""
+            if ":" not in key:
+                continue
+            channel, chat_id = key.split(":", 1)
+            if channel in {"cli", "system"}:
+                continue
+            if channel in enabled and chat_id:
+                return channel, chat_id
+        # Fallback keeps prior behavior but remains explicit.
+        return "cli", "direct"
+
+    def _pick_cron_target(job: CronJob) -> tuple[str, str]:
+        """Pick the execution/notification target for cron-triggered turns."""
+        return cron_override_target or (job.payload.channel or "cli", job.payload.to or "direct")
+
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
@@ -599,10 +625,7 @@ def gateway(
         if isinstance(cron_tool, CronTool):
             cron_token = cron_tool.set_cron_context(True)
         try:
-            exec_channel, exec_chat_id = cron_override_target or (
-                job.payload.channel or "cli",
-                job.payload.to or "direct",
-            )
+            exec_channel, exec_chat_id = _pick_cron_target(job)
             resp = await agent.process_direct(
                 reminder_note,
                 session_key=f"cron:{job.id}",
@@ -626,10 +649,7 @@ def gateway(
             )
             if should_notify:
                 from nanobot.bus.events import OutboundMessage
-                notify_channel, notify_chat_id = cron_override_target or (
-                    job.payload.channel or "cli",
-                    job.payload.to or "direct",
-                )
+                notify_channel, notify_chat_id = _pick_cron_target(job)
                 await bus.publish_outbound(OutboundMessage(
                     channel=notify_channel,
                     chat_id=notify_chat_id,
@@ -638,29 +658,10 @@ def gateway(
         return response
     cron.on_job = on_cron_job
 
-    # Create channel manager
-    channels = ChannelManager(config, bus)
-
-    def _pick_heartbeat_target() -> tuple[str, str]:
-        """Pick a routable channel/chat target for heartbeat-triggered messages."""
-        enabled = set(channels.enabled_channels)
-        # Prefer the most recently updated non-internal session on an enabled channel.
-        for item in session_manager.list_sessions():
-            key = item.get("key") or ""
-            if ":" not in key:
-                continue
-            channel, chat_id = key.split(":", 1)
-            if channel in {"cli", "system"}:
-                continue
-            if channel in enabled and chat_id:
-                return channel, chat_id
-        # Fallback keeps prior behavior but remains explicit.
-        return "cli", "direct"
-
     # Create heartbeat service
     async def on_heartbeat_execute(tasks: str) -> str:
         """Phase 2: execute heartbeat tasks through the full agent loop."""
-        channel, chat_id = hb_override_target or _pick_heartbeat_target()
+        channel, chat_id = _pick_heartbeat_target()
 
         async def _silent(*_args, **_kwargs):
             pass
@@ -684,7 +685,7 @@ def gateway(
     async def on_heartbeat_notify(response: str) -> None:
         """Deliver a heartbeat response to the user's channel."""
         from nanobot.bus.events import OutboundMessage
-        channel, chat_id = hb_override_target or _pick_heartbeat_target()
+        channel, chat_id = _pick_heartbeat_target()
         if channel == "cli":
             return  # No external channel available to deliver to
         await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
