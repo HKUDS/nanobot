@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     from nanobot.agent.consolidation import ConsolidationOrchestrator
     from nanobot.agent.streaming import StreamingLLMCaller
     from nanobot.agent.turn_context import TurnContextManager
-    from nanobot.agent.turn_orchestrator import TurnOrchestrator
     from nanobot.agent.turn_types import Orchestrator, Processor
     from nanobot.agent.verifier import AnswerVerifier
     from nanobot.bus.queue import MessageBus
@@ -83,7 +82,7 @@ class _Subsystems:
     dispatcher: DelegationDispatcher
     llm_caller: StreamingLLMCaller
     verifier: AnswerVerifier
-    orchestrator: TurnOrchestrator
+    orchestrator: Orchestrator
     processor: Processor
 
 

@@ -327,18 +327,51 @@ def build_agent(
         memory_store=context.memory,
     )
 
-    # 12. Construct TurnOrchestrator
-    orchestrator = TurnOrchestrator(
-        llm_caller=llm_caller,
-        tool_executor=_tool_build.tools,
-        verifier=verifier,
-        config=config,
-        prompts=prompts,
-        context=context,
-        provider=provider,
-        model=model,
-        role_name=role_config.name if role_config else "",
-    )
+    # 12. Construct orchestrator (TurnRunner behind feature flag, TurnOrchestrator default)
+    from nanobot.agent.turn_types import Orchestrator as _Orchestrator
+
+    orchestrator: _Orchestrator
+    _use_turn_runner = getattr(config, "use_turn_runner", False)
+    if _use_turn_runner:
+        from nanobot.agent.turn_guardrails import (
+            EmptyResultRecovery,
+            FailureEscalation,
+            GuardrailChain,
+            NoProgressBudget,
+            RepeatedStrategyDetection,
+            SkillTunnelVision,
+        )
+        from nanobot.agent.turn_runner import TurnRunner
+
+        guardrails = GuardrailChain(
+            [
+                FailureEscalation(),
+                NoProgressBudget(),
+                RepeatedStrategyDetection(),
+                EmptyResultRecovery(),
+                SkillTunnelVision(),
+            ]
+        )
+        orchestrator = TurnRunner(
+            llm_caller=llm_caller,
+            tool_executor=_tool_build.tools,
+            guardrails=guardrails,
+            context=context,
+            config=config,
+            provider=provider,
+        )
+    else:
+        orchestrator = TurnOrchestrator(
+            llm_caller=llm_caller,
+            tool_executor=_tool_build.tools,
+            verifier=verifier,
+            config=config,
+            prompts=prompts,
+            context=context,
+            provider=provider,
+            model=model,
+            role_name=role_config.name if role_config else "",
+        )
 
     # 12.5 Construct TurnContextManager
     from nanobot.agent.turn_context import TurnContextManager
