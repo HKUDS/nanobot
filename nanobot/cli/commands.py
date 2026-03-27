@@ -491,6 +491,24 @@ def _migrate_cron_store(config: "Config") -> None:
         shutil.move(str(legacy_path), str(new_path))
 
 
+def _configured_notify_target(channel: str, chat_id: str, config_key: str) -> tuple[str, str] | None:
+    """Return a configured target if both fields are present, else ``None``."""
+    from loguru import logger
+
+    ch = (channel or "").strip()
+    cid = (chat_id or "").strip()
+    if ch and cid:
+        return ch, cid
+    if ch or cid:
+        logger.warning(
+            "{} is partially configured (channel='{}', chatId='{}'); ignoring override",
+            config_key,
+            ch,
+            cid,
+        )
+    return None
+
+
 # ============================================================================
 # Gateway / Server
 # ============================================================================
@@ -552,6 +570,16 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
     )
+    hb_override_target = _configured_notify_target(
+        config.gateway.heartbeat_notify.channel,
+        config.gateway.heartbeat_notify.chat_id,
+        "gateway.heartbeatNotify",
+    )
+    cron_override_target = _configured_notify_target(
+        config.gateway.cron_notify.channel,
+        config.gateway.cron_notify.chat_id,
+        "gateway.cronNotify",
+    )
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
@@ -571,11 +599,15 @@ def gateway(
         if isinstance(cron_tool, CronTool):
             cron_token = cron_tool.set_cron_context(True)
         try:
+            exec_channel, exec_chat_id = cron_override_target or (
+                job.payload.channel or "cli",
+                job.payload.to or "direct",
+            )
             resp = await agent.process_direct(
                 reminder_note,
                 session_key=f"cron:{job.id}",
-                channel=job.payload.channel or "cli",
-                chat_id=job.payload.to or "direct",
+                channel=exec_channel,
+                chat_id=exec_chat_id,
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
@@ -587,15 +619,20 @@ def gateway(
         if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
             return response
 
-        if job.payload.deliver and job.payload.to and response:
+        has_delivery_target = bool(job.payload.to) or cron_override_target is not None
+        if job.payload.deliver and has_delivery_target and response:
             should_notify = await evaluate_response(
                 response, job.payload.message, provider, agent.model,
             )
             if should_notify:
                 from nanobot.bus.events import OutboundMessage
+                notify_channel, notify_chat_id = cron_override_target or (
+                    job.payload.channel or "cli",
+                    job.payload.to or "direct",
+                )
                 await bus.publish_outbound(OutboundMessage(
-                    channel=job.payload.channel or "cli",
-                    chat_id=job.payload.to,
+                    channel=notify_channel,
+                    chat_id=notify_chat_id,
                     content=response,
                 ))
         return response
@@ -623,7 +660,7 @@ def gateway(
     # Create heartbeat service
     async def on_heartbeat_execute(tasks: str) -> str:
         """Phase 2: execute heartbeat tasks through the full agent loop."""
-        channel, chat_id = _pick_heartbeat_target()
+        channel, chat_id = hb_override_target or _pick_heartbeat_target()
 
         async def _silent(*_args, **_kwargs):
             pass
@@ -647,7 +684,7 @@ def gateway(
     async def on_heartbeat_notify(response: str) -> None:
         """Deliver a heartbeat response to the user's channel."""
         from nanobot.bus.events import OutboundMessage
-        channel, chat_id = _pick_heartbeat_target()
+        channel, chat_id = hb_override_target or _pick_heartbeat_target()
         if channel == "cli":
             return  # No external channel available to deliver to
         await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))

@@ -95,12 +95,21 @@ class HeartbeatConfig(Base):
     keep_recent_messages: int = 8
 
 
+class NotificationTargetConfig(Base):
+    """Generic notification target (channel + chat_id)."""
+
+    channel: str = ""
+    chat_id: str = ""
+
+
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
     host: str = "0.0.0.0"
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    heartbeat_notify: NotificationTargetConfig = Field(default_factory=NotificationTargetConfig)
+    cron_notify: NotificationTargetConfig = Field(default_factory=NotificationTargetConfig)
 
 
 class WebSearchConfig(Base):

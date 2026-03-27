@@ -7,7 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.cli.commands import _make_provider, app
+from nanobot.cli.commands import _configured_notify_target, _make_provider, app
 from nanobot.config.schema import Config
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
@@ -640,6 +640,31 @@ def test_heartbeat_retains_recent_messages_by_default():
     config = Config()
 
     assert config.gateway.heartbeat.keep_recent_messages == 8
+
+
+def test_gateway_notification_targets_support_camel_case_aliases() -> None:
+    config = Config.model_validate(
+        {
+            "gateway": {
+                "heartbeatNotify": {"channel": "discord", "chatId": "123"},
+                "cronNotify": {"channel": "telegram", "chatId": "456"},
+            }
+        }
+    )
+
+    assert config.gateway.heartbeat_notify.channel == "discord"
+    assert config.gateway.heartbeat_notify.chat_id == "123"
+    assert config.gateway.cron_notify.channel == "telegram"
+    assert config.gateway.cron_notify.chat_id == "456"
+
+
+def test_configured_notify_target_returns_override_when_complete() -> None:
+    assert _configured_notify_target("discord", "123", "gateway.heartbeatNotify") == ("discord", "123")
+
+
+def test_configured_notify_target_returns_none_when_partial() -> None:
+    assert _configured_notify_target("discord", "", "gateway.heartbeatNotify") is None
+    assert _configured_notify_target("", "123", "gateway.heartbeatNotify") is None
 
 
 def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Path) -> None:
