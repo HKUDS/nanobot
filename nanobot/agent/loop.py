@@ -180,13 +180,14 @@ class AgentLoop:
             
             val = None
             if isinstance(args, dict):
-                if "path" in args and isinstance(args["path"], str):
-                    val = args["path"]
-                elif "query" in args and isinstance(args["query"], str):
-                    val = args["query"]
-                elif "command" in args and isinstance(args["command"], str):
-                    val = args["command"]
-                else:
+                # Prioritize specific keys for better hints
+                for key in ["command", "query", "task", "path", "url"]:
+                    if key in args and isinstance(args[key], str):
+                        val = args[key]
+                        break
+                
+                # Fallback to the first string value
+                if val is None:
                     for v in args.values():
                         if isinstance(v, str):
                             val = v
