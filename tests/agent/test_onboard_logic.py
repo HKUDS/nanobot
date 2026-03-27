@@ -636,7 +636,7 @@ class TestToolHintChannelsPriority:
         assert is_allowed is True
 
     def test_default_config_enables_all_hints(self):
-        """Default configuration should enable tool hints for all channels."""
+        """Default configuration should disable tool hints for all channels."""
         from nanobot.config.schema import ChannelsConfig
         
         # Default config
@@ -645,6 +645,3 @@ class TestToolHintChannelsPriority:
         # Defaults
         assert config.send_tool_hints is False
         assert config.tool_hint_channels == {}
-        
-        # This means tool hints are enabled for all by default (backward compatible)
-        assert config.send_tool_hints and not config.tool_hint_channels
