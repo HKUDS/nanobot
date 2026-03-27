@@ -571,14 +571,14 @@ def gateway(
         channels_config=config.channels,
     )
     hb_override_target = _configured_notify_target(
-        config.gateway.heartbeat_notify.channel,
-        config.gateway.heartbeat_notify.chat_id,
-        "gateway.heartbeatNotify",
+        config.gateway.heartbeat.notify.channel,
+        config.gateway.heartbeat.notify.chat_id,
+        "gateway.heartbeat.notify",
     )
     cron_override_target = _configured_notify_target(
-        config.gateway.cron_notify.channel,
-        config.gateway.cron_notify.chat_id,
-        "gateway.cronNotify",
+        config.gateway.cron.notify.channel,
+        config.gateway.cron.notify.chat_id,
+        "gateway.cron.notify",
     )
 
     # Set cron callback (needs agent)

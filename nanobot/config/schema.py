@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -87,19 +87,26 @@ class ProvidersConfig(Base):
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
 
 
+class NotificationTargetConfig(Base):
+    """Generic notification target (channel + chat_id)."""
+
+    channel: str = ""
+    chat_id: str = ""
+
+
 class HeartbeatConfig(Base):
     """Heartbeat service configuration."""
 
     enabled: bool = True
     interval_s: int = 30 * 60  # 30 minutes
     keep_recent_messages: int = 8
+    notify: NotificationTargetConfig = Field(default_factory=NotificationTargetConfig)
 
 
-class NotificationTargetConfig(Base):
-    """Generic notification target (channel + chat_id)."""
+class CronConfig(Base):
+    """Cron service configuration."""
 
-    channel: str = ""
-    chat_id: str = ""
+    notify: NotificationTargetConfig = Field(default_factory=NotificationTargetConfig)
 
 
 class GatewayConfig(Base):
@@ -108,8 +115,39 @@ class GatewayConfig(Base):
     host: str = "0.0.0.0"
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
-    heartbeat_notify: NotificationTargetConfig = Field(default_factory=NotificationTargetConfig)
-    cron_notify: NotificationTargetConfig = Field(default_factory=NotificationTargetConfig)
+    cron: CronConfig = Field(default_factory=CronConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_notify_keys(cls, data):
+        """Map legacy gateway heartbeatNotify/cronNotify into nested heartbeat/cron notify blocks."""
+        if not isinstance(data, dict):
+            return data
+
+        migrated = dict(data)
+        legacy_hb = migrated.pop("heartbeatNotify", None)
+        if legacy_hb is None:
+            legacy_hb = migrated.pop("heartbeat_notify", None)
+        legacy_cron = migrated.pop("cronNotify", None)
+        if legacy_cron is None:
+            legacy_cron = migrated.pop("cron_notify", None)
+
+        if isinstance(legacy_hb, dict):
+            heartbeat = migrated.get("heartbeat")
+            if not isinstance(heartbeat, dict):
+                heartbeat = {}
+            heartbeat.setdefault("notify", legacy_hb)
+            migrated["heartbeat"] = heartbeat
+
+        if isinstance(legacy_cron, dict):
+            cron = migrated.get("cron")
+            if not isinstance(cron, dict):
+                cron = {}
+            cron.setdefault("notify", legacy_cron)
+            migrated["cron"] = cron
+
+        return migrated
+
 
 
 class WebSearchConfig(Base):

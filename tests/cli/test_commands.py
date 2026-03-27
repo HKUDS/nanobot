@@ -642,7 +642,23 @@ def test_heartbeat_retains_recent_messages_by_default():
     assert config.gateway.heartbeat.keep_recent_messages == 8
 
 
-def test_gateway_notification_targets_support_camel_case_aliases() -> None:
+def test_gateway_notification_targets_support_nested_camel_case_aliases() -> None:
+    config = Config.model_validate(
+        {
+            "gateway": {
+                "heartbeat": {"notify": {"channel": "discord", "chatId": "123"}},
+                "cron": {"notify": {"channel": "telegram", "chatId": "456"}},
+            }
+        }
+    )
+
+    assert config.gateway.heartbeat.notify.channel == "discord"
+    assert config.gateway.heartbeat.notify.chat_id == "123"
+    assert config.gateway.cron.notify.channel == "telegram"
+    assert config.gateway.cron.notify.chat_id == "456"
+
+
+def test_gateway_notification_targets_keep_legacy_key_compatibility() -> None:
     config = Config.model_validate(
         {
             "gateway": {
@@ -652,19 +668,19 @@ def test_gateway_notification_targets_support_camel_case_aliases() -> None:
         }
     )
 
-    assert config.gateway.heartbeat_notify.channel == "discord"
-    assert config.gateway.heartbeat_notify.chat_id == "123"
-    assert config.gateway.cron_notify.channel == "telegram"
-    assert config.gateway.cron_notify.chat_id == "456"
+    assert config.gateway.heartbeat.notify.channel == "discord"
+    assert config.gateway.heartbeat.notify.chat_id == "123"
+    assert config.gateway.cron.notify.channel == "telegram"
+    assert config.gateway.cron.notify.chat_id == "456"
 
 
 def test_configured_notify_target_returns_override_when_complete() -> None:
-    assert _configured_notify_target("discord", "123", "gateway.heartbeatNotify") == ("discord", "123")
+    assert _configured_notify_target("discord", "123", "gateway.heartbeat.notify") == ("discord", "123")
 
 
 def test_configured_notify_target_returns_none_when_partial() -> None:
-    assert _configured_notify_target("discord", "", "gateway.heartbeatNotify") is None
-    assert _configured_notify_target("", "123", "gateway.heartbeatNotify") is None
+    assert _configured_notify_target("discord", "", "gateway.heartbeat.notify") is None
+    assert _configured_notify_target("", "123", "gateway.heartbeat.notify") is None
 
 
 def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Path) -> None:
