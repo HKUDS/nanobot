@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 from nanobot.agent.consolidation import ConsolidationOrchestrator
 from nanobot.agent.loop import AgentLoop
-from nanobot.agent.verifier import AnswerVerifier
 from nanobot.coordination.delegation import DelegationDispatcher
 from nanobot.coordination.delegation_contract import (
     build_execution_context,
@@ -34,15 +33,6 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
     )
     loop.context = SimpleNamespace(memory=mem_ns)
     loop._consolidator = ConsolidationOrchestrator(memory=mem_ns)
-    loop._verifier = AnswerVerifier(
-        provider=None,  # type: ignore[arg-type]
-        model="m",
-        temperature=0.0,
-        max_tokens=32,
-        verification_mode="off",
-        memory_uncertainty_threshold=0.6,
-        memory_store=mem_ns,  # type: ignore[arg-type]
-    )
     return loop
 
 
@@ -143,47 +133,6 @@ def test_build_parallel_and_contract_includes_optional_sections(
     assert "Overall Plan" in user_content
     assert "Prior Results" in user_content
     assert "Your response MUST use this structure" in output_schema
-
-
-async def test_verification_helpers_and_lock_lifecycle(tmp_path: Path) -> None:
-    loop = _make_loop(tmp_path)
-    assert AnswerVerifier._looks_like_question("How are you") is True
-    assert AnswerVerifier._looks_like_question("status update") is False
-
-    # Test _estimate_grounding_confidence via the verifier
-    v = loop._verifier
-
-    async def _retrieve_score_x(*_a, **_k):
-        return [{"score": "x"}]
-
-    async def _retrieve_score_high(*_a, **_k):
-        return [{"score": 1.3}]
-
-    async def _retrieve_score_low(*_a, **_k):
-        return [{"score": 0.2}]
-
-    v._memory = SimpleNamespace(retriever=SimpleNamespace(retrieve=_retrieve_score_x))
-    assert await v._estimate_grounding_confidence("q") == 0.0
-    v._memory = SimpleNamespace(retriever=SimpleNamespace(retrieve=_retrieve_score_high))
-    assert await v._estimate_grounding_confidence("q") == 1.0
-    v._memory = SimpleNamespace(retriever=SimpleNamespace(retrieve=_retrieve_score_low))
-    assert await v.should_force_verification("What is this") is True
-
-
-async def test_attempt_recovery_missing_or_error_paths(tmp_path: Path) -> None:
-    loop = _make_loop(tmp_path)
-    verifier = loop._verifier
-    verifier.provider = SimpleNamespace(chat=None)
-
-    # Missing system/user pair -> skip recovery.
-    assert await verifier.attempt_recovery(channel="c", chat_id="id", all_msgs=[]) is None
-
-    async def _raise_chat(**_kwargs):
-        raise RuntimeError("boom")
-
-    verifier.provider = SimpleNamespace(chat=_raise_chat)
-    msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
-    assert await verifier.attempt_recovery(channel="c", chat_id="id", all_msgs=msgs) is None
 
 
 # ---------------------------------------------------------------------------

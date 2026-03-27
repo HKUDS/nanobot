@@ -218,11 +218,17 @@ def build_agent(
     from nanobot.agent.loop import AgentLoop
     from nanobot.agent.message_processor import MessageProcessor
     from nanobot.agent.streaming import StreamingLLMCaller
-    from nanobot.agent.turn_orchestrator import TurnOrchestrator
-    from nanobot.agent.verifier import AnswerVerifier
+    from nanobot.agent.turn_guardrails import (
+        EmptyResultRecovery,
+        FailureEscalation,
+        GuardrailChain,
+        NoProgressBudget,
+        RepeatedStrategyDetection,
+        SkillTunnelVision,
+    )
+    from nanobot.agent.turn_runner import TurnRunner
     from nanobot.config.schema import ExecToolConfig as _ExecToolConfig
     from nanobot.context.context import ContextBuilder
-    from nanobot.context.prompt_loader import prompts
     from nanobot.coordination.delegation import DelegationConfig, DelegationDispatcher
     from nanobot.memory import MemoryStore
     from nanobot.session.manager import SessionManager as _SessionManager
@@ -316,28 +322,23 @@ def build_agent(
         max_tokens=config.max_tokens,
     )
 
-    # 11. Construct AnswerVerifier
-    verifier = AnswerVerifier(
-        provider=provider,
-        model=model,
-        temperature=temperature,
-        max_tokens=config.max_tokens,
-        verification_mode=config.verification_mode,
-        memory_uncertainty_threshold=config.memory.uncertainty_threshold,
-        memory_store=context.memory,
+    # 11. Construct TurnRunner with guardrails
+    guardrails = GuardrailChain(
+        [
+            FailureEscalation(),
+            NoProgressBudget(),
+            RepeatedStrategyDetection(),
+            EmptyResultRecovery(),
+            SkillTunnelVision(),
+        ]
     )
-
-    # 12. Construct TurnOrchestrator
-    orchestrator = TurnOrchestrator(
+    orchestrator = TurnRunner(
         llm_caller=llm_caller,
         tool_executor=_tool_build.tools,
-        verifier=verifier,
-        config=config,
-        prompts=prompts,
+        guardrails=guardrails,
         context=context,
+        config=config,
         provider=provider,
-        model=model,
-        role_name=role_config.name if role_config else "",
     )
 
     # 12.5 Construct TurnContextManager
@@ -375,7 +376,6 @@ def build_agent(
         sessions=sessions,
         tools=_tool_build.tools,
         consolidator=consolidator,
-        verifier=verifier,
         bus=bus,
         turn_context=turn_context,
         span_module=sys.modules["nanobot.agent.loop"],
@@ -419,7 +419,6 @@ def build_agent(
         consolidator=consolidator,
         dispatcher=dispatcher,
         llm_caller=llm_caller,
-        verifier=verifier,
         orchestrator=orchestrator,
         processor=processor,
     )

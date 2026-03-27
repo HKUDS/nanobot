@@ -1,14 +1,12 @@
 """Orchestrator protocol and shared turn data types.
 
 ``TurnState`` is the mutable state bag shared across iterations of the
-Plan-Act-Observe-Reflect loop.  ``TurnResult`` is the immutable output.
-Both live here (rather than in ``turn_orchestrator.py``) so that
-``message_processor.py`` can reference them without importing the concrete
-``TurnOrchestrator`` class, avoiding an import cycle.
+tool-use loop.  ``TurnResult`` is the immutable output.  Both live here
+so that ``message_processor.py`` can reference them without importing the
+concrete ``TurnRunner`` class, avoiding an import cycle.
 
-``Orchestrator`` is a structural ``Protocol`` satisfied by
-``TurnOrchestrator`` (and any test mock that exposes the same ``run``
-signature).
+``Orchestrator`` is a structural ``Protocol`` satisfied by ``TurnRunner``
+(and any test mock that exposes the same ``run`` signature).
 """
 
 from __future__ import annotations
@@ -37,6 +35,8 @@ class TurnState:
     iteration: int = 0
     tools_def_cache: list[dict[str, Any]] = field(default_factory=list)
     tools_def_snapshot: frozenset[str] = field(default_factory=frozenset)
+    tool_results_log: list[ToolAttempt] = field(default_factory=list)
+    guardrail_activations: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,11 +68,11 @@ class ToolAttempt:
 
 
 class Orchestrator(Protocol):
-    """Structural protocol for the turn orchestrator.
+    """Structural protocol for the turn runner.
 
     Any object with a compatible ``run`` method satisfies this protocol,
-    including ``TurnOrchestrator`` and test mocks.  Zero attributes —
-    pure behavioral contract.
+    including ``TurnRunner`` and test mocks.  Zero attributes — pure
+    behavioral contract.
     """
 
     async def run(

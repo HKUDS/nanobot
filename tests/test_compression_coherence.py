@@ -8,7 +8,7 @@ Covers:
 
 from __future__ import annotations
 
-from nanobot.agent.turn_orchestrator import _dynamic_preserve_recent
+from nanobot.agent.turn_runner import _dynamic_preserve_recent
 from nanobot.context.compression import (
     _collect_tail_tool_call_ids,
     _paired_drop_tools,

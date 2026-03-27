@@ -50,44 +50,6 @@ def _make_loop(tmp_path: Path, provider: LLMProvider, verification_mode: str) ->
     return build_agent(bus=MessageBus(), provider=provider, config=cfg)
 
 
-async def test_verify_answer_revise_and_parse_fallback(tmp_path: Path) -> None:
-    provider = _ScriptedProvider(
-        [
-            LLMResponse(content='{"confidence": 2, "issues": ["unsupported claim"]}'),
-            LLMResponse(content="revised answer"),
-            LLMResponse(content="not-json"),
-        ]
-    )
-    loop = _make_loop(tmp_path, provider, verification_mode="always")
-
-    revised, msgs = await loop._verifier.verify(
-        "what changed?",
-        "candidate",
-        [{"role": "assistant", "content": "candidate"}],
-    )
-    assert revised == "revised answer"
-    assert any(m.get("role") == "system" for m in msgs)
-
-    kept, _ = await loop._verifier.verify(
-        "what changed?",
-        "candidate",
-        [{"role": "assistant", "content": "candidate"}],
-    )
-    assert kept == "candidate"
-
-
-async def test_verify_answer_on_uncertainty_skip(tmp_path: Path) -> None:
-    provider = _ScriptedProvider([LLMResponse(content='{"confidence": 5, "issues": []}')])
-    loop = _make_loop(tmp_path, provider, verification_mode="on_uncertainty")
-
-    async def _no_force(_text: str) -> bool:
-        return False
-
-    loop._verifier.should_force_verification = _no_force  # type: ignore[method-assign]
-    out, _ = await loop._verifier.verify("hi", "candidate", [])
-    assert out == "candidate"
-
-
 async def test_run_timeout_and_none_response_paths(tmp_path: Path) -> None:
     provider = _ScriptedProvider([])
     bus = MessageBus()

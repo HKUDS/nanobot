@@ -15,11 +15,9 @@ from nanobot.agent.callbacks import (
 )
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.turn_types import TurnResult
-from nanobot.agent.verifier import AnswerVerifier
 
 __all__ = [
     "AgentLoop",
-    "AnswerVerifier",
     "DelegateEndEvent",
     "DelegateStartEvent",
     "ProgressCallback",
