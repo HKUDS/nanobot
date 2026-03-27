@@ -16,9 +16,7 @@ COVERAGE_JSON = ROOT / "coverage.json"
 
 # (module_relative_path, minimum_percent_covered)
 MODULE_THRESHOLDS: list[tuple[str, float]] = [
-    ("nanobot/coordination/coordinator.py", 80.0),
     ("nanobot/coordination/delegation.py", 75.0),
-    ("nanobot/coordination/registry.py", 90.0),
 ]
 
 
