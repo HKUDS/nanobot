@@ -16,8 +16,8 @@ from typing import Any
 
 from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.message_processor import _build_no_answer_explanation
 from nanobot.agent.streaming import strip_think
-from nanobot.agent.verifier import AnswerVerifier
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.agent import AgentConfig
@@ -237,33 +237,33 @@ class TestBuildNoAnswerExplanation:
 
     def test_question_gets_rephrase_help(self):
         """A question should suggest rephrasing, not sharing a fact."""
-        result = AnswerVerifier.build_no_answer_explanation("How many cron jobs?", [])
+        result = _build_no_answer_explanation("How many cron jobs?", [])
         assert "rephras" in result.lower()
         assert "share the fact" not in result.lower()
 
     def test_question_mark_detected(self):
         """Any text with ? should be treated as a question."""
-        result = AnswerVerifier.build_no_answer_explanation("cron jobs?", [])
+        result = _build_no_answer_explanation("cron jobs?", [])
         assert "rephras" in result.lower()
 
     def test_statement_gets_share_fact_help(self):
         """A statement should suggest sharing a fact."""
-        result = AnswerVerifier.build_no_answer_explanation("My birthday is in March", [])
+        result = _build_no_answer_explanation("My birthday is in March", [])
         assert "share the fact" in result.lower()
 
     def test_no_tools_reason_improved(self):
         """When no tool results exist, the reason should not mention tools."""
-        result = AnswerVerifier.build_no_answer_explanation("What is 2+2?", [])
+        result = _build_no_answer_explanation("What is 2+2?", [])
         assert "did not produce a response" in result.lower()
         assert "tools or memory" not in result.lower()
 
     def test_tool_failure_reason(self):
         """When tool results include 'not found', the reason mentions it."""
         msgs = [{"role": "tool", "name": "read_file", "content": "Error: not found"}]
-        result = AnswerVerifier.build_no_answer_explanation("What is in test.txt?", msgs)
+        result = _build_no_answer_explanation("What is in test.txt?", msgs)
         assert "read_file" in result
 
     def test_empty_user_text(self):
         """Empty user text should still produce a valid fallback."""
-        result = AnswerVerifier.build_no_answer_explanation("", [])
+        result = _build_no_answer_explanation("", [])
         assert "Sorry" in result

@@ -1,8 +1,8 @@
 """Agent loop: the core processing engine.
 
-Orchestrates the Plan-Act-Observe-Reflect cycle, bus consumption,
-and MCP lifecycle.  Turn execution is delegated
-to ``TurnOrchestrator``; per-message processing to ``MessageProcessor``.
+Orchestrates the tool-use cycle, bus consumption, and MCP lifecycle.
+Turn execution is delegated to ``TurnRunner``; per-message processing
+to ``MessageProcessor``.
 """
 
 from __future__ import annotations
@@ -77,7 +77,6 @@ class AgentLoop:
         self._consolidator = components.subsystems.consolidator
         self._dispatcher = components.subsystems.dispatcher
         self._llm_caller = components.subsystems.llm_caller
-        self._verifier = components.subsystems.verifier
         self._orchestrator = components.subsystems.orchestrator
         self._processor: MessageProcessor = components.subsystems.processor  # type: ignore[assignment]
 

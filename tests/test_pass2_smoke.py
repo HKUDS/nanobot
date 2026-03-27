@@ -12,7 +12,7 @@ import pytest
 
 from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.loop import AgentLoop
-from nanobot.agent.turn_orchestrator import _dynamic_preserve_recent
+from nanobot.agent.turn_runner import _dynamic_preserve_recent
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.email import EmailChannel

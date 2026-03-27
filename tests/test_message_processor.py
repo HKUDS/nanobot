@@ -36,9 +36,6 @@ def _make_processor(tmp_path: Path) -> MessageProcessor:
 
     tools = MagicMock()
     consolidator = MagicMock()
-    verifier = MagicMock()
-    verifier.should_force_verification = AsyncMock(return_value=False)
-    verifier.attempt_recovery = AsyncMock(return_value=None)
     bus = MagicMock()
     bus.publish = AsyncMock()
     bus.publish_outbound = AsyncMock()
@@ -63,7 +60,6 @@ def _make_processor(tmp_path: Path) -> MessageProcessor:
         sessions=sessions,
         tools=tools,
         consolidator=consolidator,
-        verifier=verifier,
         bus=bus,
         turn_context=turn_context,
     )
@@ -139,7 +135,7 @@ class TestMessageProcessorContract:
         """Slash commands (/help, /new) must be handled without calling the LLM orchestrator.
 
         In loop.py _process_message, '/help' and '/new' return early with a canned
-        OutboundMessage before any TurnOrchestrator.run() call.  MessageProcessor
+        OutboundMessage before any orchestrator.run() call.  MessageProcessor
         must preserve that contract: the orchestrator mock must NOT be called.
         """
         processor = _make_processor(tmp_path)
@@ -149,23 +145,3 @@ class TestMessageProcessorContract:
         assert isinstance(result, str)
         # The LLM orchestrator must not have been invoked
         processor.orchestrator.run.assert_not_called()
-
-    async def test_memory_verifier_consulted(self, tmp_path: Path) -> None:
-        """MessageProcessor must consult the verifier when processing a message.
-
-        loop.py calls self._verifier.should_force_verification(msg.content) on
-        every non-slash, non-system message.  MessageProcessor must honour the same
-        contract so that callers can control verification behaviour via the injected
-        verifier.
-        """
-        processor = _make_processor(tmp_path)
-        # Configure verifier to report that forced verification is needed
-        processor.verifier.should_force_verification = AsyncMock(return_value=True)
-
-        result = await processor.process_direct("remind me about our last meeting")
-
-        assert isinstance(result, str)
-        # The verifier must have been asked about the message content
-        processor.verifier.should_force_verification.assert_called_once_with(
-            "remind me about our last meeting"
-        )

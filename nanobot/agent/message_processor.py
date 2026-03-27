@@ -19,8 +19,8 @@ from loguru import logger
 
 from nanobot.agent.agent_components import _ProcessorServices
 from nanobot.agent.callbacks import ProgressCallback
+from nanobot.agent.streaming import strip_think
 from nanobot.agent.turn_types import TurnState
-from nanobot.agent.verifier import AnswerVerifier
 from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.config.agent import AgentConfig
@@ -53,7 +53,6 @@ class MessageProcessor:
         self.sessions = services.sessions
         self.tools = services.tools
         self._consolidator = services.consolidator
-        self.verifier = services.verifier
         self.bus = services.bus
         self._turn_context = services.turn_context
         self._span_module: Any | None = services.span_module
@@ -206,14 +205,12 @@ class MessageProcessor:
             message_tool.on_turn_start()
 
         history = session.get_history(max_messages=self.config.memory.window)
-        verify_before_answer = await self.verifier.should_force_verification(msg.content)
         initial_messages = await self.context.build_messages(
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
-            verify_before_answer=verify_before_answer,
         )
 
         # Build canonical event builder scoped to this request
@@ -258,20 +255,18 @@ class MessageProcessor:
         )
 
         if final_content is None:
-            _recovered = await self.verifier.attempt_recovery(
+            _recovered = await self._attempt_recovery(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
                 all_msgs=all_msgs,
-                model=None,
-                temperature=None,
             )
             if isinstance(_recovered, str):
                 final_content = _recovered
 
         if final_content is None:
-            # Ensure all_msgs is a real list for build_no_answer_explanation.
+            # Ensure all_msgs is a real list for _build_no_answer_explanation.
             _safe_msgs: list[dict[str, Any]] = all_msgs if isinstance(all_msgs, list) else []
-            final_content = AnswerVerifier.build_no_answer_explanation(msg.content, _safe_msgs)
+            final_content = _build_no_answer_explanation(msg.content, _safe_msgs)
             _added = self.context.add_assistant_message(_safe_msgs, final_content)
             if isinstance(_added, list):
                 all_msgs = _added
@@ -495,3 +490,106 @@ class MessageProcessor:
             )
         self._consolidator.submit(session.key, session, self.provider, self.model)
         return True
+
+    async def _attempt_recovery(
+        self,
+        *,
+        channel: str,
+        chat_id: str,
+        all_msgs: list[dict[str, Any]],
+    ) -> str | None:
+        """Try a single recovery LLM call with minimal context.
+
+        Uses only the system prompt and the original user message (no tool
+        history) with tools disabled to force a direct text answer.
+        """
+        from nanobot.context.prompt_loader import prompts
+
+        system_msg = next((m for m in all_msgs if m.get("role") == "system"), None)
+        user_msg = None
+        for m in reversed(all_msgs):
+            if m.get("role") == "user":
+                user_msg = m
+                break
+
+        if not system_msg or not user_msg:
+            logger.warning("Recovery skipped: missing system or user message")
+            return None
+
+        recovery_messages = [
+            system_msg,
+            user_msg,
+            {"role": "system", "content": prompts.get("recovery")},
+        ]
+
+        logger.info("Attempting recovery LLM call for {}:{}", channel, chat_id)
+        try:
+            response = await self.provider.chat(
+                messages=recovery_messages,
+                tools=None,
+                model=self.model,
+                temperature=0.0,
+                max_tokens=self.config.max_tokens,
+            )
+        except Exception:  # crash-barrier: recovery LLM call
+            logger.exception("Recovery LLM call failed")
+            return None
+
+        if response.finish_reason == "error":
+            logger.warning("Recovery LLM call returned error: {}", response.content)
+            return None
+
+        content = strip_think(response.content)
+        if content:
+            logger.info("Recovery succeeded, returning answer")
+        else:
+            logger.warning("Recovery LLM call produced no usable content")
+        return content
+
+
+def _build_no_answer_explanation(user_text: str, messages: list[dict[str, Any]]) -> str:
+    """Explain why the agent could not produce an answer on this turn."""
+    tool_results = [m for m in messages if m.get("role") == "tool"]
+    last_tool = tool_results[-1] if tool_results else None
+    last_tool_name = str(last_tool.get("name", "")) if last_tool else ""
+    last_tool_content = str(last_tool.get("content", "")) if last_tool else ""
+    lowered = last_tool_content.lower()
+
+    reasons: list[str] = []
+    if not tool_results:
+        reasons.append("The model did not produce a response for this message.")
+    if "exit code: 1" in lowered or "no such file" in lowered or "not found" in lowered:
+        reasons.append(
+            f"My last check with `{last_tool_name or 'a tool'}` returned no matching data."
+        )
+    if "permission denied" in lowered:
+        reasons.append("The lookup failed due to a local permission error.")
+    if "insufficient_quota" in lowered or "429" in lowered:
+        reasons.append("A provider quota/rate limit blocked part of the retrieval.")
+    if not reasons:
+        reasons.append("The model returned no final answer text after tool execution.")
+
+    question = (user_text or "").strip()
+    _question_words = {
+        "who",
+        "what",
+        "when",
+        "where",
+        "why",
+        "how",
+        "is",
+        "are",
+        "can",
+        "do",
+    }
+    looks_like_question = "?" in question or (
+        question.split()[0].lower() in _question_words if question else False
+    )
+    help_line = (
+        "Please try rephrasing your question or asking again."
+        if looks_like_question
+        else "Please share the fact directly and I can save it to memory."
+    )
+
+    primary_reason = reasons[0]
+    return f"Sorry, I couldn't answer that just now. {primary_reason} {help_line}"

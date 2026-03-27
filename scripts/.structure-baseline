@@ -16,8 +16,3 @@ nanobot/memory/write/conflicts.py: 526 LOC (limit 500, add '# size-exception: <r
 nanobot/memory/write/ingester.py: 832 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/tools/builtin/excel.py: 955 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/tools/builtin/powerpoint.py: 560 LOC (limit 500, add '# size-exception: <reason>')
-
-# --- Package file count >15 (transitional) ---
-# TurnRunner coexists with TurnOrchestrator during Phase 3 migration.
-# Remove this entry when turn_orchestrator.py is deleted.
-nanobot/agent/: 16 top-level .py files (limit 15)

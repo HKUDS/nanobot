@@ -1,20 +1,20 @@
-"""Simplified tool-use loop with guardrail checkpoints.
+"""Tool-use loop with guardrail checkpoints.
 
-``TurnRunner`` replaces ``TurnOrchestrator`` as a drop-in implementation of
-the ``Orchestrator`` protocol.  It inlines the tool-execution logic from
-``ActPhase`` and adds guardrail checkpoints + ToolAttempt working memory.
+``TurnRunner`` implements the ``Orchestrator`` protocol.  It owns tool
+execution, guardrail checkpoints, ToolAttempt working memory, and an
+optional structured self-check pass.
 
 Module boundary: this module must **never** import from ``nanobot.channels.*``,
 ``nanobot.bus.*``, or ``nanobot.session.*``.
 """
-# size-exception: inlines ActPhase tool execution + main loop + error handler per task spec
+# size-exception: inlines tool execution + main loop + error handler + helpers
 
 from __future__ import annotations
 
 import asyncio
 import json
 import time
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
@@ -27,12 +27,6 @@ from nanobot.agent.callbacks import (
 from nanobot.agent.failure import ToolCallTracker
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
 from nanobot.agent.turn_guardrails import GuardrailChain
-from nanobot.agent.turn_phases import (
-    _ARGS_REDACT_TOOLS,
-    _CONTEXT_RESERVE_RATIO,
-    _dynamic_preserve_recent,
-    _safe_int,
-)
 from nanobot.agent.turn_types import ToolAttempt, TurnResult, TurnState
 from nanobot.context.compression import estimate_messages_tokens, summarize_and_compress
 from nanobot.context.context import ContextBuilder
@@ -43,6 +37,64 @@ from nanobot.tools.executor import ToolExecutor
 if TYPE_CHECKING:
     from nanobot.config.agent import AgentConfig
     from nanobot.providers.base import LLMProvider, LLMResponse
+
+# ---------------------------------------------------------------------------
+# Constants and helpers (moved from turn_phases.py)
+# ---------------------------------------------------------------------------
+
+# Tools whose arguments may contain sensitive data (file contents, credentials,
+# command strings). Their call arguments are omitted from structured log output
+# to prevent leaking sensitive information into log files or tracing backends.
+_ARGS_REDACT_TOOLS: frozenset[str] = frozenset(
+    {"write_file", "edit_file", "exec", "web_fetch", "web_search"}
+)
+
+# Named constants for magic numbers used across the agent loop (CQ-L6).
+_CONTEXT_RESERVE_RATIO: float = (
+    0.80  # Fraction of context window reserved for prompt; ~20% for reply
+)
+
+
+def _safe_int(obj: Any, attr: str, default: int) -> int:
+    """Safely extract an integer attribute, returning *default* when the value is not numeric."""
+    val = getattr(obj, attr, default)
+    return int(val) if isinstance(val, int | float) else default
+
+
+def _dynamic_preserve_recent(
+    messages: list[dict[str, Any]],
+    last_tool_call_idx: int = -1,
+    *,
+    floor: int = 6,
+    cap: int = 30,
+) -> int:
+    """Calculate how many tail messages to preserve during compression.
+
+    Ensures the last complete tool-call cycle (assistant with tool_calls ->
+    all corresponding tool results -> next message) is never split.
+    Falls back to *floor* when no tool calls are present.
+
+    *last_tool_call_idx* is the index of the last assistant message that
+    contained tool_calls.  When provided (>= 0), the backward scan is skipped
+    entirely, making this function O(1).
+    """
+    n = len(messages)
+    if n <= floor:
+        return floor
+
+    if last_tool_call_idx >= 0:
+        needed = n - last_tool_call_idx
+        return max(floor, min(needed, cap))
+
+    # Fallback: scan backwards (O(n), bounded by cap) when index unknown
+    for offset in range(1, n):
+        idx = n - offset
+        m = messages[idx]
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            needed = n - idx
+            return max(floor, min(needed, cap))
+    return floor
+
 
 # Inline nudge texts (avoids PromptLoader dependency)
 _NUDGE_FINAL = (
@@ -63,11 +115,10 @@ def _is_output_empty(output: str) -> bool:
 
 
 class TurnRunner:
-    """Simplified tool-use loop with guardrail checkpoints.
+    """Tool-use loop with guardrail checkpoints.
 
-    Implements the ``Orchestrator`` protocol as a drop-in replacement for
-    ``TurnOrchestrator``.  Inlines tool execution (no separate ActPhase)
-    and adds guardrail + ToolAttempt working memory after each batch.
+    Implements the ``Orchestrator`` protocol.  Owns tool execution inline
+    and runs guardrail + ToolAttempt working memory after each batch.
     """
 
     def __init__(
@@ -250,7 +301,7 @@ class TurnRunner:
             )
             state.messages = self._context.add_assistant_message(state.messages, final_content)
 
-        # Configurable self-check (replaces AnswerVerifier.verify)
+        # Configurable self-check
         if final_content is not None:
             final_content = await self._self_check(final_content, state)
 
@@ -264,7 +315,7 @@ class TurnRunner:
         )
 
     # ------------------------------------------------------------------
-    # Tool execution (inlined from ActPhase)
+    # Tool execution
     # ------------------------------------------------------------------
 
     async def _execute_tool_batch(
@@ -430,7 +481,7 @@ class TurnRunner:
             )
 
     # ------------------------------------------------------------------
-    # Self-check (replaces AnswerVerifier.verify)
+    # Self-check
     # ------------------------------------------------------------------
 
     async def _self_check(self, content: str, state: TurnState) -> str:
@@ -471,7 +522,7 @@ class TurnRunner:
         return content
 
     # ------------------------------------------------------------------
-    # LLM error handling (preserved exactly from TurnOrchestrator)
+    # LLM error handling
     # ------------------------------------------------------------------
 
     async def _handle_llm_error(

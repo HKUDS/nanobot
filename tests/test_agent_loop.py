@@ -356,7 +356,7 @@ class TestAgentLoopContextCompression:
         loop = _make_loop(tmp_path, provider, context_window_tokens=128_000)
 
         with patch(
-            "nanobot.agent.turn_orchestrator.summarize_and_compress", new_callable=AsyncMock
+            "nanobot.agent.turn_runner.summarize_and_compress", new_callable=AsyncMock
         ) as mock_compress:
             await loop._process_message(_make_inbound("Hello"))
             mock_compress.assert_not_called()
