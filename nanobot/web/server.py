@@ -7,7 +7,7 @@ import threading
 from functools import wraps
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory, Response
+from flask import Flask, jsonify, request, send_from_directory, Response, render_template
 from flask_cors import CORS
 
 from nanobot.config.loader import get_config_path, load_config, save_config
@@ -102,32 +102,32 @@ def require_auth(f):
 
 def register_routes(app):
     """Register main routes."""
-    
+
     @app.route("/")
     def index():
         """Serve the main dashboard."""
-        return send_from_directory(app.template_folder, "index.html")
-    
+        return render_template("index.html", active_page="dashboard")
+
     @app.route("/config")
     def config_page():
         """Serve the configuration page."""
-        return send_from_directory(app.template_folder, "config.html")
-    
+        return render_template("config.html", active_page="config")
+
     @app.route("/chat")
     def chat_page():
         """Serve the chat page."""
-        return send_from_directory(app.template_folder, "chat.html")
-    
+        return render_template("chat.html", active_page="chat")
+
     @app.route("/status")
     def status_page():
         """Serve the status page."""
-        return send_from_directory(app.template_folder, "status.html")
-    
+        return render_template("status.html", active_page="status")
+
     @app.route("/channels")
     def channels_page():
         """Serve the channels page."""
-        return send_from_directory(app.template_folder, "channels.html")
-    
+        return render_template("channels.html", active_page="channels")
+
     @app.route("/health")
     def health():
         """Health check endpoint for Koyeb."""
