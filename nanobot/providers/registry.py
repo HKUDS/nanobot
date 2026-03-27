@@ -34,7 +34,7 @@ class ProviderSpec:
     display_name: str = ""  # shown in `nanobot status`
 
     # which provider implementation to use
-    # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex"
+    # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "opencode_cli"
     backend: str = "openai_compat"
 
     # extra env vars, e.g. (("ZHIPUAI_API_KEY", "{api_key}"),)
@@ -210,6 +210,15 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="codex",
         default_api_base="https://chatgpt.com/backend-api",
         is_oauth=True,
+    ),
+    # OpenCode CLI: local agent runtime invoked through `opencode run`.
+    ProviderSpec(
+        name="opencode",
+        keywords=("opencode", "opencode-cli"),
+        env_key="",
+        display_name="OpenCode",
+        backend="opencode_cli",
+        is_direct=True,
     ),
     # GitHub Copilot: OAuth-based
     ProviderSpec(

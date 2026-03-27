@@ -229,7 +229,6 @@ class OpenAICompatProvider(LLMProvider):
         kwargs: dict[str, Any] = {
             "model": model_name,
             "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
-            "max_tokens": max(1, max_tokens),
             "max_completion_tokens": max(1, max_tokens),
             "temperature": temperature,
         }

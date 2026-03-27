@@ -408,6 +408,12 @@ def _make_provider(config: Config):
     if backend == "openai_codex":
         from nanobot.providers.openai_codex_provider import OpenAICodexProvider
         provider = OpenAICodexProvider(default_model=model)
+    elif backend == "opencode_cli":
+        from nanobot.providers.opencode_cli_provider import OpenCodeCLIProvider
+        provider = OpenCodeCLIProvider(
+            default_model=model,
+            attach_url=p.api_base if p else None,
+        )
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
         provider = AzureOpenAIProvider(
