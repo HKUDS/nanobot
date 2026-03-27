@@ -362,9 +362,14 @@ class TelegramChannel(BaseChannel):
             logger.warning("Telegram bot not running")
             return
 
-        # Only stop typing indicator for final responses
+        # Only stop typing indicator and remove reaction for final responses
         if not msg.metadata.get("_progress", False):
             self._stop_typing(msg.chat_id)
+            if reply_to_message_id := msg.metadata.get("message_id"):
+                try:
+                    await self._remove_reaction(msg.chat_id, int(reply_to_message_id))
+                except ValueError:
+                    pass
 
         try:
             chat_id = int(msg.chat_id)
@@ -498,6 +503,11 @@ class TelegramChannel(BaseChannel):
             if stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id:
                 return
             self._stop_typing(chat_id)
+            if reply_to_message_id := meta.get("message_id"):
+                try:
+                    await self._remove_reaction(chat_id, int(reply_to_message_id))
+                except ValueError:
+                    pass
             try:
                 html = _markdown_to_telegram_html(buf.text)
                 await self._call_with_retry(
@@ -902,6 +912,19 @@ class TelegramChannel(BaseChannel):
             )
         except Exception as e:
             logger.debug("Telegram reaction failed: {}", e)
+
+    async def _remove_reaction(self, chat_id: str, message_id: int) -> None:
+        """Remove emoji reaction from a message (best-effort, non-blocking)."""
+        if not self._app:
+            return
+        try:
+            await self._app.bot.set_message_reaction(
+                chat_id=int(chat_id),
+                message_id=message_id,
+                reaction=[],
+            )
+        except Exception as e:
+            logger.debug("Telegram reaction removal failed: {}", e)
 
     async def _typing_loop(self, chat_id: str) -> None:
         """Repeatedly send 'typing' action until cancelled."""
