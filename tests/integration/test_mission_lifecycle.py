@@ -30,11 +30,15 @@ def _make_manager(
     max_concurrent: int = 3,
     max_iterations: int = 3,
 ) -> MissionManager:
+    from nanobot.config.sub_agent import SubAgentConfig
+
     return MissionManager(
+        sub_agent_config=SubAgentConfig(
+            workspace=workspace,
+            model=MODEL,
+        ),
         provider=provider,
-        workspace=workspace,
         bus=MessageBus(),
-        model=MODEL,
         max_concurrent=max_concurrent,
         max_iterations=max_iterations,
     )

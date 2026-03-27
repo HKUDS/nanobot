@@ -34,6 +34,7 @@ if TYPE_CHECKING:
         ExecToolConfig,
         RoutingConfig,
     )
+    from nanobot.config.sub_agent import SubAgentConfig
     from nanobot.context.context import ContextBuilder
     from nanobot.coordination.mission import MissionManager
     from nanobot.cron.service import CronService
@@ -75,8 +76,7 @@ def _build_tools(
     config: AgentConfig,
     workspace: Path,
     bus: MessageBus,
-    model: str,
-    temperature: float,
+    sub_agent_config: SubAgentConfig,
     brave_api_key: str | None,
     exec_config: ExecToolConfig,
     role_config: AgentRoleConfig | None,
@@ -120,18 +120,12 @@ def _build_tools(
         brave_api_key=brave_api_key,
     )
     missions = MissionManager(
+        sub_agent_config=sub_agent_config,
         provider=provider,
-        workspace=workspace,
         bus=bus,
-        model=model,
-        temperature=temperature,
-        max_tokens=config.max_tokens,
         max_iterations=config.mission.max_iterations,
         max_concurrent=config.mission.max_concurrent,
         result_max_chars=config.mission.result_max_chars,
-        brave_api_key=brave_api_key,
-        exec_config=exec_config,
-        restrict_to_workspace=config.restrict_to_workspace,
         delegation_tools=_delegation_tools,
     )
     if tool_registry is None:
@@ -256,6 +250,15 @@ def build_agent(
     )
     resolved_exec_config = exec_config or _ExecToolConfig()
 
+    from nanobot.config.sub_agent import SubAgentConfig
+
+    sub_agent_config = SubAgentConfig(
+        workspace=config.workspace_path,
+        model=model,
+        temperature=temperature,
+        max_tokens=config.max_tokens,
+    )
+
     # 2. Construct MemoryStore
     memory = MemoryStore(
         config.workspace_path,
@@ -281,8 +284,7 @@ def build_agent(
         config=config,
         workspace=config.workspace_path,
         bus=bus,
-        model=model,
-        temperature=temperature,
+        sub_agent_config=sub_agent_config,
         brave_api_key=brave_api_key,
         exec_config=resolved_exec_config,
         role_config=role_config,
