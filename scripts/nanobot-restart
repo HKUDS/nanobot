@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# nanobot-restart — Stop, update and restart the nanobot stack.
+#
+# Usage:
+#   nanobot-restart           # normal restart
+#   nanobot-restart --force   # force pip reinstall + bridge rebuild
+#   nanobot-restart --logs    # tail logs after startup
+
+set -euo pipefail
+
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$_SCRIPT_DIR/../pyproject.toml" ]]; then
+  NANOBOT_DIR="$(cd "$_SCRIPT_DIR/.." && pwd)"
+elif [[ -z "${NANOBOT_DIR:-}" ]]; then
+  _CANDIDATE="$HOME/Desktop/nanobot"
+  if [[ -f "$_CANDIDATE/pyproject.toml" ]]; then
+    NANOBOT_DIR="$_CANDIDATE"
+  else
+    echo "ERROR: Cannot detect NANOBOT_DIR. Set the env var or run from the repo." >&2
+    exit 1
+  fi
+fi
+
+BRIDGE_DIR="$NANOBOT_DIR/bridge"
+VENV_DIR="$NANOBOT_DIR/.venv"
+NANOBOT_BIN="$VENV_DIR/bin/nanobot"
+PYTHON_BIN="$VENV_DIR/bin/python3"
+LOGS_DIR="$HOME/.nanobot/logs"
+BRIDGE_LOG="$LOGS_DIR/bridge.log"
+GATEWAY_LOG="$LOGS_DIR/gateway.log"
+
+FORCE=0; SHOW_LOGS=0
+for arg in "$@"; do
+  case "$arg" in --force) FORCE=1 ;; --logs) SHOW_LOGS=1 ;; esac
+done
+
+G='\033[0;32m'; Y='\033[0;33m'; B='\033[0;34m'; C='\033[0;36m'; N='\033[0m'; BOLD='\033[1m'
+ok()   { echo -e "${G}✓${N}  $*"; }
+warn() { echo -e "${Y}!${N}  $*"; }
+step() { echo -e "\n${BOLD}${C}▶  $*${N}"; }
+
+mkdir -p "$LOGS_DIR"
+
+if [[ ! -f "$NANOBOT_BIN" ]]; then
+  echo "ERROR: venv not found at $VENV_DIR" >&2; exit 1
+fi
+
+# 1. Stop running processes
+step "Stopping processes..."
+for pattern in "nanobot gateway" "node dist/index.js"; do
+  pids=$(pgrep -f "$pattern" 2>/dev/null || true)
+  if [[ -n "$pids" ]]; then
+    kill $pids 2>/dev/null || true; sleep 1
+    pids=$(pgrep -f "$pattern" 2>/dev/null || true)
+    [[ -n "$pids" ]] && kill -9 $pids 2>/dev/null || true
+    ok "Stopped: $pattern"
+  fi
+done
+
+# 2. Always reinstall Python deps (fast <2s when nothing changed,
+#    prevents ModuleNotFoundError after branch switches or code edits)
+step "Checking Python dependencies..."
+cd "$NANOBOT_DIR"
+"$PYTHON_BIN" -m pip install -e "." --quiet 2>&1 | tail -3
+ok "Python dependencies up to date"
+
+# 3. Rebuild bridge if needed
+step "Checking TypeScript bridge..."
+DIST_JS="$BRIDGE_DIR/dist/index.js"
+NEWEST_TS=$(find "$BRIDGE_DIR/src" -name "*.ts" -newer "$DIST_JS" 2>/dev/null | head -1 || true)
+if [[ $FORCE -eq 1 ]] || [[ ! -f "$DIST_JS" ]] || [[ -n "$NEWEST_TS" ]]; then
+  warn "Rebuilding bridge..."
+  cd "$BRIDGE_DIR" && npm run build 2>&1 | tail -5
+  ok "Bridge rebuilt"
+else
+  ok "Bridge up to date"
+fi
+
+# 4. Start bridge
+step "Starting WhatsApp bridge..."
+cd "$BRIDGE_DIR"
+[[ -f "$BRIDGE_LOG" ]] && [[ $(wc -c < "$BRIDGE_LOG") -gt 5242880 ]] && mv "$BRIDGE_LOG" "${BRIDGE_LOG}.old"
+nohup node dist/index.js >> "$BRIDGE_LOG" 2>&1 &
+BRIDGE_PID=$!; sleep 2
+kill -0 "$BRIDGE_PID" 2>/dev/null && ok "Bridge started (PID $BRIDGE_PID)" || { echo "Bridge failed"; tail -20 "$BRIDGE_LOG"; exit 1; }
+
+# 5. Start gateway
+step "Starting nanobot gateway..."
+cd "$NANOBOT_DIR"
+[[ -f "$GATEWAY_LOG" ]] && [[ $(wc -c < "$GATEWAY_LOG") -gt 5242880 ]] && mv "$GATEWAY_LOG" "${GATEWAY_LOG}.old"
+nohup "$NANOBOT_BIN" gateway >> "$GATEWAY_LOG" 2>&1 &
+GATEWAY_PID=$!; sleep 3
+kill -0 "$GATEWAY_PID" 2>/dev/null && ok "Gateway started (PID $GATEWAY_PID)" || { echo "Gateway failed"; tail -30 "$GATEWAY_LOG"; exit 1; }
+
+echo -e "\n${BOLD}Stack running${N}  bridge=$BRIDGE_PID  gateway=$GATEWAY_PID"
+echo "Logs: tail -f $GATEWAY_LOG"
+
+[[ $SHOW_LOGS -eq 1 ]] && tail -f "$GATEWAY_LOG" "$BRIDGE_LOG"
