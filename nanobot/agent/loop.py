@@ -33,6 +33,7 @@ from nanobot.utils.helpers import trim_history_for_budget
 if TYPE_CHECKING:
     from nanobot.config.schema import (
         ChannelsConfig,
+        Config,
         ExecToolConfig,
         InputLimitsConfig,
         WebSearchConfig,
@@ -72,6 +73,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        config: "Config | None" = None,
     ):
         from nanobot.config.schema import ExecToolConfig, InputLimitsConfig, WebSearchConfig
 
@@ -106,6 +108,7 @@ class AgentLoop:
             web_proxy=web_proxy,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            config=config,
         )
 
         self._running = False

@@ -6,6 +6,7 @@ import platform
 from pathlib import Path
 from typing import Any
 
+from nanobot.agent.agents import AgentsLoader
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.config.schema import InputLimitsConfig
@@ -22,6 +23,7 @@ class ContextBuilder:
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
+        self.agents = AgentsLoader(workspace)
         self.input_limits = input_limits or InputLimitsConfig()
 
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
@@ -50,6 +52,14 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
 
 {skills_summary}""")
+
+        agents_summary = self.agents.build_agents_summary()
+        if agents_summary:
+            parts.append(f"""# Agents
+
+The following specialized agents are available. To use an agent, read its AGENT.md file with read_file to get its full instructions, then spawn a subagent with the custom system_prompt and allowed_tools from the AGENT.md.
+
+{agents_summary}""")
 
         return "\n\n---\n\n".join(parts)
 

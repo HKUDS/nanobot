@@ -50,11 +50,43 @@ class SpawnTool(Tool):
                     "type": "string",
                     "description": "Optional short label for the task (for display)",
                 },
+                "system_prompt": {
+                    "type": "string",
+                    "description": (
+                        "Custom system prompt for the subagent. "
+                        "Use this to give the subagent a specialized persona "
+                        "(e.g. from an AGENT.md file)."
+                    ),
+                },
+                "allowed_tools": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Restrict the subagent to only these tools. "
+                        "Available: read_file, write_file, edit_file, list_dir, exec, web_search, web_fetch."
+                    ),
+                },
+                "agent": {
+                    "type": "string",
+                    "description": (
+                        "Name of a configured agent from config.json (e.g. 'tencent_server'). "
+                        "When specified, the subagent uses the full config for that agent "
+                        "(model, provider, temperature, max_tokens, etc.) instead of the defaults."
+                    ),
+                },
             },
             "required": ["task"],
         }
 
-    async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str:
+    async def execute(
+        self,
+        task: str,
+        label: str | None = None,
+        system_prompt: str | None = None,
+        allowed_tools: list[str] | None = None,
+        agent: str | None = None,
+        **kwargs: Any,
+    ) -> str:
         """Spawn a subagent to execute the given task."""
         return await self._manager.spawn(
             task=task,
@@ -62,4 +94,7 @@ class SpawnTool(Tool):
             origin_channel=self._origin_channel,
             origin_chat_id=self._origin_chat_id,
             session_key=self._session_key,
+            system_prompt=system_prompt,
+            allowed_tools=allowed_tools,
+            agent_config_name=agent,
         )
