@@ -658,22 +658,6 @@ def test_gateway_notification_targets_support_nested_camel_case_aliases() -> Non
     assert config.gateway.cron.notify.chat_id == "456"
 
 
-def test_gateway_notification_targets_keep_legacy_key_compatibility() -> None:
-    config = Config.model_validate(
-        {
-            "gateway": {
-                "heartbeatNotify": {"channel": "discord", "chatId": "123"},
-                "cronNotify": {"channel": "telegram", "chatId": "456"},
-            }
-        }
-    )
-
-    assert config.gateway.heartbeat.notify.channel == "discord"
-    assert config.gateway.heartbeat.notify.chat_id == "123"
-    assert config.gateway.cron.notify.channel == "telegram"
-    assert config.gateway.cron.notify.chat_id == "456"
-
-
 def test_configured_notify_target_returns_override_when_complete() -> None:
     assert _configured_notify_target("discord", "123", "gateway.heartbeat.notify") == ("discord", "123")
 

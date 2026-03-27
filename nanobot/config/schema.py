@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -116,37 +116,6 @@ class GatewayConfig(Base):
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     cron: CronConfig = Field(default_factory=CronConfig)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _migrate_legacy_notify_keys(cls, data):
-        """Map legacy gateway heartbeatNotify/cronNotify into nested heartbeat/cron notify blocks."""
-        if not isinstance(data, dict):
-            return data
-
-        migrated = dict(data)
-        legacy_hb = migrated.pop("heartbeatNotify", None)
-        if legacy_hb is None:
-            legacy_hb = migrated.pop("heartbeat_notify", None)
-        legacy_cron = migrated.pop("cronNotify", None)
-        if legacy_cron is None:
-            legacy_cron = migrated.pop("cron_notify", None)
-
-        if isinstance(legacy_hb, dict):
-            heartbeat = migrated.get("heartbeat")
-            if not isinstance(heartbeat, dict):
-                heartbeat = {}
-            heartbeat.setdefault("notify", legacy_hb)
-            migrated["heartbeat"] = heartbeat
-
-        if isinstance(legacy_cron, dict):
-            cron = migrated.get("cron")
-            if not isinstance(cron, dict):
-                cron = {}
-            cron.setdefault("notify", legacy_cron)
-            migrated["cron"] = cron
-
-        return migrated
 
 
 
