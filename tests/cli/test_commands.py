@@ -8,7 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.cli.commands import _configured_notify_target, _make_provider, app
+from nanobot.cli.commands import _make_provider, app
 from nanobot.config.schema import Config
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
@@ -652,9 +652,6 @@ def test_gateway_notification_targets_config() -> None:
     assert config.gateway.heartbeat.notify.chat_id == "123"
     assert config.gateway.cron.notify.channel == "telegram"
     assert config.gateway.cron.notify.chat_id == "456"
-    assert _configured_notify_target("discord", "123", "gateway.heartbeat.notify") == ("discord", "123")
-    assert _configured_notify_target("discord", "", "gateway.heartbeat.notify") is None
-    assert _configured_notify_target("", "123", "gateway.heartbeat.notify") is None
 
 
 def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Path) -> None:
