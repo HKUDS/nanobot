@@ -217,6 +217,15 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="OpenAI",
         backend="openai_compat",
     ),
+    # OpenAI (OAuth): GPT models via ChatGPT OAuth flow
+    ProviderSpec(
+        name="openai_oauth",
+        keywords=("openai-oauth",),
+        env_key="",
+        display_name="OpenAI (OAuth)",
+        backend="openai_oauth",
+        is_oauth=True,
+    ),
     # OpenAI Codex: OAuth-based, dedicated provider
     ProviderSpec(
         name="openai_codex",

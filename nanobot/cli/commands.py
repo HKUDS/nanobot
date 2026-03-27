@@ -405,7 +405,10 @@ def _make_provider(config: Config):
             raise typer.Exit(1)
 
     # --- instantiation by backend ---
-    if backend == "openai_codex":
+    if backend == "openai_oauth":
+        from nanobot.providers.openai_oauth_provider import OpenAIOAuthProvider
+        provider = OpenAIOAuthProvider(default_model=model)
+    elif backend == "openai_codex":
         from nanobot.providers.openai_codex_provider import OpenAICodexProvider
         provider = OpenAICodexProvider(default_model=model)
     elif backend == "azure_openai":
