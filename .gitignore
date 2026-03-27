@@ -40,3 +40,4 @@ coverage.json
 .nanobot/
 .worktrees/
 .serena/
+.mcp.json
