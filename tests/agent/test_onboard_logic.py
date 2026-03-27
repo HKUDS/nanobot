@@ -643,7 +643,7 @@ class TestToolHintChannelsPriority:
         config = ChannelsConfig()
         
         # Defaults
-        assert config.send_tool_hints is True
+        assert config.send_tool_hints is False
         assert config.tool_hint_channels == {}
         
         # This means tool hints are enabled for all by default (backward compatible)

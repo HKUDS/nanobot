@@ -191,9 +191,6 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         note_text = "\n".join(notes).strip()
         text_block = text if not note_text else (f"{note_text}\n\n{text}" if text else note_text)
 
-        note_text = "\n".join(notes).strip()
-        text_block = text if not note_text else (f"{note_text}\n\n{text}" if text else note_text)
-
         if not images:
             return text_block
         return images + [{"type": "text", "text": text_block}]
