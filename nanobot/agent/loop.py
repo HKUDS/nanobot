@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.subagent import SubagentManager
@@ -216,53 +217,52 @@ class AgentLoop:
         ``resuming=True`` means tool calls follow (spinner should restart);
         ``resuming=False`` means this is the final response.
         """
-        # Wrap on_stream with stateful think-tag filter so downstream
-        # consumers (CLI, channels) never see <think> blocks.
-        _raw_stream = on_stream
-        _stream_buf = ""
+        loop_self = self
 
-        async def _filtered_stream(delta: str) -> None:
-            nonlocal _stream_buf
-            from nanobot.utils.helpers import strip_think
-            prev_clean = strip_think(_stream_buf)
-            _stream_buf += delta
-            new_clean = strip_think(_stream_buf)
-            incremental = new_clean[len(prev_clean):]
-            if incremental and _raw_stream:
-                await _raw_stream(incremental)
+        class _LoopHook(AgentHook):
+            def __init__(self) -> None:
+                self._stream_buf = ""
 
-        async def _wrapped_stream_end(*, resuming: bool = False) -> None:
-            nonlocal _stream_buf
-            if on_stream_end:
-                await on_stream_end(resuming=resuming)
-            _stream_buf = ""
+            def wants_streaming(self) -> bool:
+                return on_stream is not None
 
-        async def _handle_tool_calls(response) -> None:
-            if not on_progress:
-                return
-            if not on_stream:
-                thought = self._strip_think(response.content)
-                if thought:
-                    await on_progress(thought)
-            tool_hint = self._strip_think(self._tool_hint(response.tool_calls))
-            await on_progress(tool_hint, tool_hint=True)
+            async def on_stream(self, context: AgentHookContext, delta: str) -> None:
+                from nanobot.utils.helpers import strip_think
 
-        async def _prepare_tools(tool_calls) -> None:
-            for tc in tool_calls:
-                args_str = json.dumps(tc.arguments, ensure_ascii=False)
-                logger.info("Tool call: {}({})", tc.name, args_str[:200])
-            self._set_tool_context(channel, chat_id, message_id)
+                prev_clean = strip_think(self._stream_buf)
+                self._stream_buf += delta
+                new_clean = strip_think(self._stream_buf)
+                incremental = new_clean[len(prev_clean):]
+                if incremental and on_stream:
+                    await on_stream(incremental)
+
+            async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
+                if on_stream_end:
+                    await on_stream_end(resuming=resuming)
+                self._stream_buf = ""
+
+            async def before_execute_tools(self, context: AgentHookContext) -> None:
+                if on_progress:
+                    if not on_stream:
+                        thought = loop_self._strip_think(context.response.content if context.response else None)
+                        if thought:
+                            await on_progress(thought)
+                    tool_hint = loop_self._strip_think(loop_self._tool_hint(context.tool_calls))
+                    await on_progress(tool_hint, tool_hint=True)
+                for tc in context.tool_calls:
+                    args_str = json.dumps(tc.arguments, ensure_ascii=False)
+                    logger.info("Tool call: {}({})", tc.name, args_str[:200])
+                loop_self._set_tool_context(channel, chat_id, message_id)
+
+            def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
+                return loop_self._strip_think(content)
 
         result = await self.runner.run(AgentRunSpec(
             initial_messages=initial_messages,
             tools=self.tools,
             model=self.model,
             max_iterations=self.max_iterations,
-            on_stream=_filtered_stream if on_stream else None,
-            on_stream_end=_wrapped_stream_end if on_stream else None,
-            on_tool_calls=_handle_tool_calls,
-            before_execute_tools=_prepare_tools,
-            finalize_content=self._strip_think,
+            hook=_LoopHook(),
             error_message="Sorry, I encountered an error calling the AI model.",
             concurrent_tools=True,
         ))
