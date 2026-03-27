@@ -7,7 +7,7 @@ This file documents non-obvious constraints and usage patterns.
 
 - Commands have a configurable timeout (default 60s)
 - Dangerous commands are blocked (rm -rf, format, dd, shutdown, etc.)
-- Output is truncated at 10,000 characters
+- Output is truncated at 5,000 characters
 - `restrictToWorkspace` config can limit file access to the workspace
 
 ## cron — Scheduled Reminders

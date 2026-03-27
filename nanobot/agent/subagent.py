@@ -33,9 +33,10 @@ class SubagentManager:
         web_search_config: "WebSearchConfig | None" = None,
         web_proxy: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
+        output_limits: "ToolOutputLimitsConfig | None" = None,
         restrict_to_workspace: bool = False,
     ):
-        from nanobot.config.schema import ExecToolConfig, WebSearchConfig
+        from nanobot.config.schema import ExecToolConfig, ToolOutputLimitsConfig, WebSearchConfig
 
         self.provider = provider
         self.workspace = workspace
@@ -44,6 +45,7 @@ class SubagentManager:
         self.web_search_config = web_search_config or WebSearchConfig()
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
+        self.output_limits = output_limits or ToolOutputLimitsConfig()
         self.restrict_to_workspace = restrict_to_workspace
         self.runner = AgentRunner(provider)
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
@@ -96,18 +98,32 @@ class SubagentManager:
             tools = ToolRegistry()
             allowed_dir = self.workspace if self.restrict_to_workspace else None
             extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
-            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
+            tools.register(ReadFileTool(
+                workspace=self.workspace,
+                allowed_dir=allowed_dir,
+                extra_allowed_dirs=extra_read,
+                max_chars=self.output_limits.read_file_max_chars,
+                default_limit=self.output_limits.read_file_default_limit,
+            ))
             tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
+            tools.register(ListDirTool(
+                workspace=self.workspace,
+                allowed_dir=allowed_dir,
+                default_max_entries=self.output_limits.list_dir_default_max_entries,
+            ))
             tools.register(ExecTool(
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,
                 restrict_to_workspace=self.restrict_to_workspace,
                 path_append=self.exec_config.path_append,
+                max_output_chars=self.output_limits.exec_output_max_chars,
             ))
             tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
-            tools.register(WebFetchTool(proxy=self.web_proxy))
+            tools.register(WebFetchTool(
+                max_chars=self.output_limits.web_fetch_max_chars,
+                proxy=self.web_proxy,
+            ))
             
             system_prompt = self._build_subagent_prompt()
             messages: list[dict[str, Any]] = [

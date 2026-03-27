@@ -42,6 +42,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
+    memory: "MemoryConsolidationConfig" = Field(default_factory=lambda: MemoryConsolidationConfig())
 
 
 class AgentsConfig(Base):
@@ -129,6 +130,23 @@ class ExecToolConfig(Base):
     timeout: int = 60
     path_append: str = ""
 
+class ToolOutputLimitsConfig(Base):
+    """Output-size limits for tool results and persisted tool messages."""
+
+    persisted_tool_result_max_chars: int = 8_000
+    exec_output_max_chars: int = 5_000
+    read_file_max_chars: int = 64_000
+    read_file_default_limit: int = 1_000
+    list_dir_default_max_entries: int = 100
+    web_fetch_max_chars: int = 25_000
+
+
+class MemoryConsolidationConfig(Base):
+    """Limits for memory consolidation prompt and completion size."""
+
+    prompt_memory_chars: int = 4_000
+    prompt_message_chars: int = 4_000
+    max_completion_tokens: int = 2_048
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
 
@@ -146,6 +164,7 @@ class ToolsConfig(Base):
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    output_limits: ToolOutputLimitsConfig = Field(default_factory=ToolOutputLimitsConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
