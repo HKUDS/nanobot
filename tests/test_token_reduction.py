@@ -18,7 +18,7 @@ def make_store(tmp_path: Path):
 # ── Task 1: Remove redundant _cap_long_term_text call ───────────────────────
 
 
-def test_cap_long_term_text_called_once(tmp_path):
+async def test_cap_long_term_text_called_once(tmp_path):
     """_cap_long_term_text must be called at most once per get_memory_context call."""
     store = make_store(tmp_path)
     call_count = 0
@@ -35,7 +35,7 @@ def test_cap_long_term_text_called_once(tmp_path):
     if store.db:
         store.db.write_snapshot("current", long_term_text)
 
-    store.get_memory_context(query="test query", token_budget=900, memory_md_token_cap=1500)
+    await store.get_memory_context(query="test query", token_budget=900, memory_md_token_cap=1500)
 
     assert call_count == 1, f"_cap_long_term_text called {call_count} times; expected exactly 1"
 
@@ -88,7 +88,7 @@ def test_scratchpad_injection_unchanged_when_small():
 # ── Task 4: Gate unresolved events scan on intent ────────────────────────────
 
 
-def test_read_events_not_called_for_fact_lookup(tmp_path):
+async def test_read_events_not_called_for_fact_lookup(tmp_path):
     """read_events must not be called when the inferred intent is 'fact_lookup'."""
     store = make_store(tmp_path)
     read_events_called = False
@@ -100,12 +100,12 @@ def test_read_events_not_called_for_fact_lookup(tmp_path):
 
     store.ingester.read_events = mock_read_events  # type: ignore[method-assign]
 
-    store.get_memory_context(query="what is the capital of France", token_budget=900)
+    await store.get_memory_context(query="what is the capital of France", token_budget=900)
 
     assert not read_events_called, "read_events was called for a fact_lookup query"
 
 
-def test_read_events_called_for_planning(tmp_path):
+async def test_read_events_called_for_planning(tmp_path):
     """read_events must be called when the query infers a planning intent."""
     store = make_store(tmp_path)
     read_events_called = False
@@ -117,7 +117,7 @@ def test_read_events_called_for_planning(tmp_path):
 
     store.ingester.read_events = mock_read_events  # type: ignore[method-assign]
 
-    store.get_memory_context(query="plan the sprint tasks for next week", token_budget=900)
+    await store.get_memory_context(query="plan the sprint tasks for next week", token_budget=900)
 
     assert read_events_called, "read_events was NOT called for a planning query"
 

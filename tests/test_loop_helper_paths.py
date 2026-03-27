@@ -145,25 +145,29 @@ def test_build_parallel_and_contract_includes_optional_sections(
     assert "Your response MUST use this structure" in output_schema
 
 
-def test_verification_helpers_and_lock_lifecycle(tmp_path: Path) -> None:
+async def test_verification_helpers_and_lock_lifecycle(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path)
     assert AnswerVerifier._looks_like_question("How are you") is True
     assert AnswerVerifier._looks_like_question("status update") is False
 
     # Test _estimate_grounding_confidence via the verifier
     v = loop._verifier
-    v._memory = SimpleNamespace(
-        retriever=SimpleNamespace(retrieve=lambda *_a, **_k: [{"score": "x"}])
-    )
-    assert v._estimate_grounding_confidence("q") == 0.0
-    v._memory = SimpleNamespace(
-        retriever=SimpleNamespace(retrieve=lambda *_a, **_k: [{"score": 1.3}])
-    )
-    assert v._estimate_grounding_confidence("q") == 1.0
-    v._memory = SimpleNamespace(
-        retriever=SimpleNamespace(retrieve=lambda *_a, **_k: [{"score": 0.2}])
-    )
-    assert v.should_force_verification("What is this") is True
+
+    async def _retrieve_score_x(*_a, **_k):
+        return [{"score": "x"}]
+
+    async def _retrieve_score_high(*_a, **_k):
+        return [{"score": 1.3}]
+
+    async def _retrieve_score_low(*_a, **_k):
+        return [{"score": 0.2}]
+
+    v._memory = SimpleNamespace(retriever=SimpleNamespace(retrieve=_retrieve_score_x))
+    assert await v._estimate_grounding_confidence("q") == 0.0
+    v._memory = SimpleNamespace(retriever=SimpleNamespace(retrieve=_retrieve_score_high))
+    assert await v._estimate_grounding_confidence("q") == 1.0
+    v._memory = SimpleNamespace(retriever=SimpleNamespace(retrieve=_retrieve_score_low))
+    assert await v.should_force_verification("What is this") is True
 
 
 async def test_attempt_recovery_missing_or_error_paths(tmp_path: Path) -> None:

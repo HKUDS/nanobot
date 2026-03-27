@@ -56,7 +56,7 @@ class _FakeIngester:
 
 
 class _FakeRetriever:
-    def retrieve(self, query: str, top_k: int = 6, **kw: object) -> list[dict[str, object]]:
+    async def retrieve(self, query: str, top_k: int = 6, **kw: object) -> list[dict[str, object]]:
         if query == "none":
             return []
         return [{"timestamp": "2026-03-10", "type": "fact", "score": 0.9, "summary": "x"}]
@@ -133,7 +133,7 @@ class _FakeEvalRunner:
             "kpis": {},
         }
 
-    def evaluate_retrieval_cases(
+    async def evaluate_retrieval_cases(
         self, raw_cases: list[dict[str, object]], default_top_k: int = 6, **kw: object
     ) -> dict[str, object]:
         return {

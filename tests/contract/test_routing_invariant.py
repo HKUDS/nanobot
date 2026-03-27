@@ -286,7 +286,7 @@ async def test_process_direct_calls_router_when_available():
     mock_sessions.save = MagicMock()
 
     mock_verifier = MagicMock()
-    mock_verifier.should_force_verification = MagicMock(return_value=False)
+    mock_verifier.should_force_verification = AsyncMock(return_value=False)
     mock_verifier.attempt_recovery = AsyncMock(return_value=None)
 
     mock_turn_context = MagicMock()

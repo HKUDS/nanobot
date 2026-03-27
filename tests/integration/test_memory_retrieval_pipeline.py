@@ -171,40 +171,40 @@ def seeded_store(tmp_path: Path) -> MemoryStore:
 class TestRetrievalRelevance:
     """Queries should surface semantically matching events."""
 
-    def test_preference_query_finds_preferences(self, seeded_store: MemoryStore) -> None:
-        results = seeded_store.retriever.retrieve("dark mode editor preference", top_k=5)
+    async def test_preference_query_finds_preferences(self, seeded_store: MemoryStore) -> None:
+        results = await seeded_store.retriever.retrieve("dark mode editor preference", top_k=5)
         assert len(results) > 0, "Expected at least one result for preference query"
         summaries = [r["summary"] for r in results]
         assert any("dark mode" in s.lower() for s in summaries), (
             f"Expected 'dark mode' in results, got: {summaries}"
         )
 
-    def test_programming_query_finds_languages(self, seeded_store: MemoryStore) -> None:
-        results = seeded_store.retriever.retrieve("programming language", top_k=5)
+    async def test_programming_query_finds_languages(self, seeded_store: MemoryStore) -> None:
+        results = await seeded_store.retriever.retrieve("programming language", top_k=5)
         assert len(results) > 0, "Expected at least one result for programming query"
         summaries = [r["summary"] for r in results]
         assert any("python" in s.lower() or "typescript" in s.lower() for s in summaries), (
             f"Expected language mention in results, got: {summaries}"
         )
 
-    def test_task_query_finds_tasks(self, seeded_store: MemoryStore) -> None:
-        results = seeded_store.retriever.retrieve("database migration PostgreSQL", top_k=5)
+    async def test_task_query_finds_tasks(self, seeded_store: MemoryStore) -> None:
+        results = await seeded_store.retriever.retrieve("database migration PostgreSQL", top_k=5)
         assert len(results) > 0, "Expected at least one result for task query"
         summaries = [r["summary"] for r in results]
         assert any("postgresql" in s.lower() for s in summaries), (
             f"Expected PostgreSQL mention in results, got: {summaries}"
         )
 
-    def test_relationship_query_finds_people(self, seeded_store: MemoryStore) -> None:
-        results = seeded_store.retriever.retrieve("team collaboration Alice", top_k=5)
+    async def test_relationship_query_finds_people(self, seeded_store: MemoryStore) -> None:
+        results = await seeded_store.retriever.retrieve("team collaboration Alice", top_k=5)
         assert len(results) > 0, "Expected at least one result for relationship query"
         summaries = [r["summary"] for r in results]
         assert any("alice" in s.lower() for s in summaries), (
             f"Expected Alice mention in results, got: {summaries}"
         )
 
-    def test_constraint_query_finds_limits(self, seeded_store: MemoryStore) -> None:
-        results = seeded_store.retriever.retrieve("budget cloud infrastructure cost", top_k=5)
+    async def test_constraint_query_finds_limits(self, seeded_store: MemoryStore) -> None:
+        results = await seeded_store.retriever.retrieve("budget cloud infrastructure cost", top_k=5)
         assert len(results) > 0, "Expected at least one result for constraint query"
         summaries = [r["summary"] for r in results]
         assert any("budget" in s.lower() or "$5000" in s for s in summaries), (
@@ -220,23 +220,23 @@ class TestRetrievalRelevance:
 class TestRRFFusion:
     """FTS keyword matching contributes to retrieval via RRF."""
 
-    def test_fts_keyword_match(self, seeded_store: MemoryStore) -> None:
+    async def test_fts_keyword_match(self, seeded_store: MemoryStore) -> None:
         """A distinctive keyword should surface the matching event."""
-        results = seeded_store.retriever.retrieve("Memcached", top_k=5)
+        results = await seeded_store.retriever.retrieve("Memcached", top_k=5)
         assert len(results) > 0, "FTS should find the Memcached event"
         summaries = [r["summary"] for r in results]
         assert any("memcached" in s.lower() for s in summaries), (
             f"Expected Memcached mention via FTS, got: {summaries}"
         )
 
-    def test_retrieval_returns_requested_count(self, seeded_store: MemoryStore) -> None:
+    async def test_retrieval_returns_requested_count(self, seeded_store: MemoryStore) -> None:
         """top_k should cap the number of results returned."""
-        results = seeded_store.retriever.retrieve("user", top_k=3)
+        results = await seeded_store.retriever.retrieve("user", top_k=3)
         assert len(results) <= 3, f"Expected at most 3 results, got {len(results)}"
 
-    def test_broader_query_returns_multiple(self, seeded_store: MemoryStore) -> None:
+    async def test_broader_query_returns_multiple(self, seeded_store: MemoryStore) -> None:
         """A broad query should return multiple diverse results."""
-        results = seeded_store.retriever.retrieve("user development work", top_k=10)
+        results = await seeded_store.retriever.retrieve("user development work", top_k=10)
         assert len(results) >= 3, f"Expected at least 3 results for broad query, got {len(results)}"
 
 
@@ -248,7 +248,7 @@ class TestRRFFusion:
 class TestDeduplication:
     """Duplicate events should not produce duplicate retrieval results."""
 
-    def test_duplicate_events_not_doubled(self, tmp_path: Path) -> None:
+    async def test_duplicate_events_not_doubled(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
         duplicate_event = {
             "type": "fact",
@@ -260,7 +260,7 @@ class TestDeduplication:
         store.ingester.append_events([duplicate_event])
         store.ingester.append_events([duplicate_event])
 
-        results = store.retriever.retrieve("Python programming language", top_k=10)
+        results = await store.retriever.retrieve("Python programming language", top_k=10)
         summaries = [r["summary"] for r in results]
         python_matches = [s for s in summaries if "python" in s.lower()]
         assert len(python_matches) <= 1, (
@@ -276,8 +276,8 @@ class TestDeduplication:
 class TestTokenBudget:
     """get_memory_context should respect the token budget."""
 
-    def test_memory_context_respects_budget(self, seeded_store: MemoryStore) -> None:
-        context = seeded_store.get_memory_context(
+    async def test_memory_context_respects_budget(self, seeded_store: MemoryStore) -> None:
+        context = await seeded_store.get_memory_context(
             query="all user information",
             retrieval_k=20,
             token_budget=100,
@@ -289,13 +289,13 @@ class TestTokenBudget:
             f"Memory context too long for 100-token budget: {len(context)} chars"
         )
 
-    def test_larger_budget_returns_more(self, seeded_store: MemoryStore) -> None:
-        small = seeded_store.get_memory_context(
+    async def test_larger_budget_returns_more(self, seeded_store: MemoryStore) -> None:
+        small = await seeded_store.get_memory_context(
             query="user preferences and tasks",
             retrieval_k=10,
             token_budget=50,
         )
-        large = seeded_store.get_memory_context(
+        large = await seeded_store.get_memory_context(
             query="user preferences and tasks",
             retrieval_k=10,
             token_budget=2000,
@@ -305,6 +305,6 @@ class TestTokenBudget:
             f"Larger budget produced less content: {len(large)} < {len(small)}"
         )
 
-    def test_memory_context_returns_string(self, seeded_store: MemoryStore) -> None:
-        context = seeded_store.get_memory_context(query="test", token_budget=500)
+    async def test_memory_context_returns_string(self, seeded_store: MemoryStore) -> None:
+        context = await seeded_store.get_memory_context(query="test", token_budget=500)
         assert isinstance(context, str)

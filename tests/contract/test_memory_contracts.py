@@ -101,22 +101,22 @@ class TestAppendEventsContract:
 class TestRetrieveContract:
     """retrieve must accept a query string and return a list of result dicts."""
 
-    def test_returns_list(self, tmp_path: Path):
+    async def test_returns_list(self, tmp_path: Path):
         store = _make_store(tmp_path)
-        results = store.retriever.retrieve("anything", top_k=5)
+        results = await store.retriever.retrieve("anything", top_k=5)
         assert isinstance(results, list)
 
-    def test_retrieves_stored_events(self, tmp_path: Path):
+    async def test_retrieves_stored_events(self, tmp_path: Path):
         store = _make_store(tmp_path)
         store.ingester.append_events(_sample_events())
-        results = store.retriever.retrieve("dark mode", top_k=5)
+        results = await store.retriever.retrieve("dark mode", top_k=5)
         assert isinstance(results, list)
         summaries = [r.get("summary", "").lower() for r in results]
         assert any("dark mode" in s for s in summaries), (
             f"Expected 'dark mode' in retrieved results: {summaries}"
         )
 
-    def test_top_k_limits_results(self, tmp_path: Path):
+    async def test_top_k_limits_results(self, tmp_path: Path):
         store = _make_store(tmp_path)
         # Append many events
         events = [
@@ -130,7 +130,7 @@ class TestRetrieveContract:
             for i in range(20)
         ]
         store.ingester.append_events(events)
-        results = store.retriever.retrieve("fact testing", top_k=3)
+        results = await store.retriever.retrieve("fact testing", top_k=3)
         assert len(results) <= 3
 
 
@@ -179,7 +179,7 @@ class TestProfileContract:
 class TestRoundtripConsistency:
     """Data written through append_events must be retrievable via retrieve."""
 
-    def test_preference_roundtrip(self, tmp_path: Path):
+    async def test_preference_roundtrip(self, tmp_path: Path):
         store = _make_store(tmp_path)
         store.ingester.append_events(
             [
@@ -192,11 +192,11 @@ class TestRoundtripConsistency:
                 }
             ]
         )
-        results = store.retriever.retrieve("TypeScript preference", top_k=5)
+        results = await store.retriever.retrieve("TypeScript preference", top_k=5)
         summaries = " ".join(r.get("summary", "") for r in results).lower()
         assert "typescript" in summaries
 
-    def test_fact_roundtrip(self, tmp_path: Path):
+    async def test_fact_roundtrip(self, tmp_path: Path):
         store = _make_store(tmp_path)
         store.ingester.append_events(
             [
@@ -209,7 +209,7 @@ class TestRoundtripConsistency:
                 }
             ]
         )
-        results = store.retriever.retrieve("where does user work", top_k=5)
+        results = await store.retriever.retrieve("where does user work", top_k=5)
         summaries = " ".join(r.get("summary", "") for r in results).lower()
         assert "acme" in summaries
 
@@ -235,7 +235,7 @@ class TestBehavioralInvariants:
     never exact scores or absolute positions.
     """
 
-    def test_supersession_ordering(self, tmp_path: Path):
+    async def test_supersession_ordering(self, tmp_path: Path):
         """Active events must rank above superseded events on the same topic."""
         store = _make_store(tmp_path)
         store.ingester.append_events(
@@ -258,7 +258,7 @@ class TestBehavioralInvariants:
                 },
             ]
         )
-        results = store.retriever.retrieve("coffee preference morning", top_k=10)
+        results = await store.retriever.retrieve("coffee preference morning", top_k=10)
         idx_active = _index_of(results, "espresso")
         idx_superseded = _index_of(results, "drip")
         if idx_active is not None and idx_superseded is not None:
@@ -267,7 +267,7 @@ class TestBehavioralInvariants:
                 f"superseded event (pos {idx_superseded})"
             )
 
-    def test_recency_ordering(self, tmp_path: Path):
+    async def test_recency_ordering(self, tmp_path: Path):
         """Newer events must rank above older events on the same topic."""
         store = _make_store(tmp_path)
         store.ingester.append_events(
@@ -288,7 +288,7 @@ class TestBehavioralInvariants:
                 },
             ]
         )
-        results = store.retriever.retrieve("Falcon project", top_k=10)
+        results = await store.retriever.retrieve("Falcon project", top_k=10)
         idx_new = _index_of(results, "deployment")
         idx_old = _index_of(results, "redesign")
         if idx_new is not None and idx_old is not None:
@@ -296,7 +296,7 @@ class TestBehavioralInvariants:
                 f"Newer event (pos {idx_new}) must rank above older event (pos {idx_old})"
             )
 
-    def test_negative_query_no_false_matches(self, tmp_path: Path):
+    async def test_negative_query_no_false_matches(self, tmp_path: Path):
         """Querying for an unrelated topic must not return false positives."""
         store = _make_store(tmp_path)
         store.ingester.append_events(
@@ -317,14 +317,14 @@ class TestBehavioralInvariants:
                 },
             ]
         )
-        results = store.retriever.retrieve("favorite color blue", top_k=5)
+        results = await store.retriever.retrieve("favorite color blue", top_k=5)
         for r in results:
             summary = r.get("summary", "").lower()
             assert "color" not in summary and "blue" not in summary, (
                 f"False match: '{summary}' should not appear for query 'favorite color blue'"
             )
 
-    def test_high_salience_surfaces_in_top_3(self, tmp_path: Path):
+    async def test_high_salience_surfaces_in_top_3(self, tmp_path: Path):
         """A high-salience event must appear in the top 3 results."""
         store = _make_store(tmp_path)
         filler_events = [
@@ -347,14 +347,14 @@ class TestBehavioralInvariants:
             "salience": 0.95,
         }
         store.ingester.append_events(filler_events + [high_salience_event])
-        results = store.retriever.retrieve("Kubernetes production deployment", top_k=5)
+        results = await store.retriever.retrieve("Kubernetes production deployment", top_k=5)
         idx = _index_of(results, "kubernetes")
         assert idx is not None and idx < 3, (
             f"High-salience event should appear in top 3, got position {idx}. "
             f"Results: {[r.get('summary', '')[:60] for r in results]}"
         )
 
-    def test_dedup_idempotency(self, tmp_path: Path):
+    async def test_dedup_idempotency(self, tmp_path: Path):
         """Appending the same event twice must not produce duplicates."""
         store = _make_store(tmp_path)
         event = {
@@ -372,7 +372,7 @@ class TestBehavioralInvariants:
             f"Expected exactly 1 event with id 'evt-dedup-1', got {len(matching)}"
         )
 
-    def test_type_appropriate_retrieval(self, tmp_path: Path):
+    async def test_type_appropriate_retrieval(self, tmp_path: Path):
         """Intent-based type boosts should affect ranking.
 
         For a debug/history query (``"what happened"`` trigger), the retrieval
@@ -403,7 +403,9 @@ class TestBehavioralInvariants:
             ]
         )
         # "what happened" triggers debug_history intent → episodic type boost.
-        results = store.retriever.retrieve("what happened with the deploy to staging", top_k=10)
+        results = await store.retriever.retrieve(
+            "what happened with the deploy to staging", top_k=10
+        )
         idx_episodic = _index_of(results, "failed last night")
         idx_semantic = _index_of(results, "runs nightly")
         assert idx_episodic is not None or idx_semantic is not None, (
@@ -415,7 +417,7 @@ class TestBehavioralInvariants:
                 f"semantic event (pos {idx_semantic}) for debug_history query"
             )
 
-    def test_context_assembly_completeness(self, tmp_path: Path):
+    async def test_context_assembly_completeness(self, tmp_path: Path):
         """get_memory_context must return non-empty context including profile data."""
         store = _make_store(tmp_path)
         profile: dict[str, Any] = {
@@ -451,13 +453,13 @@ class TestBehavioralInvariants:
                 }
             ]
         )
-        context = store.get_memory_context(query="dark mode preference", token_budget=2000)
+        context = await store.get_memory_context(query="dark mode preference", token_budget=2000)
         assert context, "get_memory_context must return non-empty context"
         assert "dark mode" in context.lower(), (
             f"Profile preference 'dark mode' missing from context:\n{context[:500]}"
         )
 
-    def test_pinned_item_always_included(self, tmp_path: Path):
+    async def test_pinned_item_always_included(self, tmp_path: Path):
         """A pinned preference must appear in context even for unrelated queries."""
         store = _make_store(tmp_path)
         profile: dict[str, Any] = {
@@ -476,7 +478,9 @@ class TestBehavioralInvariants:
             },
         }
         store.profile_mgr.write_profile(profile)
-        context = store.get_memory_context(query="weather forecast tomorrow", token_budget=2000)
+        context = await store.get_memory_context(
+            query="weather forecast tomorrow", token_budget=2000
+        )
         assert "vim keybindings" in context.lower(), (
             f"Pinned preference 'vim keybindings' missing from context:\n{context[:500]}"
         )

@@ -9,7 +9,7 @@ import cycle is introduced.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -27,7 +27,7 @@ class EvalRunner:
 
     def __init__(
         self,
-        retrieve_fn: Callable[..., list[dict[str, Any]]],
+        retrieve_fn: Callable[..., Awaitable[list[dict[str, Any]]]],
         workspace: Path,
         memory_dir: Path,
         *,
@@ -80,7 +80,7 @@ class EvalRunner:
             "rollout": self._memory_config_fn().rollout_status(),
         }
 
-    def evaluate_retrieval_cases(
+    async def evaluate_retrieval_cases(
         self,
         cases: list[dict[str, Any]],
         *,
@@ -196,7 +196,7 @@ class EvalRunner:
 
             expected_any_norm = [_normalize_phrase(x) for x in expected_any if _normalize_phrase(x)]
 
-            retrieved = self._retrieve(
+            retrieved = await self._retrieve(
                 query,
                 top_k=top_k,
                 recency_half_life_days=recency_half_life_days,

@@ -515,7 +515,7 @@ class TestConsolidationDeduplicationGuard:
         async def _counting_consolidate(*args, **kwargs):
             nonlocal consolidation_calls
             consolidation_calls += 1
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.5)  # long enough to still be in-flight during 2nd message
             return True
 
         loop.memory.consolidate = _counting_consolidate  # type: ignore[method-assign]

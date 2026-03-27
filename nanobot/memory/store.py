@@ -334,7 +334,7 @@ class MemoryStore:
         )
         return self._assembler
 
-    def get_memory_context(
+    async def get_memory_context(
         self,
         *,
         query: str | None = None,
@@ -345,7 +345,7 @@ class MemoryStore:
         recency_half_life_days: float | None = None,
         embedding_provider: str | None = None,
     ) -> str:
-        return self._ensure_assembler().build(
+        return await self._ensure_assembler().build(
             query=query,
             retrieval_k=retrieval_k,
             token_budget=token_budget,

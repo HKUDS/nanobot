@@ -210,32 +210,32 @@ class TestRegistryAvailabilityFiltering:
 
 
 class TestSystemPromptUnavailableInjection:
-    def test_unavailable_tools_section_injected(self, tmp_path: Path) -> None:
+    async def test_unavailable_tools_section_injected(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
         builder = ContextBuilder(ws)
         builder.set_unavailable_tools_fn(lambda: "- web_search: no API key")
 
-        prompt = builder.build_system_prompt()
+        prompt = await builder.build_system_prompt()
         assert "# Unavailable Tools" in prompt
         assert "web_search" in prompt
         assert "no API key" in prompt
 
-    def test_no_section_when_all_available(self, tmp_path: Path) -> None:
+    async def test_no_section_when_all_available(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
         builder = ContextBuilder(ws)
         builder.set_unavailable_tools_fn(lambda: "")
 
-        prompt = builder.build_system_prompt()
+        prompt = await builder.build_system_prompt()
         assert "# Unavailable Tools" not in prompt
 
-    def test_no_section_when_no_fn_set(self, tmp_path: Path) -> None:
+    async def test_no_section_when_no_fn_set(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
         builder = ContextBuilder(ws)
 
-        prompt = builder.build_system_prompt()
+        prompt = await builder.build_system_prompt()
         assert "# Unavailable Tools" not in prompt
 
-    def test_integration_with_registry(self, tmp_path: Path) -> None:
+    async def test_integration_with_registry(self, tmp_path: Path) -> None:
         """End-to-end: registry -> callback -> system prompt."""
         ws = _workspace(tmp_path)
         reg = ToolRegistry()
@@ -245,7 +245,7 @@ class TestSystemPromptUnavailableInjection:
         builder = ContextBuilder(ws)
         builder.set_unavailable_tools_fn(reg.get_unavailable_summary)
 
-        prompt = builder.build_system_prompt()
+        prompt = await builder.build_system_prompt()
         assert "# Unavailable Tools" in prompt
         assert "never_ok" in prompt
         assert "missing dependency XYZ" in prompt

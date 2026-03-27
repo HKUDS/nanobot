@@ -231,7 +231,7 @@ class TestWorkflowErrorHandling:
 class TestWorkflowMemoryRoundtrip:
     """Events stored via MemoryStore must be retrievable in the same session."""
 
-    def test_memory_store_roundtrip(self, tmp_path: Path):
+    async def test_memory_store_roundtrip(self, tmp_path: Path):
         from nanobot.memory import MemoryStore
 
         store = MemoryStore(tmp_path, embedding_provider="hash")
@@ -249,7 +249,7 @@ class TestWorkflowMemoryRoundtrip:
         store.ingester.append_events(events)
 
         # Retrieve it
-        results = store.retriever.retrieve("vim keybindings", top_k=5)
+        results = await store.retriever.retrieve("vim keybindings", top_k=5)
         summaries = [r.get("summary", "").lower() for r in results]
         assert any("vim" in s for s in summaries)
 

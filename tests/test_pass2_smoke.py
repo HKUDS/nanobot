@@ -151,7 +151,7 @@ class TestPhaseASmoke:
                 )
             )
 
-    def test_contacts_in_system_prompt(self, tmp_path: Path) -> None:
+    async def test_contacts_in_system_prompt(self, tmp_path: Path) -> None:
         """Agent sees known contacts in system prompt → no need to guess."""
         provider = ScriptedProvider([])
         loop = _make_loop(tmp_path, provider)
@@ -160,24 +160,24 @@ class TestPhaseASmoke:
         loop.set_contacts_provider(lambda: contacts)
         loop.context.set_contacts_context(contacts)
 
-        prompt = loop.context.build_system_prompt()
+        prompt = await loop.context.build_system_prompt()
         assert "Known Contacts" in prompt
         assert "alice@company.com" in prompt
         assert "bob@company.com" in prompt
         assert "Do NOT invent" in prompt
 
-    def test_contacts_refresh_updates_prompt(self, tmp_path: Path) -> None:
+    async def test_contacts_refresh_updates_prompt(self, tmp_path: Path) -> None:
         """Contacts list updates between turns."""
         loop = _make_loop(tmp_path, ScriptedProvider([]))
 
         state = {"contacts": ["old@x.com"]}
         loop.set_contacts_provider(lambda: state["contacts"])
         loop.context.set_contacts_context(state["contacts"])
-        assert "old@x.com" in loop.context.build_system_prompt()
+        assert "old@x.com" in await loop.context.build_system_prompt()
 
         state["contacts"] = ["new@x.com"]
         loop.context.set_contacts_context(state["contacts"])
-        prompt = loop.context.build_system_prompt()
+        prompt = await loop.context.build_system_prompt()
         assert "new@x.com" in prompt
         assert "old@x.com" not in prompt
 
@@ -442,7 +442,9 @@ class TestPhaseDSmoke:
 class TestCrossPhasePipeline:
     """Integration tests that touch multiple phases."""
 
-    def test_contacts_provider_with_known_recipients(self, tmp_path: Path, monkeypatch) -> None:
+    async def test_contacts_provider_with_known_recipients(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
         """EmailChannel.known_recipients feeds into agent contacts context."""
         cfg = _email_config(allow_to=["alice@co.com"])
         ch = EmailChannel(cfg, MessageBus())
@@ -453,7 +455,7 @@ class TestCrossPhasePipeline:
         loop.set_contacts_provider(lambda: ch.known_recipients)
         loop.context.set_contacts_context(ch.known_recipients)
 
-        prompt = loop.context.build_system_prompt()
+        prompt = await loop.context.build_system_prompt()
         assert "alice@co.com" in prompt
         assert "bob@co.com" in prompt
 
