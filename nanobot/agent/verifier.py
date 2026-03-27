@@ -82,11 +82,17 @@ class AnswerVerifier:
 
         logger.debug("Running verification pass (mode={})", self.verification_mode)
 
+        evidence = self._extract_evidence(messages)
+
+        critique_content = f"User's question: {user_text}\n\nAssistant's answer: {candidate}"
+        if evidence:
+            critique_content += f"\n\nEvidence retrieved:\n{evidence}"
+
         critique_messages = [
             {"role": "system", "content": prompts.get("critique")},
             {
                 "role": "user",
-                "content": f"User's question: {user_text}\n\nAssistant's answer: {candidate}",
+                "content": critique_content,
             },
         ]
 
@@ -230,6 +236,130 @@ class AnswerVerifier:
         except (TypeError, ValueError):
             score = 0.0
         return max(0.0, min(1.0, score))
+
+    # ------------------------------------------------------------------
+    # Evidence extraction for consistency checking
+    # ------------------------------------------------------------------
+
+    _TOOL_OUTPUT_CAP = 500
+    _TOOL_BUDGET = 4000
+    _MEMORY_BUDGET = 2000
+
+    _MEMORY_HEADERS = (
+        "## Relevant Semantic Memories",
+        "## Relevant Episodic Memories",
+        "## Profile Memory",
+        "## Entity Graph",
+        "## Relevant Reflection Memories",
+    )
+
+    def _extract_evidence(self, messages: list[dict[str, Any]]) -> str:
+        """Extract tool results and memory items from messages for the critique.
+
+        Returns a compact evidence summary string. Empty string if no evidence found.
+        """
+        parts: list[str] = []
+
+        tool_evidence = self._extract_tool_evidence(messages)
+        if tool_evidence:
+            parts.append(tool_evidence)
+
+        memory_evidence = self._extract_memory_evidence(messages)
+        if memory_evidence:
+            parts.append(memory_evidence)
+
+        return "\n".join(parts)
+
+    def _extract_tool_evidence(self, messages: list[dict[str, Any]]) -> str:
+        """Extract tool call/result pairs from the current turn."""
+        # Find the start of the current turn (last user message)
+        turn_start = 0
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "user":
+                turn_start = i
+                break
+
+        # Build a map of tool_call_id -> arguments summary from assistant messages
+        args_map: dict[str, str] = {}
+        for msg in messages[turn_start:]:
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    call_id = tc.get("id", "")
+                    func = tc.get("function", {})
+                    raw_args = func.get("arguments", "{}")
+                    try:
+                        parsed = json.loads(raw_args)
+                        summary_parts = [str(v) for v in parsed.values() if isinstance(v, str)]
+                        args_summary = " ".join(summary_parts) if summary_parts else raw_args
+                    except (ValueError, TypeError):
+                        args_summary = raw_args
+                    args_map[call_id] = args_summary
+
+        # Collect tool results
+        lines: list[str] = []
+        total_chars = 0
+        for msg in messages[turn_start:]:
+            if msg.get("role") != "tool":
+                continue
+            name = msg.get("name", "unknown")
+            call_id = msg.get("tool_call_id", "")
+            output = msg.get("content", "")
+
+            # Strip <tool_result> wrapping
+            output = output.replace("<tool_result>", "").replace("</tool_result>", "").strip()
+
+            # Truncate individual output
+            if len(output) > self._TOOL_OUTPUT_CAP:
+                output = output[: self._TOOL_OUTPUT_CAP] + "..."
+
+            args = args_map.get(call_id, "")
+            line = f"[tool:{name}] {args} \u2192 {output}"
+
+            if total_chars + len(line) > self._TOOL_BUDGET:
+                break
+            lines.append(line)
+            total_chars += len(line)
+
+        return "\n".join(lines)
+
+    def _extract_memory_evidence(self, messages: list[dict[str, Any]]) -> str:
+        """Extract memory sections from the system prompt."""
+        if not messages or messages[0].get("role") != "system":
+            return ""
+
+        system_content = messages[0].get("content", "")
+        if not isinstance(system_content, str):
+            return ""
+
+        lines: list[str] = []
+        total_chars = 0
+        in_memory_section = False
+
+        for line in system_content.split("\n"):
+            stripped = line.strip()
+
+            if any(stripped.startswith(h) for h in self._MEMORY_HEADERS):
+                in_memory_section = True
+                lines.append(stripped)
+                total_chars += len(stripped) + 1
+                continue
+
+            if stripped.startswith("## ") and in_memory_section:
+                if not any(stripped.startswith(h) for h in self._MEMORY_HEADERS):
+                    in_memory_section = False
+                    continue
+                else:
+                    lines.append(stripped)
+                    total_chars += len(stripped) + 1
+                    continue
+
+            if in_memory_section and stripped:
+                if total_chars + len(stripped) > self._MEMORY_BUDGET:
+                    break
+                lines.append(stripped)
+                total_chars += len(stripped) + 1
+
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Recovery & fallback explanation (moved from AgentLoop, LAN-215)
