@@ -17,7 +17,6 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -39,7 +38,7 @@ from nanobot.tools.tool_loop import run_tool_loop
 
 if TYPE_CHECKING:
     from nanobot.bus.queue import MessageBus
-    from nanobot.config.schema import ExecToolConfig
+    from nanobot.config.sub_agent import SubAgentConfig
     from nanobot.coordination.coordinator import Coordinator
     from nanobot.coordination.scratchpad import Scratchpad
     from nanobot.providers.base import LLMProvider
@@ -88,34 +87,25 @@ class MissionManager:
     def __init__(
         self,
         *,
+        sub_agent_config: SubAgentConfig,
         provider: LLMProvider,
-        workspace: Path,
         bus: MessageBus,
-        model: str,
-        temperature: float = 0.7,
-        max_tokens: int = 4096,
         max_iterations: int = 15,
         max_concurrent: int = 3,
         result_max_chars: int = 4000,
-        brave_api_key: str | None = None,
-        exec_config: ExecToolConfig | None = None,
-        restrict_to_workspace: bool = False,
         delegation_tools: dict[str, Any] | None = None,
     ) -> None:
-        from nanobot.config.schema import ExecToolConfig as _Etc
-
+        self.sub_agent_config = sub_agent_config
         self.provider = provider
-        self.workspace = workspace
         self.bus = bus
-        self.model = model
-        self.temperature = temperature
-        self.max_tokens = max_tokens
+        # Unpack config fields for concise access throughout the class body.
+        self.workspace = sub_agent_config.workspace
+        self.model = sub_agent_config.model
+        self.temperature = sub_agent_config.temperature
+        self.max_tokens = sub_agent_config.max_tokens
         self.max_iterations = max_iterations
         self.max_concurrent = max_concurrent
         self.result_max_chars = result_max_chars
-        self.brave_api_key = brave_api_key
-        self.exec_config = exec_config or _Etc()
-        self.restrict_to_workspace = restrict_to_workspace
         self._delegation_tools: dict[str, Any] = delegation_tools or {}
 
         # Set lazily by AgentLoop when coordinator is available

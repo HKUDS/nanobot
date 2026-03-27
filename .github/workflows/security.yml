@@ -29,18 +29,19 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: pip install -e ".[dev]"
-
       - name: Install pip-audit
         # Pin version to prevent dependency drift between CI and security scan (LAN-169)
         run: pip install pip-audit==2.7.3
 
       - name: Run pip-audit
+        # Audit declared dependencies via pyproject.toml (project path mode).
+        # This avoids the --strict vs --skip-editable incompatibility where
+        # pip-audit treats skipped editable packages as fatal errors.
+        #
         # GHSA-5239-wwwm-4pmq: pygments ≤2.19.2 ReDoS in AdlLexer — no fix
         # available yet (transitive dep via rich/pytest). Remove ignore when
         # pygments releases a patched version.
-        run: pip-audit --strict --desc --ignore-vuln GHSA-5239-wwwm-4pmq
+        run: pip-audit --strict --desc --ignore-vuln GHSA-5239-wwwm-4pmq .
 
   trivy-image:
     name: Container image scan

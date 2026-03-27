@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.config.schema import AgentRoleConfig
+from nanobot.config.sub_agent import SubAgentConfig
 from nanobot.coordination.delegation import DelegationConfig, DelegationDispatcher
 from nanobot.coordination.registry import AgentRegistry
 from nanobot.tools.builtin.delegate import _CycleError
@@ -27,18 +28,21 @@ from nanobot.tools.builtin.delegate import _CycleError
 # Helpers
 # ---------------------------------------------------------------------------
 
-_CONFIG_FIELDS = {f for f in DelegationConfig.__dataclass_fields__}
+_SUB_AGENT_FIELDS = {"workspace", "model", "temperature", "max_tokens"}
+_CONFIG_FIELDS = {f for f in DelegationConfig.__dataclass_fields__} | _SUB_AGENT_FIELDS
 
 
 def _make_dispatcher(tmp_path: Path, **overrides: Any) -> DelegationDispatcher:
     exec_cfg = MagicMock()
     exec_cfg.timeout = 30
     exec_cfg.shell_mode = "denylist"
-    config_defaults: dict[str, Any] = dict(
+    sub_defaults: dict[str, Any] = dict(
         workspace=tmp_path,
         model="test-model",
         temperature=0.7,
         max_tokens=4096,
+    )
+    deleg_defaults: dict[str, Any] = dict(
         max_iterations=5,
         restrict_to_workspace=True,
         brave_api_key=None,
@@ -47,8 +51,15 @@ def _make_dispatcher(tmp_path: Path, **overrides: Any) -> DelegationDispatcher:
     )
     cfg_overrides = {k: v for k, v in overrides.items() if k in _CONFIG_FIELDS}
     wiring_overrides = {k: v for k, v in overrides.items() if k not in _CONFIG_FIELDS}
-    config_defaults.update(cfg_overrides)
-    config = DelegationConfig(**config_defaults)  # type: ignore[arg-type]
+    for k, v in cfg_overrides.items():
+        if k in _SUB_AGENT_FIELDS:
+            sub_defaults[k] = v
+        else:
+            deleg_defaults[k] = v
+    config = DelegationConfig(
+        sub_agent=SubAgentConfig(**sub_defaults),
+        **deleg_defaults,  # type: ignore[arg-type]
+    )
     if "delegation_tools" not in wiring_overrides:
         from nanobot.tools.setup import build_delegation_tools
 

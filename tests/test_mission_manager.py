@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from nanobot.config.schema import AgentRoleConfig
+from nanobot.config.sub_agent import SubAgentConfig
 from nanobot.coordination.mission import Mission, MissionManager, MissionStatus
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.tools.base import Tool, ToolResult
@@ -70,10 +71,12 @@ def _make_manager(
 ) -> MissionManager:
     responses = responses or [LLMResponse(content="Mission result.")]
     return MissionManager(
+        sub_agent_config=SubAgentConfig(
+            workspace=Path("/tmp/test-workspace"),
+            model="openai/gpt-4.1",
+        ),
         provider=_DummyProvider(responses),
-        workspace=Path("/tmp/test-workspace"),
         bus=bus or _make_bus(),
-        model="openai/gpt-4.1",
         max_iterations=3,
         delegation_tools=_default_delegation_tools(),
     )
@@ -101,10 +104,12 @@ async def test_mission_completes_with_result() -> None:
     bus = _make_bus()
     provider = _DummyProvider([LLMResponse(content="## Findings\nAll good.")])
     mgr = MissionManager(
+        sub_agent_config=SubAgentConfig(
+            workspace=Path("/tmp/test-workspace"),
+            model="openai/gpt-4.1",
+        ),
         provider=provider,
-        workspace=Path("/tmp/test-workspace"),
         bus=bus,
-        model="openai/gpt-4.1",
         max_iterations=2,
         delegation_tools=_default_delegation_tools(),
     )
@@ -131,10 +136,12 @@ async def test_mission_delivers_on_failure() -> None:
 
     bus = _make_bus()
     mgr = MissionManager(
+        sub_agent_config=SubAgentConfig(
+            workspace=Path("/tmp/test-workspace"),
+            model="openai/gpt-4.1",
+        ),
         provider=_FailProvider(),  # type: ignore[arg-type]
-        workspace=Path("/tmp/test-workspace"),
         bus=bus,
-        model="openai/gpt-4.1",
         max_iterations=2,
         delegation_tools=_default_delegation_tools(),
     )
@@ -160,10 +167,12 @@ async def test_mission_grounded_when_tools_used() -> None:
     ]
     bus = _make_bus()
     mgr = MissionManager(
+        sub_agent_config=SubAgentConfig(
+            workspace=Path("/tmp/test-workspace"),
+            model="openai/gpt-4.1",
+        ),
         provider=_DummyProvider(responses),
-        workspace=Path("/tmp/test-workspace"),
         bus=bus,
-        model="openai/gpt-4.1",
         max_iterations=3,
         delegation_tools=_default_delegation_tools(),
     )
@@ -266,10 +275,12 @@ async def test_cancel_sets_cancelled_status() -> None:
 
     bus = _make_bus()
     mgr = MissionManager(
+        sub_agent_config=SubAgentConfig(
+            workspace=Path("/tmp/test-workspace"),
+            model="openai/gpt-4.1",
+        ),
         provider=_SlowProvider(),  # type: ignore[arg-type]
-        workspace=Path("/tmp/test-workspace"),
         bus=bus,
-        model="openai/gpt-4.1",
         max_iterations=3,
         delegation_tools=_default_delegation_tools(),
     )
@@ -325,10 +336,12 @@ async def test_concurrent_missions_complete_independently() -> None:
     responses = [LLMResponse(content=f"Result {i}") for i in range(3)]
     bus = _make_bus()
     mgr = MissionManager(
+        sub_agent_config=SubAgentConfig(
+            workspace=Path("/tmp/test-workspace"),
+            model="openai/gpt-4.1",
+        ),
         provider=_DummyProvider(responses),
-        workspace=Path("/tmp/test-workspace"),
         bus=bus,
-        model="openai/gpt-4.1",
         max_iterations=2,
         delegation_tools=_default_delegation_tools(),
     )
@@ -348,10 +361,12 @@ async def test_result_truncation_in_delivery() -> None:
     long_content = "x" * 10000
     bus = _make_bus()
     mgr = MissionManager(
+        sub_agent_config=SubAgentConfig(
+            workspace=Path("/tmp/test-workspace"),
+            model="openai/gpt-4.1",
+        ),
         provider=_DummyProvider([LLMResponse(content=long_content)]),
-        workspace=Path("/tmp/test-workspace"),
         bus=bus,
-        model="openai/gpt-4.1",
         max_iterations=2,
         delegation_tools=_default_delegation_tools(),
     )
@@ -376,10 +391,12 @@ async def test_bus_delivery_failure_does_not_crash() -> None:
     bus = _make_bus()
     bus.publish_outbound = AsyncMock(side_effect=RuntimeError("bus down"))
     mgr = MissionManager(
+        sub_agent_config=SubAgentConfig(
+            workspace=Path("/tmp/test-workspace"),
+            model="openai/gpt-4.1",
+        ),
         provider=_DummyProvider([LLMResponse(content="ok")]),
-        workspace=Path("/tmp/test-workspace"),
         bus=bus,
-        model="openai/gpt-4.1",
         max_iterations=2,
         delegation_tools=_default_delegation_tools(),
     )
@@ -407,10 +424,12 @@ async def test_retry_when_no_tools_used() -> None:
     ]
     bus = _make_bus()
     mgr = MissionManager(
+        sub_agent_config=SubAgentConfig(
+            workspace=Path("/tmp/test-workspace"),
+            model="openai/gpt-4.1",
+        ),
         provider=_DummyProvider(responses),
-        workspace=Path("/tmp/test-workspace"),
         bus=bus,
-        model="openai/gpt-4.1",
         max_iterations=5,
         delegation_tools=_default_delegation_tools(),
     )
@@ -558,10 +577,12 @@ async def test_mission_cancel_tool_success() -> None:
 
     bus = _make_bus()
     mgr = MissionManager(
+        sub_agent_config=SubAgentConfig(
+            workspace=Path("/tmp/test-workspace"),
+            model="openai/gpt-4.1",
+        ),
         provider=_SlowProvider(),  # type: ignore[arg-type]
-        workspace=Path("/tmp/test-workspace"),
         bus=bus,
-        model="openai/gpt-4.1",
         max_iterations=2,
         delegation_tools=_default_delegation_tools(),
     )

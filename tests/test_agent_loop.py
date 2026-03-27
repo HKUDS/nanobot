@@ -686,6 +686,7 @@ class TestDelegationDepthLimit:
         from unittest.mock import MagicMock
 
         from nanobot.config.schema import AgentRoleConfig, ExecToolConfig
+        from nanobot.config.sub_agent import SubAgentConfig
         from nanobot.coordination.delegation import (
             MAX_DELEGATION_DEPTH,
             DelegationConfig,
@@ -697,10 +698,12 @@ class TestDelegationDepthLimit:
         provider = ScriptedProvider([])
         dispatcher = DelegationDispatcher(
             config=DelegationConfig(
-                workspace=tmp_path,
-                model="test-model",
-                temperature=0.0,
-                max_tokens=2048,
+                sub_agent=SubAgentConfig(
+                    workspace=tmp_path,
+                    model="test-model",
+                    temperature=0.0,
+                    max_tokens=2048,
+                ),
                 max_iterations=3,
                 restrict_to_workspace=True,
                 brave_api_key="",
