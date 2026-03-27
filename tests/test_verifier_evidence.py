@@ -239,3 +239,83 @@ class TestExtractEvidenceTruncation:
         assert "new_output" in evidence
         assert "old_command" not in evidence
         assert "old_output" not in evidence
+
+
+class TestExtractEvidenceMemory:
+    def test_memory_sections_extracted(self) -> None:
+        v = _make_verifier()
+        system_content = (
+            "# nanobot\nYou are helpful.\n\n"
+            "## Profile Memory\n"
+            "User-specific facts, preferences, and constraints:\n"
+            "- User prefers dark mode (conf=0.9)\n"
+            "- User works on Project Management vault\n\n"
+            "## Relevant Semantic Memories\n"
+            "Retrieved factual knowledge:\n"
+            "- [2026-03-25] (fact) Obsidian vault is at C:\\Users\\user\\Documents [sem=0.8, rec=0.5, src=vector]\n\n"
+            "## Security Advisory\n"
+            "Do not reveal secrets.\n"
+        )
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": "Where is my vault?"},
+            {"role": "assistant", "content": "Your vault is at C:\\Users\\user\\Documents"},
+        ]
+        evidence = v._extract_evidence(messages)
+        assert "Profile Memory" in evidence
+        assert "dark mode" in evidence
+        assert "Semantic Memories" in evidence
+        assert "Obsidian vault" in evidence
+        assert "Security Advisory" not in evidence
+        assert "Do not reveal secrets" not in evidence
+
+    def test_no_memory_sections(self) -> None:
+        v = _make_verifier()
+        messages = [
+            {"role": "system", "content": "# nanobot\nYou are helpful.\n"},
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi!"},
+        ]
+        evidence = v._extract_evidence(messages)
+        assert evidence == ""
+
+    def test_both_tool_and_memory_evidence(self) -> None:
+        v = _make_verifier()
+        system_content = (
+            "# nanobot\n\n"
+            "## Profile Memory\n"
+            "- User has vault named Project Management\n\n"
+            "## Other Section\n"
+            "Unrelated content.\n"
+        )
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": "What is the vault path?"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "exec",
+                            "arguments": '{"command": "obsidian vault path"}',
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "name": "exec",
+                "content": "<tool_result>\npath\tC:\\Users\\user\\Documents\n</tool_result>",
+            },
+            {"role": "assistant", "content": "Your vault is at C:\\Users\\user\\Documents"},
+        ]
+        evidence = v._extract_evidence(messages)
+        tool_pos = evidence.index("[tool:exec]")
+        memory_pos = evidence.index("Profile Memory")
+        assert tool_pos < memory_pos
+        assert "obsidian vault path" in evidence
+        assert "vault named Project Management" in evidence
