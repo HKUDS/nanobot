@@ -22,6 +22,7 @@ if sys.platform == "win32":
             pass
 
 import typer
+from loguru import logger
 from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.formatted_text import ANSI, HTML
@@ -493,10 +494,8 @@ def _migrate_cron_store(config: "Config") -> None:
 
 def _configured_notify_target(channel: str, chat_id: str, config_key: str) -> tuple[str, str] | None:
     """Return a configured target if both fields are present, else ``None``."""
-    from loguru import logger
-
-    ch = (channel or "").strip()
-    cid = (chat_id or "").strip()
+    ch = channel.strip()
+    cid = chat_id.strip()
     if ch and cid:
         return ch, cid
     if ch or cid:
@@ -622,10 +621,10 @@ def gateway(
 
         cron_tool = agent.tools.get("cron")
         cron_token = None
+        exec_channel, exec_chat_id = _pick_cron_target(job)
         if isinstance(cron_tool, CronTool):
             cron_token = cron_tool.set_cron_context(True)
         try:
-            exec_channel, exec_chat_id = _pick_cron_target(job)
             resp = await agent.process_direct(
                 reminder_note,
                 session_key=f"cron:{job.id}",
@@ -649,10 +648,9 @@ def gateway(
             )
             if should_notify:
                 from nanobot.bus.events import OutboundMessage
-                notify_channel, notify_chat_id = _pick_cron_target(job)
                 await bus.publish_outbound(OutboundMessage(
-                    channel=notify_channel,
-                    chat_id=notify_chat_id,
+                    channel=exec_channel,
+                    chat_id=exec_chat_id,
                     content=response,
                 ))
         return response
