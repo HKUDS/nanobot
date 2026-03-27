@@ -79,6 +79,15 @@ export class BridgeServer {
   }
 
   private setupClient(ws: WebSocket): void {
+    // Close any existing clients before accepting the new one.
+    // This prevents duplicate message delivery when nanobot reconnects.
+    if (this.clients.size > 0) {
+      console.log(`⚠️  New client connected — closing ${this.clients.size} existing client(s)`);
+      for (const existing of this.clients) {
+        existing.close();
+      }
+      this.clients.clear();
+    }
     this.clients.add(ws);
 
     ws.on('message', async (data) => {
