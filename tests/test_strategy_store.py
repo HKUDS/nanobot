@@ -1,0 +1,115 @@
+from __future__ import annotations
+
+import sqlite3
+import uuid
+from datetime import datetime, timezone
+
+import pytest
+
+from nanobot.memory.strategy import Strategy, StrategyStore
+
+
+def _sample_strategy(**overrides: object) -> Strategy:
+    """Create a Strategy with sensible defaults, overridable by keyword."""
+    now = datetime.now(timezone.utc)
+    defaults: dict = dict(
+        id=str(uuid.uuid4()),
+        domain="filesystem",
+        task_type="file_read",
+        strategy="Use read_file with explicit encoding param",
+        context="When reading non-UTF8 files",
+        source="guardrail_recovery",
+        confidence=0.7,
+        created_at=now,
+        last_used=now,
+        use_count=0,
+        success_count=0,
+    )
+    defaults.update(overrides)
+    return Strategy(**defaults)
+
+
+@pytest.fixture()
+def store(tmp_path: object) -> StrategyStore:
+    return StrategyStore(tmp_path / "test.db")  # type: ignore[operator]
+
+
+class TestStrategyStore:
+    def test_save_and_retrieve(self, store: StrategyStore) -> None:
+        s = _sample_strategy(domain="shell")
+        store.save(s)
+        results = store.retrieve(domain="shell")
+        assert len(results) == 1
+        assert results[0].id == s.id
+        assert results[0].domain == "shell"
+        assert results[0].strategy == s.strategy
+
+    def test_retrieve_empty(self, store: StrategyStore) -> None:
+        results = store.retrieve()
+        assert results == []
+
+    def test_retrieve_by_domain(self, store: StrategyStore) -> None:
+        store.save(_sample_strategy(domain="filesystem"))
+        store.save(_sample_strategy(domain="network"))
+        fs_results = store.retrieve(domain="filesystem")
+        net_results = store.retrieve(domain="network")
+        assert len(fs_results) == 1
+        assert len(net_results) == 1
+        assert fs_results[0].domain == "filesystem"
+        assert net_results[0].domain == "network"
+
+    def test_update_confidence(self, store: StrategyStore) -> None:
+        s = _sample_strategy(confidence=0.5)
+        store.save(s)
+        store.update_confidence(s.id, 0.9)
+        results = store.retrieve()
+        assert len(results) == 1
+        assert results[0].confidence == pytest.approx(0.9)
+
+    def test_record_usage_success(self, store: StrategyStore) -> None:
+        s = _sample_strategy(use_count=0, success_count=0)
+        store.save(s)
+        store.record_usage(s.id, success=True)
+        results = store.retrieve()
+        assert results[0].use_count == 1
+        assert results[0].success_count == 1
+
+    def test_record_usage_failure(self, store: StrategyStore) -> None:
+        s = _sample_strategy(use_count=0, success_count=0)
+        store.save(s)
+        store.record_usage(s.id, success=False)
+        results = store.retrieve()
+        assert results[0].use_count == 1
+        assert results[0].success_count == 0
+
+    def test_prune_low_confidence(self, store: StrategyStore) -> None:
+        store.save(_sample_strategy(confidence=0.05, domain="low"))
+        store.save(_sample_strategy(confidence=0.8, domain="high"))
+        pruned = store.prune(min_confidence=0.1)
+        assert pruned == 1
+        results = store.retrieve()
+        assert len(results) == 1
+        assert results[0].domain == "high"
+
+    def test_retrieve_with_limit(self, store: StrategyStore) -> None:
+        for i in range(10):
+            store.save(_sample_strategy(confidence=i * 0.1))
+        results = store.retrieve(limit=3)
+        assert len(results) == 3
+
+    def test_retrieve_min_confidence(self, store: StrategyStore) -> None:
+        store.save(_sample_strategy(confidence=0.2, domain="low"))
+        store.save(_sample_strategy(confidence=0.8, domain="high"))
+        results = store.retrieve(min_confidence=0.5)
+        assert len(results) == 1
+        assert results[0].domain == "high"
+
+    def test_table_created_on_init(self, tmp_path: object) -> None:
+        db_path = tmp_path / "init_test.db"  # type: ignore[operator]
+        StrategyStore(db_path)
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='strategies'"
+        )
+        assert cursor.fetchone() is not None
+        conn.close()
