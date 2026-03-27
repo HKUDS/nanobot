@@ -30,6 +30,8 @@ services:
     env:
       - key: PORT
         value: "18790"
+      - key: MODE
+        value: "web"
       # Add your API keys and configuration here or via Koyeb CLI
       # - key: OPENAI_API_KEY
       #   scope: run
