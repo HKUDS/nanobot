@@ -1,1 +1,0 @@
-Delegation(s) complete. Review the results above. If all planned delegations are done, produce your final answer synthesizing the results. Do NOT start another round of delegations unless the results are clearly insufficient (e.g. empty or errored).

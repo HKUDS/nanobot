@@ -20,7 +20,6 @@ from nanobot.agent.failure import ToolCallTracker
 
 if TYPE_CHECKING:
     from nanobot.agent.callbacks import ProgressCallback
-    from nanobot.coordination.coordinator import ClassificationResult
 
 
 @dataclass(slots=True)
@@ -29,7 +28,6 @@ class TurnState:
 
     messages: list[dict[str, Any]]
     user_text: str
-    classification_result: ClassificationResult | None = None
     disabled_tools: set[str] = field(default_factory=set)
     tracker: ToolCallTracker = field(default_factory=ToolCallTracker)
     nudged_for_final: bool = False
@@ -39,13 +37,6 @@ class TurnState:
     iteration: int = 0
     tools_def_cache: list[dict[str, Any]] = field(default_factory=list)
     tools_def_snapshot: frozenset[str] = field(default_factory=frozenset)
-
-    # Per-turn role overrides (None = use component construction-time defaults).
-    # Set by MessageProcessor.set_active_settings() before each turn.
-    active_model: str | None = None
-    active_temperature: float | None = None
-    active_max_iterations: int | None = None
-    active_role_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
