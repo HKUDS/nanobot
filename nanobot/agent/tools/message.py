@@ -1,9 +1,19 @@
 """Message tool for sending messages to users."""
 
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool
 from nanobot.bus.events import OutboundMessage
+
+
+@dataclass(slots=True)
+class _MessageTurnState:
+    channel: str
+    chat_id: str
+    message_id: str | None
+    sent_targets: set[tuple[str, str]] = field(default_factory=set)
 
 
 class MessageTool(Tool):
@@ -20,13 +30,28 @@ class MessageTool(Tool):
         self._default_channel = default_channel
         self._default_chat_id = default_chat_id
         self._default_message_id = default_message_id
-        self._sent_in_turn: bool = False
+        self._turn_state: ContextVar[_MessageTurnState | None] = ContextVar(
+            "message_turn_state",
+            default=None,
+        )
+
+    def _get_turn_state(self) -> _MessageTurnState:
+        state = self._turn_state.get()
+        if state is None:
+            state = _MessageTurnState(
+                channel=self._default_channel,
+                chat_id=self._default_chat_id,
+                message_id=self._default_message_id,
+            )
+            self._turn_state.set(state)
+        return state
 
     def set_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Set the current message context."""
-        self._default_channel = channel
-        self._default_chat_id = chat_id
-        self._default_message_id = message_id
+        state = self._get_turn_state()
+        state.channel = channel
+        state.chat_id = chat_id
+        state.message_id = message_id
 
     def set_send_callback(self, callback: Callable[[OutboundMessage], Awaitable[None]]) -> None:
         """Set the callback for sending messages."""
@@ -34,7 +59,11 @@ class MessageTool(Tool):
 
     def start_turn(self) -> None:
         """Reset per-turn send tracking."""
-        self._sent_in_turn = False
+        self._get_turn_state().sent_targets.clear()
+
+    def get_turn_sends(self) -> list[tuple[str, str]]:
+        """Return outbound targets used in the current turn."""
+        return list(self._get_turn_state().sent_targets)
 
     @property
     def name(self) -> str:
@@ -84,9 +113,10 @@ class MessageTool(Tool):
         media: list[str] | None = None,
         **kwargs: Any
     ) -> str:
-        channel = channel or self._default_channel
-        chat_id = chat_id or self._default_chat_id
-        message_id = message_id or self._default_message_id
+        state = self._get_turn_state()
+        channel = channel or state.channel
+        chat_id = chat_id or state.chat_id
+        message_id = message_id or state.message_id
 
         if not channel or not chat_id:
             return "Error: No target channel/chat specified"
@@ -106,8 +136,7 @@ class MessageTool(Tool):
 
         try:
             await self._send_callback(msg)
-            if channel == self._default_channel and chat_id == self._default_chat_id:
-                self._sent_in_turn = True
+            state.sent_targets.add((channel, chat_id))
             media_info = f" with {len(media)} attachments" if media else ""
             return f"Message sent to {channel}:{chat_id}{media_info}"
         except Exception as e:

@@ -404,6 +404,9 @@ class AgentLoop:
             session = self.sessions.get_or_create(key)
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+            if message_tool := self.tools.get("message"):
+                if isinstance(message_tool, MessageTool):
+                    message_tool.start_turn()
             history = session.get_history(max_messages=0)
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
             messages = self.context.build_messages(
@@ -472,8 +475,11 @@ class AgentLoop:
         self.sessions.save(session)
         self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
 
-        if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
-            return None
+        if mt := self.tools.get("message"):
+            if isinstance(mt, MessageTool):
+                sent_targets = set(mt.get_turn_sends())
+                if (msg.channel, msg.chat_id) in sent_targets:
+                    return None
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
