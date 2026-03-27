@@ -322,25 +322,26 @@ def register_api_routes(app):
     
     @app.route("/api/chat", methods=["POST"])
     @require_auth
-    async def chat():
+    def chat():
         """Send a message to the agent."""
         try:
             import asyncio
-            from concurrent.futures import ThreadPoolExecutor
-            
+
             data = request.get_json()
             message = data.get("message", "")
             session_id = data.get("session_id", "web:default")
-            
+
             if not message:
                 return jsonify({"error": "Message is required"}), 400
-            
-            # Run the agent in a thread pool
+
+            # Run the agent in a new event loop
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
+
             try:
-                response = await run_agent_message(message, session_id, app.config["CONFIG_PATH"])
+                response = loop.run_until_complete(
+                    run_agent_message(message, session_id, current_app.config["CONFIG_PATH"])
+                )
                 return jsonify({
                     "success": True,
                     "response": response.content if response else "",
@@ -348,104 +349,53 @@ def register_api_routes(app):
                 })
             finally:
                 loop.close()
-                
+
         except Exception as e:
+            print(f"Error in /api/chat: {e}")
+            import traceback
+            traceback.print_exc()
             return jsonify({"error": str(e)}), 500
     
     @app.route("/api/chat/stream", methods=["POST"])
     @require_auth
     def chat_stream():
-        """Stream a message to the agent using SSE."""
+        """Stream a message to the agent using SSE (simplified for now)."""
+        # For now, use the same implementation as /api/chat
+        # Streaming can be implemented properly later
         import asyncio
-        from concurrent.futures import ThreadPoolExecutor
-        
+
         data = request.get_json()
         message = data.get("message", "")
         session_id = data.get("session_id", "web:default")
-        
+
         if not message:
             return jsonify({"error": "Message is required"}), 400
-        
-        def generate():
-            """Generate SSE stream."""
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+
+        # Run the agent in a new event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            response = loop.run_until_complete(
+                run_agent_message(message, session_id, current_app.config["CONFIG_PATH"])
+            )
             
-            try:
-                async def stream_handler():
-                    from nanobot.agent.loop import AgentLoop
-                    from nanobot.bus.queue import MessageBus
-                    from nanobot.cron.service import CronService
-                    
-                    config = load_config(app.config["CONFIG_PATH"])
-                    bus = MessageBus()
-                    
-                    # Create provider
-                    from nanobot.cli.commands import _make_provider
-                    provider = _make_provider(config)
-                    
-                    # Create cron service
-                    cron_store_path = config.workspace_path / "cron" / "jobs.json"
-                    cron = CronService(cron_store_path)
-                    
-                    # Create agent loop
-                    agent_loop = AgentLoop(
-                        bus=bus,
-                        provider=provider,
-                        workspace=config.workspace_path,
-                        model=config.agents.defaults.model,
-                        max_iterations=config.agents.defaults.max_tool_iterations,
-                        context_window_tokens=config.agents.defaults.context_window_tokens,
-                        web_search_config=config.tools.web.search,
-                        web_proxy=config.tools.web.proxy or None,
-                        exec_config=config.tools.exec,
-                        cron_service=cron,
-                        restrict_to_workspace=config.tools.restrict_to_workspace,
-                        mcp_servers=config.tools.mcp_servers,
-                        channels_config=config.channels,
-                        timezone=config.agents.defaults.timezone,
-                    )
-                    
-                    # Collect response chunks
-                    chunks = []
-                    
-                    async def on_delta(content: str):
-                        chunks.append(content)
-                        yield f"data: {content}\n\n"
-                    
-                    async def on_stream_end():
-                        yield f"event: end\n\n"
-                    
-                    # Process message
-                    response = await agent_loop.process_direct(
-                        message,
-                        session_id,
-                        on_progress=lambda c, t=False: None,  # Skip progress for now
-                    )
-                    
-                    # Send final response
-                    yield f"data: [DONE]\n\n"
-                    
-                    # Cleanup
-                    await agent_loop.close_mcp()
-                
-                # Run the async generator
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                gen = loop.run_until_complete(stream_handler())
-                for chunk in gen:
-                    yield chunk
-            finally:
-                loop.close()
-        
-        return Response(
-            generate(),
-            mimetype="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-            }
-        )
+            # Return as SSE format for compatibility
+            return Response(
+                f"data: {json.dumps({'response': response.content if response else '', 'metadata': response.metadata if response else {}})}\n\ndata: [DONE]\n\n",
+                mimetype="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",
+                }
+            )
+        except Exception as e:
+            print(f"Error in /api/chat/stream: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            loop.close()
 
 
 def register_auth_routes(app):
