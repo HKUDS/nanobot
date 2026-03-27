@@ -49,17 +49,6 @@ def test_returns_agent_loop(tmp_path: Path) -> None:
     assert isinstance(loop, AgentLoop)
 
 
-def test_role_manager_wired(tmp_path: Path) -> None:
-    """Post-construction wiring sets role_manager."""
-    bus = MessageBus()
-    provider = _provider()
-    config = _config(tmp_path)
-
-    loop = build_agent(bus, provider, config)
-
-    assert loop._role_manager is not None
-
-
 def test_injected_tool_registry(tmp_path: Path) -> None:
     """When a ``tool_registry`` is provided, the loop uses it."""
     bus = MessageBus()

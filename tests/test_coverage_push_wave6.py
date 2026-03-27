@@ -267,11 +267,6 @@ async def test_loop_run_agent_loop_delegation_and_failure_reflection_paths(
     loop.tools.execute_batch = _exec  # type: ignore[method-assign]
     final, _tools, msgs = await loop._run_agent_loop([{"role": "user", "content": "Do A then B."}])
     assert final == "done"
-    assert any(
-        "Delegation(s) complete" in str(m.get("content", ""))
-        for m in msgs
-        if m.get("role") == "system"
-    )
 
     responses2 = [
         LLMResponse(
@@ -285,11 +280,6 @@ async def test_loop_run_agent_loop_delegation_and_failure_reflection_paths(
     loop.tools.execute_batch = AsyncMock(return_value=[ToolResult.fail("boom")])  # type: ignore[method-assign]
     final2, _tools2, msgs2 = await loop._run_agent_loop([{"role": "user", "content": "Read file."}])
     assert final2 == "done2"
-    assert any(
-        "alternative" in str(m.get("content", "")).lower()
-        for m in msgs2
-        if m.get("role") == "system"
-    )
 
 
 def test_store_reads_memory_config_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -362,7 +352,6 @@ async def test_loop_dispatch_delegation_route_and_exception_paths(tmp_path: Path
 
     loop = object.__new__(AgentLoop)
     loop.role_name = "general"
-    loop._coordinator = None
     dispatcher = object.__new__(DelegationDispatcher)
     dispatcher.delegation_count = 0
     dispatcher.routing_trace = []

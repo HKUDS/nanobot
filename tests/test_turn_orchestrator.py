@@ -71,8 +71,6 @@ def _make_minimal_mocks() -> dict[str, Any]:
         "llm_caller": MagicMock(),
         "tool_executor": tool_executor,
         "verifier": verifier,
-        "dispatcher": MagicMock(),
-        "delegation_advisor": MagicMock(),
         "config": config,
         "prompts": MagicMock(),
         "context": context,

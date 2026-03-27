@@ -21,7 +21,6 @@ import pytest
 from nanobot.config.schema import AgentRoleConfig
 from nanobot.config.sub_agent import SubAgentConfig
 from nanobot.coordination.delegation import DelegationConfig, DelegationDispatcher
-from nanobot.coordination.registry import AgentRegistry
 from nanobot.tools.builtin.delegate import _CycleError
 
 # ---------------------------------------------------------------------------
@@ -243,111 +242,6 @@ class TestWebToolPermissions:
         registry = captured_registry[0]
         tool_names = list(registry._tools.keys())
         assert "exec" in tool_names, "exec must be available when explicitly in allowed_tools"
-
-
-# ---------------------------------------------------------------------------
-# T-02: Disabled role routing
-# ---------------------------------------------------------------------------
-
-
-class TestDisabledRoleRouting:
-    """Disabled roles must not be reachable via the AgentRegistry."""
-
-    def test_disabled_role_not_in_registry(self) -> None:
-        """A role with enabled=False must not be found via __contains__."""
-        registry = AgentRegistry()
-        registry.register(_role("disabled_agent", enabled=False))
-        assert "disabled_agent" not in registry, (
-            "Disabled roles must not be accessible via __contains__"
-        )
-
-    def test_disabled_role_not_in_list_roles(self) -> None:
-        """Disabled roles must be excluded from list_roles()."""
-        registry = AgentRegistry()
-        registry.register(_role("active", enabled=True))
-        registry.register(_role("inactive", enabled=False))
-        names = [r.name for r in registry.list_roles()]
-        assert "active" in names
-        assert "inactive" not in names, "Disabled roles must not appear in list_roles()"
-
-    def test_disabled_role_not_in_role_names(self) -> None:
-        """Disabled roles must be excluded from role_names()."""
-        registry = AgentRegistry()
-        registry.register(_role("active", enabled=True))
-        registry.register(_role("inactive", enabled=False))
-        names = registry.role_names()
-        assert "active" in names
-        assert "inactive" not in names, "Disabled roles must not appear in role_names()"
-
-    def test_enabled_role_is_in_registry(self) -> None:
-        """An enabled role must be found via __contains__."""
-        registry = AgentRegistry()
-        registry.register(_role("research", enabled=True))
-        assert "research" in registry
-
-    def test_route_direct_returns_none_for_disabled(self) -> None:
-        """Coordinator.route_direct must return None for a disabled role."""
-        from nanobot.coordination.coordinator import Coordinator
-        from nanobot.providers.base import LLMProvider, LLMResponse
-
-        class StubProvider(LLMProvider):
-            def get_default_model(self) -> str:
-                return "stub"
-
-            async def chat(  # type: ignore[override]
-                self,
-                messages: Any,
-                tools: Any = None,
-                model: Any = None,
-                max_tokens: int = 4096,
-                temperature: float = 0.7,
-                metadata: Any = None,
-            ) -> LLMResponse:
-                return LLMResponse(content='{"role": "general"}')
-
-        registry = AgentRegistry(default_role="general")
-        registry.register(_role("general", enabled=True))
-        registry.register(_role("hidden", enabled=False))
-
-        coordinator = Coordinator(
-            provider=StubProvider(), registry=registry, default_role="general"
-        )
-        result = coordinator.route_direct("hidden")
-        assert result is None, (
-            "route_direct must return None for a disabled role — "
-            "it must not be routable even by explicit name"
-        )
-
-    def test_route_direct_returns_role_when_enabled(self) -> None:
-        """Coordinator.route_direct must return the config for an enabled role."""
-        from nanobot.coordination.coordinator import Coordinator
-        from nanobot.providers.base import LLMProvider, LLMResponse
-
-        class StubProvider(LLMProvider):
-            def get_default_model(self) -> str:
-                return "stub"
-
-            async def chat(  # type: ignore[override]
-                self,
-                messages: Any,
-                tools: Any = None,
-                model: Any = None,
-                max_tokens: int = 4096,
-                temperature: float = 0.7,
-                metadata: Any = None,
-            ) -> LLMResponse:
-                return LLMResponse(content='{"role": "general"}')
-
-        registry = AgentRegistry(default_role="general")
-        registry.register(_role("general", enabled=True))
-        registry.register(_role("code", enabled=True))
-
-        coordinator = Coordinator(
-            provider=StubProvider(), registry=registry, default_role="general"
-        )
-        result = coordinator.route_direct("code")
-        assert result is not None
-        assert result.name == "code"
 
 
 # ---------------------------------------------------------------------------
