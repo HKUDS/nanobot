@@ -271,7 +271,6 @@ def build_agent(
         config.workspace_path,
         memory=memory,
         memory_config=config.memory if config.memory_enabled else None,
-        role_system_prompt=role_config.system_prompt if role_config else "",
     )
 
     # 5. Construct SessionManager

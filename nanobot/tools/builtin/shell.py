@@ -98,7 +98,10 @@ class ExecTool(Tool):
         self.restrict_to_workspace = restrict_to_workspace
 
     name = "exec"
-    description = "Execute a shell command and return its output. Use with caution."
+    description = (
+        "Execute a shell command. Use for skill commands, system operations,"
+        " or when no specific tool fits. Check skill decision guides for which command to use."
+    )
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {

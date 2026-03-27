@@ -66,13 +66,11 @@ class ContextBuilder:
         *,
         memory: MemoryStore | None = None,
         memory_config: MemoryConfig | None = None,
-        role_system_prompt: str = "",
     ):
         self.workspace = workspace
         self.memory = memory
         self._memory_config = memory_config
         self.skills = SkillsLoader(workspace)
-        self.role_system_prompt = role_system_prompt
         self._contacts_context: str = ""
         self._unavailable_tools_fn: Callable[[], str] | None = None
         # P-03: mtime-keyed cache for bootstrap files — avoids re-reading static
@@ -111,9 +109,11 @@ class ContextBuilder:
         # Core identity
         parts.append(self._get_identity())
 
-        # Role-specific system prompt (multi-agent routing)
-        if self.role_system_prompt:
-            parts.append(f"# Agent Role\n\n{self.role_system_prompt}")
+        # Reasoning protocol — structured thinking guidance
+        parts.append(prompts.get("reasoning"))
+
+        # Tool guide — when and how to use tools
+        parts.append(prompts.get("tool_guide"))
 
         # Bootstrap files
         bootstrap = self._load_bootstrap_files()
@@ -251,7 +251,7 @@ class ContextBuilder:
         # System prompt
         system_prompt = await self.build_system_prompt(current_message=current_message)
         if verify_before_answer:
-            system_prompt += "\n\n" + prompts.get("verification_required")
+            system_prompt += "\n\n" + prompts.get("self_check")
         messages.append({"role": "system", "content": system_prompt})
 
         # History
