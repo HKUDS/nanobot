@@ -1,6 +1,7 @@
 """Nanobot Web UI - Flask-based web interface."""
 
 import asyncio
+import json
 import os
 import threading
 from functools import wraps
@@ -13,6 +14,35 @@ from nanobot.config.loader import get_config_path, load_config, save_config
 from nanobot.config.schema import Config
 
 
+def ensure_config_exists(config_path: Path) -> bool:
+    """Ensure config file exists, create default if missing."""
+    if config_path.exists():
+        return True
+    
+    try:
+        # Create parent directories
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Create default config
+        config = Config()
+        save_config(config, config_path)
+        
+        return True
+    except Exception as e:
+        print(f"Warning: Could not create config file: {e}")
+        return False
+
+
+def ensure_workspace_exists(workspace_path: Path) -> bool:
+    """Ensure workspace directory exists."""
+    try:
+        workspace_path.mkdir(parents=True, exist_ok=True)
+        return True
+    except Exception as e:
+        print(f"Warning: Could not create workspace directory: {e}")
+        return False
+
+
 def create_app(config_path: Path | None = None, workspace_path: Path | None = None):
     """Create and configure the Flask application."""
     app = Flask(
@@ -20,23 +50,35 @@ def create_app(config_path: Path | None = None, workspace_path: Path | None = No
         template_folder=str(Path(__file__).parent.parent / "templates" / "web"),
         static_folder=str(Path(__file__).parent.parent / "static"),
     )
-    
+
     # Enable CORS for API endpoints
     CORS(app, resources={r"/api/*": {"origins": "*"}})
-    
+
     # Configuration
     app.config["SECRET_KEY"] = os.environ.get("NANOBOT_WEB_SECRET", os.urandom(24).hex())
     app.config["AUTH_TOKEN"] = os.environ.get("NANOBOT_WEB_AUTH_TOKEN", "")
-    
+
     # Store config paths
-    app.config["CONFIG_PATH"] = config_path or get_config_path()
+    config_path = config_path or get_config_path()
+    app.config["CONFIG_PATH"] = config_path
     app.config["WORKSPACE_PATH"] = workspace_path
     
+    # Ensure config and workspace exist
+    config_exists = ensure_config_exists(config_path)
+    if workspace_path:
+        ensure_workspace_exists(workspace_path)
+    
+    # Log config status
+    if config_exists:
+        print(f"✓ Config loaded from: {config_path}")
+    else:
+        print(f"⚠ Config file missing and could not be created: {config_path}")
+
     # Register routes
     register_routes(app)
     register_api_routes(app)
     register_auth_routes(app)
-    
+
     return app
 
 
