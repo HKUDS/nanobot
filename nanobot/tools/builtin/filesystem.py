@@ -77,7 +77,10 @@ class ReadFileTool(Tool):
         self._allowed_dir = allowed_dir
 
     name = "read_file"
-    description = "Read the contents of a file at the given path."
+    description = (
+        "Read full contents of a file at a known path."
+        " If you don't know the path, use list_dir first to find it."
+    )
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {"path": {"type": "string", "description": "The file path to read"}},
@@ -111,7 +114,10 @@ class WriteFileTool(Tool):
         self._allowed_dir = allowed_dir
 
     name = "write_file"
-    description = "Write content to a file at the given path. Creates parent directories if needed."
+    description = (
+        "Write content to a file. Creates parent directories if needed."
+        " Always read_file first to confirm current content before writing."
+    )
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
@@ -147,7 +153,10 @@ class EditFileTool(Tool):
         self._allowed_dir = allowed_dir
 
     name = "edit_file"
-    description = "Edit a file by replacing old_text with new_text. The old_text must exist exactly in the file."
+    description = (
+        "Edit a file by replacing old_text with new_text. old_text must match exactly."
+        " Always read_file first to confirm current content before editing."
+    )
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
@@ -228,7 +237,10 @@ class ListDirTool(Tool):
         self._allowed_dir = allowed_dir
 
     name = "list_dir"
-    description = "List the contents of a directory."
+    description = (
+        "List files and folders in a directory. Use to explore structure, find items by name,"
+        " or verify paths. Prefer over search when looking by folder name or project code."
+    )
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {"path": {"type": "string", "description": "The directory path to list"}},
