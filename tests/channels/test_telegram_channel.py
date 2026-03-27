@@ -13,7 +13,7 @@ except ImportError:
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.telegram import TELEGRAM_REPLY_CONTEXT_MAX_LEN, TelegramChannel
+from nanobot.channels.telegram import TELEGRAM_REPLY_CONTEXT_MAX_LEN, TelegramChannel, _StreamBuf
 from nanobot.channels.telegram import TelegramConfig
 
 
@@ -50,8 +50,9 @@ class _FakeBot:
     async def set_my_commands(self, commands) -> None:
         self.commands = commands
 
-    async def send_message(self, **kwargs) -> None:
+    async def send_message(self, **kwargs):
         self.sent_messages.append(kwargs)
+        return SimpleNamespace(message_id=len(self.sent_messages))
 
     async def send_photo(self, **kwargs) -> None:
         self.sent_media.append({"kind": "photo", **kwargs})
@@ -271,11 +272,130 @@ async def test_send_text_gives_up_after_max_retries() -> None:
     orig_delay = tg_mod._SEND_RETRY_BASE_DELAY
     tg_mod._SEND_RETRY_BASE_DELAY = 0.01
     try:
-        await channel._send_text(123, "hello", None, {})
+        with pytest.raises(TimedOut):
+            await channel._send_text(123, "hello", None, {})
     finally:
         tg_mod._SEND_RETRY_BASE_DELAY = orig_delay
 
     assert channel._app.bot.sent_messages == []
+
+
+@pytest.mark.asyncio
+async def test_on_error_logs_network_issues_as_warning(monkeypatch) -> None:
+    from telegram.error import NetworkError
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    recorded: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.logger.warning",
+        lambda message, error: recorded.append(("warning", message.format(error))),
+    )
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.logger.error",
+        lambda message, error: recorded.append(("error", message.format(error))),
+    )
+
+    await channel._on_error(object(), SimpleNamespace(error=NetworkError("proxy disconnected")))
+
+    assert recorded == [("warning", "Telegram network issue: proxy disconnected")]
+
+
+@pytest.mark.asyncio
+async def test_on_error_keeps_non_network_exceptions_as_error(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    recorded: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.logger.warning",
+        lambda message, error: recorded.append(("warning", message.format(error))),
+    )
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.logger.error",
+        lambda message, error: recorded.append(("error", message.format(error))),
+    )
+
+    await channel._on_error(object(), SimpleNamespace(error=RuntimeError("boom")))
+
+    assert recorded == [("error", "Telegram error: boom")]
+
+
+@pytest.mark.asyncio
+async def test_send_delta_stream_end_raises_and_keeps_buffer_on_failure() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.edit_message_text = AsyncMock(side_effect=RuntimeError("boom"))
+    channel._stream_bufs["123"] = _StreamBuf(text="hello", message_id=7, last_edit=0.0)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await channel.send_delta("123", "", {"_stream_end": True})
+
+    assert "123" in channel._stream_bufs
+
+
+@pytest.mark.asyncio
+async def test_send_delta_stream_end_treats_not_modified_as_success() -> None:
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.edit_message_text = AsyncMock(side_effect=BadRequest("Message is not modified"))
+    channel._stream_bufs["123"] = _StreamBuf(text="hello", message_id=7, last_edit=0.0, stream_id="s:0")
+
+    await channel.send_delta("123", "", {"_stream_end": True, "_stream_id": "s:0"})
+
+    assert "123" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
+async def test_send_delta_new_stream_id_replaces_stale_buffer() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._stream_bufs["123"] = _StreamBuf(
+        text="hello",
+        message_id=7,
+        last_edit=0.0,
+        stream_id="old:0",
+    )
+
+    await channel.send_delta("123", "world", {"_stream_delta": True, "_stream_id": "new:0"})
+
+    buf = channel._stream_bufs["123"]
+    assert buf.text == "world"
+    assert buf.stream_id == "new:0"
+    assert buf.message_id == 1
+
+
+@pytest.mark.asyncio
+async def test_send_delta_incremental_edit_treats_not_modified_as_success() -> None:
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._stream_bufs["123"] = _StreamBuf(text="hello", message_id=7, last_edit=0.0, stream_id="s:0")
+    channel._app.bot.edit_message_text = AsyncMock(side_effect=BadRequest("Message is not modified"))
+
+    await channel.send_delta("123", "", {"_stream_delta": True, "_stream_id": "s:0"})
+
+    assert channel._stream_bufs["123"].last_edit > 0.0
 
 
 def test_derive_topic_session_key_uses_thread_id() -> None:

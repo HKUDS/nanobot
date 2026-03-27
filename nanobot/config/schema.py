@@ -25,6 +25,7 @@ class ChannelsConfig(Base):
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
+    send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
 
 
 class MemoryConfig(Base):
@@ -55,6 +56,7 @@ class AgentDefaults(Base):
     memory_window: int | None = Field(default=None, exclude=True)
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
 
     @property
     def should_warn_deprecated_memory_window(self) -> bool:
@@ -95,6 +97,7 @@ class ProvidersConfig(Base):
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     mistral: ProviderConfig = Field(default_factory=ProviderConfig)
+    stepfun: ProviderConfig = Field(default_factory=ProviderConfig)  # Step Fun (阶跃星辰)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
     aicodewith: ProviderConfig = Field(default_factory=ProviderConfig)  # AICodewith API gateway
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
@@ -141,22 +144,6 @@ class WebToolsConfig(Base):
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
-class ImageGenerationConfig(Base):
-    """Image generation tool configuration."""
-
-    enabled: bool = False
-    provider: str = "openai-compatible"
-    model: str = "gpt-image-1"
-    api_key: str = ""
-    base_url: str | None = None
-    default_size: str = "1024x1536"
-    default_aspect_ratio: str = "3:4"
-    default_style_preset: str = "xiaohongshu-card"
-    watermark: bool = False  # Jimeng/Seedream: add watermark to generated images
-    skip_staging: bool = False  # If true, generate images directly without staging/confirmation
-
-
-
 class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
@@ -199,11 +186,6 @@ class Config(BaseSettings):
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
 
-    @staticmethod
-    def _config_field(spec) -> str:
-        """Config field name for a provider spec (config_key override or spec.name)."""
-        return spec.config_key or spec.name
-
     def _match_provider(
         self, model: str | None = None
     ) -> tuple["ProviderConfig | None", str | None]:
@@ -229,14 +211,14 @@ class Config(BaseSettings):
 
         # Explicit provider prefix wins — prevents `github-copilot/...codex` matching openai_codex.
         for spec in PROVIDERS:
-            p = getattr(self.providers, self._config_field(spec), None)
+            p = getattr(self.providers, spec.name, None)
             if p and model_prefix and normalized_prefix == spec.name:
                 if spec.is_oauth or spec.is_local or p.api_key:
                     return p, spec.name
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
-            p = getattr(self.providers, self._config_field(spec), None)
+            p = getattr(self.providers, spec.name, None)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
                 if spec.is_oauth or spec.is_local or p.api_key:
                     return p, spec.name
@@ -249,7 +231,7 @@ class Config(BaseSettings):
         for spec in PROVIDERS:
             if not spec.is_local:
                 continue
-            p = getattr(self.providers, self._config_field(spec), None)
+            p = getattr(self.providers, spec.name, None)
             if not (p and p.api_base):
                 continue
             if spec.detect_by_base_keyword and spec.detect_by_base_keyword in p.api_base:
@@ -264,7 +246,7 @@ class Config(BaseSettings):
         for spec in PROVIDERS:
             if spec.is_oauth:
                 continue
-            p = getattr(self.providers, self._config_field(spec), None)
+            p = getattr(self.providers, spec.name, None)
             if p and p.api_key:
                 return p, spec.name
         return None, None

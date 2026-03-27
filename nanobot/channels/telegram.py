@@ -12,7 +12,7 @@ from typing import Any, Literal
 from loguru import logger
 from pydantic import Field
 from telegram import BotCommand, ReactionTypeEmoji, ReplyParameters, Update
-from telegram.error import TimedOut
+from telegram.error import BadRequest, TimedOut
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
@@ -163,6 +163,7 @@ class _StreamBuf:
     text: str = ""
     message_id: int | None = None
     last_edit: float = 0.0
+    stream_id: str | None = None
 
 
 class TelegramConfig(Base):
@@ -478,6 +479,11 @@ class TelegramChannel(BaseChannel):
                 )
             except Exception as e2:
                 logger.error("Error sending Telegram message: {}", e2)
+                raise
+
+    @staticmethod
+    def _is_not_modified_error(exc: Exception) -> bool:
+        return isinstance(exc, BadRequest) and "message is not modified" in str(exc).lower()
 
     async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
         """Progressive message editing: send on first delta, edit on subsequent ones."""
@@ -485,10 +491,13 @@ class TelegramChannel(BaseChannel):
             return
         meta = metadata or {}
         int_chat_id = int(chat_id)
+        stream_id = meta.get("_stream_id")
 
         if meta.get("_stream_end"):
-            buf = self._stream_bufs.pop(chat_id, None)
+            buf = self._stream_bufs.get(chat_id)
             if not buf or not buf.message_id or not buf.text:
+                return
+            if stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id:
                 return
             self._stop_typing(chat_id)
             try:
@@ -499,6 +508,10 @@ class TelegramChannel(BaseChannel):
                     text=html, parse_mode="HTML",
                 )
             except Exception as e:
+                if self._is_not_modified_error(e):
+                    logger.debug("Final stream edit already applied for {}", chat_id)
+                    self._stream_bufs.pop(chat_id, None)
+                    return
                 logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
                 try:
                     await self._call_with_retry(
@@ -506,14 +519,22 @@ class TelegramChannel(BaseChannel):
                         chat_id=int_chat_id, message_id=buf.message_id,
                         text=buf.text,
                     )
-                except Exception:
-                    pass
+                except Exception as e2:
+                    if self._is_not_modified_error(e2):
+                        logger.debug("Final stream plain edit already applied for {}", chat_id)
+                        self._stream_bufs.pop(chat_id, None)
+                        return
+                    logger.warning("Final stream edit failed: {}", e2)
+                    raise  # Let ChannelManager handle retry
+            self._stream_bufs.pop(chat_id, None)
             return
 
         buf = self._stream_bufs.get(chat_id)
-        if buf is None:
-            buf = _StreamBuf()
+        if buf is None or (stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id):
+            buf = _StreamBuf(stream_id=stream_id)
             self._stream_bufs[chat_id] = buf
+        elif buf.stream_id is None:
+            buf.stream_id = stream_id
         buf.text += delta
 
         if not buf.text.strip():
@@ -530,6 +551,7 @@ class TelegramChannel(BaseChannel):
                 buf.last_edit = now
             except Exception as e:
                 logger.warning("Stream initial send failed: {}", e)
+                raise  # Let ChannelManager handle retry
         elif (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL:
             try:
                 await self._call_with_retry(
@@ -538,8 +560,12 @@ class TelegramChannel(BaseChannel):
                     text=buf.text,
                 )
                 buf.last_edit = now
-            except Exception:
-                pass
+            except Exception as e:
+                if self._is_not_modified_error(e):
+                    buf.last_edit = now
+                    return
+                logger.warning("Stream edit failed: {}", e)
+                raise  # Let ChannelManager handle retry
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
@@ -892,7 +918,12 @@ class TelegramChannel(BaseChannel):
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
-        logger.error("Telegram error: {}", context.error)
+        from telegram.error import NetworkError, TimedOut
+        
+        if isinstance(context.error, (NetworkError, TimedOut)):
+            logger.warning("Telegram network issue: {}", str(context.error))
+        else:
+            logger.error("Telegram error: {}", context.error)
 
     def _get_extension(
         self,
