@@ -10,34 +10,10 @@ Covers:
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from typing import Any
 
-from conftest import FakeProvider
-
-from nanobot.config.agent import AgentConfig
-from nanobot.config.memory import MemoryConfig
-from nanobot.coordination.coordinator import Coordinator, build_default_registry
 from nanobot.tools.builtin.delegate import DelegateParallelTool, DelegationResult, _CycleError
 from nanobot.tools.registry import ToolRegistry
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_agent_config(tmp_path: Path, **overrides: Any) -> AgentConfig:
-    defaults: dict[str, Any] = dict(
-        workspace=str(tmp_path),
-        model="test-model",
-        memory=MemoryConfig(window=10),
-        max_iterations=5,
-        planning_enabled=False,
-        verification_mode="off",
-    )
-    defaults.update(overrides)
-    return AgentConfig(**defaults)
-
 
 # ---------------------------------------------------------------------------
 # Parallel dispatch tests
@@ -136,36 +112,6 @@ class TestParallelDelegation:
         assert result.success
         assert "ok:good_task" in result.output
         assert "cycle" in result.output.lower()
-
-    async def test_per_branch_stack_isolation(self, tmp_path: Path) -> None:
-        """Each parallel branch gets independent delegation stack tracking."""
-        from nanobot.agent.agent_factory import build_agent
-        from nanobot.bus.queue import MessageBus
-
-        provider = FakeProvider(["result"] * 10)
-        bus = MessageBus()
-        loop = build_agent(bus=bus, provider=provider, config=_make_agent_config(tmp_path))
-
-        registry = build_default_registry("general")
-        loop._coordinator = Coordinator(
-            provider=provider, registry=registry, default_role="general"
-        )
-        loop._dispatcher.coordinator = loop._coordinator
-        loop._dispatcher.wire_delegate_tools(available_roles_fn=loop._capabilities.role_names)
-
-        # Delegate to code and research in parallel — neither is in the stack
-        loop._delegation_stack = []
-        tool = loop.tools.get("delegate_parallel")
-        assert tool is not None
-        result = await tool.execute(
-            subtasks=[
-                {"task": "write code", "target_role": "code"},
-                {"task": "find info", "target_role": "research"},
-            ]
-        )
-        assert result.success
-        # Stack should be empty after both parallel branches finish
-        assert loop._delegation_stack == []
 
 
 # ---------------------------------------------------------------------------

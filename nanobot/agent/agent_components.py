@@ -28,14 +28,10 @@ if TYPE_CHECKING:
         AgentRoleConfig,
         ChannelsConfig,
         ExecToolConfig,
-        RoutingConfig,
     )
     from nanobot.context.context import ContextBuilder
-    from nanobot.coordination.coordinator import Coordinator
     from nanobot.coordination.delegation import DelegationDispatcher
-    from nanobot.coordination.delegation_advisor import DelegationAdvisor
     from nanobot.coordination.mission import MissionManager
-    from nanobot.coordination.role_switching import TurnRoleManager
     from nanobot.cron.service import CronService
     from nanobot.memory import MemoryStore
     from nanobot.memory.write.micro_extractor import MicroExtractor
@@ -61,9 +57,8 @@ class _CoreConfig:
 
 @dataclass(slots=True)
 class _InfraConfig:
-    """External infrastructure: routing, channels, MCP, exec policy."""
+    """External infrastructure: channels, MCP, exec policy."""
 
-    routing_config: RoutingConfig | None
     channels_config: ChannelsConfig | None
     mcp_servers: dict
     brave_api_key: str | None
@@ -86,7 +81,6 @@ class _Subsystems:
     missions: MissionManager
     consolidator: ConsolidationOrchestrator
     dispatcher: DelegationDispatcher
-    delegation_advisor: DelegationAdvisor
     llm_caller: StreamingLLMCaller
     verifier: AnswerVerifier
     orchestrator: TurnOrchestrator
@@ -130,5 +124,3 @@ class _AgentComponents:
     core: _CoreConfig
     infra: _InfraConfig
     subsystems: _Subsystems
-    coordinator: Coordinator | None = None
-    role_manager: TurnRoleManager | None = None

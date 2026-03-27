@@ -1,4 +1,4 @@
-# size-exception: single-class module; routing wrapper adds indentation overhead
+# size-exception: single-class module with long per-message pipeline
 """Per-message processing pipeline.
 
 ``MessageProcessor`` owns the per-message lifecycle: session lookup,
@@ -30,9 +30,6 @@ from nanobot.observability.tracing import TraceContext, bind_trace
 from nanobot.session.manager import Session
 
 if TYPE_CHECKING:
-    from nanobot.coordination.coordinator import ClassificationResult
-    from nanobot.coordination.role_switching import TurnContext, TurnRoleManager
-    from nanobot.coordination.router import MessageRouter
     from nanobot.providers.base import LLMProvider
 
 
@@ -48,7 +45,6 @@ class MessageProcessor:
         role_name: str,
         provider: LLMProvider,
         model: str,
-        router: MessageRouter | None = None,
     ) -> None:
         self.orchestrator = services.orchestrator
         self._dispatcher = services.dispatcher
@@ -65,7 +61,6 @@ class MessageProcessor:
         self.config = config
         self.workspace = workspace
         self.role_name = role_name
-        self._role_manager: TurnRoleManager | None = None
         self.provider = provider
         self.model = model
 
@@ -74,42 +69,8 @@ class MessageProcessor:
         self._turn_tokens_completion = 0
         self._turn_llm_calls = 0
 
-        # Classification result (consumed by _run_orchestrator each turn).
-        self.classification_result: ClassificationResult | None = None
-
-        # Message router (injected by composition root when routing is enabled).
-        self._router = router
-
-        # Per-turn active settings (set by AgentLoop before each turn).
-        self._active_model: str | None = None
-        self._active_temperature: float | None = None
-        self._active_max_iterations: int | None = None
-        self._active_role_name: str | None = None
-
         # Last TurnResult from the orchestrator, used by _sync_token_counters.
         self._last_turn_result: Any | None = None
-
-    def set_role_manager(self, role_manager: TurnRoleManager) -> None:
-        """Set the role manager (called by the factory after construction)."""
-        self._role_manager = role_manager
-
-    def set_classification_result(self, result: ClassificationResult | None) -> None:
-        """Forward a coordinator classification result for the next turn."""
-        self.classification_result = result
-
-    def set_active_settings(
-        self,
-        *,
-        model: str,
-        temperature: float,
-        max_iterations: int,
-        role_name: str,
-    ) -> None:
-        """Forward role-switched settings for the upcoming turn."""
-        self._active_model = model
-        self._active_temperature = temperature
-        self._active_max_iterations = max_iterations
-        self._active_role_name = role_name
 
     async def process(
         self,
@@ -149,301 +110,259 @@ class MessageProcessor:
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
 
-        # --- ROUTE: classify and resolve role (single call site) ---
-        turn_ctx: TurnContext | None = None
-        if self._router:
-            from nanobot.coordination.router import UnknownRoleError
+        t0_request = time.monotonic()
 
-            try:
-                decision = await self._router.route(
-                    msg.content,
-                    msg.channel,
-                    forced_role=msg.forced_role,
-                )
-            except UnknownRoleError as exc:
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=str(exc),
-                )
-            if decision:
-                self.classification_result = decision.classification
-                assert self._role_manager is not None
-                turn_ctx = self._role_manager.apply(decision.role)
-                # Sync active settings after role switch
-                self.set_active_settings(
-                    model=self._role_manager._loop.model,
-                    temperature=self._role_manager._loop.temperature,
-                    max_iterations=self._role_manager._loop.max_iterations,
-                    role_name=self._role_manager._loop.role_name,
-                )
-
-        try:
-            t0_request = time.monotonic()
-
-            effective_model = self._active_model if self._active_model is not None else self.model
-            effective_role = (
-                self._active_role_name if self._active_role_name is not None else self.role_name
+        # System messages: parse origin from chat_id ("channel:chat_id")
+        if msg.channel == "system":
+            channel, chat_id = (
+                msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
             )
-
-            # System messages: parse origin from chat_id ("channel:chat_id")
-            if msg.channel == "system":
-                channel, chat_id = (
-                    msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
-                )
-                logger.info("Processing system message from {}", msg.sender_id)
-                key = f"{channel}:{chat_id}"
-                session = self.sessions.get_or_create(key)
-                self._turn_context.set_tool_context(
-                    channel, chat_id, msg.metadata.get("message_id")
-                )
-                history = session.get_history(max_messages=self.config.memory.window)
-                messages = await self.context.build_messages(
-                    history=history,
-                    current_message=msg.content,
-                    channel=channel,
-                    chat_id=chat_id,
-                )
-                final_content, tools_used, all_msgs = await self._run_orchestrator(
-                    messages, on_progress
-                )
-                self._save_turn(session, all_msgs, 1 + len(history))
-                self.sessions.save(session)
-                return OutboundMessage(
-                    channel=channel,
-                    chat_id=chat_id,
-                    content=final_content or "Background task completed.",
-                )
-
-            preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
-            bind_trace().info(
-                "Processing message from {}:{}: {}",
-                msg.channel,
-                msg.sender_id,
-                preview,
-            )
-
-            key = session_key or msg.session_key
+            logger.info("Processing system message from {}", msg.sender_id)
+            key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
-
-            # Slash commands
-            cmd = msg.content.strip().lower()
-            if cmd == "/new":
-                return await self._handle_slash_new(msg, session)
-            if cmd == "/help":
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=(
-                        "\U0001f408 nanobot commands:\n"
-                        "/new \u2014 Start a new conversation\n"
-                        "/help \u2014 Show available commands"
-                    ),
-                )
-
-            memory_store = self.context.memory
-            assert memory_store is not None  # always injected by build_agent
-
-            # Run memory pre-checks (conflict resolution and live corrections).
-            # These are only meaningful when the memory subsystem is wired up;
-            # skip when memory is disabled to avoid exercising stub/mock stores.
-            pending_conflict_question: str | None = None
-            if self.config.memory_enabled:
-                conflict_reply, correction_result = await self._pre_turn_memory(msg, memory_store)
-                if conflict_reply.get("handled"):
-                    return OutboundMessage(
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        content=str(conflict_reply.get("message", "")),
-                    )
-
-                if correction_result and correction_result.get("question"):
-                    return OutboundMessage(
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        content=str(correction_result.get("question", "")),
-                    )
-
-                # Defer conflict questions until after the agent answers
-                pending_conflict_question = memory_store.conflict_mgr.ask_user_for_conflict(
-                    user_message=msg.content,
-                )
-
-            # Trigger background consolidation if needed
-            unconsolidated = len(session.messages) - session.last_consolidated
-            if self.config.memory_enabled and unconsolidated >= self.config.memory.window:
-                self._consolidator.submit(session.key, session, self.provider, effective_model)
-
-            self._turn_context.set_tool_context(
-                msg.channel, msg.chat_id, msg.metadata.get("message_id")
-            )
-            self._turn_context.ensure_scratchpad(key, self.workspace)
-            if message_tool := self.tools.get("message"):
-                message_tool.on_turn_start()
-
+            self._turn_context.set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=self.config.memory.window)
-            verify_before_answer = await self.verifier.should_force_verification(msg.content)
-            initial_messages = await self.context.build_messages(
+            messages = await self.context.build_messages(
                 history=history,
                 current_message=msg.content,
-                media=msg.media if msg.media else None,
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                verify_before_answer=verify_before_answer,
+                channel=channel,
+                chat_id=chat_id,
             )
-
-            # Build canonical event builder scoped to this request
-            _turn_num = len(session.messages) // 2
-            _canonical_message_id = "msg_asst_" + uuid.uuid4().hex[:12]
-            _canonical_builder = CanonicalEventBuilder(
-                run_id=TraceContext.get()["request_id"] or key,
-                session_id=key,
-                turn_id=f"turn_{_turn_num:05d}",
-                actor_id=effective_role,
-            )
-
-            # Build base metadata dict once for this turn
-            _base_meta: dict[str, Any] = dict(msg.metadata or {})
-            _base_meta["_progress"] = True
-
-            _bus_progress = make_bus_progress(
-                bus=self.bus,
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                base_meta=_base_meta,
-                canonical_builder=_canonical_builder,
-            )
-
-            # Emit run.start + message.start before the agent loop begins
-            for _start_event in (
-                _canonical_builder.run_start(),
-                _canonical_builder.message_start(_canonical_message_id),
-            ):
-                await self.bus.publish_outbound(
-                    OutboundMessage(
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        content="",
-                        metadata={"_progress": True, "_canonical": _start_event},
-                    )
-                )
-
             final_content, tools_used, all_msgs = await self._run_orchestrator(
-                initial_messages,
-                on_progress=(
-                    (on_progress or _bus_progress) if self.config.streaming_enabled else None
-                ),
+                messages, on_progress
             )
-
-            if final_content is None:
-                _recovered = await self.verifier.attempt_recovery(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    all_msgs=all_msgs,
-                    model=self._active_model,
-                    temperature=self._active_temperature,
-                )
-                if isinstance(_recovered, str):
-                    final_content = _recovered
-
-            if final_content is None:
-                # Ensure all_msgs is a real list for build_no_answer_explanation.
-                _safe_msgs: list[dict[str, Any]] = all_msgs if isinstance(all_msgs, list) else []
-                final_content = AnswerVerifier.build_no_answer_explanation(msg.content, _safe_msgs)
-                _added = self.context.add_assistant_message(_safe_msgs, final_content)
-                if isinstance(_added, list):
-                    all_msgs = _added
-
-            # Ensure final_content is a real string for downstream consumers.
-            if not isinstance(final_content, str):
-                final_content = str(final_content) if final_content else ""
-
-            # Sync token counters from the loop (where _run_agent_loop updates them)
-            self._sync_token_counters()
-
-            # Annotate the active langfuse span with request metadata + output.
-            # Resolve update_current_span via _span_module (late binding) so that
-            # tests patching nanobot.agent.loop.update_current_span take effect.
-            _update_span = (
-                getattr(self._span_module, "update_current_span", update_current_span)
-                if self._span_module is not None
-                else update_current_span
-            )
-            _update_span(
-                output=final_content[:500] if final_content else None,
-                metadata={
-                    "channel": msg.channel,
-                    "sender": msg.sender_id,
-                    "model": effective_model,
-                    "role": effective_role,
-                    "session_key": key,
-                    "llm_calls": self._turn_llm_calls,
-                    "prompt_tokens": self._turn_tokens_prompt,
-                    "completion_tokens": self._turn_tokens_completion,
-                    "duration_ms": round((time.monotonic() - t0_request) * 1000),
-                },
-            )
-
-            preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-            logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
-
-            # Request audit line
-            duration_ms = (time.monotonic() - t0_request) * 1000
-            bind_trace().info(
-                "request_complete | {ch}:{cid} | {dur:.0f}ms | model={mdl}"
-                " | tools={tc} | len={rlen}"
-                " | llm_calls={lc} | prompt_tokens={pt} | completion_tokens={ct}",
-                ch=msg.channel,
-                cid=msg.chat_id,
-                dur=duration_ms,
-                mdl=effective_model,
-                tc=len(tools_used),
-                rlen=len(final_content),
-                lc=self._turn_llm_calls,
-                pt=self._turn_tokens_prompt,
-                ct=self._turn_tokens_completion,
-            )
-
-            if isinstance(all_msgs, list):
-                self._save_turn(session, all_msgs, 1 + len(history))
+            self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
-
-            # Micro-extraction: per-turn memory extraction (async, non-blocking)
-            # Only on the primary path where agent produced a substantive response.
-            # The system-message path (~line 209) is intentionally excluded.
-            if self._micro_extractor is not None and final_content:
-                await self._micro_extractor.submit(
-                    user_message=msg.content,
-                    assistant_message=final_content,
-                )
-
-            # Append deferred conflict question after answering
-            if pending_conflict_question:
-                final_content += "\n\n---\n" + pending_conflict_question
-
-            if msg_tool := self.tools.get("message"):
-                if msg_tool.sent_in_turn:
-                    return None
-
-            response_meta = dict(msg.metadata or {})
-            response_meta["usage"] = {
-                "prompt_tokens": self._turn_tokens_prompt,
-                "completion_tokens": self._turn_tokens_completion,
-            }
-            response_meta["_canonical"] = _canonical_builder.message_end(
-                _canonical_message_id,
-                input_tokens=self._turn_tokens_prompt,
-                output_tokens=self._turn_tokens_completion,
+            return OutboundMessage(
+                channel=channel,
+                chat_id=chat_id,
+                content=final_content or "Background task completed.",
             )
+
+        preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
+        bind_trace().info(
+            "Processing message from {}:{}: {}",
+            msg.channel,
+            msg.sender_id,
+            preview,
+        )
+
+        key = session_key or msg.session_key
+        session = self.sessions.get_or_create(key)
+
+        # Slash commands
+        cmd = msg.content.strip().lower()
+        if cmd == "/new":
+            return await self._handle_slash_new(msg, session)
+        if cmd == "/help":
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content=final_content,
-                metadata=response_meta,
+                content=(
+                    "\U0001f408 nanobot commands:\n"
+                    "/new \u2014 Start a new conversation\n"
+                    "/help \u2014 Show available commands"
+                ),
             )
-        finally:
-            if self._role_manager and turn_ctx is not None:
-                self._role_manager.reset(turn_ctx)
+
+        memory_store = self.context.memory
+        assert memory_store is not None  # always injected by build_agent
+
+        # Run memory pre-checks (conflict resolution and live corrections).
+        # These are only meaningful when the memory subsystem is wired up;
+        # skip when memory is disabled to avoid exercising stub/mock stores.
+        pending_conflict_question: str | None = None
+        if self.config.memory_enabled:
+            conflict_reply, correction_result = await self._pre_turn_memory(msg, memory_store)
+            if conflict_reply.get("handled"):
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=str(conflict_reply.get("message", "")),
+                )
+
+            if correction_result and correction_result.get("question"):
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=str(correction_result.get("question", "")),
+                )
+
+            # Defer conflict questions until after the agent answers
+            pending_conflict_question = memory_store.conflict_mgr.ask_user_for_conflict(
+                user_message=msg.content,
+            )
+
+        # Trigger background consolidation if needed
+        unconsolidated = len(session.messages) - session.last_consolidated
+        if self.config.memory_enabled and unconsolidated >= self.config.memory.window:
+            self._consolidator.submit(session.key, session, self.provider, self.model)
+
+        self._turn_context.set_tool_context(
+            msg.channel, msg.chat_id, msg.metadata.get("message_id")
+        )
+        self._turn_context.ensure_scratchpad(key, self.workspace)
+        if message_tool := self.tools.get("message"):
+            message_tool.on_turn_start()
+
+        history = session.get_history(max_messages=self.config.memory.window)
+        verify_before_answer = await self.verifier.should_force_verification(msg.content)
+        initial_messages = await self.context.build_messages(
+            history=history,
+            current_message=msg.content,
+            media=msg.media if msg.media else None,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            verify_before_answer=verify_before_answer,
+        )
+
+        # Build canonical event builder scoped to this request
+        _turn_num = len(session.messages) // 2
+        _canonical_message_id = "msg_asst_" + uuid.uuid4().hex[:12]
+        _canonical_builder = CanonicalEventBuilder(
+            run_id=TraceContext.get()["request_id"] or key,
+            session_id=key,
+            turn_id=f"turn_{_turn_num:05d}",
+            actor_id=self.role_name,
+        )
+
+        # Build base metadata dict once for this turn
+        _base_meta: dict[str, Any] = dict(msg.metadata or {})
+        _base_meta["_progress"] = True
+
+        _bus_progress = make_bus_progress(
+            bus=self.bus,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            base_meta=_base_meta,
+            canonical_builder=_canonical_builder,
+        )
+
+        # Emit run.start + message.start before the agent loop begins
+        for _start_event in (
+            _canonical_builder.run_start(),
+            _canonical_builder.message_start(_canonical_message_id),
+        ):
+            await self.bus.publish_outbound(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="",
+                    metadata={"_progress": True, "_canonical": _start_event},
+                )
+            )
+
+        final_content, tools_used, all_msgs = await self._run_orchestrator(
+            initial_messages,
+            on_progress=((on_progress or _bus_progress) if self.config.streaming_enabled else None),
+        )
+
+        if final_content is None:
+            _recovered = await self.verifier.attempt_recovery(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                all_msgs=all_msgs,
+                model=None,
+                temperature=None,
+            )
+            if isinstance(_recovered, str):
+                final_content = _recovered
+
+        if final_content is None:
+            # Ensure all_msgs is a real list for build_no_answer_explanation.
+            _safe_msgs: list[dict[str, Any]] = all_msgs if isinstance(all_msgs, list) else []
+            final_content = AnswerVerifier.build_no_answer_explanation(msg.content, _safe_msgs)
+            _added = self.context.add_assistant_message(_safe_msgs, final_content)
+            if isinstance(_added, list):
+                all_msgs = _added
+
+        # Ensure final_content is a real string for downstream consumers.
+        if not isinstance(final_content, str):
+            final_content = str(final_content) if final_content else ""
+
+        # Sync token counters from the loop (where _run_agent_loop updates them)
+        self._sync_token_counters()
+
+        # Annotate the active langfuse span with request metadata + output.
+        # Resolve update_current_span via _span_module (late binding) so that
+        # tests patching nanobot.agent.loop.update_current_span take effect.
+        _update_span = (
+            getattr(self._span_module, "update_current_span", update_current_span)
+            if self._span_module is not None
+            else update_current_span
+        )
+        _update_span(
+            output=final_content[:500] if final_content else None,
+            metadata={
+                "channel": msg.channel,
+                "sender": msg.sender_id,
+                "model": self.model,
+                "role": self.role_name,
+                "session_key": key,
+                "llm_calls": self._turn_llm_calls,
+                "prompt_tokens": self._turn_tokens_prompt,
+                "completion_tokens": self._turn_tokens_completion,
+                "duration_ms": round((time.monotonic() - t0_request) * 1000),
+            },
+        )
+
+        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
+        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+
+        # Request audit line
+        duration_ms = (time.monotonic() - t0_request) * 1000
+        bind_trace().info(
+            "request_complete | {ch}:{cid} | {dur:.0f}ms | model={mdl}"
+            " | tools={tc} | len={rlen}"
+            " | llm_calls={lc} | prompt_tokens={pt} | completion_tokens={ct}",
+            ch=msg.channel,
+            cid=msg.chat_id,
+            dur=duration_ms,
+            mdl=self.model,
+            tc=len(tools_used),
+            rlen=len(final_content),
+            lc=self._turn_llm_calls,
+            pt=self._turn_tokens_prompt,
+            ct=self._turn_tokens_completion,
+        )
+
+        if isinstance(all_msgs, list):
+            self._save_turn(session, all_msgs, 1 + len(history))
+        self.sessions.save(session)
+
+        # Micro-extraction: per-turn memory extraction (async, non-blocking)
+        # Only on the primary path where agent produced a substantive response.
+        # The system-message path (~line 209) is intentionally excluded.
+        if self._micro_extractor is not None and final_content:
+            await self._micro_extractor.submit(
+                user_message=msg.content,
+                assistant_message=final_content,
+            )
+
+        # Append deferred conflict question after answering
+        if pending_conflict_question:
+            final_content += "\n\n---\n" + pending_conflict_question
+
+        if msg_tool := self.tools.get("message"):
+            if msg_tool.sent_in_turn:
+                return None
+
+        response_meta = dict(msg.metadata or {})
+        response_meta["usage"] = {
+            "prompt_tokens": self._turn_tokens_prompt,
+            "completion_tokens": self._turn_tokens_completion,
+        }
+        response_meta["_canonical"] = _canonical_builder.message_end(
+            _canonical_message_id,
+            input_tokens=self._turn_tokens_prompt,
+            output_tokens=self._turn_tokens_completion,
+        )
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=final_content,
+            metadata=response_meta,
+        )
 
     def _sync_token_counters(self) -> None:
         """Pull token counters from the last ``TurnResult``."""
@@ -477,14 +396,8 @@ class MessageProcessor:
         state = TurnState(
             messages=messages,
             user_text=user_text,
-            classification_result=self.classification_result,
             tools_def_cache=list(self.tools.get_definitions()),
-            active_model=self._active_model,
-            active_temperature=self._active_temperature,
-            active_max_iterations=self._active_max_iterations,
-            active_role_name=self._active_role_name,
         )
-        self.classification_result = None  # consumed
         result = await self.orchestrator.run(state, on_progress)
         self._last_turn_result = result  # stored for _sync_token_counters
 
@@ -576,10 +489,9 @@ class MessageProcessor:
 
     async def _consolidate_memory(self, session: Session, archive_all: bool = False) -> bool:
         """Delegate to ConsolidationOrchestrator."""
-        effective_model = self._active_model if self._active_model is not None else self.model
         if archive_all:
             return await self._consolidator.consolidate_and_wait(
-                session.key, session, self.provider, effective_model, archive_all=True
+                session.key, session, self.provider, self.model, archive_all=True
             )
-        self._consolidator.submit(session.key, session, self.provider, effective_model)
+        self._consolidator.submit(session.key, session, self.provider, self.model)
         return True

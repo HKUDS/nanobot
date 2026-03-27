@@ -20,8 +20,6 @@ from nanobot.agent.failure import ToolCallTracker
 
 if TYPE_CHECKING:
     from nanobot.agent.callbacks import ProgressCallback
-    from nanobot.coordination.coordinator import ClassificationResult
-    from nanobot.coordination.delegation_advisor import DelegationAction
 
 
 @dataclass(slots=True)
@@ -30,26 +28,15 @@ class TurnState:
 
     messages: list[dict[str, Any]]
     user_text: str
-    classification_result: ClassificationResult | None = None
     disabled_tools: set[str] = field(default_factory=set)
     tracker: ToolCallTracker = field(default_factory=ToolCallTracker)
     nudged_for_final: bool = False
     turn_tool_calls: int = 0
     last_tool_call_msg_idx: int = -1
-    last_delegation_advice: DelegationAction | None = None
-    has_plan: bool = False
-    plan_enforced: bool = False
     consecutive_errors: int = 0
     iteration: int = 0
     tools_def_cache: list[dict[str, Any]] = field(default_factory=list)
     tools_def_snapshot: frozenset[str] = field(default_factory=frozenset)
-
-    # Per-turn role overrides (None = use component construction-time defaults).
-    # Set by MessageProcessor.set_active_settings() before each turn.
-    active_model: str | None = None
-    active_temperature: float | None = None
-    active_max_iterations: int | None = None
-    active_role_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,19 +77,6 @@ class Processor(Protocol):
     ``agent_components.py`` can reference the type without importing
     the concrete class — breaking the import cycle by construction.
     """
-
-    def set_role_manager(self, role_manager: Any) -> None: ...
-
-    def set_classification_result(self, result: Any) -> None: ...
-
-    def set_active_settings(
-        self,
-        *,
-        model: str,
-        temperature: float,
-        max_iterations: int,
-        role_name: str,
-    ) -> None: ...
 
     async def process(
         self,

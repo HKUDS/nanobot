@@ -1,7 +1,7 @@
 """Unified capability registry (ADR-009).
 
 ``CapabilityRegistry`` composes the existing ``ToolRegistry``,
-``SkillsLoader``, and ``AgentRegistry`` behind a single facade that
+``SkillsLoader``, and agent registry behind a single facade that
 tracks availability, health, and metadata for every capability the
 agent can use.
 
@@ -18,9 +18,6 @@ from loguru import logger
 
 from nanobot.tools.base import Tool, ToolResult
 from nanobot.tools.registry import ToolRegistry
-
-if TYPE_CHECKING:
-    from nanobot.coordination.registry import AgentRegistry
 
 if TYPE_CHECKING:
     from nanobot.config.schema import AgentRoleConfig
@@ -72,7 +69,7 @@ class Capability:
 
 
 class CapabilityRegistry:
-    """Unified registry that composes ToolRegistry, SkillsLoader, and AgentRegistry.
+    """Unified registry that composes ToolRegistry, SkillsLoader, and agent registry.
 
     This is the single source of truth for "what can the agent do right now".
     Internally it delegates tool execution to ``ToolRegistry`` and delegates
@@ -83,7 +80,7 @@ class CapabilityRegistry:
         self,
         tool_registry: ToolRegistry | None = None,
         skills_loader: SkillsLoader | None = None,
-        agent_registry: AgentRegistry | None = None,
+        agent_registry: Any | None = None,
     ) -> None:
         self._tools = tool_registry if tool_registry is not None else ToolRegistry()
         self._skills = skills_loader
@@ -103,7 +100,7 @@ class CapabilityRegistry:
         return self._skills
 
     @property
-    def agent_registry(self) -> AgentRegistry | None:
+    def agent_registry(self) -> Any | None:
         return self._agents
 
     # ------------------------------------------------------------------

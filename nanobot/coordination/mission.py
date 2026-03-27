@@ -39,7 +39,6 @@ from nanobot.tools.tool_loop import run_tool_loop
 if TYPE_CHECKING:
     from nanobot.bus.queue import MessageBus
     from nanobot.config.sub_agent import SubAgentConfig
-    from nanobot.coordination.coordinator import Coordinator
     from nanobot.coordination.scratchpad import Scratchpad
     from nanobot.providers.base import LLMProvider
     from nanobot.tools.base import Tool
@@ -108,8 +107,7 @@ class MissionManager:
         self.result_max_chars = result_max_chars
         self._delegation_tools: dict[str, Any] = delegation_tools or {}
 
-        # Set lazily by AgentLoop when coordinator is available
-        self.coordinator: Coordinator | None = None
+        # Coordinator removed — missions always use the default "general" role.
         # Set per-session by AgentLoop
         self.scratchpad: Scratchpad | None = None
         # MCP tools injected lazily by AgentLoop after _connect_mcp()
@@ -331,8 +329,6 @@ class MissionManager:
 
     async def _resolve_role(self, task: str) -> AgentRoleConfig:
         """Resolve the specialist role for this mission."""
-        if self.coordinator:
-            return await self.coordinator.route(task)
         return AgentRoleConfig(
             name="general",
             description="General-purpose assistant",

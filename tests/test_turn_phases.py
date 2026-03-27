@@ -1,52 +1,12 @@
 """Unit tests for turn_phases module helpers.
 
-Tests the pure functions extracted from turn_orchestrator.py.
-ActPhase and ReflectPhase integration is covered indirectly by
-test_turn_orchestrator.py.
+Tests _dynamic_preserve_recent extracted from turn_orchestrator.py.
+ActPhase integration is covered indirectly by test_turn_orchestrator.py.
 """
 
 from __future__ import annotations
 
-import pytest
-
-from nanobot.agent.turn_phases import _dynamic_preserve_recent, _needs_planning
-
-# ---------------------------------------------------------------------------
-# _needs_planning
-# ---------------------------------------------------------------------------
-
-
-class TestNeedsPlanning:
-    """Heuristic planning detection for user messages."""
-
-    def test_empty_string_returns_false(self) -> None:
-        assert _needs_planning("") is False
-
-    def test_short_greeting_returns_false(self) -> None:
-        assert _needs_planning("Hello!") is False
-        assert _needs_planning("Hi there") is False
-
-    def test_multi_step_task_returns_true(self) -> None:
-        assert _needs_planning("Please research the topic and then write a summary") is True
-
-    def test_numbered_list_returns_true(self) -> None:
-        assert _needs_planning("I need you to:\n1. Read the file\n2. Update it") is True
-
-    def test_single_action_below_threshold(self) -> None:
-        # Short but above greeting length, no planning signals
-        assert _needs_planning("What is the weather today?") is False
-
-    @pytest.mark.parametrize(
-        "text",
-        [
-            "First read the config and then update it",
-            "Create a new file and implement the feature",
-            "Analyze the logs and compare with yesterday",
-        ],
-    )
-    def test_various_planning_signals(self, text: str) -> None:
-        assert _needs_planning(text) is True
-
+from nanobot.agent.turn_phases import _dynamic_preserve_recent
 
 # ---------------------------------------------------------------------------
 # _dynamic_preserve_recent
