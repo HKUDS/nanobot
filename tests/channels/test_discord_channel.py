@@ -71,6 +71,20 @@ class _FakePartialMessage:
         self.id = message_id
 
 
+class _FakeReactionMessage:
+    # Message double that records emoji operations for reaction-feedback assertions.
+    def __init__(self, message_id: int) -> None:
+        self.id = message_id
+        self.added_reactions: list[str] = []
+        self.removed_reactions: list[tuple[str, object]] = []
+
+    async def add_reaction(self, emoji: str) -> None:
+        self.added_reactions.append(emoji)
+
+    async def remove_reaction(self, emoji: str, user: object) -> None:
+        self.removed_reactions.append((emoji, user))
+
+
 class _FakeChannel:
     # Channel double that records outbound payloads and typing activity.
     def __init__(self, channel_id: int = 123) -> None:
@@ -78,6 +92,7 @@ class _FakeChannel:
         self.sent_payloads: list[dict] = []
         self.trigger_typing_calls = 0
         self.typing_enter_hook = None
+        self.messages: dict[int, object] = {}
 
     async def send(self, **kwargs) -> None:
         payload = dict(kwargs)
@@ -88,6 +103,12 @@ class _FakeChannel:
 
     def get_partial_message(self, message_id: int) -> _FakePartialMessage:
         return _FakePartialMessage(message_id)
+
+    async def fetch_message(self, message_id: int):
+        msg = self.messages.get(message_id)
+        if msg is None:
+            raise RuntimeError("message not found")
+        return msg
 
     def typing(self):
         channel = self
@@ -149,16 +170,15 @@ def _make_message(
     # Factory for incoming Discord message objects with optional guild/reply/attachments.
     guild = SimpleNamespace(id=guild_id) if guild_id is not None else None
     reference = SimpleNamespace(message_id=reply_to) if reply_to is not None else None
-    return SimpleNamespace(
-        author=SimpleNamespace(id=author_id, bot=author_bot),
-        channel=_FakeChannel(channel_id),
-        content=content,
-        guild=guild,
-        mentions=mentions or [],
-        attachments=attachments or [],
-        reference=reference,
-        id=message_id,
-    )
+    msg = _FakeReactionMessage(message_id)
+    msg.author = SimpleNamespace(id=author_id, bot=author_bot)
+    msg.channel = _FakeChannel(channel_id)
+    msg.content = content
+    msg.guild = guild
+    msg.mentions = mentions or []
+    msg.attachments = attachments or []
+    msg.reference = reference
+    return msg
 
 
 @pytest.mark.asyncio
@@ -279,11 +299,13 @@ async def test_on_message_accepts_allowlisted_dm() -> None:
 
     channel._handle_message = capture_handle  # type: ignore[method-assign]
 
-    await channel._on_message(_make_message(author_id=123, channel_id=456, message_id=789))
+    message = _make_message(author_id=123, channel_id=456, message_id=789)
+    await channel._on_message(message)
 
     assert len(handled) == 1
     assert handled[0]["chat_id"] == "456"
     assert handled[0]["metadata"] == {"message_id": "789", "guild_id": None, "reply_to": None}
+    assert message.added_reactions == ["👀"]
 
 
 @pytest.mark.asyncio
@@ -301,9 +323,11 @@ async def test_on_message_ignores_unmentioned_guild_message() -> None:
 
     channel._handle_message = capture_handle  # type: ignore[method-assign]
 
-    await channel._on_message(_make_message(guild_id=1, content="hello everyone"))
+    message = _make_message(guild_id=1, content="hello everyone")
+    await channel._on_message(message)
 
     assert handled == []
+    assert message.added_reactions == []
 
 
 @pytest.mark.asyncio
@@ -321,17 +345,17 @@ async def test_on_message_accepts_mentioned_guild_message() -> None:
 
     channel._handle_message = capture_handle  # type: ignore[method-assign]
 
-    await channel._on_message(
-        _make_message(
-            guild_id=1,
-            content="<@999> hello",
-            mentions=[SimpleNamespace(id=999)],
-            reply_to=321,
-        )
+    message = _make_message(
+        guild_id=1,
+        content="<@999> hello",
+        mentions=[SimpleNamespace(id=999)],
+        reply_to=321,
     )
+    await channel._on_message(message)
 
     assert len(handled) == 1
     assert handled[0]["metadata"]["reply_to"] == "321"
+    assert message.added_reactions == ["👀"]
 
 
 @pytest.mark.asyncio
@@ -632,6 +656,54 @@ async def test_send_stops_typing_after_send() -> None:
     await asyncio.sleep(0)
 
     assert channel._typing_tasks == {}
+
+
+@pytest.mark.asyncio
+async def test_send_updates_source_message_reactions_on_final_response() -> None:
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = _FakeDiscordClient(channel, intents=None)
+    source_message = _FakeReactionMessage(message_id=789)
+    source_channel = _FakeChannel(channel_id=123)
+    source_channel.messages[789] = source_message
+    client.channels[123] = source_channel
+    channel._client = client
+    channel._running = True
+
+    await channel.send(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="done",
+            metadata={"message_id": "789"},
+        )
+    )
+
+    assert source_message.removed_reactions == [("👀", client.user)]
+    assert source_message.added_reactions == ["✅"]
+
+
+@pytest.mark.asyncio
+async def test_send_progress_does_not_update_source_message_reactions() -> None:
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = _FakeDiscordClient(channel, intents=None)
+    source_message = _FakeReactionMessage(message_id=789)
+    source_channel = _FakeChannel(channel_id=123)
+    source_channel.messages[789] = source_message
+    client.channels[123] = source_channel
+    channel._client = client
+    channel._running = True
+
+    await channel.send(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="working...",
+            metadata={"message_id": "789", "_progress": True},
+        )
+    )
+
+    assert source_message.removed_reactions == []
+    assert source_message.added_reactions == []
 
 
 @pytest.mark.asyncio

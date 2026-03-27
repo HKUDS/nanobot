@@ -42,6 +42,8 @@ class DiscordConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     intents: int = 37377
     group_policy: Literal["mention", "open"] = "mention"
+    react_emoji: str = "👀"
+    done_emoji: str = "✅"
 
 
 if DISCORD_AVAILABLE:
@@ -305,12 +307,16 @@ class DiscordChannel(BaseChannel):
             return
 
         is_progress = bool((msg.metadata or {}).get("_progress"))
+        send_ok = False
         try:
             await client.send_outbound(msg)
+            send_ok = True
         except Exception as e:
             logger.error("Error sending Discord message: {}", e)
         finally:
             if not is_progress:
+                if send_ok:
+                    await self._mark_done_reaction(msg)
                 await self._stop_typing(msg.chat_id)
 
     async def _handle_discord_message(self, message: discord.Message) -> None:
@@ -330,6 +336,7 @@ class DiscordChannel(BaseChannel):
         metadata = self._build_inbound_metadata(message)
 
         await self._start_typing(message.channel)
+        await self._add_reaction(message, self.config.react_emoji)
 
         try:
             await self._handle_message(
@@ -459,6 +466,64 @@ class DiscordChannel(BaseChannel):
         channel_ids = list(self._typing_tasks)
         for channel_id in channel_ids:
             await self._stop_typing(channel_id)
+
+    async def _add_reaction(self, message: discord.Message, emoji: str) -> None:
+        """Add a reaction to a message (best-effort)."""
+        if not emoji:
+            return
+        try:
+            await message.add_reaction(emoji)
+        except Exception as e:
+            logger.debug("Discord add_reaction failed message={} emoji={}: {}", message.id, emoji, e)
+
+    async def _remove_reaction(self, message: discord.Message, emoji: str) -> None:
+        """Remove the bot's own reaction from a message (best-effort)."""
+        if not emoji:
+            return
+        client = self._client
+        user = client.user if client else None
+        if user is None:
+            return
+        try:
+            await message.remove_reaction(emoji, user)
+        except Exception as e:
+            logger.debug("Discord remove_reaction failed message={} emoji={}: {}", message.id, emoji, e)
+
+    async def _mark_done_reaction(self, msg: OutboundMessage) -> None:
+        """Flip in-progress reaction to done reaction on the source message (best-effort)."""
+        client = self._client
+        if client is None:
+            return
+
+        meta = msg.metadata or {}
+        message_id_raw = meta.get("message_id")
+        if not message_id_raw:
+            return
+
+        try:
+            channel_id = int(msg.chat_id)
+            message_id = int(str(message_id_raw))
+        except (TypeError, ValueError):
+            return
+
+        channel = client.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await client.fetch_channel(channel_id)
+            except Exception:
+                return
+
+        fetch_message = getattr(channel, "fetch_message", None)
+        if not callable(fetch_message):
+            return
+
+        try:
+            source_message = await fetch_message(message_id)
+        except Exception:
+            return
+
+        await self._remove_reaction(source_message, self.config.react_emoji)
+        await self._add_reaction(source_message, self.config.done_emoji)
 
     async def _reset_runtime_state(self, close_client: bool) -> None:
         """Reset client and typing state."""
