@@ -87,19 +87,6 @@ class Processor(Protocol):
     the concrete class — breaking the import cycle by construction.
     """
 
-    def set_role_manager(self, role_manager: Any) -> None: ...
-
-    def set_classification_result(self, result: Any) -> None: ...
-
-    def set_active_settings(
-        self,
-        *,
-        model: str,
-        temperature: float,
-        max_iterations: int,
-        role_name: str,
-    ) -> None: ...
-
     async def process(
         self,
         message: Any,

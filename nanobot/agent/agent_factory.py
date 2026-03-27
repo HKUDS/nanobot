@@ -210,7 +210,7 @@ def build_agent(
     mcp_servers: dict | None = None,
     channels_config: ChannelsConfig | None = None,
     role_config: AgentRoleConfig | None = None,
-    routing_config: RoutingConfig | None = None,
+    routing_config: RoutingConfig | None = None,  # accepted but unused; routing removed
     tool_registry: ToolRegistry | None = None,
 ) -> AgentLoop:
     """Construct a fully wired ``AgentLoop`` instance.
@@ -227,8 +227,6 @@ def build_agent(
     from nanobot.context.context import ContextBuilder
     from nanobot.context.prompt_loader import prompts
     from nanobot.coordination.delegation import DelegationConfig, DelegationDispatcher
-    from nanobot.coordination.delegation_advisor import DelegationAdvisor
-    from nanobot.coordination.role_switching import TurnRoleManager
     from nanobot.memory import MemoryStore
     from nanobot.session.manager import SessionManager as _SessionManager
 
@@ -313,43 +311,7 @@ def build_agent(
         delegate_tool_factory=DelegateTool,
     )
 
-    # 8.5 Construct Coordinator (if routing is enabled)
-    coordinator: Coordinator | None = None
-    if routing_config and routing_config.enabled:
-        from nanobot.coordination.coordinator import DEFAULT_ROLES, Coordinator
-
-        for role in DEFAULT_ROLES:
-            _tool_build.capabilities.register_role(role)
-        for role_cfg in routing_config.roles:
-            _tool_build.capabilities.merge_register_role(role_cfg)
-        _agent_registry = _tool_build.capabilities.agent_registry
-        assert _agent_registry is not None
-        _agent_registry.set_default_role(routing_config.default_role)
-        coordinator = Coordinator(
-            provider=provider,
-            registry=_agent_registry,
-            classifier_model=routing_config.classifier_model,
-            default_role=routing_config.default_role,
-            confidence_threshold=routing_config.confidence_threshold,
-        )
-        dispatcher.coordinator = coordinator
-        _tool_build.missions.coordinator = coordinator
-
-    # 8.6 Construct MessageRouter (if routing is enabled)
-    router = None
-    if coordinator is not None:
-        from nanobot.coordination.router import MessageRouter
-
-        router = MessageRouter(
-            coordinator=coordinator,
-            routing_config=routing_config,
-            dispatcher=dispatcher,
-        )
-
-    # 9. Construct DelegationAdvisor
-    delegation_advisor = DelegationAdvisor()
-
-    # 10. Construct StreamingLLMCaller
+    # 9. Construct StreamingLLMCaller
     llm_caller = StreamingLLMCaller(
         provider=provider,
         model=model,
@@ -429,7 +391,6 @@ def build_agent(
         role_name=role_config.name if role_config else "",
         provider=provider,
         model=model,
-        router=router,
     )
 
     # 14. Pack _AgentComponents (nested groups)
@@ -442,7 +403,6 @@ def build_agent(
         role_name=role_config.name if role_config else "",
     )
     _infra = _InfraConfig(
-        routing_config=routing_config,
         channels_config=channels_config,
         mcp_servers=mcp_servers or {},
         brave_api_key=brave_api_key,
@@ -461,7 +421,6 @@ def build_agent(
         missions=_tool_build.missions,
         consolidator=consolidator,
         dispatcher=dispatcher,
-        delegation_advisor=delegation_advisor,
         llm_caller=llm_caller,
         verifier=verifier,
         orchestrator=orchestrator,
@@ -474,17 +433,10 @@ def build_agent(
         core=_core,
         infra=_infra,
         subsystems=_subs,
-        coordinator=coordinator,
-        role_manager=None,
     )
 
     # 15. Construct AgentLoop
     loop = AgentLoop(components=components)
 
-    # 16. Post-construction wiring
-    role_manager = TurnRoleManager(loop)
-    loop._role_manager = role_manager
-    loop._processor.set_role_manager(role_manager)  # public method
-
-    # 17. Return loop
+    # 16. Return loop
     return loop
