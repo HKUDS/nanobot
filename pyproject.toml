@@ -1,6 +1,6 @@
 [project]
 name = "nanobot-ai"
-version = "0.2.0"
+version = "1.0.0"
 description = "A personal AI assistant framework"
 requires-python = ">=3.10"
 license = {text = "MIT"}
