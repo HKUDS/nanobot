@@ -7,7 +7,7 @@ import threading
 from functools import wraps
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory, Response, render_template
+from flask import Flask, jsonify, request, send_from_directory, Response, render_template, current_app
 from flask_cors import CORS
 
 from nanobot.config.loader import get_config_path, load_config, save_config
@@ -87,15 +87,15 @@ def require_auth(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         auth_token = request.headers.get("X-Auth-Token") or request.args.get("token")
-        expected_token = request.app.config.get("AUTH_TOKEN", "")
-        
+        expected_token = current_app.config.get("AUTH_TOKEN", "")
+
         # If no token is configured, allow access (for local dev)
         if not expected_token:
             return f(*args, **kwargs)
-        
+
         if not auth_token or auth_token != expected_token:
             return jsonify({"error": "Unauthorized"}), 401
-        
+
         return f(*args, **kwargs)
     return decorated_function
 
