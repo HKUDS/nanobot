@@ -431,8 +431,19 @@ class TelegramChannel(BaseChannel):
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
-            for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
-                await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
+            is_tool_hint = bool(msg.metadata.get("_tool_hint"))
+            chunk_len = TELEGRAM_MAX_MESSAGE_LEN - 4 if is_tool_hint else TELEGRAM_MAX_MESSAGE_LEN
+            for chunk in split_message(msg.content, chunk_len):
+                if is_tool_hint:
+                    chunk = f"`{chunk}`"
+                await self._send_text(
+                    chat_id,
+                    chunk,
+                    reply_params,
+                    thread_kwargs,
+                    parse_html=not is_tool_hint,
+                    disable_notification=is_tool_hint,
+                )
 
     async def _call_with_retry(self, fn, *args, **kwargs):
         """Call an async Telegram API function with retry on pool/network timeout."""
@@ -455,14 +466,29 @@ class TelegramChannel(BaseChannel):
         text: str,
         reply_params=None,
         thread_kwargs: dict | None = None,
+        *,
+        parse_html: bool = True,
+        disable_notification: bool = False,
     ) -> None:
-        """Send a plain text message with HTML fallback."""
+        """Send text, using Telegram HTML formatting when requested."""
+        if not parse_html:
+            await self._call_with_retry(
+                self._app.bot.send_message,
+                chat_id=chat_id,
+                text=text,
+                reply_parameters=reply_params,
+                disable_notification=disable_notification,
+                **(thread_kwargs or {}),
+            )
+            return
+
         try:
             html = _markdown_to_telegram_html(text)
             await self._call_with_retry(
                 self._app.bot.send_message,
                 chat_id=chat_id, text=html, parse_mode="HTML",
                 reply_parameters=reply_params,
+                disable_notification=disable_notification,
                 **(thread_kwargs or {}),
             )
         except Exception as e:
@@ -473,6 +499,7 @@ class TelegramChannel(BaseChannel):
                     chat_id=chat_id,
                     text=text,
                     reply_parameters=reply_params,
+                    disable_notification=disable_notification,
                     **(thread_kwargs or {}),
                 )
             except Exception as e2:

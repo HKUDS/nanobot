@@ -473,6 +473,33 @@ async def test_send_reply_infers_topic_from_message_id_cache() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_tool_hint_uses_silent_plain_text_with_code_markers() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content='web_search("test query")',
+            metadata={"_tool_hint": True},
+        )
+    )
+
+    assert channel._app.bot.sent_messages == [
+        {
+            "chat_id": 123,
+            "text": '`web_search("test query")`',
+            "reply_parameters": None,
+            "disable_notification": True,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_send_remote_media_url_after_security_validation(monkeypatch) -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
