@@ -36,6 +36,7 @@ class MemoryIndex:
         """Check once at init whether sqlite-vec can be loaded."""
         try:
             import sqlite_vec as sv
+
             conn = sqlite3.connect(":memory:")
             conn.enable_load_extension(True)
             sv.load(conn)
@@ -50,6 +51,7 @@ class MemoryIndex:
         conn.row_factory = sqlite3.Row
         if self._vec_available:
             import sqlite_vec
+
             conn.enable_load_extension(True)
             sqlite_vec.load(conn)
             conn.enable_load_extension(False)
@@ -72,9 +74,7 @@ class MemoryIndex:
                     f"CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec "
                     f"USING vec0(embedding FLOAT[{dim}])"
                 )
-            row = conn.execute(
-                "SELECT 1 FROM index_meta WHERE key='embedding_model'"
-            ).fetchone()
+            row = conn.execute("SELECT 1 FROM index_meta WHERE key='embedding_model'").fetchone()
             if not row:
                 conn.execute(
                     "INSERT INTO index_meta(key, value) VALUES (?, ?)",
@@ -112,15 +112,13 @@ class MemoryIndex:
 
     def _setup_provider(self) -> None:
         if self.config.embedding.provider == "ollama":
-            try:
-                from nanobot.memory_index.embeddings import OllamaEmbeddingProvider
-                self._provider = OllamaEmbeddingProvider(
-                    base_url=self.config.embedding.base_url,
-                    model=self.config.embedding.model,
-                    batch_size=self.config.embedding.batch_size,
-                )
-            except ImportError:
-                logger.debug("Embedding provider not yet available, skipping provider setup")
+            from nanobot.memory_index.embeddings import OllamaEmbeddingProvider
+
+            self._provider = OllamaEmbeddingProvider(
+                base_url=self.config.embedding.base_url,
+                model=self.config.embedding.model,
+                batch_size=self.config.embedding.batch_size,
+            )
 
     async def startup_index(self) -> None:
         """Re-index memory files at startup (skips unchanged files)."""
@@ -136,7 +134,10 @@ class MemoryIndex:
     async def _index_file(self, path: Path) -> None:
         """Index a single file if its content has changed."""
         from nanobot.memory_index.indexer import (
-            chunk_history_file, chunk_memory_file, file_hash, write_chunks,
+            chunk_history_file,
+            chunk_memory_file,
+            file_hash,
+            write_chunks,
         )
 
         current_hash = await asyncio.to_thread(file_hash, path)
@@ -144,9 +145,7 @@ class MemoryIndex:
 
         conn = self._open_conn()
         try:
-            row = conn.execute(
-                "SELECT hash FROM files WHERE path = ?", [str(path)]
-            ).fetchone()
+            row = conn.execute("SELECT hash FROM files WHERE path = ?", [str(path)]).fetchone()
         finally:
             conn.close()
 
@@ -161,6 +160,7 @@ class MemoryIndex:
         embeddings = None
         if self._vec_available and self._provider and chunks:
             from nanobot.memory_index.embeddings import EmbeddingUnavailableError
+
             try:
                 embeddings = await self._provider.embed_batch([c.text for c in chunks])
             except EmbeddingUnavailableError:
