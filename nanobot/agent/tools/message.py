@@ -13,6 +13,7 @@ class _MessageTurnState:
     channel: str
     chat_id: str
     message_id: str | None
+    metadata: dict[str, Any] = field(default_factory=dict)
     sent_targets: set[tuple[str, str]] = field(default_factory=set)
 
 
@@ -46,12 +47,16 @@ class MessageTool(Tool):
             self._turn_state.set(state)
         return state
 
-    def set_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
+    def set_context(
+        self, channel: str, chat_id: str, message_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         """Set the current message context."""
         state = self._get_turn_state()
         state.channel = channel
         state.chat_id = chat_id
         state.message_id = message_id
+        state.metadata = dict(metadata or {})
 
     def set_send_callback(self, callback: Callable[[OutboundMessage], Awaitable[None]]) -> None:
         """Set the callback for sending messages."""
@@ -124,14 +129,16 @@ class MessageTool(Tool):
         if not self._send_callback:
             return "Error: Message sending not configured"
 
+        metadata = dict(state.metadata)
+        if message_id is not None:
+            metadata["message_id"] = message_id
+
         msg = OutboundMessage(
             channel=channel,
             chat_id=chat_id,
             content=content,
             media=media or [],
-            metadata={
-                "message_id": message_id,
-            },
+            metadata=metadata,
         )
 
         try:
