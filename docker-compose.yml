@@ -22,6 +22,28 @@ services:
           cpus: '0.25'
           memory: 256M
   
+  nanobot-twilio:
+    container_name: nanobot-twilio
+    build:
+      context: .
+      dockerfile: Dockerfile.twilio
+    volumes:
+      - ~/.nanobot:/root/.nanobot
+    command: ["gateway"]
+    restart: unless-stopped
+    profiles:
+      - twilio
+    ports:
+      - 18790:18790
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
   nanobot-cli:
     <<: *common-config
     profiles:
