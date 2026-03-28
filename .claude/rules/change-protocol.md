@@ -1,3 +1,10 @@
+---
+description: "Change protocol for nanobot code changes"
+globs:
+  - "nanobot/**/*.py"
+  - "tests/**/*.py"
+---
+
 # Change Protocol
 
 ## Before implementing any change (including trivial ones)
@@ -35,7 +42,7 @@
    temperature, role_name, etc.), verify the extracted component has a propagation
    path for runtime updates — not a stale copy. Add an integration test that
    modifies the field on the parent, runs a turn, and asserts the component used
-   the updated value. See `tests/contract/test_role_propagation.py` for the pattern.
+   the updated value. See `tests/contract/test_role_propagation.py` for an example.
 
 ## After completing changes
 
@@ -68,7 +75,7 @@ All three greps must return zero matches (excluding comments and docs/).
 - Tests first, then extract
 - Preserve `__all__` exports without an ADR
 - No speculative abstraction
-- Run `make lint && make typecheck` after every edit
+- Run `make check` before committing
 
 ## Before Adding Any File — Placement Gate
 
@@ -105,18 +112,7 @@ All three greps must return zero matches (excluding comments and docs/).
 
 ## Package Growth Limits
 
-**Hard limits — violations are bugs:**
+Enforced by `scripts/check_structure.py` (hard gate in pre-commit + CI):
+- Files per package ≤ 15, exports ≤ 12, file LOC ≤ 500
 
-| Metric | Threshold |
-|--------|-----------|
-| Top-level `.py` files in a package (excluding `__init__.py`) | <=15 |
-| `__init__.py` exports (`__all__` entries) | <=12 |
-| Single file LOC | <=500 |
-
-**Advisory limits — trigger a design review:**
-
-| Metric | Threshold |
-|--------|-----------|
-| Package total LOC | > 5,000 |
-| Single file LOC | > 300 |
-| Constructor parameters | > 7 |
+Advisory (triggers design review): package LOC > 5,000, file LOC > 300, constructor params > 7.

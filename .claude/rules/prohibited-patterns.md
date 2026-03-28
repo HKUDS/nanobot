@@ -11,21 +11,22 @@ These are not suggestions — they are errors. Fix immediately if detected.
 
 ## Package structure violations
 
+Enforced by `check_imports.py` + `check_structure.py` + `check-placement.sh` hook:
+- Import direction violations, catch-all filenames, file count > 15, exports > 12
+
+**Not script-enforced (require judgment):**
 - Business logic in `agent/` that belongs in `coordination/`, `memory/`, or `tools/`
 - Direct construction of subsystems in `AgentLoop.__init__` (use `agent_factory.py`)
-- Import direction violations — outer packages importing from inner ones
 - New flat files in `memory/` that should be in a subdirectory
 - Tool implementations at `tools/` level instead of `tools/builtin/`
-- Catch-all modules (`utils.py`, `helpers.py`, `common.py`) with mixed ownership
-- A package exceeding 15 top-level `.py` files without planned extraction
-- An `__init__.py` with more than 12 `__all__` exports
 
 ## Code quality violations
 
+Enforced by `check_structure.py`: crash-barrier comments, file size > 500 LOC.
+
+**Not script-enforced:**
 - Magic numbers outside of config schema or named constants
-- `except Exception` without `# crash-barrier: <reason>` comment
 - Circular imports resolved by `TYPE_CHECKING` guards that mask a real boundary violation
-- Files exceeding 500 LOC without `# size-exception: <reason>`
 
 ## Wiring violations
 
@@ -59,6 +60,5 @@ These are not suggestions — they are errors. Fix immediately if detected.
 
 ## Growth violations
 
-- Adding a file to a package at its file-count limit without extracting first
-- Adding code that pushes a file past 500 LOC without extracting first
-- Adding an `__init__.py` export that pushes past 12 without extracting first
+Enforced by `check_structure.py` — file count, LOC, and export limits are hard gates.
+The rule: extract BEFORE adding, not after. No TODOs for future extraction.

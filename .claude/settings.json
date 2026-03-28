@@ -15,16 +15,6 @@
     ]
   },
   "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cat .claude/hooks/session-checklist.txt 2>/dev/null || echo 'No session checklist found'"
-          }
-        ]
-      }
-    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
@@ -67,6 +57,17 @@
           {
             "type": "command",
             "command": ".claude/hooks/check-placement.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "InstructionsLoaded": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/verify-rules-loaded.sh",
             "timeout": 5
           }
         ]

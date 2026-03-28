@@ -157,6 +157,20 @@ Every test file that tests tool-related code MUST include:
 Do NOT use only simple `{"cmd": "ls"}` fixtures. Real tool arguments look like:
 `{"command": "obsidian search query=\"DS10540\"", "working_dir": None, "timeout": 60}`
 
+### Quality Discipline
+
+These rules exist because the 2026-03-28 post-refactor audit found every critical
+issue would have been caught by following them:
+
+- **Never skip code quality review** on implementation tasks — dispatch a code-reviewer
+  subagent after implementation, before committing
+- **Subagent convention context**: when dispatching implementer subagents, include
+  "Conventions to follow" based on existing files in the target package
+- **Cross-component data contracts**: if component A writes dicts that component B
+  reads, write a contract test verifying the schema (required keys, types, defaults)
+- **Post-refactor audit**: after any multi-phase refactoring (>3 phases), run a
+  comprehensive review before declaring the work complete
+
 ## Memory System Architecture
 
 The memory subsystem (`nanobot/memory/`) uses a **unified SQLite storage** strategy:
