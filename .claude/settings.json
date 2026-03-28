@@ -1,4 +1,19 @@
 {
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "allow": [
+      "Bash(*)",
+      "Read",
+      "Write",
+      "Edit",
+      "Agent",
+      "SendMessage",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Skill(update-config)"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -52,6 +67,18 @@
           {
             "type": "command",
             "command": ".claude/hooks/check-placement.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/check-doc-staleness.sh",
             "timeout": 5
           }
         ]
