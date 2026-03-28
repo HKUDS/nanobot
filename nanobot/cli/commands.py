@@ -1302,7 +1302,7 @@ def web(
         from nanobot.web.server import run_server
         run_server(host=host, port=port, config_path=config_path, workspace_path=workspace_path, debug=debug)
     except ImportError as e:
-        console.print(f"[red]Error: Flask is not installed.[/red]")
+        console.print(f"[red]Error: FastAPI is not installed.[/red]")
         console.print("Install the web dependencies with: pip install nanobot-ai[web]")
         console.print(f"[dim]Details: {e}[/dim]")
         raise typer.Exit(1)

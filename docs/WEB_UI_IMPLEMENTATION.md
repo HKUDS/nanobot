@@ -7,9 +7,9 @@ Successfully implemented a complete Web UI for nanobot to provide browser-based 
 
 ### New Files
 
-#### Backend (Flask)
+#### Backend (FastAPI)
 - `nanobot/web/__init__.py` - Web module initialization
-- `nanobot/web/server.py` - Flask application with all API endpoints
+- `nanobot/web/server.py` - FastAPI application with all API endpoints
 
 #### Frontend Templates
 - `nanobot/templates/web/base.html` - Base template with sidebar navigation
@@ -30,7 +30,7 @@ Successfully implemented a complete Web UI for nanobot to provide browser-based 
 ### Modified Files
 
 #### Configuration
-- `pyproject.toml` - Added `[web]` optional dependency (Flask, Flask-CORS)
+- `pyproject.toml` - Added `[web]` optional dependency (FastAPI, uvicorn, python-multipart, jinja2)
 
 #### CLI
 - `nanobot/cli/commands.py` - Added `nanobot web` command
@@ -119,12 +119,13 @@ nanobot web [OPTIONS]
 
 ## Technical Stack
 
-- **Backend**: Flask 3.x
+- **Backend**: FastAPI 0.115+
 - **Frontend**: HTML5, CSS3, Vanilla JavaScript
 - **Styling**: Bootstrap 5.3 + Bootstrap Icons + Custom CSS
+- **Templates**: Jinja2
 - **Markdown**: Marked.js
 - **Real-time**: Server-Sent Events (SSE) for streaming
-- **CORS**: Flask-CORS
+- **Server**: uvicorn (ASGI)
 
 ## Koyeb Deployment
 
@@ -193,8 +194,8 @@ nanobot web --debug
 
 ## Testing Checklist
 
-- [x] Python syntax validation (py3 env)
-- [ ] Flask app startup
+- [x] Python syntax validation (python3 env)
+- [ ] FastAPI app startup
 - [ ] Health endpoint
 - [ ] Configuration load/save
 - [ ] Chat functionality

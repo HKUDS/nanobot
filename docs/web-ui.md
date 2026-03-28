@@ -229,7 +229,6 @@ POST /api/auth/verify
 | `PORT` | Web UI port | `18790` |
 | `MODE` | Run mode: `web` or `gateway` | `web` |
 | `NANOBOT_WEB_AUTH_TOKEN` | Authentication token | (none) |
-| `NANOBOT_WEB_SECRET` | Flask secret key | (auto-generated) |
 | `NANOBOT_CONFIG` | Custom config path | `~/.nanobot/config.json` |
 | `NANOBOT_WORKSPACE` | Custom workspace path | `~/.nanobot/workspace` |
 
@@ -273,20 +272,22 @@ CORS is enabled for API endpoints to allow browser-based access. In production, 
 
 Edit `nanobot/web/server.py`:
 ```python
-CORS(app, resources={
-    r"/api/*": {
-        "origins": ["https://your-domain.com"],
-        "methods": ["GET", "POST"],
-        "allow_headers": ["Content-Type", "X-Auth-Token"]
-    }
-})
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://your-domain.com"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "X-Auth-Token"],
+)
 ```
 
 ## Troubleshooting
 
 ### Web UI won't start
 
-1. Check if Flask is installed:
+1. Check if FastAPI is installed:
    ```bash
    pip install nanobot-ai[web]
    ```
@@ -351,7 +352,7 @@ This enables:
 nanobot/
 ├── web/
 │   ├── __init__.py          # Web module
-│   ├── server.py            # Flask application
+│   ├── server.py            # FastAPI application
 │   └── ...
 ├── templates/
 │   └── web/
