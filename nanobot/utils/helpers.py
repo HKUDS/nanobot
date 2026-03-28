@@ -126,6 +126,8 @@ def build_assistant_message(
         msg["tool_calls"] = tool_calls
     if reasoning_content is not None:
         msg["reasoning_content"] = reasoning_content
+    elif thinking_blocks is not None:
+        msg["reasoning_content"] = ""
     if thinking_blocks:
         msg["thinking_blocks"] = thinking_blocks
     return msg
