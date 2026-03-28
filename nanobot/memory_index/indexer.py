@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-TOKEN_ESTIMATE_RATIO = 4   # characters per token (heuristic)
+TOKEN_ESTIMATE_RATIO = 4  # characters per token (heuristic)
 TARGET_TOKENS = 400
 OVERLAP_TOKENS = 50
 MIN_TOKENS = 50
@@ -125,7 +125,7 @@ def _split_section(text: str, base_line: int, created_at: float) -> list[Chunk]:
     # char check here so that genuine content ("Some fact.", 10 chars) is kept
     # while near-empty bodies ("hi", 2 chars) are dropped.
     lines = stripped.splitlines()
-    body_text = "\n".join(l for l in lines if not l.startswith("## ")).strip()
+    body_text = "\n".join(ln for ln in lines if not ln.startswith("## ")).strip()
     if len(body_text) < _MIN_BODY_CHARS:  # near-empty body → skip
         return []
 
@@ -148,11 +148,13 @@ def _split_section(text: str, base_line: int, created_at: float) -> list[Chunk]:
             n_lines = chunk_text.count("\n")
             if len(chunk_text) // TOKEN_ESTIMATE_RATIO >= MIN_TOKENS:
                 chunks.append(Chunk(chunk_text, line_offset, line_offset + n_lines, created_at))
-            # overlap: keep last paragraph for context continuity
-            overlap = buf[-1]
+            # overlap: use last OVERLAP_TOKENS worth of characters (~200 chars) for context
+            overlap_text = (
+                chunk_text[-(OVERLAP_TOKENS * TOKEN_ESTIMATE_RATIO) :] if chunk_text else ""
+            )
             line_offset += n_lines + 2
-            buf = [overlap, para]
-            buf_tokens = len(overlap) // TOKEN_ESTIMATE_RATIO + para_tokens
+            buf = [overlap_text, para] if overlap_text.strip() else [para]
+            buf_tokens = len(overlap_text) // TOKEN_ESTIMATE_RATIO + para_tokens
         else:
             buf.append(para)
             buf_tokens += para_tokens

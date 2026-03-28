@@ -1,16 +1,16 @@
 import time
-from pathlib import Path
-import pytest
+
 from nanobot.memory_index.indexer import (
-    MIN_TOKENS, TARGET_TOKENS, chunk_history_file, chunk_memory_file,
+    MIN_TOKENS,
+    chunk_history_file,
+    chunk_memory_file,
 )
 
 
 def test_chunk_memory_splits_on_headers(tmp_path):
     f = tmp_path / "MEMORY.md"
     f.write_text(
-        "## Section A\n\nContent about section A.\n\n"
-        "## Section B\n\nContent about section B.\n"
+        "## Section A\n\nContent about section A.\n\n## Section B\n\nContent about section B.\n"
     )
     chunks = chunk_memory_file(f)
     assert len(chunks) == 2
@@ -52,8 +52,7 @@ def test_chunk_memory_large_section_splits_on_paragraphs(tmp_path):
 def test_chunk_history_splits_by_timestamp(tmp_path):
     f = tmp_path / "HISTORY.md"
     f.write_text(
-        "[2025-01-01 10:00] USER: hello world\n\n"
-        "[2025-01-02 11:00] USER: another entry\n\n"
+        "[2025-01-01 10:00] USER: hello world\n\n[2025-01-02 11:00] USER: another entry\n\n"
     )
     chunks = chunk_history_file(f)
     assert len(chunks) >= 1
@@ -65,9 +64,7 @@ def test_chunk_history_splits_by_timestamp(tmp_path):
 
 def test_chunk_history_groups_small_entries(tmp_path):
     f = tmp_path / "HISTORY.md"
-    entries = "".join(
-        f"[2025-01-{i + 1:02d} 10:00] USER: short entry {i}\n\n" for i in range(5)
-    )
+    entries = "".join(f"[2025-01-{i + 1:02d} 10:00] USER: short entry {i}\n\n" for i in range(5))
     f.write_text(entries)
     chunks = chunk_history_file(f)
     # All 5 tiny entries should fit in a single window
@@ -78,9 +75,46 @@ def test_chunk_history_splits_large_window(tmp_path):
     f = tmp_path / "HISTORY.md"
     # Each entry ~60 tokens; 8 entries = ~480 tokens > TARGET_TOKENS
     big_entry = "word " * 60
-    entries = "".join(
-        f"[2025-01-{i + 1:02d} 10:00] USER: {big_entry}\n\n" for i in range(8)
-    )
+    entries = "".join(f"[2025-01-{i + 1:02d} 10:00] USER: {big_entry}\n\n" for i in range(8))
     f.write_text(entries)
     chunks = chunk_history_file(f)
     assert len(chunks) >= 2
+
+
+def test_chunk_memory_merges_short_tail(tmp_path):
+    # Create a MEMORY.md with one section that splits into paragraphs,
+    # where the last paragraph is very short (< 50 tokens)
+    content = "# Long-term Memory\n\n## Big Section\n\n"
+    # Add a large first paragraph (> 400 tokens)
+    content += "A " * 250 + "\n\n"  # ~250 tokens first paragraph
+    # Add a short second paragraph (< 50 tokens)
+    content += "Short tail.\n"
+
+    p = tmp_path / "MEMORY.md"
+    p.write_text(content)
+    chunks = chunk_memory_file(p)
+
+    # Should not have a standalone chunk for "Short tail."
+    # The short tail should be merged into the last chunk
+    assert not any(c.text.strip() == "Short tail." for c in chunks)
+    # The last chunk should contain "Short tail."
+    assert "Short tail." in chunks[-1].text
+
+
+def test_chunk_memory_overlap_on_split(tmp_path):
+    # Create a single section with two large paragraphs that together exceed TARGET_TOKENS
+    content = "## Big Section\n\n"
+    content += "Alpha " * 250 + "\n\n"  # ~250 tokens first para
+    content += "Beta " * 250 + "\n"  # ~250 tokens second para
+    # Together ~500 tokens > TARGET_TOKENS=400, so the section will split
+
+    p = tmp_path / "MEMORY.md"
+    p.write_text(content)
+    chunks = chunk_memory_file(p)
+
+    # Should produce multiple chunks
+    assert len(chunks) >= 2
+    # The second chunk should contain overlap text from the end of the first chunk.
+    # Overlap is the last OVERLAP_TOKENS * TOKEN_ESTIMATE_RATIO = 200 chars of chunk[0].
+    overlap_text = chunks[0].text[-200:]
+    assert overlap_text.strip() in chunks[1].text
