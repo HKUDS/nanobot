@@ -259,6 +259,53 @@ async def test_runner_returns_structured_tool_error():
 
 
 @pytest.mark.asyncio
+async def test_runner_retries_empty_final_response_without_tools():
+    from nanobot.agent.runner import (
+        EMPTY_FINAL_RESPONSE_PLACEHOLDER,
+        EMPTY_FINAL_RESPONSE_REPROMPT,
+        AgentRunSpec,
+        AgentRunner,
+    )
+
+    provider = MagicMock()
+    calls: list[dict] = []
+
+    async def chat_with_retry(**kwargs):
+        calls.append({
+            **kwargs,
+            "messages": [dict(message) for message in kwargs["messages"]],
+        })
+        if len(calls) == 1:
+            return LLMResponse(content=None, tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = [{"type": "function", "function": {"name": "list_dir"}}]
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "do task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=3,
+    ))
+
+    assert result.final_content == "done"
+    assert len(calls) == 2
+    assert calls[0]["tools"] == [{"type": "function", "function": {"name": "list_dir"}}]
+    assert calls[1]["tools"] is None
+    assert calls[1]["messages"][-2] == {
+        "role": "assistant",
+        "content": EMPTY_FINAL_RESPONSE_PLACEHOLDER,
+    }
+    assert calls[1]["messages"][-1] == {
+        "role": "user",
+        "content": EMPTY_FINAL_RESPONSE_REPROMPT,
+    }
+
+
+@pytest.mark.asyncio
 async def test_loop_max_iterations_message_stays_stable(tmp_path):
     loop = _make_loop(tmp_path)
     loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
