@@ -1,0 +1,82 @@
+<div class="row mb-4">
+    <div class="col-12">
+        <h1><i class="bi bi-activity me-2"></i>System Status</h1>
+        <p class="text-muted">Monitor your nanobot instance health and configuration</p>
+    </div>
+</div>
+
+<!-- Status Overview -->
+<div class="row g-4 mb-4">
+    <div class="col-md-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body text-center">
+                <i class="bi bi-file-earmark-check display-4 text-success mb-3"></i>
+                <h5>Configuration</h5>
+                <div id="configStatus" class="badge bg-secondary">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body text-center">
+                <i class="bi bi-folder display-4 text-primary mb-3"></i>
+                <h5>Workspace</h5>
+                <div id="workspaceStatus" class="badge bg-secondary">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body text-center">
+                <i class="bi bi-cloud display-4 text-info mb-3"></i>
+                <h5>Providers</h5>
+                <div id="providersStatus" class="badge bg-secondary">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body text-center">
+                <i class="bi bi-plug display-4 text-warning mb-3"></i>
+                <h5>Channels</h5>
+                <div id="channelsStatus" class="badge bg-secondary">Loading...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Detailed Status -->
+<div class="row g-4">
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-cloud me-2"></i>Providers</h5>
+            </div>
+            <div class="card-body">
+                <div id="providersList">
+                    <div class="text-center py-3">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-plug me-2"></i>Channels</h5>
+            </div>
+            <div class="card-body">
+                <div id="channelsList">
+                    <div class="text-center py-3">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

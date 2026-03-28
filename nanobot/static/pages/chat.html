@@ -1,0 +1,52 @@
+<div class="row h-100">
+    <div class="col-12 h-100">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-chat-dots me-2"></i>Chat with nanobot</h5>
+                <div>
+                    <select class="form-select form-select-sm d-inline-block w-auto" id="sessionSelect">
+                        <option value="web:default">Default Session</option>
+                    </select>
+                    <button class="btn btn-outline-secondary btn-sm ms-2" onclick="clearChat()" title="Clear chat">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body p-0 d-flex flex-column">
+                <!-- Chat Messages -->
+                <div id="chatMessages" class="flex-grow-1 p-4 overflow-auto" style="min-height: 400px;">
+                    <div class="text-center text-muted py-5" id="welcomeMessage">
+                        <i class="bi bi-robot display-1 mb-3"></i>
+                        <h4>Welcome to nanobot Chat</h4>
+                        <p>Start a conversation with your AI assistant</p>
+                    </div>
+                </div>
+
+                <!-- Input Area -->
+                <div class="border-top p-3 bg-light">
+                    <div class="input-group">
+                        <textarea class="form-control" id="chatInput" rows="2"
+                                  placeholder="Type your message here... (Press Enter to send, Shift+Enter for new line)"
+                                  onkeypress="handleChatKeyPress(event)"></textarea>
+                        <button class="btn btn-primary" type="button" id="sendButton" onclick="sendMessage()">
+                            <i class="bi bi-send me-1"></i>Send
+                        </button>
+                        <button class="btn btn-outline-secondary" type="button" id="stopButton" onclick="stopGeneration()" style="display: none;">
+                            <i class="bi bi-stop-circle me-1"></i>Stop
+                        </button>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mt-2">
+                        <small class="text-muted">
+                            <i class="bi bi-info-circle me-1"></i>
+                            Markdown supported • Session: <span id="currentSession">web:default</span>
+                        </small>
+                        <div id="typingIndicator" style="display: none;">
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                            <span>nanobot is thinking...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

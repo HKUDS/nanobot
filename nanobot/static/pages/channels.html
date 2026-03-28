@@ -1,0 +1,47 @@
+<div class="row mb-4">
+    <div class="col-12">
+        <h1><i class="bi bi-plug me-2"></i>Channel Management</h1>
+        <p class="text-muted">Configure and manage chat channel integrations</p>
+    </div>
+</div>
+
+<!-- Channels List -->
+<div class="row g-4" id="channelsList">
+    <div class="col-12 text-center py-5">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+</div>
+
+<!-- Channel Configuration Modal -->
+<div class="modal fade" id="channelConfigModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="channelConfigTitle">Configure Channel</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="channelConfigForm">
+                    <input type="hidden" id="channelName">
+
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle me-2"></i>
+                        <span id="channelDescription">Configure your channel settings below.</span>
+                    </div>
+
+                    <div id="channelConfigFields">
+                        <!-- Dynamic fields will be inserted here -->
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveChannelConfig()">
+                    <i class="bi bi-save me-2"></i>Save Configuration
+                </button>
+            </div>
+        </div>
+    </div>
+</div>

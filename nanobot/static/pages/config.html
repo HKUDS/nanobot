@@ -1,0 +1,63 @@
+<div class="row mb-4">
+    <div class="col-12">
+        <h1><i class="bi bi-gear me-2"></i>Configuration</h1>
+        <p class="text-muted">Manage your nanobot settings, API keys, and preferences</p>
+    </div>
+</div>
+
+<!-- Configuration Form -->
+<form id="configForm" onsubmit="saveConfig(event)">
+    <!-- Providers Section -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white">
+            <h5 class="mb-0"><i class="bi bi-cloud me-2"></i>LLM Providers</h5>
+        </div>
+        <div class="card-body">
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle me-2"></i>
+                Configure your LLM provider API keys. At least one provider is required.
+            </div>
+
+            <div class="row g-3" id="providersContainer">
+                <div class="col-12 text-center py-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Agent Defaults Section -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white">
+            <h5 class="mb-0"><i class="bi bi-robot me-2"></i>Agent Settings</h5>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label for="agentModel" class="form-label">Default Model</label>
+                    <input type="text" class="form-control" id="agentModel"
+                           name="agents.defaults.model"
+                           placeholder="e.g., anthropic/claude-opus-4-5">
+                    <div class="form-text">Format: provider/model-name</div>
+                </div>
+                <div class="col-md-6">
+                    <label for="maxIterations" class="form-label">Max Tool Iterations</label>
+                    <input type="number" class="form-control" id="maxIterations"
+                           name="agents.defaults.max_tool_iterations" value="10">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Save Button -->
+    <div class="d-flex justify-content-end gap-2">
+        <button type="button" class="btn btn-outline-secondary" onclick="loadConfig()">
+            <i class="bi bi-arrow-clockwise me-2"></i>Reload
+        </button>
+        <button type="submit" class="btn btn-primary">
+            <i class="bi bi-save me-2"></i>Save Configuration
+        </button>
+    </div>
+</form>

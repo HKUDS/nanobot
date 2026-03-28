@@ -1,13 +1,12 @@
-"""Nanobot Web UI - FastAPI-based web interface."""
+"""Nanobot Web UI - FastAPI-based web interface with static files."""
 
 import json
 import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request, HTTPException, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from nanobot.config.loader import get_config_path, load_config, save_config
@@ -20,13 +19,9 @@ def ensure_config_exists(config_path: Path) -> bool:
         return True
 
     try:
-        # Create parent directories
         config_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Create default config
         config = Config()
         save_config(config, config_path)
-
         return True
     except Exception as e:
         print(f"Warning: Could not create config file: {e}")
@@ -54,11 +49,6 @@ class AuthVerifyRequest(BaseModel):
     token: str = ""
 
 
-class ConfigUpdateRequest(BaseModel):
-    """Request model for config update."""
-    pass
-
-
 def create_app(config_path: Path | None = None, workspace_path: Path | None = None) -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
@@ -67,10 +57,18 @@ def create_app(config_path: Path | None = None, workspace_path: Path | None = No
         version="0.1.4.post5",
     )
 
-    # Mount static files
-    static_path = Path(__file__).parent.parent / "static"
+    # Setup paths
+    base_path = Path(__file__).parent.parent
+    template_path = base_path / "templates" / "web"
+    static_path = base_path / "static"
+
+    # Mount static files (CSS, JS, images)
     if static_path.exists():
         app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
+    
+    # Mount HTML templates as static files too
+    if template_path.exists():
+        app.mount("/", StaticFiles(directory=str(template_path), html=True), name="templates")
 
     # Configuration
     auth_token = os.environ.get("NANOBOT_WEB_AUTH_TOKEN", "")
@@ -92,27 +90,11 @@ def create_app(config_path: Path | None = None, workspace_path: Path | None = No
     else:
         print(f"⚠ Config file missing and could not be created: {config_path}")
 
-    # Register routes
-    register_routes(app)
+    # Register API routes
     register_api_routes(app)
     register_auth_routes(app)
 
     return app
-
-
-async def require_auth(request: Request) -> bool:
-    """Dependency to require authentication for API routes."""
-    auth_token = request.headers.get("X-Auth-Token") or request.query_params.get("token")
-    expected_token = request.app.state.auth_token
-
-    # If no token is configured, allow access (for local dev)
-    if not expected_token:
-        return True
-
-    if not auth_token or auth_token != expected_token:
-        return False
-    
-    return True
 
 
 async def check_auth(request: Request):
@@ -126,60 +108,6 @@ async def check_auth(request: Request):
 
     if not auth_token or auth_token != expected_token:
         raise HTTPException(status_code=401, detail="Unauthorized")
-
-
-def register_routes(app: FastAPI):
-    """Register main routes."""
-    template_dir = Path(__file__).parent.parent / "templates" / "web"
-    templates = Jinja2Templates(directory=str(template_dir))
-
-    @app.get("/", response_class=HTMLResponse)
-    async def index(request: Request):
-        """Serve the main dashboard."""
-        return templates.TemplateResponse(
-            "index.html",
-            {"request": request, "active_page": "dashboard"}
-        )
-
-    @app.get("/config", response_class=HTMLResponse)
-    async def config_page(request: Request):
-        """Serve the configuration page."""
-        return templates.TemplateResponse(
-            "config.html",
-            {"request": request, "active_page": "config"}
-        )
-
-    @app.get("/chat", response_class=HTMLResponse)
-    async def chat_page(request: Request):
-        """Serve the chat page."""
-        return templates.TemplateResponse(
-            "chat.html",
-            {"request": request, "active_page": "chat"}
-        )
-
-    @app.get("/status", response_class=HTMLResponse)
-    async def status_page(request: Request):
-        """Serve the status page."""
-        return templates.TemplateResponse(
-            "status.html",
-            {"request": request, "active_page": "status"}
-        )
-
-    @app.get("/channels", response_class=HTMLResponse)
-    async def channels_page(request: Request):
-        """Serve the channels page."""
-        return templates.TemplateResponse(
-            "channels.html",
-            {"request": request, "active_page": "channels"}
-        )
-
-    @app.get("/health")
-    async def health():
-        """Health check endpoint for Koyeb."""
-        return {
-            "status": "healthy",
-            "version": "0.1.4.post5"
-        }
 
 
 def register_api_routes(app: FastAPI):
@@ -205,13 +133,8 @@ def register_api_routes(app: FastAPI):
             if not data:
                 raise HTTPException(status_code=400, detail="No data provided")
 
-            # Load existing config to preserve any fields not in the request
             config = load_config(request.app.state.config_path)
-
-            # Update config with provided data
             update_config_from_dict(config, data)
-
-            # Save updated config
             save_config(config, request.app.state.config_path)
 
             return {"success": True, "message": "Configuration saved"}
@@ -326,9 +249,7 @@ def register_api_routes(app: FastAPI):
         await check_auth(request)
         try:
             from nanobot.cli.models import get_model_suggestions
-
             suggestions = get_model_suggestions(provider)
-
             return {"models": suggestions}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -415,7 +336,6 @@ def register_api_routes(app: FastAPI):
                 request.app.state.config_path
             )
 
-            # Return as SSE format
             return Response(
                 content=f"data: {json.dumps({'response': response.content if response else '', 'metadata': response.metadata if response else {}})}\n\ndata: [DONE]\n\n",
                 media_type="text/event-stream",
@@ -432,17 +352,26 @@ def register_api_routes(app: FastAPI):
             traceback.print_exc()
             raise HTTPException(status_code=500, detail=str(e))
 
+    # Health check endpoint (not authenticated for monitoring)
+    @app.get("/health")
+    async def health():
+        """Health check endpoint for Koyeb."""
+        return {
+            "status": "healthy",
+            "version": "0.1.4.post5"
+        }
+
 
 def register_auth_routes(app: FastAPI):
     """Register authentication routes."""
 
     @app.get("/api/auth/check")
-    async def check_auth(request: Request):
+    async def check_auth():
         """Check if authentication is required."""
-        auth_token = request.app.state.auth_token
+        auth_token = app.state.auth_token
         return {
             "auth_required": bool(auth_token),
-            "authenticated": not bool(auth_token)  # If no token, consider authenticated
+            "authenticated": not bool(auth_token)
         }
 
     @app.post("/api/auth/verify")
@@ -450,7 +379,7 @@ def register_auth_routes(app: FastAPI):
         """Verify authentication token."""
         data = await request.json()
         token = data.get("token", "")
-        expected_token = request.app.state.auth_token
+        expected_token = app.state.auth_token
 
         if not expected_token:
             return {"authenticated": True}
@@ -472,11 +401,9 @@ async def run_agent_message(message: str, session_id: str, config_path: Path):
     bus = MessageBus()
     provider = _make_provider(config)
 
-    # Create cron service
     cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
-    # Create agent loop
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
@@ -507,9 +434,7 @@ async def run_agent_message(message: str, session_id: str, config_path: Path):
 
 def update_config_from_dict(config: Config, data: dict):
     """Update config object from dictionary data."""
-    # This is a simplified updater - in production you'd want more robust validation
     for key, value in data.items():
-        # Convert camelCase to snake_case
         snake_key = key
         for i, char in enumerate(key):
             if char.isupper() and (i == 0 or not key[i-1].isupper()):
@@ -523,7 +448,6 @@ def update_config_from_dict(config: Config, data: dict):
             elif isinstance(attr, (list, tuple)) and isinstance(value, (list, tuple)):
                 setattr(config, snake_key, value)
             elif hasattr(attr, "model_dump"):
-                # It's a Pydantic model, try to update it
                 if isinstance(value, dict):
                     for sub_key, sub_value in value.items():
                         sub_snake = sub_key
@@ -556,7 +480,6 @@ def run_server(host: str = "0.0.0.0", port: int = 18790, config_path: Path | Non
     
     app = get_app(config_path, workspace_path)
     
-    # Configure uvicorn
     uvicorn.run(
         app,
         host=host,
