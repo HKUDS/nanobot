@@ -1096,6 +1096,325 @@ def plugins_list():
 
 
 # ============================================================================
+# Cron Commands
+# ============================================================================
+
+cron_app = typer.Typer(help="Manage cron jobs")
+app.add_typer(cron_app, name="cron")
+
+def _get_cron_service() -> "CronService":
+    from nanobot.config.loader import load_config
+    from nanobot.cron.service import CronService
+
+    config = load_config()
+    cron_store_path = config.workspace_path / "cron" / "jobs.json"
+    return CronService(cron_store_path)
+
+@cron_app.command("status")
+def cron_status():
+    """Show cron scheduler status."""
+    service = _get_cron_service()
+    status = service.status()
+    
+    # We check if gateway is actually running the cron service by trying to connect to its bus,
+    # or looking for a pid. For simplicity, since the CLI instantiates its own service here,
+    # `status['enabled']` will just show False because `start()` wasn't called on this instance.
+    # We'll just show the number of jobs and next wake time to avoid confusing "Enabled: no"
+    # when the gateway is actually running it in the background.
+    
+    console.print(f"{__logo__} nanobot Cron Status\n")
+    console.print(f"Jobs: {status['jobs']}")
+    if status['next_wake_at_ms']:
+        import datetime
+        dt = datetime.datetime.fromtimestamp(status['next_wake_at_ms'] / 1000)
+        console.print(f"Next wake: {dt.isoformat()}")
+
+@cron_app.command("list")
+def cron_list(all: bool = typer.Option(False, "--all", help="Include disabled jobs")):
+    """List all scheduled cron jobs."""
+    service = _get_cron_service()
+    jobs = service.list_jobs(include_disabled=all)
+    
+    if not jobs:
+        console.print("No cron jobs found.")
+        return
+
+    table = Table(title="Cron Jobs")
+    table.add_column("ID", style="cyan")
+    table.add_column("Name", style="magenta")
+    table.add_column("Status", style="green")
+    table.add_column("Schedule", style="yellow")
+    table.add_column("Next Run")
+
+    for job in jobs:
+        status_str = "[green]enabled[/green]" if job.enabled else "[dim]disabled[/dim]"
+        
+        # Format schedule
+        sched = job.schedule
+        if sched.kind == "every":
+            sched_str = f"every {sched.every_ms // 1000}s"
+        elif sched.kind == "cron":
+            sched_str = f"cron: {sched.expr}" + (f" ({sched.tz})" if sched.tz else "")
+        elif sched.kind == "at":
+            import datetime
+            dt = datetime.datetime.fromtimestamp((sched.at_ms or 0) / 1000)
+            sched_str = f"at: {dt.isoformat()}"
+        else:
+            sched_str = sched.kind
+            
+        next_run = ""
+        if job.state.next_run_at_ms:
+            import datetime
+            dt = datetime.datetime.fromtimestamp(job.state.next_run_at_ms / 1000)
+            next_run = dt.isoformat()
+            
+        table.add_row(job.id, job.name, status_str, sched_str, next_run)
+
+    console.print(table)
+
+@cron_app.command("add")
+def cron_add(
+    name: str = typer.Option(..., "--name", "-n", help="Job name"),
+    message: str = typer.Option(..., "--message", "-m", help="Instruction message"),
+    every_seconds: int = typer.Option(None, "--every", "-e", help="Run every X seconds"),
+    cron_expr: str = typer.Option(None, "--cron", "-c", help="Cron expression (e.g. '0 * * * *')"),
+    at: str = typer.Option(None, "--at", "-a", help="ISO datetime for one-shot run"),
+    tz: str = typer.Option(None, "--tz", help="Timezone for cron expression"),
+    channel: str = typer.Option(None, "--channel", help="Channel to deliver to"),
+    to: str = typer.Option(None, "--to", help="Chat ID to deliver to"),
+):
+    """Create a new cron job."""
+    from nanobot.cron.types import CronSchedule
+    import datetime
+
+    if sum(x is not None for x in [every_seconds, cron_expr, at]) != 1:
+        console.print("[red]Error: Must provide exactly one of --every, --cron, or --at[/red]")
+        raise typer.Exit(1)
+        
+    schedule = None
+    delete_after = False
+    
+    try:
+        if every_seconds is not None:
+            schedule = CronSchedule(kind="every", every_ms=every_seconds * 1000)
+        elif cron_expr is not None:
+            schedule = CronSchedule(kind="cron", expr=cron_expr, tz=tz)
+        elif at is not None:
+            try:
+                dt = datetime.datetime.fromisoformat(at)
+                schedule = CronSchedule(kind="at", at_ms=int(dt.timestamp() * 1000))
+                delete_after = True
+            except ValueError:
+                console.print(f"[red]Error: Invalid ISO datetime format '{at}'[/red]")
+                raise typer.Exit(1)
+                
+        service = _get_cron_service()
+        job = service.add_job(
+            name=name,
+            schedule=schedule,
+            message=message,
+            deliver=bool(channel and to),
+            channel=channel,
+            to=to,
+            delete_after_run=delete_after
+        )
+        console.print(f"[green]✓ Created job '{job.name}' (id: {job.id})[/green]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+@cron_app.command("edit")
+def cron_edit(
+    id: str = typer.Argument(..., help="Job ID"),
+    name: str = typer.Option(None, "--name", "-n", help="New job name"),
+    message: str = typer.Option(None, "--message", "-m", help="New instruction message"),
+    every_seconds: int = typer.Option(None, "--every", "-e", help="Run every X seconds"),
+    cron_expr: str = typer.Option(None, "--cron", "-c", help="Cron expression"),
+    at: str = typer.Option(None, "--at", "-a", help="ISO datetime"),
+    tz: str = typer.Option(None, "--tz", help="Timezone"),
+    channel: str = typer.Option(None, "--channel", help="Channel"),
+    to: str = typer.Option(None, "--to", help="Chat ID"),
+):
+    """Edit an existing cron job."""
+    from nanobot.cron.types import CronSchedule
+    import datetime
+    
+    service = _get_cron_service()
+    job = service.get_job(id)
+    if not job:
+        console.print(f"[red]Job {id} not found.[/red]")
+        raise typer.Exit(1)
+
+    schedule = None
+    if every_seconds is not None or cron_expr is not None or at is not None:
+        if sum(x is not None for x in [every_seconds, cron_expr, at]) > 1:
+            console.print("[red]Error: Can only provide one of --every, --cron, or --at[/red]")
+            raise typer.Exit(1)
+            
+        if every_seconds is not None:
+            schedule = CronSchedule(kind="every", every_ms=every_seconds * 1000)
+        elif cron_expr is not None:
+            schedule = CronSchedule(kind="cron", expr=cron_expr, tz=tz or job.schedule.tz)
+        elif at is not None:
+            try:
+                dt = datetime.datetime.fromisoformat(at)
+                schedule = CronSchedule(kind="at", at_ms=int(dt.timestamp() * 1000))
+            except ValueError:
+                console.print(f"[red]Error: Invalid ISO datetime format '{at}'[/red]")
+                raise typer.Exit(1)
+
+    try:
+        deliver = None
+        if channel is not None or to is not None:
+            deliver = bool(channel or job.payload.channel) and bool(to or job.payload.to)
+
+        updated = service.edit_job(
+            job_id=id,
+            name=name,
+            schedule=schedule,
+            message=message,
+            deliver=deliver,
+            channel=channel,
+            to=to
+        )
+        if updated:
+            console.print(f"[green]✓ Updated job '{updated.name}' (id: {updated.id})[/green]")
+        else:
+            console.print(f"[red]Failed to update job {id}[/red]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+@cron_app.command("rm")
+def cron_rm(id: str = typer.Argument(..., help="Job ID")):
+    """Delete a cron job."""
+    service = _get_cron_service()
+    if service.remove_job(id):
+        console.print(f"[green]✓ Removed job {id}[/green]")
+    else:
+        console.print(f"[red]Job {id} not found.[/red]")
+
+@cron_app.command("enable")
+def cron_enable(id: str = typer.Argument(..., help="Job ID")):
+    """Enable a cron job."""
+    service = _get_cron_service()
+    job = service.enable_job(id, True)
+    if job:
+        console.print(f"[green]✓ Enabled job {id}[/green]")
+    else:
+        console.print(f"[red]Job {id} not found.[/red]")
+
+@cron_app.command("disable")
+def cron_disable(id: str = typer.Argument(..., help="Job ID")):
+    """Disable a cron job."""
+    service = _get_cron_service()
+    job = service.enable_job(id, False)
+    if job:
+        console.print(f"[green]✓ Disabled job {id}[/green]")
+    else:
+        console.print(f"[red]Job {id} not found.[/red]")
+
+@cron_app.command("run")
+def cron_run(
+    id: str = typer.Argument(..., help="Job ID"),
+    force: bool = typer.Option(False, "--force", "-f", help="Run even if disabled")
+):
+    """Immediately trigger a cron job execution."""
+    from nanobot.config.loader import load_config
+    from nanobot.cron.service import CronService
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.session.manager import SessionManager
+    import asyncio
+    import sys
+    
+    config = load_config()
+    cron_store_path = config.workspace_path / "cron" / "jobs.json"
+    
+    # To actually execute the job properly, we need an agent instance
+    bus = MessageBus()
+    provider = _make_provider(config)
+    session_manager = SessionManager(config.workspace_path)
+    cron = CronService(cron_store_path)
+    
+    agent = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=config.workspace_path,
+        model=config.agents.defaults.model,
+        max_iterations=config.agents.defaults.max_tool_iterations,
+        context_window_tokens=config.agents.defaults.context_window_tokens,
+        web_search_config=config.tools.web.search,
+        web_proxy=config.tools.web.proxy or None,
+        exec_config=config.tools.exec,
+        cron_service=cron,
+        restrict_to_workspace=config.tools.restrict_to_workspace,
+        session_manager=session_manager,
+        mcp_servers=config.tools.mcp_servers,
+        channels_config=config.channels,
+        timezone=config.agents.defaults.timezone,
+    )
+
+    async def on_cron_job(job) -> str | None:
+        from nanobot.agent.tools.cron import CronTool
+        from nanobot.agent.tools.message import MessageTool
+        
+        reminder_note = (
+            "[Scheduled Task] Manual Trigger.\n\n"
+            f"Task '{job.name}' has been triggered manually.\n"
+            f"Scheduled instruction: {job.payload.message}"
+        )
+        
+        cron_tool = agent.tools.get("cron")
+        cron_token = None
+        if isinstance(cron_tool, CronTool):
+            cron_token = cron_tool.set_cron_context(True)
+            
+        try:
+            resp = await agent.process_direct(
+                reminder_note,
+                session_key=f"cron:{job.id}",
+                channel=job.payload.channel or "cli",
+                chat_id=job.payload.to or "direct",
+            )
+            
+            response = resp.content if resp else ""
+            
+            message_tool = agent.tools.get("message")
+            if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+                return response
+                
+            if response and job.payload.deliver and job.payload.to:
+                # We can't easily deliver if gateway isn't running, but we can print it
+                console.print("\n[cyan]Agent Response (would be delivered to channel):[/cyan]")
+                console.print(response)
+                
+            return response
+        finally:
+            if isinstance(cron_tool, CronTool) and cron_token is not None:
+                cron_tool.reset_cron_context(cron_token)
+
+    cron.on_job = on_cron_job
+
+    job = cron.get_job(id)
+    if not job:
+        console.print(f"[red]Job {id} not found.[/red]")
+        raise typer.Exit(1)
+        
+    console.print(f"Running job '{job.name}' (id: {id})...")
+    
+    async def _run():
+        success = await cron.run_job(id, force=force)
+        await agent.close_mcp()
+        return success
+        
+    success = asyncio.run(_run())
+    if success:
+        console.print(f"\n[green]✓ Triggered and finished job {id}[/green]")
+    else:
+        console.print(f"\n[red]Failed to trigger job {id} (is it disabled? use --force)[/red]")
+
+# ============================================================================
 # Status Commands
 # ============================================================================
 
