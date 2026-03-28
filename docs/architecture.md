@@ -122,6 +122,45 @@ can interact with tools without importing concrete types:
 Orchestration calls hooks on all tools via `ToolExecutor.all_tools()` — no isinstance
 checks, no concrete type imports.
 
+## Agent Cognitive Core
+
+The agent uses a four-layer architecture (see [ADR-011](adr/ADR-011-agent-cognitive-redesign.md)):
+
+```
+ENTRY LAYER       MessageProcessor — sessions, slash commands, context assembly
+COGNITIVE LOOP    TurnRunner — simple tool-use loop with guardrail checkpoints
+GUARDRAIL LAYER   GuardrailChain — 5 modular failure pattern detectors
+PROMPT LAYER      ContextBuilder — 11-section system prompt assembly
+```
+
+### TurnRunner Loop
+
+```
+while iteration < max_iterations:
+    compress if over budget → call LLM → handle errors
+    if tool_calls: execute → log ToolAttempt → guardrail check → continue
+    if text: break
+optional self-check → return TurnResult
+```
+
+### Guardrail Chain (first intervention wins)
+
+| Guardrail | Fires When |
+|-----------|-----------|
+| FailureEscalation | Tool fails N times |
+| NoProgressBudget | 4+ iterations, no useful data |
+| RepeatedStrategyDetection | Same tool+args 3 times |
+| EmptyResultRecovery | Success but empty output |
+| SkillTunnelVision | All exec, no data, iteration >= 3 |
+
+### Three-Tier Memory
+
+- **Declarative** (cross-session): facts, entities → SQLite
+- **Procedural** (cross-session): learned tool strategies → SQLite (strategies table)
+- **Working** (per-turn): ToolAttempt log → in-memory TurnState
+
+Feedback loop: guardrail recovery → strategy saved → loaded next session → guardrail never fires again.
+
 ## Data Flow
 
 ### Inbound Message Processing
@@ -235,7 +274,8 @@ Architecture rules are enforced programmatically in pre-commit hooks and CI.
 | `scripts/check_imports.py` | Import direction rules + dependency inversion (RUNTIME_RULES) | Pre-commit + CI |
 | `scripts/check_structure.py` | File size (500 LOC), package growth (15 files), `__init__.py` exports (12), crash-barriers, `__all__`, catch-all filenames, future annotations | Pre-commit + CI |
 | `scripts/check_prompt_manifest.py` | Prompt file consistency | Pre-commit + CI |
-| `scripts/check_doc_references.py` | Class/file references in docs/architecture.md | Pre-commit + CI |
+| `scripts/check_phase_todos.py` | TODOs referencing completed phases | Pre-commit + CI |
+| `scripts/check_doc_references.py` | Class/file references in all living docs + ADR status chains | Pre-commit + CI |
 
 `check_structure.py` uses a baseline file (`scripts/.structure-baseline`) to track
 pre-existing violations. New violations block commits; existing ones are printed as
