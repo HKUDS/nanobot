@@ -64,6 +64,9 @@ matrix = [
     "mistune>=3.0.0,<4.0.0",
     "nh3>=0.2.17,<1.0.0",
 ]
+memory = [
+    "sqlite-vec>=0.1.0",
+]
 langsmith = [
     "langsmith>=0.1.0",
 ]
