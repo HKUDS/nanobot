@@ -221,7 +221,7 @@ class AgentLoop:
             )
 
             tokens_used += response.usage.get("total_tokens", 0)
-            if self.max_tokens_per_turn and tokens_used > self.max_tokens_per_turn:
+            if self.max_tokens_per_turn and tokens_used > self.max_tokens_per_turn and iteration > 1:
                 logger.warning("Token budget exceeded: {} > {}", tokens_used, self.max_tokens_per_turn)
                 clean = self._strip_think(response.content)
                 if clean:
