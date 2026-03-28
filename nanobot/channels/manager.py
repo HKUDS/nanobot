@@ -26,11 +26,13 @@ class ChannelManager:
     - Route outbound messages
     """
 
-    def __init__(self, config: Config, bus: MessageBus):
+    def __init__(self, config: Config, bus: MessageBus,session_manager: "SessionManager | None" = None,cron_service: Any = None):
         self.config = config
         self.bus = bus
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
+        self.session_manager = session_manager
+        self.cron_service = cron_service
 
         self._init_channels()
 
@@ -52,22 +54,31 @@ class ChannelManager:
             if not enabled:
                 continue
             try:
-                channel = cls(section, self.bus)
+                if name == "web":
+                    channel = cls(
+                        section,
+                        self.bus,
+                        session_manager=self.session_manager,
+                        full_config=self.config,
+                        cron_service=self.cron_service,
+                    )
+                else:
+                    channel = cls(section, self.bus)
                 channel.transcription_api_key = groq_key
                 self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)
             except Exception as e:
                 logger.warning("{} channel not available: {}", name, e)
 
-        self._validate_allow_from()
+        # self._validate_allow_from()
 
-    def _validate_allow_from(self) -> None:
-        for name, ch in self.channels.items():
-            if getattr(ch.config, "allow_from", None) == []:
-                raise SystemExit(
-                    f'Error: "{name}" has empty allowFrom (denies all). '
-                    f'Set ["*"] to allow everyone, or add specific user IDs.'
-                )
+    # def _validate_allow_from(self) -> None:
+        # for name, ch in self.channels.items():
+        #     if getattr(ch.config, "allow_from", None) == []:
+        #         raise SystemExit(
+        #             f'Error: "{name}" has empty allowFrom (denies all). '
+        #             f'Set ["*"] to allow everyone, or add specific user IDs.'
+        #         )
 
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""

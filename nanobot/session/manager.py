@@ -76,6 +76,8 @@ class Session:
             if message.get("role") == "user":
                 sliced = sliced[i:]
                 break
+        else:
+            sliced = []
 
         # Some providers reject orphan tool results if the matching assistant
         # tool_calls message fell outside the fixed-size history window.
@@ -85,12 +87,25 @@ class Session:
 
         out: list[dict[str, Any]] = []
         for message in sliced:
+            if message.get("role") == "system":
+                continue  # Skip system (prompts, Viking memory) — rebuilt fresh each turn
             entry: dict[str, Any] = {"role": message["role"], "content": message.get("content", "")}
             for key in ("tool_calls", "tool_call_id", "name"):
                 if key in message:
                     entry[key] = message[key]
             out.append(entry)
         return out
+
+    def clone(self) -> "Session":
+        """Return a shallow copy with an independent messages list."""
+        return Session(
+            key=self.key,
+            messages=list(self.messages),
+            created_at=self.created_at,
+            updated_at=self.updated_at,
+            metadata=dict(self.metadata),
+            last_consolidated=self.last_consolidated,
+        )
 
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
@@ -144,7 +159,7 @@ class SessionManager:
         return self.sessions_dir / f"{safe_key}.jsonl"
 
     def _get_legacy_session_path(self, key: str) -> Path:
-        """Legacy global session path (~/.nanobot/sessions/)."""
+        """Legacy global session path (~/.hiperone/sessions/)."""
         safe_key = safe_filename(key.replace(":", "_"))
         return self.legacy_sessions_dir / f"{safe_key}.jsonl"
 

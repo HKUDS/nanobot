@@ -85,7 +85,7 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     """Return available slash commands."""
     lines = [
-        "🐈 nanobot commands:",
+        "commands:",
         "/new — Start a new conversation",
         "/stop — Stop the current task",
         "/restart — Restart the bot",

@@ -10,7 +10,7 @@
  *   npm run build && npm start
  *   
  * Or with custom settings:
- *   BRIDGE_PORT=3001 AUTH_DIR=~/.nanobot/whatsapp npm start
+ *   BRIDGE_PORT=3001 AUTH_DIR=~/.hiperone/whatsapp npm start
  */
 
 // Polyfill crypto for Baileys in ESM
