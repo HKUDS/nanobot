@@ -101,7 +101,7 @@ Consumed by all domain packages but owns no domain logic.
 `providers/` (LLM abstraction), `config/` (Pydantic models), `session/` (conversation state).
 These are foundational — they must never import from orchestration or domain subsystems.
 
-For detailed module ownership and file-level documentation, see `docs/architecture.md`.
+For detailed module ownership and file-level documentation, see `.claude/rules/architecture.md`.
 
 ## Architectural Constraints
 
@@ -255,7 +255,7 @@ Full protocol (create, work, finish, prune, rules) in `.claude/rules/git-workflo
 ## Architecture References
 
 - Architecture decisions: `docs/adr/` (ADR-001, ADR-003 through ADR-011)
-- Module ownership and import rules: `docs/architecture.md`
+- Module ownership and import rules: `.claude/rules/architecture.md`
 - Memory subsystem: `docs/memory-system-reference.md`
 - Deployment: `docs/deployment.md`
 

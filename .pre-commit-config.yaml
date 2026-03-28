@@ -52,4 +52,4 @@ repos:
         entry: python scripts/check_doc_references.py
         language: system
         pass_filenames: false
-        files: '^docs/architecture\.md$'
+        files: '^\.claude/rules/architecture\.md$'

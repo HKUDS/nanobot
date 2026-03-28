@@ -37,7 +37,7 @@ service.
    ```
 
    This is an architectural target, not an immediate refactor. Document the pattern in
-   `docs/architecture.md` and apply when adding new tool families.
+   `.claude/rules/architecture.md` and apply when adding new tool families.
 
 3. **Extract `ToolExecutor`** from `AgentLoop` (see ADR-002). The executor:
    - Receives `list[ToolCallRequest]` and the `ToolRegistry`.

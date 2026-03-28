@@ -19,13 +19,7 @@
       {
         "matcher": "Bash",
         "hooks": [
-          {
-            "type": "command",
-            "if": "Bash(*git commit*)",
-            "command": ".claude/hooks/test-hook-trigger.sh",
-            "timeout": 5
-          },
-          {
+{
             "type": "command",
             "if": "Bash(*git commit*)",
             "command": ".claude/hooks/validate-commit.sh",

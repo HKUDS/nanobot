@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Enforce module boundary rules from CLAUDE.md and docs/architecture.md.
+"""Enforce module boundary rules from CLAUDE.md and .claude/rules/architecture.md.
 
 Exit 0 if all rules pass, exit 1 with details on violations.
 Designed to run in CI:  python scripts/check_imports.py

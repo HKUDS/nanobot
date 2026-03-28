@@ -34,7 +34,7 @@ We adopt a **modular monolith** architecture with the following rules:
 
 2. **Define explicit module boundaries.** Each top-level package documents what it owns,
    what public API it exposes, and what it must never import from. See
-   `docs/architecture.md` for the module ownership map.
+   `.claude/rules/architecture.md` for the module ownership map.
 
 3. **Enforce import rules.** CI checks prevent cross-boundary violations (e.g.,
    `channels/` must never import from `agent/loop`, `tools/` must never import from

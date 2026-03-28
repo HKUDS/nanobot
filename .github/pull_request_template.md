@@ -34,7 +34,7 @@ Closes #
 
 ### If architectural change:
 - [ ] ADR created or updated in `docs/adr/`
-- [ ] `docs/architecture.md` updated if module boundaries changed
+- [ ] `.claude/rules/architecture.md` updated if module boundaries changed
 
 ## Testing
 

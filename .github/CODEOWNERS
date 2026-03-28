@@ -38,7 +38,7 @@ nanobot/bus/                    @carlos
 
 # ── Architecture & governance ─────────────────────────────────
 docs/adr/                       @carlos
-docs/architecture.md            @carlos
+.claude/rules/architecture.md   @carlos
 docs/branch-protection.md       @carlos
 docs/feature-flag-governance.md @carlos
 docs/operating-policies.md      @carlos

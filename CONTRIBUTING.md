@@ -28,7 +28,7 @@ nanobot/
 ```
 
 > For detailed module ownership, file-level descriptions, and import rules, see
-> [docs/architecture.md](../docs/architecture.md).
+> [.claude/rules/architecture.md](../.claude/rules/architecture.md).
 
 ## Development Workflow
 
@@ -265,7 +265,7 @@ All changes follow a PR-first workflow. No direct pushes to `main`.
 
 ### Architecture resources
 
-- Module ownership and import rules: `docs/architecture.md`
+- Module ownership and import rules: `.claude/rules/architecture.md`
 - Architecture Decision Records: `docs/adr/`
 - Refactoring guidelines: `docs/refactoring-principles.md`
 - Reusable Copilot prompts: `.github/prompts/`

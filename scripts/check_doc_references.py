@@ -19,7 +19,7 @@ from pathlib import Path
 # Living docs to check (relative to project root)
 LIVING_DOCS = [
     "CLAUDE.md",
-    "docs/architecture.md",
+    ".claude/rules/architecture.md",
     "docs/memory-system-reference.md",
     "docs/deployment.md",
 ]
