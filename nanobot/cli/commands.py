@@ -33,6 +33,14 @@ from rich.table import Table
 from rich.text import Text
 
 from nanobot import __logo__, __version__
+from nanobot.cli.inspect import (
+    remove_gateway_pid,
+    show_agents,
+    show_health,
+    show_models,
+    show_status,
+    write_gateway_pid,
+)
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.config.paths import get_workspace_path, is_default_workspace
 from nanobot.config.schema import Config
@@ -675,6 +683,7 @@ def gateway(
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
     async def run():
+        write_gateway_pid()
         try:
             await cron.start()
             await heartbeat.start()
@@ -694,6 +703,7 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
+            remove_gateway_pid()
 
     asyncio.run(run())
 
@@ -1102,39 +1112,26 @@ def plugins_list():
 
 @app.command()
 def status():
-    """Show nanobot status."""
-    from nanobot.config.loader import get_config_path, load_config
+    """Show nanobot status (gateway, provider, channels, heartbeat, workspace)."""
+    show_status()
 
-    config_path = get_config_path()
-    config = load_config()
-    workspace = config.workspace_path
 
-    console.print(f"{__logo__} nanobot Status\n")
+@app.command()
+def agents():
+    """Show agent sessions, profiles, and running subagents."""
+    show_agents()
 
-    console.print(f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}")
-    console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
 
-    if config_path.exists():
-        from nanobot.providers.registry import PROVIDERS
+@app.command(name="models")
+def models_cmd():
+    """List available models and provider configuration."""
+    show_models()
 
-        console.print(f"Model: {config.agents.defaults.model}")
 
-        # Check API keys from registry
-        for spec in PROVIDERS:
-            p = getattr(config.providers, spec.name, None)
-            if p is None:
-                continue
-            if spec.is_oauth:
-                console.print(f"{spec.label}: [green]✓ (OAuth)[/green]")
-            elif spec.is_local:
-                # Local deployments show api_base instead of api_key
-                if p.api_base:
-                    console.print(f"{spec.label}: [green]✓ {p.api_base}[/green]")
-                else:
-                    console.print(f"{spec.label}: [dim]not set[/dim]")
-            else:
-                has_key = bool(p.api_key)
-                console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+@app.command()
+def health():
+    """Check health of all connections (gateway, channels, MCP servers)."""
+    show_health()
 
 
 # ============================================================================
