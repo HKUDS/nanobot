@@ -1,14 +1,11 @@
 """Nanobot Web UI - FastAPI-based web interface."""
 
-import asyncio
 import json
 import os
-from functools import wraps
 from pathlib import Path
-from typing import Any
 
-from fastapi import FastAPI, Request, HTTPException, Depends, Response
-from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
+from fastapi import FastAPI, Request, HTTPException, Response
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -70,15 +67,8 @@ def create_app(config_path: Path | None = None, workspace_path: Path | None = No
         version="0.1.4.post5",
     )
 
-    # Setup paths
-    base_path = Path(__file__).parent.parent
-    template_path = base_path / "templates" / "web"
-    static_path = base_path / "static"
-
-    # Setup templates and static files
-    templates = Jinja2Templates(directory=str(template_path))
-    
     # Mount static files
+    static_path = Path(__file__).parent.parent / "static"
     if static_path.exists():
         app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
 
@@ -90,7 +80,6 @@ def create_app(config_path: Path | None = None, workspace_path: Path | None = No
     app.state.config_path = config_path
     app.state.workspace_path = workspace_path
     app.state.auth_token = auth_token
-    app.state.templates = templates
 
     # Ensure config and workspace exist
     config_exists = ensure_config_exists(config_path)
@@ -141,46 +130,48 @@ async def check_auth(request: Request):
 
 def register_routes(app: FastAPI):
     """Register main routes."""
+    template_dir = Path(__file__).parent.parent / "templates" / "web"
+    templates = Jinja2Templates(directory=str(template_dir))
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
         """Serve the main dashboard."""
-        return request.app.state.templates.TemplateResponse("index.html", {
-            "request": request,
-            "active_page": "dashboard"
-        })
+        return templates.TemplateResponse(
+            "index.html",
+            {"request": request, "active_page": "dashboard"}
+        )
 
     @app.get("/config", response_class=HTMLResponse)
     async def config_page(request: Request):
         """Serve the configuration page."""
-        return request.app.state.templates.TemplateResponse("config.html", {
-            "request": request,
-            "active_page": "config"
-        })
+        return templates.TemplateResponse(
+            "config.html",
+            {"request": request, "active_page": "config"}
+        )
 
     @app.get("/chat", response_class=HTMLResponse)
     async def chat_page(request: Request):
         """Serve the chat page."""
-        return request.app.state.templates.TemplateResponse("chat.html", {
-            "request": request,
-            "active_page": "chat"
-        })
+        return templates.TemplateResponse(
+            "chat.html",
+            {"request": request, "active_page": "chat"}
+        )
 
     @app.get("/status", response_class=HTMLResponse)
     async def status_page(request: Request):
         """Serve the status page."""
-        return request.app.state.templates.TemplateResponse("status.html", {
-            "request": request,
-            "active_page": "status"
-        })
+        return templates.TemplateResponse(
+            "status.html",
+            {"request": request, "active_page": "status"}
+        )
 
     @app.get("/channels", response_class=HTMLResponse)
     async def channels_page(request: Request):
         """Serve the channels page."""
-        return request.app.state.templates.TemplateResponse("channels.html", {
-            "request": request,
-            "active_page": "channels"
-        })
+        return templates.TemplateResponse(
+            "channels.html",
+            {"request": request, "active_page": "channels"}
+        )
 
     @app.get("/health")
     async def health():

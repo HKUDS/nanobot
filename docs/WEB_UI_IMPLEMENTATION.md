@@ -30,7 +30,7 @@ Successfully implemented a complete Web UI for nanobot to provide browser-based 
 ### Modified Files
 
 #### Configuration
-- `pyproject.toml` - Added `[web]` optional dependency (FastAPI, uvicorn, python-multipart, jinja2)
+- `pyproject.toml` - Added `[web]` optional dependency (FastAPI, uvicorn, python-multipart)
 
 #### CLI
 - `nanobot/cli/commands.py` - Added `nanobot web` command
