@@ -157,6 +157,13 @@ the question "does this belong here?"
 5. **Will `__init__.py` need new exports?** If adding the export would exceed 12, the
    package is doing too much. Plan an extraction first.
 
+6. **Check conventions.** Read 1-2 existing files in the target package. Document:
+   - Connection/resource management pattern
+   - Error handling pattern (crash-barrier usage)
+   - Async/sync boundaries
+   New code MUST follow these conventions. If a plan's code example conflicts
+   with existing conventions, the conventions win.
+
 ## Before Growing a File — Size Gate
 
 **Before adding logic to an existing file, check its size.** This gate exists because
@@ -196,6 +203,16 @@ adding "just one more method."
 
 `make test` must stay fast (< 30s). Integration tests may do real I/O and are excluded
 from the fast loop. `make check` runs both tiers — never commit without it passing.
+
+### Test Data Requirements
+
+Every test file that tests tool-related code MUST include:
+- At least one test with mixed-type dict arguments (str, int, None, list, dict)
+- At least one test with the EXACT data format production code produces
+- Boundary condition tests (empty strings, max-length strings, edge values)
+
+Do NOT use only simple `{"cmd": "ls"}` fixtures. Real tool arguments look like:
+`{"command": "obsidian search query=\"DS10540\"", "working_dir": None, "timeout": 60}`
 
 ## Memory System Architecture
 
@@ -258,12 +275,13 @@ make test-integration # Integration tests (LLM tests fail without API key)
 make lint           # Ruff lint + format check
 make format         # Auto-format with ruff
 make typecheck      # mypy type checker
-make check          # Full validation: lint + typecheck + import-check + structure-check + prompt-check + test + integration
-make ci             # CI pipeline: lint + typecheck + import-check + structure-check + prompt-check + test-cov + integration
+make check          # Full validation: lint + typecheck + import-check + structure-check + prompt-check + phase-todo-check + test + integration
+make ci             # CI pipeline: lint + typecheck + import-check + structure-check + prompt-check + phase-todo-check + test-cov + integration
 make pre-push       # CI + merge-readiness check (run before pushing PRs)
 make import-check   # Check module boundary violations
 make structure-check # Check structural rules (file size, crash-barriers, __all__, catch-all filenames)
 make prompt-check   # Check prompt manifest consistency
+make phase-todo-check # Check for TODOs referencing completed phases
 make memory-eval    # Advisory memory retrieval trend (non-gating)
 make live-eval      # Run live agent evaluation
 make clean          # Remove __pycache__, .mypy_cache, etc.
@@ -505,6 +523,20 @@ Confirm:
 - Tests cover the new behavior
 - `make lint && make typecheck` passes
 - Documentation updated if public API changed
+- If a component writes data consumed by another component, verify the data contract
+  with a test (both writer and reader agree on required keys, types, defaults)
+- If implementation deviates from the spec, update the spec IMMEDIATELY in the same
+  commit. Add a `## Deviations` section. Stale specs mislead future sessions.
+
+### After deleting any module
+
+Grep for THREE patterns (not just imports):
+1. Import path: `grep -rn "from nanobot.X.deleted_module" nanobot/ tests/`
+2. Class name: `grep -rn "\bDeletedClass\b" nanobot/ tests/ --include="*.py"`
+3. Attribute: `grep -rn "\.deleted_attribute\b" nanobot/ tests/ --include="*.py"`
+
+Also: clear mypy cache (`rm -rf .mypy_cache`) and re-run `make typecheck`.
+All three greps must return zero matches (excluding comments and docs/).
 
 ### Refactoring Rules
 

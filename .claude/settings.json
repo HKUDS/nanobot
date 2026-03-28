@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cat .claude/hooks/session-checklist.txt 2>/dev/null || echo 'No session checklist found'"
+          }
+        ]
+      }
+    ]
+  }
+}

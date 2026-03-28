@@ -1,5 +1,9 @@
 .assets
-.claude/
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+.claude/hooks/*
+!.claude/hooks/session-checklist.txt
 .env
 .full-review/
 deploy/production/.env

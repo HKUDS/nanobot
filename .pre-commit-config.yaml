@@ -41,3 +41,9 @@ repos:
         language: system
         pass_filenames: false
         files: '^prompts/'
+      - id: phase-todo-check
+        name: phase TODO check
+        entry: python scripts/check_phase_todos.py
+        language: system
+        pass_filenames: false
+        files: '^nanobot/'
