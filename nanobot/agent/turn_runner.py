@@ -105,13 +105,38 @@ _NUDGE_MALFORMED = (
     "Your previous tool calls were malformed (empty name or arguments). "
     "Produce the final answer directly without calling any more tools."
 )
-_EMPTY_MARKERS: frozenset[str] = frozenset(
-    {"", "no matches found", "no results", "none", "no output"}
+# Substrings that indicate a tool returned no useful data.  Checked via
+# ``in`` (substring match) against the lowercased, stripped output — so
+# "No matches found." (with trailing period) is caught by "no match".
+_NEGATIVE_INDICATORS: tuple[str, ...] = (
+    "no match",
+    "no result",
+    "not found",
+    "0 result",
+    "no output",
+    "no data",
+    "nothing found",
+    "no file",
+    "no note",
+    "no item",
+    "empty result",
 )
 
 
 def _is_output_empty(output: str) -> bool:
-    return output.strip().lower() in _EMPTY_MARKERS
+    """Detect whether a tool result is semantically empty.
+
+    Uses substring matching against common negative-indicator phrases.
+    A short output (< 80 chars) containing any indicator is considered empty.
+    A completely blank output is always empty.
+    """
+    stripped = output.strip()
+    if not stripped:
+        return True
+    lower = stripped.lower()
+    if len(stripped) < 80:
+        return any(indicator in lower for indicator in _NEGATIVE_INDICATORS)
+    return False
 
 
 class TurnRunner:
