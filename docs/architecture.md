@@ -1,7 +1,7 @@
 # Nanobot Architecture
 
 > Living document. Updated as the codebase evolves.
-> Last updated: 2026-03-25.
+> Last updated: 2026-03-27.
 
 ## Overview
 
@@ -36,8 +36,8 @@ multi-channel messaging.
 
 | Package | Concern | Key Classes |
 |---------|---------|-------------|
-| `agent/` | Orchestration engine (PAOR loop) | `AgentLoop`, `TurnOrchestrator`, `MessageProcessor` |
-| `coordination/` | Multi-agent routing and delegation | `Coordinator`, `DelegationDispatcher`, `MissionManager` |
+| `agent/` | Orchestration engine (tool-use loop, guardrails) | `AgentLoop`, `TurnRunner`, `GuardrailChain`, `MessageProcessor` |
+| `coordination/` | Multi-agent delegation and missions | `Coordinator`, `DelegationDispatcher`, `MissionManager` |
 | `memory/` | Persistent memory with hybrid retrieval | `MemoryStore`, `UnifiedMemoryDB`, `KnowledgeGraph` |
 | `tools/` | Tool infrastructure + domain implementations | `Tool`, `ToolRegistry`, `ToolExecutor`, `CapabilityRegistry` |
 | `context/` | Prompt assembly and skill discovery | `ContextBuilder`, `SkillsLoader`, `PromptLoader` |
@@ -106,10 +106,6 @@ runtime-only rules — they construct and wire subsystems by design.
 | `config/schema.py` → `providers.registry` | Deferred import | Config resolves model-to-key mappings |
 | `tools/builtin/mission.py` → `coordination.mission` | Data object | MissionStatus enum |
 | `coordination/delegation.py` → `tools.builtin.delegate` | Data object | DelegationResult dataclass |
-| `turn_orchestrator.py` → `coordination.task_types` | Pure function | `has_parallel_structure()` called at runtime |
-| `turn_orchestrator.py` → `coordination.delegation_advisor` | Enum | `DelegationAction` compared at runtime |
-| `turn_phases.py` → `coordination.task_types` | Pure function | Same as turn_orchestrator |
-| `turn_phases.py` → `coordination.delegation_advisor` | Enum | Same as turn_orchestrator |
 
 ### Tool Lifecycle Hooks
 
@@ -135,8 +131,8 @@ Channel.start() → bus.publish_inbound(InboundMessage)
   → AgentLoop.run() consumes from bus
     → ContextBuilder.build() assembles prompt
     → LLMProvider.chat() calls model
-    → ToolRegistry.execute() runs tools (if tool calls)
-    → Loop continues until final answer or max iterations
+    → TurnRunner executes tool-use loop (tool calls + guardrail checkpoints)
+    → Loop continues until final answer, guardrail recovery, or max iterations
   → bus.publish_outbound(OutboundMessage)
 → ChannelManager dispatches to correct channel
 → Channel.send() delivers response
@@ -174,6 +170,8 @@ See [docs/adr/](adr/) for Architecture Decision Records:
 - [ADR-007: Channel Adapter Model](adr/ADR-007-channel-adapter-model.md)
 - [ADR-008: Prompt Management](adr/ADR-008-prompt-management.md)
 - [ADR-009: Capability Registry](adr/ADR-009-capability-registry.md)
+- [ADR-010: Lightweight Memory Dependencies](adr/ADR-010-lightweight-memory-deps.md)
+- [ADR-011: Agent Cognitive Core Redesign](adr/ADR-011-agent-cognitive-redesign.md)
 
 ## Observability
 

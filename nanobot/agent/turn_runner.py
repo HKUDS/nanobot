@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider, LLMResponse
 
 # ---------------------------------------------------------------------------
-# Constants and helpers (moved from turn_phases.py)
+# Constants and helpers
 # ---------------------------------------------------------------------------
 
 # Tools whose arguments may contain sensitive data (file contents, credentials,

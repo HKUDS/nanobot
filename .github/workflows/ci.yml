@@ -58,7 +58,7 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
       - name: Run unit tests with coverage
-        run: python -m pytest tests/ --ignore=tests/integration -x -q --cov=nanobot --cov-report=term-missing --cov-report=json --cov-fail-under=84  # Temporarily lowered during Phase 1 deletion; restore to 85 after Phase 3
+        run: python -m pytest tests/ --ignore=tests/integration -x -q --cov=nanobot --cov-report=term-missing --cov-report=json --cov-fail-under=85
 
   integration:
     name: integration + LLM round-trip (requires API key)

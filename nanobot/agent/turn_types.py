@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 @dataclass(slots=True)
 class TurnState:
-    """Mutable state shared across iterations of the Plan-Act-Observe-Reflect loop."""
+    """Mutable state shared across iterations of the tool-use loop."""
 
     messages: list[dict[str, Any]]
     user_text: str
@@ -41,7 +41,7 @@ class TurnState:
 
 @dataclass(frozen=True, slots=True)
 class TurnResult:
-    """Immutable result of a single turn of the PAOR loop."""
+    """Immutable result of a single turn of the tool-use loop."""
 
     content: str
     tools_used: list[str]  # tool names called this turn; empty list = no tools used

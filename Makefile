@@ -16,7 +16,7 @@ test-verbose:
 	$(PYTHON) -m pytest tests/ --ignore=tests/integration -v
 
 test-cov:
-	$(PYTHON) -m pytest tests/ --ignore=tests/integration --cov=nanobot --cov-report=term-missing --cov-report=json --cov-fail-under=84
+	$(PYTHON) -m pytest tests/ --ignore=tests/integration --cov=nanobot --cov-report=term-missing --cov-report=json --cov-fail-under=85
 
 test-integration:  ## Integration tests (before push, LLM tests need API key)
 	$(PYTHON) -m pytest tests/integration/ -v --tb=short -x
