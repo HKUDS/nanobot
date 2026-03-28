@@ -21,25 +21,25 @@
         "hooks": [
           {
             "type": "command",
-            "if": "Bash(git commit *)",
+            "if": "Bash(*git commit*)",
             "command": ".claude/hooks/validate-commit.sh",
             "timeout": 10
           },
           {
             "type": "command",
-            "if": "Bash(git commit *)",
+            "if": "Bash(*git commit*)",
             "command": ".claude/hooks/no-main-commits.sh",
             "timeout": 5
           },
           {
             "type": "command",
-            "if": "Bash(git push *)",
+            "if": "Bash(*git push*)",
             "command": ".claude/hooks/pre-push-reminder.sh",
             "timeout": 5
           },
           {
             "type": "command",
-            "if": "Bash(git push *)",
+            "if": "Bash(*git push*)",
             "command": ".claude/hooks/check-arch-review.sh",
             "timeout": 5
           }
