@@ -4,6 +4,7 @@ import asyncio
 import re
 from typing import Any
 
+import httpx
 from loguru import logger
 from pydantic import Field
 from slack_sdk.socket_mode.request import SocketModeRequest
@@ -341,6 +342,8 @@ class SlackChannel(BaseChannel):
         """
         Download file from Slack with retry logic and timeout protection.
 
+        Uses httpx with Authorization header to download private Slack files.
+
         Args:
             file_id: Slack file ID
             filename: Original filename
@@ -354,26 +357,37 @@ class SlackChannel(BaseChannel):
         media_dir.mkdir(parents=True, exist_ok=True)
         file_path = media_dir / f"{file_id}_{filename}"
 
+        # Prepare authorization header using bot token
+        headers = {"Authorization": f"Bearer {self.config.bot_token}"}
+
         for attempt in range(max_retries):
             try:
-                # Use asyncio.wait_for to add timeout (30s for download)
-                response = await asyncio.wait_for(
-                    self._web_client.request("GET", url_private),
-                    timeout=30.0,
-                )
-                response.raise_for_status()
+                # Use httpx to download with timeout
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.get(url_private, headers=headers)
+                    response.raise_for_status()
 
-                # Write file in chunks to avoid blocking
-                with open(file_path, "wb") as f:
-                    f.write(response.body)
+                    # Write file
+                    with open(file_path, "wb") as f:
+                        f.write(response.content)
 
-                logger.info("Downloaded Slack file: {} as {} (attempt {})", filename, file_path, attempt + 1)
-                return str(file_path)
+                    logger.info("Downloaded Slack file: {} as {} (attempt {})", filename, file_path, attempt + 1)
+                    return str(file_path)
 
             except asyncio.TimeoutError:
                 logger.warning("Download timeout for {} (attempt {})", filename, attempt + 1)
                 if attempt < max_retries - 1:
-                    await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
+                    await asyncio.sleep(1 * (attempt + 1))
+                    continue
+            except httpx.TimeoutException:
+                logger.warning("HTTP timeout for {} (attempt {})", filename, attempt + 1)
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1 * (attempt + 1))
+                    continue
+            except httpx.HTTPStatusError as e:
+                logger.warning("HTTP error for {} (attempt {}): {}", filename, attempt + 1, e)
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1 * (attempt + 1))
                     continue
             except Exception as e:
                 logger.warning("Download failed for {} (attempt {}): {}", filename, attempt + 1, e)

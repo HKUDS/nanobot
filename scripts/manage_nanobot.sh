@@ -34,7 +34,7 @@ install() {
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>$(dirname $NANOBOT_BIN):/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>$(dirname $NANOBOT_BIN):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
 </dict>
 </plist>
