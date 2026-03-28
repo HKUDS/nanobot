@@ -432,7 +432,7 @@ class TelegramChannel(BaseChannel):
         # Send text content
         if msg.content and msg.content != "[empty message]":
             is_tool_hint = bool(msg.metadata.get("_tool_hint"))
-            chunk_len = TELEGRAM_MAX_MESSAGE_LEN - 4 if is_tool_hint else TELEGRAM_MAX_MESSAGE_LEN
+            chunk_len = TELEGRAM_MAX_MESSAGE_LEN - 2 if is_tool_hint else TELEGRAM_MAX_MESSAGE_LEN
             for chunk in split_message(msg.content, chunk_len):
                 if is_tool_hint:
                     chunk = f"`{chunk}`"
@@ -441,7 +441,6 @@ class TelegramChannel(BaseChannel):
                     chunk,
                     reply_params,
                     thread_kwargs,
-                    parse_html=not is_tool_hint,
                     disable_notification=is_tool_hint,
                 )
 
@@ -467,21 +466,9 @@ class TelegramChannel(BaseChannel):
         reply_params=None,
         thread_kwargs: dict | None = None,
         *,
-        parse_html: bool = True,
         disable_notification: bool = False,
     ) -> None:
-        """Send text, using Telegram HTML formatting when requested."""
-        if not parse_html:
-            await self._call_with_retry(
-                self._app.bot.send_message,
-                chat_id=chat_id,
-                text=text,
-                reply_parameters=reply_params,
-                disable_notification=disable_notification,
-                **(thread_kwargs or {}),
-            )
-            return
-
+        """Send a plain text message with HTML fallback."""
         try:
             html = _markdown_to_telegram_html(text)
             await self._call_with_retry(
