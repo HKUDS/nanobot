@@ -190,23 +190,22 @@ Should show `twilio_whatsapp` as enabled.
 
 ## Running with Docker
 
-The project includes a dedicated `Dockerfile.twilio` — a slim, pure-Python image with no Node.js.
+The project includes `Dockerfile.twilio` and `docker-compose.twilio.yml` — a slim, pure-Python setup with no Node.js.
 
 ### 1. Configure nanobot
 
-Create or edit `~/.nanobot/config.json` on your host machine with the Twilio settings (see [step 3](#3-configure-nanobot) above). The docker-compose file mounts `~/.nanobot` into the container.
+Create or edit `~/.nanobot/config.json` on your host machine with the Twilio settings (see [step 3](#3-configure-nanobot) above). The compose file mounts `~/.nanobot` into the container.
 
 ### 2. Build and start
 
 ```bash
-docker compose --profile twilio build
-docker compose --profile twilio up -d
+docker compose -f docker-compose.twilio.yml up -d --build
 ```
 
 Check the logs:
 
 ```bash
-docker compose logs -f nanobot-twilio
+docker compose -f docker-compose.twilio.yml logs -f
 ```
 
 You should see:
@@ -224,50 +223,6 @@ ngrok http 18790
 ```
 
 Then set the ngrok URL in the Twilio Console as described in [step 5](#5-configure-the-twilio-webhook).
-
-### 4. Using ngrok in Docker (alternative)
-
-You can also run ngrok as a Docker service alongside nanobot. Add it to `docker-compose.yml`:
-
-```yaml
-services:
-  ngrok:
-    image: ngrok/ngrok:latest
-    command: http nanobot-twilio:18790
-    environment:
-      - NGROK_AUTHTOKEN=your_ngrok_auth_token
-    ports:
-      - 4040:4040  # ngrok inspection UI
-    profiles:
-      - twilio
-    depends_on:
-      - nanobot-twilio
-```
-
-Get your auth token from [ngrok dashboard](https://dashboard.ngrok.com/get-started/your-authtoken).
-
-After starting:
-
-```bash
-docker compose --profile twilio up -d
-```
-
-Visit http://localhost:4040 to find the public URL, then configure it in the Twilio Console.
-
-### Running CLI commands with Docker
-
-Use the `cli` profile to run one-off nanobot commands:
-
-```bash
-# Check status
-docker compose run --rm nanobot-cli status
-
-# List plugins
-docker compose run --rm nanobot-cli plugins list
-
-# Run onboarding
-docker compose run --rm nanobot-cli onboard
-```
 
 ## Architecture
 
