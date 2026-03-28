@@ -161,7 +161,6 @@ Session ends → AgentLoop triggers consolidation
 See [docs/adr/](adr/) for Architecture Decision Records:
 
 - [ADR-001: Modular Monolith Strategy](adr/ADR-001-modular-monolith.md)
-- [ADR-002: Agent Loop Ownership](adr/ADR-002-agent-loop-ownership.md)
 - [ADR-003: Memory Architecture](adr/ADR-003-memory-architecture.md)
 - [ADR-004: Tool Execution Contract](adr/ADR-004-tool-execution-contract.md)
 - [ADR-005: Observability Standard](adr/ADR-005-observability.md)
