@@ -1,4 +1,7 @@
 import time
+from datetime import datetime, timezone
+
+import pytest
 
 from nanobot.memory_index.indexer import (
     MIN_TOKENS,
@@ -58,8 +61,10 @@ def test_chunk_history_splits_by_timestamp(tmp_path):
     assert len(chunks) >= 1
     # created_at must be parsed from the timestamp, not file mtime
     assert chunks[0].created_at > 0
-    # Jan 1 2025 is around unix 1735689600
-    assert chunks[0].created_at > 1_700_000_000
+    # [2025-01-01 10:00] in UTC = 1735725600.0
+    assert chunks[0].created_at == pytest.approx(
+        datetime(2025, 1, 1, 10, 0, tzinfo=timezone.utc).timestamp()
+    )
 
 
 def test_chunk_history_groups_small_entries(tmp_path):

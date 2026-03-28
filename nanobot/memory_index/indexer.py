@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 TOKEN_ESTIMATE_RATIO = 4  # characters per token (heuristic)
@@ -152,7 +152,10 @@ def _split_section(text: str, base_line: int, created_at: float) -> list[Chunk]:
             overlap_text = (
                 chunk_text[-(OVERLAP_TOKENS * TOKEN_ESTIMATE_RATIO) :] if chunk_text else ""
             )
-            line_offset += n_lines + 2
+            overlap_lines = overlap_text.count("\n") + 1 if overlap_text.strip() else 0
+            # Advance by the chunk's lines, then step back by overlap so next chunk's
+            # start_line reflects that it begins with repeated content from the previous chunk.
+            line_offset += n_lines + 2 - overlap_lines
             buf = [overlap_text, para] if overlap_text.strip() else [para]
             buf_tokens = len(overlap_text) // TOKEN_ESTIMATE_RATIO + para_tokens
         else:
@@ -176,4 +179,4 @@ def _split_section(text: str, base_line: int, created_at: float) -> list[Chunk]:
 
 
 def _parse_ts(ts_str: str) -> float:
-    return datetime.strptime(ts_str, "%Y-%m-%d %H:%M").timestamp()
+    return datetime.strptime(ts_str, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc).timestamp()
