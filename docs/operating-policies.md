@@ -62,26 +62,6 @@ Allowlist mode (`shell_mode = "allowlist"`) restricts to an explicit set of safe
 
 ## Multi-Agent Delegation
 
-### Coordinator Classification Flow
-
-Every inbound message is classified by the `Coordinator` before agent processing begins:
-
-1. **Prompt assembly** — `Coordinator._build_classify_prompt()` lists all registered
-   roles (name + description) and wraps the user message in `<user_message>` tags.
-2. **LLM classification** — A lightweight LLM call (temperature 0, max 128 tokens)
-   returns JSON with `role`, `confidence`, `needs_orchestration`, and `relevant_roles`.
-3. **Confidence filter** — If the response is valid JSON (`from_json=True`) and
-   `confidence < confidence_threshold` (default 0.6), the role falls back to the
-   configured `default_role` (typically `general`).  Text-scan fallback responses
-   (`from_json=False`) bypass this filter because they are already a last-resort
-   heuristic.
-4. **Orchestration override** — When the classified role is not `pm` or `general`,
-   the role is overridden to `pm` if either `needs_orchestration=True` **or**
-   `len(relevant_roles) >= 2`.  The relevant-roles count is the authoritative signal
-   for multi-specialist tasks.
-5. **Role lookup** — The final role name is resolved via `AgentRegistry.get()`.  If
-   the role is missing or disabled (`enabled=False`), the registry default is used.
-
 ### Role Configuration
 
 Roles are defined via `AgentRoleConfig` in `config/schema.py`.  Key fields:
@@ -132,24 +112,14 @@ Delegated sub-agents receive a **restricted tool set** governed by `AgentRoleCon
 This means a role with `allowed_tools: ["exec", "web_search"]` and
 `denied_tools: ["web_search"]` will have `exec` available but `web_search` blocked.
 
-### Classification Security
-
-The routing classification prompt wraps user messages in `<user_message>` XML tags.
-The classifier is instructed to treat content inside these tags as opaque data and ignore
-any instructions that appear within them. This prevents prompt injection from routing a
-malicious message to a privileged role (CWE-77).
-
 ## Memory System
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `memory_rollout_mode` | `enabled` | Active memory consolidation |
-| `memory_type_separation_enabled` | `True` | Separate semantic/episodic mem |
-| `memory_router_enabled` | `True` | LLM-based memory routing |
-| `memory_reflection_enabled` | `True` | Post-consolidation reflection |
-| `memory_enable_contradiction_check` | `True` | Detect conflicting memories |
-| `memory_uncertainty_threshold` | `0.6` | Confidence floor for retrieval |
-| `mem0.verify_write` | `True` | Verify mem0 writes succeeded |
+| `memory_enabled` | `True` | Master switch for memory subsystem |
+
+Memory uses unified SQLite storage with FTS5 + sqlite-vec. See `docs/memory-system-reference.md`
+for architecture details and ADR-010 for the design rationale.
 
 ## Logging & Telemetry
 
@@ -175,12 +145,5 @@ All log events include correlation IDs (`request_id`, `session_id`, `agent_id`) 
 Managed via `nanobot/templates/prompts/` with SHA-256 integrity checking
 (`prompts_manifest.json`). Override by placing files in `<workspace>/prompts/`.
 
-| Template | Purpose |
-|----------|---------|
-| `plan.md` | Planning step instructions |
-| `classify.md` | Intent classification / routing |
-| `compress.md` | Context summarisation |
-| `critique.md` | Self-critique + verification |
-| `failure_strategy.md` | Error recovery strategies |
-| `progress.md` | Progress tracking |
-| `reflect.md` | Memory reflection |
+There are currently 28 prompt templates. See `docs/prompt-inventory.md` for the
+full list and their consumers.

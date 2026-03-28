@@ -21,7 +21,7 @@ isolated networks, ports, and config directories.
 | Port            | 18791                            | 18790                            |
 | Config dir      | `~/.nanobot-staging/`            | `~/.nanobot/`                    |
 | Memory limit    | 512 MB                           | 1 GB                             |
-| Neo4j           | No (saves RAM)                   | Yes (neo4j-prod on port 7688)    |
+| Knowledge graph | networkx + JSON (in-process)     | networkx + JSON (in-process)     |
 | Caddy domain    | `staging.nanobot.internal`       | `nanobot.internal`               |
 
 ## Prerequisites

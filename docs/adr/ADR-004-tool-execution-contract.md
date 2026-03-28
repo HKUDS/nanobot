@@ -47,8 +47,8 @@ service.
    - Shapes results (truncation, error formatting) before returning to the loop.
    - Returns `list[ToolResult]`.
 
-4. **Tool registration remains in `AgentLoop.__init__`** for now. A future ADR may
-   propose a declarative registration mechanism.
+4. **Tool registration is handled by `agent_factory.py` via `build_agent()`** (see
+   Composition Root). A future ADR may propose a declarative registration mechanism.
 
 ## Consequences
 

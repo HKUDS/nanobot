@@ -43,6 +43,9 @@ that "just work" locally.
    - `LLMConfig` — LLM call tuning (timeout_s, max_retries).  Replaces
      scattered `NANOBOT_LLM_TIMEOUT_S` / `NANOBOT_LLM_MAX_RETRIES` env reads.
 
+> **Note:** The `from_defaults()` pattern was replaced by hierarchical `AgentConfig`
+> during the config single-model refactor (2026-03-26).
+
 3. **Feature flags flow** from root `Config.features` through `_make_agent_config()`
    into `AgentConfig` fields, then into `AgentLoop` behaviour:
 
