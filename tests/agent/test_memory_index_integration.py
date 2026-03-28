@@ -26,7 +26,7 @@ def test_context_builder_loads_memory_file_when_disabled(tmp_path):
 
 
 async def test_agent_loop_registers_tool_when_enabled(tmp_path):
-    # Must be async: AgentLoop.__init__ calls asyncio.create_task for startup_index
+    # startup_index() is deferred to run()/process_direct(); only tool registration is checked here.
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
 

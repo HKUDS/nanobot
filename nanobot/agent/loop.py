@@ -37,6 +37,7 @@ if TYPE_CHECKING:
         WebSearchConfig,
     )
     from nanobot.cron.service import CronService
+    from nanobot.memory_index import MemoryIndex
 
 
 class AgentLoop:
@@ -109,6 +110,7 @@ class AgentLoop:
         )
 
         self._running = False
+        self._memory_index: MemoryIndex | None = None
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
@@ -167,9 +169,9 @@ class AgentLoop:
             from nanobot.agent.tools.memory_search import MemorySearchTool
             from nanobot.memory_index import MemoryIndex
 
-            _index = MemoryIndex(self.workspace, self.memory_index_config)
-            self._schedule_background(_index.startup_index())
-            self.tools.register(MemorySearchTool(_index))
+            self._memory_index = MemoryIndex(self.workspace, self.memory_index_config)
+            self.tools.register(MemorySearchTool(self._memory_index))
+            # startup_index() is scheduled in run()/process_direct() once the event loop is running
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -365,6 +367,9 @@ class AgentLoop:
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
+        if self._memory_index is not None:
+            self._schedule_background(self._memory_index.startup_index())
+            self._memory_index = None  # only schedule once
         await self._connect_mcp()
         logger.info("Agent loop started")
 
@@ -690,6 +695,9 @@ class AgentLoop:
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
+        if self._memory_index is not None:
+            self._schedule_background(self._memory_index.startup_index())
+            self._memory_index = None  # only schedule once
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         return await self._process_message(
