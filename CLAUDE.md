@@ -73,8 +73,10 @@ may import from inner layers, never the reverse.
 **Entry points** — `cli/`, `cron/`, `heartbeat/`. Parse input, wire subsystems, invoke
 the agent. May import from any layer.
 
-**Orchestration** — `agent/`. Owns the Plan-Act-Observe-Reflect loop, message processing,
-and the composition root (`agent_factory.py`). Orchestrates subsystems — never owns
+**Orchestration** — `agent/`. Owns the tool-use loop (`TurnRunner`), guardrail checkpoints
+(`GuardrailChain`), message processing, and the composition root (`agent_factory.py`).
+Behavioral fixes go through extension points (guardrails, context contributors, prompt
+templates) — the loop itself rarely changes. Orchestrates subsystems — never owns
 domain logic for tools, memory, or coordination.
 
 **Domain subsystems** — each owns a single bounded context:
@@ -318,8 +320,8 @@ from collapsing back into a monolith.
 
 | Package | Owns | Must never import from |
 |---------|------|----------------------|
-| `agent/` | Orchestration engine (PAOR loop, message processing) | `channels/`, `cli/` |
-| `coordination/` | Multi-agent routing, delegation, missions | `channels/`, `cli/` |
+| `agent/` | Orchestration engine (tool-use loop, guardrails, message processing) | `channels/`, `cli/` |
+| `coordination/` | Multi-agent delegation, missions, scratchpad | `channels/`, `cli/` |
 | `memory/` | Persistent memory, retrieval, knowledge graph | `channels/`, `tools/` |
 | `tools/` | Tool infrastructure + domain implementations | `channels/` |
 | `context/` | Prompt assembly, compression, skill discovery | `channels/`, `cli/` |
@@ -369,7 +371,7 @@ the system's wiring without reading 1,000+ lines.
    Do not scatter construction across multiple modules.
 
 **Detection test:** grep for class instantiation patterns (`SomeClass(`) in `loop.py`,
-`turn_orchestrator.py`, `message_processor.py`. If any construct a subsystem (not a local
+`turn_runner.py`, `message_processor.py`. If any construct a subsystem (not a local
 value object), it's a violation.
 
 ### Dependency Inversion — No Cross-Package Instantiation
@@ -426,8 +428,8 @@ and tested before it is considered done.
 
 All message entry points (`run()`, `process_direct()`, future entry points) must
 converge into `MessageProcessor._process_message()` before the first processing step.
-Processing steps — routing, context building, orchestration, verification — must have
-a single code path inside the processor. Entry points must not duplicate or skip
+Processing steps — context building, orchestration, self-check — must have a single
+code path inside the processor. Entry points must not duplicate or skip
 processing steps.
 
 **Why this rule exists:** `process_direct()` was written as a "lightweight" path that
@@ -444,7 +446,7 @@ Do not add processing logic to the loop or the new caller.
 
 ## Architecture References
 
-- Architecture decisions: `docs/adr/` (ADR-001 through ADR-009)
+- Architecture decisions: `docs/adr/` (ADR-001 through ADR-011)
 - Module ownership and import rules: `docs/architecture.md`
 - Refactoring guidelines: `docs/refactoring-principles.md`
 - Architecture restructuring history: `docs/plans/2026-03-24-architecture-restructuring.md`
@@ -554,10 +556,13 @@ These are not suggestions — they are errors. Fix immediately if detected.
   (per-call parameters, shared reference, or `TurnState` fields) — not a stale
   construction-time copy. See `tests/contract/test_role_propagation.py` for the
   pattern.
-- Processing steps (routing, context building, orchestration) implemented at the
+- Processing steps (context building, orchestration) implemented at the
   entry-point level (`AgentLoop.run()`, `process_direct()`) rather than inside
   `MessageProcessor._process_message()`. Entry points must be thin shells that
   delegate to the processor.
+- Domain logic in the loop — the loop is a dumb tool-use driver. Behavioral fixes
+  go through extension points (guardrails, context contributors, prompt templates),
+  not by adding conditionals to `TurnRunner`.
 
 **Growth violations:**
 - Adding a file to a package at its file-count limit without extracting first

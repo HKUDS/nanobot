@@ -14,11 +14,15 @@ Override: Place same-named files in `<workspace>/prompts/` (workspace-local wins
 |------|-------|---------|-------------|
 | `classify.md` | 10 | Intent routing — maps messages to specialist agents | `Coordinator.classify()` |
 | `compress.md` | 1 | Context compression — summarise conversation to ≤300 tokens | `summarize_and_compress()` |
-| `critique.md` | 1 | Answer verification — JSON confidence + issues check | `AnswerVerifier` |
-| `failure_strategy.md` | 4 | Tool failure recovery — design reference for `_build_failure_prompt()` (not injected directly; dynamic prompt built from live tracker state) | `_build_failure_prompt()` via `_run_agent_loop()` REFLECT phase |
-| `plan.md` | 8 | Planning — numbered 3–7 step plan with delegation policy | `_run_agent_loop()` PLAN phase |
-| `progress.md` | 1 | Mid-loop reflection — assess steps complete vs remaining | `_run_agent_loop()` |
-| `reflect.md` | 1 | Post-tool reflection — evaluate results, decide next action | `_run_agent_loop()` REFLECT phase |
+| `critique.md` | 1 | Answer verification — JSON confidence + issues check | Self-check pass in `TurnRunner` |
+| `failure_strategy.md` | 4 | Tool failure recovery — design reference for failure prompt building | `TurnRunner` error handling |
+| `plan.md` | 8 | Planning — numbered 3-7 step plan with delegation policy | Context assembly |
+| `progress.md` | 1 | Mid-loop reflection — assess steps complete vs remaining | Context assembly |
+| `reasoning.md` | - | Structured pre-action reasoning protocol | System prompt (injected by `ContextBuilder`) |
+| `recovery.md` | - | Guardrail recovery instructions | `GuardrailChain` recovery prompts |
+| `reflect.md` | 1 | Post-tool reflection — evaluate results, decide next action | Context assembly |
+| `self_check.md` | - | Configurable self-check pass | `TurnRunner` self-check |
+| `tool_guide.md` | - | Purpose-driven tool selection with anti-patterns | System prompt (injected by `ContextBuilder`) |
 
 ## Integrity Verification
 
