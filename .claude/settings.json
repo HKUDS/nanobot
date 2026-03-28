@@ -18,6 +18,7 @@
     "PreToolUse": [
       {
         "matcher": "Bash",
+        "if": "Bash(git commit*)",
         "hooks": [
           {
             "type": "command",
@@ -33,10 +34,16 @@
       },
       {
         "matcher": "Bash",
+        "if": "Bash(git push*)",
         "hooks": [
           {
             "type": "command",
             "command": ".claude/hooks/pre-push-reminder.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/check-arch-review.sh",
             "timeout": 5
           }
         ]
