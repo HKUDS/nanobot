@@ -1,464 +1,94 @@
-{% extends "base.html" %}
-
-{% block title %}Channels{% endblock %}
-{% block active_page %}channels{% endblock %}
-
-{% block content %}
-<div class="row mb-4">
-    <div class="col-12">
-        <h1><i class="bi bi-plug me-2"></i>Channel Management</h1>
-        <p class="text-muted">Configure and manage chat channel integrations</p>
-    </div>
-</div>
-
-<!-- Channels List -->
-<div class="row g-4" id="channelsList">
-    <div class="col-12 text-center py-5">
-        <div class="spinner-border text-primary" role="status">
-            <span class="visually-hidden">Loading...</span>
-        </div>
-    </div>
-</div>
-
-<!-- Channel Configuration Modal -->
-<div class="modal fade" id="channelConfigModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="channelConfigTitle">Configure Channel</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Channels - nanobot Web UI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <div class="d-flex" id="wrapper">
+        <div class="sidebar" id="sidebar-wrapper">
+            <div class="sidebar-heading text-center py-4">
+                <img src="/static/img/nanobot_logo.png" alt="nanobot" class="logo-img"
+                     onerror="this.style.display='none'; this.nextElementSibling.style.display='block'">
+                <h4 class="mb-0" style="display: none;">🐈 nanobot</h4>
             </div>
-            <div class="modal-body">
-                <form id="channelConfigForm">
-                    <input type="hidden" id="channelName">
-                    
-                    <div class="alert alert-info">
-                        <i class="bi bi-info-circle me-2"></i>
-                        <span id="channelDescription">Configure your channel settings below.</span>
-                    </div>
-                    
-                    <div id="channelConfigFields">
-                        <!-- Dynamic fields will be inserted here -->
-                    </div>
-                </form>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="saveChannelConfig()">
-                    <i class="bi bi-save me-2"></i>Save Configuration
-                </button>
+            <div class="list-group list-group-flush">
+                <a href="/index.html" class="list-group-item list-group-item-action">
+                    <i class="bi bi-speedometer2 me-2"></i>Dashboard
+                </a>
+                <a href="/chat.html" class="list-group-item list-group-item-action">
+                    <i class="bi bi-chat-dots me-2"></i>Chat
+                </a>
+                <a href="/config.html" class="list-group-item list-group-item-action">
+                    <i class="bi bi-gear me-2"></i>Configuration
+                </a>
+                <a href="/status.html" class="list-group-item list-group-item-action">
+                    <i class="bi bi-activity me-2"></i>Status
+                </a>
+                <a href="/channels.html" class="list-group-item list-group-item-action active">
+                    <i class="bi bi-plug me-2"></i>Channels
+                </a>
             </div>
         </div>
-    </div>
-</div>
-
-<!-- QR Code Modal for Login -->
-<div class="modal fade" id="qrLoginModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Scan QR Code</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body text-center">
-                <div id="qrCodeContainer">
-                    <div class="spinner-border text-primary mb-3" role="status">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                    <p>Generating QR code...</p>
+        <div id="page-content-wrapper">
+            <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+                <div class="container-fluid">
+                    <button class="btn btn-primary" id="sidebarToggle">
+                        <i class="bi bi-list"></i>
+                    </button>
                 </div>
-            </div>
-        </div>
-    </div>
-</div>
-{% endblock %}
-
-{% block extra_js %}
-<script>
-let allChannels = [];
-let currentConfig = {};
-
-// Load on page ready
-document.addEventListener('DOMContentLoaded', function() {
-    loadChannels();
-});
-
-async function loadChannels() {
-    try {
-        const response = await api.get('/api/channels');
-        allChannels = response.channels;
-        
-        // Load current config
-        currentConfig = await api.get('/api/config');
-        
-        renderChannels();
-    } catch (error) {
-        console.error('Failed to load channels:', error);
-        showToast('Failed to load channels', 'danger');
-    }
-}
-
-function renderChannels() {
-    const container = document.getElementById('channelsList');
-    container.innerHTML = '';
-    
-    const channelInfo = {
-        'telegram': {
-            icon: 'bi-telegram',
-            color: 'primary',
-            description: 'Telegram bot integration. Requires bot token from @BotFather.',
-            fields: [
-                { name: 'enabled', type: 'boolean', label: 'Enabled', default: false },
-                { name: 'token', type: 'password', label: 'Bot Token', placeholder: 'Bot token from @BotFather' },
-                { name: 'allowFrom', type: 'text', label: 'Allowed User IDs', placeholder: 'Comma-separated user IDs, use * for all' },
-            ]
-        },
-        'discord': {
-            icon: 'bi-discord',
-            color: 'secondary',
-            description: 'Discord bot integration. Requires bot token and message content intent.',
-            fields: [
-                { name: 'enabled', type: 'boolean', label: 'Enabled', default: false },
-                { name: 'token', type: 'password', label: 'Bot Token', placeholder: 'Discord bot token' },
-                { name: 'allowFrom', type: 'text', label: 'Allowed User IDs', placeholder: 'Comma-separated user IDs' },
-                { name: 'groupPolicy', type: 'select', label: 'Group Policy', options: ['mention', 'open'], default: 'mention' },
-            ]
-        },
-        'whatsapp': {
-            icon: 'bi-whatsapp',
-            color: 'success',
-            description: 'WhatsApp integration via QR code login. Requires Node.js >= 18.',
-            fields: [
-                { name: 'enabled', type: 'boolean', label: 'Enabled', default: false },
-                { name: 'allowFrom', type: 'text', label: 'Allowed Phone Numbers', placeholder: 'Comma-separated phone numbers, use * for all' },
-            ],
-            hasQR: true
-        },
-        'weixin': {
-            icon: 'bi-wechat',
-            color: 'success',
-            description: 'WeChat (微信) integration via QR code login.',
-            fields: [
-                { name: 'enabled', type: 'boolean', label: 'Enabled', default: false },
-                { name: 'allowFrom', type: 'text', label: 'Allowed User IDs', placeholder: 'Comma-separated user IDs' },
-            ],
-            hasQR: true
-        },
-        'feishu': {
-            icon: 'bi-box',
-            color: 'primary',
-            description: 'Feishu (飞书) integration using WebSocket. No public IP required.',
-            fields: [
-                { name: 'enabled', type: 'boolean', label: 'Enabled', default: false },
-                { name: 'appId', type: 'text', label: 'App ID', placeholder: 'cli_xxx' },
-                { name: 'appSecret', type: 'password', label: 'App Secret', placeholder: 'App secret from Feishu console' },
-                { name: 'allowFrom', type: 'text', label: 'Allowed User IDs', placeholder: 'Open IDs, use * for all' },
-                { name: 'groupPolicy', type: 'select', label: 'Group Policy', options: ['mention', 'open'], default: 'mention' },
-            ]
-        },
-        'dingtalk': {
-            icon: 'bi-chat-square-text',
-            color: 'primary',
-            description: 'DingTalk (钉钉) integration using Stream Mode.',
-            fields: [
-                { name: 'enabled', type: 'boolean', label: 'Enabled', default: false },
-                { name: 'clientId', type: 'text', label: 'App Key', placeholder: 'Client ID' },
-                { name: 'clientSecret', type: 'password', label: 'App Secret', placeholder: 'Client Secret' },
-                { name: 'allowFrom', type: 'text', label: 'Allowed Staff IDs', placeholder: 'Staff IDs, use * for all' },
-            ]
-        },
-        'slack': {
-            icon: 'bi-slack',
-            color: 'danger',
-            description: 'Slack integration using Socket Mode. No public URL required.',
-            fields: [
-                { name: 'enabled', type: 'boolean', label: 'Enabled', default: false },
-                { name: 'botToken', type: 'password', label: 'Bot Token', placeholder: 'xoxb-...' },
-                { name: 'appToken', type: 'password', label: 'App-Level Token', placeholder: 'xapp-...' },
-                { name: 'allowFrom', type: 'text', label: 'Allowed User IDs', placeholder: 'Slack user IDs' },
-                { name: 'groupPolicy', type: 'select', label: 'Group Policy', options: ['mention', 'open'], default: 'mention' },
-            ]
-        },
-        'matrix': {
-            icon: 'bi-chat-square',
-            color: 'info',
-            description: 'Matrix (Element) integration. Requires homeserver credentials.',
-            fields: [
-                { name: 'enabled', type: 'boolean', label: 'Enabled', default: false },
-                { name: 'homeserver', type: 'text', label: 'Homeserver URL', placeholder: 'https://matrix.org' },
-                { name: 'userId', type: 'text', label: 'User ID', placeholder: '@user:matrix.org' },
-                { name: 'accessToken', type: 'password', label: 'Access Token', placeholder: 'Access token' },
-                { name: 'deviceId', type: 'text', label: 'Device ID', placeholder: 'NANOBOT01' },
-                { name: 'allowFrom', type: 'text', label: 'Allowed User IDs', placeholder: 'Matrix user IDs' },
-            ]
-        },
-        'email': {
-            icon: 'bi-envelope',
-            color: 'warning',
-            description: 'Email integration via IMAP/SMTP. Give nanobot its own email account.',
-            fields: [
-                { name: 'enabled', type: 'boolean', label: 'Enabled', default: false },
-                { name: 'consentGranted', type: 'boolean', label: 'Consent Granted', default: false },
-                { name: 'imapHost', type: 'text', label: 'IMAP Host', placeholder: 'imap.gmail.com' },
-                { name: 'imapPort', type: 'number', label: 'IMAP Port', default: 993 },
-                { name: 'imapUsername', type: 'text', label: 'IMAP Username', placeholder: 'your-email@gmail.com' },
-                { name: 'imapPassword', type: 'password', label: 'IMAP Password', placeholder: 'App password' },
-                { name: 'smtpHost', type: 'text', label: 'SMTP Host', placeholder: 'smtp.gmail.com' },
-                { name: 'smtpPort', type: 'number', label: 'SMTP Port', default: 587 },
-                { name: 'smtpUsername', type: 'text', label: 'SMTP Username', placeholder: 'your-email@gmail.com' },
-                { name: 'smtpPassword', type: 'password', label: 'SMTP Password', placeholder: 'App password' },
-                { name: 'fromAddress', type: 'text', label: 'From Address', placeholder: 'your-email@gmail.com' },
-                { name: 'allowFrom', type: 'text', label: 'Allowed Senders', placeholder: 'Email addresses, use * for all' },
-            ]
-        },
-        'qq': {
-            icon: 'bi-chat-dots',
-            color: 'primary',
-            description: 'QQ bot integration using WebSocket. Currently supports private messages only.',
-            fields: [
-                { name: 'enabled', type: 'boolean', label: 'Enabled', default: false },
-                { name: 'appId', type: 'text', label: 'App ID', placeholder: 'QQ App ID' },
-                { name: 'secret', type: 'password', label: 'App Secret', placeholder: 'QQ App Secret' },
-                { name: 'allowFrom', type: 'text', label: 'Allowed OpenIDs', placeholder: 'OpenIDs, use * for all' },
-                { name: 'msgFormat', type: 'select', label: 'Message Format', options: ['plain', 'markdown'], default: 'plain' },
-            ]
-        },
-        'wecom': {
-            icon: 'bi-building',
-            color: 'primary',
-            description: 'WeCom (企业微信) bot integration.',
-            fields: [
-                { name: 'enabled', type: 'boolean', label: 'Enabled', default: false },
-                { name: 'botId', type: 'text', label: 'Bot ID', placeholder: 'WeCom Bot ID' },
-                { name: 'botSecret', type: 'password', label: 'Bot Secret', placeholder: 'WeCom Bot Secret' },
-            ]
-        },
-        'mochat': {
-            icon: 'bi-chat-heart',
-            color: 'success',
-            description: 'MoChat (Claw IM) integration using Socket.IO WebSocket.',
-            fields: [
-                { name: 'enabled', type: 'boolean', label: 'Enabled', default: false },
-                { name: 'base_url', type: 'text', label: 'Base URL', placeholder: 'https://mochat.io' },
-                { name: 'socket_url', type: 'text', label: 'Socket URL', placeholder: 'https://mochat.io' },
-                { name: 'claw_token', type: 'password', label: 'Claw Token', placeholder: 'claw_xxx' },
-                { name: 'agent_user_id', type: 'text', label: 'Agent User ID', placeholder: '6982abcdef' },
-            ]
-        },
-    };
-    
-    if (allChannels.length === 0) {
-        container.innerHTML = `
-            <div class="col-12 text-center py-5">
-                <i class="bi bi-plug display-1 text-muted mb-3"></i>
-                <h5>No channels available</h5>
-                <p class="text-muted">Channel plugins will appear here when installed</p>
-            </div>
-        `;
-        return;
-    }
-    
-    allChannels.forEach(channel => {
-        const info = channelInfo[channel.name] || {
-            icon: 'bi-plug',
-            color: 'secondary',
-            description: channel.display_name,
-            fields: []
-        };
-        
-        const col = document.createElement('div');
-        col.className = 'col-md-6 col-lg-4';
-        
-        const statusClass = channel.enabled ? 'border-success' : '';
-        const statusBadge = channel.enabled 
-            ? '<span class="badge bg-success">✓ Enabled</span>' 
-            : '<span class="badge bg-secondary">✗ Disabled</span>';
-        
-        col.innerHTML = `
-            <div class="card h-100 shadow-sm ${statusClass}">
-                <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                    <div class="d-flex align-items-center">
-                        <i class="bi ${info.icon} display-5 text-${info.color} me-3"></i>
-                        <div>
-                            <h6 class="mb-0">${channel.display_name}</h6>
-                            <small class="text-muted">${info.description.substring(0, 50)}...</small>
+            </nav>
+            <div class="container-fluid p-4">
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <h1><i class="bi bi-plug me-2"></i>Channel Management</h1>
+                        <p class="text-muted">Configure and manage chat channel integrations</p>
+                    </div>
+                </div>
+                <div class="row g-4" id="channelsList">
+                    <div class="col-12 text-center py-5">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
                         </div>
                     </div>
                 </div>
-                <div class="card-body">
-                    <div class="mb-3">${statusBadge}</div>
-                    <p class="card-text small text-muted mb-3">${info.description}</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="channelConfigModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="channelConfigTitle">Configure Channel</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="card-footer bg-white">
-                    <div class="d-flex gap-2">
-                        <button class="btn btn-sm btn-primary flex-grow-1" onclick="editChannel('${channel.name}')">
-                            <i class="bi bi-gear me-1"></i>Configure
-                        </button>
-                        ${info.hasQR ? `
-                        <button class="btn btn-sm btn-outline-success" onclick="showQRLogin('${channel.name}')">
-                            <i class="bi bi-qr-code"></i>
-                        </button>
-                        ` : ''}
-                    </div>
+                <div class="modal-body">
+                    <form id="channelConfigForm">
+                        <input type="hidden" id="channelName">
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle me-2"></i>
+                            <span id="channelDescription">Configure your channel settings below.</span>
+                        </div>
+                        <div id="channelConfigFields"></div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="saveChannelConfig()">
+                        <i class="bi bi-save me-2"></i>Save Configuration
+                    </button>
                 </div>
             </div>
-        `;
-        
-        container.appendChild(col);
-    });
-}
-
-function editChannel(channelName) {
-    const channel = allChannels.find(c => c.name === channelName);
-    if (!channel) return;
-    
-    const info = {
-        'telegram': {
-            description: 'Telegram bot integration. Requires bot token from @BotFather.',
-            fields: [
-                { name: 'enabled', type: 'boolean', label: 'Enabled', default: false },
-                { name: 'token', type: 'password', label: 'Bot Token', placeholder: 'Bot token from @BotFather' },
-                { name: 'allowFrom', type: 'text', label: 'Allowed User IDs', placeholder: 'User IDs (comma-separated), * for all' },
-            ]
-        },
-        'discord': {
-            description: 'Discord bot integration. Requires bot token and message content intent.',
-            fields: [
-                { name: 'enabled', type: 'boolean', label: 'Enabled', default: false },
-                { name: 'token', type: 'password', label: 'Bot Token', placeholder: 'Discord bot token' },
-                { name: 'allowFrom', type: 'text', label: 'Allowed User IDs', placeholder: 'User IDs (comma-separated)' },
-                { name: 'groupPolicy', type: 'select', label: 'Group Policy', options: ['mention', 'open'], default: 'mention' },
-            ]
-        },
-        'whatsapp': {
-            description: 'WhatsApp integration via QR code login. Requires Node.js >= 18.',
-            fields: [
-                { name: 'enabled', type: 'boolean', label: 'Enabled', default: false },
-                { name: 'allowFrom', type: 'text', label: 'Allowed Phone Numbers', placeholder: 'Phone numbers (comma-separated), * for all' },
-            ]
-        },
-        // Add more channel configs as needed
-    }[channelName] || {
-        description: channel.display_name,
-        fields: []
-    };
-    
-    document.getElementById('channelName').value = channelName;
-    document.getElementById('channelConfigTitle').textContent = `Configure ${channel.display_name}`;
-    document.getElementById('channelDescription').textContent = info.description;
-    
-    // Generate form fields
-    const fieldsContainer = document.getElementById('channelConfigFields');
-    fieldsContainer.innerHTML = '';
-    
-    const channelConfig = currentConfig.channels?.[channelName] || {};
-    
-    info.fields.forEach(field => {
-        const value = channelConfig[field.name] !== undefined 
-            ? channelConfig[field.name] 
-            : field.default;
-        
-        let inputHtml = '';
-        
-        if (field.type === 'boolean') {
-            inputHtml = `
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" 
-                           id="field_${field.name}" ${value ? 'checked' : ''}>
-                    <label class="form-check-label" for="field_${field.name}">${field.label}</label>
-                </div>
-            `;
-        } else if (field.type === 'select') {
-            inputHtml = `
-                <select class="form-select" id="field_${field.name}">
-                    ${field.options.map(opt => 
-                        `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`
-                    ).join('')}
-                </select>
-            `;
-        } else {
-            inputHtml = `
-                <input type="${field.type}" class="form-control" 
-                       id="field_${field.name}" 
-                       placeholder="${field.placeholder || ''}"
-                       value="${value || ''}">
-            `;
-        }
-        
-        const formGroup = document.createElement('div');
-        formGroup.className = 'mb-3';
-        formGroup.innerHTML = `
-            <label class="form-label" for="field_${field.name}">${field.label}</label>
-            ${inputHtml}
-        `;
-        
-        fieldsContainer.appendChild(formGroup);
-    });
-    
-    // Show modal
-    const modal = new bootstrap.Modal(document.getElementById('channelConfigModal'));
-    modal.show();
-}
-
-async function saveChannelConfig() {
-    const channelName = document.getElementById('channelName').value;
-    const channel = allChannels.find(c => c.name === channelName);
-    if (!channel) return;
-    
-    // Collect form values
-    const config = {};
-    const formFields = document.getElementById('channelConfigFields').querySelectorAll('[id^="field_"]');
-    
-    formFields.forEach(field => {
-        const fieldName = field.id.replace('field_', '');
-        if (field.type === 'checkbox') {
-            config[fieldName] = field.checked;
-        } else if (field.tagName === 'SELECT') {
-            config[fieldName] = field.value;
-        } else {
-            config[fieldName] = field.value;
-        }
-    });
-    
-    try {
-        // Load current config
-        const currentConfig = await api.get('/api/config');
-        
-        // Update channel config
-        if (!currentConfig.channels) {
-            currentConfig.channels = {};
-        }
-        currentConfig.channels[channelName] = config;
-        
-        // Save
-        await api.post('/api/config', currentConfig);
-        
-        showToast(`${channel.display_name} configuration saved`, 'success');
-        
-        // Close modal
-        const modal = bootstrap.Modal.getInstance(document.getElementById('channelConfigModal'));
-        modal.hide();
-        
-        // Reload channels
-        loadChannels();
-    } catch (error) {
-        console.error('Failed to save channel config:', error);
-        showToast('Failed to save configuration', 'danger');
-    }
-}
-
-function showQRLogin(channelName) {
-    const modal = new bootstrap.Modal(document.getElementById('qrLoginModal'));
-    modal.show();
-    
-    // In a real implementation, this would call the login API and display the QR code
-    document.getElementById('qrCodeContainer').innerHTML = `
-        <div class="spinner-border text-primary mb-3" role="status">
-            <span class="visually-hidden">Loading...</span>
         </div>
-        <p>QR code login for ${channelName} is not yet implemented in the web UI.</p>
-        <p class="small text-muted">Please use the CLI command: <code>nanobot channels login ${channelName}</code></p>
-    `;
-}
-</script>
-{% endblock %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/app.js"></script>
+    <script src="/static/js/channels.js"></script>
+</body>
+</html>
