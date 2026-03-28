@@ -387,6 +387,9 @@ class TelegramChannel(BaseChannel):
                     allow_sending_without_reply=True
                 )
 
+        # Get message_thread_id for forum topics
+        thread_id = msg.message_thread_id
+
         # Send media files
         for media_path in (msg.media or []):
             try:
@@ -417,7 +420,9 @@ class TelegramChannel(BaseChannel):
                         chat_id=chat_id,
                         **{param: f},
                         reply_parameters=reply_params,
+                        message_thread_id=thread_id,
                         **thread_kwargs,
+
                     )
             except Exception as e:
                 filename = media_path.rsplit("/", 1)[-1]
@@ -425,7 +430,8 @@ class TelegramChannel(BaseChannel):
                 await self._app.bot.send_message(
                     chat_id=chat_id,
                     text=f"[Failed to send: {filename}]",
-                    reply_parameters=reply_params,
+                    reply_parameters=reply_params,                
+                    message_thread_id=thread_id,
                     **thread_kwargs,
                 )
 
@@ -512,6 +518,26 @@ class TelegramChannel(BaseChannel):
                     return
                 logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
                 try:
+                    html = _markdown_to_telegram_html(chunk)
+                    await self._app.bot.send_message(
+                        chat_id=chat_id, 
+                        text=html, 
+                        parse_mode="HTML",
+                        reply_parameters=reply_params,
+                        message_thread_id=thread_id,
+                    )
+                except Exception as e:
+                    logger.warning("HTML parse failed, falling back to plain text: {}", e)
+                    try:
+                        await self._app.bot.send_message(
+                            chat_id=chat_id, 
+                            text=chunk,
+                            reply_parameters=reply_params,
+                            message_thread_id=thread_id,
+                        )
+                    except Exception as e2:
+                        logger.error("Error sending Telegram message: {}", e2)
+    
                     await self._call_with_retry(
                         self._app.bot.edit_message_text,
                         chat_id=int_chat_id, message_id=buf.message_id,
@@ -858,6 +884,14 @@ class TelegramChannel(BaseChannel):
             chat_id=str_chat_id,
             content=content,
             media=media_paths,
+            metadata={
+                "message_id": message.message_id,
+                "user_id": user.id,
+                "username": user.username,
+                "first_name": user.first_name,
+                "is_group": message.chat.type != "private",
+                "message_thread_id": message.message_thread_id,  # For forum topics
+            }
             metadata=metadata,
             session_key=session_key,
         )
