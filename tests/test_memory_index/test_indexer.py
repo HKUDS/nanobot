@@ -103,6 +103,14 @@ def test_write_chunks_replaces_on_reindex(tmp_path):
     conn.close()
     assert texts == ["New content."]  # old chunk gone
 
+    conn = _open(idx.db_path)
+    # Old text should be gone from FTS
+    old_fts = conn.execute(
+        "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH 'Old'",
+    ).fetchall()
+    conn.close()
+    assert old_fts == []  # FTS cleaned up on re-index
+
 
 def test_write_chunks_populates_fts(tmp_path):
     idx = MemoryIndex(tmp_path, MemoryIndexConfig())
@@ -122,7 +130,7 @@ async def test_startup_index_skips_unchanged_file(tmp_path):
     cfg = MemoryIndexConfig()
     idx = MemoryIndex(tmp_path, cfg)
     f = tmp_path / "memory" / "MEMORY.md"
-    f.write_text("## Facts\n\nA fact.\n")
+    f.write_text("## Facts\n\nSome fact.\n")
 
     await idx.startup_index()
     conn = _open(idx.db_path)
@@ -134,4 +142,5 @@ async def test_startup_index_skips_unchanged_file(tmp_path):
     conn = _open(idx.db_path)
     count_after_second = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
     conn.close()
+    assert count_after_first > 0  # first run actually indexed something
     assert count_after_first == count_after_second
