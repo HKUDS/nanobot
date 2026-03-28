@@ -227,6 +227,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     memory_window: int = 100
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    max_tokens_per_turn: int = 0  # 0 = unlimited; hard cap on total tokens per message turn
 
 
 class AgentsConfig(Base):

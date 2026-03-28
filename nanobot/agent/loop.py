@@ -65,6 +65,7 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         web_fetch_config: Any | None = None,
+        max_tokens_per_turn: int = 0,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -82,6 +83,7 @@ class AgentLoop:
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
         self.web_fetch_config = web_fetch_config
+        self.max_tokens_per_turn = max_tokens_per_turn
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -200,6 +202,7 @@ class AgentLoop:
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        tokens_used = 0
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -212,6 +215,17 @@ class AgentLoop:
                 max_tokens=self.max_tokens,
                 reasoning_effort=self.reasoning_effort,
             )
+
+            tokens_used += response.usage.get("total_tokens", 0)
+            if self.max_tokens_per_turn and tokens_used > self.max_tokens_per_turn:
+                logger.warning("Token budget exceeded: {} > {}", tokens_used, self.max_tokens_per_turn)
+                clean = self._strip_think(response.content)
+                if clean:
+                    messages = self.context.add_assistant_message(messages, clean)
+                    final_content = clean
+                else:
+                    final_content = f"I've used {tokens_used:,} tokens this turn (budget: {self.max_tokens_per_turn:,}). Stopping to save costs."
+                break
 
             if response.has_tool_calls:
                 if on_progress:

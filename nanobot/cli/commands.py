@@ -292,6 +292,7 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         web_fetch_config=config.tools.web.fetch,
+        max_tokens_per_turn=config.agents.defaults.max_tokens_per_turn,
     )
 
     # Set cron callback (needs agent)
@@ -453,6 +454,7 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         web_fetch_config=config.tools.web.fetch,
+        max_tokens_per_turn=config.agents.defaults.max_tokens_per_turn,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
@@ -945,6 +947,7 @@ def cron_run(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         web_fetch_config=config.tools.web.fetch,
+        max_tokens_per_turn=config.agents.defaults.max_tokens_per_turn,
     )
 
     store_path = get_data_dir() / "cron" / "jobs.json"
