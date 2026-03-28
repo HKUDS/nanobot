@@ -16,7 +16,12 @@ from loguru import logger
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.memory import MemoryConsolidator
-from nanobot.agent.runner import AgentRunSpec, AgentRunner
+from nanobot.agent.runner import (
+    EMPTY_FINAL_RESPONSE_PLACEHOLDER,
+    EMPTY_FINAL_RESPONSE_REPROMPT,
+    AgentRunSpec,
+    AgentRunner,
+)
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
@@ -538,6 +543,10 @@ class AgentLoop:
         for m in messages[skip:]:
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
+            if role == "assistant" and content == EMPTY_FINAL_RESPONSE_PLACEHOLDER:
+                continue
+            if role == "user" and content == EMPTY_FINAL_RESPONSE_REPROMPT:
+                continue
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
             if role == "tool":

@@ -1,5 +1,6 @@
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.runner import EMPTY_FINAL_RESPONSE_PLACEHOLDER, EMPTY_FINAL_RESPONSE_REPROMPT
 from nanobot.session.manager import Session
 
 
@@ -72,3 +73,20 @@ def test_save_turn_keeps_tool_results_under_16k() -> None:
     )
 
     assert session.messages[0]["content"] == content
+
+
+def test_save_turn_skips_empty_response_repair_artifacts() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:empty-repair")
+
+    loop._save_turn(
+        session,
+        [
+            {"role": "assistant", "content": EMPTY_FINAL_RESPONSE_PLACEHOLDER},
+            {"role": "user", "content": EMPTY_FINAL_RESPONSE_REPROMPT},
+            {"role": "assistant", "content": "final reply"},
+        ],
+        skip=0,
+    )
+
+    assert [msg["content"] for msg in session.messages] == ["final reply"]

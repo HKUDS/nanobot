@@ -16,6 +16,31 @@ _DEFAULT_MAX_ITERATIONS_MESSAGE = (
     "without completing the task. You can try breaking the task into smaller steps."
 )
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
+EMPTY_FINAL_RESPONSE_MAX_RETRIES = 1
+EMPTY_FINAL_RESPONSE_PLACEHOLDER = "[empty assistant response]"
+EMPTY_FINAL_RESPONSE_REPROMPT = (
+    "Your previous response contained no user-visible content. "
+    "Reply with a concise final answer for the user based on the work already completed. "
+    "Do not call tools, and do not output only hidden reasoning or an empty message."
+)
+
+
+def _append_empty_response_reprompt(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Append a repair prompt after an empty assistant reply."""
+    if (
+        messages
+        and messages[-1].get("role") == "assistant"
+        and messages[-1].get("content") is None
+        and not messages[-1].get("tool_calls")
+    ):
+        messages[-1] = {
+            **messages[-1],
+            "content": EMPTY_FINAL_RESPONSE_PLACEHOLDER,
+        }
+    elif messages and messages[-1].get("role") == "user":
+        messages.append(build_assistant_message(EMPTY_FINAL_RESPONSE_PLACEHOLDER))
+    messages.append({"role": "user", "content": EMPTY_FINAL_RESPONSE_REPROMPT})
+    return messages
 
 
 @dataclass(slots=True)
@@ -64,13 +89,15 @@ class AgentRunner:
         error: str | None = None
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
+        empty_response_retries = 0
+        text_only_repair = False
 
         for iteration in range(spec.max_iterations):
             context = AgentHookContext(iteration=iteration, messages=messages)
             await hook.before_iteration(context)
             kwargs: dict[str, Any] = {
                 "messages": messages,
-                "tools": spec.tools.get_definitions(),
+                "tools": None if text_only_repair else spec.tools.get_definitions(),
                 "model": spec.model,
             }
             if spec.temperature is not None:
@@ -101,6 +128,7 @@ class AgentRunner:
             context.tool_calls = list(response.tool_calls)
 
             if response.has_tool_calls:
+                text_only_repair = False
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=True)
 
@@ -154,6 +182,14 @@ class AgentRunner:
                 reasoning_content=response.reasoning_content,
                 thinking_blocks=response.thinking_blocks,
             ))
+            if clean is None and empty_response_retries < EMPTY_FINAL_RESPONSE_MAX_RETRIES:
+                empty_response_retries += 1
+                messages = _append_empty_response_reprompt(messages)
+                text_only_repair = True
+                context.final_content = None
+                await hook.after_iteration(context)
+                continue
+            text_only_repair = False
             final_content = clean
             context.final_content = final_content
             context.stop_reason = stop_reason
