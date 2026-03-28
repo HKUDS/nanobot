@@ -1,3 +1,5 @@
+import asyncio
+
 import httpx
 import pytest
 
@@ -57,6 +59,7 @@ async def test_embed_batch_caches_results(monkeypatch):
 
 
 async def test_embed_batch_respects_batch_size(monkeypatch):
+    """3 texts with batch_size=2 should make exactly 3 individual API calls (Ollama API is per-text)."""
     calls = []
 
     async def mock_post(self, url, **kw):
@@ -67,6 +70,27 @@ async def test_embed_batch_respects_batch_size(monkeypatch):
     provider = OllamaEmbeddingProvider(
         base_url="http://localhost:11434", model="nomic-embed-text", batch_size=2
     )
-    # 3 texts with batch_size=2 should make 3 individual calls (Ollama API is per-text)
     await provider.embed_batch(["a", "b", "c"])
     assert len(calls) == 3
+
+
+async def test_embed_batch_concurrent_within_batch(monkeypatch):
+    """batch_size=2 with 3 texts should fire 2 requests concurrently, then 1."""
+    concurrent_at_peak = 0
+    current_concurrent = 0
+
+    async def mock_post(self, url, **kw):
+        nonlocal concurrent_at_peak, current_concurrent
+        current_concurrent += 1
+        concurrent_at_peak = max(concurrent_at_peak, current_concurrent)
+        await asyncio.sleep(0)  # yield to let other coroutines start
+        current_concurrent -= 1
+        return _mock_response([0.1])
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    provider = OllamaEmbeddingProvider(
+        base_url="http://localhost:11434", model="nomic-embed-text", batch_size=2
+    )
+    result = await provider.embed_batch(["a", "b", "c"])
+    assert len(result) == 3
+    assert concurrent_at_peak == 2  # peak concurrency matches batch_size
