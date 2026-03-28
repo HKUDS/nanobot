@@ -281,6 +281,8 @@ class AgentLoop:
                 "without completing the task. You can try breaking the task into smaller steps."
             )
 
+        if tokens_used:
+            logger.info("Turn complete: {} tokens, {} iterations, {} tool calls", tokens_used, iteration, len(tools_used))
         return final_content, tools_used, messages
 
     async def run(self) -> None:
