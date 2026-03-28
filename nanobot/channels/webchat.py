@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import signal
+import socket
+import subprocess
 import uuid
 from collections import defaultdict
 from pathlib import Path
@@ -16,6 +20,7 @@ from pydantic import Field
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 
 
@@ -30,6 +35,10 @@ class WebChatConfig(Base):
     static_path: str | None = None  # Custom static files path
     show_typing: bool = True  # Show "typing..." indicator while processing
     typing_emoji: str = "🔄"  # Emoji to show while processing
+    max_upload_size: int = 10 * 1024 * 1024  # 10MB max upload size
+    allowed_extensions: list[str] = Field(
+        default_factory=lambda: ["jpg", "jpeg", "png", "gif", "webp", "pdf", "txt", "doc", "docx", "zip"]
+    )
 
 
 class WebChatChannel(BaseChannel):
@@ -67,17 +76,145 @@ class WebChatChannel(BaseChannel):
         # Track typing state per chat_id
         self._typing_sent: set[str] = set()
 
+    def _get_media_dir(self) -> Path:
+        """Get the media directory for webchat uploads."""
+        return get_media_dir("webchat")
+
+    def _is_allowed_file(self, filename: str) -> bool:
+        """Check if file extension is allowed."""
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        allowed = getattr(self.config, "allowed_extensions", [])
+        return ext in allowed
+
+    async def _save_uploaded_file(self, data: bytes, filename: str) -> str | None:
+        """Save uploaded file data to media directory, return local path."""
+        max_size = getattr(self.config, "max_upload_size", 10 * 1024 * 1024)
+        if len(data) > max_size:
+            logger.warning("WebChat: file {} exceeds max size limit", filename)
+            return None
+
+        if not self._is_allowed_file(filename):
+            logger.warning("WebChat: file type not allowed for {}", filename)
+            return None
+
+        try:
+            media_dir = self._get_media_dir()
+            # Generate unique filename to avoid collisions
+            import time
+            unique_prefix = f"{int(time.time())}_{uuid.uuid4().hex[:8]}"
+            safe_filename = f"{unique_prefix}_{filename}"
+            file_path = media_dir / safe_filename
+            await asyncio.to_thread(file_path.write_bytes, data)
+            logger.debug("WebChat: saved file to {}", file_path)
+            return str(file_path)
+        except Exception as e:
+            logger.error("WebChat: failed to save file {}: {}", filename, e)
+            return None
+
+    async def _save_base64_media(self, base64_data: str, filename: str) -> str | None:
+        """Decode base64 data and save to media directory, return local path."""
+        try:
+            import base64
+            # Handle data URI format: data:image/png;base64,xxxxx
+            if "," in base64_data:
+                base64_data = base64_data.split(",", 1)[1]
+            data = base64.b64decode(base64_data)
+            return await self._save_uploaded_file(data, filename)
+        except Exception as e:
+            logger.error("WebChat: failed to decode base64 media {}: {}", filename, e)
+            return None
+
+    async def _cleanup_port(self, port: int) -> bool:
+        """Check if port is in use and try to kill stale processes.
+        
+        Returns True if port is now available.
+        """
+        # Check if port is available
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        try:
+            result = sock.connect_ex(("127.0.0.1", port))
+            sock.close()
+            if result != 0:
+                # Port is free
+                return True
+        except Exception:
+            sock.close()
+            return True
+
+        # Port is in use, find the process
+        try:
+            result = subprocess.run(
+                ["lsof", "-ti", f":{port}"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            pids = result.stdout.strip().split("\n")
+            for pid in pids:
+                if not pid:
+                    continue
+                try:
+                    pid_int = int(pid)
+                    # Get process info
+                    proc_result = subprocess.run(
+                        ["ps", "-p", pid, "-o", "comm="],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    proc_name = proc_result.stdout.strip()
+                    
+                    # Only kill Python processes (likely stale nanobot instances)
+                    if "Python" in proc_name or "python" in proc_name.lower():
+                        logger.warning(
+                            "Port {} is in use by PID {} ({}). Killing stale process...",
+                            port, pid, proc_name
+                        )
+                        try:
+                            os.kill(pid_int, signal.SIGTERM)
+                            # Wait briefly for graceful shutdown
+                            await asyncio.sleep(0.5)
+                        except ProcessLookupError:
+                            pass  # Process already gone
+                        except PermissionError:
+                            logger.warning("Cannot kill PID {}: permission denied", pid_int)
+                except (ValueError, subprocess.TimeoutExpired):
+                    continue
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            logger.warning("Cannot check port {}: lsof not available", port)
+
+        # Recheck if port is now free
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        try:
+            result = sock.connect_ex(("127.0.0.1", port))
+            sock.close()
+            return result != 0
+        except Exception:
+            sock.close()
+            return True
+
     async def start(self) -> None:
         """Start the Web Chat HTTP/WebSocket server."""
         self._running = True
         host = getattr(self.config, "host", "0.0.0.0")
         port = getattr(self.config, "port", 8080)
 
+        # Check and cleanup stale processes on the port
+        if not await self._cleanup_port(port):
+            logger.warning(
+                "Port {} is still in use after cleanup attempt. "
+                "WebChat may fail to start.",
+                port
+            )
+
         self._app = web.Application()
-        self._app.router.add_get("/", self._handle_index)
         self._app.router.add_get("/ws", self._handle_websocket)
         self._app.router.add_post("/api/message", self._handle_http_message)
+        self._app.router.add_post("/api/upload", self._handle_file_upload)
         self._app.router.add_get("/api/health", self._handle_health)
+        self._app.router.add_get("/media/{filename:.*}", self._handle_media)
 
         # Serve custom static files if configured
         static_path = getattr(self.config, "static_path", None)
@@ -148,10 +285,27 @@ class WebChatChannel(BaseChannel):
             await self._send_typing(chat_id, is_typing=False)
             self._typing_sent.discard(chat_id)
 
+        # Convert local file paths to HTTP URLs for media
+        media_urls = []
+        for item in (msg.media or []):
+            if isinstance(item, str):
+                # Local file path -> HTTP URL
+                if item.startswith("/") or item.startswith("~"):
+                    filename = Path(item).name
+                    media_urls.append({"url": f"/media/{filename}", "type": "file"})
+                else:
+                    # Already a URL
+                    media_urls.append({"url": item, "type": "file"})
+            elif isinstance(item, dict):
+                # Already formatted media item
+                media_urls.append(item)
+            else:
+                media_urls.append(str(item))
+
         payload = {
             "type": "message",
             "content": msg.content,
-            "media": msg.media or [],
+            "media": media_urls,
             "metadata": msg.metadata,
         }
 
@@ -199,295 +353,6 @@ class WebChatChannel(BaseChannel):
         if meta.get("_stream_end"):
             self._stream_buffers.pop(chat_id, None)
 
-    async def _handle_index(self, request: web.Request) -> web.Response:
-        """Serve the main chat interface HTML."""
-        html = """<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nanobot Web Chat</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f5f5f5;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-        .header {
-            background: #1a1a2e;
-            color: white;
-            padding: 1rem;
-            text-align: center;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .header h1 { font-size: 1.25rem; font-weight: 500; }
-        .chat-container {
-            flex: 1;
-            overflow-y: auto;
-            padding: 1rem;
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-        }
-        .message {
-            max-width: 80%;
-            padding: 0.75rem 1rem;
-            border-radius: 1rem;
-            word-wrap: break-word;
-            animation: fadeIn 0.2s ease;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .message.user {
-            align-self: flex-end;
-            background: #007bff;
-            color: white;
-            border-bottom-right-radius: 0.25rem;
-        }
-        .message.bot {
-            align-self: flex-start;
-            background: white;
-            color: #333;
-            border-bottom-left-radius: 0.25rem;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-        }
-        .message.streaming {
-            border-left: 3px solid #007bff;
-        }
-        .input-container {
-            background: white;
-            padding: 1rem;
-            border-top: 1px solid #e0e0e0;
-            display: flex;
-            gap: 0.5rem;
-        }
-        #messageInput {
-            flex: 1;
-            padding: 0.75rem 1rem;
-            border: 1px solid #ddd;
-            border-radius: 1.5rem;
-            outline: none;
-            font-size: 1rem;
-        }
-        #messageInput:focus {
-            border-color: #007bff;
-        }
-        #sendBtn {
-            padding: 0.75rem 1.5rem;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 1.5rem;
-            cursor: pointer;
-            font-size: 1rem;
-            transition: background 0.2s;
-        }
-        #sendBtn:hover { background: #0056b3; }
-        #sendBtn:disabled { background: #ccc; cursor: not-allowed; }
-        .status {
-            text-align: center;
-            padding: 0.5rem;
-            font-size: 0.875rem;
-            color: #666;
-        }
-        .status.connected { color: #28a745; }
-        .status.disconnected { color: #dc3545; }
-        .typing-indicator {
-            display: flex;
-            gap: 0.25rem;
-            padding: 0.5rem 1rem;
-        }
-        .typing-indicator span {
-            width: 8px;
-            height: 8px;
-            background: #999;
-            border-radius: 50%;
-            animation: bounce 1.4s infinite ease-in-out both;
-        }
-        .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
-        .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
-        @keyframes bounce {
-            0%, 80%, 100% { transform: scale(0); }
-            40% { transform: scale(1); }
-        }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>🤖 Nanobot Web Chat</h1>
-    </div>
-    <div class="status disconnected" id="status">Disconnected</div>
-    <div class="chat-container" id="chatContainer"></div>
-    <div class="input-container">
-        <input type="text" id="messageInput" placeholder="Type a message..." autocomplete="off">
-        <button id="sendBtn">Send</button>
-    </div>
-
-    <script>
-        const chatContainer = document.getElementById('chatContainer');
-        const messageInput = document.getElementById('messageInput');
-        const sendBtn = document.getElementById('sendBtn');
-        const statusEl = document.getElementById('status');
-
-        let ws = null;
-        let reconnectAttempts = 0;
-        let currentBotMessage = null;
-
-        // Parse URL params for fixed session/agent ID
-        const urlParams = new URLSearchParams(window.location.search);
-        const urlSessionId = urlParams.get('session_id') || urlParams.get('session') || urlParams.get('sid');
-        const agentId = urlParams.get('agent') || urlParams.get('agent_id');
-
-        // Priority: URL session_id > URL agent_id > localStorage > generate new
-        let sessionId;
-        if (urlSessionId) {
-            sessionId = urlSessionId;
-        } else if (agentId) {
-            // Map agent to a fixed session ID: agent_{agentId}
-            sessionId = 'agent_' + agentId;
-        } else {
-            sessionId = localStorage.getItem('webchat_session_id') || generateSessionId();
-            localStorage.setItem('webchat_session_id', sessionId);
-        }
-
-        // Update page title if agent specified
-        if (agentId) {
-            document.querySelector('.header h1').textContent = `🤖 ${agentId}`;
-            document.title = `${agentId} - Nanobot Chat`;
-        }
-
-        function generateSessionId() {
-            return 'web_' + Math.random().toString(36).substr(2, 9);
-        }
-
-        function connect() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(`${protocol}//${window.location.host}/ws?session_id=${sessionId}`);
-
-            ws.onopen = () => {
-                console.log('WebSocket connected');
-                statusEl.textContent = 'Connected';
-                statusEl.className = 'status connected';
-                sendBtn.disabled = false;
-                reconnectAttempts = 0;
-            };
-
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                handleMessage(data);
-            };
-
-            ws.onclose = () => {
-                console.log('WebSocket disconnected');
-                statusEl.textContent = 'Disconnected - Reconnecting...';
-                statusEl.className = 'status disconnected';
-                sendBtn.disabled = true;
-
-                // Exponential backoff
-                const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
-                reconnectAttempts++;
-                setTimeout(connect, delay);
-            };
-
-            ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-            };
-        }
-
-        // handleMessage is defined below with typing support
-
-        function addMessage(text, sender) {
-            const msgDiv = document.createElement('div');
-            msgDiv.className = `message ${sender}`;
-            msgDiv.textContent = text;
-            chatContainer.appendChild(msgDiv);
-            scrollToBottom();
-            return msgDiv;
-        }
-
-        function scrollToBottom() {
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-        }
-
-        function sendMessage() {
-            const text = messageInput.value.trim();
-            if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
-
-            addMessage(text, 'user');
-            ws.send(JSON.stringify({ text }));
-            messageInput.value = '';
-            currentBotMessage = null;
-        }
-        
-        sendBtn.addEventListener('click', sendMessage);
-        messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') sendMessage();
-        });
-        
-        // Typing indicator element
-        let typingIndicator = null;
-        
-        function showTyping(emoji) {
-            if (typingIndicator) return;
-            typingIndicator = document.createElement('div');
-            typingIndicator.className = 'message bot typing-message';
-            typingIndicator.innerHTML = `<span style="margin-right: 8px;">${emoji}</span><span class="typing-indicator"><span></span><span></span><span></span></span>`;
-            chatContainer.appendChild(typingIndicator);
-            scrollToBottom();
-        }
-        
-        function hideTyping() {
-            if (typingIndicator) {
-                typingIndicator.remove();
-                typingIndicator = null;
-            }
-        }
-        
-        function handleMessage(data) {
-            if (data.type === 'typing') {
-                if (data.is_typing) {
-                    showTyping(data.emoji || '🔄');
-                } else {
-                    hideTyping();
-                }
-            } else if (data.type === 'delta') {
-                hideTyping();
-                if (!currentBotMessage) {
-                    currentBotMessage = addMessage('', 'bot');
-                    currentBotMessage.classList.add('streaming');
-                }
-                currentBotMessage.textContent = data.content;
-                scrollToBottom();
-        
-                if (data.is_end) {
-                    currentBotMessage.classList.remove('streaming');
-                    currentBotMessage = null;
-                }
-            } else if (data.type === 'message') {
-                hideTyping();
-                if (currentBotMessage) {
-                    currentBotMessage.classList.remove('streaming');
-                    currentBotMessage = null;
-                }
-                addMessage(data.content, 'bot');
-            }
-        }
-        
-        // Override previous handleMessage
-        window.handleMessage = handleMessage;
-
-        // Initial connection
-        connect();
-    </script>
-</body>
-</html>"""
-        return web.Response(text=html, content_type="text/html")
-
     async def _handle_websocket(self, request: web.Request) -> web.WebSocketResponse:
         """Handle WebSocket connections."""
         ws = web.WebSocketResponse()
@@ -510,15 +375,41 @@ class WebChatChannel(BaseChannel):
                     try:
                         data = json.loads(msg.data)
                         text = data.get("text", "").strip()
-                        if text:
+                        media = []
+
+                        # Handle inline base64 media (images)
+                        inline_media = data.get("media", [])
+                        for item in inline_media:
+                            if isinstance(item, dict):
+                                base64_data = item.get("data", "")
+                                filename = item.get("filename", "image.png")
+                            else:
+                                base64_data = str(item)
+                                filename = "image.png"
+                            if base64_data:
+                                file_path = await self._save_base64_media(base64_data, filename)
+                                if file_path:
+                                    media.append(file_path)
+                                    logger.debug("WebSocket: saved inline media to {}", file_path)
+
+                        if text or media:
                             # Show typing indicator before processing
                             if getattr(self.config, "show_typing", True):
                                 await self._send_typing(chat_id, is_typing=True)
                                 self._typing_sent.add(chat_id)
+
+                            # Build content text
+                            content = text
+                            if media and not text:
+                                # If only media, show placeholder text
+                                media_names = [Path(p).name for p in media]
+                                content = f"[{', '.join(['file: ' + n for n in media_names])}]"
+
                             await self._handle_message(
                                 sender_id=session_id,
                                 chat_id=chat_id,
-                                content=text,
+                                content=content,
+                                media=media if media else None,
                                 metadata={"session_id": session_id, "via": "websocket"},
                             )
                     except json.JSONDecodeError:
@@ -543,16 +434,38 @@ class WebChatChannel(BaseChannel):
             data = await request.json()
             text = data.get("text", "").strip()
             session_id = data.get("session_id") or str(uuid.uuid4())
+            media = []
 
-            if not text:
+            # Handle inline base64 media
+            inline_media = data.get("media", [])
+            for item in inline_media:
+                if isinstance(item, dict):
+                    base64_data = item.get("data", "")
+                    filename = item.get("filename", "image.png")
+                else:
+                    base64_data = str(item)
+                    filename = "image.png"
+                if base64_data:
+                    file_path = await self._save_base64_media(base64_data, filename)
+                    if file_path:
+                        media.append(file_path)
+
+            if not text and not media:
                 return web.json_response({"error": "Empty message"}, status=400)
 
             chat_id = f"webchat_{session_id}"
 
+            # Build content text
+            content = text
+            if media and not text:
+                media_names = [Path(p).name for p in media]
+                content = f"[{', '.join(['file: ' + n for n in media_names])}]"
+
             await self._handle_message(
                 sender_id=session_id,
                 chat_id=chat_id,
-                content=text,
+                content=content,
+                media=media if media else None,
                 metadata={"session_id": session_id, "via": "http"},
             )
 
@@ -561,6 +474,89 @@ class WebChatChannel(BaseChannel):
             return web.json_response({"error": "Invalid JSON"}, status=400)
         except Exception as e:
             logger.error("Error handling HTTP message: {}", e)
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_file_upload(self, request: web.Request) -> web.Response:
+        """Handle HTTP file upload requests."""
+        try:
+            # Support both multipart form and JSON with base64
+            content_type = request.headers.get("Content-Type", "")
+            session_id = request.query.get("session_id") or str(uuid.uuid4())
+            chat_id = f"webchat_{session_id}"
+
+            media_paths = []
+            text = ""
+
+            if "multipart/form-data" in content_type:
+                # Handle multipart file upload
+                reader = await request.multipart()
+                while True:
+                    field = await reader.next()
+                    if field is None:
+                        break
+
+                    if field.name == "file":
+                        filename = field.filename or "upload.bin"
+                        data = await field.read()
+                        file_path = await self._save_uploaded_file(data, filename)
+                        if file_path:
+                            media_paths.append(file_path)
+                            text += f"[file: {Path(filename).name}] "
+                    elif field.name == "text":
+                        text = (await field.text()).strip()
+
+            elif "application/json" in content_type:
+                # Handle JSON with base64 media
+                data = await request.json()
+                text = data.get("text", "").strip()
+
+                # Accept array of base64 items or single item
+                media_items = data.get("media", [])
+                if isinstance(media_items, str):
+                    media_items = [{"data": media_items, "filename": "image.png"}]
+                elif isinstance(media_items, list):
+                    media_items = [
+                        {"data": item if isinstance(item, str) else item.get("data", ""),
+                         "filename": item.get("filename", "image.png") if isinstance(item, dict) else "image.png"}
+                        for item in media_items
+                    ]
+
+                for item in media_items:
+                    if item.get("data"):
+                        file_path = await self._save_base64_media(item["data"], item.get("filename", "image.png"))
+                        if file_path:
+                            media_paths.append(file_path)
+            else:
+                return web.json_response({"error": "Unsupported content type"}, status=400)
+
+            if not text and not media_paths:
+                return web.json_response({"error": "No content"}, status=400)
+
+            if not text and media_paths:
+                media_names = [Path(p).name for p in media_paths]
+                text = f"[{', '.join(['file: ' + n for n in media_names])}]"
+
+            # Show typing indicator
+            if getattr(self.config, "show_typing", True):
+                await self._send_typing(chat_id, is_typing=True)
+                self._typing_sent.add(chat_id)
+
+            await self._handle_message(
+                sender_id=session_id,
+                chat_id=chat_id,
+                content=text,
+                media=media_paths if media_paths else None,
+                metadata={"session_id": session_id, "via": "http_upload"},
+            )
+
+            return web.json_response({
+                "status": "ok",
+                "chat_id": chat_id,
+                "media": [str(Path(p).name) for p in media_paths]
+            })
+
+        except Exception as e:
+            logger.error("Error handling file upload: {}", e)
             return web.json_response({"error": str(e)}, status=500)
 
     async def _handle_health(self, request: web.Request) -> web.Response:
@@ -572,3 +568,42 @@ class WebChatChannel(BaseChannel):
             "active_sessions": len(self._session_chat_map),
             "active_connections": sum(len(conns) for conns in self._connections.values()),
         })
+
+    async def _handle_media(self, request: web.Request) -> web.Response:
+        """Serve uploaded media files."""
+        filename = request.match_info.get("filename", "")
+        if not filename:
+            return web.Response(status=404)
+
+        # Security: prevent path traversal
+        if ".." in filename or filename.startswith("/"):
+            return web.Response(status=403)
+
+        # Find the file in media directory
+        media_dir = self._get_media_dir()
+        file_path = media_dir / filename
+
+        # Also check subdirectories
+        if not file_path.exists():
+            # Try to find by partial match (unique prefix)
+            for part in filename.split("_"):
+                if len(part) >= 8:
+                    for f in media_dir.glob(f"*{part}*"):
+                        if f.name == filename:
+                            file_path = f
+                            break
+
+        if not file_path.exists() or not file_path.is_file():
+            return web.Response(status=404)
+
+        # Determine content type
+        import mimetypes
+        content_type, _ = mimetypes.guess_type(str(file_path))
+        if not content_type:
+            content_type = "application/octet-stream"
+
+        return web.Response(
+            body=file_path.read_bytes(),
+            content_type=content_type,
+            headers={"Cache-Control": "public, max-age=86400"}
+        )
