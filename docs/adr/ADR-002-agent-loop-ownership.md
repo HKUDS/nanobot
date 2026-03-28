@@ -1,8 +1,12 @@
 # ADR-002: Agent Loop Ownership and Lifecycle
 
+> **Status: Superseded by [ADR-011](ADR-011-agent-cognitive-redesign.md)**
+> The PAOR loop described here was replaced by a simple tool-use loop (TurnRunner)
+> in March 2026. This ADR is retained for historical context.
+
 ## Status
 
-Accepted — Phase 2 implemented (2026-03-12)
+Superseded — see ADR-011. Originally accepted, Phase 2 implemented (2026-03-12).
 
 ## Date
 
