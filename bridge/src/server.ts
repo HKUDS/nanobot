@@ -16,6 +16,17 @@ interface SendCommand {
   emoji?: string;       // For reaction
 }
 
+interface SendMediaCommand {
+  type: 'send_media';
+  to: string;
+  filePath: string;
+  mimetype: string;
+  caption?: string;
+  fileName?: string;
+}
+
+type BridgeCommand = SendCommand | SendMediaCommand;
+
 interface BridgeMessage {
   type: 'message' | 'status' | 'qr' | 'error';
   [key: string]: unknown;
@@ -76,7 +87,7 @@ export class BridgeServer {
 
     ws.on('message', async (data) => {
       try {
-        const cmd = JSON.parse(data.toString()) as SendCommand;
+        const cmd = JSON.parse(data.toString()) as BridgeCommand;
         await this.handleCommand(cmd);
         ws.send(JSON.stringify({ type: 'sent', to: cmd.to }));
       } catch (error) {
@@ -96,13 +107,15 @@ export class BridgeServer {
     });
   }
 
-  private async handleCommand(cmd: SendCommand): Promise<void> {
+  private async handleCommand(cmd: BridgeCommand): Promise<void> {
     if (!this.wa) return;
-    
-    if (cmd.type === 'send_reaction' && cmd.message_id && cmd.emoji) {
+
+    if (cmd.type === 'send_reaction' && 'message_id' in cmd && 'emoji' in cmd) {
       // Send reaction to a message
-      await this.wa.sendReaction(cmd.to, cmd.message_id, cmd.emoji);
-    } else {
+      await this.wa.sendReaction(cmd.to, cmd.message_id!, cmd.emoji!);
+    } else if (cmd.type === 'send_media') {
+      await this.wa.sendMedia(cmd.to, cmd.filePath, cmd.mimetype, cmd.caption, cmd.fileName);
+    } else if (cmd.type === 'send') {
       // Unified send method (text or media)
       await this.wa.sendMessage(cmd.to, cmd.text || '', cmd.media_path, cmd.media_type || undefined);
     }
