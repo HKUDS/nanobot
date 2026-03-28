@@ -21,10 +21,16 @@ Run this after every code change. Fix any errors before proceeding.
 Before committing:
 
 ```bash
-make check    # lint + typecheck + import-check + prompt-check + doc-check + test + integration (full validation)
+make check    # lint + typecheck + import-check + structure-check + prompt-check + phase-todo-check + doc-check (fast, ~10s)
 ```
 
 Before committing, also review documentation: check that READMEs, CHANGELOG, ADRs, docstrings, and inline comments are accurate and up to date with the changes being committed.
+
+Before pushing:
+
+```bash
+make pre-push    # full CI: make check + tests with coverage (85% gate) + integration tests + merge-readiness (~2min)
+```
 
 ## Commit Message Convention
 
@@ -135,10 +141,11 @@ immediately if detected. Full list in `.claude/rules/prohibited-patterns.md`.
 |------|---------|-----------|-------------|
 | **Unit** | `make test` | `tests/` excluding `tests/integration/` — fast, deterministic, no external deps | After every edit |
 | **Integration** | `make test-integration` | `tests/integration/` — real subsystems wired together, LLM tests fail without API key | Before push |
-| **Full** | `make check` | Unit + integration + lint + typecheck + boundary checks | Before commit |
+| **Structural** | `make check` | lint + typecheck + import-check + structure-check + prompt-check + phase-todo-check + doc-check (no tests) | Before commit |
+| **Full** | `make pre-push` | `make check` + tests with coverage (85% gate) + integration + merge-readiness | Before push |
 
-`make test` must stay fast (< 30s). Integration tests may do real I/O and are excluded
-from the fast loop. `make check` runs both tiers — never commit without it passing.
+`make test` must stay fast (< 30s). `make check` is fast (~10s) — run before every commit.
+`make pre-push` runs the full suite — run before pushing (tests only need to run once, not on both commit and push).
 
 ### Test Data Requirements
 
@@ -211,13 +218,13 @@ make test-integration # Integration tests (LLM tests fail without API key)
 make lint           # Ruff lint + format check
 make format         # Auto-format with ruff
 make typecheck      # mypy type checker
-make check          # Full validation: lint + typecheck + import-check + structure-check + prompt-check + doc-check + test + integration
-make ci             # CI pipeline: lint + typecheck + import-check + structure-check + prompt-check + doc-check + test-cov + integration
+make check          # Fast structural validation (before commit): lint + typecheck + boundary checks (no tests)
+make ci             # Full CI pipeline: check + tests with coverage (85% gate) + integration
 make pre-push       # CI + merge-readiness check (run before pushing PRs)
 make import-check   # Check module boundary violations
 make structure-check # Check structural rules (file size, crash-barriers, __all__, catch-all filenames)
 make prompt-check   # Check prompt manifest consistency
-make doc-check      # Check docs/architecture.md references are still valid
+make doc-check      # Check living doc references are still valid (CLAUDE.md, architecture.md, ADRs, etc.)
 make phase-todo-check # Check for TODOs referencing completed phases
 make memory-eval    # Advisory memory retrieval trend (non-gating)
 make live-eval      # Run live agent evaluation

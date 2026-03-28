@@ -32,7 +32,7 @@ format:
 typecheck:
 	$(PYTHON) -m mypy nanobot/
 
-check: lint typecheck import-check structure-check prompt-check phase-todo-check doc-check test test-integration
+check: lint typecheck import-check structure-check prompt-check phase-todo-check doc-check  ## Fast structural validation (before commit)
 
 ci: lint typecheck import-check structure-check prompt-check phase-todo-check doc-check test-cov test-integration
 
