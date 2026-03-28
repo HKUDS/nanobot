@@ -5,6 +5,22 @@
 let allChannels = [];
 let currentConfig = {};
 
+// Channel metadata information
+const channelInfo = {
+    'telegram': { icon: 'bi-telegram', color: 'primary', description: 'Telegram bot integration. Requires bot token from @BotFather.' },
+    'discord': { icon: 'bi-discord', color: 'secondary', description: 'Discord bot integration. Requires bot token.' },
+    'whatsapp': { icon: 'bi-whatsapp', color: 'success', description: 'WhatsApp integration via QR code login.' },
+    'weixin': { icon: 'bi-wechat', color: 'success', description: 'WeChat (微信) integration via QR code login.' },
+    'feishu': { icon: 'bi-box', color: 'primary', description: 'Feishu (飞书) integration using WebSocket.' },
+    'dingtalk': { icon: 'bi-chat-square-text', color: 'primary', description: 'DingTalk (钉钉) integration using Stream Mode.' },
+    'slack': { icon: 'bi-slack', color: 'danger', description: 'Slack integration using Socket Mode.' },
+    'matrix': { icon: 'bi-chat-square', color: 'info', description: 'Matrix (Element) integration.' },
+    'email': { icon: 'bi-envelope', color: 'warning', description: 'Email integration via IMAP/SMTP.' },
+    'qq': { icon: 'bi-chat-dots', color: 'primary', description: 'QQ bot integration.' },
+    'wecom': { icon: 'bi-building', color: 'primary', description: 'WeCom (企业微信) bot integration.' },
+    'mochat': { icon: 'bi-chat-heart', color: 'success', description: 'MoChat (Claw IM) integration.' },
+};
+
 document.addEventListener('DOMContentLoaded', function() {
     loadChannels();
     setupSidebarToggle();
@@ -25,20 +41,7 @@ async function loadChannels() {
 function renderChannels() {
     const container = document.getElementById('channelsList');
     container.innerHTML = '';
-    const channelInfo = {
-        'telegram': { icon: 'bi-telegram', color: 'primary', description: 'Telegram bot integration. Requires bot token from @BotFather.' },
-        'discord': { icon: 'bi-discord', color: 'secondary', description: 'Discord bot integration. Requires bot token.' },
-        'whatsapp': { icon: 'bi-whatsapp', color: 'success', description: 'WhatsApp integration via QR code login.' },
-        'weixin': { icon: 'bi-wechat', color: 'success', description: 'WeChat (微信) integration via QR code login.' },
-        'feishu': { icon: 'bi-box', color: 'primary', description: 'Feishu (飞书) integration using WebSocket.' },
-        'dingtalk': { icon: 'bi-chat-square-text', color: 'primary', description: 'DingTalk (钉钉) integration using Stream Mode.' },
-        'slack': { icon: 'bi-slack', color: 'danger', description: 'Slack integration using Socket Mode.' },
-        'matrix': { icon: 'bi-chat-square', color: 'info', description: 'Matrix (Element) integration.' },
-        'email': { icon: 'bi-envelope', color: 'warning', description: 'Email integration via IMAP/SMTP.' },
-        'qq': { icon: 'bi-chat-dots', color: 'primary', description: 'QQ bot integration.' },
-        'wecom': { icon: 'bi-building', color: 'primary', description: 'WeCom (企业微信) bot integration.' },
-        'mochat': { icon: 'bi-chat-heart', color: 'success', description: 'MoChat (Claw IM) integration.' },
-    };
+    
     if (allChannels.length === 0) {
         container.innerHTML = `
             <div class="col-12 text-center py-5">
