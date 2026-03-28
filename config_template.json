@@ -1,0 +1,25 @@
+{
+  "agents": {
+    "defaults": {
+      "model": "nvidia/nemotron-3-super-120b-a12b:free",
+      "provider": "openrouter"
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "8511176191:AAHtY5y_zpvOhpwpDuk491czUaXALaK1ZxQ",
+      "allowFrom": [
+        "543867556"
+      ],
+      "proxy": null,
+      "replyToMessage": false,
+      "groupPolicy": "open"
+    }
+  },
+  "providers": {
+    "openrouter": {
+      "apiKey": "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"
+    }
+  }
+}

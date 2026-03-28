@@ -64,26 +64,18 @@ class GroqTranscriptionProvider:
             return ""
 
 
-class WhisperTranscriber:
+from typing import Any
+
+class SpeachesTranscriptionProvider:
     """
-    Local Whisper transcription provider using a self-hosted whisper-server
-    (Speaches-AI compatible OpenAI API).
+    Voice transcription provider using Speaches/local Whisper node.
     """
 
-    def __init__(self, base_url: str = "http://192.168.22.102:8000", model: str = "large-v3"):
-        self.base_url = base_url.rstrip("/")
+    def __init__(self, api_base: str, model: str = "whisper-large-v3"):
+        self.api_url = f"{api_base.rstrip('/')}/audio/transcriptions"
         self.model = model
 
     async def transcribe(self, file_path: str | Path) -> str:
-        """
-        Transcribe an audio file using local whisper-server.
-
-        Args:
-            file_path: Path to the audio file (WAV).
-
-        Returns:
-            Transcribed text.
-        """
         path = Path(file_path)
         if not path.exists():
             logger.error("Audio file not found: {}", file_path)
@@ -93,23 +85,31 @@ class WhisperTranscriber:
             async with httpx.AsyncClient() as client:
                 with open(path, "rb") as f:
                     files = {
-                        "file": (path.name, f, "audio/wav"),
-                    }
-                    data = {
-                        "model": self.model,
-                        "language": "ru",
-                        "response_format": "json",
+                        "file": (path.name, f),
+                        "model": (None, self.model),
                     }
                     response = await client.post(
-                        f"{self.base_url}/v1/audio/transcriptions",
+                        self.api_url,
                         files=files,
-                        data=data,
-                        timeout=30.0,
+                        timeout=90.0
                     )
+
                     response.raise_for_status()
-                    result = response.json()
-                    return result.get("text", "")
+                    data = response.json()
+                    return data.get("text", "")
 
         except Exception as e:
-            logger.error("Whisper transcription error: {}", e)
+            logger.error("Speaches transcription error: {}", e)
             return ""
+
+
+def get_transcription_provider(stt_config: Any) -> Any:
+    """Factory to get the configured transcription provider."""
+    provider_type = getattr(stt_config, "provider", "groq")
+    if provider_type == "speaches":
+        base = getattr(stt_config, "api_base", "") or "http://localhost:8000/v1"
+        model = getattr(stt_config, "model", "whisper-large-v3")
+        return SpeachesTranscriptionProvider(api_base=base, model=model)
+    else:
+        key = getattr(stt_config, "api_key", None)
+        return GroqTranscriptionProvider(api_key=key)

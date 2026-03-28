@@ -49,7 +49,7 @@ dependencies = [
     "openai>=2.8.0",
     "tiktoken>=0.12.0,<1.0.0",
     "opuslib>=3.0.1",
-    "edge-tts>=6.1.0",
+    "edge-tts>=6.1.12",
 ]
 
 [project.optional-dependencies]
