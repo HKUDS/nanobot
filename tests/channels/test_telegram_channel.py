@@ -419,6 +419,10 @@ def test_telegram_group_policy_defaults_to_mention() -> None:
     assert TelegramConfig().group_policy == "mention"
 
 
+def test_telegram_link_preview_defaults_to_true() -> None:
+    assert TelegramConfig().link_preview is True
+
+
 def test_is_allowed_accepts_legacy_telegram_id_username_formats() -> None:
     channel = TelegramChannel(TelegramConfig(allow_from=["12345", "alice", "67890|bob"]), MessageBus())
 
@@ -450,6 +454,62 @@ async def test_send_progress_keeps_message_in_topic() -> None:
     )
 
     assert channel._app.bot.sent_messages[0]["message_thread_id"] == 42
+
+
+@pytest.mark.asyncio
+async def test_send_tool_hint_renders_as_code_block() -> None:
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content='read_file("a<b>&c.txt")',
+            metadata={"_progress": True, "_tool_hint": True},
+        )
+    )
+
+    assert channel._app.bot.sent_messages[0]["text"] == (
+        '<pre><code>read_file("a&lt;b&gt;&amp;c.txt")</code></pre>'
+    )
+    assert channel._app.bot.sent_messages[0]["parse_mode"] == "HTML"
+
+
+@pytest.mark.asyncio
+async def test_send_disables_link_preview_when_config_false() -> None:
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], link_preview=False)
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="https://example.com",
+        )
+    )
+
+    assert channel._app.bot.sent_messages[0]["disable_web_page_preview"] is True
+
+
+@pytest.mark.asyncio
+async def test_send_delta_disables_link_preview_when_config_false() -> None:
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], link_preview=False)
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.edit_message_text = AsyncMock()
+    channel._stream_bufs["123"] = _StreamBuf(
+        text="https://example.com",
+        message_id=7,
+        last_edit=0.0,
+        stream_id="s:0",
+    )
+
+    await channel.send_delta("123", "", {"_stream_end": True, "_stream_id": "s:0"})
+
+    assert channel._app.bot.edit_message_text.await_args.kwargs["disable_web_page_preview"] is True
 
 
 @pytest.mark.asyncio
