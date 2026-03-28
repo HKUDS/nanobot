@@ -57,6 +57,7 @@ class MessageProcessor:
         self._turn_context = services.turn_context
         self._span_module: Any | None = services.span_module
         self._micro_extractor = services.micro_extractor
+        self._strategy_extractor = services.strategy_extractor
         self.config = config
         self.workspace = workspace
         self.role_name = role_name
@@ -333,6 +334,26 @@ class MessageProcessor:
                 user_message=msg.content,
                 assistant_message=final_content,
             )
+
+        # Procedural memory: extract strategies from guardrail recoveries
+        _turn_result = self._last_turn_result
+        _guardrail_acts = (
+            getattr(_turn_result, "guardrail_activations", []) if _turn_result is not None else []
+        )
+        if self._strategy_extractor and _guardrail_acts:
+            try:
+                _tool_log = (
+                    getattr(_turn_result, "tool_results_log", [])
+                    if _turn_result is not None
+                    else []
+                )
+                await self._strategy_extractor.extract_from_turn(
+                    tool_results_log=_tool_log,
+                    guardrail_activations=_guardrail_acts,
+                    user_text=msg.content,
+                )
+            except Exception:  # crash-barrier: strategy extraction is best-effort
+                logger.warning("Strategy extraction failed")
 
         # Append deferred conflict question after answering
         if pending_conflict_question:

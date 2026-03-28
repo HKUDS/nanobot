@@ -266,11 +266,19 @@ def build_agent(
         memory_config=config.memory,
     )
 
+    # 3.5 Construct StrategyStore for procedural memory
+    from nanobot.memory.strategy import StrategyStore
+
+    _memory_dir = config.workspace_path / ".nanobot" / "memory"
+    _memory_dir.mkdir(parents=True, exist_ok=True)
+    strategy_store = StrategyStore(_memory_dir / "strategies.db")
+
     # 4. Construct ContextBuilder
     context = ContextBuilder(
         config.workspace_path,
         memory=memory,
         memory_config=config.memory if config.memory_enabled else None,
+        strategy_store=strategy_store,
     )
 
     # 5. Construct SessionManager
@@ -364,6 +372,15 @@ def build_agent(
             enabled=True,
         )
 
+    # 13.2 Construct StrategyExtractor (procedural memory)
+    from nanobot.memory.strategy_extractor import StrategyExtractor as _StrategyExtractor
+
+    _strategy_extractor = _StrategyExtractor(
+        store=strategy_store,
+        provider=provider,
+        model=model,
+    )
+
     # 13.5. Construct _ProcessorServices and MessageProcessor
     from nanobot.agent.agent_components import _ProcessorServices
 
@@ -379,6 +396,7 @@ def build_agent(
         turn_context=turn_context,
         span_module=sys.modules["nanobot.agent.loop"],
         micro_extractor=_micro_extractor,
+        strategy_extractor=_strategy_extractor,
     )
     processor = MessageProcessor(
         services=services,

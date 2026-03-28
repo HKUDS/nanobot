@@ -312,6 +312,8 @@ class TurnRunner:
             tokens_prompt=self._turn_tokens_prompt,
             tokens_completion=self._turn_tokens_completion,
             llm_calls=self._turn_llm_calls,
+            guardrail_activations=list(state.guardrail_activations),
+            tool_results_log=list(state.tool_results_log),
         )
 
     # ------------------------------------------------------------------
@@ -477,6 +479,7 @@ class TurnRunner:
                     "severity": intervention.severity,
                     "iteration": state.iteration,
                     "message": intervention.message,
+                    "strategy_tag": intervention.strategy_tag,
                 }
             )
 

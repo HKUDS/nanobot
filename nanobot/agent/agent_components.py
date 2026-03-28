@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from nanobot.coordination.mission import MissionManager
     from nanobot.cron.service import CronService
     from nanobot.memory import MemoryStore
+    from nanobot.memory.strategy_extractor import StrategyExtractor
     from nanobot.memory.write.micro_extractor import MicroExtractor
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import SessionManager
@@ -99,6 +100,7 @@ class _ProcessorServices:
     turn_context: TurnContextManager
     span_module: Any = None
     micro_extractor: MicroExtractor | None = None
+    strategy_extractor: StrategyExtractor | None = None
 
 
 @dataclass(slots=True)

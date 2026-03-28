@@ -49,6 +49,8 @@ class TurnResult:
     tokens_prompt: int = 0
     tokens_completion: int = 0
     llm_calls: int = 0
+    guardrail_activations: list[dict[str, Any]] = field(default_factory=list)
+    tool_results_log: list[ToolAttempt] = field(default_factory=list)
 
 
 @dataclass(slots=True, frozen=True)
