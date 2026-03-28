@@ -128,11 +128,15 @@ class AgentLoop:
                 allowed_dir=allowed_dir,
                 protected_patterns=self._PROTECTED_FILES,
             ))
+        allow_patterns = [
+            rf"^\s*{re.escape(cmd)}\b" for cmd in self.exec_config.allow_commands
+        ] if self.exec_config.allow_commands else []
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
             path_append=self.exec_config.path_append,
+            allow_patterns=allow_patterns or None,
         ))
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         wf_cfg = self.web_fetch_config

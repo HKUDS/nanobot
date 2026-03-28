@@ -309,6 +309,7 @@ class ExecToolConfig(Base):
 
     timeout: int = 60
     path_append: str = ""
+    allow_commands: list[str] = Field(default_factory=list)  # Allowlist of command prefixes (e.g. ["grep", "ls", "cat"])
 
 
 class MCPServerConfig(Base):

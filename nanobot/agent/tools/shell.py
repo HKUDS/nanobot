@@ -44,6 +44,8 @@ class ExecTool(Tool):
     
     @property
     def description(self) -> str:
+        if self.allow_patterns:
+            return "Execute a shell command (restricted to allowed commands only)."
         return "Execute a shell command and return its output. Use with caution."
     
     @property
@@ -132,8 +134,17 @@ class ExecTool(Tool):
                 return "Error: Command blocked by safety guard (dangerous pattern detected)"
 
         if self.allow_patterns:
-            if not any(re.search(p, lower) for p in self.allow_patterns):
-                return "Error: Command blocked by safety guard (not in allowlist)"
+            # Block subshell escapes
+            if re.search(r'\$\(|`', lower):
+                return "Error: Command blocked by safety guard (subshell not allowed)"
+            # Split on pipes and command chaining operators, check each segment
+            segments = re.split(r'\s*[|;&]\s*|\s*&&\s*|\s*\|\|\s*', lower)
+            for segment in segments:
+                segment = segment.strip()
+                if not segment:
+                    continue
+                if not any(re.search(p, segment) for p in self.allow_patterns):
+                    return f"Error: Command blocked by safety guard ('{segment.split()[0]}' not in allowlist)"
 
         if self.restrict_to_workspace:
             if "..\\" in cmd or "../" in cmd:
