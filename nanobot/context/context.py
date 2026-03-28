@@ -40,6 +40,7 @@ from nanobot.observability.tracing import bind_trace
 if TYPE_CHECKING:
     from nanobot.config.memory import MemoryConfig
     from nanobot.memory.store import MemoryStore
+    from nanobot.memory.strategy import StrategyStore
 
 # ---------------------------------------------------------------------------
 # Module-level platform info cache — avoid repeated syscalls on every LLM
@@ -66,10 +67,12 @@ class ContextBuilder:
         *,
         memory: MemoryStore | None = None,
         memory_config: MemoryConfig | None = None,
+        strategy_store: StrategyStore | None = None,
     ):
         self.workspace = workspace
         self.memory = memory
         self._memory_config = memory_config
+        self._strategy_store = strategy_store
         self.skills = SkillsLoader(workspace)
         self._contacts_context: str = ""
         self._unavailable_tools_fn: Callable[[], str] | None = None
@@ -114,6 +117,29 @@ class ContextBuilder:
 
         # Tool guide — when and how to use tools
         parts.append(prompts.get("tool_guide"))
+
+        # Procedural memory — learned strategies from past sessions
+        if self._strategy_store is not None:
+            try:
+                strategies = self._strategy_store.retrieve(
+                    limit=5,
+                    min_confidence=0.3,
+                )
+                if strategies:
+                    lines = ["# Relevant Strategies\n"]
+                    lines.append(
+                        "These strategies were learned from past sessions. "
+                        "Apply them when relevant.\n"
+                    )
+                    for s in strategies:
+                        lines.append(
+                            f"**{s.domain} / {s.task_type}** "
+                            f"(confidence: {s.confidence:.0%}, used {s.use_count}x)\n"
+                            f"{s.strategy}\n"
+                        )
+                    parts.append("\n".join(lines))
+            except Exception:  # crash-barrier: procedural memory is best-effort
+                logger.warning("Procedural memory retrieval failed; continuing without strategies")
 
         # Bootstrap files
         bootstrap = self._load_bootstrap_files()
