@@ -243,10 +243,13 @@ class OpenAICompatProvider(LLMProvider):
         kwargs: dict[str, Any] = {
             "model": model_name,
             "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
-            "max_tokens": max(1, max_tokens),
-            "max_completion_tokens": max(1, max_tokens),
             "temperature": temperature,
         }
+
+        if spec and getattr(spec, "supports_max_completion_tokens", False):
+            kwargs["max_completion_tokens"] = max(1, max_tokens)
+        else:
+            kwargs["max_tokens"] = max(1, max_tokens)
 
         if spec:
             model_lower = model_name.lower()

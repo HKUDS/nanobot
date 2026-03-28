@@ -916,7 +916,12 @@ class TelegramChannel(BaseChannel):
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
-        logger.error("Telegram error: {}", context.error)
+        from telegram.error import NetworkError, TimedOut
+        
+        if isinstance(context.error, (NetworkError, TimedOut)):
+            logger.warning("Telegram network issue: {}", str(context.error))
+        else:
+            logger.error("Telegram error: {}", context.error)
 
     def _get_extension(
         self,
