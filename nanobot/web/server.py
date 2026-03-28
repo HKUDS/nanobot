@@ -57,22 +57,9 @@ def create_app(config_path: Path | None = None, workspace_path: Path | None = No
         version="0.1.4.post5",
     )
 
-    # Setup paths
-    base_path = Path(__file__).parent.parent
-    template_path = base_path / "templates" / "web"
-    static_path = base_path / "static"
-
-    # Mount static files (CSS, JS, images)
-    if static_path.exists():
-        app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
-    
-    # Mount HTML templates as static files too
-    if template_path.exists():
-        app.mount("/", StaticFiles(directory=str(template_path), html=True), name="templates")
-
     # Configuration
     auth_token = os.environ.get("NANOBOT_WEB_AUTH_TOKEN", "")
-    
+
     # Store config paths in app state
     config_path = config_path or get_config_path()
     app.state.config_path = config_path
@@ -90,9 +77,22 @@ def create_app(config_path: Path | None = None, workspace_path: Path | None = No
     else:
         print(f"⚠ Config file missing and could not be created: {config_path}")
 
-    # Register API routes
+    # Register API routes FIRST (before static files)
     register_api_routes(app)
     register_auth_routes(app)
+
+    # Setup paths
+    base_path = Path(__file__).parent.parent
+    template_path = base_path / "templates" / "web"
+    static_path = base_path / "static"
+
+    # Mount static files (CSS, JS, images)
+    if static_path.exists():
+        app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
+
+    # Mount HTML templates as static files (catches all other routes)
+    if template_path.exists():
+        app.mount("/", StaticFiles(directory=str(template_path), html=True), name="templates")
 
     return app
 
