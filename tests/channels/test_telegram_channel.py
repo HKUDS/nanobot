@@ -9,7 +9,9 @@ import pytest
 try:
     import telegram  # noqa: F401
 except ImportError:
-    pytest.skip("Telegram dependencies not installed (python-telegram-bot)", allow_module_level=True)
+    pytest.skip(
+        "Telegram dependencies not installed (python-telegram-bot)", allow_module_level=True
+    )
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -70,8 +72,10 @@ class _FakeBot:
 
     async def get_file(self, file_id: str):
         """Return a fake file that 'downloads' to a path (for reply-to-media tests)."""
+
         async def _fake_download(path) -> None:
             pass
+
         return SimpleNamespace(download_to_drive=_fake_download)
 
 
@@ -240,6 +244,7 @@ async def test_send_text_retries_on_timeout() -> None:
     channel._app.bot.send_message = flaky_send
 
     import nanobot.channels.telegram as tg_mod
+
     orig_delay = tg_mod._SEND_RETRY_BASE_DELAY
     tg_mod._SEND_RETRY_BASE_DELAY = 0.01
     try:
@@ -268,6 +273,7 @@ async def test_send_text_gives_up_after_max_retries() -> None:
     channel._app.bot.send_message = always_timeout
 
     import nanobot.channels.telegram as tg_mod
+
     orig_delay = tg_mod._SEND_RETRY_BASE_DELAY
     tg_mod._SEND_RETRY_BASE_DELAY = 0.01
     try:
@@ -317,7 +323,9 @@ def test_telegram_group_policy_defaults_to_mention() -> None:
 
 
 def test_is_allowed_accepts_legacy_telegram_id_username_formats() -> None:
-    channel = TelegramChannel(TelegramConfig(allow_from=["12345", "alice", "67890|bob"]), MessageBus())
+    channel = TelegramChannel(
+        TelegramConfig(allow_from=["12345", "alice", "67890|bob"]), MessageBus()
+    )
 
     assert channel.is_allowed("12345|carol") is True
     assert channel.is_allowed("99999|alice") is True
@@ -467,8 +475,12 @@ async def test_group_policy_mention_accepts_text_mention_and_caches_bot_identity
     channel._start_typing = lambda _chat_id: None
 
     mention = SimpleNamespace(type="mention", offset=0, length=13)
-    await channel._on_message(_make_telegram_update(text="@nanobot_test hi", entities=[mention]), None)
-    await channel._on_message(_make_telegram_update(text="@nanobot_test again", entities=[mention]), None)
+    await channel._on_message(
+        _make_telegram_update(text="@nanobot_test hi", entities=[mention]), None
+    )
+    await channel._on_message(
+        _make_telegram_update(text="@nanobot_test again", entities=[mention]), None
+    )
 
     assert len(handled) == 2
     assert channel._app.bot.get_me_calls == 1
@@ -592,8 +604,10 @@ async def test_on_message_includes_reply_context() -> None:
     )
     channel._app = _FakeApp(lambda: None)
     handled = []
+
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
+
     channel._handle_message = capture_handle
     channel._start_typing = lambda _chat_id: None
 
@@ -664,9 +678,7 @@ async def test_download_message_media_uses_file_unique_id_when_available(
         MessageBus(),
     )
     app = _FakeApp(lambda: None)
-    app.bot.get_file = AsyncMock(
-        return_value=SimpleNamespace(download_to_drive=_download_to_drive)
-    )
+    app.bot.get_file = AsyncMock(return_value=SimpleNamespace(download_to_drive=_download_to_drive))
     channel._app = app
 
     msg = SimpleNamespace(
@@ -713,8 +725,10 @@ async def test_on_message_attaches_reply_to_media_when_available(monkeypatch, tm
     )
     channel._app = app
     handled = []
+
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
+
     channel._handle_message = capture_handle
     channel._start_typing = lambda _chat_id: None
 
@@ -752,8 +766,10 @@ async def test_on_message_reply_to_media_fallback_when_download_fails() -> None:
     channel._app = _FakeApp(lambda: None)
     channel._app.bot.get_file = None
     handled = []
+
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
+
     channel._handle_message = capture_handle
     channel._start_typing = lambda _chat_id: None
 
@@ -796,8 +812,10 @@ async def test_on_message_reply_to_caption_and_media(monkeypatch, tmp_path) -> N
     )
     channel._app = app
     handled = []
+
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
+
     channel._handle_message = capture_handle
     channel._start_typing = lambda _chat_id: None
 
@@ -834,8 +852,10 @@ async def test_forward_command_does_not_inject_reply_context() -> None:
     )
     channel._app = _FakeApp(lambda: None)
     handled = []
+
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
+
     channel._handle_message = capture_handle
 
     reply = SimpleNamespace(text="some old message", message_id=2, from_user=SimpleNamespace(id=1))
@@ -861,3 +881,169 @@ async def test_on_help_includes_restart_command() -> None:
     help_text = update.message.reply_text.await_args.args[0]
     assert "/restart" in help_text
     assert "/status" in help_text
+
+
+@pytest.mark.asyncio
+async def test_send_delta_rolls_over_when_approaching_limit() -> None:
+    """send_delta should start a new message when current one approaches the limit."""
+    from nanobot.channels.telegram import TELEGRAM_MAX_MESSAGE_LEN, _STREAM_ROLLOVER_THRESHOLD
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    threshold = TELEGRAM_MAX_MESSAGE_LEN - _STREAM_ROLLOVER_THRESHOLD
+    long_text = "x" * (threshold + 100)
+
+    class FakeSent:
+        def __init__(self, msg_id):
+            self.message_id = msg_id
+
+    call_count = [0]
+
+    async def mock_send_message(**kwargs):
+        call_count[0] += 1
+        return FakeSent(call_count[0])
+
+    channel._app.bot.send_message = mock_send_message
+
+    await channel.send_delta("123", long_text, {})
+    assert call_count[0] == 1
+    buf = channel._stream_bufs.get("123")
+    assert buf is not None
+    assert buf.message_id == 1
+    remaining_text_len = len(buf.text)
+    assert remaining_text_len == 0
+
+    await channel.send_delta("123", "y" * (threshold + 100), {})
+    assert call_count[0] >= 2
+    assert len(buf.prev_message_ids) >= 1
+
+
+@pytest.mark.asyncio
+async def test_send_delta_stream_end_edits_final_message() -> None:
+    """On stream end, edit the last message (current message_id), not the first."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    buf = _StreamBuf(text="final content", message_id=5, last_edit=0.0)
+    buf.prev_message_ids = [1, 2, 3, 4]
+    channel._stream_bufs["123"] = buf
+
+    edit_calls = []
+
+    async def mock_edit_message_text(**kwargs):
+        edit_calls.append(kwargs)
+        return SimpleNamespace()
+
+    channel._app.bot.edit_message_text = mock_edit_message_text
+    channel._stop_typing = lambda _: None
+
+    await channel.send_delta("123", "", {"_stream_end": True})
+
+    assert len(edit_calls) >= 1
+    assert edit_calls[-1]["message_id"] == 5
+
+
+@pytest.mark.asyncio
+async def test_call_with_retry_raises_immediately_on_message_too_long() -> None:
+    """_call_with_retry should raise immediately on Message_too_long without retries."""
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    call_count = [0]
+
+    async def always_fail(**kwargs):
+        call_count[0] += 1
+        raise BadRequest("Message_too_long")
+
+    channel._app.bot.send_message = always_fail
+
+    import nanobot.channels.telegram as tg_mod
+
+    orig_delay = tg_mod._SEND_RETRY_BASE_DELAY
+    tg_mod._SEND_RETRY_BASE_DELAY = 0.01
+    try:
+        with pytest.raises(BadRequest):
+            await channel._call_with_retry(channel._app.bot.send_message, chat_id=123, text="x")
+        assert call_count[0] == 1
+    finally:
+        tg_mod._SEND_RETRY_BASE_DELAY = orig_delay
+
+
+@pytest.mark.asyncio
+async def test_call_with_retry_retries_on_other_bad_request() -> None:
+    """_call_with_retry should retry on other BadRequest errors."""
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    call_count = [0]
+
+    async def fail_twice_then_succeed(**kwargs):
+        call_count[0] += 1
+        if call_count[0] < 3:
+            raise BadRequest("Some other error")
+        return SimpleNamespace(message_id=1)
+
+    channel._app.bot.send_message = fail_twice_then_succeed
+
+    import nanobot.channels.telegram as tg_mod
+
+    orig_delay = tg_mod._SEND_RETRY_BASE_DELAY
+    tg_mod._SEND_RETRY_BASE_DELAY = 0.01
+    try:
+        result = await channel._call_with_retry(
+            channel._app.bot.send_message, chat_id=123, text="x"
+        )
+        assert result.message_id == 1
+        assert call_count[0] == 3
+    finally:
+        tg_mod._SEND_RETRY_BASE_DELAY = orig_delay
+
+
+@pytest.mark.asyncio
+async def test_send_delta_handles_exact_length_limit() -> None:
+    """send_delta should handle content exactly at the limit."""
+    from nanobot.channels.telegram import TELEGRAM_MAX_MESSAGE_LEN
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    exact_text = "x" * TELEGRAM_MAX_MESSAGE_LEN
+
+    class FakeSent:
+        def __init__(self, msg_id):
+            self.message_id = msg_id
+
+    sent_count = [0]
+
+    async def mock_send_message(**kwargs):
+        sent_count[0] += 1
+        return FakeSent(sent_count[0])
+
+    channel._app.bot.send_message = mock_send_message
+
+    await channel.send_delta("123", exact_text, {})
+
+    assert sent_count[0] == 1
+    buf = channel._stream_bufs.get("123")
+    assert buf is not None
+    assert buf.message_id == 1
