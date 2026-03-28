@@ -8,6 +8,7 @@ import os
 import re
 import sys
 from contextlib import AsyncExitStack
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -32,6 +33,15 @@ from nanobot.session.manager import Session, SessionManager
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
     from nanobot.cron.service import CronService
+
+
+@dataclass
+class DirectResponse:
+    """Structured result from process_direct, includes text and usage."""
+
+    content: str = ""
+    usage: dict[str, Any] = field(default_factory=dict)
+    proposals: list[dict[str, Any]] = field(default_factory=list)
 
 
 class AgentLoop:
@@ -133,6 +143,16 @@ class AgentLoop:
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
+    def set_tool_permissions(
+        self,
+        require_approval_tools: set[str] | list[str],
+        user_overrides: dict[str, str] | None = None,
+    ) -> None:
+        """Set tool permissions for the current request."""
+        from nanobot.agent.tools.permissions import ToolPermissionManager
+        manager = ToolPermissionManager(set(require_approval_tools), user_overrides)
+        self.tools.set_permissions(manager)
+
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
         if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
@@ -184,12 +204,21 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
-    ) -> tuple[str | None, list[str], list[dict]]:
-        """Run the agent iteration loop."""
+    ) -> tuple[str | None, list[str], list[dict], dict[str, Any]]:
+        """Run the agent iteration loop.
+
+        Returns (final_content, tools_used, messages, accumulated_usage).
+        """
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        accumulated_usage: dict[str, Any] = {
+            "cost_usd": 0.0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "model": self.model,
+        }
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -201,6 +230,12 @@ class AgentLoop:
                 tools=tool_defs,
                 model=self.model,
             )
+
+            # Accumulate usage from this LLM call
+            if response.usage:
+                accumulated_usage["input_tokens"] += response.usage.get("prompt_tokens", 0)
+                accumulated_usage["output_tokens"] += response.usage.get("completion_tokens", 0)
+                accumulated_usage["cost_usd"] += response.usage.get("cost", 0.0)
 
             if response.has_tool_calls:
                 if on_progress:
@@ -251,7 +286,7 @@ class AgentLoop:
                 "without completing the task. You can try breaking the task into smaller steps."
             )
 
-        return final_content, tools_used, messages
+        return final_content, tools_used, messages, accumulated_usage
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
@@ -312,7 +347,7 @@ class AgentLoop:
         """Process a message under the global lock."""
         async with self._processing_lock:
             try:
-                response = await self._process_message(msg)
+                response, _ = await self._process_message(msg)
                 if response is not None:
                     await self.bus.publish_outbound(response)
                 elif msg.channel == "cli":
@@ -358,8 +393,10 @@ class AgentLoop:
         msg: InboundMessage,
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
-    ) -> OutboundMessage | None:
-        """Process a single inbound message and return the response."""
+    ) -> tuple[OutboundMessage | None, dict[str, Any]]:
+        """Process a single inbound message and return (response, usage)."""
+        empty_usage: dict[str, Any] = {}
+
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
@@ -377,12 +414,12 @@ class AgentLoop:
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, _, all_msgs, usage = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
-            return OutboundMessage(channel=channel, chat_id=chat_id,
-                                  content=final_content or "Background task completed.")
+            return (OutboundMessage(channel=channel, chat_id=chat_id,
+                                   content=final_content or "Background task completed."), usage)
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
@@ -401,8 +438,8 @@ class AgentLoop:
             if snapshot:
                 self._schedule_background(self.memory_consolidator.archive_messages(snapshot))
 
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="New session started.")
+            return (OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
+                                   content="New session started."), empty_usage)
         if cmd == "/help":
             lines = [
                 "🐈 nanobot commands:",
@@ -411,9 +448,9 @@ class AgentLoop:
                 "/restart — Restart the bot",
                 "/help — Show available commands",
             ]
-            return OutboundMessage(
+            return (OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
-            )
+            ), empty_usage)
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
@@ -437,7 +474,7 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
+        final_content, _, all_msgs, usage = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
         )
 
@@ -449,14 +486,14 @@ class AgentLoop:
         self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
-            return None
+            return (None, usage)
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
-        return OutboundMessage(
+        return (OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=msg.metadata or {},
-        )
+        ), usage)
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""
@@ -502,9 +539,17 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
-    ) -> str:
-        """Process a message directly (for CLI or cron usage)."""
+    ) -> DirectResponse:
+        """Process a message directly (for CLI or cron usage).
+
+        Returns DirectResponse with content and accumulated usage.
+        """
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
-        return response.content if response else ""
+        response, usage = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+        proposals = self.tools.get_and_clear_proposals()
+        return DirectResponse(
+            content=response.content if response else "",
+            usage=usage,
+            proposals=proposals,
+        )
