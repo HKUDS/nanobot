@@ -134,8 +134,30 @@ class ChannelManager:
                     )
 
                 if msg.metadata.get("_progress"):
-                    if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
-                        continue
+                    # Tool hint filtering with backward-compatible send_tool_hints flag
+                    if msg.metadata.get("_tool_hint"):
+                        # Check global switch first
+                        if not self.config.channels.send_tool_hints:
+                            continue
+                        
+                        allowed = self.config.channels.tool_hint_channels.get(msg.channel, [])
+                        sender_id = msg.metadata.get("_sender_id", "")
+                        chat_id = msg.chat_id
+                        chat_type = msg.metadata.get("chat_type", "")
+                        
+                        if not allowed:
+                            pass  # Allow all
+                        else:
+                            if "*" not in allowed:
+                                if chat_type == "group" or sender_id != chat_id:
+                                    # Group mode: require both sender AND group to be allowed
+                                    if not (sender_id in allowed and chat_id in allowed):
+                                        continue
+                                else:
+                                    # Private chat: only check sender_id
+                                    if sender_id not in allowed:
+                                        continue
+                    
                     if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
                         continue
 
