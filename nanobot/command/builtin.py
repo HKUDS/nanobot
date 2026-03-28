@@ -96,7 +96,7 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
         content="\n".join(lines),
-        metadata={"render_as": "text"},
+        metadata={"render_as": "text", "source_event": ctx.msg},
     )
 
 

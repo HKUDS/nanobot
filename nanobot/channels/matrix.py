@@ -387,10 +387,13 @@ class MatrixChannel(BaseChannel):
         """Send outbound content; clear typing for non-progress messages."""
         if not self.client:
             return
+
+        self._handle_command_response(msg)
         text = msg.content or ""
         candidates = self._collect_outbound_media_candidates(msg.media)
         relates_to = self._build_thread_relates_to(msg.metadata)
         is_progress = bool((msg.metadata or {}).get("_progress"))
+
         try:
             failures: list[str] = []
             if candidates:
@@ -695,8 +698,10 @@ class MatrixChannel(BaseChannel):
     async def _on_message(self, room: MatrixRoom, event: RoomMessageText) -> None:
         if event.sender == self.config.user_id or not self._should_process_message(room, event):
             return
+
         await self._start_typing_keepalive(room.room_id)
         try:
+            self._handle_command(event)
             await self._handle_message(
                 sender_id=event.sender, chat_id=room.room_id,
                 content=event.body, metadata=self._base_metadata(room, event),
@@ -704,6 +709,18 @@ class MatrixChannel(BaseChannel):
         except Exception:
             await self._stop_typing_keepalive(room.room_id, clear_typing=True)
             raise
+
+    @staticmethod
+    def _handle_command(event: RoomMessageText) -> None:
+        if event.body.startswith("!"):
+            event.body = "/" + event.body[1:]
+            if event.body == "/help":
+                event.is_help_command = True
+
+    @staticmethod
+    def _handle_command_response(event: RoomMessageText) -> None:
+        if event.metadata and "source_event" in  event.metadata and event.metadata["source_event"].content == "/help":
+            event.content = event.content.replace("/","!")
 
     async def _on_media_message(self, room: MatrixRoom, event: MatrixMediaEvent) -> None:
         if event.sender == self.config.user_id or not self._should_process_message(room, event):
