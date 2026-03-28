@@ -1,5 +1,9 @@
 # ADR-003: Memory Architecture
 
+> **Note (2026-03-28):** The mem0 backend described below was replaced by unified
+> SQLite storage (see ADR-010 and `docs/memory-system-reference.md`). The data
+> model (MemoryEvent, BeliefRecord) remains accurate.
+
 ## Status
 
 Accepted — MemoryEvent model implemented (2026-03-12)

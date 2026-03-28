@@ -15,8 +15,10 @@
 ## Changelog
 
 - [ ] Update `CHANGELOG.md` — move `[Unreleased]` items under new version heading
-- [ ] Bump version in `pyproject.toml`
 - [ ] Commit: `chore: release vX.Y.Z`
+
+> **Note:** Version bumps in `pyproject.toml` are handled automatically by
+> `python-semantic-release` on merge to main. Do not manually edit version numbers.
 
 ## Tagging
 

@@ -5,24 +5,41 @@
 ## Template Directory
 
 Source: `nanobot/templates/prompts/`
-Loader: `nanobot/agent/prompt_loader.py` (`PromptLoader`)
+Loader: `nanobot/context/prompt_loader.py` (`PromptLoader`)
 Override: Place same-named files in `<workspace>/prompts/` (workspace-local wins).
 
 ## Templates
 
-| File | Lines | Purpose | Consumed By |
-|------|-------|---------|-------------|
-| `classify.md` | 10 | Intent routing — maps messages to specialist agents | `Coordinator.classify()` |
-| `compress.md` | 1 | Context compression — summarise conversation to ≤300 tokens | `summarize_and_compress()` |
-| `critique.md` | 1 | Answer verification — JSON confidence + issues check | Self-check pass in `TurnRunner` |
-| `failure_strategy.md` | 4 | Tool failure recovery — design reference for failure prompt building | `TurnRunner` error handling |
-| `plan.md` | 8 | Planning — numbered 3-7 step plan with delegation policy | Context assembly |
-| `progress.md` | 1 | Mid-loop reflection — assess steps complete vs remaining | Context assembly |
-| `reasoning.md` | - | Structured pre-action reasoning protocol | System prompt (injected by `ContextBuilder`) |
-| `recovery.md` | - | Guardrail recovery instructions | `GuardrailChain` recovery prompts |
-| `reflect.md` | 1 | Post-tool reflection — evaluate results, decide next action | Context assembly |
-| `self_check.md` | - | Configurable self-check pass | `TurnRunner` self-check |
-| `tool_guide.md` | - | Purpose-driven tool selection with anti-patterns | System prompt (injected by `ContextBuilder`) |
+| File | Purpose | Consumed By |
+|------|---------|-------------|
+| `compress.md` | Context compression — summarise conversation | `summarize_and_compress()` |
+| `consolidation.md` | Memory consolidation instructions | `ConsolidationPipeline` |
+| `critique.md` | Answer verification — JSON confidence + issues check | Self-check pass in `TurnRunner` |
+| `deck_synthesis.md` | Deck/presentation synthesis | Skill-specific |
+| `delegation_agent.md` | Delegation agent system prompt | `DelegationDispatcher` |
+| `delegation_schema.md` | Delegation response schema | `DelegationDispatcher` |
+| `extractor.md` | Memory event extraction instructions | `MemoryExtractor` |
+| `failure_strategy.md` | Tool failure recovery strategies | `TurnRunner` error handling |
+| `heartbeat.md` | Heartbeat/scheduled task instructions | `HeartbeatService` |
+| `identity.md` | Core agent identity and behavioral rules | `ContextBuilder` system prompt |
+| `memory_header.md` | Memory context header for prompts | `ContextBuilder` |
+| `micro_extract.md` | Lightweight memory extraction | `MicroExtractor` |
+| `nudge_final_answer.md` | Nudge LLM toward final response | Context assembly |
+| `nudge_malformed_fallback.md` | Recovery from malformed LLM output | `TurnRunner` |
+| `plan.md` | Planning — numbered step plan | Context assembly |
+| `progress.md` | Mid-loop reflection — assess progress | Context assembly |
+| `reasoning.md` | Structured pre-action reasoning protocol | `ContextBuilder` system prompt |
+| `recovery.md` | Guardrail recovery instructions | `GuardrailChain` |
+| `reflect.md` | Post-tool reflection — evaluate results | Context assembly |
+| `revision_request.md` | Request revision of agent output | `TurnRunner` |
+| `security_advisory.md` | Security constraint reminders | `ContextBuilder` system prompt |
+| `self_check.md` | Configurable self-check pass | `TurnRunner` self-check |
+| `skills_header.md` | Skills context header | `ContextBuilder` |
+| `slide_analysis.md` | Slide/image analysis instructions | Skill-specific |
+| `summary_system.md` | Summary generation system prompt | `summarize_and_compress()` |
+| `tool_guide.md` | Purpose-driven tool selection guidance | `ContextBuilder` system prompt |
+| `unavailable_tools.md` | Message when tools are unavailable | `TurnRunner` |
+| `verification_required.md` | Verification pass instructions | `TurnRunner` verification |
 
 ## Integrity Verification
 

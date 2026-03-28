@@ -98,7 +98,7 @@ on end-to-end data flow rather than orchestration mechanism verification.
 |---|---|---|
 | Overall | ≥ 85% | Enforced in CI via `--cov-fail-under=85` |
 | `agent/loop.py` | ≥ 80% | Core orchestration — golden tests cover main paths |
-| `agent/tools/` | ≥ 90% | High impact, well-isolated |
+| `tools/` | ≥ 90% | High impact, well-isolated |
 | `config/schema.py` | ≥ 95% | Pure validation logic |
 | `channels/` | ≥ 60% | Many paths require real platform connections |
 | `providers/` | ≥ 70% | Some paths require real API keys |
