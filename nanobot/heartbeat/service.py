@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from loguru import logger
 
 if TYPE_CHECKING:
+    from nanobot.config.schema import HeartbeatScheduleEntry
     from nanobot.providers.base import LLMProvider
 
 _HEARTBEAT_TOOL = [
@@ -59,6 +61,7 @@ class HeartbeatService:
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
         enabled: bool = True,
+        schedule: list[HeartbeatScheduleEntry] | None = None,
     ):
         self.workspace = workspace
         self.provider = provider
@@ -67,6 +70,7 @@ class HeartbeatService:
         self.on_notify = on_notify
         self.interval_s = interval_s
         self.enabled = enabled
+        self._schedule = schedule or []
         self._running = False
         self._task: asyncio.Task | None = None
 
@@ -125,11 +129,28 @@ class HeartbeatService:
             self._task.cancel()
             self._task = None
 
+    def _current_interval(self) -> int:
+        """Return the interval for the current time of day, checking schedule entries."""
+        if not self._schedule:
+            return self.interval_s
+        now = datetime.now().strftime("%H:%M")
+        for entry in self._schedule:
+            if entry.start <= entry.end:
+                # Normal range, e.g. 06:00–22:00
+                if entry.start <= now <= entry.end:
+                    return entry.interval_s
+            else:
+                # Wraps midnight, e.g. 22:00–06:00
+                if now >= entry.start or now <= entry.end:
+                    return entry.interval_s
+        return self.interval_s
+
     async def _run_loop(self) -> None:
         """Main heartbeat loop."""
         while self._running:
             try:
-                await asyncio.sleep(self.interval_s)
+                interval = self._current_interval()
+                await asyncio.sleep(interval)
                 if self._running:
                     await self._tick()
             except asyncio.CancelledError:

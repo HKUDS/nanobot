@@ -266,11 +266,20 @@ class ProvidersConfig(Base):
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
 
 
+class HeartbeatScheduleEntry(Base):
+    """A time-of-day interval with its own heartbeat frequency."""
+
+    start: str = "00:00"  # HH:MM (24h, local time)
+    end: str = "23:59"    # HH:MM (24h, local time)
+    interval_s: int = 30 * 60
+
+
 class HeartbeatConfig(Base):
     """Heartbeat service configuration."""
 
     enabled: bool = True
-    interval_s: int = 30 * 60  # 30 minutes
+    interval_s: int = 30 * 60  # Default interval (used when no schedule matches)
+    schedule: list[HeartbeatScheduleEntry] = Field(default_factory=list)  # Time-of-day overrides
     shared_session: bool = False  # Use target channel's session key instead of isolated "heartbeat"
     send_reasoning: bool = False  # Auto-deliver full agent response; when False only explicit message tool calls reach the user
     model: str = ""  # Override model for heartbeat (e.g. cheaper model). Empty = use default agent model.
