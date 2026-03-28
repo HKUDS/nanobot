@@ -47,3 +47,9 @@ repos:
         language: system
         pass_filenames: false
         files: '^nanobot/'
+      - id: doc-check
+        name: doc reference check
+        entry: python scripts/check_doc_references.py
+        language: system
+        pass_filenames: false
+        files: '^docs/architecture\.md$'

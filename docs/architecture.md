@@ -1,7 +1,7 @@
 # Nanobot Architecture
 
 > Living document. Updated as the codebase evolves.
-> Last updated: 2026-03-27.
+> Last updated: 2026-03-28.
 
 ## Overview
 
@@ -37,7 +37,7 @@ multi-channel messaging.
 | Package | Concern | Key Classes |
 |---------|---------|-------------|
 | `agent/` | Orchestration engine (tool-use loop, guardrails) | `AgentLoop`, `TurnRunner`, `GuardrailChain`, `MessageProcessor` |
-| `coordination/` | Multi-agent delegation and missions | `Coordinator`, `DelegationDispatcher`, `MissionManager` |
+| `coordination/` | Multi-agent delegation and missions | `DelegationDispatcher`, `MissionManager` |
 | `memory/` | Persistent memory with hybrid retrieval | `MemoryStore`, `UnifiedMemoryDB`, `KnowledgeGraph` |
 | `tools/` | Tool infrastructure + domain implementations | `Tool`, `ToolRegistry`, `ToolExecutor`, `CapabilityRegistry` |
 | `context/` | Prompt assembly and skill discovery | `ContextBuilder`, `SkillsLoader`, `PromptLoader` |
@@ -129,7 +129,7 @@ checks, no concrete type imports.
 ```
 Channel.start() → bus.publish_inbound(InboundMessage)
   → AgentLoop.run() consumes from bus
-    → ContextBuilder.build() assembles prompt
+    → ContextBuilder.build_system_prompt() + build_messages() assembles prompt
     → LLMProvider.chat() calls model
     → TurnRunner executes tool-use loop (tool calls + guardrail checkpoints)
     → Loop continues until final answer, guardrail recovery, or max iterations
@@ -142,8 +142,7 @@ Channel.start() → bus.publish_inbound(InboundMessage)
 
 ```
 Parent AgentLoop → DelegateTool.execute()
-  → Coordinator.classify() determines target role
-  → Child AgentLoop.run_tool_loop() executes bounded sub-task
+  → DelegationDispatcher.execute_delegated_agent() runs child agent
   → Result written to Scratchpad
   → Parent reads via read_scratchpad tool
 ```
@@ -152,7 +151,7 @@ Parent AgentLoop → DelegateTool.execute()
 
 ```
 Session ends → AgentLoop triggers consolidation
-  → MemoryExtractor.extract(messages) → list[MemoryEvent]
+  → MemoryExtractor.extract_structured_memory(messages) → list[MemoryEvent]
   → EventIngester.append_events() → UnifiedMemoryDB (SQLite)
   → ConsolidationPipeline.consolidate() → update profile + snapshot
 ```
@@ -189,7 +188,6 @@ See [docs/adr/](adr/) for Architecture Decision Records:
 
 - **`memory/unified_db.py`** — Single SQLite database (`memory.db`) with FTS5 + sqlite-vec
 - **`memory/embedder.py`** — `Embedder` protocol with `OpenAIEmbedder` and `LocalEmbedder`
-- **`memory/migration.py`** — One-time file-to-SQLite migration
 - **Knowledge graph** — entities and edges in SQLite tables; BFS via recursive CTE
 
 ## Memory Subsystem Internal Structure
@@ -202,12 +200,18 @@ memory/
 ├── event.py                  # MemoryEvent model
 ├── write/                    # Ingestion pipeline
 │   ├── extractor.py          # LLM + heuristic extraction
+│   ├── micro_extractor.py    # Lightweight extraction
 │   ├── ingester.py           # Event write path
-│   └── conflicts.py          # Conflict detection
+│   ├── conflicts.py          # Conflict detection
+│   ├── classification.py     # Event classification
+│   ├── coercion.py           # Type coercion
+│   └── dedup.py              # Deduplication
 ├── read/                     # Retrieval pipeline
 │   ├── retriever.py          # Vector + FTS retrieval
 │   ├── retrieval_planner.py  # Query planning
-│   └── context_assembler.py  # Context assembly for prompts
+│   ├── context_assembler.py  # Context assembly for prompts
+│   ├── graph_augmentation.py # Graph-augmented retrieval
+│   └── scoring.py            # Relevance scoring
 ├── ranking/                  # Reranking
 │   ├── reranker.py           # Protocol + composite
 │   └── onnx_reranker.py      # ONNX cross-encoder
@@ -232,6 +236,7 @@ Architecture rules are enforced programmatically in pre-commit hooks and CI.
 | `scripts/check_imports.py` | Import direction rules + dependency inversion (RUNTIME_RULES) | Pre-commit + CI |
 | `scripts/check_structure.py` | File size (500 LOC), package growth (15 files), `__init__.py` exports (12), crash-barriers, `__all__`, catch-all filenames, future annotations | Pre-commit + CI |
 | `scripts/check_prompt_manifest.py` | Prompt file consistency | Pre-commit + CI |
+| `scripts/check_doc_references.py` | Class/file references in docs/architecture.md | Pre-commit + CI |
 
 `check_structure.py` uses a baseline file (`scripts/.structure-baseline`) to track
 pre-existing violations. New violations block commits; existing ones are printed as

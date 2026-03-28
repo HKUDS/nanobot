@@ -2,8 +2,7 @@
 .claude/*
 !.claude/settings.json
 !.claude/hooks/
-.claude/hooks/*
-!.claude/hooks/session-checklist.txt
+!.claude/rules/
 .env
 .full-review/
 deploy/production/.env
