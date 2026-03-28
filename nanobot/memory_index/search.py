@@ -79,6 +79,10 @@ def apply_temporal_decay(
     }
 
 
+def _dot(a: list[float], b: list[float]) -> float:
+    return sum(x * y for x, y in zip(a, b))
+
+
 def mmr_rerank(
     scores: dict[int, float],
     chunk_vecs: dict[int, list[float]],
@@ -190,7 +194,3 @@ def sync_search(
         ]
     finally:
         conn.close()
-
-
-def _dot(a: list[float], b: list[float]) -> float:
-    return sum(x * y for x, y in zip(a, b))

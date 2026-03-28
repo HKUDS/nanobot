@@ -67,14 +67,14 @@ def test_bm25_search_returns_empty_on_no_match(tmp_path):
     assert ids == []
 
 
-def test_rrf_merge_boosts_shared_doc(tmp_path):
+def test_rrf_merge_boosts_shared_doc():
     # doc 1 appears in both lists; doc 2 only in bm25; doc 3 only in vec
     scores = rrf_merge([1, 2], [1, 3])
     assert scores[1] > scores[2]  # doc 1 boosted by both
     assert scores[1] > scores[3]
 
 
-def test_rrf_merge_single_list(tmp_path):
+def test_rrf_merge_single_list():
     scores = rrf_merge([5, 6, 7], [])
     assert 5 in scores
     assert scores[5] > scores[6] > scores[7]
