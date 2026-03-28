@@ -1,6 +1,6 @@
 ---
 description: "Prohibited code patterns — violations are bugs"
-globs:
+paths:
   - "nanobot/**/*.py"
   - "tests/**/*.py"
 ---

@@ -1,6 +1,6 @@
 ---
 description: "Architectural constraints for nanobot Python code"
-globs:
+paths:
   - "nanobot/**/*.py"
 ---
 

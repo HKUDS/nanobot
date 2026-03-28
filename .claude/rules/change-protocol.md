@@ -1,6 +1,6 @@
 ---
 description: "Change protocol for nanobot code changes"
-globs:
+paths:
   - "nanobot/**/*.py"
   - "tests/**/*.py"
 ---
