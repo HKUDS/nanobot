@@ -233,11 +233,10 @@ Full protocol (create, work, finish, prune, rules) in `.claude/rules/git-workflo
 
 ## Architecture References
 
-- Architecture decisions: `docs/adr/` (ADR-001 through ADR-011)
+- Architecture decisions: `docs/adr/` (ADR-001, ADR-003 through ADR-011)
 - Module ownership and import rules: `docs/architecture.md`
-- Refactoring guidelines: `docs/refactoring-principles.md`
-- Architecture restructuring history: `docs/archive/proposals/2026-03-24-architecture-restructuring.md`
-- Architecture review: `docs/archive/reviews/architecture-review-2026-03.md`
+- Memory subsystem: `docs/memory-system-reference.md`
+- Deployment: `docs/deployment.md`
 
 ## Known Gotchas
 

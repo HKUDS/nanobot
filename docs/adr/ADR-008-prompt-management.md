@@ -29,8 +29,8 @@ multi-line prompt strings.
    | `delegation.md` | Delegation contract for sub-agents |
    | `tool_error.md` | Tool execution failure summary |
 
-   > **Note:** The template list above reflects the initial set. As of v1.0.1, there are
-   > 28 prompt templates. See `docs/prompt-inventory.md` for the current list.
+   > **Note:** The template list above reflects the initial set. See `prompts_manifest.json`
+   > for the current list.
 
 2. **`PromptLoader`** (`nanobot/context/prompt_loader.py`) loads all `.md` files
    from the templates directory at import time.  A module-level `prompts`
