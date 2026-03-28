@@ -18,6 +18,7 @@ from check_imports import (  # noqa: E402
     COMPOSITION_ROOTS,
     RULES,
     RUNTIME_RULES,
+    _check_type_checking_imports_exist,
     _collect_imports,
     check,
 )
@@ -211,6 +212,95 @@ class TestAllowlist:
 # ---------------------------------------------------------------------------
 # check() integration
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# TYPE_CHECKING import existence
+# ---------------------------------------------------------------------------
+
+
+class TestTypeCheckingImportExistence:
+    """Verify _check_type_checking_imports_exist detects missing modules."""
+
+    def test_existing_module_no_violation(self, tmp_path: Path):
+        """TYPE_CHECKING import of an existing module produces no violations."""
+        # Create a fake nanobot package structure
+        nanobot_dir = tmp_path / "nanobot"
+        nanobot_dir.mkdir()
+        (nanobot_dir / "__init__.py").touch()
+        sub = nanobot_dir / "agent"
+        sub.mkdir()
+        (sub / "__init__.py").touch()
+        (sub / "turn_types.py").write_text("# stub")
+
+        code = (
+            "from __future__ import annotations\n"
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n"
+            "    from nanobot.agent.turn_types import TurnState\n"
+        )
+        tree = ast.parse(code)
+        violations = _check_type_checking_imports_exist(
+            tree, Path("nanobot/test_file.py"), nanobot_dir
+        )
+        assert violations == []
+
+    def test_missing_module_produces_violation(self, tmp_path: Path):
+        """TYPE_CHECKING import of a non-existent module is flagged."""
+        nanobot_dir = tmp_path / "nanobot"
+        nanobot_dir.mkdir()
+        (nanobot_dir / "__init__.py").touch()
+
+        code = (
+            "from __future__ import annotations\n"
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n"
+            "    from nanobot.agent.deleted_module import SomeClass\n"
+        )
+        tree = ast.parse(code)
+        violations = _check_type_checking_imports_exist(
+            tree, Path("nanobot/test_file.py"), nanobot_dir
+        )
+        assert len(violations) == 1
+        assert "non-existent module" in violations[0]
+        assert "nanobot.agent.deleted_module" in violations[0]
+
+    def test_non_nanobot_import_skipped(self, tmp_path: Path):
+        """TYPE_CHECKING imports of third-party packages are not checked."""
+        nanobot_dir = tmp_path / "nanobot"
+        nanobot_dir.mkdir()
+        (nanobot_dir / "__init__.py").touch()
+
+        code = (
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n"
+            "    from some_other_package import Foo\n"
+        )
+        tree = ast.parse(code)
+        violations = _check_type_checking_imports_exist(
+            tree, Path("nanobot/test_file.py"), nanobot_dir
+        )
+        assert violations == []
+
+    def test_package_init_resolves(self, tmp_path: Path):
+        """TYPE_CHECKING import of a package (dir with __init__.py) passes."""
+        nanobot_dir = tmp_path / "nanobot"
+        nanobot_dir.mkdir()
+        (nanobot_dir / "__init__.py").touch()
+        pkg = nanobot_dir / "memory"
+        pkg.mkdir()
+        (pkg / "__init__.py").touch()
+
+        code = (
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n"
+            "    from nanobot.memory import MemoryStore\n"
+        )
+        tree = ast.parse(code)
+        violations = _check_type_checking_imports_exist(
+            tree, Path("nanobot/test_file.py"), nanobot_dir
+        )
+        assert violations == []
 
 
 class TestCheck:

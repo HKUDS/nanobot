@@ -50,7 +50,6 @@ from nanobot.tools.registry import ToolRegistry
 from nanobot.tools.tool_loop import run_tool_loop
 
 if TYPE_CHECKING:
-    from nanobot.coordination.coordinator import Coordinator
     from nanobot.coordination.scratchpad import Scratchpad
     from nanobot.providers.base import LLMProvider
     from nanobot.tools.base import Tool
@@ -112,7 +111,7 @@ class DelegationDispatcher:
         *,
         config: DelegationConfig,
         provider: LLMProvider,
-        coordinator: Coordinator | None = None,
+        coordinator: Any | None = None,
         scratchpad: Scratchpad | None = None,
         active_messages: list[dict[str, Any]] | None = None,
         tools: ToolExecutor | None = None,
@@ -176,7 +175,7 @@ class DelegationDispatcher:
         self.max_delegations: int = max_delegation_depth
         self.routing_trace: deque[dict[str, Any]] = deque(maxlen=1000)
 
-        self.coordinator: Coordinator | None = coordinator
+        self.coordinator: Any | None = coordinator
         self.scratchpad: Scratchpad | None = scratchpad
         self.active_messages: list[dict[str, Any]] | None = active_messages
         self.tools: ToolExecutor | None = tools

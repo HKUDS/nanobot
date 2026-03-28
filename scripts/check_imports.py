@@ -243,6 +243,66 @@ def _check_rules(
     return violations
 
 
+def _is_type_checking_guard(node: ast.If) -> bool:
+    """Return True if the ``if`` node is ``if TYPE_CHECKING:``."""
+    test = node.test
+    if isinstance(test, ast.Name) and test.id == "TYPE_CHECKING":
+        return True
+    if isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING":
+        return True
+    return False
+
+
+def _check_type_checking_imports_exist(
+    tree: ast.AST,
+    filepath: Path,
+    nanobot_root: Path,
+) -> list[str]:
+    """Verify TYPE_CHECKING imports reference modules that exist on disk.
+
+    Walks the AST for ``if TYPE_CHECKING:`` blocks, finds all ``ImportFrom``
+    nodes inside, and checks that the referenced module path resolves to a
+    real ``.py`` file or ``__init__.py`` directory.  Only checks imports from
+    the ``nanobot`` package (third-party and stdlib are skipped).
+    """
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        if not _is_type_checking_guard(node):
+            continue
+        for child in ast.walk(node):
+            if not isinstance(child, ast.ImportFrom):
+                continue
+            module = child.module
+            if not module or not module.startswith("nanobot"):
+                continue
+            module_path = module.replace(".", "/")
+            if (nanobot_root.parent / f"{module_path}.py").exists() or (
+                nanobot_root.parent / module_path / "__init__.py"
+            ).exists():
+                continue
+            violations.append(
+                f"  {filepath}:{child.lineno}  TYPE_CHECKING import "
+                f"from non-existent module '{module}'"
+            )
+    return violations
+
+
+def check_type_checking_existence() -> list[str]:
+    """Check all nanobot source files for TYPE_CHECKING imports of missing modules."""
+    nanobot_root = ROOT / "nanobot"
+    violations: list[str] = []
+    for source_file in sorted(nanobot_root.rglob("*.py")):
+        rel = source_file.relative_to(ROOT)
+        try:
+            tree = ast.parse(source_file.read_text(encoding="utf-8"), filename=str(rel))
+        except SyntaxError:
+            continue
+        violations.extend(_check_type_checking_imports_exist(tree, rel, nanobot_root))
+    return violations
+
+
 def check() -> list[str]:
     violations = _check_rules(RULES, skip_type_checking=False)
     violations.extend(
@@ -252,6 +312,7 @@ def check() -> list[str]:
             exempt_files=COMPOSITION_ROOTS,
         )
     )
+    violations.extend(check_type_checking_existence())
     return violations
 
 
