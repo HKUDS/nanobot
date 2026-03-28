@@ -106,19 +106,34 @@ const api = {
 // Toast Notifications
 function showToast(message, type = 'info') {
     const toastEl = document.getElementById('liveToast');
+    
+    // If toast element doesn't exist, just log to console
+    if (!toastEl) {
+        console.log(`[${type.toUpperCase()}] ${message}`);
+        return;
+    }
+    
     const toastMessage = document.getElementById('toastMessage');
     const toastHeader = toastEl.querySelector('.toast-header');
-    
+
     // Set message
-    toastMessage.textContent = message;
-    
+    if (toastMessage) {
+        toastMessage.textContent = message;
+    }
+
     // Set color based on type
-    toastHeader.className = 'toast-header';
-    toastEl.className = `toast bg-${type}`;
-    
+    if (toastHeader) {
+        toastHeader.className = 'toast-header';
+    }
+    toastEl.className = `toast align-items-center text-white bg-${type} border-0`;
+
     // Show toast
-    const toast = new bootstrap.Toast(toastEl);
-    toast.show();
+    try {
+        const toast = new bootstrap.Toast(toastEl);
+        toast.show();
+    } catch (e) {
+        console.error('Failed to show toast:', e);
+    }
 }
 
 // Sidebar Toggle
