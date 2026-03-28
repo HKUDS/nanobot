@@ -18,30 +18,43 @@ Use this skill when the user asks any of:
 - "what skills are available?"
 - "update my skills"
 
+## Find workspace path
+
+Before install/update, you MUST determine the correct workspace path. Check the config file:
+
+```bash
+cat ~/.nanobot/config.json | grep -A2 '"workspace"'
+```
+
+Or use the configured workspace path (default: `~/.nanobot/workspace`). Store it in a variable for reuse.
+
 ## Search
 
 ```bash
-npx --yes clawhub@latest search "web scraping" --limit 5
+npx --yes clawhub@latest search "<query>" --limit 5
 ```
 
 ## Install
 
 ```bash
-npx --yes clawhub@latest install <slug> --workdir ~/.nanobot/workspace
+WORKSPACE=$(cat ~/.nanobot/config.json | grep -oP '"workspace"\s*:\s*"\K[^"]+' || echo "$HOME/.nanobot/workspace")
+npx --yes clawhub@latest install <slug> --workdir "$WORKSPACE"
 ```
 
-Replace `<slug>` with the skill name from search results. This places the skill into `~/.nanobot/workspace/skills/`, where nanobot loads workspace skills from. Always include `--workdir`.
+Replace `<slug>` with the skill name from search results. This places the skill into `<workspace>/skills/`, where nanobot loads workspace skills from.
 
 ## Update
 
 ```bash
-npx --yes clawhub@latest update --all --workdir ~/.nanobot/workspace
+WORKSPACE=$(cat ~/.nanobot/config.json | grep -oP '"workspace"\s*:\s*"\K[^"]+' || echo "$HOME/.nanobot/workspace")
+npx --yes clawhub@latest update --all --workdir "$WORKSPACE"
 ```
 
 ## List installed
 
 ```bash
-npx --yes clawhub@latest list --workdir ~/.nanobot/workspace
+WORKSPACE=$(cat ~/.nanobot/config.json | grep -oP '"workspace"\s*:\s*"\K[^"]+' || echo "$HOME/.nanobot/workspace")
+npx --yes clawhub@latest list --workdir "$WORKSPACE"
 ```
 
 ## Notes
@@ -49,5 +62,5 @@ npx --yes clawhub@latest list --workdir ~/.nanobot/workspace
 - Requires Node.js (`npx` comes with it).
 - No API key needed for search and install.
 - Login (`npx --yes clawhub@latest login`) is only required for publishing.
-- `--workdir ~/.nanobot/workspace` is critical — without it, skills install to the current directory instead of the nanobot workspace.
+- **Always use `--workdir` pointing to your configured workspace** — without it, skills install to the current directory instead of the nanobot workspace.
 - After install, remind the user to start a new session to load the skill.
