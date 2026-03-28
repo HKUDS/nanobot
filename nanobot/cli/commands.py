@@ -343,13 +343,20 @@ def gateway(
 
         session_key = f"{channel}:{chat_id}" if hb_cfg.shared_session else "heartbeat"
 
-        return await agent.process_direct(
-            tasks,
-            session_key=session_key,
-            channel=channel,
-            chat_id=chat_id,
-            on_progress=_silent,
-        )
+        # Temporarily swap model if heartbeat has a dedicated one
+        original_model = agent.model
+        if hb_cfg.model:
+            agent.model = hb_cfg.model
+        try:
+            return await agent.process_direct(
+                tasks,
+                session_key=session_key,
+                channel=channel,
+                chat_id=chat_id,
+                on_progress=_silent,
+            )
+        finally:
+            agent.model = original_model
 
     async def on_heartbeat_notify(response: str) -> None:
         """Deliver a heartbeat response to the user's channel."""
@@ -363,7 +370,7 @@ def gateway(
     heartbeat = HeartbeatService(
         workspace=config.workspace_path,
         provider=provider,
-        model=agent.model,
+        model=hb_cfg.model or agent.model,
         on_execute=on_heartbeat_execute,
         on_notify=on_heartbeat_notify if hb_cfg.send_reasoning else None,
         interval_s=hb_cfg.interval_s,
