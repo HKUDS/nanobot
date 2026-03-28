@@ -71,9 +71,16 @@ class ExecTool(Tool):
         if guard_error:
             return guard_error
         
-        env = os.environ.copy()
+        # Minimal environment — only PATH and locale. Prevents leaking
+        # API keys, tokens, and other secrets to agent-executed commands.
+        env = {
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "HOME": os.environ.get("HOME", ""),
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "LC_ALL": os.environ.get("LC_ALL", ""),
+        }
         if self.path_append:
-            env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
+            env["PATH"] = env["PATH"] + os.pathsep + self.path_append
 
         try:
             process = await asyncio.create_subprocess_shell(
