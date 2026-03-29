@@ -160,6 +160,84 @@ class HeartbeatService:
 
         return due
 
+    @staticmethod
+    def _compute_task_statuses(content: str, now: datetime) -> str:
+        """Parse ## User Tasks section and compute due status in Python.
+
+        Returns a formatted string describing which tasks are DUE NOW and which
+        are not yet due, or "" if no tasks with Schedule fields are found.
+        """
+        user_tasks_match = re.search(r"^## User Tasks\s*$", content, re.MULTILINE)
+        if not user_tasks_match:
+            return ""
+
+        section_start = user_tasks_match.end()
+        next_section_match = re.search(r"^## ", content[section_start:], re.MULTILINE)
+        if next_section_match:
+            section_end = section_start + next_section_match.start()
+        else:
+            section_end = len(content)
+        section = content[section_start:section_end]
+
+        task_blocks = re.split(r"\n(?=###\s)", section)
+        lines = []
+
+        for block in task_blocks:
+            block = block.strip()
+            if not block.startswith("###"):
+                continue
+
+            name_match = re.match(r"###\s+(.+)", block)
+            if not name_match:
+                continue
+            task_name = name_match.group(1).strip()
+
+            schedule_match = re.search(
+                r"Schedule:\s*(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?)", block
+            )
+            if not schedule_match:
+                continue
+            schedule_str = schedule_match.group(1).strip()
+
+            if re.match(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", schedule_str):
+                try:
+                    schedule_dt = datetime.strptime(schedule_str, "%Y-%m-%d %H:%M")
+                except ValueError:
+                    continue
+            else:
+                try:
+                    schedule_dt = datetime.strptime(schedule_str, "%Y-%m-%d")
+                except ValueError:
+                    continue
+
+            until_match = re.search(r"Until:\s*(\d{4}-\d{2}-\d{2})", block)
+            if until_match:
+                try:
+                    until_dt = datetime.strptime(until_match.group(1), "%Y-%m-%d")
+                    if now > until_dt:
+                        continue
+                except ValueError:
+                    pass
+
+            now_str = now.strftime("%Y-%m-%d %H:%M")
+            if now >= schedule_dt:
+                lines.append(
+                    f"  - '{task_name}' IS DUE NOW "
+                    f"(scheduled {schedule_str}, now is {now_str})"
+                )
+            else:
+                lines.append(
+                    f"  - '{task_name}' is NOT due until {schedule_str}"
+                )
+
+        if not lines:
+            return ""
+
+        return (
+            "Python-computed task due status (authoritative — trust this over your own date math):\n"
+            + "\n".join(lines)
+        )
+
     def _read_heartbeat_file(self) -> str | None:
         if self.heartbeat_file.exists():
             try:
