@@ -91,11 +91,20 @@ class HeartbeatService:
 
         Returns (action, tasks) where action is 'skip' or 'run'.
         """
+        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         response = await self.provider.chat(
             messages=[
-                {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
+                {"role": "system", "content": (
+                    "You are a heartbeat agent. Call the heartbeat tool with action \"run\" "
+                    "ONLY if there are tasks that need to execute right now. "
+                    "If tasks exist but have no immediate action needed, call with action \"skip\". "
+                    "The mere presence of task definitions does not mean they need to run — "
+                    "check schedules, times, and conditions before deciding."
+                )},
                 {"role": "user", "content": (
-                    "Review the following HEARTBEAT.md and decide whether there are active tasks.\n\n"
+                    f"Current time: {now}\n\n"
+                    "Review the following HEARTBEAT.md and decide whether any task "
+                    "requires immediate action at this time.\n\n"
                     f"{content}"
                 )},
             ],
