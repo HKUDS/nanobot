@@ -4,27 +4,9 @@ from __future__ import annotations
 
 import math
 
-import pytest
-
 from nanobot.memory.embedder import HashEmbedder, LocalEmbedder
 
 
-def _onnx_available() -> bool:
-    """Check if ONNX Runtime is available for LocalEmbedder."""
-    try:
-        e = LocalEmbedder()
-        return e.available
-    except Exception:
-        return False
-
-
-_skip_no_onnx = pytest.mark.skipif(
-    not _onnx_available(),
-    reason="Requires ONNX Runtime for LocalEmbedder tests",
-)
-
-
-@_skip_no_onnx
 class TestLocalEmbedder:
     def test_available_is_true(self):
         e = LocalEmbedder()
