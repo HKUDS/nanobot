@@ -102,15 +102,24 @@ class DiscordChannel(BaseChannel):
             logger.warning("Discord HTTP client not initialized")
             return
 
-        # TTS: generate audio and attach as MP3
+        # TTS: generate audio and send as voice message
         if self._tts_service and msg.content and not msg.metadata.get("_progress"):
             session_tts = msg.metadata.get("_session_tts", False)
             if self._tts_service.should_trigger(session_tts=session_tts):
                 audio_path = await self._tts_service.synthesize(msg.content)
                 if audio_path:
+                    ogg_path = await self._convert_to_ogg(audio_path)
+                    if ogg_path:
+                        url = f"{DISCORD_API_BASE}/channels/{msg.chat_id}"
+                        headers = {"Authorization": f"Bot {self.config.token}"}
+                        sent = await self._send_voice_message(url, headers, ogg_path, reply_to=msg.reply_to)
+                        if sent:
+                            await self._stop_typing(msg.chat_id)
+                            return  # Voice message sent, skip text
+                    # Fallback: send as MP3 attachment if voice message fails
                     if not msg.media:
                         msg.media = []
-                    msg.media.insert(0, str(audio_path))  # Audio first, then text
+                    msg.media.insert(0, str(audio_path))
 
         url = f"{DISCORD_API_BASE}/channels/{msg.chat_id}/messages"
         headers = {"Authorization": f"Bot {self.config.token}"}
@@ -241,36 +250,71 @@ class DiscordChannel(BaseChannel):
             return None
 
     async def _send_voice_message(
-        self, url: str, headers: dict[str, str], ogg_path: Path, reply_to: str | None = None,
+        self, channel_url: str, headers: dict[str, str], ogg_path: Path,
+        reply_to: str | None = None,
     ) -> bool:
-        """Send an audio file as a Discord voice message."""
-        VOICE_MESSAGE_FLAG = 1 << 13  # IS_VOICE_MESSAGE
+        """Send an audio file as a Discord voice message (3-step upload flow)."""
+        import base64
 
-        payload_json: dict[str, Any] = {"flags": VOICE_MESSAGE_FLAG}
-        if reply_to:
-            payload_json["message_reference"] = {"message_id": reply_to}
-            payload_json["allowed_mentions"] = {"replied_user": False}
+        VOICE_MESSAGE_FLAG = 1 << 13
+        file_size = ogg_path.stat().st_size
 
-        for attempt in range(3):
-            try:
-                with open(ogg_path, "rb") as f:
-                    files = {"files[0]": ("voice-message.ogg", f, "audio/ogg")}
-                    data: dict[str, Any] = {"payload_json": json.dumps(payload_json)}
-                    response = await self._http.post(url, headers=headers, files=files, data=data)
-                if response.status_code == 429:
-                    resp_data = response.json()
-                    retry_after = float(resp_data.get("retry_after", 1.0))
-                    await asyncio.sleep(retry_after)
-                    continue
-                response.raise_for_status()
-                logger.info("Discord voice message sent: {}", ogg_path.name)
-                return True
-            except Exception as e:
-                if attempt == 2:
-                    logger.error("Error sending voice message: {}", e)
-                else:
-                    await asyncio.sleep(1)
-        return False
+        try:
+            # Step 1: Request upload URL
+            attach_resp = await self._http.post(
+                f"{channel_url}/attachments",
+                headers={**headers, "Content-Type": "application/json"},
+                json={"files": [{"filename": "voice-message.ogg", "file_size": file_size, "id": "0"}]},
+            )
+            attach_resp.raise_for_status()
+            attach_data = attach_resp.json()
+            upload_url = attach_data["attachments"][0]["upload_url"]
+            uploaded_filename = attach_data["attachments"][0]["upload_filename"]
+
+            # Step 2: Upload the file
+            with open(ogg_path, "rb") as f:
+                file_bytes = f.read()
+            put_resp = await self._http.put(
+                upload_url,
+                headers={"Content-Type": "audio/ogg"},
+                content=file_bytes,
+            )
+            put_resp.raise_for_status()
+
+            # Step 3: Send the voice message
+            # Generate a simple waveform (256 bytes, base64 encoded)
+            waveform_bytes = bytes([128] * 256)
+            waveform_b64 = base64.b64encode(waveform_bytes).decode()
+
+            # Estimate duration (rough: ogg opus at ~64kbps)
+            duration_secs = max(1.0, file_size / 8000)
+
+            payload: dict[str, Any] = {
+                "flags": VOICE_MESSAGE_FLAG,
+                "attachments": [{
+                    "id": "0",
+                    "filename": "voice-message.ogg",
+                    "uploaded_filename": uploaded_filename,
+                    "duration_secs": round(duration_secs, 1),
+                    "waveform": waveform_b64,
+                }],
+            }
+            if reply_to:
+                payload["message_reference"] = {"message_id": reply_to}
+                payload["allowed_mentions"] = {"replied_user": False}
+
+            msg_resp = await self._http.post(
+                f"{channel_url}/messages",
+                headers={**headers, "Content-Type": "application/json"},
+                json=payload,
+            )
+            msg_resp.raise_for_status()
+            logger.info("Discord voice message sent: {}", ogg_path.name)
+            return True
+
+        except Exception as e:
+            logger.error("Voice message failed: {}", e)
+            return False
 
     async def _gateway_loop(self) -> None:
         """Main gateway loop: identify, heartbeat, dispatch events."""
