@@ -2,78 +2,78 @@
   {
     "id": 1,
     "category": "setup",
-    "description": "The Telegram coding-task long-message fix is tracked as its own harness task so future sessions can resume from the notifier/report split instead of re-debugging live chat output.",
+    "description": "The `/coding` behavior convergence work is tracked as a new harness task so future sessions can resume from the completed-harness, `/coding status`, and notification-policy decisions instead of rediscovering them live.",
     "steps": [
-      "Open PLAN.json and verify it only tracks the Telegram coding-task notification-shortening harness.",
-      "Open PROGRESS.md and verify the reboot entry records that notifier currently sends detailed report.summary strings to Telegram.",
-      "Confirm the scope is limited to proactive Telegram push shortening, while detailed status diagnostics remain unchanged."
+      "Open PLAN.json and verify it only tracks the `/coding` behavior convergence harness.",
+      "Open PROGRESS.md and verify the reboot entry records the three target changes: completed-harness direct launch, `/coding status`, and push-notification suppression.",
+      "Confirm the scope remains limited to nanobot orchestration and Telegram behavior, without changing the target repo harness format or Codex worker execution model."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 2,
     "category": "functional",
-    "description": "Starting and running coding tasks use a dedicated short notification format instead of sending the full progress report to Telegram.",
+    "description": "Completed repo harnesses no longer block new Telegram coding tasks; nanobot treats them as historical context and launches the new task immediately.",
     "steps": [
-      "Inspect the notifier path and verify starting or running tasks no longer return report.summary directly.",
-      "Verify the proactive Telegram message includes only compact status, repo, goal or task identity, and one short progress line.",
-      "Confirm waiting_user, failed, and completed tasks still use their existing specialized reports."
+      "Create a repo with PLAN.json, PROGRESS.md, and init.sh whose PLAN.json is fully complete, then send a Telegram-style `/coding ...` request.",
+      "Verify the task goes directly to `starting` instead of `waiting_user` and that no `repo_completed_harness` conflict metadata is written.",
+      "Confirm an active unfinished harness still follows the explicit confirmation path before launch."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 3,
     "category": "functional",
-    "description": "Notification progress extraction prefers meaningful live output or clear blockers and ignores shell prompt noise or plan-only summaries.",
+    "description": "Telegram supports `/coding status` as an explicit coding-task status command while preserving the existing Chinese `状态` control path.",
     "steps": [
-      "Feed pane output containing only prompt noise and verify no new proactive progress text is selected from it.",
-      "Feed progress data with useful live output or an explicit error and verify that shorter signal is chosen for Telegram pushes.",
-      "Confirm long repo-history notes are shortened before they can reach proactive Telegram notifications."
+      "Send `/coding status` for a private-chat coding task and verify it returns the same detailed status content as `状态`.",
+      "Verify `/coding status` does not create a new coding task or get parsed as repo `status`.",
+      "Verify `/coding ...` with a real repo name still creates and launches a task as before."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 4,
     "category": "functional",
-    "description": "Detailed status views remain unchanged so CLI status and Telegram 状态 still expose full diagnostics even after proactive push messages are shortened.",
+    "description": "Telegram proactive coding-task notifications are limited to start, completion, failure, and required user-confirmation events; running progress no longer pushes continuously.",
     "steps": [
-      "Run coding-task status for an active task and verify plan progress, latest note, and live report still appear in detail.",
-      "Verify Telegram 状态 routing still returns the detailed task status payload rather than the short proactive notification format.",
-      "Confirm the long-message fix only changes background push behavior, not explicit status inspection."
+      "Trigger a starting task and verify one start notification is emitted to Telegram.",
+      "Advance a task to `running` and verify notifier sends no new progress push from poll-loop updates alone.",
+      "Verify `waiting_user`, `completed`, and `failed` continue to emit their dedicated notifications."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 5,
-    "category": "testing",
-    "description": "Focused tests cover short notification building, duplicate suppression, prompt-noise rejection, and preservation of detailed status reporting.",
+    "category": "functional",
+    "description": "Detailed coding-task diagnostics remain available through explicit status views even after proactive running notifications are disabled.",
     "steps": [
-      "Run focused pytest coverage for notifier, progress, reporting, and coding-task routing behavior.",
-      "Verify the suite covers long-note trimming and prompt-only updates not sending new proactive notifications.",
-      "Confirm compileall still succeeds for all touched coding-task modules and tests."
+      "Run `nanobot coding-task status <id>` and verify the CLI still shows repo, goal, recent progress, live report, and tmux metadata.",
+      "Send Telegram `状态` and `/coding status` for the same task and verify both return the detailed diagnostic view.",
+      "Confirm the notification policy change only affects background push behavior, not explicit status inspection."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 6,
-    "category": "integration",
-    "description": "A real active coding task such as 543a97d0 produces a short proactive Telegram-style summary while explicit status inspection still shows the full dirty history.",
+    "category": "testing",
+    "description": "Focused tests cover completed-harness routing, `/coding status`, and the reduced notification policy without regressing existing active-harness controls.",
     "steps": [
-      "Load a real active coding task from the workspace and build the proactive notification content through the live runtime path.",
-      "Verify the proactive content is short and no longer echoes the full repo note or plan-progress string.",
-      "Verify coding-task status for that same task still exposes the full detailed report."
+      "Run focused pytest for coding-task routing, notifier behavior, and CLI status coverage.",
+      "Verify tests cover the completed-harness direct-launch path, `/coding status` lookup, and suppression of running-task pushes.",
+      "Confirm `python -m compileall` still succeeds for the touched coding-task modules and tests."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 7,
     "category": "docs",
-    "description": "PROGRESS.md records the root cause, new notification strategy, and validation evidence for the Telegram long-message fix.",
+    "description": "README and PROGRESS.md document the new `/coding` defaults, including completed-harness direct launch, `/coding status`, and the reduced Telegram push policy.",
     "steps": [
-      "Open PROGRESS.md and verify it records why Telegram received a long message and what changed in the notifier path.",
-      "Confirm PLAN.json is fully marked complete once verification passes.",
-      "Verify the final checkpoint commit captures only this notification-shortening harness work."
+      "Open README.md and verify it documents `/coding status`, the direct-launch behavior for completed harnesses, and the new push-notification policy.",
+      "Open PROGRESS.md and verify it records the baseline, implementation decisions, and verification evidence for this harness task.",
+      "Confirm PLAN.json is fully marked complete after the implementation and verification pass."
     ],
-    "passes": true
+    "passes": false
   }
 ]

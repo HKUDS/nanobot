@@ -1,3 +1,18 @@
+## Harness reboot - 2026-03-29 (coding-task behavior convergence)
+- Task pivot:
+  - Superseded the prior Telegram long-message notifier harness with a new `/coding` convergence task focused on three decisions: completed harnesses should no longer block new work, `/coding status` should become a first-class status query, and Telegram should stop pushing running progress continuously.
+- Existing work detected before re-planning:
+  - `repo_completed_harness` currently still enters the same confirmation path as unfinished harnesses, which makes completed repos ask for a choice before launching new tasks.
+  - Telegram coding-task status is still only exposed through the plain-text `状态` control path; `/coding status` is currently parsed as a new start command shape.
+  - The notifier already shortened running-task messages, but it still proactively pushes `starting` and `running` progress content during the poll loop instead of reserving Telegram pushes for lifecycle changes and required user input.
+- Baseline validation before edits:
+  - `bash ~/.codex/scripts/global-init.sh` -> exited 0 with the known repo-wide pytest warning still present in `/tmp/nanobot-harness-pytest.log`
+  - `curl -sS http://127.0.0.1:8787/health` -> failed because no gateway instance was running at session start
+- Key decisions:
+  - Keep unfinished harness behavior unchanged: only completed harnesses skip conflict confirmation.
+  - Add `/coding status` as a Telegram-only status alias while preserving the existing Chinese `状态` command for backward compatibility.
+  - Treat `waiting_user` as a must-notify lifecycle event even under the reduced push policy, because it requires the user to act.
+
 ## Harness initialized - 2026-03-28
 - Project type: Python CLI / gateway application (`pyproject.toml`, `nanobot gateway`, pytest)
 - Features planned: 52
