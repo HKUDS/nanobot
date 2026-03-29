@@ -29,6 +29,11 @@ HARNESS_STATE_VALUES = (
     "active",
 )
 
+HARNESS_RESOLUTION_VALUES = (
+    "resume_existing",
+    "start_new_goal",
+)
+
 
 @dataclass(slots=True)
 class CodingTask:

@@ -482,3 +482,21 @@
   - Keep the fix narrow: intercept active-harness conflicts before Codex launch instead of redesigning the whole coding-task lifecycle
   - Reuse `waiting_user` rather than inventing a new persistent status, with conflict details stored in task metadata
   - Require explicit conflict commands such as `继续旧任务` and `按新任务开始`; bare `继续` is too ambiguous in this state
+
+## Session update - 2026-03-29 (repo harness conflict confirmation)
+- Completed features:
+  - Extended [nanobot/coding_tasks/harness.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/harness.py) so active harness detection now returns a concise summary from `PROGRESS.md` or `PLAN.json` progress, and added a dedicated `start_new_goal` bootstrap mode
+  - Added metadata updates and a pre-launch `waiting_user` path in [nanobot/coding_tasks/manager.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/manager.py), [nanobot/coding_tasks/router.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/router.py), and [nanobot/coding_tasks/reporting.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/reporting.py) so Telegram now pauses on active-harness conflicts and asks for `继续旧任务 / 按新任务开始 / 取消`
+  - Updated [nanobot/coding_tasks/worker.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/worker.py) so explicit new-goal launches tell Codex to treat the old harness as background context rather than the primary unfinished task
+  - Hardened [nanobot/coding_tasks/progress.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/progress.py) against unreadable `PROGRESS.md` / `PLAN.json` files so one inaccessible repo no longer crashes the whole gateway poller
+  - Updated [README.md](/Users/miau/Documents/nanobot/README.md) with the new conflict confirmation flow
+- Verification:
+  - `.venv/bin/pytest tests/coding_tasks/test_harness.py tests/coding_tasks/test_worker.py tests/coding_tasks/test_reporting.py tests/agent/test_coding_task_routing.py` -> passed (35 tests)
+  - `.venv/bin/pytest tests/coding_tasks/test_progress.py tests/coding_tasks/test_harness.py tests/coding_tasks/test_worker.py tests/coding_tasks/test_reporting.py tests/agent/test_coding_task_routing.py tests/cli/test_commands.py -k "extract_latest_progress_note_handles_permission_errors or summarize_plan_progress_handles_permission_errors or coding_task_status_shows_details_and_recent_events or gateway_reports_coding_task_counts or test_private_telegram_start_coding_waits_for_confirmation_when_repo_has_active_harness or test_private_telegram_start_new_goal_launches_conflict_task_with_override or test_launch_task_writes_new_goal_override_prompt_for_conflict_resolution"` -> passed (7 selected tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks/harness.py nanobot/coding_tasks/manager.py nanobot/coding_tasks/progress.py nanobot/coding_tasks/reporting.py nanobot/coding_tasks/router.py nanobot/coding_tasks/worker.py tests/coding_tasks/test_harness.py tests/coding_tasks/test_progress.py tests/coding_tasks/test_worker.py tests/coding_tasks/test_reporting.py tests/agent/test_coding_task_routing.py tests/cli/test_commands.py` -> passed
+  - Manual/runtime smokes:
+    - A real `AgentLoop` smoke against a repo with an active harness now returns a waiting-user conflict message instead of auto-starting old work
+    - A real gateway crash caused by `PermissionError` on `/Users/miau/Documents/codex-remote/PROGRESS.md` was reproduced from `nanobot:0.0`, then covered by the new progress-file error handling
+- Remaining blockers / follow-up:
+  - The original `nanobot:0.0` tmux shell currently cannot re-exec the repo venv cleanly; direct `.venv/bin/nanobot gateway` fails on `pyvenv.cfg`, and even the system-Python fallback behaves inconsistently inside that pane
+  - A temporary non-tmux gateway process can be launched successfully with `/tmp/nanobot-gateway-restart.sh`, but live user confirmation of the new Telegram conflict reply is still pending

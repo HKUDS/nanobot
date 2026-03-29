@@ -8,18 +8,23 @@ from dataclasses import dataclass
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
+from nanobot.coding_tasks.harness import detect_repo_harness
 from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.policy import CodingTaskPolicy
 from nanobot.coding_tasks.progress import CodexProgressMonitor
 from nanobot.coding_tasks.repo_resolver import RepoRefResolver
+from nanobot.coding_tasks.reporting import build_waiting_user_report
 from nanobot.coding_tasks.worker import CodexWorkerLauncher
 
 _START_PREFIX = "开始编程"
 _SLASH_START_PATTERN = re.compile(r"^/coding(?:@[A-Za-z0-9_]+)?(?:\s|$)")
 _STATUS_COMMANDS = {"状态"}
 _RESUME_COMMANDS = {"继续"}
+_RESUME_EXISTING_COMMANDS = {"继续旧任务"}
+_START_NEW_GOAL_COMMANDS = {"按新任务开始", "开始新任务"}
 _CANCEL_COMMANDS = {"取消"}
 _STOP_COMMANDS = {"停止"}
+_HARNESS_CONFLICT_REASON = "repo_active_harness"
 
 _FIELD_PATTERNS = {
     "repo_path": re.compile(r"^(?:仓库|repo|repo_path|路径)\s*[:：=]\s*(.+)$", re.IGNORECASE),
@@ -154,6 +159,8 @@ def validate_repo_path(
 ) -> tuple[str | None, str | None]:
     """Backward-compatible wrapper for repo reference resolution."""
     return resolve_repo_ref(repo_path, repo_resolver=repo_resolver)
+
+
 def register_coding_task_commands(
     router: CommandRouter,
     manager: CodexWorkerManager,
@@ -242,10 +249,12 @@ def _make_start_coding_handler(
                 metadata={"render_as": "text"},
             )
 
+        harness = detect_repo_harness(repo_path)
         task = manager.create_task(
             repo_path=repo_path,
             goal=parsed.goal,
             title=parsed.title,
+            harness_state=harness.harness_state,
             metadata={
                 "origin_channel": msg.channel,
                 "origin_chat_id": msg.chat_id,
@@ -254,6 +263,26 @@ def _make_start_coding_handler(
                 "message_id": msg.metadata.get("message_id"),
             },
         )
+        if harness.harness_state == "active":
+            task = manager.update_metadata(
+                task.id,
+                updates={
+                    "harness_conflict_reason": _HARNESS_CONFLICT_REASON,
+                    "existing_harness_summary": harness.summary,
+                    "harness_conflict_resolution": "resume_existing",
+                },
+            )
+            waiting = manager.mark_waiting_user(
+                task.id,
+                summary="仓库里已有未完成的 harness，等待你确认继续旧任务还是按新任务开始。",
+            )
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=build_waiting_user_report(waiting),
+                metadata={"render_as": "text"},
+            )
+
         if launcher is None:
             return OutboundMessage(
                 channel=msg.channel,
@@ -324,7 +353,7 @@ def _make_control_handler(
             return None
 
         command = ctx.raw.strip()
-        if command not in _STATUS_COMMANDS | _RESUME_COMMANDS | _CANCEL_COMMANDS | _STOP_COMMANDS:
+        if command not in _STATUS_COMMANDS | _RESUME_COMMANDS | _RESUME_EXISTING_COMMANDS | _START_NEW_GOAL_COMMANDS | _CANCEL_COMMANDS | _STOP_COMMANDS:
             return None
 
         task = policy.select_control_task(msg.channel, msg.chat_id)
@@ -360,6 +389,59 @@ def _make_control_handler(
                 ),
                 metadata={"render_as": "text"},
             )
+
+        if _is_harness_conflict_task(task):
+            if command in _RESUME_COMMANDS:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=(
+                        "这个仓库里还有旧 harness，继续动作需要你明确选择。\n"
+                        "回复“继续旧任务”继续原来的 harness，或回复“按新任务开始”按这次的新目标启动。"
+                    ),
+                    metadata={"render_as": "text"},
+                )
+
+            if command in _RESUME_EXISTING_COMMANDS | _START_NEW_GOAL_COMMANDS:
+                resolution = "start_new_goal" if command in _START_NEW_GOAL_COMMANDS else "resume_existing"
+                control = "start_new_goal" if resolution == "start_new_goal" else "resume_existing"
+                manager.record_user_control(task.id, control)
+                manager.update_metadata(
+                    task.id,
+                    updates={"harness_conflict_resolution": resolution},
+                )
+                if launcher:
+                    launched = launcher.launch_task(task.id)
+                    updated = launched.task
+                    action = "已按新任务启动编程任务" if resolution == "start_new_goal" else "已继续旧任务"
+                    reused_text = "yes" if launched.session_reused else "no"
+                    session_note = f"\n复用 tmux: {reused_text}"
+                    return OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content=(
+                            f"{action}\n"
+                            f"任务ID: {updated.id}\n"
+                            f"状态: {updated.status}\n"
+                            f"仓库: {updated.repo_path}\n"
+                            f"目标: {updated.goal}"
+                            f"{session_note}"
+                        ),
+                        metadata={"render_as": "text"},
+                    )
+
+                updated = manager.mark_starting(task.id, summary="Recorded harness conflict choice from Telegram private chat")
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=(
+                        "已记录你的选择，但当前运行时没有连接 launcher。\n"
+                        f"任务ID: {updated.id}\n"
+                        f"状态: {updated.status}\n"
+                        "请使用 CLI 手动运行该任务。"
+                    ),
+                    metadata={"render_as": "text"},
+                )
 
         if command in _CANCEL_COMMANDS:
             manager.record_user_control(task.id, "cancel")
@@ -452,3 +534,10 @@ def _format_task_status(task, *, report_summary: str = "", note: str = "当前�
     if task.tmux_session:
         lines.append(f"tmux: {task.tmux_session}")
     return "\n".join(lines)
+
+
+def _is_harness_conflict_task(task) -> bool:
+    return (
+        task.status == "waiting_user"
+        and task.metadata.get("harness_conflict_reason") == _HARNESS_CONFLICT_REASON
+    )

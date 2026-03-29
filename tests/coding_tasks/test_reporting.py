@@ -66,9 +66,25 @@ def test_completion_and_failure_reports_include_actionable_context() -> None:
             last_progress_summary="Need plan confirmation",
         )
     )
+    conflict_waiting = build_waiting_user_report(
+        CodingTask(
+            id="task-4",
+            title="demo",
+            repo_path="/tmp/repo",
+            goal="replace settings icon",
+            status="waiting_user",
+            last_progress_summary="Need plan confirmation",
+            metadata={
+                "harness_conflict_reason": "repo_active_harness",
+                "existing_harness_summary": "continue old task",
+            },
+        )
+    )
 
     assert "分支: feature/demo" in completion
     assert "最近提交: abc123 init repo" in completion
     assert "最近成功步骤: Refactor complete" in failure
     assert "恢复建议" in failure
     assert "等待原因: Need plan confirmation" in waiting
+    assert "旧任务摘要: continue old task" in conflict_waiting
+    assert "按新任务开始" in conflict_waiting

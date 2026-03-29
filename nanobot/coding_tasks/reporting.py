@@ -70,6 +70,17 @@ def build_failure_report(task: CodingTask) -> str:
 
 def build_waiting_user_report(task: CodingTask) -> str:
     """Build a report for tasks waiting on explicit human input."""
+    if task.metadata.get("harness_conflict_reason") == "repo_active_harness":
+        lines = [
+            "仓库里已有未完成的 harness",
+            f"任务ID: {task.id}",
+        ]
+        if existing := task.metadata.get("existing_harness_summary"):
+            lines.append(f"旧任务摘要: {existing}")
+        lines.append(f"你的新目标: {task.goal}")
+        lines.append("下一步: 回复“继续旧任务”继续原来的 harness，回复“按新任务开始”按这次的新目标启动，或回复“取消”终止。")
+        return "\n".join(lines)
+
     lines = [
         "编程任务等待你的确认",
         f"任务ID: {task.id}",

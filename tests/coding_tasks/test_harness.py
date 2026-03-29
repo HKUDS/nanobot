@@ -7,7 +7,7 @@ def test_detect_repo_harness_distinguishes_active_and_missing(tmp_path: Path) ->
     active_repo = tmp_path / "active-repo"
     active_repo.mkdir()
     (active_repo / "PLAN.json").write_text("[]", encoding="utf-8")
-    (active_repo / "PROGRESS.md").write_text("progress", encoding="utf-8")
+    (active_repo / "PROGRESS.md").write_text("## Session update\n- Continue old task\n", encoding="utf-8")
     (active_repo / "init.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
 
     missing_repo = tmp_path / "missing-repo"
@@ -20,6 +20,7 @@ def test_detect_repo_harness_distinguishes_active_and_missing(tmp_path: Path) ->
     assert active.has_progress is True
     assert active.has_init is True
     assert active.harness_state == "active"
+    assert active.summary == "Continue old task"
 
     assert missing.has_plan is False
     assert missing.has_progress is False
@@ -45,7 +46,7 @@ def test_build_codex_bootstrap_prompt_for_existing_harness_repo(tmp_path: Path) 
     repo.mkdir()
     (repo / "AGENTS.md").write_text("Follow repo rules", encoding="utf-8")
     (repo / "PLAN.json").write_text("[]", encoding="utf-8")
-    (repo / "PROGRESS.md").write_text("progress", encoding="utf-8")
+    (repo / "PROGRESS.md").write_text("## Session update\n- Continue old task\n", encoding="utf-8")
     (repo / "init.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
 
     prompt = build_codex_bootstrap_prompt(
@@ -62,6 +63,25 @@ def test_build_codex_bootstrap_prompt_for_existing_harness_repo(tmp_path: Path) 
     assert "Preferred branch: codex/test-branch" in prompt
     assert "Do not push, deploy, or perform external side effects" in prompt
     assert "Repository instructions detected: read AGENTS.md before any edits." in prompt
+    assert "Existing harness summary: Continue old task" in prompt
+
+
+def test_build_codex_bootstrap_prompt_for_new_goal_override_against_existing_harness(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "PLAN.json").write_text("[]", encoding="utf-8")
+    (repo / "PROGRESS.md").write_text("## Session update\n- Continue old task\n", encoding="utf-8")
+    (repo / "init.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    prompt = build_codex_bootstrap_prompt(
+        repo_path=repo,
+        goal="Replace the settings icon",
+        harness_resolution="start_new_goal",
+    )
+
+    assert "user explicitly chose to start a new goal" in prompt
+    assert "Do not continue the old unfinished harness features as the primary task." in prompt
+    assert "Existing harness summary: Continue old task" in prompt
 
 
 def test_build_codex_bootstrap_prompt_for_missing_harness_repo(tmp_path: Path) -> None:

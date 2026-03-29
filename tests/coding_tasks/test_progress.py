@@ -45,6 +45,23 @@ def test_extract_latest_progress_note_returns_newest_session_note(tmp_path: Path
     assert latest == "Fixed second thing"
 
 
+def test_extract_latest_progress_note_handles_permission_errors(monkeypatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _prepare_repo(repo)
+    original = Path.read_text
+
+    def _raise_for_progress(self: Path, *args, **kwargs):
+        if self.name == "PROGRESS.md":
+            raise PermissionError("no access")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _raise_for_progress)
+
+    latest = extract_latest_progress_note(repo)
+
+    assert latest == ""
+
+
 def test_summarize_plan_progress_counts_completed_and_remaining(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _prepare_repo(repo)
@@ -54,6 +71,25 @@ def test_summarize_plan_progress_counts_completed_and_remaining(tmp_path: Path) 
     assert progress.completed == 2
     assert progress.remaining == 1
     assert progress.total == 3
+
+
+def test_summarize_plan_progress_handles_permission_errors(monkeypatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _prepare_repo(repo)
+    original = Path.read_text
+
+    def _raise_for_plan(self: Path, *args, **kwargs):
+        if self.name == "PLAN.json":
+            raise PermissionError("no access")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _raise_for_plan)
+
+    progress = summarize_plan_progress(repo)
+
+    assert progress.completed == 0
+    assert progress.remaining == 0
+    assert progress.total == 0
 
 
 def test_build_task_progress_report_combines_harness_and_pane_output(tmp_path: Path) -> None:

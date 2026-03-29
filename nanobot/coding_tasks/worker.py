@@ -59,12 +59,14 @@ class CodexWorkerLauncher:
         """Launch a coding task in tmux or reuse the existing session."""
         task = self.manager.require_task(task_id)
         harness = detect_repo_harness(task.repo_path)
+        harness_resolution = task.metadata.get("harness_conflict_resolution", "resume_existing")
         prompt = build_codex_bootstrap_prompt(
             repo_path=task.repo_path,
             goal=task.goal,
             branch_name=task.branch_name,
             approval_policy=task.approval_policy,
             harness=harness,
+            harness_resolution=harness_resolution,
         )
         prompt_path = self._write_prompt_file(task, prompt)
         log_path = self._log_path(task)

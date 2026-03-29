@@ -17,7 +17,7 @@ from nanobot.coding_tasks.types import (
 from nanobot.utils.helpers import safe_filename
 
 _ALLOWED_TRANSITIONS = {
-    "queued": {"starting", "cancelled", "failed"},
+    "queued": {"starting", "waiting_user", "cancelled", "failed"},
     "starting": {"running", "waiting_user", "failed", "cancelled"},
     "running": {"waiting_user", "completed", "failed", "cancelled"},
     "waiting_user": {"starting", "running", "completed", "failed", "cancelled"},
@@ -125,6 +125,39 @@ class CodexWorkerManager:
                 event="user_control",
                 status=updated.status,
                 message=control,
+            )
+        )
+        return updated
+
+    def update_metadata(
+        self,
+        task_id: str,
+        *,
+        updates: dict | None = None,
+        remove_keys: tuple[str, ...] = (),
+    ) -> CodingTask:
+        """Merge task metadata fields without changing lifecycle state."""
+        task = self.require_task(task_id)
+        metadata = dict(task.metadata)
+        for key in remove_keys:
+            metadata.pop(key, None)
+        if updates:
+            metadata.update(updates)
+        updated = replace(
+            task,
+            metadata=metadata,
+            updated_at_ms=now_ms(),
+        )
+        self.store.upsert_task(updated)
+        self.store.append_run_event(
+            CodingRunEvent(
+                task_id=task_id,
+                event="metadata_updated",
+                status=updated.status,
+                payload={
+                    "updated_keys": sorted((updates or {}).keys()),
+                    "removed_keys": list(remove_keys),
+                },
             )
         )
         return updated

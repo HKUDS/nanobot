@@ -104,6 +104,13 @@ def _create_origin_task(store: CodingTaskStore, tmp_path: Path, *, status: str =
     return manager, task
 
 
+def _init_active_harness(repo_path: Path, *, note: str = "Continue old task") -> None:
+    repo_path.mkdir(exist_ok=True)
+    (repo_path / "PLAN.json").write_text("[]", encoding="utf-8")
+    (repo_path / "PROGRESS.md").write_text(f"## Session update\n- {note}\n", encoding="utf-8")
+    (repo_path / "init.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+
 @pytest.mark.asyncio
 async def test_private_telegram_start_coding_creates_task_and_acknowledges(tmp_path: Path) -> None:
     loop, store, _manager, launcher = _make_loop(tmp_path, attach_launcher=True)
@@ -133,6 +140,33 @@ async def test_private_telegram_start_coding_creates_task_and_acknowledges(tmp_p
     assert tasks[0].metadata["origin_channel"] == "telegram"
     assert tasks[0].metadata["origin_chat_id"] == "chat-1"
     assert tasks[0].metadata["requested_via"] == "telegram_private_chat"
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_start_coding_waits_for_confirmation_when_repo_has_active_harness(tmp_path: Path) -> None:
+    loop, store, _manager, launcher = _make_loop(tmp_path, attach_launcher=True)
+    repo_path = tmp_path / "demo-repo"
+    _init_active_harness(repo_path, note="Continue old task")
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content=f"开始编程 {repo_path} 修复登录回调",
+            metadata={"is_group": False, "message_id": 41},
+        )
+    )
+
+    assert response is not None
+    assert "仓库里已有未完成的 harness" in response.content
+    assert "旧任务摘要: Continue old task" in response.content
+    assert "按新任务开始" in response.content
+    tasks = store.list_tasks()
+    assert len(tasks) == 1
+    assert launcher.launched_ids == []
+    assert tasks[0].status == "waiting_user"
+    assert tasks[0].metadata["harness_conflict_reason"] == "repo_active_harness"
 
 
 @pytest.mark.asyncio
@@ -360,6 +394,108 @@ async def test_private_telegram_resume_routes_to_failed_origin_task(tmp_path: Pa
     assert updated is not None
     assert updated.status == "starting"
     assert updated.last_user_control == "resume"
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_resume_requires_explicit_choice_for_harness_conflict(tmp_path: Path) -> None:
+    loop, store, _manager, _launcher = _make_loop(tmp_path, attach_launcher=True)
+    repo_path = tmp_path / "demo-repo"
+    _init_active_harness(repo_path, note="Continue old task")
+
+    await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content=f"开始编程 {repo_path} 修复登录回调",
+            metadata={"is_group": False, "message_id": 47},
+        )
+    )
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="继续",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert "继续旧任务" in response.content
+    task = store.list_tasks()[0]
+    assert task.status == "waiting_user"
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_continue_old_harness_launches_conflict_task(tmp_path: Path) -> None:
+    loop, store, _manager, launcher = _make_loop(tmp_path, attach_launcher=True)
+    repo_path = tmp_path / "demo-repo"
+    _init_active_harness(repo_path, note="Continue old task")
+
+    await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content=f"开始编程 {repo_path} 修复登录回调",
+            metadata={"is_group": False, "message_id": 48},
+        )
+    )
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="继续旧任务",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert "已继续旧任务" in response.content
+    task = store.list_tasks()[0]
+    assert launcher.launched_ids == [task.id]
+    assert task.status == "starting"
+    assert task.last_user_control == "resume_existing"
+    assert task.metadata["harness_conflict_resolution"] == "resume_existing"
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_start_new_goal_launches_conflict_task_with_override(tmp_path: Path) -> None:
+    loop, store, _manager, launcher = _make_loop(tmp_path, attach_launcher=True)
+    repo_path = tmp_path / "demo-repo"
+    _init_active_harness(repo_path, note="Continue old task")
+
+    await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content=f"开始编程 {repo_path} 修复登录回调",
+            metadata={"is_group": False, "message_id": 49},
+        )
+    )
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="按新任务开始",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert "已按新任务启动编程任务" in response.content
+    task = store.list_tasks()[0]
+    assert launcher.launched_ids == [task.id]
+    assert task.status == "starting"
+    assert task.last_user_control == "start_new_goal"
+    assert task.metadata["harness_conflict_resolution"] == "start_new_goal"
 
 
 @pytest.mark.asyncio

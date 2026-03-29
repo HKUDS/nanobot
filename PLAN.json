@@ -8,7 +8,7 @@
       "Open PROGRESS.md and verify the reboot entry explains why new Telegram goals were being hijacked by an old in-repo harness.",
       "Confirm the scope is limited to Telegram coding-task launch conflicts and does not reopen unrelated parser work."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 2,
@@ -19,7 +19,7 @@
       "Verify the launcher-side harness inspection returns both the active state and a human-facing summary.",
       "Confirm repos without a complete harness continue to report no conflict summary."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 3,
@@ -30,7 +30,7 @@
       "Verify nanobot creates the coding task but leaves it in waiting_user rather than starting Codex immediately.",
       "Confirm the reply explains both the existing harness summary and the newly requested goal."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 4,
@@ -41,7 +41,7 @@
       "From the same conflict state, send 按新任务开始 and verify the task launches with the explicit new-goal override recorded.",
       "Confirm bare 继续 remains ambiguous in conflict mode and asks for an explicit choice."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 5,
@@ -52,7 +52,7 @@
       "Inspect the generated Codex bootstrap prompt and verify it says not to continue the old unfinished features as the primary task.",
       "Confirm the old harness summary is preserved as context while the new goal becomes the task focus."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 6,
@@ -63,7 +63,7 @@
       "Launch a conflict task and choose 继续旧任务; verify it follows the same shared launcher path as before.",
       "Confirm create-only and launch-failure fallbacks still work."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 7,
@@ -74,7 +74,7 @@
       "Verify the suite covers conflict summary extraction, explicit choice handling, and non-conflict regressions.",
       "Confirm the tests stay scoped away from unrelated repo-wide failures."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 8,
@@ -85,7 +85,7 @@
       "Verify it explains that active repo harnesses require explicit user confirmation before resuming or replacing work.",
       "Confirm PROGRESS.md records the reasoning and the new control phrases."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 9,

@@ -39,7 +39,10 @@ def extract_latest_progress_note(repo_path: str | Path) -> str:
     if not path.exists():
         return ""
 
-    text = path.read_text(encoding="utf-8").strip()
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
     if not text:
         return ""
 
@@ -57,7 +60,10 @@ def summarize_plan_progress(repo_path: str | Path) -> PlanProgress:
     if not path.exists():
         return PlanProgress(completed=0, remaining=0, total=0)
 
-    items = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        items = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return PlanProgress(completed=0, remaining=0, total=0)
     completed = sum(1 for item in items if item.get("passes"))
     total = len(items)
     return PlanProgress(completed=completed, remaining=max(total - completed, 0), total=total)

@@ -29,7 +29,7 @@ def _make_launcher(tmp_path: Path, *, has_session: bool, capture_output: str = "
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "PLAN.json").write_text("[]", encoding="utf-8")
-    (repo / "PROGRESS.md").write_text("progress", encoding="utf-8")
+    (repo / "PROGRESS.md").write_text("## Session update\n- Continue old task\n", encoding="utf-8")
     (repo / "init.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
     task = manager.create_task(repo_path=str(repo), goal="Implement worker launch")
     fake_runner = _FakeRunner(has_session=has_session, capture_output=capture_output)
@@ -111,6 +111,21 @@ def test_launch_task_writes_existing_harness_recovery_prompt(tmp_path: Path) -> 
     assert "Approval policy: local_only" in prompt
     assert "Harness mode: existing harness detected." in prompt
     assert "Read PROGRESS.md." in prompt
+    assert "Existing harness summary: Continue old task" in prompt
+
+
+def test_launch_task_writes_new_goal_override_prompt_for_conflict_resolution(tmp_path: Path) -> None:
+    launcher, task, _fake_runner = _make_launcher(tmp_path, has_session=False)
+    launcher.manager.update_metadata(
+        task.id,
+        updates={"harness_conflict_resolution": "start_new_goal"},
+    )
+
+    result = launcher.launch_task(task.id)
+    prompt = Path(result.prompt_path).read_text(encoding="utf-8")
+
+    assert "user explicitly chose to start a new goal" in prompt
+    assert "Do not continue the old unfinished harness features as the primary task." in prompt
 
 
 def test_worker_artifacts_are_namespaced_by_task_id(tmp_path: Path) -> None:
