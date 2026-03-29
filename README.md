@@ -114,6 +114,7 @@ The user-visible control flow is:
 
 1. Send `开始编程 ...` or `/coding ...` in Telegram private chat, or create a task from the CLI.
 2. Telegram start commands now persist the coding task and immediately launch or reuse a tmux-backed Codex worker; the CLI still keeps explicit `coding-task create` and `coding-task run` steps for manual control.
+   The worker now starts inside a workspace-scoped private tmux socket and an isolated `/bin/sh` environment, so it does not inherit the user's interactive zsh or global Codex shell noise.
 3. Codex restores or initializes the target repo harness before editing.
 4. nanobot polls tmux output and harness files to build status summaries.
 5. Telegram controls such as `状态`, `继续`, `停止`, and `取消` act on the same tracked coding task instead of creating duplicate work.

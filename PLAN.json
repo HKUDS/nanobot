@@ -2,66 +2,77 @@
   {
     "id": 1,
     "category": "setup",
-    "description": "The completed-harness false-positive fix is tracked as its own harness task so future sessions do not confuse it with the earlier active-harness conflict work.",
+    "description": "The worker-launch isolation fix is tracked as its own harness task so future sessions can resume from the tmux/bootstrap failure evidence directly.",
     "steps": [
-      "Open PLAN.json and verify it only tracks the completed-harness false-positive fix.",
-      "Open PROGRESS.md and verify the reboot entry explains that completed harnesses were being mislabeled as unfinished.",
-      "Confirm the scope is limited to harness-state detection, conflict wording, and prompt semantics."
+      "Open PLAN.json and verify it only tracks the worker-launch isolation harness.",
+      "Open PROGRESS.md and verify the reboot entry records the tmux zsh bootstrap error, the host-shell Codex run, and the global Codex config mismatch.",
+      "Confirm the scope is limited to worker startup isolation, launch observability, and real Codex validation."
     ],
     "passes": true
   },
   {
     "id": 2,
     "category": "functional",
-    "description": "Repo harness detection distinguishes missing, active, and completed harness states based on PLAN.json completion instead of file presence alone.",
+    "description": "CodexWorkerLauncher uses an isolated shell session instead of tmux's default interactive zsh environment.",
     "steps": [
-      "Inspect a repo with all harness files present and unfinished PLAN.json items.",
-      "Verify detect_repo_harness reports active for unfinished plans and completed for plans with zero remaining work.",
-      "Confirm missing and partial harness repos still report missing or initializing correctly."
+      "Inspect the tmux launcher code and verify new sessions no longer boot into the default zsh login shell.",
+      "Verify reused sessions still relaunch work through the same isolated shell path.",
+      "Confirm the launcher keeps the existing tmux reuse and interrupt semantics."
     ],
     "passes": true
   },
   {
     "id": 3,
     "category": "functional",
-    "description": "Telegram start-coding flow pauses for confirmation on both active and completed harness repos, but uses different conflict reasons and user-facing wording.",
+    "description": "The worker launch command explicitly overrides unstable global Codex config so background runs do not inherit incompatible reasoning-summary settings.",
     "steps": [
-      "Send a private-chat start command for an unfinished harness repo and verify nanobot says the repo has an unfinished harness.",
-      "Send the same flow for a completed harness repo and verify nanobot says the repo has a completed harness that can be used as historical context.",
-      "Confirm repos without a complete harness still auto-start directly."
+      "Inspect the generated Codex command line for a coding task launch.",
+      "Verify it includes a compatible reasoning-summary override and still runs from the target repo root.",
+      "Confirm the user-level ~/.codex/config.toml file is not modified."
     ],
     "passes": true
   },
   {
     "id": 4,
-    "category": "integration",
-    "description": "Codex bootstrap prompt semantics reflect the difference between completed and unfinished harnesses, so completed plans are treated as background context rather than pending work.",
+    "category": "functional",
+    "description": "Worker logs and status views surface meaningful startup failures instead of collapsing to shell prompt noise.",
     "steps": [
-      "Inspect the prompt generated for an unfinished harness repo and verify it still restores the current unfinished task state first.",
-      "Inspect the prompt generated for a completed harness repo and verify it describes the old harness as completed historical context.",
-      "Confirm the start_new_goal override still tells Codex not to resume unfinished work as the primary task."
+      "Inspect a pane/log stream with startup errors and verify the most useful error line is preserved instead of a bare shell prompt.",
+      "Verify stderr is captured into the worker artifact log alongside Codex JSON output.",
+      "Confirm coding-task status remains readable for successful launches."
     ],
     "passes": true
   },
   {
     "id": 5,
     "category": "testing",
-    "description": "Focused tests cover completed-harness detection, waiting-user reporting, router branching, notifier compatibility, and prompt generation.",
+    "description": "Focused tests cover isolated shell startup, Codex config overrides, prompt/log behavior, and progress extraction regressions.",
     "steps": [
-      "Run focused pytest coverage for harness, reporting, router, worker, and notifier flows.",
-      "Verify the suite covers both repo_active_harness and repo_completed_harness conflict reasons.",
-      "Confirm compileall still succeeds for the touched coding-task modules and tests."
+      "Run focused pytest coverage for worker, routing, harness, reporting, and progress modules.",
+      "Verify the suite covers both the new shell wrapper and startup-error summarization paths.",
+      "Confirm compileall still succeeds for all touched modules and tests."
     ],
     "passes": true
   },
   {
     "id": 6,
     "category": "integration",
-    "description": "A real codex-remote validation path shows the completed harness now triggers completed-context wording instead of the old unfinished-harness false positive.",
+    "description": "A real codex-remote launch path shows the worker enters true Codex execution after choosing 按新任务开始, without the previous brew/zsh bootstrap failure.",
     "steps": [
-      "Use the real /Users/miau/Documents/codex-remote repo, whose current PLAN.json is fully complete.",
-      "Simulate a Telegram start-coding request against that repo through the live routing stack.",
-      "Verify the response explicitly says the repo has a completed harness that can be used as historical context."
+      "Launch a real coding task against /Users/miau/Documents/codex-remote after the completed-harness confirmation step.",
+      "Verify the tmux pane no longer shows the brew shell bootstrap error or the earlier operation-not-permitted failure.",
+      "Confirm the artifact log and pane include real codex exec --json events."
+    ],
+    "passes": true
+  },
+  {
+    "id": 7,
+    "category": "docs",
+    "description": "README and PROGRESS document the isolated worker-launch behavior, validation evidence, and any remaining runtime caveats.",
+    "steps": [
+      "Open README.md and verify the coding-task section explains the isolated worker environment at a high level.",
+      "Open PROGRESS.md and verify it records the launch failure root cause, the new launch strategy, and the final validation result.",
+      "Confirm PLAN.json is fully marked complete once all verification passes."
     ],
     "passes": true
   }

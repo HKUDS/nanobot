@@ -51,8 +51,11 @@ def test_launch_task_creates_tmux_session_and_marks_task_starting(tmp_path: Path
     assert result.session_reused is False
     assert result.session_hint == "sess-123"
     assert Path(result.prompt_path).exists()
+    assert Path(result.launch_script_path).exists()
     assert any("new-session" in cmd for cmd in fake_runner.commands)
-    assert any("send-keys" in cmd for cmd in fake_runner.commands)
+    assert any("/bin/sh" in part for cmd in fake_runner.commands if "new-session" in cmd for part in cmd)
+    assert any(tmp_path.as_posix() == part for cmd in fake_runner.commands if "new-session" in cmd for part in cmd)
+    assert not any("respawn-pane" in cmd for cmd in fake_runner.commands)
 
 
 def test_launch_task_reuses_existing_tmux_session_without_new_session(tmp_path: Path) -> None:
@@ -62,21 +65,42 @@ def test_launch_task_reuses_existing_tmux_session_without_new_session(tmp_path: 
 
     assert result.session_reused is True
     assert not any("new-session" in cmd for cmd in fake_runner.commands)
-    assert any(cmd[-1] == "C-c" for cmd in fake_runner.commands if "send-keys" in cmd)
+    assert any("respawn-pane" in cmd for cmd in fake_runner.commands)
+    assert any(tmp_path.as_posix() == part for cmd in fake_runner.commands if "respawn-pane" in cmd for part in cmd)
 
 
-def test_build_exec_command_carries_repo_and_codex_prompt_file(tmp_path: Path) -> None:
+def test_build_exec_command_uses_task_launch_script(tmp_path: Path) -> None:
+    launcher, task, _fake_runner = _make_launcher(tmp_path, has_session=False)
+    launch_script_path = Path(tmp_path / "task.launch.sh")
+
+    command = launcher.build_exec_command(task, launch_script_path)
+
+    assert command == f"/bin/sh {launch_script_path}"
+
+
+def test_launcher_defaults_to_workspace_scoped_tmux_socket(tmp_path: Path) -> None:
+    launcher, _task, _fake_runner = _make_launcher(tmp_path, has_session=False)
+
+    assert launcher.socket_path == str(tmp_path / "automation" / "coding" / "tmux.sock")
+
+
+def test_build_launch_script_wraps_codex_with_isolated_shell_and_log_capture(tmp_path: Path) -> None:
     launcher, task, _fake_runner = _make_launcher(tmp_path, has_session=False)
     prompt_path = Path(tmp_path / "prompt.txt")
     log_path = Path(tmp_path / "task.log")
 
-    command = launcher.build_exec_command(task, prompt_path, log_path)
+    script = launcher.build_launch_script(task, prompt_path, log_path)
 
-    assert "codex" in command
-    assert "exec --json --full-auto" in command
-    assert str(prompt_path) in command
-    assert str(log_path) in command
-    assert str(Path(task.repo_path)) in command
+    assert script.startswith("#!/bin/sh")
+    assert "env -i" in script
+    assert "/bin/sh -c" in script
+    assert "codex" in script
+    assert "exec --json --full-auto" in script
+    assert 'model_reasoning_summary="detailed"' in script
+    assert str(prompt_path) in script
+    assert str(log_path) in script
+    assert str(Path(task.repo_path)) in script
+    assert "2>&1 | tee -a" in script
 
 
 def test_extract_session_hint_accepts_multiple_formats() -> None:
@@ -151,6 +175,18 @@ def test_launch_task_writes_completed_harness_prompt_for_conflict_resolution(tmp
 
     assert "Harness mode: completed harness detected." in prompt
     assert "completed background context" in prompt
+
+
+def test_launch_task_reports_startup_diagnostic_when_pane_output_contains_shell_failure(tmp_path: Path) -> None:
+    launcher, task, _fake_runner = _make_launcher(
+        tmp_path,
+        has_session=False,
+        capture_output="Error: The current working directory must be readable to miau to run brew.\n",
+    )
+
+    result = launcher.launch_task(task.id)
+
+    assert "Worker shell bootstrap failed before Codex launch" in result.task.last_progress_summary
 
 
 def test_worker_artifacts_are_namespaced_by_task_id(tmp_path: Path) -> None:

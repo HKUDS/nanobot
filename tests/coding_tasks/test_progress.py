@@ -119,6 +119,21 @@ def test_build_task_progress_report_summarizes_codex_json_events(tmp_path: Path)
     assert "aggregated_output" not in report.summary
 
 
+def test_build_task_progress_report_prefers_error_over_prompt_noise(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _prepare_repo(repo)
+
+    pane_output = (
+        "Error: The current working directory must be readable to miau to run brew.\n"
+        "~/Documents/codex-remote\n"
+        "❯\n"
+    )
+
+    report = build_task_progress_report(repo, pane_output)
+
+    assert "当前输出: Error: The current working directory must be readable to miau to run brew." in report.summary
+
+
 def test_build_task_report_is_read_only_for_task_metadata(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")

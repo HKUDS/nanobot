@@ -11,6 +11,14 @@ from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.reporting import detect_waiting_reason, inspect_repo_snapshot
 from nanobot.coding_tasks.worker import CodexWorkerLauncher
 
+_PROMPT_LINES = {"❯", "$", "%", "#", "sh-3.2$", "zsh%"}
+_ERROR_HINTS = (
+    "error:",
+    "unsupported value",
+    "operation not permitted",
+    "must be readable",
+)
+
 
 @dataclass(slots=True)
 class PlanProgress:
@@ -153,14 +161,18 @@ def _extract_live_output(pane_output: str) -> str:
     for line in reversed(lines):
         if summary := _summarize_codex_event_line(line):
             return summary
-    return _trim_summary(lines[-1])
+    for line in reversed(lines):
+        if _is_shell_noise_line(line):
+            continue
+        return _trim_summary(line)
+    return ""
 
 
 def _summarize_codex_event_line(line: str) -> str:
     try:
         payload = json.loads(line)
     except json.JSONDecodeError:
-        return _trim_summary(line)
+        return ""
 
     item = payload.get("item")
     if not isinstance(item, dict):
@@ -174,6 +186,14 @@ def _summarize_codex_event_line(line: str) -> str:
         if command:
             return _trim_summary(f"执行命令: {command}")
     return ""
+
+
+def _is_shell_noise_line(line: str) -> bool:
+    if line in _PROMPT_LINES:
+        return True
+    if (line.startswith("~/") or line.startswith("/Users/")) and " " not in line:
+        return True
+    return False
 
 
 def _trim_summary(text: str, limit: int = 160) -> str:

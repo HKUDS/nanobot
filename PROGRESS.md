@@ -242,6 +242,36 @@
   - `.venv/bin/python` temporary-workspace routing smoke against real `/Users/miau/Documents/codex-remote` -> returned `仓库里已有已完成的 harness，可作为历史上下文参考`, with the completed Phase 5 summary instead of the old unfinished-harness warning
 - Remaining blockers / follow-up:
   - The live gateway process still needs the earlier in-place runtime cleanup before the tmux pane can serve as the canonical manual-validation environment again; this fix validated the real repo path through the routing stack in an isolated workspace instead.
+
+## Harness reboot - 2026-03-29 (worker launch isolation)
+- Task pivot:
+  - Superseded the finished completed-harness wording fix with the next live blocker: nanobot can now route Telegram coding tasks correctly, but the tmux-backed Codex worker still fails before true execution because it boots through the default interactive zsh environment.
+- Existing work detected before implementation:
+  - `CodexWorkerLauncher` still starts tmux sessions with the default shell and sends a raw `codex exec --json --full-auto ... | tee ...` line into that shell.
+  - On `/Users/miau/Documents/codex-remote`, a fresh tmux session immediately reports `Error: The current working directory must be readable to miau to run brew.` before Codex really starts; a plain `/bin/sh` tmux session does not reproduce that bootstrap failure.
+  - A host-shell `codex exec` run reaches Codex itself but also reveals a second instability: the global `~/.codex/config.toml` currently sets `model_reasoning_summary = "concise"`, which is not accepted by every model Codex may pick internally.
+- Key decisions:
+  - Move the worker launch path to an isolated minimal shell and stop depending on user `~/.zshrc` side effects.
+  - Override the unstable Codex reasoning-summary setting at launch time instead of mutating the user's global Codex config.
+
+## Session update - 2026-03-29 (worker launch isolation)
+- Completed features:
+  - Refactored [nanobot/coding_tasks/worker.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/worker.py) so coding-task workers now boot through a generated launch script, an isolated `/bin/sh` wrapper, and a workspace-scoped private tmux socket instead of the shared interactive tmux server state.
+  - Changed tmux startup to use a safe launch cwd outside the target repo; the launch script now performs the explicit `cd <repo>` step itself, which avoids the earlier shell bootstrap failure before Codex can start.
+  - Added an explicit `model_reasoning_summary="detailed"` Codex override on every worker launch and preserved stderr capture in the per-task artifact log so startup failures remain inspectable.
+  - Updated [nanobot/coding_tasks/progress.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/progress.py) to prefer meaningful startup errors over shell prompt noise when building status summaries.
+  - Extended [tests/coding_tasks/test_worker.py](/Users/miau/Documents/nanobot/tests/coding_tasks/test_worker.py) and [tests/coding_tasks/test_progress.py](/Users/miau/Documents/nanobot/tests/coding_tasks/test_progress.py) to cover the isolated shell wrapper, workspace tmux socket, and startup-error summarization path.
+- Verification:
+  - `bash ~/.codex/scripts/global-init.sh` -> exited 0, with the same unrelated pytest warning bundle in `/tmp/nanobot-harness-pytest.log`
+  - `.venv/bin/pytest tests/coding_tasks/test_worker.py tests/coding_tasks/test_progress.py tests/agent/test_coding_task_routing.py tests/coding_tasks/test_harness.py tests/coding_tasks/test_reporting.py` -> passed (53 tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks tests/coding_tasks/test_worker.py tests/coding_tasks/test_progress.py tests/agent/test_coding_task_routing.py tests/coding_tasks/test_harness.py tests/coding_tasks/test_reporting.py` -> passed
+  - Manual/runtime probes:
+    - A shared legacy tmux server still reproduced `ls /Users/miau/Documents/codex-remote -> Operation not permitted`, proving the remaining failure was tmux-server state rather than the launch script itself.
+    - A fresh private-socket tmux server could both `ls /Users/miau/Documents/codex-remote` and run `codex exec --json` successfully, confirming the isolation strategy.
+    - A real launcher probe against `/Users/miau/Documents/codex-remote` using the new default private socket wrote true Codex JSON events (`thread.started`, `turn.started`) to `/tmp/nanobot-worker-probe3/automation/coding/artifacts/a03dc928.codex.log` without the earlier `brew` or `Operation not permitted` bootstrap failures; that run then stopped on a separate external usage-limit error from Codex itself.
+- Remaining blockers / follow-up:
+  - The live Telegram path still depends on restarting the gateway onto this new launcher build; the worker-launch code itself is now isolated and validated.
+  - Real background runs can still stop on external Codex account limits, but that is downstream of startup and no longer the tmux/bootstrap bug tracked by this harness.
 - Verification:
   - `.venv/bin/pytest tests/coding_tasks/test_recovery.py tests/coding_tasks/test_progress.py tests/coding_tasks/test_worker.py tests/coding_tasks/test_manager.py tests/agent/test_coding_task_routing.py` -> passed (22 tests)
   - `.venv/bin/pytest tests/cli/test_commands.py -k "gateway_reports_coding_task_counts or coding_task_status_shows_details_and_recent_events or coding_task_run_launches_tmux_worker or coding_task_create_persists_task or coding_task_create_rejects_missing_repo or coding_task_list_shows_status_and_recoverability or test_coding_task_cancel_updates_status_and_reason or test_coding_task_resume_moves_failed_task_back_to_starting"` -> passed (8 selected tests)
