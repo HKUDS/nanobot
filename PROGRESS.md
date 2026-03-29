@@ -249,3 +249,21 @@
 - Remaining blockers / follow-up:
   - Progress notifications are still pull-based via status views rather than throttled push notifications, so feature `#37` is the next natural step
   - Completion/failure reporting and branch/commit metadata persistence are not implemented yet
+
+## Session update - 2026-03-29 (features #43, #44, #45, #46, #47, #48, #49, #50)
+- Completed features:
+  - Verified multiple queued coding tasks survive store reload without being dropped or duplicated
+  - Added status-list coverage proving queued, starting, waiting, failed, completed, and cancelled tasks all surface distinctly in reporting
+  - Verified worker prompt artifacts are namespaced by task id under the workspace artifacts directory
+  - Kept the focused coding-task suite green across storage, lifecycle, prompt shaping, recovery, and Telegram routing while the unrelated `repo_sync` baseline remains red
+  - Added a README architecture note that explains nanobot as orchestrator, Codex as coding worker, and the target repo harness as the long-term memory layer
+  - Preserved explicit PROGRESS notes about the separate `nanobot.repo_sync.service` baseline failure so later sessions can keep using the focused coding-task verification path
+- Verification:
+  - `.venv/bin/pytest tests/coding_tasks/test_queueing.py tests/coding_tasks/test_worker.py tests/coding_tasks/test_audit.py tests/coding_tasks/test_recovery.py tests/coding_tasks/test_progress.py tests/coding_tasks/test_harness.py tests/agent/test_coding_task_routing.py tests/cli/test_commands.py -k "test_coding_task_list_distinguishes_all_major_statuses or gateway_reports_coding_task_counts or coding_task_status_shows_details_and_recent_events or coding_task_run_launches_tmux_worker or coding_task_create_persists_task or coding_task_create_rejects_missing_repo or coding_task_list_shows_status_and_recoverability or test_coding_task_cancel_updates_status_and_reason or test_coding_task_resume_moves_failed_task_back_to_starting or test_multiple_queued_tasks_survive_store_reload"` -> passed (10 selected tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks tests/coding_tasks/test_queueing.py tests/coding_tasks/test_worker.py tests/coding_tasks/test_audit.py` -> passed
+- Key decisions:
+  - Treat artifact naming and queued-task reload as regression-proofing features, verified through deterministic store/worker tests instead of relying on live gateway restarts for every pass
+  - Keep the focused coding-task test surface explicitly separate from the unrelated repo-wide red baseline, and continue documenting that split in `PROGRESS.md`
+  - Document the nanobot/Codex/repo-harness split in README directly under the architecture section so future operators can orient quickly
+- Remaining blockers / follow-up:
+  - The remaining major gaps are gateway single-instance protection in the active runtime path and a true end-to-end manual run against a local repo

@@ -1120,6 +1120,47 @@ def test_coding_task_list_shows_status_and_recoverability(monkeypatch, tmp_path:
     assert "recoverable" in output
 
 
+def test_coding_task_list_distinguishes_all_major_statuses(monkeypatch, tmp_path: Path) -> None:
+    from nanobot.coding_tasks.manager import CodexWorkerManager
+    from nanobot.coding_tasks.store import CodingTaskStore
+
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    workspace = tmp_path / "workspace"
+    config = Config()
+    config.agents.defaults.workspace = str(workspace)
+
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, store)
+    manager.create_task(repo_path="/tmp/repo-a", goal="Queue")
+    starting = manager.create_task(repo_path="/tmp/repo-b", goal="Start")
+    manager.mark_starting(starting.id, summary="Boot")
+    waiting = manager.create_task(repo_path="/tmp/repo-c", goal="Wait")
+    manager.mark_starting(waiting.id, summary="Boot")
+    manager.mark_waiting_user(waiting.id, summary="Need input")
+    failed = manager.create_task(repo_path="/tmp/repo-d", goal="Fail")
+    manager.mark_starting(failed.id, summary="Boot")
+    manager.mark_failed(failed.id, summary="Broken")
+    completed = manager.create_task(repo_path="/tmp/repo-e", goal="Done")
+    manager.mark_starting(completed.id, summary="Boot")
+    manager.mark_running(completed.id, summary="Working")
+    manager.mark_completed(completed.id, summary="done")
+    cancelled = manager.create_task(repo_path="/tmp/repo-f", goal="Cancel")
+    manager.cancel_task(cancelled.id, summary="No longer needed")
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+
+    result = runner.invoke(app, ["coding-task", "list", "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    output = _strip_ansi(result.stdout).replace("\n", " ")
+    for status in ("queued", "starting", "waiting_user", "failed", "completed", "cancelled"):
+        assert status in output
+
+
 def test_coding_task_status_shows_details_and_recent_events(monkeypatch, tmp_path: Path) -> None:
     from nanobot.coding_tasks.manager import CodexWorkerManager
     from nanobot.coding_tasks.store import CodingTaskStore

@@ -111,3 +111,22 @@ def test_launch_task_writes_existing_harness_recovery_prompt(tmp_path: Path) -> 
     assert "Approval policy: local_only" in prompt
     assert "Harness mode: existing harness detected." in prompt
     assert "Read PROGRESS.md." in prompt
+
+
+def test_worker_artifacts_are_namespaced_by_task_id(tmp_path: Path) -> None:
+    store = CodingTaskStore(tmp_path / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(tmp_path, store)
+    repo_a = tmp_path / "repo-a"
+    repo_b = tmp_path / "repo-b"
+    repo_a.mkdir()
+    repo_b.mkdir()
+    task_a = manager.create_task(repo_path=str(repo_a), goal="Task A")
+    task_b = manager.create_task(repo_path=str(repo_b), goal="Task B")
+
+    launcher = CodexWorkerLauncher(tmp_path, manager, runner=_FakeRunner(has_session=False))
+    result_a = launcher.launch_task(task_a.id)
+    result_b = launcher.launch_task(task_b.id)
+
+    assert result_a.prompt_path != result_b.prompt_path
+    assert Path(result_a.prompt_path).name.startswith(task_a.id)
+    assert Path(result_b.prompt_path).name.startswith(task_b.id)

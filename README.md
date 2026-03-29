@@ -102,6 +102,22 @@
   <img src="nanobot_arch.png" alt="nanobot architecture" width="800">
 </p>
 
+### Codex-Orchestrated Coding Tasks
+
+For long-running coding work, nanobot now uses a three-layer split:
+
+- `nanobot` is the orchestrator. It receives Telegram or CLI requests, creates coding tasks, tracks lifecycle state, and reports progress back to the user.
+- `Codex` is the coding worker. It runs inside a tmux-backed session, edits the target repository, and performs the actual implementation work.
+- The target repository harness is the long-term memory layer. `PLAN.json`, `PROGRESS.md`, and `init.sh` live in the repo being worked on, so Codex can recover context across restarts and long sessions.
+
+The user-visible control flow is:
+
+1. Send `开始编程 ...` in Telegram private chat or create a task from the CLI.
+2. nanobot persists the coding task and launches or reuses a tmux-backed Codex worker.
+3. Codex restores or initializes the target repo harness before editing.
+4. nanobot polls tmux output and harness files to build status summaries.
+5. Telegram controls such as `状态`, `继续`, `停止`, and `取消` act on the same tracked coding task instead of creating duplicate work.
+
 ## Table of Contents
 
 - [News](#-news)

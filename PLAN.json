@@ -470,7 +470,7 @@
       "Restart the gateway or reload the store.",
       "Verify all queued tasks remain intact and none are dropped or duplicated."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 44,
@@ -481,7 +481,7 @@
       "Run the list/status reporting path.",
       "Verify each status appears distinctly and maps to the correct stored task."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 45,
@@ -492,7 +492,7 @@
       "Inspect the workspace automation artifacts directory after the run.",
       "Verify the saved artifact is namespaced by task and does not overwrite unrelated task data."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 46,
@@ -503,7 +503,7 @@
       "Verify the suite covers store persistence, status transitions, and prompt-shaping logic.",
       "Confirm the focused suite passes even while the unrelated repo_sync baseline remains red."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 47,
@@ -514,7 +514,7 @@
       "Run the recovery-focused tests.",
       "Verify live sessions reconnect while missing sessions are marked failed with recovery hints."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 48,
@@ -525,7 +525,7 @@
       "Verify `开始编程`, `状态`, `继续`, `停止`, and `取消` are all routed correctly.",
       "Confirm ordinary chat messages still bypass the coding-task control path."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 49,
@@ -536,7 +536,7 @@
       "Verify it explains the three-layer split between nanobot, Codex, and repo harness.",
       "Confirm it includes the user-visible control flow for Telegram-driven coding tasks."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 50,
@@ -547,7 +547,7 @@
       "Verify it names the missing `nanobot.repo_sync.service` baseline issue separately from coding-task tests.",
       "Confirm later sessions can rerun the focused coding-task verification command directly from the notes."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 51,
