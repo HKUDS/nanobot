@@ -403,3 +403,18 @@
   - `tests/config/test_config_migration.py` still expects the deprecated `memory_window` field to disappear entirely
   - `tests/test_openai_oauth_provider.py` still expects `nanobot.providers.openai_oauth_provider` to be lazily addressable for monkeypatching
   - `tests/tools/test_tool_validation.py::test_exec_head_tail_truncation` still assumes `python` exists on PATH, while this environment only has `.venv/bin/python`
+
+## Harness reboot - 2026-03-29 (telegram coding-task auto-launch)
+- Task pivot:
+  - Start a new standalone harness to let Telegram private-chat `开始编程` create and immediately launch a Codex-backed coding task
+- Existing work detected before re-planning:
+  - The active coding-task runtime already passes a shared launcher into [nanobot/coding_tasks/router.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/router.py) through [nanobot/agent/loop.py](/Users/miau/Documents/nanobot/nanobot/agent/loop.py)
+  - Today the Telegram start handler only creates the task and replies with `状态: queued`; the first launch still requires the CLI `nanobot coding-task run <task_id>` path
+  - Repo-wide pytest is no longer blocked by `repo_sync.service`, but unrelated red tests remain in CLI gateway mocks, config migration, OpenAI OAuth lazy imports, and exec PATH assumptions
+- Baseline validation before feature work:
+  - `bash ~/.codex/scripts/global-init.sh` -> exited 0 with one known pytest error bundle from unrelated baseline failures
+  - `git status --short` -> only untracked `.codex/` before this harness reboot
+- Key decisions:
+  - Keep the change narrow: Telegram start should call the existing shared launcher, not invent a second worker-start path
+  - Preserve current CLI `coding-task create` and `coding-task run` semantics as an explicit alternative workflow
+  - If launch fails, keep the created task on disk and report the failure clearly to Telegram instead of silently rolling back the task record

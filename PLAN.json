@@ -2,122 +2,78 @@
   {
     "id": 1,
     "category": "setup",
-    "description": "The repo_sync recovery task is reinitialized as a standalone harness with the missing service-module baseline clearly separated from older dormant gateway debt.",
+    "description": "The Telegram auto-launch task is reinitialized as a standalone harness separate from the completed repo_sync recovery work.",
     "steps": [
-      "Open PLAN.json and verify it only contains repo_sync recovery work rather than the completed coding-task cleanup plan.",
-      "Open PROGRESS.md and verify the new reboot entry records the missing module baseline, the scoped goal, and what is intentionally out of scope.",
-      "Confirm the harness scope is limited to repo_sync service recovery instead of also reviving missing app.prompts or app.runtime modules."
+      "Open PLAN.json and verify it only describes Telegram auto-launch work for coding tasks.",
+      "Open PROGRESS.md and verify the reboot entry records the current baseline and the decision to keep CLI run semantics unchanged.",
+      "Confirm the new task scope is limited to Telegram start-command launch behavior and its focused regressions."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 2,
     "category": "functional",
-    "description": "The nanobot.repo_sync package exports a concrete RepoSyncWatcher service module again so the repo-wide test collector can import it.",
+    "description": "Telegram private-chat `开始编程` automatically launches the newly created coding task when a launcher is available.",
     "steps": [
-      "Import nanobot.repo_sync.service in a Python shell.",
-      "Verify RepoSyncWatcher resolves without ModuleNotFoundError.",
-      "Confirm the package layout includes source files rather than only stale __pycache__ artifacts."
+      "Send a Telegram private-chat start command in a focused routing test with a fake launcher attached.",
+      "Verify nanobot creates the task and immediately calls the launcher for that new task id.",
+      "Confirm the Telegram acknowledgement reports the launched status instead of leaving the task queued."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 3,
     "category": "functional",
-    "description": "RepoSyncWatcher accepts the gateway's current constructor contract, including sync-runner injection and repo-sync policy fields.",
+    "description": "Automatic Telegram launch reuses the existing coding-task launcher path rather than duplicating worker startup logic in the router.",
     "steps": [
-      "Instantiate RepoSyncWatcher with the same keyword arguments used by the dormant gateway path.",
-      "Verify the watcher stores the repo path, branch, remotes, timing controls, and sync runner without raising.",
-      "Confirm the watcher can be built both with a custom sync_runner and with the default sync helper."
+      "Inspect the Telegram start-command handler after the change.",
+      "Verify it delegates launch to the shared launcher abstraction already used by `nanobot coding-task run`.",
+      "Confirm no second worker-start implementation or ad hoc tmux logic is added to the router."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 4,
     "category": "functional",
-    "description": "RepoSyncWatcher start() is idempotent and runs an immediate sync when run_on_start is enabled.",
+    "description": "If no launcher is wired into the runtime, Telegram start commands still fall back to create-only behavior instead of failing.",
     "steps": [
-      "Start a watcher configured with run_on_start=True and an injected fake sync runner.",
-      "Verify the runner is called once immediately after startup.",
-      "Call start() again and confirm no duplicate immediate sync is scheduled."
+      "Send a Telegram private-chat start command through a runtime that only has a manager.",
+      "Verify the task is still persisted successfully.",
+      "Confirm the acknowledgement remains usable and does not claim a worker was launched."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 5,
     "category": "functional",
-    "description": "RepoSyncWatcher can poll on a short interval when sync_hour disables nightly scheduling.",
+    "description": "If automatic launch raises an exception, nanobot preserves the created task and returns a clear Telegram failure message instead of silently dropping work.",
     "steps": [
-      "Start a watcher with sync_hour set outside the nightly range and a short interval.",
-      "Let it run briefly under asyncio.",
-      "Verify the injected sync runner is invoked multiple times before stop() is called."
+      "Send a Telegram private-chat start command with a launcher stub that raises.",
+      "Verify the task record still exists in the coding-task store.",
+      "Confirm the Telegram reply explains that creation succeeded but launch failed."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 6,
-    "category": "functional",
-    "description": "RepoSyncWatcher stop() cancels the background loop cleanly without leaving a live task reference behind.",
+    "category": "testing",
+    "description": "Focused regression tests cover Telegram auto-launch success, create-only fallback, and launch failure behavior.",
     "steps": [
-      "Start a watcher and then call stop().",
-      "Verify the background task is cancelled cleanly and the watcher no longer reports itself as running.",
-      "Confirm repeated stop() calls remain harmless."
+      "Run the focused coding-task routing test files.",
+      "Verify the new assertions cover both the happy path and the failure boundary.",
+      "Confirm the regression suite remains scoped away from unrelated global pytest failures."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 7,
-    "category": "functional",
-    "description": "trigger_now() serializes concurrent sync attempts through an async lock so overlapping polls cannot run the sync runner twice at once.",
-    "steps": [
-      "Call trigger_now() concurrently from two coroutines against a watcher with a slow fake runner.",
-      "Verify the calls complete without overlapping runner execution.",
-      "Confirm the watcher still records both trigger requests sequentially."
-    ],
-    "passes": true
-  },
-  {
-    "id": 8,
-    "category": "functional",
-    "description": "The default sync_fork_once helper provides a safe baseline implementation that reports validation failures and no-op sync states without crashing the watcher.",
-    "steps": [
-      "Invoke the default sync helper with a missing repo path.",
-      "Verify it returns a human-readable failed status instead of raising uncaught exceptions.",
-      "Confirm RepoSyncWatcher can use the default helper without requiring a custom test stub."
-    ],
-    "passes": true
-  },
-  {
-    "id": 9,
-    "category": "testing",
-    "description": "Focused tests cover the restored watcher lifecycle and synchronization behavior without depending on dormant gateway imports.",
-    "steps": [
-      "Run tests/test_repo_sync_service.py.",
-      "Verify the suite covers immediate startup, interval polling, and idempotent start behavior.",
-      "Confirm any new watcher tests exercise serialization or stop semantics directly through the service module."
-    ],
-    "passes": true
-  },
-  {
-    "id": 10,
-    "category": "integration",
-    "description": "Repo-wide pytest no longer stops at tests/test_repo_sync_service.py import collection because the service module exists again.",
-    "steps": [
-      "Run the repository's standard pytest command.",
-      "Verify test collection proceeds past tests/test_repo_sync_service.py without ModuleNotFoundError.",
-      "Record any remaining unrelated failures in PROGRESS.md if additional baseline issues surface."
-    ],
-    "passes": true
-  },
-  {
-    "id": 11,
     "category": "docs",
-    "description": "PROGRESS.md captures the repo_sync recovery decisions so future sessions know the service layer was intentionally restored as a thin watcher rather than a full gateway revival.",
+    "description": "User-facing documentation explains that Telegram `开始编程` now launches Codex immediately while CLI create/run remains available as an explicit path.",
     "steps": [
-      "Open the newest PROGRESS.md entry.",
-      "Verify it records the source of truth for the missing-module failure and the chosen thin-watcher recovery strategy.",
-      "Confirm the log distinguishes repo_sync recovery from the still-dormant app.prompts and app.runtime gaps."
+      "Open the updated README coding-task section.",
+      "Verify it states that Telegram start commands now create and launch automatically.",
+      "Confirm the docs still mention the CLI create/run workflow as an explicit alternative."
     ],
-    "passes": true
+    "passes": false
   }
 ]
