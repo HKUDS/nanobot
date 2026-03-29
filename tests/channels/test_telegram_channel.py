@@ -964,3 +964,113 @@ async def test_on_help_includes_restart_command() -> None:
     help_text = update.message.reply_text.await_args.args[0]
     assert "/restart" in help_text
     assert "/status" in help_text
+
+
+@pytest.mark.asyncio
+async def test_send_uses_message_thread_id_field_when_metadata_has_none() -> None:
+    """OutboundMessage.message_thread_id is used when metadata has no message_thread_id."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="hello",
+            message_thread_id=99,
+        )
+    )
+
+    assert channel._app.bot.sent_messages[0].get("message_thread_id") == 99
+
+
+@pytest.mark.asyncio
+async def test_send_metadata_thread_id_takes_precedence_over_field() -> None:
+    """metadata['message_thread_id'] takes precedence over OutboundMessage.message_thread_id."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="hello",
+            metadata={"message_thread_id": 10},
+            message_thread_id=99,
+        )
+    )
+
+    assert channel._app.bot.sent_messages[0].get("message_thread_id") == 10
+
+
+@pytest.mark.asyncio
+async def test_send_without_thread_id_omits_message_thread_id_kwarg() -> None:
+    """When neither metadata nor field specifies a thread, message_thread_id is not passed."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="hello",
+        )
+    )
+
+    assert "message_thread_id" not in channel._app.bot.sent_messages[0]
+
+
+@pytest.mark.asyncio
+async def test_on_message_forum_thread_id_included_in_metadata() -> None:
+    """message_thread_id from a Telegram forum message is passed to the bus in metadata."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+
+    update = _make_telegram_update(text="hello topic")
+    update.message.message_thread_id = 42
+    await channel._on_message(update, None)
+
+    assert len(handled) == 1
+    assert handled[0]["metadata"]["message_thread_id"] == 42
+
+
+@pytest.mark.asyncio
+async def test_on_message_no_thread_id_for_regular_group_message() -> None:
+    """message_thread_id is None in metadata for regular (non-forum) group messages."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+
+    update = _make_telegram_update(text="hello")  # message_thread_id=None by default
+    await channel._on_message(update, None)
+
+    assert len(handled) == 1
+    assert handled[0]["metadata"]["message_thread_id"] is None

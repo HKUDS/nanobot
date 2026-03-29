@@ -173,12 +173,12 @@ class AgentLoop:
         finally:
             self._mcp_connecting = False
 
-    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
+    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None, message_thread_id: int | None = None) -> None:
         """Update context for all tools that need routing info."""
         for name in ("message", "spawn", "cron"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
-                    tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+                    tool.set_context(channel, chat_id, *([message_id, message_thread_id] if name == "message" else []))
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -209,6 +209,7 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        message_thread_id: int | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop.
 
@@ -252,7 +253,7 @@ class AgentLoop:
                 for tc in context.tool_calls:
                     args_str = json.dumps(tc.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tc.name, args_str[:200])
-                loop_self._set_tool_context(channel, chat_id, message_id)
+                loop_self._set_tool_context(channel, chat_id, message_id, message_thread_id)
 
             def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
                 return loop_self._strip_think(content)
@@ -320,10 +321,14 @@ class AgentLoop:
                     def _current_stream_id() -> str:
                         return f"{stream_base_id}:{stream_segment}"
 
+                    _stream_thread_id = (msg.metadata or {}).get("message_thread_id")
+
                     async def on_stream(delta: str) -> None:
                         meta = dict(msg.metadata or {})
                         meta["_stream_delta"] = True
                         meta["_stream_id"] = _current_stream_id()
+                        if _stream_thread_id is not None:
+                            meta["message_thread_id"] = _stream_thread_id
                         await self.bus.publish_outbound(OutboundMessage(
                             channel=msg.channel, chat_id=msg.chat_id,
                             content=delta, metadata=meta,
@@ -331,10 +336,13 @@ class AgentLoop:
 
                     async def on_stream_end(*, resuming: bool = False) -> None:
                         nonlocal stream_segment
+
                         meta = dict(msg.metadata or {})
                         meta["_stream_end"] = True
                         meta["_resuming"] = resuming
                         meta["_stream_id"] = _current_stream_id()
+                        if _stream_thread_id is not None:
+                            meta["message_thread_id"] = _stream_thread_id
                         await self.bus.publish_outbound(OutboundMessage(
                             channel=msg.channel, chat_id=msg.chat_id,
                             content="", metadata=meta,
@@ -401,7 +409,7 @@ class AgentLoop:
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"), msg.metadata.get("message_thread_id"))
             history = session.get_history(max_messages=0)
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
             messages = self.context.build_messages(
@@ -412,6 +420,7 @@ class AgentLoop:
             final_content, _, all_msgs = await self._run_agent_loop(
                 messages, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
+                message_thread_id=msg.metadata.get("message_thread_id"),
             )
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
@@ -433,7 +442,7 @@ class AgentLoop:
 
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"), msg.metadata.get("message_thread_id"))
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
@@ -461,6 +470,7 @@ class AgentLoop:
             on_stream_end=on_stream_end,
             channel=msg.channel, chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
+            message_thread_id=msg.metadata.get("message_thread_id"),
         )
 
         if final_content is None:
