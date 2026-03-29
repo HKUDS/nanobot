@@ -52,6 +52,7 @@ class TwilioWhatsAppConfig(Base):
     validate_signature: bool = False
     public_url: str = ""  # e.g. "https://abcd.ngrok-free.app" — used to reconstruct the signed URL
     allow_from: list[str] = Field(default_factory=list)  # ["+1234567890"] or ["*"]
+    immediate_response: str = ""  # If set, reply with this message in TwiML before agent processes
     group_policy: Literal["open", "mention"] = "open"
 
 
@@ -86,6 +87,7 @@ class TwilioWhatsAppChannel(BaseChannel):
         self._public_url: str = config.public_url.rstrip("/")
         self._webhook_path: str = config.webhook_path
         self._webhook_port: int = config.webhook_port
+        self._immediate_response: str = config.immediate_response
 
         self._twilio: TwilioClient = TwilioClient(self._account_sid, self._auth_token)
         self._validator: RequestValidator | None = (
@@ -231,8 +233,12 @@ class TwilioWhatsAppChannel(BaseChannel):
             },
         )
 
-        # Return empty TwiML — actual reply comes via REST API
-        return web.Response(text="<Response></Response>", content_type="application/xml")
+        # Return TwiML — actual reply comes via REST API
+        if self._immediate_response:
+            twiml = f"<Response><Message>{self._immediate_response}</Message></Response>"
+        else:
+            twiml = "<Response></Response>"
+        return web.Response(text=twiml, content_type="application/xml")
 
     async def _health(self, request: Any) -> Any:
         from aiohttp import web
