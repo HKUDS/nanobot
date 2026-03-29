@@ -978,6 +978,14 @@ class FeishuChannel(BaseChannel):
                     json.dumps({"type": "card", "data": {"card_id": card_id}}),
                 )
             return card_id
+                message_id = self._send_message_sync(
+                    receive_id_type, chat_id, "interactive",
+                    json.dumps({"type": "card", "data": {"card_id": card_id}}),
+                )
+                if message_id:
+                    return card_id
+                logger.warning("Created streaming card {} but failed to send it to {}", card_id, chat_id)
+            return None
         except Exception as e:
             logger.warning("Error creating streaming card: {}", e)
             return None
@@ -1000,6 +1008,39 @@ class FeishuChannel(BaseChannel):
             return True
         except Exception as e:
             logger.warning("Error stream-updating card {}: {}", card_id, e)
+            return False
+
+    def _close_streaming_mode_sync(self, card_id: str, sequence: int) -> bool:
+        """Turn off CardKit streaming_mode so the chat list preview exits the streaming placeholder.
+
+        Per Feishu docs, streaming cards keep a generating-style summary in the session list until
+        streaming_mode is set to false via card settings (after final content update).
+        Sequence must strictly exceed the previous card OpenAPI operation on this entity.
+        """
+        from lark_oapi.api.cardkit.v1 import SettingsCardRequest, SettingsCardRequestBody
+        settings_payload = json.dumps({"config": {"streaming_mode": False}}, ensure_ascii=False)
+        try:
+            request = SettingsCardRequest.builder() \
+                .card_id(card_id) \
+                .request_body(
+                    SettingsCardRequestBody.builder()
+                    .settings(settings_payload)
+                    .sequence(sequence)
+                    .uuid(str(uuid.uuid4()))
+                    .build()
+                ).build()
+            response = self._client.cardkit.v1.card.settings(request)
+            if not response.success():
+                logger.warning(
+                    "Failed to close streaming on card {}: code={}, msg={}",
+                    card_id, response.code, response.msg,
+                )
+                return False
+            return True
+        except Exception as e:
+            logger.warning("Error closing streaming on card {}: {}", card_id, e)
+            return False
+
             return False
 
     def _close_streaming_mode_sync(self, card_id: str, sequence: int) -> bool:

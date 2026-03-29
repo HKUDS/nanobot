@@ -170,6 +170,42 @@ class TestDeltaCoalescing:
         assert len(pending) == 0
 
     @pytest.mark.asyncio
+    async def test_coalescing_stops_at_first_non_matching_boundary(self, manager, bus):
+        """Only consecutive deltas should be merged; later deltas stay queued."""
+        await bus.publish_outbound(OutboundMessage(
+            channel="mock",
+            chat_id="chat1",
+            content="Hello",
+            metadata={"_stream_delta": True, "_stream_id": "seg-1"},
+        ))
+        await bus.publish_outbound(OutboundMessage(
+            channel="mock",
+            chat_id="chat1",
+            content="",
+            metadata={"_stream_end": True, "_stream_id": "seg-1"},
+        ))
+        await bus.publish_outbound(OutboundMessage(
+            channel="mock",
+            chat_id="chat1",
+            content="world",
+            metadata={"_stream_delta": True, "_stream_id": "seg-2"},
+        ))
+
+        first_msg = await bus.consume_outbound()
+        merged, pending = manager._coalesce_stream_deltas(first_msg)
+
+        assert merged.content == "Hello"
+        assert merged.metadata.get("_stream_end") is None
+        assert len(pending) == 1
+        assert pending[0].metadata.get("_stream_end") is True
+        assert pending[0].metadata.get("_stream_id") == "seg-1"
+
+        # The next stream segment must remain in queue order for later dispatch.
+        remaining = await bus.consume_outbound()
+        assert remaining.content == "world"
+        assert remaining.metadata.get("_stream_id") == "seg-2"
+
+    @pytest.mark.asyncio
     async def test_non_delta_message_preserved(self, manager, bus):
         """Non-delta messages should be preserved in pending list."""
         await bus.publish_outbound(OutboundMessage(

@@ -181,6 +181,8 @@ class ChannelManager:
         non_matching: list[OutboundMessage] = []
 
         # Drain all pending _stream_delta messages for the same (channel, chat_id)
+        # Only merge consecutive deltas. As soon as we hit any other message,
+        # stop and hand that boundary back to the dispatcher via `pending`.
         while True:
             try:
                 next_msg = self.bus.outbound.get_nowait()
@@ -203,6 +205,9 @@ class ChannelManager:
             else:
                 # Keep for later processing
                 non_matching.append(next_msg)
+                # First non-matching message defines the coalescing boundary.
+                non_matching.append(next_msg)
+                break
 
         merged = OutboundMessage(
             channel=first_msg.channel,
