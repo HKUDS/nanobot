@@ -168,6 +168,7 @@
             currentAbortController = new AbortController();
             const signal = currentAbortController.signal;
             let metadata = {};
+            let hasError = false;
             
             try {
                 const response = await fetch('/api/chat?stream=true', {
@@ -211,9 +212,15 @@
                                     streamingMessageDiv.innerHTML = marked.parse(fullContent);
                                     scrollToBottom();
                                 } else if (event.type === 'error') {
+                                    hasError = true;
                                     throw new Error(event.error);
                                 } else if (event.type === 'done') {
                                     metadata = event.metadata || {};
+                                    // Check if content contains an error
+                                    if (event.content && (event.content.startsWith('Error') || event.content.includes('Error calling LLM'))) {
+                                        hasError = true;
+                                        throw new Error(event.content);
+                                    }
                                     // Update with model info if available
                                     const messageEl = streamingMessageDiv.closest('.message');
                                     if (messageEl && metadata.metadata && metadata.metadata.model) {

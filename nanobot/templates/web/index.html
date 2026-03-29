@@ -243,6 +243,7 @@
             responseContent.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Thinking...';
             
             let fullContent = '';
+            let hasError = false;
             try {
                 const controller = new AbortController();
                 const response = await fetch('/api/chat?stream=true', {
@@ -282,7 +283,14 @@
                                     fullContent += event.content;
                                     responseContent.innerHTML = marked.parse(fullContent);
                                 } else if (event.type === 'error') {
+                                    hasError = true;
                                     throw new Error(event.error);
+                                } else if (event.type === 'done') {
+                                    // Check if content contains an error
+                                    if (event.content && (event.content.startsWith('Error') || event.content.includes('Error calling LLM'))) {
+                                        hasError = true;
+                                        throw new Error(event.content);
+                                    }
                                 }
                             } catch (e) {
                                 if (e.name !== 'SyntaxError') throw e;
