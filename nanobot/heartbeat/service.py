@@ -167,6 +167,8 @@ class HeartbeatService:
         Returns a formatted string describing which tasks are DUE NOW and which
         are not yet due, or "" if no tasks with Schedule fields are found.
         """
+        # Schedule strings are naive; strip tzinfo for comparison
+        now = now.replace(tzinfo=None)
         user_tasks_match = re.search(r"^## User Tasks\s*$", content, re.MULTILINE)
         if not user_tasks_match:
             return ""
