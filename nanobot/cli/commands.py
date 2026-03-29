@@ -504,6 +504,23 @@ def gateway(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Start the nanobot gateway."""
+    from loguru import logger
+    import sys
+
+    # Setup file handler with 1-hour rotation
+    log_path = Path.home() / ".nanobot" / "nanobot.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.remove()  # Remove default handler
+    logger.add(
+        str(log_path),
+        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
+        level="DEBUG",
+        rotation="00:59",  # Rotate every hour (HH:MM format)
+        retention=1,         # Keep 1 file
+        enqueue=True,
+    )
+    logger.add(sys.stderr, level="INFO")  # Keep stderr output
+
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
@@ -717,6 +734,21 @@ def agent(
 ):
     """Interact with the agent directly."""
     from loguru import logger
+    import sys
+
+    # Setup file handler with 1-hour rotation
+    log_path = Path.home() / ".nanobot" / "nanobot.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.remove()  # Remove default handler
+    logger.add(
+        str(log_path),
+        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
+        level="DEBUG",
+        rotation="00:59",  # Rotate every hour (HH:MM format)
+        retention=1,         # Keep 1 file
+        enqueue=True,
+    )
+    logger.add(sys.stderr, level="INFO")  # Keep stderr output
 
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
