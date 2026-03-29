@@ -54,13 +54,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Cache ONNX reranker model
+      - name: Cache ONNX models
         uses: actions/cache@v4
         with:
-          path: ~/.cache/nanobot/models
-          key: onnx-reranker-ms-marco-MiniLM-L-6-v2
+          path: |
+            ~/.cache/nanobot/models
+            ~/.cache/huggingface
+          key: onnx-models-v2-${{ matrix.python-version }}
       - name: Install dependencies
         run: pip install -e ".[dev]"
+      - name: Pre-download ONNX models
+        run: |
+          python -c "
+          from nanobot.memory.embedder import LocalEmbedder
+          e = LocalEmbedder()
+          print('LocalEmbedder available:', e.available)
+          "
       - name: Run unit tests with coverage
         run: python -m pytest tests/ --ignore=tests/integration -x -q --cov=nanobot --cov-report=term-missing --cov-report=json --cov-fail-under=85
 
