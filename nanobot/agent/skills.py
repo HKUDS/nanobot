@@ -18,10 +18,19 @@ class SkillsLoader:
     specific tools or perform certain tasks.
     """
 
-    def __init__(self, workspace: Path, builtin_skills_dir: Path | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        builtin_skills_dir: Path | None = None,
+        discovery_enabled: bool = False,
+        discovery_threshold: int = 50,
+    ):
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
+        self._discovery_enabled = discovery_enabled
+        self._discovery_threshold = discovery_threshold
+        self._workspace_skill_count: int | None = None  # cache
 
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """
@@ -94,21 +103,50 @@ class SkillsLoader:
             content = self.load_skill(name)
             if content:
                 content = self._strip_frontmatter(content)
+                # Replace {baseDir} with actual skill directory path
+                skill_dir = self._get_skill_dir(name)
+                if skill_dir:
+                    content = content.replace("{baseDir}", str(skill_dir))
                 parts.append(f"### Skill: {name}\n\n{content}")
 
         return "\n\n---\n\n".join(parts) if parts else ""
 
-    def build_skills_summary(self) -> str:
-        """
-        Build a summary of all skills (name, description, path, availability).
+    def _get_skill_dir(self, name: str) -> Path | None:
+        """Get the directory path for a skill."""
+        # Check workspace first
+        workspace_skill_dir = self.workspace_skills / name
+        if workspace_skill_dir.exists():
+            return workspace_skill_dir
 
-        This is used for progressive loading - the agent can read the full
-        skill content using read_file when needed.
+        # Check built-in
+        if self.builtin_skills:
+            builtin_skill_dir = self.builtin_skills / name
+            if builtin_skill_dir.exists():
+                return builtin_skill_dir
+
+        return None
+
+    def build_skills_summary(self, source: str | None = None) -> str:
+        """
+        Build a summary of skills (name, description, path, availability).
+
+        When workspace skills exceed threshold, automatically filters to builtin only
+        (discovery mode) unless source is explicitly specified.
+
+        Args:
+            source: Filter by source ("workspace" or "builtin"). None for auto.
 
         Returns:
             XML-formatted skills summary.
         """
+        # Auto-select source based on discovery mode
+        if source is None and self.should_use_discovery_mode():
+            source = "builtin"
+
         all_skills = self.list_skills(filter_unavailable=False)
+        if source:
+            all_skills = [s for s in all_skills if s.get("source") == source]
+
         if not all_skills:
             return ""
 
@@ -128,7 +166,6 @@ class SkillsLoader:
             lines.append(f"    <description>{desc}</description>")
             lines.append(f"    <location>{path}</location>")
 
-            # Show missing requirements for unavailable skills
             if not available:
                 missing = self._get_missing_requirements(skill_meta)
                 if missing:
@@ -199,6 +236,22 @@ class SkillsLoader:
             if skill_meta.get("always") or meta.get("always"):
                 result.append(s["name"])
         return result
+
+    def get_workspace_skill_count(self) -> int:
+        """Get count of workspace skills (cached)."""
+        if self._workspace_skill_count is None:
+            self._workspace_skill_count = sum(
+                1 for s in self.list_skills(filter_unavailable=False)
+                if s.get("source") == "workspace"
+            )
+        return self._workspace_skill_count
+
+    def should_use_discovery_mode(self) -> bool:
+        """Check if should use discovery mode (enabled + threshold exceeded)."""
+        return (
+            self._discovery_enabled
+            and self.get_workspace_skill_count() > self._discovery_threshold
+        )
 
     def get_skill_metadata(self, name: str) -> dict | None:
         """

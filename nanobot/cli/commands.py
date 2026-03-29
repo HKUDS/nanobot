@@ -550,6 +550,8 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        skill_discovery_enabled=config.agents.defaults.skill_discovery_enabled,
+        skill_discovery_threshold=config.agents.defaults.skill_discovery_threshold,
     )
 
     # Set cron callback (needs agent)
@@ -755,6 +757,8 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        skill_discovery_enabled=config.agents.defaults.skill_discovery_enabled,
+        skill_discovery_threshold=config.agents.defaults.skill_discovery_threshold,
     )
 
     # Shared reference for progress callbacks

@@ -68,6 +68,8 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
+        skill_discovery_enabled: bool = False,
+        skill_discovery_threshold: int = 50,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -86,7 +88,12 @@ class AgentLoop:
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
 
-        self.context = ContextBuilder(workspace, timezone=timezone)
+        self.context = ContextBuilder(
+            workspace,
+            timezone=timezone,
+            skill_discovery_enabled=skill_discovery_enabled,
+            skill_discovery_threshold=skill_discovery_threshold,
+        )
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)
