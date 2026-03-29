@@ -11,6 +11,69 @@ from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 
 
+def _extract_nullable_branch(options: Any) -> tuple[dict[str, Any], bool] | None:
+    """Return the single non-null branch for nullable unions."""
+    if not isinstance(options, list):
+        return None
+
+    non_null: list[dict[str, Any]] = []
+    saw_null = False
+    for option in options:
+        if not isinstance(option, dict):
+            return None
+        if option.get("type") == "null":
+            saw_null = True
+            continue
+        non_null.append(option)
+
+    if saw_null and len(non_null) == 1:
+        return non_null[0], True
+    return None
+
+
+def _normalize_schema_for_openai(schema: Any) -> dict[str, Any]:
+    """Normalize only nullable JSON Schema patterns for tool definitions."""
+    if not isinstance(schema, dict):
+        return {"type": "object", "properties": {}}
+
+    normalized = dict(schema)
+
+    raw_type = normalized.get("type")
+    if isinstance(raw_type, list):
+        non_null = [item for item in raw_type if item != "null"]
+        if "null" in raw_type and len(non_null) == 1:
+            normalized["type"] = non_null[0]
+            normalized["nullable"] = True
+
+    for key in ("oneOf", "anyOf"):
+        nullable_branch = _extract_nullable_branch(normalized.get(key))
+        if nullable_branch is not None:
+            branch, _ = nullable_branch
+            merged = {k: v for k, v in normalized.items() if k != key}
+            merged.update(branch)
+            normalized = merged
+            normalized["nullable"] = True
+            break
+
+    if "properties" in normalized and isinstance(normalized["properties"], dict):
+        normalized["properties"] = {
+            name: _normalize_schema_for_openai(prop)
+            if isinstance(prop, dict)
+            else prop
+            for name, prop in normalized["properties"].items()
+        }
+
+    if "items" in normalized and isinstance(normalized["items"], dict):
+        normalized["items"] = _normalize_schema_for_openai(normalized["items"])
+
+    if normalized.get("type") != "object":
+        return normalized
+
+    normalized.setdefault("properties", {})
+    normalized.setdefault("required", [])
+    return normalized
+
+
 class MCPToolWrapper(Tool):
     """Wraps a single MCP server tool as a nanobot Tool."""
 
@@ -19,7 +82,8 @@ class MCPToolWrapper(Tool):
         self._original_name = tool_def.name
         self._name = f"mcp_{server_name}_{tool_def.name}"
         self._description = tool_def.description or tool_def.name
-        self._parameters = tool_def.inputSchema or {"type": "object", "properties": {}}
+        raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
+        self._parameters = _normalize_schema_for_openai(raw_schema)
         self._tool_timeout = tool_timeout
 
     @property
@@ -138,11 +202,47 @@ async def connect_mcp_servers(
             await session.initialize()
 
             tools = await session.list_tools()
+            enabled_tools = set(cfg.enabled_tools)
+            allow_all_tools = "*" in enabled_tools
+            registered_count = 0
+            matched_enabled_tools: set[str] = set()
+            available_raw_names = [tool_def.name for tool_def in tools.tools]
+            available_wrapped_names = [f"mcp_{name}_{tool_def.name}" for tool_def in tools.tools]
             for tool_def in tools.tools:
+                wrapped_name = f"mcp_{name}_{tool_def.name}"
+                if (
+                    not allow_all_tools
+                    and tool_def.name not in enabled_tools
+                    and wrapped_name not in enabled_tools
+                ):
+                    logger.debug(
+                        "MCP: skipping tool '{}' from server '{}' (not in enabledTools)",
+                        wrapped_name,
+                        name,
+                    )
+                    continue
                 wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
                 registry.register(wrapper)
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
+                registered_count += 1
+                if enabled_tools:
+                    if tool_def.name in enabled_tools:
+                        matched_enabled_tools.add(tool_def.name)
+                    if wrapped_name in enabled_tools:
+                        matched_enabled_tools.add(wrapped_name)
 
-            logger.info("MCP server '{}': connected, {} tools registered", name, len(tools.tools))
+            if enabled_tools and not allow_all_tools:
+                unmatched_enabled_tools = sorted(enabled_tools - matched_enabled_tools)
+                if unmatched_enabled_tools:
+                    logger.warning(
+                        "MCP server '{}': enabledTools entries not found: {}. Available raw names: {}. "
+                        "Available wrapped names: {}",
+                        name,
+                        ", ".join(unmatched_enabled_tools),
+                        ", ".join(available_raw_names) or "(none)",
+                        ", ".join(available_wrapped_names) or "(none)",
+                    )
+
+            logger.info("MCP server '{}': connected, {} tools registered", name, registered_count)
         except Exception as e:
             logger.error("MCP server '{}': failed to connect: {}", name, e)

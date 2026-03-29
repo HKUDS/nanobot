@@ -18,8 +18,8 @@ import { extname, basename } from 'path';
 import { Boom } from '@hapi/boom';
 import qrcode from 'qrcode-terminal';
 import pino from 'pino';
-import { writeFile, mkdir } from 'fs/promises';
-import { join } from 'path';
+import { readFile, writeFile, mkdir } from 'fs/promises';
+import { join, basename } from 'path';
 import { randomBytes } from 'crypto';
 
 const VERSION = '0.1.0';
@@ -37,6 +37,7 @@ export interface InboundMessage {
   content: string;
   timestamp: number;
   isGroup: boolean;
+  wasMentioned?: boolean;
   media?: string[];
   audio?: AudioData; // present when message is a voice/audio note
 }
@@ -55,6 +56,31 @@ export class WhatsAppClient {
 
   constructor(options: WhatsAppClientOptions) {
     this.options = options;
+  }
+
+  private normalizeJid(jid: string | undefined | null): string {
+    return (jid || '').split(':')[0];
+  }
+
+  private wasMentioned(msg: any): boolean {
+    if (!msg?.key?.remoteJid?.endsWith('@g.us')) return false;
+
+    const candidates = [
+      msg?.message?.extendedTextMessage?.contextInfo?.mentionedJid,
+      msg?.message?.imageMessage?.contextInfo?.mentionedJid,
+      msg?.message?.videoMessage?.contextInfo?.mentionedJid,
+      msg?.message?.documentMessage?.contextInfo?.mentionedJid,
+      msg?.message?.audioMessage?.contextInfo?.mentionedJid,
+    ];
+    const mentioned = candidates.flatMap((items) => (Array.isArray(items) ? items : []));
+    if (mentioned.length === 0) return false;
+
+    const selfIds = new Set(
+      [this.sock?.user?.id, this.sock?.user?.lid, this.sock?.user?.jid]
+        .map((jid) => this.normalizeJid(jid))
+        .filter(Boolean),
+    );
+    return mentioned.some((jid: string) => selfIds.has(this.normalizeJid(jid)));
   }
 
   async connect(): Promise<void> {
@@ -169,6 +195,7 @@ export class WhatsAppClient {
         if (!finalContent && mediaPaths.length === 0 && !audioData) continue;
 
         const isGroup = msg.key.remoteJid?.endsWith('@g.us') || false;
+        const wasMentioned = this.wasMentioned(msg);
 
         this.options.onMessage({
           id: msg.key.id || '',
@@ -177,6 +204,7 @@ export class WhatsAppClient {
           content: finalContent,
           timestamp: msg.messageTimestamp as number,
           isGroup,
+          ...(isGroup ? { wasMentioned } : {}),
           ...(mediaPaths.length > 0 ? { media: mediaPaths } : {}),
           ...(audioData ? { audio: audioData } : {}),
         });
@@ -281,23 +309,30 @@ export class WhatsAppClient {
     await this.sock.sendMessage(to, { text });
   }
 
-  async sendMediaMessage(to: string, filePath: string, caption?: string): Promise<void> {
+  async sendMedia(
+    to: string,
+    filePath: string,
+    mimetype: string,
+    caption?: string,
+    fileName?: string,
+  ): Promise<void> {
     if (!this.sock) {
       throw new Error('Not connected');
     }
 
-    const buffer = readFileSync(filePath);
-    const ext = extname(filePath).toLowerCase();
-    const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+    const buffer = await readFile(filePath);
+    const category = mimetype.split('/')[0];
 
-    if (imageExts.includes(ext)) {
-      await this.sock.sendMessage(to, { image: buffer, caption: caption || '' });
+    if (category === 'image') {
+      await this.sock.sendMessage(to, { image: buffer, caption: caption || undefined, mimetype });
+    } else if (category === 'video') {
+      await this.sock.sendMessage(to, { video: buffer, caption: caption || undefined, mimetype });
+    } else if (category === 'audio') {
+      await this.sock.sendMessage(to, { audio: buffer, mimetype });
     } else {
-      await this.sock.sendMessage(to, {
-        document: buffer,
-        caption: caption || '',
-        fileName: basename(filePath),
-      });
+      const name = fileName || basename(filePath);
+      await this.sock.sendMessage(to, { document: buffer, mimetype, fileName: name });
+    }
     }
   }
 

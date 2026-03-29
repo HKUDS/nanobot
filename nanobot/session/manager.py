@@ -43,23 +43,52 @@ class Session:
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
+    @staticmethod
+    def _find_legal_start(messages: list[dict[str, Any]]) -> int:
+        """Find first index where every tool result has a matching assistant tool_call."""
+        declared: set[str] = set()
+        start = 0
+        for i, msg in enumerate(messages):
+            role = msg.get("role")
+            if role == "assistant":
+                for tc in msg.get("tool_calls") or []:
+                    if isinstance(tc, dict) and tc.get("id"):
+                        declared.add(str(tc["id"]))
+            elif role == "tool":
+                tid = msg.get("tool_call_id")
+                if tid and str(tid) not in declared:
+                    start = i + 1
+                    declared.clear()
+                    for prev in messages[start:i + 1]:
+                        if prev.get("role") == "assistant":
+                            for tc in prev.get("tool_calls") or []:
+                                if isinstance(tc, dict) and tc.get("id"):
+                                    declared.add(str(tc["id"]))
+        return start
+
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
-        """Return unconsolidated messages for LLM input, aligned to a user turn."""
+        """Return unconsolidated messages for LLM input, aligned to a legal tool-call boundary."""
         unconsolidated = self.messages[self.last_consolidated:]
         sliced = unconsolidated[-max_messages:]
 
-        # Drop leading non-user messages to avoid orphaned tool_result blocks
-        for i, m in enumerate(sliced):
-            if m.get("role") == "user":
+        # Drop leading non-user messages to avoid starting mid-turn when possible.
+        for i, message in enumerate(sliced):
+            if message.get("role") == "user":
                 sliced = sliced[i:]
                 break
 
+        # Some providers reject orphan tool results if the matching assistant
+        # tool_calls message fell outside the fixed-size history window.
+        start = self._find_legal_start(sliced)
+        if start:
+            sliced = sliced[start:]
+
         out: list[dict[str, Any]] = []
-        for m in sliced:
-            entry: dict[str, Any] = {"role": m["role"], "content": m.get("content", "")}
-            for k in ("tool_calls", "tool_call_id", "name"):
-                if k in m:
-                    entry[k] = m[k]
+        for message in sliced:
+            entry: dict[str, Any] = {"role": message["role"], "content": message.get("content", "")}
+            for key in ("tool_calls", "tool_call_id", "name"):
+                if key in message:
+                    entry[key] = message[key]
             out.append(entry)
         return out
 
@@ -67,6 +96,32 @@ class Session:
         """Clear all messages and reset session to initial state."""
         self.messages = []
         self.last_consolidated = 0
+        self.updated_at = datetime.now()
+
+    def retain_recent_legal_suffix(self, max_messages: int) -> None:
+        """Keep a legal recent suffix, mirroring get_history boundary rules."""
+        if max_messages <= 0:
+            self.clear()
+            return
+        if len(self.messages) <= max_messages:
+            return
+
+        start_idx = max(0, len(self.messages) - max_messages)
+
+        # If the cutoff lands mid-turn, extend backward to the nearest user turn.
+        while start_idx > 0 and self.messages[start_idx].get("role") != "user":
+            start_idx -= 1
+
+        retained = self.messages[start_idx:]
+
+        # Mirror get_history(): avoid persisting orphan tool results at the front.
+        start = self._find_legal_start(retained)
+        if start:
+            retained = retained[start:]
+
+        dropped = len(self.messages) - len(retained)
+        self.messages = retained
+        self.last_consolidated = max(0, self.last_consolidated - dropped)
         self.updated_at = datetime.now()
 
 

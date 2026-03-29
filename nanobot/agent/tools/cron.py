@@ -1,18 +1,20 @@
 """Cron tool for scheduling reminders and tasks."""
 
 from contextvars import ContextVar
+from datetime import datetime
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
 from nanobot.cron.service import CronService
-from nanobot.cron.types import CronSchedule
+from nanobot.cron.types import CronJobState, CronSchedule
 
 
 class CronTool(Tool):
     """Tool to schedule reminders and recurring tasks."""
 
-    def __init__(self, cron_service: CronService):
+    def __init__(self, cron_service: CronService, default_timezone: str = "UTC"):
         self._cron = cron_service
+        self._default_timezone = default_timezone
         self._channel = ""
         self._chat_id = ""
         self._in_cron_context: ContextVar[bool] = ContextVar("cron_in_context", default=False)
@@ -30,13 +32,37 @@ class CronTool(Tool):
         """Restore previous cron context."""
         self._in_cron_context.reset(token)
 
+    @staticmethod
+    def _validate_timezone(tz: str) -> str | None:
+        from zoneinfo import ZoneInfo
+
+        try:
+            ZoneInfo(tz)
+        except (KeyError, Exception):
+            return f"Error: unknown timezone '{tz}'"
+        return None
+
+    def _display_timezone(self, schedule: CronSchedule) -> str:
+        """Pick the most human-meaningful timezone for display."""
+        return schedule.tz or self._default_timezone
+
+    @staticmethod
+    def _format_timestamp(ms: int, tz_name: str) -> str:
+        from zoneinfo import ZoneInfo
+
+        dt = datetime.fromtimestamp(ms / 1000, tz=ZoneInfo(tz_name))
+        return f"{dt.isoformat()} ({tz_name})"
+
     @property
     def name(self) -> str:
         return "cron"
 
     @property
     def description(self) -> str:
-        return "Schedule reminders and recurring tasks. Actions: add, list, remove."
+        return (
+            "Schedule reminders and recurring tasks. Actions: add, list, remove. "
+            f"If tz is omitted, cron expressions and naive ISO times default to {self._default_timezone}."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -59,11 +85,17 @@ class CronTool(Tool):
                 },
                 "tz": {
                     "type": "string",
-                    "description": "IANA timezone for cron expressions (e.g. 'America/Vancouver')",
+                    "description": (
+                        "Optional IANA timezone for cron expressions "
+                        f"(e.g. 'America/Vancouver'). Defaults to {self._default_timezone}."
+                    ),
                 },
                 "at": {
                     "type": "string",
-                    "description": "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00')",
+                    "description": (
+                        "ISO datetime for one-time execution "
+                        f"(e.g. '2026-02-12T10:30:00'). Naive values default to {self._default_timezone}."
+                    ),
                 },
                 "job_id": {"type": "string", "description": "Job ID (for remove)"},
             },
@@ -106,26 +138,29 @@ class CronTool(Tool):
         if tz and not cron_expr:
             return "Error: tz can only be used with cron_expr"
         if tz:
-            from zoneinfo import ZoneInfo
-
-            try:
-                ZoneInfo(tz)
-            except (KeyError, Exception):
-                return f"Error: unknown timezone '{tz}'"
+            if err := self._validate_timezone(tz):
+                return err
 
         # Build schedule
         delete_after = False
         if every_seconds:
             schedule = CronSchedule(kind="every", every_ms=every_seconds * 1000)
         elif cron_expr:
-            schedule = CronSchedule(kind="cron", expr=cron_expr, tz=tz)
+            effective_tz = tz or self._default_timezone
+            if err := self._validate_timezone(effective_tz):
+                return err
+            schedule = CronSchedule(kind="cron", expr=cron_expr, tz=effective_tz)
         elif at:
-            from datetime import datetime
+            from zoneinfo import ZoneInfo
 
             try:
                 dt = datetime.fromisoformat(at)
             except ValueError:
                 return f"Error: invalid ISO datetime format '{at}'. Expected format: YYYY-MM-DDTHH:MM:SS"
+            if dt.tzinfo is None:
+                if err := self._validate_timezone(self._default_timezone):
+                    return err
+                dt = dt.replace(tzinfo=ZoneInfo(self._default_timezone))
             at_ms = int(dt.timestamp() * 1000)
             schedule = CronSchedule(kind="at", at_ms=at_ms)
             delete_after = True
@@ -143,11 +178,50 @@ class CronTool(Tool):
         )
         return f"Created job '{job.name}' (id: {job.id})"
 
+    def _format_timing(self, schedule: CronSchedule) -> str:
+        """Format schedule as a human-readable timing string."""
+        if schedule.kind == "cron":
+            tz = f" ({schedule.tz})" if schedule.tz else ""
+            return f"cron: {schedule.expr}{tz}"
+        if schedule.kind == "every" and schedule.every_ms:
+            ms = schedule.every_ms
+            if ms % 3_600_000 == 0:
+                return f"every {ms // 3_600_000}h"
+            if ms % 60_000 == 0:
+                return f"every {ms // 60_000}m"
+            if ms % 1000 == 0:
+                return f"every {ms // 1000}s"
+            return f"every {ms}ms"
+        if schedule.kind == "at" and schedule.at_ms:
+            return f"at {self._format_timestamp(schedule.at_ms, self._display_timezone(schedule))}"
+        return schedule.kind
+
+    def _format_state(self, state: CronJobState, schedule: CronSchedule) -> list[str]:
+        """Format job run state as display lines."""
+        lines: list[str] = []
+        display_tz = self._display_timezone(schedule)
+        if state.last_run_at_ms:
+            info = (
+                f"  Last run: {self._format_timestamp(state.last_run_at_ms, display_tz)}"
+                f" — {state.last_status or 'unknown'}"
+            )
+            if state.last_error:
+                info += f" ({state.last_error})"
+            lines.append(info)
+        if state.next_run_at_ms:
+            lines.append(f"  Next run: {self._format_timestamp(state.next_run_at_ms, display_tz)}")
+        return lines
+
     def _list_jobs(self) -> str:
         jobs = self._cron.list_jobs()
         if not jobs:
             return "No scheduled jobs."
-        lines = [f"- {j.name} (id: {j.id}, {j.schedule.kind})" for j in jobs]
+        lines = []
+        for j in jobs:
+            timing = self._format_timing(j.schedule)
+            parts = [f"- {j.name} (id: {j.id}, {timing})"]
+            parts.extend(self._format_state(j.state, j.schedule))
+            lines.append("\n".join(parts))
         return "Scheduled jobs:\n" + "\n".join(lines)
 
     def _remove_job(self, job_id: str | None) -> str:
