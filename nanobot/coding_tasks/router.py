@@ -15,6 +15,7 @@ from nanobot.coding_tasks.progress import CodexProgressMonitor
 from nanobot.coding_tasks.worker import CodexWorkerLauncher
 
 _START_PREFIX = "开始编程"
+_SLASH_START_PATTERN = re.compile(r"^/coding(?:@[A-Za-z0-9_]+)?(?:\s|$)")
 _STATUS_COMMANDS = {"状态"}
 _RESUME_COMMANDS = {"继续"}
 _CANCEL_COMMANDS = {"取消"}
@@ -38,17 +39,25 @@ class ParsedCodingTaskRequest:
 
 def is_start_coding_request(text: str) -> bool:
     """Return True when a message asks nanobot to start a coding task."""
-    return text.strip().startswith(_START_PREFIX)
+    body = text.strip()
+    return body.startswith(_START_PREFIX) or _SLASH_START_PATTERN.match(body) is not None
+
+
+def _strip_start_prefix(text: str) -> str | None:
+    body = text.strip()
+    if body.startswith(_START_PREFIX):
+        return body[len(_START_PREFIX) :].strip().lstrip(":：").strip()
+    slash_match = _SLASH_START_PATTERN.match(body)
+    if slash_match is not None:
+        return body[slash_match.end() :].strip().lstrip(":：").strip()
+    return None
 
 
 def parse_start_coding_request(text: str) -> ParsedCodingTaskRequest | None:
     """Parse a natural-language start request into repo path and goal."""
-    body = text.strip()
-    if not body.startswith(_START_PREFIX):
+    body = _strip_start_prefix(text)
+    if body is None:
         return None
-
-    body = body[len(_START_PREFIX) :].strip()
-    body = body.lstrip(":：").strip()
     if not body:
         return None
 
@@ -68,6 +77,14 @@ def parse_start_coding_request(text: str) -> ParsedCodingTaskRequest | None:
 
     if repo_path and goal:
         return ParsedCodingTaskRequest(repo_path=repo_path, goal=goal, title=title)
+
+    alias_match = re.match(r"^(?P<repo>\S+)\s+的\s+(?P<goal>.+)$", body)
+    if alias_match:
+        return ParsedCodingTaskRequest(
+            repo_path=alias_match.group("repo").strip(),
+            goal=alias_match.group("goal").strip(),
+            title=title,
+        )
 
     try:
         tokens = shlex.split(body)
@@ -96,12 +113,24 @@ def validate_repo_path(repo_path: str) -> tuple[str | None, str | None]:
     if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", raw):
         return None, "当前只支持本地仓库路径，不支持 URL。"
 
-    resolved = Path(raw).expanduser()
+    resolved = _resolve_repo_path(raw)
     if not resolved.exists():
         return None, f"仓库路径不存在: {resolved}"
     if not resolved.is_dir():
         return None, f"仓库路径不是目录: {resolved}"
     return str(resolved), None
+
+
+def _resolve_repo_path(raw: str) -> Path:
+    candidate = Path(raw).expanduser()
+    if _looks_like_repo_path(raw):
+        return candidate
+
+    documents_candidate = Path.home() / "Documents" / raw
+    if documents_candidate.exists():
+        return documents_candidate
+
+    return candidate
 
 
 def register_coding_task_commands(
@@ -141,6 +170,10 @@ def _make_start_coding_handler(
                 content=(
                     "请用以下格式创建编程任务：\n"
                     "开始编程 仓库路径 任务目标\n\n"
+                    "或：\n"
+                    "开始编程 仓库名 的 任务目标\n\n"
+                    "或：\n"
+                    "/coding 仓库名 的 任务目标\n\n"
                     "或：\n"
                     "开始编程\n"
                     "仓库: /path/to/repo\n"

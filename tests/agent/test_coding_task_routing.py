@@ -130,6 +130,58 @@ async def test_private_telegram_start_coding_creates_task_and_acknowledges(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_private_telegram_start_coding_with_repo_alias_and_natural_language_goal(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    loop, store, _manager, launcher = _make_loop(tmp_path, attach_launcher=True)
+    repo_path = tmp_path / "Documents" / "codex-remote"
+    repo_path.mkdir(parents=True)
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="开始编程 codex-remote 的 设置 icon 换一个",
+            metadata={"is_group": False, "message_id": 43},
+        )
+    )
+
+    assert response is not None
+    assert "已创建并启动编程任务" in response.content
+    tasks = store.list_tasks()
+    assert len(tasks) == 1
+    assert launcher.launched_ids == [tasks[0].id]
+    assert tasks[0].repo_path == str(repo_path)
+    assert tasks[0].goal == "设置 icon 换一个"
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_slash_coding_command_uses_repo_alias(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    loop, store, _manager, launcher = _make_loop(tmp_path, attach_launcher=True)
+    repo_path = tmp_path / "Documents" / "codex-remote"
+    repo_path.mkdir(parents=True)
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="/coding codex-remote 的 设置 icon 换一个",
+            metadata={"is_group": False, "message_id": 44},
+        )
+    )
+
+    assert response is not None
+    assert "已创建并启动编程任务" in response.content
+    tasks = store.list_tasks()
+    assert len(tasks) == 1
+    assert launcher.launched_ids == [tasks[0].id]
+    assert tasks[0].repo_path == str(repo_path)
+    assert tasks[0].goal == "设置 icon 换一个"
+
+
+@pytest.mark.asyncio
 async def test_private_telegram_start_coding_without_repo_or_goal_returns_usage(tmp_path: Path) -> None:
     loop, store, _manager, _launcher = _make_loop(tmp_path)
 
