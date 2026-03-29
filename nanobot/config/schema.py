@@ -227,6 +227,15 @@ class ToolsConfig(Base):
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
 
+class TTSConfig(Base):
+    """Text-to-Speech configuration."""
+
+    enabled: bool = False
+    provider: str = "edge"
+    voice: str = "zh-CN-XiaoxiaoNeural"
+    max_text_length: int = 2000
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
@@ -236,6 +245,7 @@ class Config(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    tts: TTSConfig = Field(default_factory=TTSConfig)
 
     @property
     def workspace_path(self) -> Path:
