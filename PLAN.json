@@ -1,574 +1,178 @@
 [
   {
     "id": 1,
-    "category": "setup",
-    "description": "Workspace-scoped coding task runtime persists Codex task metadata, tmux session hints, recoverable states, and append-only run logs.",
+    "category": "refactor",
+    "description": "A dedicated coding-task runtime module can assemble the store, manager, launcher, monitor, recovery helper, and notifier from one workspace/config root.",
     "steps": [
-      "Run `.venv/bin/pytest tests/coding_tasks/test_store.py tests/coding_tasks/test_manager.py` and verify the persistence and lifecycle tests pass.",
-      "Confirm creating a coding task writes `tasks.json` plus a matching `runs/<task_id>.jsonl` entry under the workspace automation directory.",
-      "Verify tasks in `starting`, `running`, or `waiting_user` are surfaced as recoverable by the worker manager after reloading from disk."
+      "Instantiate the runtime helper for a temporary workspace and verify it returns the expected coding-task collaborators.",
+      "Confirm every collaborator points at the same workspace-scoped automation path rather than creating divergent task stores.",
+      "Run focused coding-task tests and verify the new runtime assembly does not break existing persistence behavior."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 2,
-    "category": "integration",
-    "description": "Gateway startup wires the coding task runtime and reports tracked versus recoverable coding tasks without breaking existing startup flow.",
+    "category": "refactor",
+    "description": "The runtime helper can be created both with and without an outbound notifier callback so CLI-only paths do not need ad hoc partial wiring.",
     "steps": [
-      "Start `nanobot gateway` in a controlled workspace with coding task files present.",
-      "Verify startup output reports the number of tracked and recoverable coding tasks alongside existing cron and heartbeat status.",
-      "Confirm gateway startup still reaches the normal ready state instead of failing before channel bootstrap."
+      "Build the coding-task runtime without a message bus callback.",
+      "Verify create/list/status style commands still have access to store, manager, launcher, and monitor without constructing extra helper objects.",
+      "Build the same runtime with an outbound callback and confirm notifier support is available for gateway paths."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 3,
-    "category": "functional",
-    "description": "Coding task IDs and default tmux session names are stable, repo-derived, and safe for reuse across restarts.",
+    "category": "integration",
+    "description": "The active CLI gateway entrypoint uses the shared coding-task runtime builder instead of manually wiring coding-task collaborators inline.",
     "steps": [
-      "Create a coding task for a repo with a normal directory name.",
-      "Verify the generated tmux session name includes the repo basename and task id in a shell-safe format.",
-      "Confirm reloading the stored task preserves the same session name rather than deriving a new one."
+      "Start the gateway in a controlled test harness.",
+      "Verify startup still reports tracked and recoverable coding-task counts.",
+      "Confirm the gateway path no longer assembles launcher, monitor, recovery, and notifier by hand in the command body."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 4,
-    "category": "api",
-    "description": "CLI can create a new coding task record with repo path, goal, and default execution policy.",
+    "category": "integration",
+    "description": "CLI coding-task commands reuse the shared runtime instead of instantiating launcher or monitor ad hoc inside individual commands.",
     "steps": [
-      "Run the new CLI command to create a coding task against a sample repo path.",
-      "Verify the command returns the task id and initial status.",
-      "Confirm the created task is visible in the persisted coding task store."
+      "Run create, list, status, resume, cancel, and run against a temporary workspace.",
+      "Verify the commands still succeed and report the same task data as before.",
+      "Inspect the command implementations and confirm they all resolve collaborators through the shared runtime path."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 5,
-    "category": "api",
-    "description": "CLI can list coding tasks with status, repo, last progress summary, and recoverability.",
+    "category": "integration",
+    "description": "AgentLoop command interception reuses the same coding-task runtime wiring contract instead of reconstructing launcher and monitor privately.",
     "steps": [
-      "Create multiple coding tasks in different statuses.",
-      "Run the list command and verify all tasks are shown with status and repo path.",
-      "Confirm recoverable tasks are visually distinguished from queued, completed, and failed tasks."
+      "Instantiate AgentLoop with coding-task support enabled in a focused test.",
+      "Verify Telegram coding-task command interception still works for start, status, stop, cancel, and resume.",
+      "Confirm AgentLoop no longer constructs a separate launcher/monitor stack outside the shared runtime contract."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 6,
-    "category": "api",
-    "description": "CLI can show detailed status for a single coding task including session metadata and recent run events.",
+    "category": "refactor",
+    "description": "Coding-task task-selection and concurrency rules live in a dedicated policy layer rather than being hardcoded in the Telegram router.",
     "steps": [
-      "Create a coding task and move it through at least one state transition.",
-      "Run the detailed status command for that task id.",
-      "Verify the response includes tmux session, last progress summary, and recent run-log events."
+      "Create tasks from different origins in a focused test fixture.",
+      "Verify the policy chooses the same active task as today's behavior for the current MVP rules.",
+      "Confirm the router delegates selection and single-active enforcement to the policy helper instead of embedding those rules inline."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 7,
-    "category": "api",
-    "description": "CLI can cancel a coding task and persist the cancellation reason to the task run log.",
+    "category": "functional",
+    "description": "The extracted coding-task policy preserves the current single-active-task MVP rule for Telegram private chat.",
     "steps": [
-      "Create a queued or running coding task.",
-      "Issue the CLI cancellation command with a short reason.",
-      "Verify the task status becomes `cancelled` and the reason is visible in the run history."
+      "Start one coding task from Telegram private chat in a focused integration test.",
+      "Attempt to start a second task from the same workspace while the first stays non-terminal.",
+      "Verify the same rejection behavior and user-facing explanation are preserved after the policy extraction."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 8,
-    "category": "api",
-    "description": "CLI can resume a failed or waiting coding task by moving it back into the startup path for the same worker session.",
+    "category": "functional",
+    "description": "The extracted coding-task policy preserves current origin-chat task selection for Telegram control commands.",
     "steps": [
-      "Prepare a task in `failed` or `waiting_user` state.",
-      "Run the CLI resume command for that task id.",
-      "Verify the task transitions back to `starting` instead of creating a duplicate task record."
+      "Create multiple coding tasks associated with different Telegram chats.",
+      "Send `状态` or `继续` from one chat in a focused test.",
+      "Verify nanobot still targets the newest non-terminal task for that origin chat only."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 9,
-    "category": "functional",
-    "description": "Telegram private-chat command parsing can create a coding task from a natural-language '开始编程' request.",
+    "category": "refactor",
+    "description": "Progress reporting exposes a pure read path that builds task reports without persisting metadata or mutating task state.",
     "steps": [
-      "Send a private Telegram message that requests starting a coding task against a repo.",
-      "Verify nanobot creates exactly one coding task record with the parsed repo and goal.",
-      "Confirm the chat receives an acknowledgement containing the task id and initial state."
+      "Call the report-building API for a task with existing repo metadata and pane output.",
+      "Verify the returned report includes branch, commit, harness-note, and live-output summaries.",
+      "Confirm the task record on disk is unchanged by the pure read call."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 10,
-    "category": "functional",
-    "description": "Telegram private-chat control messages map onto the active coding task lifecycle instead of being treated as normal chat.",
+    "category": "refactor",
+    "description": "A dedicated refresh path can explicitly persist repo metadata and progress summaries when polling or lifecycle code needs to update task state.",
     "steps": [
-      "Start a coding task from Telegram private chat.",
-      "Send control messages such as `状态`, `继续`, and `取消` in the same chat.",
-      "Verify nanobot routes those controls to the tracked coding task instead of answering with generic assistant text."
+      "Invoke the refresh API for a running or starting task with new pane output.",
+      "Verify branch metadata, recent commit summary, and progress summary are persisted.",
+      "Confirm waiting-user detection and other lifecycle updates happen only through the explicit refresh path."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 11,
-    "category": "functional",
-    "description": "Nanobot enforces a single active coding task per workspace in the MVP so Telegram control messages stay unambiguous.",
+    "category": "integration",
+    "description": "CLI `coding-task status` uses the pure read/report path for display and no longer mutates task state just because a user viewed status.",
     "steps": [
-      "Start one coding task and leave it running.",
-      "Attempt to start a second coding task in the same workspace.",
-      "Verify nanobot refuses the second start or queues it explicitly instead of launching both concurrently."
+      "Create a coding task with known metadata and capture its persisted state before running the status command.",
+      "Run `nanobot coding-task status <id>`.",
+      "Verify the output still includes branch, commit, and live report details while the underlying task record is unchanged unless an explicit refresh ran earlier."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 12,
-    "category": "functional",
-    "description": "Repo path validation rejects missing paths, non-directories, and paths outside the allowed local filesystem expectations before task creation.",
+    "category": "integration",
+    "description": "Gateway polling and recovery use the explicit refresh path so state mutation stays localized to background lifecycle code.",
     "steps": [
-      "Attempt to create coding tasks for a missing path and a file path.",
-      "Verify nanobot rejects each invalid target with a clear explanation.",
-      "Confirm no task record is created for rejected inputs."
+      "Run the focused recovery and notifier test paths.",
+      "Verify polling still refreshes persisted progress and repo metadata for active tasks.",
+      "Confirm the gateway watch loop does not rely on status-view side effects to keep task state current."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 13,
     "category": "functional",
-    "description": "Harness detection can identify whether a target repo already has `PLAN.json`, `PROGRESS.md`, or `init.sh` before Codex is launched.",
+    "description": "Telegram `状态` reporting keeps the current user-facing summary while reading from the new pure report path.",
     "steps": [
-      "Create one repo fixture with harness files and one without.",
-      "Run the harness detection logic for both repos.",
-      "Verify the detected state distinguishes existing harnesses from missing ones."
+      "Trigger Telegram `状态` in a focused routing test for an active coding task.",
+      "Verify the reply still includes task id, status, repo, recent progress, and live report content.",
+      "Confirm the reply path does not rely on hidden persistence side effects from a read-only report builder."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 14,
-    "category": "functional",
-    "description": "Prompt building for existing-harness repos tells Codex to restore state first and honor the repo's startup sequence before editing.",
+    "category": "testing",
+    "description": "Focused regression tests cover the new runtime builder, policy layer, and pure-report versus refresh split.",
     "steps": [
-      "Build the initial Codex prompt for a repo that already contains harness files.",
-      "Verify the prompt explicitly instructs Codex to read `PROGRESS.md`, `PLAN.json`, and run the repo init sequence first.",
-      "Confirm the prompt includes the user goal without overwriting the repo's own instructions."
+      "Run the focused coding-task test files that cover runtime assembly, routing, progress, recovery, notifier, and CLI status behavior.",
+      "Verify the new tests would fail if runtime assembly drift or report-side mutation were reintroduced.",
+      "Confirm the test suite remains explicitly scoped away from the unrelated repo_sync baseline failure."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 15,
-    "category": "functional",
-    "description": "Prompt building for repos without a harness tells Codex to initialize the harness before starting feature work.",
+    "category": "docs",
+    "description": "Repository documentation explains the refactored coding-task runtime boundaries so future sessions know where to extend orchestration behavior.",
     "steps": [
-      "Build the initial Codex prompt for a repo that does not have harness files.",
-      "Verify the prompt instructs Codex to generate `PLAN.json`, `PROGRESS.md`, and `init.sh` before coding.",
-      "Confirm the prompt still includes the requested task goal and execution boundaries."
+      "Open the updated architecture documentation or module docstrings.",
+      "Verify it states where runtime assembly, policy, report building, and lifecycle refresh now live.",
+      "Confirm the docs do not reintroduce the old duplicated wiring story."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 16,
     "category": "integration",
-    "description": "Codex launcher can start a new tmux-backed worker session for a coding task and persist the tmux target back into task state.",
+    "description": "A focused end-to-end smoke path still supports create, run, and status for coding tasks after the architectural cleanup.",
     "steps": [
-      "Create a coding task and launch the Codex worker.",
-      "Verify a tmux session is created or attached for that task id.",
-      "Confirm the task state records the tmux session and moves to `starting`."
+      "Create a coding task in a temporary workspace against a local repo fixture.",
+      "Launch the worker and inspect status through the refactored runtime path.",
+      "Verify nanobot still surfaces the same task identity, harness state, and live report shape after the refactor."
     ],
-    "passes": true
-  },
-  {
-    "id": 17,
-    "category": "integration",
-    "description": "Codex launcher can reuse an existing tmux session for the same task instead of spawning duplicate worker shells.",
-    "steps": [
-      "Launch a coding task once to create its tmux session.",
-      "Trigger resume or continue for the same task.",
-      "Verify nanobot writes into the original tmux target instead of creating a second session."
-    ],
-    "passes": true
-  },
-  {
-    "id": 18,
-    "category": "integration",
-    "description": "Codex startup command carries repo path, task goal, and execution boundaries into the worker in a reproducible way.",
-    "steps": [
-      "Launch a coding task and inspect the command or prompt sent into the Codex worker.",
-      "Verify the repo path, goal, and no-push execution boundary are all present.",
-      "Confirm repeated launches for the same task preserve the same goal and repo routing."
-    ],
-    "passes": true
-  },
-  {
-    "id": 19,
-    "category": "integration",
-    "description": "Codex session hints extracted from the running worker can be persisted for later resume and diagnosis.",
-    "steps": [
-      "Launch a coding task and capture the first visible Codex session metadata or banner output.",
-      "Verify nanobot stores a session hint in the coding task record when that information is present.",
-      "Confirm the stored hint survives reloading the coding task from disk."
-    ],
-    "passes": true
-  },
-  {
-    "id": 20,
-    "category": "integration",
-    "description": "Worker polling can capture recent tmux pane output for a running Codex task without blocking the gateway event loop.",
-    "steps": [
-      "Run a coding task long enough to produce several lines of output in tmux.",
-      "Invoke the pane polling logic while the task continues running.",
-      "Verify nanobot retrieves recent output without freezing cron, heartbeat, or chat handling."
-    ],
-    "passes": true
-  },
-  {
-    "id": 21,
-    "category": "functional",
-    "description": "Pane-output polling updates the coding task's last progress summary and timestamp when visible work advances.",
-    "steps": [
-      "Poll a running coding task after new terminal output appears.",
-      "Verify the task's last progress summary changes to reflect the new work.",
-      "Confirm the progress timestamp updates at the same time."
-    ],
-    "passes": true
-  },
-  {
-    "id": 22,
-    "category": "functional",
-    "description": "Progress summarization can read the target repo's `PROGRESS.md` and extract the latest session note for reporting.",
-    "steps": [
-      "Prepare a repo with a populated `PROGRESS.md` containing multiple session entries.",
-      "Run the progress summarizer against that repo.",
-      "Verify the latest session note appears in the coding task report."
-    ],
-    "passes": true
-  },
-  {
-    "id": 23,
-    "category": "functional",
-    "description": "Progress summarization can read the target repo's `PLAN.json` and compute completed versus remaining feature counts.",
-    "steps": [
-      "Prepare a repo with a `PLAN.json` containing a mix of passing and pending features.",
-      "Run the summarizer against that repo.",
-      "Verify the resulting report includes accurate completed and remaining counts."
-    ],
-    "passes": true
-  },
-  {
-    "id": 24,
-    "category": "functional",
-    "description": "Nanobot can synthesize harness files and terminal output into a concise progress report for a coding task.",
-    "steps": [
-      "Run a coding task in a repo that has both harness files and recent worker output.",
-      "Request task status through the reporting path.",
-      "Verify the response includes what was completed, what is in progress, and the next blocker or next step."
-    ],
-    "passes": true
-  },
-  {
-    "id": 25,
-    "category": "integration",
-    "description": "Gateway restart recovery can reload coding task state and reconnect to tasks left in `starting`, `running`, or `waiting_user`.",
-    "steps": [
-      "Leave a coding task in a recoverable state and restart the gateway.",
-      "Verify the gateway reloads the task state from disk on startup.",
-      "Confirm the task becomes observable again without creating a duplicate record."
-    ],
-    "passes": true
-  },
-  {
-    "id": 26,
-    "category": "integration",
-    "description": "If a recoverable task's tmux session is missing after restart, nanobot marks the task failed with an actionable recovery hint.",
-    "steps": [
-      "Delete or kill the tmux session for a recoverable coding task before gateway restart.",
-      "Restart the gateway and trigger recovery scanning.",
-      "Verify the task moves to `failed` and the status message explains how to resume or relaunch it."
-    ],
-    "passes": true
-  },
-  {
-    "id": 27,
-    "category": "functional",
-    "description": "Telegram `状态` requests return the active coding task summary rather than a generic assistant answer.",
-    "steps": [
-      "Start a coding task from Telegram private chat.",
-      "Send `状态` while the task is active.",
-      "Verify the reply contains task status, repo, last progress, and recoverability."
-    ],
-    "passes": true
-  },
-  {
-    "id": 28,
-    "category": "functional",
-    "description": "Telegram `继续` requests send a control instruction into the same Codex worker session for the active task.",
-    "steps": [
-      "Start a coding task and let it reach a paused or waiting state.",
-      "Send `继续` from the same Telegram private chat.",
-      "Verify nanobot writes the resume instruction into the existing worker session instead of creating a new task."
-    ],
-    "passes": true
-  },
-  {
-    "id": 29,
-    "category": "functional",
-    "description": "Telegram `停止` requests can gracefully interrupt the running Codex worker while preserving task state for later resume.",
-    "steps": [
-      "Run a coding task until the worker is actively doing work.",
-      "Send `停止` from Telegram private chat.",
-      "Verify the worker is interrupted and the task status becomes `waiting_user` or another resumable state."
-    ],
-    "passes": true
-  },
-  {
-    "id": 30,
-    "category": "functional",
-    "description": "Telegram `取消` requests fully cancel the coding task and prevent later resume without an explicit relaunch.",
-    "steps": [
-      "Start a coding task and then send `取消` in Telegram.",
-      "Verify the task status becomes `cancelled` and the run log records the control action.",
-      "Confirm later `继续` attempts are rejected for that cancelled task."
-    ],
-    "passes": true
-  },
-  {
-    "id": 31,
-    "category": "functional",
-    "description": "Coding task creation stores a no-push default approval policy so Codex can commit locally without pushing automatically.",
-    "steps": [
-      "Create a coding task with the default execution policy.",
-      "Verify the persisted task record shows the expected no-push or local-only approval policy.",
-      "Confirm the initial Codex prompt reflects that boundary."
-    ],
-    "passes": true
-  },
-  {
-    "id": 32,
-    "category": "functional",
-    "description": "Codex startup prompt explicitly instructs the worker to honor the target repo's `AGENTS.md` and harness startup sequence before editing.",
-    "steps": [
-      "Generate the startup prompt for a repo that contains custom `AGENTS.md` instructions.",
-      "Verify the prompt tells Codex to follow repo-specific instructions first.",
-      "Confirm the prompt still preserves the user goal and nanobot execution boundary."
-    ],
-    "passes": true
-  },
-  {
-    "id": 33,
-    "category": "integration",
-    "description": "A repo without an existing harness triggers a Codex harness-init flow before the first implementation step.",
-    "steps": [
-      "Launch a coding task against a repo that lacks `PLAN.json`, `PROGRESS.md`, and `init.sh`.",
-      "Verify Codex initializes the harness files before touching implementation files.",
-      "Confirm the coding task report reflects that the harness was created first."
-    ],
-    "passes": true
-  },
-  {
-    "id": 34,
-    "category": "integration",
-    "description": "A repo with an existing harness triggers a Codex recovery flow that reads progress and baseline state before new coding work begins.",
-    "steps": [
-      "Launch a coding task against a repo with an active harness and prior progress entries.",
-      "Verify the first visible worker actions are reading `PROGRESS.md`, `PLAN.json`, and running the repo init sequence.",
-      "Confirm progress reporting references the pre-existing harness context rather than ignoring it."
-    ],
-    "passes": true
-  },
-  {
-    "id": 35,
-    "category": "functional",
-    "description": "Every significant coding task lifecycle change appends a structured run event so later sessions can audit what happened.",
-    "steps": [
-      "Create a coding task and move it through multiple states.",
-      "Inspect the corresponding `runs/<task_id>.jsonl` file.",
-      "Verify each lifecycle change appears as a structured append-only event in chronological order."
-    ],
-    "passes": true
-  },
-  {
-    "id": 36,
-    "category": "functional",
-    "description": "User control actions such as continue, pause, and cancel are appended to the run log separately from automatic worker status changes.",
-    "steps": [
-      "Send at least two control messages against an active coding task.",
-      "Inspect the task's run log.",
-      "Verify the control actions are recorded as distinct events rather than being folded into generic status updates."
-    ],
-    "passes": true
-  },
-  {
-    "id": 37,
-    "category": "functional",
-    "description": "Progress notifications are throttled so nanobot does not spam Telegram while Codex emits many short terminal updates.",
-    "steps": [
-      "Run a coding task that produces frequent worker output over a short period.",
-      "Observe the outgoing Telegram progress notifications.",
-      "Verify notifications are grouped or throttled instead of sending one message per terminal line."
-    ],
-    "passes": true
-  },
-  {
-    "id": 38,
-    "category": "functional",
-    "description": "Successful completion reports include task outcome, verification summary, repo branch, and recent commit information.",
-    "steps": [
-      "Complete a coding task that makes at least one commit.",
-      "Observe the final completion message sent to Telegram or CLI.",
-      "Verify it includes the outcome, test status, branch, and recent commit summary."
-    ],
-    "passes": true
-  },
-  {
-    "id": 39,
-    "category": "functional",
-    "description": "Failure reports include the last successful step, current blocker, and a concrete resume hint.",
-    "steps": [
-      "Force a coding task into a failure state after some progress has been made.",
-      "Request or observe the failure report.",
-      "Verify the report includes what completed successfully, what failed, and how to resume."
-    ],
-    "passes": true
-  },
-  {
-    "id": 40,
-    "category": "functional",
-    "description": "Tasks that need human approval can move into `waiting_user` with a summary that explains what Codex is waiting on.",
-    "steps": [
-      "Run a coding task against a repo whose instructions require a plan confirmation before major edits.",
-      "Verify nanobot moves the task into `waiting_user` when that pause point is reached.",
-      "Confirm the stored summary explains exactly what confirmation or decision is needed."
-    ],
-    "passes": true
-  },
-  {
-    "id": 41,
-    "category": "functional",
-    "description": "Task metadata can persist the working branch once Codex creates or switches branches in the target repo.",
-    "steps": [
-      "Run a coding task that creates or switches to a dedicated branch.",
-      "Inspect the stored coding task metadata after the branch change.",
-      "Verify the branch name is persisted for status and completion reporting."
-    ],
-    "passes": true
-  },
-  {
-    "id": 42,
-    "category": "functional",
-    "description": "Task metadata can persist a recent commit summary so completion and status messages do not need to rescan git every time.",
-    "steps": [
-      "Run a coding task that makes at least one commit.",
-      "Update task metadata from the repo state.",
-      "Verify the coding task record stores a recent commit summary that matches `git log --oneline`."
-    ],
-    "passes": true
-  },
-  {
-    "id": 43,
-    "category": "functional",
-    "description": "Multiple queued coding tasks can survive restart even though only one active task is allowed in the first release.",
-    "steps": [
-      "Create several queued coding tasks without running them all at once.",
-      "Restart the gateway or reload the store.",
-      "Verify all queued tasks remain intact and none are dropped or duplicated."
-    ],
-    "passes": true
-  },
-  {
-    "id": 44,
-    "category": "functional",
-    "description": "Status listing cleanly distinguishes queued, running, waiting, completed, failed, and cancelled coding tasks.",
-    "steps": [
-      "Populate the coding task store with tasks in each supported status.",
-      "Run the list/status reporting path.",
-      "Verify each status appears distinctly and maps to the correct stored task."
-    ],
-    "passes": true
-  },
-  {
-    "id": 45,
-    "category": "data",
-    "description": "Workspace artifacts directory can store auxiliary coding-task material such as prompt snapshots or progress extracts used for reporting.",
-    "steps": [
-      "Run a coding task that emits at least one saved artifact.",
-      "Inspect the workspace automation artifacts directory after the run.",
-      "Verify the saved artifact is namespaced by task and does not overwrite unrelated task data."
-    ],
-    "passes": true
-  },
-  {
-    "id": 46,
-    "category": "testing",
-    "description": "Targeted tests cover coding task storage, lifecycle transitions, and prompt-building helpers without relying on the repo-wide red baseline.",
-    "steps": [
-      "Run the focused coding task test suite.",
-      "Verify the suite covers store persistence, status transitions, and prompt-shaping logic.",
-      "Confirm the focused suite passes even while the unrelated repo_sync baseline remains red."
-    ],
-    "passes": true
-  },
-  {
-    "id": 47,
-    "category": "testing",
-    "description": "Targeted tests cover restart recovery and missing-session failure handling for recoverable coding tasks.",
-    "steps": [
-      "Create recoverable and broken coding task fixtures.",
-      "Run the recovery-focused tests.",
-      "Verify live sessions reconnect while missing sessions are marked failed with recovery hints."
-    ],
-    "passes": true
-  },
-  {
-    "id": 48,
-    "category": "testing",
-    "description": "Targeted tests cover Telegram command parsing and control-message routing for coding tasks.",
-    "steps": [
-      "Run the Telegram command-parsing test suite for coding tasks.",
-      "Verify `开始编程`, `状态`, `继续`, `停止`, and `取消` are all routed correctly.",
-      "Confirm ordinary chat messages still bypass the coding-task control path."
-    ],
-    "passes": true
-  },
-  {
-    "id": 49,
-    "category": "docs",
-    "description": "Repository documentation explains nanobot's role as orchestrator, Codex's role as coding worker, and the target repo harness as the long-term memory layer.",
-    "steps": [
-      "Open the updated docs or architecture section after implementation.",
-      "Verify it explains the three-layer split between nanobot, Codex, and repo harness.",
-      "Confirm it includes the user-visible control flow for Telegram-driven coding tasks."
-    ],
-    "passes": true
-  },
-  {
-    "id": 50,
-    "category": "docs",
-    "description": "Progress notes record the known unrelated repo_sync baseline failure separately from coding-task verification so later sessions do not misdiagnose it.",
-    "steps": [
-      "Open `PROGRESS.md` after the coding-task session updates.",
-      "Verify it names the missing `nanobot.repo_sync.service` baseline issue separately from coding-task tests.",
-      "Confirm later sessions can rerun the focused coding-task verification command directly from the notes."
-    ],
-    "passes": true
-  },
-  {
-    "id": 51,
-    "category": "integration",
-    "description": "Gateway runtime keeps the existing single-instance safety checks while adding coding-task orchestration so duplicate gateways do not duplicate coding work.",
-    "steps": [
-      "Attempt to start a second gateway process while one is already active.",
-      "Verify the duplicate process is rejected before coding-task orchestration starts.",
-      "Confirm the original gateway retains ownership of tracked coding tasks."
-    ],
-    "passes": true
-  },
-  {
-    "id": 52,
-    "category": "integration",
-    "description": "An end-to-end manual run can start a real coding task against a local repo, launch Codex, persist state, and return a status summary through nanobot.",
-    "steps": [
-      "Launch a real coding task against a local test repo from the nanobot entrypoint.",
-      "Verify Codex starts in the target repo, reads or initializes the harness, and updates task state on disk.",
-      "Confirm nanobot can report the live task status back through its user-facing control path."
-    ],
-    "passes": true
+    "passes": false
   }
 ]

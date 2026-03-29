@@ -307,3 +307,18 @@
 - Remaining blockers / follow-up:
   - `PLAN.json` is now fully complete for the nanobot coding-task orchestration initiative
   - The unrelated repo-wide baseline remains red because `tests/test_repo_sync_service.py` still imports missing `nanobot.repo_sync.service`
+
+## Harness reboot - 2026-03-29 (coding-task architecture cleanup)
+- Task pivot:
+  - Superseded the completed coding-task delivery plan with a new harness whose scope is limited to the architectural debt introduced while landing that feature set
+  - Explicitly excluded older repository debt from this new plan, especially the dormant `nanobot/app/gateway.py` branch and the unrelated `nanobot.repo_sync.service` baseline failure
+- Existing work detected before re-planning:
+  - The coding-task feature itself is complete and verified, including a real manual `create -> run -> status` flow against a local repo
+  - The main new debt is local to the new coding-task surface: duplicated runtime assembly, router-embedded policy decisions, and report paths that still blend reads with persistence side effects
+- Baseline validation before the new plan:
+  - `bash ~/.codex/scripts/global-init.sh` still exits 0 with the same known unrelated repo-wide pytest warning for `tests/test_repo_sync_service.py`
+  - `.venv/bin/pytest tests/coding_tasks/test_reporting.py tests/coding_tasks/test_notifier.py tests/coding_tasks/test_progress.py tests/coding_tasks/test_recovery.py tests/coding_tasks/test_worker.py tests/cli/test_commands.py -k "coding_task_status_shows_details_and_recent_events or coding_task_run_launches_tmux_worker or gateway_reports_coding_task_counts or build_task_progress_report_summarizes_codex_json_events or build_task_progress_report_combines_harness_and_pane_output or test_poll_task_updates_progress_summary_and_timestamp or test_poll_task_persists_branch_and_recent_commit_metadata"` -> passed (7 selected tests)
+- Key decisions:
+  - Keep the new plan intentionally narrow: only clean up debt created by the coding-task harness rollout, not pre-existing gateway or repo_sync issues
+  - Preserve current user-facing behavior while refactoring internals, so the cleanup plan focuses on composition boundaries and state ownership rather than changing the external protocol
+  - Replace the completed `PLAN.json` with a fresh remaining-work plan for this new task, while keeping the earlier delivery history in `PROGRESS.md`
