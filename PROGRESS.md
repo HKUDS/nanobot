@@ -229,3 +229,23 @@
 - Remaining blockers / follow-up:
   - The live control loop still lacks automatic background polling / notifications, so the next stretch should focus on scheduled observation and user-facing progress push
   - Telegram `取消` currently cancels task state immediately rather than first interrupting a live tmux process; that may need tightening in later safety polish
+
+## Session update - 2026-03-29 (features #30, #31, #32, #33, #34, #35, #36)
+- Completed features:
+  - Tightened Telegram `取消` so the control action is logged first, any live tmux worker is best-effort interrupted, and later `继续` attempts are rejected for the cancelled task
+  - Verified the default `local_only` approval policy is persisted on new tasks and reflected in the generated Codex bootstrap prompt
+  - Made the startup prompt explicitly call out repository `AGENTS.md` when present and require reading it before edits
+  - Verified launch-time prompt artifacts distinguish missing-harness initialization flows from existing-harness recovery flows
+  - Added focused audit tests proving lifecycle changes append structured run events in chronological order
+  - Added focused audit tests proving user control actions are logged separately from automatic status transitions
+- Verification:
+  - `.venv/bin/pytest tests/coding_tasks/test_audit.py tests/coding_tasks/test_harness.py tests/coding_tasks/test_worker.py tests/agent/test_coding_task_routing.py` -> passed (22 tests)
+  - `.venv/bin/pytest tests/coding_tasks/test_worker.py tests/coding_tasks/test_harness.py tests/coding_tasks/test_audit.py` -> passed (12 tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks tests/coding_tasks/test_audit.py tests/coding_tasks/test_worker.py tests/agent/test_coding_task_routing.py` -> passed
+- Key decisions:
+  - Treat cancelled tasks as terminal from the chat-control layer, requiring an explicit new `开始编程` request instead of silently resurrecting a cancelled record
+  - Keep the no-push/default approval semantics encoded in both persisted task metadata and the generated worker prompt, so the boundary is visible in both control plane and execution plane
+  - Validate missing/existing harness launch behavior by reading the prompt artifact file produced at launch time, which gives a deterministic test surface without needing a live Codex run
+- Remaining blockers / follow-up:
+  - Progress notifications are still pull-based via status views rather than throttled push notifications, so feature `#37` is the next natural step
+  - Completion/failure reporting and branch/commit metadata persistence are not implemented yet

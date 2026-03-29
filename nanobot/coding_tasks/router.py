@@ -211,6 +211,19 @@ def _make_control_handler(
 
         task = manager.latest_active_task_for_origin(msg.channel, msg.chat_id)
         if task is None:
+            latest_origin_tasks = manager.tasks_for_origin(msg.channel, msg.chat_id)
+            latest_origin = latest_origin_tasks[0] if latest_origin_tasks else None
+            if command in _RESUME_COMMANDS and latest_origin and latest_origin.status == "cancelled":
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=(
+                        "最近的编程任务已经取消，不能直接继续。\n"
+                        f"任务ID: {latest_origin.id}\n"
+                        "请重新发送“开始编程 ...”显式创建新任务。"
+                    ),
+                    metadata={"render_as": "text"},
+                )
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
@@ -232,8 +245,13 @@ def _make_control_handler(
             )
 
         if command in _CANCEL_COMMANDS:
+            manager.record_user_control(task.id, "cancel")
+            if launcher:
+                try:
+                    launcher.interrupt_task(task.id)
+                except Exception:
+                    pass
             updated = manager.cancel_task(task.id, summary="Cancelled from Telegram private chat")
-            manager.record_user_control(updated.id, "cancel")
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,

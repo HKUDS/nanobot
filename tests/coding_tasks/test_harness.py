@@ -43,6 +43,7 @@ def test_detect_repo_harness_marks_partial_harness_as_initializing(tmp_path: Pat
 def test_build_codex_bootstrap_prompt_for_existing_harness_repo(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
+    (repo / "AGENTS.md").write_text("Follow repo rules", encoding="utf-8")
     (repo / "PLAN.json").write_text("[]", encoding="utf-8")
     (repo / "PROGRESS.md").write_text("progress", encoding="utf-8")
     (repo / "init.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
@@ -60,6 +61,7 @@ def test_build_codex_bootstrap_prompt_for_existing_harness_repo(tmp_path: Path) 
     assert "Task goal: Implement feature 14" in prompt
     assert "Preferred branch: codex/test-branch" in prompt
     assert "Do not push, deploy, or perform external side effects" in prompt
+    assert "Repository instructions detected: read AGENTS.md before any edits." in prompt
 
 
 def test_build_codex_bootstrap_prompt_for_missing_harness_repo(tmp_path: Path) -> None:

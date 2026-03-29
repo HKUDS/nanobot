@@ -63,6 +63,8 @@ def build_codex_bootstrap_prompt(
             "- Follow the repository's AGENTS.md and local instructions without overwriting them.",
         ]
     )
+    if (root / "AGENTS.md").exists():
+        lines.append("Repository instructions detected: read AGENTS.md before any edits.")
 
     if state.harness_state == "active":
         lines.extend(

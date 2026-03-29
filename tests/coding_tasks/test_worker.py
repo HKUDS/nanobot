@@ -83,3 +83,31 @@ def test_extract_session_hint_accepts_multiple_formats() -> None:
     assert CodexWorkerLauncher.extract_session_hint('{"session_id":"abc-1"}') == "abc-1"
     assert CodexWorkerLauncher.extract_session_hint("sessionId = sess-2") == "sess-2"
     assert CodexWorkerLauncher.extract_session_hint("no session here") is None
+
+
+def test_launch_task_writes_missing_harness_bootstrap_prompt(tmp_path: Path) -> None:
+    store = CodingTaskStore(tmp_path / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(tmp_path, store)
+    repo = tmp_path / "repo-missing"
+    repo.mkdir()
+    task = manager.create_task(repo_path=str(repo), goal="Initialize harness first")
+    fake_runner = _FakeRunner(has_session=False)
+    launcher = CodexWorkerLauncher(tmp_path, manager, runner=fake_runner)
+
+    result = launcher.launch_task(task.id)
+    prompt = Path(result.prompt_path).read_text(encoding="utf-8")
+
+    assert "Harness mode: no complete harness detected." in prompt
+    assert "Create a granular PLAN.json" in prompt
+
+
+def test_launch_task_writes_existing_harness_recovery_prompt(tmp_path: Path) -> None:
+    launcher, task, _fake_runner = _make_launcher(tmp_path, has_session=False)
+
+    result = launcher.launch_task(task.id)
+    prompt = Path(result.prompt_path).read_text(encoding="utf-8")
+
+    assert task.approval_policy == "local_only"
+    assert "Approval policy: local_only" in prompt
+    assert "Harness mode: existing harness detected." in prompt
+    assert "Read PROGRESS.md." in prompt

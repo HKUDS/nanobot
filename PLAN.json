@@ -327,7 +327,7 @@
       "Verify the task status becomes `cancelled` and the run log records the control action.",
       "Confirm later `继续` attempts are rejected for that cancelled task."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 31,
@@ -338,7 +338,7 @@
       "Verify the persisted task record shows the expected no-push or local-only approval policy.",
       "Confirm the initial Codex prompt reflects that boundary."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 32,
@@ -349,7 +349,7 @@
       "Verify the prompt tells Codex to follow repo-specific instructions first.",
       "Confirm the prompt still preserves the user goal and nanobot execution boundary."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 33,
@@ -360,7 +360,7 @@
       "Verify Codex initializes the harness files before touching implementation files.",
       "Confirm the coding task report reflects that the harness was created first."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 34,
@@ -371,7 +371,7 @@
       "Verify the first visible worker actions are reading `PROGRESS.md`, `PLAN.json`, and running the repo init sequence.",
       "Confirm progress reporting references the pre-existing harness context rather than ignoring it."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 35,
@@ -382,7 +382,7 @@
       "Inspect the corresponding `runs/<task_id>.jsonl` file.",
       "Verify each lifecycle change appears as a structured append-only event in chronological order."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 36,
@@ -393,7 +393,7 @@
       "Inspect the task's run log.",
       "Verify the control actions are recorded as distinct events rather than being folded into generic status updates."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 37,

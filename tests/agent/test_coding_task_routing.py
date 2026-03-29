@@ -152,6 +152,36 @@ async def test_private_telegram_cancel_routes_to_origin_task(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
+async def test_private_telegram_continue_rejects_cancelled_task(tmp_path: Path) -> None:
+    loop, store = _make_loop(tmp_path)
+    _manager, task = _create_origin_task(store, tmp_path)
+
+    await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="取消",
+            metadata={"is_group": False},
+        )
+    )
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="继续",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert f"任务ID: {task.id}" in response.content
+    assert "已经取消" in response.content
+
+
+@pytest.mark.asyncio
 async def test_private_telegram_resume_routes_to_failed_origin_task(tmp_path: Path) -> None:
     loop, store = _make_loop(tmp_path)
     _manager, task = _create_origin_task(store, tmp_path, status="failed")
