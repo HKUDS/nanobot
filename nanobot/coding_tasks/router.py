@@ -5,13 +5,13 @@ from __future__ import annotations
 import re
 import shlex
 from dataclasses import dataclass
-from pathlib import Path
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.policy import CodingTaskPolicy
 from nanobot.coding_tasks.progress import CodexProgressMonitor
+from nanobot.coding_tasks.repo_resolver import RepoRefResolver
 from nanobot.coding_tasks.worker import CodexWorkerLauncher
 
 _START_PREFIX = "开始编程"
@@ -32,18 +32,23 @@ _FIELD_PATTERNS = {
 class ParsedCodingTaskRequest:
     """Structured request extracted from a natural-language chat message."""
 
-    repo_path: str
+    repo_ref: str
     goal: str
     title: str | None = None
 
 
-def is_start_coding_request(text: str) -> bool:
-    """Return True when a message asks nanobot to start a coding task."""
+def is_explicit_coding_entry(text: str) -> bool:
+    """Return True when a message explicitly enters coding-task mode."""
     body = text.strip()
     return body.startswith(_START_PREFIX) or _SLASH_START_PATTERN.match(body) is not None
 
 
-def _strip_start_prefix(text: str) -> str | None:
+def is_start_coding_request(text: str) -> bool:
+    """Backward-compatible alias for explicit coding entry detection."""
+    return is_explicit_coding_entry(text)
+
+
+def _strip_explicit_coding_entry(text: str) -> str | None:
     body = text.strip()
     if body.startswith(_START_PREFIX):
         return body[len(_START_PREFIX) :].strip().lstrip(":：").strip()
@@ -53,9 +58,13 @@ def _strip_start_prefix(text: str) -> str | None:
     return None
 
 
-def parse_start_coding_request(text: str) -> ParsedCodingTaskRequest | None:
-    """Parse a natural-language start request into repo path and goal."""
-    body = _strip_start_prefix(text)
+def extract_coding_task_slots(
+    text: str,
+    *,
+    repo_resolver: RepoRefResolver | None = None,
+) -> ParsedCodingTaskRequest | None:
+    """Extract repo ref and goal from an explicit Telegram coding command."""
+    body = _strip_explicit_coding_entry(text)
     if body is None:
         return None
     if not body:
@@ -71,20 +80,12 @@ def parse_start_coding_request(text: str) -> ParsedCodingTaskRequest | None:
                 fields[key] = match.group(1).strip()
                 break
 
-    repo_path = fields.get("repo_path")
+    repo_ref = fields.get("repo_path")
     goal = fields.get("goal")
     title = fields.get("title") or None
 
-    if repo_path and goal:
-        return ParsedCodingTaskRequest(repo_path=repo_path, goal=goal, title=title)
-
-    alias_match = re.match(r"^(?P<repo>\S+)\s+的\s+(?P<goal>.+)$", body)
-    if alias_match:
-        return ParsedCodingTaskRequest(
-            repo_path=alias_match.group("repo").strip(),
-            goal=alias_match.group("goal").strip(),
-            title=title,
-        )
+    if repo_ref and goal:
+        return ParsedCodingTaskRequest(repo_ref=repo_ref, goal=goal, title=title)
 
     try:
         tokens = shlex.split(body)
@@ -94,26 +95,51 @@ def parse_start_coding_request(text: str) -> ParsedCodingTaskRequest | None:
     if not tokens:
         return None
 
-    candidate_repo = tokens[0].strip()
-    if not _looks_like_repo_path(candidate_repo):
-        return None
-
-    goal = " ".join(tokens[1:]).strip()
+    repo_ref = tokens[0].strip()
+    remainder = body[len(repo_ref) :].strip() if body.startswith(repo_ref) else " ".join(tokens[1:]).strip()
+    if remainder.startswith("的"):
+        remainder = remainder[1:].strip()
+    goal = remainder.strip()
     if not goal:
         return None
 
-    return ParsedCodingTaskRequest(repo_path=candidate_repo, goal=goal, title=title)
+    return ParsedCodingTaskRequest(repo_ref=repo_ref, goal=goal, title=title)
 
 
-def validate_repo_path(repo_path: str) -> tuple[str | None, str | None]:
-    """Validate a local repository path before creating a coding task."""
-    raw = repo_path.strip()
+def parse_start_coding_request(
+    text: str,
+    *,
+    repo_resolver: RepoRefResolver | None = None,
+) -> ParsedCodingTaskRequest | None:
+    """Backward-compatible wrapper around the unified coding-task extractor."""
+    return extract_coding_task_slots(text, repo_resolver=repo_resolver)
+
+
+def detect_coding_task_intent(
+    text: str,
+    *,
+    repo_resolver: RepoRefResolver | None = None,
+) -> bool:
+    """Return True when an explicit Telegram coding entry contains extractable task slots."""
+    if not is_explicit_coding_entry(text):
+        return False
+    return extract_coding_task_slots(text, repo_resolver=repo_resolver) is not None
+
+
+def resolve_repo_ref(
+    repo_ref: str,
+    *,
+    repo_resolver: RepoRefResolver | None = None,
+) -> tuple[str | None, str | None]:
+    """Resolve a repo ref into a validated local directory path."""
+    raw = repo_ref.strip()
     if not raw:
         return None, "仓库路径不能为空。"
     if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", raw):
         return None, "当前只支持本地仓库路径，不支持 URL。"
 
-    resolved = _resolve_repo_path(raw)
+    resolver = repo_resolver or RepoRefResolver()
+    resolved = resolver.resolve(raw)
     if not resolved.exists():
         return None, f"仓库路径不存在: {resolved}"
     if not resolved.is_dir():
@@ -121,18 +147,13 @@ def validate_repo_path(repo_path: str) -> tuple[str | None, str | None]:
     return str(resolved), None
 
 
-def _resolve_repo_path(raw: str) -> Path:
-    candidate = Path(raw).expanduser()
-    if _looks_like_repo_path(raw):
-        return candidate
-
-    documents_candidate = Path.home() / "Documents" / raw
-    if documents_candidate.exists():
-        return documents_candidate
-
-    return candidate
-
-
+def validate_repo_path(
+    repo_path: str,
+    *,
+    repo_resolver: RepoRefResolver | None = None,
+) -> tuple[str | None, str | None]:
+    """Backward-compatible wrapper for repo reference resolution."""
+    return resolve_repo_ref(repo_path, repo_resolver=repo_resolver)
 def register_coding_task_commands(
     router: CommandRouter,
     manager: CodexWorkerManager,
@@ -140,11 +161,22 @@ def register_coding_task_commands(
     launcher: CodexWorkerLauncher | None = None,
     monitor: CodexProgressMonitor | None = None,
     policy: CodingTaskPolicy | None = None,
+    repo_resolver: RepoRefResolver | None = None,
 ) -> None:
     """Register chat-level interceptors for coding-task lifecycle actions."""
     task_policy = policy or CodingTaskPolicy(manager)
-    router.intercept(_make_start_coding_handler(manager, task_policy, launcher=launcher))
-    router.intercept(_make_control_handler(manager, task_policy, launcher=launcher, monitor=monitor))
+    resolver = repo_resolver or RepoRefResolver()
+    router.intercept(
+        _make_start_coding_handler(
+            manager,
+            task_policy,
+            launcher=launcher,
+            repo_resolver=resolver,
+        )
+    )
+    router.intercept(
+        _make_control_handler(manager, task_policy, launcher=launcher, monitor=monitor)
+    )
 
 
 def _make_start_coding_handler(
@@ -152,18 +184,19 @@ def _make_start_coding_handler(
     policy: CodingTaskPolicy,
     *,
     launcher: CodexWorkerLauncher | None = None,
+    repo_resolver: RepoRefResolver | None = None,
 ):
+    resolver = repo_resolver or RepoRefResolver()
+
     async def _handle_start_coding(ctx: CommandContext) -> OutboundMessage | None:
         msg = ctx.msg
         if msg.channel != "telegram":
             return None
         if msg.metadata.get("is_group", True):
             return None
-        if not is_start_coding_request(ctx.raw):
+        if not is_explicit_coding_entry(ctx.raw):
             return None
-
-        parsed = parse_start_coding_request(ctx.raw)
-        if parsed is None:
+        if not detect_coding_task_intent(ctx.raw, repo_resolver=resolver):
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
@@ -171,16 +204,20 @@ def _make_start_coding_handler(
                     "请用以下格式创建编程任务：\n"
                     "开始编程 仓库路径 任务目标\n\n"
                     "或：\n"
-                    "开始编程 仓库名 的 任务目标\n\n"
+                    "开始编程 仓库名 任务目标\n\n"
                     "或：\n"
-                    "/coding 仓库名 的 任务目标\n\n"
+                    "/coding 仓库名 任务目标\n\n"
                     "或：\n"
                     "开始编程\n"
-                    "仓库: /path/to/repo\n"
+                    "仓库: codex-remote\n"
                     "目标: 修复某个问题"
                 ),
                 metadata={"render_as": "text"},
             )
+
+        parsed = extract_coding_task_slots(ctx.raw, repo_resolver=resolver)
+        if parsed is None:
+            return None
 
         if active_task := policy.blocking_active_task():
             return OutboundMessage(
@@ -196,7 +233,7 @@ def _make_start_coding_handler(
                 metadata={"render_as": "text"},
             )
 
-        repo_path, validation_error = validate_repo_path(parsed.repo_path)
+        repo_path, validation_error = resolve_repo_ref(parsed.repo_ref, repo_resolver=resolver)
         if validation_error:
             return OutboundMessage(
                 channel=msg.channel,
@@ -415,7 +452,3 @@ def _format_task_status(task, *, report_summary: str = "", note: str = "当前�
     if task.tmux_session:
         lines.append(f"tmux: {task.tmux_session}")
     return "\n".join(lines)
-
-
-def _looks_like_repo_path(token: str) -> bool:
-    return token.startswith(("/", "~", "./", "../")) or "/" in token

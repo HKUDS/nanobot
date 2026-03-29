@@ -529,7 +529,11 @@ def _load_coding_task_runtime(config: "Config", *, send_callback=None):
     """Build the workspace-scoped coding task store and manager."""
     from nanobot.coding_tasks import build_coding_task_runtime
 
-    return build_coding_task_runtime(config.workspace_path, send_callback=send_callback)
+    return build_coding_task_runtime(
+        config.workspace_path,
+        send_callback=send_callback,
+        repo_aliases=config.gateway.coding_task_repos,
+    )
 
 
 # ============================================================================

@@ -124,6 +124,7 @@ class GatewayConfig(Base):
     host: str = "0.0.0.0"
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    coding_task_repos: dict[str, str] = Field(default_factory=dict)
 
 
 class WebSearchConfig(Base):

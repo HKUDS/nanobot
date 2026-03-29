@@ -26,6 +26,7 @@ def test_build_runtime_assembles_shared_workspace_collaborators(tmp_path: Path) 
     assert runtime.recovery.launcher is runtime.launcher
     assert runtime.recovery.monitor is runtime.monitor
     assert runtime.policy.manager is runtime.manager
+    assert runtime.repo_resolver.aliases == {}
     assert runtime.notifier is None
 
 
@@ -38,3 +39,12 @@ def test_build_runtime_can_attach_optional_notifier_without_rewiring_store(tmp_p
     assert runtime.notifier.throttle_s == 45
     assert runtime.policy.manager is runtime.manager
     assert runtime.store.store_path == tmp_path / "automation" / "coding" / "tasks.json"
+
+
+def test_build_runtime_can_include_repo_aliases(tmp_path: Path) -> None:
+    runtime = build_coding_task_runtime(
+        tmp_path,
+        repo_aliases={"codex-remote": "/Users/miau/Documents/codex-remote"},
+    )
+
+    assert runtime.repo_resolver.aliases["codex-remote"] == "/Users/miau/Documents/codex-remote"

@@ -12,6 +12,7 @@ from nanobot.coding_tasks.progress import (
     extract_latest_progress_note,
     summarize_plan_progress,
 )
+from nanobot.coding_tasks.repo_resolver import RepoRefResolver
 from nanobot.coding_tasks.recovery import CodexTaskRecovery, RecoveryResult
 from nanobot.coding_tasks.reporting import (
     RepoSnapshot,
@@ -37,6 +38,7 @@ __all__ = [
     "RepoHarnessState",
     "RepoSnapshot",
     "RecoveryResult",
+    "RepoRefResolver",
     "TaskProgressReport",
     "build_codex_bootstrap_prompt",
     "build_completion_report",

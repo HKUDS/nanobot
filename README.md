@@ -118,11 +118,30 @@ The user-visible control flow is:
 4. nanobot polls tmux output and harness files to build status summaries.
 5. Telegram controls such as `状态`, `继续`, `停止`, and `取消` act on the same tracked coding task instead of creating duplicate work.
 
-Telegram start commands accept both explicit paths and lightweight repo aliases when the repo lives under `~/Documents`, for example:
+Telegram start commands now use explicit entry words plus natural slot extraction. They accept both explicit paths and lightweight repo aliases, for example:
 
 - `开始编程 /Users/miau/Documents/codex-remote 设置 icon 换一个`
 - `开始编程 codex-remote 的 设置 icon 换一个`
+- `开始编程 codex-remote 设置 icon 换一个`
 - `/coding codex-remote 的 设置 icon 换一个`
+- `/coding codex-remote 设置 icon 换一个`
+
+Repo resolution is alias-first:
+
+- If `gateway.codingTaskRepos` defines an alias, nanobot uses that absolute path first.
+- Otherwise nanobot falls back to `~/Documents/<repo>`.
+
+Example config:
+
+```json
+{
+  "gateway": {
+    "codingTaskRepos": {
+      "codex-remote": "/Users/miau/Documents/codex-remote"
+    }
+  }
+}
+```
 
 Internally, the coding-task orchestration now has a dedicated composition root:
 

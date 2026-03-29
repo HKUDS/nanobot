@@ -11,6 +11,7 @@ from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.notifier import CodingTaskNotifier
 from nanobot.coding_tasks.policy import CodingTaskPolicy
 from nanobot.coding_tasks.progress import CodexProgressMonitor
+from nanobot.coding_tasks.repo_resolver import RepoRefResolver
 from nanobot.coding_tasks.recovery import CodexTaskRecovery
 from nanobot.coding_tasks.store import CodingTaskStore
 from nanobot.coding_tasks.worker import CodexWorkerLauncher
@@ -27,6 +28,7 @@ class CodingTaskRuntime:
     monitor: CodexProgressMonitor
     recovery: CodexTaskRecovery
     policy: CodingTaskPolicy
+    repo_resolver: RepoRefResolver
     notifier: CodingTaskNotifier | None = None
 
 
@@ -38,6 +40,7 @@ def build_coding_task_runtime(
     store: CodingTaskStore | None = None,
     manager: CodexWorkerManager | None = None,
     launcher: CodexWorkerLauncher | None = None,
+    repo_aliases: dict[str, str] | None = None,
 ) -> CodingTaskRuntime:
     """Assemble the coding-task collaborators from one workspace root."""
     resolved_workspace = Path(workspace)
@@ -49,6 +52,12 @@ def build_coding_task_runtime(
     task_monitor = CodexProgressMonitor(task_manager, task_launcher)
     task_recovery = CodexTaskRecovery(task_manager, task_launcher, task_monitor)
     task_policy = CodingTaskPolicy(task_manager)
+    task_repo_resolver = RepoRefResolver(
+        aliases={
+            alias: path
+            for alias, path in dict(repo_aliases or {}).items()
+        }
+    )
     task_notifier = (
         CodingTaskNotifier(task_manager, send_callback, throttle_s=throttle_s)
         if send_callback is not None
@@ -62,5 +71,6 @@ def build_coding_task_runtime(
         monitor=task_monitor,
         recovery=task_recovery,
         policy=task_policy,
+        repo_resolver=task_repo_resolver,
         notifier=task_notifier,
     )

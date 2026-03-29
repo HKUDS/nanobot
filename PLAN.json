@@ -8,7 +8,7 @@
       "Open PROGRESS.md and verify the reboot entry records the current parser limitations and the new intent-driven scope.",
       "Confirm the task scope is limited to Telegram private-chat coding-task detection and repo resolution."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 2,
@@ -19,7 +19,7 @@
       "Verify the active coding-task runtime receives the alias map without changing CLI coding-task behavior.",
       "Confirm the gateway path still boots with no alias map configured."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 3,
@@ -30,7 +30,7 @@
       "Resolve an unconfigured repo name that exists under ~/Documents and verify it falls back correctly.",
       "Resolve a missing repo ref and confirm it returns a clear validation failure."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 4,
@@ -41,7 +41,7 @@
       "Verify it extracts the same repo ref and goal from natural expressions like repo 的 goal and repo goal.",
       "Confirm ordinary non-coding chat without an explicit entry does not produce a coding-task request."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 5,
@@ -52,7 +52,7 @@
       "Verify nanobot resolves the repo, creates the task, and auto-launches via the shared launcher.",
       "Confirm no new worker-launch path is added outside the existing launcher abstraction."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 6,
@@ -63,7 +63,7 @@
       "Run the Telegram start flow with a failing launcher and verify the task is preserved with a clear failure response.",
       "Confirm these behaviors continue to work with repo alias resolution enabled."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 7,
@@ -74,7 +74,7 @@
       "Verify the suite covers alias-map resolution, ~/Documents fallback, explicit-entry parsing, and launch fallback paths.",
       "Confirm the tests remain scoped away from unrelated repo-wide baseline failures."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 8,
@@ -85,7 +85,7 @@
       "Verify it documents 开始编程 and /coding as explicit triggers with natural goal wording.",
       "Confirm it explains alias-table priority and the ~/Documents fallback."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 9,
@@ -96,6 +96,6 @@
       "Send a Telegram private-chat command like 开始编程 codex-remote 底部tab设置icon换一个.",
       "Verify the task enters the coding-task flow instead of falling through to normal chat."
     ],
-    "passes": false
+    "passes": true
   }
 ]

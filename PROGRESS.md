@@ -449,3 +449,21 @@
   - Keep explicit Telegram entry signals (`开始编程`, `/coding`) as the first-version boundary, but remove hardcoded sentence-specific routing beneath them
   - Move repo resolution into a dedicated resolver with alias-table priority and `~/Documents/<repo>` fallback
   - Preserve the existing shared launcher path and current Telegram control commands; this task only replaces the start-intent understanding layer
+
+## Session update - 2026-03-29 (telegram coding intent refactor)
+- Completed features:
+  - Added [nanobot/coding_tasks/repo_resolver.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/repo_resolver.py) and wired it through [nanobot/coding_tasks/runtime.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/runtime.py), [nanobot/cli/commands.py](/Users/miau/Documents/nanobot/nanobot/cli/commands.py), and [nanobot/agent/loop.py](/Users/miau/Documents/nanobot/nanobot/agent/loop.py) so Telegram coding-task entrypoints resolve repos via config aliases first and `~/Documents/<repo>` second
+  - Refactored [nanobot/coding_tasks/router.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/router.py) into explicit-entry detection, unified slot extraction, and repo-ref resolution instead of branching on specific Chinese sentence templates
+  - Preserved the existing shared create/launch path, including queued-task fallback when no launcher is wired and failed-task retention when automatic launch raises
+  - Updated focused tests in [tests/coding_tasks/test_router.py](/Users/miau/Documents/nanobot/tests/coding_tasks/test_router.py), [tests/agent/test_coding_task_routing.py](/Users/miau/Documents/nanobot/tests/agent/test_coding_task_routing.py), [tests/coding_tasks/test_runtime.py](/Users/miau/Documents/nanobot/tests/coding_tasks/test_runtime.py), and [tests/cli/test_commands.py](/Users/miau/Documents/nanobot/tests/cli/test_commands.py) to cover explicit triggers, natural repo-plus-goal phrasing, alias-table priority, Documents fallback, and runtime compatibility
+  - Updated [README.md](/Users/miau/Documents/nanobot/README.md) to document the new Telegram entry style and the `gateway.codingTaskRepos` alias map
+- Verification:
+  - `.venv/bin/pytest tests/coding_tasks/test_router.py tests/agent/test_coding_task_routing.py tests/coding_tasks/test_runtime.py` -> passed (31 tests)
+  - `.venv/bin/pytest tests/cli/test_commands.py -k "gateway_reports_coding_task_counts or coding_task_create_persists_task or coding_task_status_shows_details_and_recent_events or coding_task_run_launches_tmux_worker or coding_task_status_reads_report_without_persisting_metadata"` -> passed (5 selected tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks/router.py nanobot/coding_tasks/repo_resolver.py nanobot/coding_tasks/runtime.py tests/coding_tasks/test_router.py tests/agent/test_coding_task_routing.py tests/coding_tasks/test_runtime.py tests/cli/test_commands.py` -> passed
+  - Live/runtime smoke:
+    - Restarted the existing `nanobot:0.0` tmux gateway in place and verified `Telegram bot @kimmydoomyBot connected`
+    - Ran a post-restart real `AgentLoop` smoke with repo alias config and the message `开始编程 codex-remote 底部tab设置icon换一个`; it returned `已创建并启动编程任务` and persisted the task in `starting` status
+- Remaining blockers / follow-up:
+  - Repo-wide pytest still has unrelated baseline failures outside this harness, including config migration, OpenAI OAuth lazy import behavior, and exec PATH assumptions
+  - Full end-to-end inbound Telegram confirmation for the exact natural-language phrase still depends on a real user message, but the live gateway was restarted successfully and the same routing path was exercised in a post-restart smoke
