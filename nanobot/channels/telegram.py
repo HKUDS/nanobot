@@ -634,11 +634,11 @@ class TelegramChannel(BaseChannel):
         bot_id, _ = await self._ensure_bot_identity()
         reply_user = getattr(reply, "from_user", None)
         
-        if bot_id and reply_user and reply_user.id == bot_id:
+        if bot_id and reply_user and getattr(reply_user, "id", None) == bot_id:
             return f"[Reply to bot: {text}]"
-        elif reply_user and reply_user.username:
+        elif reply_user and getattr(reply_user, "username", None):
             return f"[Reply to @{reply_user.username}: {text}]"
-        elif reply_user and reply_user.first_name:
+        elif reply_user and getattr(reply_user, "first_name", None):
             return f"[Reply to {reply_user.first_name}: {text}]"
         else:
             return f"[Reply to: {text}]"
