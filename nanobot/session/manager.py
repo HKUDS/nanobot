@@ -1,6 +1,7 @@
 """Session management for conversation history."""
 
 import json
+import os
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -219,7 +220,8 @@ class SessionManager:
         """Save a session to disk."""
         path = self._get_session_path(session.key)
 
-        with open(path, "w", encoding="utf-8") as f:
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             metadata_line = {
                 "_type": "metadata",
                 "key": session.key,
