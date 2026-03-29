@@ -572,8 +572,12 @@ class VoiceServerChannel(BaseChannel):
                             elif state == "stop":
                                 self.audio_states[client_id]["is_listening"] = False
                                 pcm_len = len(self.audio_states[client_id]['pcm_buffer'])
-                                logger.info(f"Client {client_id} STOPPED listening. Buffered {pcm_len} bytes ({pcm_len/32000:.2f}s)")
+                                logger.info(f"Client {client_id} sent STOP listening. Buffered {pcm_len} bytes ({pcm_len/32000:.2f}s)")
                                 
+                                if pcm_len == 0:
+                                    logger.warning(f"Client {client_id} sent STOP but no audio was buffered. Ignoring.")
+                                    return
+
                                 # Process the audio!
                                 await self._process_audio_buffer(client_id)
                                 
