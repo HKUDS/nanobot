@@ -241,9 +241,55 @@
             input.disabled = true;
             responseDiv.style.display = 'block';
             responseContent.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Thinking...';
+            
+            let fullContent = '';
             try {
-                const result = await api.post('/api/chat', { message: message, session_id: 'web:quick' });
-                responseContent.innerHTML = marked.parse(result.response);
+                const controller = new AbortController();
+                const response = await fetch('/api/chat?stream=true', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Auth-Token': api.getToken() || ''
+                    },
+                    body: JSON.stringify({ message: message, session_id: 'web:quick' }),
+                    signal: controller.signal
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ detail: 'Request failed' }));
+                    throw new Error(errorData.detail || `HTTP ${response.status}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = line.slice(6);
+                            if (data === '[DONE]') continue;
+                            try {
+                                const event = JSON.parse(data);
+                                if (event.type === 'content') {
+                                    fullContent += event.content;
+                                    responseContent.innerHTML = marked.parse(fullContent);
+                                } else if (event.type === 'error') {
+                                    throw new Error(event.error);
+                                }
+                            } catch (e) {
+                                if (e.name !== 'SyntaxError') throw e;
+                            }
+                        }
+                    }
+                }
             } catch (error) {
                 responseContent.innerHTML = `<div class="alert alert-danger mb-0">Error: ${error.message}</div>`;
             } finally {

@@ -153,7 +153,11 @@
                 await streamChat(message, sessionId);
             } catch (error) {
                 console.error('Chat error:', error);
-                streamingMessageDiv.innerHTML += `<div class="alert alert-danger mt-2">Error: ${escapeHtml(error.message)}</div>`;
+                if (streamingMessageDiv) {
+                    streamingMessageDiv.innerHTML += `<div class="alert alert-danger mt-2">Error: ${escapeHtml(error.message)}</div>`;
+                } else {
+                    addMessage('error', `Error: ${error.message}`);
+                }
             } finally {
                 setGenerating(false);
                 streamingMessageDiv = null;
@@ -163,6 +167,7 @@
         async function streamChat(message, sessionId) {
             currentAbortController = new AbortController();
             const signal = currentAbortController.signal;
+            let metadata = {};
             
             try {
                 const response = await fetch('/api/chat?stream=true', {
@@ -208,6 +213,18 @@
                                 } else if (event.type === 'error') {
                                     throw new Error(event.error);
                                 } else if (event.type === 'done') {
+                                    metadata = event.metadata || {};
+                                    // Update with model info if available
+                                    const messageEl = streamingMessageDiv.closest('.message');
+                                    if (messageEl && metadata.metadata && metadata.metadata.model) {
+                                        const modelBadge = messageEl.querySelector('.text-muted.ms-2');
+                                        if (!modelBadge) {
+                                            const modelInfo = messageEl.querySelector('.fw-bold');
+                                            if (modelInfo) {
+                                                modelInfo.innerHTML += ` <small class="text-muted ms-2">${escapeHtml(metadata.metadata.model)}</small>`;
+                                            }
+                                        }
+                                    }
                                     // Add copy button after completion
                                     const messageContent = streamingMessageDiv.closest('.message');
                                     if (messageContent && !messageContent.querySelector('button[onclick^="copyMessage"]')) {

@@ -425,7 +425,7 @@ async def stream_agent_message(message: str, session_id: str, config_path: Path)
     )
 
     accumulated_content = ""
-    metadata = {}
+    final_metadata = {}
 
     try:
         stream_queue = asyncio.Queue()
@@ -440,7 +440,7 @@ async def stream_agent_message(message: str, session_id: str, config_path: Path)
         
         async def run_agent():
             """Run agent processing in background."""
-            nonlocal accumulated_content, metadata
+            nonlocal accumulated_content, final_metadata
             try:
                 response = await agent_loop.process_direct(
                     message,
@@ -450,8 +450,12 @@ async def stream_agent_message(message: str, session_id: str, config_path: Path)
                     on_stream_end=on_stream_end_cb,
                 )
                 if response:
-                    metadata['final_content'] = response.content
-                    metadata['metadata'] = getattr(response, 'metadata', {})
+                    accumulated_content = response.content
+                    final_metadata = {
+                        'model': config.agents.defaults.model,
+                        'session_id': session_id,
+                        **(getattr(response, 'metadata', {}) or {})
+                    }
                 await stream_queue.put(('done', None))
             except Exception as e:
                 await stream_queue.put(('error', str(e)))
@@ -464,12 +468,11 @@ async def stream_agent_message(message: str, session_id: str, config_path: Path)
                 event_type, data = await stream_queue.get()
                 
                 if event_type == 'content':
-                    accumulated_content += data
                     yield f"data: {json.dumps({'type': 'content', 'content': data})}\n\n"
                 elif event_type == 'stream_end':
                     yield f"data: {json.dumps({'type': 'stream_end', **data})}\n\n"
                 elif event_type == 'done':
-                    yield f"data: {json.dumps({'type': 'done', 'content': accumulated_content, 'metadata': metadata})}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'content': accumulated_content, 'metadata': final_metadata})}\n\n"
                     yield "data: [DONE]\n\n"
                     break
                 elif event_type == 'error':
