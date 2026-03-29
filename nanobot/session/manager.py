@@ -40,7 +40,10 @@ class Session:
             "timestamp": datetime.now().isoformat(),
             **kwargs
         }
-        self.messages.append(msg)
+        self.add_messages([msg])
+
+    def add_messages(self, messages: list[dict[str, Any]]) -> None:
+        self.messages.extend(messages)
         self.updated_at = datetime.now()
 
     @staticmethod

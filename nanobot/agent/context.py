@@ -18,6 +18,7 @@ class ContextBuilder:
 
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
+    _TOOL_RESULT_MAX_CHARS = 16_000
 
     def __init__(self, workspace: Path, timezone: str | None = None):
         self.workspace = workspace
@@ -109,6 +110,98 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         if channel and chat_id:
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
+
+    @classmethod
+    def is_runtime_context(cls, content: str | None):
+        return isinstance(content, str) and content.startswith(cls._RUNTIME_CONTEXT_TAG)
+
+    @staticmethod
+    def _image_placeholder(block: dict[str, Any]) -> dict[str, str]:
+        """Convert an inline image block into a compact text placeholder."""
+        path = (block.get("_meta") or {}).get("path", "")
+        return {"type": "text", "text": f"[image: {path}]" if path else "[image]"}
+
+    def _sanitize_persisted_blocks(
+        self,
+        content: list[dict[str, Any]],
+        *,
+        truncate_text: bool = False,
+        drop_runtime: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Strip volatile multimodal payloads before writing session history."""
+        filtered: list[dict[str, Any]] = []
+        for block in content:
+            if not isinstance(block, dict):
+                filtered.append(block)
+                continue
+
+            if (
+                drop_runtime
+                and block.get("type") == "text"
+                and self.is_runtime_context(block.get("text"))
+            ):
+                continue
+
+            if block.get("type") == "image_url" and block.get("image_url", {}).get(
+                "url", ""
+            ).startswith("data:image/"):
+                filtered.append(self._image_placeholder(block))
+                continue
+
+            if block.get("type") == "text" and isinstance(block.get("text"), str):
+                text = block["text"]
+                if truncate_text and len(text) > self._TOOL_RESULT_MAX_CHARS:
+                    text = text[: self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+                filtered.append({**block, "text": text})
+                continue
+
+            filtered.append(block)
+
+        return filtered
+
+    def _sanitize_messages(self, messages: list[dict]) -> list[dict]:
+        """Truncate large tool results in messages"""
+        from datetime import datetime
+
+        sanitized_messages = []
+        for m in messages:
+            entry = dict(m)
+            role, content = entry.get("role"), entry.get("content")
+            if role == "assistant" and not content and not entry.get("tool_calls"):
+                continue  # skip empty assistant messages — they poison session context
+            if role == "tool":
+                if (
+                    isinstance(content, str)
+                    and len(content) > self._TOOL_RESULT_MAX_CHARS
+                ):
+                    entry["content"] = (
+                        content[: self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+                    )
+                elif isinstance(content, list):
+                    filtered = self._sanitize_persisted_blocks(
+                        content, truncate_text=True
+                    )
+                    if not filtered:
+                        continue
+                    entry["content"] = filtered
+            elif role == "user":
+                if self.is_runtime_context(content):
+                    # Strip the runtime-context prefix, keep only the user text.
+                    parts = content.split("\n\n", 1)
+                    if len(parts) > 1 and parts[1].strip():
+                        entry["content"] = parts[1]
+                    else:
+                        continue
+                if isinstance(content, list):
+                    filtered = self._sanitize_persisted_blocks(
+                        content, drop_runtime=True
+                    )
+                    if not filtered:
+                        continue
+                    entry["content"] = filtered
+            entry.setdefault("timestamp", datetime.now().isoformat())
+            sanitized_messages.append(entry)
+        return sanitized_messages
 
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
