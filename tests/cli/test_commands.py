@@ -333,40 +333,17 @@ def test_config_falls_back_to_vllm_when_ollama_not_configured():
     assert config.get_api_base() == "http://localhost:8000"
 
 
-def test_config_legacy_dashscope_coding_api_base_remaps_to_coding_plan_provider():
+def test_config_dashscope_coding_plan_supports_international_api_base_override():
     config = Config.model_validate(
         {
             "agents": {
                 "defaults": {
-                    "provider": "dashscope",
+                    "provider": "dashscopeCodingPlan",
                     "model": "qwen3-coder-plus",
                 }
             },
             "providers": {
-                "dashscope": {
-                    "apiKey": "test-key",
-                    "apiBase": "https://coding.dashscope.aliyuncs.com/v1",
-                }
-            },
-        }
-    )
-
-    assert config.get_provider_name() == "dashscope_coding_plan"
-    assert config.get_provider().api_base == "https://coding.dashscope.aliyuncs.com/v1"
-    assert config.get_api_base() == "https://coding.dashscope.aliyuncs.com/v1"
-
-
-def test_config_auto_detects_dashscope_coding_plan_from_coding_api_base():
-    config = Config.model_validate(
-        {
-            "agents": {
-                "defaults": {
-                    "provider": "auto",
-                    "model": "qwen3-coder-plus",
-                }
-            },
-            "providers": {
-                "dashscope": {
+                "dashscopeCodingPlan": {
                     "apiKey": "test-key",
                     "apiBase": "https://coding-intl.dashscope.aliyuncs.com/v1",
                 }
@@ -375,7 +352,6 @@ def test_config_auto_detects_dashscope_coding_plan_from_coding_api_base():
     )
 
     assert config.get_provider_name() == "dashscope_coding_plan"
-    assert config.get_provider().api_base == "https://coding-intl.dashscope.aliyuncs.com/v1"
     assert config.get_api_base() == "https://coding-intl.dashscope.aliyuncs.com/v1"
 
 

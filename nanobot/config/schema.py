@@ -169,15 +169,14 @@ class Config(BaseSettings):
         self, model: str | None = None
     ) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
-        from nanobot.providers.registry import PROVIDERS, find_by_name, resolve_provider_name
+        from nanobot.providers.registry import PROVIDERS, find_by_name
 
         forced = self.agents.defaults.provider
         if forced != "auto":
             spec = find_by_name(forced)
             if spec:
                 p = getattr(self.providers, spec.name, None)
-                resolved_name = resolve_provider_name(spec.name, p.api_base if p else None)
-                return (p, resolved_name) if p else (None, None)
+                return (p, spec.name) if p else (None, None)
             return None, None
 
         model_lower = (model or self.agents.defaults.model).lower()
@@ -194,14 +193,14 @@ class Config(BaseSettings):
             p = getattr(self.providers, spec.name, None)
             if p and model_prefix and normalized_prefix == spec.name:
                 if spec.is_oauth or spec.is_local or p.api_key:
-                    return p, resolve_provider_name(spec.name, p.api_base)
+                    return p, spec.name
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
                 if spec.is_oauth or spec.is_local or p.api_key:
-                    return p, resolve_provider_name(spec.name, p.api_base)
+                    return p, spec.name
 
         # Fallback: configured local providers can route models without
         # provider-specific keywords (for example plain "llama3.2" on Ollama).
@@ -228,7 +227,7 @@ class Config(BaseSettings):
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and p.api_key:
-                return p, resolve_provider_name(spec.name, p.api_base)
+                return p, spec.name
         return None, None
 
     def get_provider(self, model: str | None = None) -> ProviderConfig | None:

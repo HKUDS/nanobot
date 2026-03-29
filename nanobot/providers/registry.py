@@ -363,17 +363,3 @@ def find_by_name(name: str) -> ProviderSpec | None:
         if spec.name == normalized:
             return spec
     return None
-
-
-def resolve_provider_name(name: str | None, api_base: str | None = None) -> str | None:
-    """Resolve provider aliases that depend on configured endpoint details."""
-    if name != "dashscope" or not api_base:
-        return name
-
-    lowered = api_base.lower()
-    if (
-        "coding.dashscope.aliyuncs.com" in lowered
-        or "coding-intl.dashscope.aliyuncs.com" in lowered
-    ):
-        return "dashscope_coding_plan"
-    return name
