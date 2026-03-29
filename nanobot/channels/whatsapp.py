@@ -147,14 +147,6 @@ class WhatsAppChannel(BaseChannel):
         task = self._typing_tasks.pop(chat_id, None)
         if task and not task.done():
             task.cancel()
-        # Send explicit "stopped composing" so WhatsApp clears the indicator
-        if self._ws and self._connected:
-            try:
-                asyncio.ensure_future(
-                    self._ws.send(json.dumps({"type": "typing", "to": chat_id, "composing": False}))
-                )
-            except Exception:
-                pass
 
     async def _typing_loop(self, chat_id: str) -> None:
         """Send 'composing' presence every 10 seconds until cancelled."""
@@ -163,7 +155,12 @@ class WhatsAppChannel(BaseChannel):
                 await self._ws.send(json.dumps({"type": "typing", "to": chat_id, "composing": True}))
                 await asyncio.sleep(10)
         except asyncio.CancelledError:
-            pass
+            # Send explicit "paused" so WhatsApp clears the indicator
+            try:
+                if self._ws and self._connected:
+                    await self._ws.send(json.dumps({"type": "typing", "to": chat_id, "composing": False}))
+            except Exception:
+                pass
         except Exception as e:
             logger.debug("WhatsApp typing indicator stopped for {}: {}", chat_id, e)
 
