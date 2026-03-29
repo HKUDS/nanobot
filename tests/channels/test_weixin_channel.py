@@ -281,6 +281,70 @@ async def test_send_does_not_send_when_session_is_paused() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_typing_ticket_fetches_and_caches_per_user() -> None:
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._api_post = AsyncMock(return_value={"ret": 0, "typing_ticket": "ticket-1"})
+
+    first = await channel._get_typing_ticket("wx-user", "ctx-1")
+    second = await channel._get_typing_ticket("wx-user", "ctx-2")
+
+    assert first == "ticket-1"
+    assert second == "ticket-1"
+    channel._api_post.assert_awaited_once_with(
+        "ilink/bot/getconfig",
+        {"ilink_user_id": "wx-user", "context_token": "ctx-1", "base_info": weixin_mod.BASE_INFO},
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_uses_typing_start_and_cancel_when_ticket_available() -> None:
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._context_tokens["wx-user"] = "ctx-typing"
+    channel._send_text = AsyncMock()
+    channel._api_post = AsyncMock(
+        side_effect=[
+            {"ret": 0, "typing_ticket": "ticket-typing"},
+            {"ret": 0},
+            {"ret": 0},
+        ]
+    )
+
+    await channel.send(
+        type("Msg", (), {"chat_id": "wx-user", "content": "pong", "media": [], "metadata": {}})()
+    )
+
+    channel._send_text.assert_awaited_once_with("wx-user", "pong", "ctx-typing")
+    assert channel._api_post.await_count == 3
+    assert channel._api_post.await_args_list[0].args[0] == "ilink/bot/getconfig"
+    assert channel._api_post.await_args_list[1].args[0] == "ilink/bot/sendtyping"
+    assert channel._api_post.await_args_list[1].args[1]["status"] == 1
+    assert channel._api_post.await_args_list[2].args[0] == "ilink/bot/sendtyping"
+    assert channel._api_post.await_args_list[2].args[1]["status"] == 2
+
+
+@pytest.mark.asyncio
+async def test_send_still_sends_text_when_typing_ticket_missing() -> None:
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._context_tokens["wx-user"] = "ctx-no-ticket"
+    channel._send_text = AsyncMock()
+    channel._api_post = AsyncMock(return_value={"ret": 1, "errmsg": "no config"})
+
+    await channel.send(
+        type("Msg", (), {"chat_id": "wx-user", "content": "pong", "media": [], "metadata": {}})()
+    )
+
+    channel._send_text.assert_awaited_once_with("wx-user", "pong", "ctx-no-ticket")
+    channel._api_post.assert_awaited_once()
+    assert channel._api_post.await_args_list[0].args[0] == "ilink/bot/getconfig"
+
+
+@pytest.mark.asyncio
 async def test_poll_once_pauses_session_on_expired_errcode() -> None:
     channel, _bus = _make_channel()
     channel._client = SimpleNamespace(timeout=None)
