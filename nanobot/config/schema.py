@@ -235,6 +235,10 @@ class TTSConfig(Base):
     voice: str = "zh-CN-XiaoxiaoNeural"
     max_text_length: int = 2000
 
+    # Fish Audio specific
+    fish_api_key: str = ""
+    fish_reference_id: str = ""
+
 
 class Config(BaseSettings):
     """Root configuration for nanobot."""

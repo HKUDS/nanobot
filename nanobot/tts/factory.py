@@ -18,4 +18,11 @@ def create_provider(config: TTSConfig, voice_override: str | None = None) -> TTS
         from .edge import EdgeTTSProvider
         return EdgeTTSProvider(voice=voice)
 
+    if config.provider == "fish":
+        from .fish import FishTTSProvider
+        return FishTTSProvider(
+            api_key=config.fish_api_key,
+            reference_id=config.fish_reference_id,
+        )
+
     raise ValueError(f"Unknown TTS provider: {config.provider}")
