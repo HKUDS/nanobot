@@ -1,5 +1,6 @@
 """Tests for WhatsApp channel outbound media support."""
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
 
@@ -17,6 +18,15 @@ def _make_channel() -> WhatsAppChannel:
     return ch
 
 
+def _sent_payloads(ch) -> list[dict]:
+    """Extract all JSON payloads sent via the websocket."""
+    return [json.loads(call[0][0]) for call in ch._ws.send.call_args_list]
+
+
+def _sent_payloads_by_type(ch, msg_type: str) -> list[dict]:
+    return [p for p in _sent_payloads(ch) if p.get("type") == msg_type]
+
+
 @pytest.mark.asyncio
 async def test_send_text_only():
     ch = _make_channel()
@@ -24,10 +34,12 @@ async def test_send_text_only():
 
     await ch.send(msg)
 
-    ch._ws.send.assert_called_once()
-    payload = json.loads(ch._ws.send.call_args[0][0])
-    assert payload["type"] == "send"
-    assert payload["text"] == "hello"
+    payloads = _sent_payloads(ch)
+    # composing=false (paused) + actual send
+    assert len(payloads) == 2
+    assert payloads[0] == {"type": "typing", "to": "123@s.whatsapp.net", "composing": False}
+    assert payloads[1]["type"] == "send"
+    assert payloads[1]["text"] == "hello"
 
 
 @pytest.mark.asyncio
@@ -42,17 +54,12 @@ async def test_send_media_dispatches_send_media_command():
 
     await ch.send(msg)
 
-    assert ch._ws.send.call_count == 2
-    text_payload = json.loads(ch._ws.send.call_args_list[0][0][0])
-    media_payload = json.loads(ch._ws.send.call_args_list[1][0][0])
-
-    assert text_payload["type"] == "send"
-    assert text_payload["text"] == "check this out"
-
-    assert media_payload["type"] == "send_media"
-    assert media_payload["filePath"] == "/tmp/photo.jpg"
-    assert media_payload["mimetype"] == "image/jpeg"
-    assert media_payload["fileName"] == "photo.jpg"
+    media_sends = _sent_payloads_by_type(ch, "send_media")
+    assert len(media_sends) == 1
+    assert media_sends[0]["filePath"] == "/tmp/photo.jpg"
+    assert media_sends[0]["mimetype"] == "image/jpeg"
+    assert media_sends[0]["fileName"] == "photo.jpg"
+    assert media_sends[0]["caption"] == "check this out"
 
 
 @pytest.mark.asyncio
@@ -67,10 +74,9 @@ async def test_send_media_only_no_text():
 
     await ch.send(msg)
 
-    ch._ws.send.assert_called_once()
-    payload = json.loads(ch._ws.send.call_args[0][0])
-    assert payload["type"] == "send_media"
-    assert payload["mimetype"] == "application/pdf"
+    media_sends = _sent_payloads_by_type(ch, "send_media")
+    assert len(media_sends) == 1
+    assert media_sends[0]["mimetype"] == "application/pdf"
 
 
 @pytest.mark.asyncio
@@ -85,11 +91,10 @@ async def test_send_multiple_media():
 
     await ch.send(msg)
 
-    assert ch._ws.send.call_count == 2
-    p1 = json.loads(ch._ws.send.call_args_list[0][0][0])
-    p2 = json.loads(ch._ws.send.call_args_list[1][0][0])
-    assert p1["mimetype"] == "image/png"
-    assert p2["mimetype"] == "video/mp4"
+    media_sends = _sent_payloads_by_type(ch, "send_media")
+    assert len(media_sends) == 2
+    assert media_sends[0]["mimetype"] == "image/png"
+    assert media_sends[1]["mimetype"] == "video/mp4"
 
 
 @pytest.mark.asyncio
@@ -155,3 +160,67 @@ async def test_group_policy_mention_accepts_mentioned_group_message():
     kwargs = ch._handle_message.await_args.kwargs
     assert kwargs["chat_id"] == "12345@g.us"
     assert kwargs["sender_id"] == "user"
+
+
+# ── Typing indicator tests ────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_start_typing_sends_composing_true():
+    """_start_typing should send composing=true to the bridge."""
+    ch = _make_channel()
+    ch._start_typing("chat1@lid")
+    # Let the typing loop run once
+    await asyncio.sleep(0.05)
+    ch._stop_typing("chat1@lid")
+    await asyncio.sleep(0.05)
+
+    payloads = _sent_payloads(ch)
+    composing_true = [p for p in payloads if p.get("composing") is True]
+    assert len(composing_true) >= 1
+    assert composing_true[0]["to"] == "chat1@lid"
+
+
+@pytest.mark.asyncio
+async def test_send_clears_typing_indicator():
+    """send() must send composing=false before the actual message."""
+    ch = _make_channel()
+    # Start typing as if an inbound message arrived
+    ch._start_typing("chat1@lid")
+    await asyncio.sleep(0.05)
+
+    # Now send the response
+    msg = OutboundMessage(channel="whatsapp", chat_id="chat1@lid", content="reply")
+    await ch.send(msg)
+
+    payloads = _sent_payloads(ch)
+    # Find the composing=false that comes right before the send
+    paused = [i for i, p in enumerate(payloads) if p.get("composing") is False]
+    sends = [i for i, p in enumerate(payloads) if p.get("type") == "send"]
+    assert len(paused) >= 1, "composing=false must be sent"
+    assert len(sends) == 1, "message must be sent"
+    # composing=false must come before the send
+    assert paused[-1] < sends[0], "composing=false must precede the message send"
+
+
+@pytest.mark.asyncio
+async def test_send_paused_without_active_typing():
+    """send() should send composing=false even if no typing was active."""
+    ch = _make_channel()
+    msg = OutboundMessage(channel="whatsapp", chat_id="chat1@lid", content="hi")
+    await ch.send(msg)
+
+    payloads = _sent_payloads(ch)
+    assert payloads[0] == {"type": "typing", "to": "chat1@lid", "composing": False}
+    assert payloads[1]["type"] == "send"
+
+
+@pytest.mark.asyncio
+async def test_typing_task_cancelled_on_stop():
+    """_stop_typing should cancel the typing loop task."""
+    ch = _make_channel()
+    ch._start_typing("chat1@lid")
+    assert "chat1@lid" in ch._typing_tasks
+
+    ch._stop_typing("chat1@lid")
+    assert "chat1@lid" not in ch._typing_tasks
