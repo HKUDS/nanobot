@@ -25,6 +25,17 @@ def _read_pdf(file_path: Path) -> str:
     return "\n\n".join(pages)
 
 
+def _is_pdf(file_path: Path) -> bool:
+    """Detect PDF by extension or file magic bytes."""
+    if file_path.suffix.lower() == ".pdf":
+        return True
+    try:
+        with open(file_path, "rb") as f:
+            return f.read(5) == b"%PDF-"
+    except Exception:
+        return False
+
+
 def _resolve_path(path: str, workspace: Path | None = None, allowed_dir: Path | None = None) -> Path:
     """Resolve path against workspace (if relative) and enforce directory restriction."""
     p = Path(path).expanduser()
@@ -82,7 +93,7 @@ class ReadFileTool(Tool):
             if not file_path.is_file():
                 return f"Error: Not a file: {path}"
 
-            if file_path.suffix.lower() == ".pdf":
+            if _is_pdf(file_path):
                 content = _read_pdf(file_path)
             else:
                 content = file_path.read_text(encoding="utf-8")
