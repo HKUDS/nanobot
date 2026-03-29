@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Validates Conventional Commits format on git commit commands.
-# Silent on success (zero tokens). Advisory systemMessage on invalid format.
+# Silent on success (zero tokens). Advisory on invalid format.
 
 # Extract commit message from the command arguments
 COMMAND="$@"
@@ -42,6 +42,6 @@ if [[ "$FIRST_LINE" =~ ^(feat|fix|perf|refactor|docs|test|chore|ci)(\([a-zA-Z0-9
   exit 0
 fi
 
-# Invalid format — advisory message
-echo "{\"systemMessage\": \"Commit message does not follow Conventional Commits format. Expected: <type>(<scope>): <description> where type is one of: feat, fix, perf, refactor, docs, test, chore, ci. Example: feat(memory): add hybrid retrieval\"}"
+# Invalid format — advisory
+echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "Commit message does not follow Conventional Commits format. Expected: <type>(<scope>): <description> where type is one of: feat, fix, perf, refactor, docs, test, chore, ci. Example: feat(memory): add hybrid retrieval"}}'
 exit 0

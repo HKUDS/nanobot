@@ -30,5 +30,5 @@ if [ -z "$MATCHES" ]; then
 fi
 
 # Advisory when matches found
-echo "{\"systemMessage\": \"You modified $BASENAME. These docs reference it:$MATCHES — verify they are still accurate.\"}"
+echo "{\"hookSpecificOutput\": {\"hookEventName\": \"PostToolUse\", \"additionalContext\": \"You modified $BASENAME. These docs reference it:$MATCHES — verify they are still accurate.\"}}"
 exit 0

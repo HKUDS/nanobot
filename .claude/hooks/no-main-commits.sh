@@ -36,7 +36,7 @@ fi
 
 # Block feat, fix, refactor, test, perf on main
 if [[ "$FIRST_LINE" =~ ^(feat|fix|refactor|test|perf) ]]; then
-  echo "{\"systemMessage\": \"BLOCKED: Implementation commits (feat/fix/refactor/test/perf) should not go directly to main. Create a feature branch: git worktree add ../nanobot-<branch> -b <branch>\"}"
+  echo "BLOCKED: Implementation commits (feat/fix/refactor/test/perf) should not go directly to main. Create a feature branch: git worktree add ../nanobot-<branch> -b <branch>" >&2
   exit 2
 fi
 

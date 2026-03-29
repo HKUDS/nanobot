@@ -23,6 +23,6 @@ FIRST_LINE=$(echo "$MSG" | head -1)
 
 # Only remind for implementation commits
 if [[ "$FIRST_LINE" =~ ^(feat|fix|refactor|perf) ]]; then
-  echo '{"systemMessage": "REMINDER: Have you dispatched a code-reviewer subagent for this implementation work? CLAUDE.md requires code quality review before committing. If not done, cancel this commit, run the review, then commit."}'
+  echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "REMINDER: Have you dispatched a code-reviewer subagent for this implementation work? CLAUDE.md requires code quality review before committing. If not done, cancel this commit, run the review, then commit."}}'
 fi
 exit 0

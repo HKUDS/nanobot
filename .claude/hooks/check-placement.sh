@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Advisory on new file creation in nanobot/.
-# Hard blocks banned filenames. Advisory for misplaced files.
+# Hard blocks banned filenames (exit 2 + stderr). Advisory for misplaced files.
 # Silent for normal files.
 
 # Read the tool input from stdin
@@ -23,14 +23,14 @@ esac
 BASENAME=$(basename "$FILE_PATH")
 case "$BASENAME" in
   utils.py|helpers.py|common.py|misc.py)
-    echo "{\"systemMessage\": \"BLOCKED: Catch-all filenames (utils.py, helpers.py, common.py, misc.py) are prohibited. Place logic in the package that owns the concept.\"}"
+    echo "BLOCKED: Catch-all filenames (utils.py, helpers.py, common.py, misc.py) are prohibited. Place logic in the package that owns the concept." >&2
     exit 2
     ;;
 esac
 
 # Check for memory flat files (not in a subdirectory)
 if [[ "$FILE_PATH" =~ nanobot/memory/[^/]+\.py$ ]] && [[ ! "$FILE_PATH" =~ nanobot/memory/__init__\.py$ ]]; then
-  echo "{\"systemMessage\": \"Advisory: nanobot/memory/ has internal subdirectories (write/, read/, ranking/, persistence/, graph/). Should this file be in one of those subdirectories instead?\"}"
+  echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "Advisory: nanobot/memory/ has internal subdirectories (write/, read/, ranking/, persistence/, graph/). Should this file be in one of those subdirectories instead?"}}'
   exit 0
 fi
 
@@ -43,7 +43,7 @@ if [[ "$FILE_PATH" =~ nanobot/tools/[^/]+\.py$ ]] && [[ ! "$FILE_PATH" =~ nanobo
       exit 0
       ;;
     *)
-      echo "{\"systemMessage\": \"Advisory: Tool implementations go in nanobot/tools/builtin/, not at the tools/ level. Infrastructure (base, registry, executor) stays at tools/ level.\"}"
+      echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "Advisory: Tool implementations go in nanobot/tools/builtin/, not at the tools/ level. Infrastructure (base, registry, executor) stays at tools/ level."}}'
       exit 0
       ;;
   esac
