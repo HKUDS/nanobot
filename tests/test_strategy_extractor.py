@@ -2,22 +2,45 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import sqlite3
 
 import pytest
 
 from nanobot.agent.turn_types import ToolAttempt
-from nanobot.memory.strategy import StrategyStore
+from nanobot.memory.strategy import StrategyAccess
 from nanobot.memory.strategy_extractor import StrategyExtractor
 
 
-@pytest.fixture()
-def strategy_store(tmp_path: Path) -> StrategyStore:
-    return StrategyStore(tmp_path / "strategies.db")
+def _create_schema(conn: sqlite3.Connection) -> None:
+    """Create the strategies table (normally owned by UnifiedMemoryDB)."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS strategies (
+            id            TEXT PRIMARY KEY,
+            domain        TEXT NOT NULL,
+            task_type     TEXT NOT NULL,
+            strategy      TEXT NOT NULL,
+            context       TEXT NOT NULL,
+            source        TEXT NOT NULL DEFAULT 'guardrail_recovery',
+            confidence    REAL NOT NULL DEFAULT 0.5,
+            created_at    TEXT NOT NULL,
+            last_used     TEXT NOT NULL,
+            use_count     INTEGER NOT NULL DEFAULT 0,
+            success_count INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_strategies_domain ON strategies(domain);
+        CREATE INDEX IF NOT EXISTS idx_strategies_task_type ON strategies(task_type);
+    """)
 
 
 @pytest.fixture()
-def extractor(strategy_store: StrategyStore) -> StrategyExtractor:
+def strategy_store() -> StrategyAccess:
+    conn = sqlite3.connect(":memory:")
+    _create_schema(conn)
+    return StrategyAccess(conn)
+
+
+@pytest.fixture()
+def extractor(strategy_store: StrategyAccess) -> StrategyExtractor:
     """Extractor without LLM provider (fallback text generation)."""
     return StrategyExtractor(store=strategy_store)
 
@@ -41,7 +64,7 @@ def _make_attempt(
 
 @pytest.mark.asyncio
 async def test_extracts_from_successful_recovery(
-    extractor: StrategyExtractor, strategy_store: StrategyStore
+    extractor: StrategyExtractor, strategy_store: StrategyAccess
 ) -> None:
     """When a guardrail fires with strategy_tag and a subsequent tool succeeds,
     a strategy is extracted and saved."""
@@ -78,7 +101,7 @@ async def test_extracts_from_successful_recovery(
 
 @pytest.mark.asyncio
 async def test_no_extraction_when_no_strategy_tag(
-    extractor: StrategyExtractor, strategy_store: StrategyStore
+    extractor: StrategyExtractor, strategy_store: StrategyAccess
 ) -> None:
     """Guardrail activations without strategy_tag are skipped."""
     tool_log = [
@@ -106,7 +129,7 @@ async def test_no_extraction_when_no_strategy_tag(
 
 @pytest.mark.asyncio
 async def test_no_extraction_when_recovery_failed(
-    extractor: StrategyExtractor, strategy_store: StrategyStore
+    extractor: StrategyExtractor, strategy_store: StrategyAccess
 ) -> None:
     """When subsequent tool calls all fail or return empty, no strategy is saved."""
     tool_log = [
@@ -134,7 +157,7 @@ async def test_no_extraction_when_recovery_failed(
 
 @pytest.mark.asyncio
 async def test_confidence_update_on_success(
-    extractor: StrategyExtractor, strategy_store: StrategyStore
+    extractor: StrategyExtractor, strategy_store: StrategyAccess
 ) -> None:
     """When strategies were in context and no guardrails fired, confidence increases."""
     # Save a strategy first
@@ -170,7 +193,7 @@ async def test_confidence_update_on_success(
 
 @pytest.mark.asyncio
 async def test_confidence_update_on_failure(
-    extractor: StrategyExtractor, strategy_store: StrategyStore
+    extractor: StrategyExtractor, strategy_store: StrategyAccess
 ) -> None:
     """When strategies were in context and guardrails fired, confidence decreases."""
     tool_log = [

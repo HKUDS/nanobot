@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from nanobot.memory.strategy import Strategy, StrategyStore
+from nanobot.memory.strategy import Strategy, StrategyAccess
 
 if TYPE_CHECKING:
     from nanobot.agent.turn_types import ToolAttempt
@@ -30,7 +30,7 @@ class StrategyExtractor:
 
     def __init__(
         self,
-        store: StrategyStore,
+        store: StrategyAccess,
         provider: LLMProvider | None = None,
         model: str = "",
     ) -> None:

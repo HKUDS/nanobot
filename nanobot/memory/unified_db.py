@@ -137,6 +137,25 @@ class UnifiedMemoryDB:
                 PRIMARY KEY (source, relation, target)
             );
 
+            CREATE TABLE IF NOT EXISTS strategies (
+                id            TEXT PRIMARY KEY,
+                domain        TEXT NOT NULL,
+                task_type     TEXT NOT NULL,
+                strategy      TEXT NOT NULL,
+                context       TEXT NOT NULL,
+                source        TEXT NOT NULL DEFAULT 'guardrail_recovery',
+                confidence    REAL NOT NULL DEFAULT 0.5,
+                created_at    TEXT NOT NULL,
+                last_used     TEXT NOT NULL,
+                use_count     INTEGER NOT NULL DEFAULT 0,
+                success_count INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_strategies_domain
+                ON strategies(domain);
+            CREATE INDEX IF NOT EXISTS idx_strategies_task_type
+                ON strategies(task_type);
+
             {_FTS_TRIGGERS}
         """)
 
@@ -456,6 +475,19 @@ class UnifiedMemoryDB:
             (entity_name, depth, entity_name),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # Connection access
+    # ------------------------------------------------------------------
+
+    @property
+    def connection(self) -> sqlite3.Connection:
+        """The shared SQLite connection (WAL mode, check_same_thread=False).
+
+        Exposed for subsystem components (e.g. StrategyAccess) that store
+        data in the same database but manage their own table logic.
+        """
+        return self._conn
 
     # ------------------------------------------------------------------
     # Lifecycle

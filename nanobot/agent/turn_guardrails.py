@@ -7,10 +7,22 @@ Each guardrail inspects tool-call history and returns an ``Intervention``
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
 from nanobot.agent.turn_types import ToolAttempt
+
+
+def _canonical_args(arguments: dict[str, Any]) -> str:
+    """Canonical string representation of tool arguments for dedup.
+
+    Uses ``json.dumps(sort_keys=True)`` so dict key order is deterministic.
+    Values are never compared by ``sorted()`` — avoids ``TypeError`` on
+    mixed types (str vs None vs int) that real tool arguments contain.
+    """
+    return json.dumps(arguments, sort_keys=True)
+
 
 # ---------------------------------------------------------------------------
 # Data types
@@ -125,7 +137,7 @@ class RepeatedStrategyDetection:
     ) -> Intervention | None:
         counts: dict[tuple[str, str], int] = {}
         for a in all_attempts:
-            key = (a.tool_name, repr(sorted(a.arguments.items())))
+            key = (a.tool_name, _canonical_args(a.arguments))
             counts[key] = counts.get(key, 0) + 1
 
         for (tool_name, _), count in counts.items():

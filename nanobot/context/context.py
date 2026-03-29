@@ -40,7 +40,7 @@ from nanobot.observability.tracing import bind_trace
 if TYPE_CHECKING:
     from nanobot.config.memory import MemoryConfig
     from nanobot.memory.store import MemoryStore
-    from nanobot.memory.strategy import StrategyStore
+    from nanobot.memory.strategy import StrategyAccess
 
 # ---------------------------------------------------------------------------
 # Module-level platform info cache — avoid repeated syscalls on every LLM
@@ -67,7 +67,7 @@ class ContextBuilder:
         *,
         memory: MemoryStore | None = None,
         memory_config: MemoryConfig | None = None,
-        strategy_store: StrategyStore | None = None,
+        strategy_store: StrategyAccess | None = None,
     ):
         self.workspace = workspace
         self.memory = memory
