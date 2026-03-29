@@ -104,6 +104,7 @@ class MessageTool(Tool):
             if channel == self._default_channel and chat_id == self._default_chat_id:
                 self._sent_in_turn = True
             media_info = f" with {len(media)} attachments" if media else ""
-            return f"Message sent to {channel}:{chat_id}{media_info}"
+            preview = content[:200] + "..." if len(content) > 200 else content
+            return f"Message sent to {channel}:{chat_id}{media_info}: \"{preview}\""
         except Exception as e:
             return f"Error sending message: {str(e)}"
