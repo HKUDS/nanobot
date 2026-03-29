@@ -38,6 +38,7 @@ class FishTTSProvider(TTSProvider):
                         "text": text,
                         "reference_id": self.reference_id,
                         "format": "mp3",
+                        "mp3_bitrate": 64,
                         "prosody": {"speed": self.speed},
                     },
                 )
