@@ -21,7 +21,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import TelegramConfig
+from nanobot.config.schema import Base
 from nanobot.providers.transcription import TranscriptionProvider
 from nanobot.security.network import validate_url_target
 from nanobot.utils.helpers import split_message
@@ -203,15 +203,17 @@ class TelegramChannel(BaseChannel):
         BotCommand("status", "Show bot status"),
     ]
 
-    def __init__(
-        self,
-        config: TelegramConfig,
-        bus: MessageBus,
-        transcription_provider: TranscriptionProvider | None = None,
-    ):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return TelegramConfig().model_dump(by_alias=True)
+
+    _STREAM_EDIT_INTERVAL = 0.6  # min seconds between edit_message_text calls
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = TelegramConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: TelegramConfig = config
-        self._transcription_provider = transcription_provider
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
@@ -834,37 +836,13 @@ class TelegramChannel(BaseChannel):
                 media_paths.append(str(file_path))
 
                 # Handle voice/audio transcription
-                if media_type == "voice" or media_type == "audio":
-                    if self._transcription_provider is None:
-                        content_parts.append(f"[{media_type}: {file_path}]")
+                if media_type in ("voice", "audio"):
+                    transcription = await self.transcribe_audio(file_path)
+                    if transcription:
+                        logger.info("Transcribed {}: {}...", media_type, transcription[:50])
+                        content_parts.append(f"[transcription: {transcription}]")
                     else:
-                        # Read audio into memory; keep path out of media_paths so Homer
-                        # only sees plain text (the transcript).
-                        media_paths.pop()  # remove the audio file path we just added
-                        try:
-                            with open(file_path, "rb") as af:
-                                audio_bytes = af.read()
-                        except Exception as read_err:
-                            logger.error("Failed to read audio file {}: {}", file_path, read_err)
-                            audio_bytes = b""
-
-                        if audio_bytes:
-                            mime_type = getattr(media_file, "mime_type", None) or (
-                                "audio/ogg" if media_type == "voice" else "audio/mpeg"
-                            )
-                            duration = getattr(media_file, "duration", None)
-                            transcription = await self._transcription_provider.transcribe(
-                                audio_bytes=audio_bytes,
-                                mime_type=mime_type,
-                                duration_seconds=duration,
-                            )
-                            logger.info(
-                                "Transcribed {} from {}: {}...",
-                                media_type, sender_id, transcription[:80],
-                            )
-                            content_parts.append(transcription)
-                        else:
-                            content_parts.append("[Voice message - transcription failed]")
+                        content_parts.append(f"[{media_type}: {file_path}]")
                 else:
                     content_parts.append(f"[{media_type}: {file_path}]")
 

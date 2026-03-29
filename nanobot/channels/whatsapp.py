@@ -17,8 +17,18 @@ from pydantic import Field
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import WhatsAppConfig
+from nanobot.config.schema import Base
 from nanobot.providers.transcription import TranscriptionProvider
+
+
+class WhatsAppConfig(Base):
+    """WhatsApp channel configuration."""
+
+    enabled: bool = False
+    bridge_url: str = "ws://localhost:3001"
+    bridge_token: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+    group_policy: Literal["open", "mention"] = "open"
 
 
 class WhatsAppChannel(BaseChannel):
@@ -32,15 +42,15 @@ class WhatsAppChannel(BaseChannel):
     name = "whatsapp"
     display_name = "WhatsApp"
 
-    def __init__(
-        self,
-        config: WhatsAppConfig,
-        bus: MessageBus,
-        transcription_provider: TranscriptionProvider | None = None,
-    ):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return WhatsAppConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = WhatsAppConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: WhatsAppConfig = config
-        self._transcription_provider = transcription_provider
         self._ws = None
         self._connected = False
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
@@ -269,21 +279,12 @@ class WhatsAppChannel(BaseChannel):
             logger.error("WhatsApp bridge error: {}", data.get('error'))
 
     async def _transcribe_audio(self, audio_data: dict, sender_id: str) -> str:
-        """Transcribe a voice/audio message via the injected transcription provider.
+        """Transcribe a voice/audio message using base channel transcription.
 
-        Audio bytes from the bridge are base64-encoded and decoded in memory —
-        nothing is written to disk on the Python side.
-
-        Args:
-            audio_data: Dict with keys ``data`` (base64 str), ``mimetype`` (str),
-                        and optionally ``duration`` (float seconds).
-            sender_id: Sender identifier used for log context.
-
-        Returns:
-            Transcript string, or a sentinel message on failure.
+        Audio bytes from the bridge are base64-encoded, decoded to a temp file,
+        then transcribed via self.transcribe_audio() (Groq via BaseChannel).
         """
-        if self._transcription_provider is None:
-            return "[Voice Message]"
+        import tempfile
 
         try:
             audio_bytes = base64.b64decode(audio_data.get("data", ""))
@@ -291,19 +292,30 @@ class WhatsAppChannel(BaseChannel):
             logger.error("Failed to decode audio bytes from bridge for {}: {}", sender_id, e)
             return "[Voice message - transcription failed]"
 
+        if not audio_bytes:
+            return "[Voice message - transcription failed]"
+
         mimetype = audio_data.get("mimetype", "audio/ogg; codecs=opus")
-        duration = audio_data.get("duration")
+        ext = ".ogg" if "ogg" in mimetype else ".mp3"
 
         logger.info(
-            "Transcribing voice message from {} ({} bytes, mimetype={}, duration={}s)",
-            sender_id, len(audio_bytes), mimetype, duration,
+            "Transcribing voice message from {} ({} bytes, mimetype={})",
+            sender_id, len(audio_bytes), mimetype,
         )
 
-        transcript = await self._transcription_provider.transcribe(
-            audio_bytes=audio_bytes,
-            mime_type=mimetype,
-            duration_seconds=duration,
-        )
+        try:
+            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+                tmp.write(audio_bytes)
+                tmp_path = tmp.name
+            transcript = await self.transcribe_audio(tmp_path)
+        except Exception as e:
+            logger.error("Voice transcription failed for {}: {}", sender_id, e)
+            return "[Voice message - transcription failed]"
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
         if transcript:
             logger.info("Transcribed voice message from {}: {}...", sender_id, transcript[:80])
