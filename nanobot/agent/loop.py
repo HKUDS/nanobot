@@ -189,7 +189,9 @@ class AgentLoop:
             store = self.memory_consolidator.store
             long_term = store.read_long_term()
             if long_term:
-                paragraphs = [p.strip() for p in long_term.split("\n\n") if len(p.strip()) > 30]
+                paragraphs = [p.strip() for p in long_term.split("\n\n")
+                              if len(p.strip()) > 30 and not p.strip().startswith("[image:")
+                              and len(p.strip().split()) >= 10]
                 if paragraphs:
                     await self.rag.store(session.key, paragraphs)
         except Exception:
@@ -317,8 +319,8 @@ class AgentLoop:
                     tool_hint = loop_self._strip_think(loop_self._tool_hint(context.tool_calls))
                     await on_progress(tool_hint, tool_hint=True)
                 for tc in context.tool_calls:
-                    args_str = json.dumps(tc.arguments, ensure_ascii=False)
-                    logger.info("Tool call: {}({})", tc.name, args_str[:200])
+                    # Only log tool name, not full arguments (reduces log volume)
+                    logger.debug("Tool call: {}", tc.name)
                 loop_self._set_tool_context(channel, chat_id, message_id)
 
             def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:

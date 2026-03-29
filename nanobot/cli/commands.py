@@ -515,7 +515,7 @@ def gateway(
         str(log_path),
         format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
         level="DEBUG",
-        rotation="00:59",  # Rotate every hour (HH:MM format)
+        rotation="03:59",  # Rotate every 4 hours
         retention=1,         # Keep 1 file
         enqueue=True,
     )
@@ -744,7 +744,7 @@ def agent(
         str(log_path),
         format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
         level="DEBUG",
-        rotation="00:59",  # Rotate every hour (HH:MM format)
+        rotation="03:59",  # Rotate every 4 hours
         retention=1,         # Keep 1 file
         enqueue=True,
     )

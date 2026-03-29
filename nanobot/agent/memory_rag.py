@@ -107,7 +107,9 @@ class VectorMemoryStore:
                 for chunk, vector in zip(chunks, vectors)
             ]
             self._client.upsert(collection_name=self.collection, points=points)
-            logger.debug("RAG: stored {} chunks for {}", len(chunks), session_key)
+            # Only log if significant chunks stored
+            if len(chunks) > 5:
+                logger.debug("RAG: stored {} chunks for {}", len(chunks), session_key)
         except Exception:
             logger.warning("RAG: store failed for {}", session_key)
 
@@ -130,7 +132,11 @@ class VectorMemoryStore:
                 limit=fetch_k,
                 with_payload=True,
             ).points
-            logger.debug("RAG: retrieved {} hits for query", len(hits))
+            # Only log if no hits or many hits
+            if len(hits) == 0:
+                logger.debug("RAG: no hits found")
+            elif len(hits) > 10:
+                logger.debug("RAG: retrieved {} hits", len(hits))
         except Exception:
             logger.warning("RAG: Qdrant search failed")
             return []

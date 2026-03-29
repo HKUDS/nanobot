@@ -486,8 +486,10 @@ class TelegramChannel(BaseChannel):
     async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
         """Progressive message editing: send on first delta, edit on subsequent ones."""
         meta = metadata or {}
-        if not meta.get("_stream_end"):
-            logger.info("SEND_DELTA_DEBUG: chat_id={}, thread_id={}, message_id={}, keys={}", chat_id, meta.get("message_thread_id"), meta.get("message_id"), list(meta.keys()))
+        # Only log first delta per stream (when _stream_id exists but not _stream_end)
+        if meta.get("_stream_id") and not meta.get("_stream_sent") and not meta.get("_stream_end"):
+            logger.debug("SEND_DELTA: chat_id={}, message_id={}", chat_id, meta.get("message_id"))
+            meta["_stream_sent"] = True
         if not self._app:
             return
         int_chat_id = int(chat_id)
