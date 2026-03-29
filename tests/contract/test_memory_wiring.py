@@ -8,6 +8,26 @@ from nanobot.config.memory import MemoryConfig
 from nanobot.memory.store import MemoryStore
 
 
+def test_strategies_ddl_importable():
+    """STRATEGIES_DDL is a public constant in unified_db, used by test fixtures."""
+    from nanobot.memory.unified_db import STRATEGIES_DDL
+
+    assert "CREATE TABLE" in STRATEGIES_DDL
+    assert "strategies" in STRATEGIES_DDL
+
+
+def test_unified_db_connection_property(tmp_path):
+    """UnifiedMemoryDB exposes a shared connection for subsystem components."""
+    import sqlite3
+
+    store = _make_store(tmp_path)
+    conn = store.db.connection
+    assert isinstance(conn, sqlite3.Connection)
+    # Verify strategies table exists in the shared database
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='strategies'")
+    assert cursor.fetchone() is not None
+
+
 def _make_store(tmp_path: Path) -> MemoryStore:
     return MemoryStore(
         tmp_path,
