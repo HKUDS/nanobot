@@ -7,8 +7,9 @@ import sqlite3
 import pytest
 
 from nanobot.agent.turn_types import ToolAttempt
-from nanobot.memory.strategy import STRATEGIES_DDL, StrategyAccess
+from nanobot.memory.strategy import StrategyAccess
 from nanobot.memory.strategy_extractor import StrategyExtractor
+from nanobot.memory.unified_db import STRATEGIES_DDL
 
 
 @pytest.fixture()

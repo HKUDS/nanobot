@@ -15,17 +15,31 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+import sqlite_vec  # type: ignore[import-untyped]
+
 from ._text import _utc_now_iso
-from .strategy import STRATEGIES_DDL
 
-__all__ = ["UnifiedMemoryDB"]
+__all__ = ["UnifiedMemoryDB", "STRATEGIES_DDL"]
 
-
-def _load_sqlite_vec() -> Any:
-    """Lazy-import sqlite-vec so the module is importable without it installed."""
-    import sqlite_vec  # type: ignore[import-untyped]
-
-    return sqlite_vec
+# Schema DDL for the strategies table — single source of truth.
+# Used by _init_schema() and imported by test fixtures.
+STRATEGIES_DDL = """
+CREATE TABLE IF NOT EXISTS strategies (
+    id            TEXT PRIMARY KEY,
+    domain        TEXT NOT NULL,
+    task_type     TEXT NOT NULL,
+    strategy      TEXT NOT NULL,
+    context       TEXT NOT NULL,
+    source        TEXT NOT NULL DEFAULT 'guardrail_recovery',
+    confidence    REAL NOT NULL DEFAULT 0.5,
+    created_at    TEXT NOT NULL,
+    last_used     TEXT NOT NULL,
+    use_count     INTEGER NOT NULL DEFAULT 0,
+    success_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_strategies_domain ON strategies(domain);
+CREATE INDEX IF NOT EXISTS idx_strategies_task_type ON strategies(task_type);
+"""
 
 
 # FTS5 content-sync triggers — keep events_fts in sync with events table.
@@ -68,7 +82,7 @@ class UnifiedMemoryDB:
         self._conn.execute("PRAGMA journal_mode=WAL")
         try:
             self._conn.enable_load_extension(True)
-            _load_sqlite_vec().load(self._conn)
+            sqlite_vec.load(self._conn)
             self._conn.enable_load_extension(False)
         except Exception:  # crash-barrier: sqlite-vec extension load failure
             self._conn.close()
@@ -186,7 +200,7 @@ class UnifiedMemoryDB:
                 ).fetchone()[0]
                 self._conn.execute(
                     "INSERT OR REPLACE INTO events_vec (id, embedding) VALUES (?, ?)",
-                    (rowid, _load_sqlite_vec().serialize_float32(embedding)),
+                    (rowid, sqlite_vec.serialize_float32(embedding)),
                 )
 
     def read_events(
@@ -230,7 +244,7 @@ class UnifiedMemoryDB:
                WHERE v.embedding MATCH ?
                AND k = ?
                ORDER BY v.distance""",
-            (_load_sqlite_vec().serialize_float32(query_embedding), k),
+            (sqlite_vec.serialize_float32(query_embedding), k),
         ).fetchall()
         return [dict(row) for row in rows]
 

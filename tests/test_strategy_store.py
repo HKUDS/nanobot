@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from nanobot.memory.strategy import STRATEGIES_DDL, Strategy, StrategyAccess
+from nanobot.memory.strategy import Strategy, StrategyAccess
+from nanobot.memory.unified_db import STRATEGIES_DDL
 
 
 def _sample_strategy(**overrides: object) -> Strategy:
