@@ -1,178 +1,123 @@
 [
   {
     "id": 1,
-    "category": "refactor",
-    "description": "A dedicated coding-task runtime module can assemble the store, manager, launcher, monitor, recovery helper, and notifier from one workspace/config root.",
+    "category": "setup",
+    "description": "The repo_sync recovery task is reinitialized as a standalone harness with the missing service-module baseline clearly separated from older dormant gateway debt.",
     "steps": [
-      "Instantiate the runtime helper for a temporary workspace and verify it returns the expected coding-task collaborators.",
-      "Confirm every collaborator points at the same workspace-scoped automation path rather than creating divergent task stores.",
-      "Run focused coding-task tests and verify the new runtime assembly does not break existing persistence behavior."
+      "Open PLAN.json and verify it only contains repo_sync recovery work rather than the completed coding-task cleanup plan.",
+      "Open PROGRESS.md and verify the new reboot entry records the missing module baseline, the scoped goal, and what is intentionally out of scope.",
+      "Confirm the harness scope is limited to repo_sync service recovery instead of also reviving missing app.prompts or app.runtime modules."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 2,
-    "category": "refactor",
-    "description": "The runtime helper can be created both with and without an outbound notifier callback so CLI-only paths do not need ad hoc partial wiring.",
+    "category": "functional",
+    "description": "The nanobot.repo_sync package exports a concrete RepoSyncWatcher service module again so the repo-wide test collector can import it.",
     "steps": [
-      "Build the coding-task runtime without a message bus callback.",
-      "Verify create/list/status style commands still have access to store, manager, launcher, and monitor without constructing extra helper objects.",
-      "Build the same runtime with an outbound callback and confirm notifier support is available for gateway paths."
+      "Import nanobot.repo_sync.service in a Python shell.",
+      "Verify RepoSyncWatcher resolves without ModuleNotFoundError.",
+      "Confirm the package layout includes source files rather than only stale __pycache__ artifacts."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 3,
-    "category": "integration",
-    "description": "The active CLI gateway entrypoint uses the shared coding-task runtime builder instead of manually wiring coding-task collaborators inline.",
+    "category": "functional",
+    "description": "RepoSyncWatcher accepts the gateway's current constructor contract, including sync-runner injection and repo-sync policy fields.",
     "steps": [
-      "Start the gateway in a controlled test harness.",
-      "Verify startup still reports tracked and recoverable coding-task counts.",
-      "Confirm the gateway path no longer assembles launcher, monitor, recovery, and notifier by hand in the command body."
+      "Instantiate RepoSyncWatcher with the same keyword arguments used by the dormant gateway path.",
+      "Verify the watcher stores the repo path, branch, remotes, timing controls, and sync runner without raising.",
+      "Confirm the watcher can be built both with a custom sync_runner and with the default sync helper."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 4,
-    "category": "integration",
-    "description": "CLI coding-task commands reuse the shared runtime instead of instantiating launcher or monitor ad hoc inside individual commands.",
+    "category": "functional",
+    "description": "RepoSyncWatcher start() is idempotent and runs an immediate sync when run_on_start is enabled.",
     "steps": [
-      "Run create, list, status, resume, cancel, and run against a temporary workspace.",
-      "Verify the commands still succeed and report the same task data as before.",
-      "Inspect the command implementations and confirm they all resolve collaborators through the shared runtime path."
+      "Start a watcher configured with run_on_start=True and an injected fake sync runner.",
+      "Verify the runner is called once immediately after startup.",
+      "Call start() again and confirm no duplicate immediate sync is scheduled."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 5,
-    "category": "integration",
-    "description": "AgentLoop command interception reuses the same coding-task runtime wiring contract instead of reconstructing launcher and monitor privately.",
+    "category": "functional",
+    "description": "RepoSyncWatcher can poll on a short interval when sync_hour disables nightly scheduling.",
     "steps": [
-      "Instantiate AgentLoop with coding-task support enabled in a focused test.",
-      "Verify Telegram coding-task command interception still works for start, status, stop, cancel, and resume.",
-      "Confirm AgentLoop no longer constructs a separate launcher/monitor stack outside the shared runtime contract."
+      "Start a watcher with sync_hour set outside the nightly range and a short interval.",
+      "Let it run briefly under asyncio.",
+      "Verify the injected sync runner is invoked multiple times before stop() is called."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 6,
-    "category": "refactor",
-    "description": "Coding-task task-selection and concurrency rules live in a dedicated policy layer rather than being hardcoded in the Telegram router.",
+    "category": "functional",
+    "description": "RepoSyncWatcher stop() cancels the background loop cleanly without leaving a live task reference behind.",
     "steps": [
-      "Create tasks from different origins in a focused test fixture.",
-      "Verify the policy chooses the same active task as today's behavior for the current MVP rules.",
-      "Confirm the router delegates selection and single-active enforcement to the policy helper instead of embedding those rules inline."
+      "Start a watcher and then call stop().",
+      "Verify the background task is cancelled cleanly and the watcher no longer reports itself as running.",
+      "Confirm repeated stop() calls remain harmless."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 7,
     "category": "functional",
-    "description": "The extracted coding-task policy preserves the current single-active-task MVP rule for Telegram private chat.",
+    "description": "trigger_now() serializes concurrent sync attempts through an async lock so overlapping polls cannot run the sync runner twice at once.",
     "steps": [
-      "Start one coding task from Telegram private chat in a focused integration test.",
-      "Attempt to start a second task from the same workspace while the first stays non-terminal.",
-      "Verify the same rejection behavior and user-facing explanation are preserved after the policy extraction."
+      "Call trigger_now() concurrently from two coroutines against a watcher with a slow fake runner.",
+      "Verify the calls complete without overlapping runner execution.",
+      "Confirm the watcher still records both trigger requests sequentially."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 8,
     "category": "functional",
-    "description": "The extracted coding-task policy preserves current origin-chat task selection for Telegram control commands.",
+    "description": "The default sync_fork_once helper provides a safe baseline implementation that reports validation failures and no-op sync states without crashing the watcher.",
     "steps": [
-      "Create multiple coding tasks associated with different Telegram chats.",
-      "Send `状态` or `继续` from one chat in a focused test.",
-      "Verify nanobot still targets the newest non-terminal task for that origin chat only."
+      "Invoke the default sync helper with a missing repo path.",
+      "Verify it returns a human-readable failed status instead of raising uncaught exceptions.",
+      "Confirm RepoSyncWatcher can use the default helper without requiring a custom test stub."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 9,
-    "category": "refactor",
-    "description": "Progress reporting exposes a pure read path that builds task reports without persisting metadata or mutating task state.",
+    "category": "testing",
+    "description": "Focused tests cover the restored watcher lifecycle and synchronization behavior without depending on dormant gateway imports.",
     "steps": [
-      "Call the report-building API for a task with existing repo metadata and pane output.",
-      "Verify the returned report includes branch, commit, harness-note, and live-output summaries.",
-      "Confirm the task record on disk is unchanged by the pure read call."
+      "Run tests/test_repo_sync_service.py.",
+      "Verify the suite covers immediate startup, interval polling, and idempotent start behavior.",
+      "Confirm any new watcher tests exercise serialization or stop semantics directly through the service module."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 10,
-    "category": "refactor",
-    "description": "A dedicated refresh path can explicitly persist repo metadata and progress summaries when polling or lifecycle code needs to update task state.",
+    "category": "integration",
+    "description": "Repo-wide pytest no longer stops at tests/test_repo_sync_service.py import collection because the service module exists again.",
     "steps": [
-      "Invoke the refresh API for a running or starting task with new pane output.",
-      "Verify branch metadata, recent commit summary, and progress summary are persisted.",
-      "Confirm waiting-user detection and other lifecycle updates happen only through the explicit refresh path."
+      "Run the repository's standard pytest command.",
+      "Verify test collection proceeds past tests/test_repo_sync_service.py without ModuleNotFoundError.",
+      "Record any remaining unrelated failures in PROGRESS.md if additional baseline issues surface."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 11,
-    "category": "integration",
-    "description": "CLI `coding-task status` uses the pure read/report path for display and no longer mutates task state just because a user viewed status.",
-    "steps": [
-      "Create a coding task with known metadata and capture its persisted state before running the status command.",
-      "Run `nanobot coding-task status <id>`.",
-      "Verify the output still includes branch, commit, and live report details while the underlying task record is unchanged unless an explicit refresh ran earlier."
-    ],
-    "passes": true
-  },
-  {
-    "id": 12,
-    "category": "integration",
-    "description": "Gateway polling and recovery use the explicit refresh path so state mutation stays localized to background lifecycle code.",
-    "steps": [
-      "Run the focused recovery and notifier test paths.",
-      "Verify polling still refreshes persisted progress and repo metadata for active tasks.",
-      "Confirm the gateway watch loop does not rely on status-view side effects to keep task state current."
-    ],
-    "passes": true
-  },
-  {
-    "id": 13,
-    "category": "functional",
-    "description": "Telegram `状态` reporting keeps the current user-facing summary while reading from the new pure report path.",
-    "steps": [
-      "Trigger Telegram `状态` in a focused routing test for an active coding task.",
-      "Verify the reply still includes task id, status, repo, recent progress, and live report content.",
-      "Confirm the reply path does not rely on hidden persistence side effects from a read-only report builder."
-    ],
-    "passes": true
-  },
-  {
-    "id": 14,
-    "category": "testing",
-    "description": "Focused regression tests cover the new runtime builder, policy layer, and pure-report versus refresh split.",
-    "steps": [
-      "Run the focused coding-task test files that cover runtime assembly, routing, progress, recovery, notifier, and CLI status behavior.",
-      "Verify the new tests would fail if runtime assembly drift or report-side mutation were reintroduced.",
-      "Confirm the test suite remains explicitly scoped away from the unrelated repo_sync baseline failure."
-    ],
-    "passes": true
-  },
-  {
-    "id": 15,
     "category": "docs",
-    "description": "Repository documentation explains the refactored coding-task runtime boundaries so future sessions know where to extend orchestration behavior.",
+    "description": "PROGRESS.md captures the repo_sync recovery decisions so future sessions know the service layer was intentionally restored as a thin watcher rather than a full gateway revival.",
     "steps": [
-      "Open the updated architecture documentation or module docstrings.",
-      "Verify it states where runtime assembly, policy, report building, and lifecycle refresh now live.",
-      "Confirm the docs do not reintroduce the old duplicated wiring story."
+      "Open the newest PROGRESS.md entry.",
+      "Verify it records the source of truth for the missing-module failure and the chosen thin-watcher recovery strategy.",
+      "Confirm the log distinguishes repo_sync recovery from the still-dormant app.prompts and app.runtime gaps."
     ],
-    "passes": true
-  },
-  {
-    "id": 16,
-    "category": "integration",
-    "description": "A focused end-to-end smoke path still supports create, run, and status for coding tasks after the architectural cleanup.",
-    "steps": [
-      "Create a coding task in a temporary workspace against a local repo fixture.",
-      "Launch the worker and inspect status through the refactored runtime path.",
-      "Verify nanobot still surfaces the same task identity, harness state, and live report shape after the refactor."
-    ],
-    "passes": true
+    "passes": false
   }
 ]

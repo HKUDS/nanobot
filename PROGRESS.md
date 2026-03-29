@@ -371,3 +371,18 @@
 - Remaining blockers / follow-up:
   - `PLAN.json` is now fully complete for the coding-task architecture-cleanup harness
   - The unrelated repo-wide baseline remains red because `tests/test_repo_sync_service.py` still imports missing `nanobot.repo_sync.service`
+
+## Harness reboot - 2026-03-29 (repo_sync service recovery)
+- Task pivot:
+  - Start a standalone harness to recover the missing `nanobot.repo_sync.service` module without reopening the completed coding-task cleanup plan
+- Existing work detected before re-planning:
+  - Repo-wide pytest currently fails during collection because [tests/test_repo_sync_service.py] imports `nanobot.repo_sync.service.RepoSyncWatcher`
+  - The dormant [nanobot/app/gateway.py] path still references `RepoSyncWatcher`, but it remains separately blocked by missing `nanobot.app.prompts` and `nanobot.app.runtime`
+  - `nanobot/repo_sync/` still contains a compiled `service.cpython-313.pyc`, which confirms the historical service was a thin watcher around an injectable sync runner
+- Baseline validation before feature work:
+  - `bash ~/.codex/scripts/global-init.sh` -> exited 0 with one known error because pytest stopped at `ModuleNotFoundError: No module named 'nanobot.repo_sync.service'`
+  - `.venv/bin/python -c "import nanobot.app.gateway"` -> still fails on the unrelated missing `nanobot.app.prompts`
+- Key decisions:
+  - Recover `RepoSyncWatcher` as a small, architecture-safe service layer first, rather than reviving the entire dormant gateway dependency chain
+  - Keep watcher lifecycle code separate from any heavier git-sync policy so the fix clears the baseline import failure without coupling new logic to stale runtime paths
+  - Treat `app.prompts` / `app.runtime` as explicitly out of scope for this recovery unless a later task asks for the dormant gateway path to run again
