@@ -453,6 +453,45 @@ async def test_send_progress_keeps_message_in_topic() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_tool_hint_uses_silent_notification() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content='read_file("README.md")',
+            metadata={"_progress": True, "_tool_hint": True},
+        )
+    )
+
+    assert channel._app.bot.sent_messages[0]["disable_notification"] is True
+
+
+@pytest.mark.asyncio
+async def test_send_regular_message_keeps_notification_default() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="hello",
+        )
+    )
+
+    assert channel._app.bot.sent_messages[0]["disable_notification"] is False
+
+
+@pytest.mark.asyncio
 async def test_send_reply_infers_topic_from_message_id_cache() -> None:
     config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], reply_to_message=True)
     channel = TelegramChannel(config, MessageBus())

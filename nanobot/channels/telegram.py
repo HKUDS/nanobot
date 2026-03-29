@@ -431,8 +431,15 @@ class TelegramChannel(BaseChannel):
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
+            disable_notification = bool(msg.metadata.get("_tool_hint"))
             for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
-                await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
+                await self._send_text(
+                    chat_id,
+                    chunk,
+                    reply_params,
+                    thread_kwargs,
+                    disable_notification=disable_notification,
+                )
 
     async def _call_with_retry(self, fn, *args, **kwargs):
         """Call an async Telegram API function with retry on pool/network timeout."""
@@ -455,6 +462,8 @@ class TelegramChannel(BaseChannel):
         text: str,
         reply_params=None,
         thread_kwargs: dict | None = None,
+        *,
+        disable_notification: bool = False,
     ) -> None:
         """Send a plain text message with HTML fallback."""
         try:
@@ -463,6 +472,7 @@ class TelegramChannel(BaseChannel):
                 self._app.bot.send_message,
                 chat_id=chat_id, text=html, parse_mode="HTML",
                 reply_parameters=reply_params,
+                disable_notification=disable_notification,
                 **(thread_kwargs or {}),
             )
         except Exception as e:
@@ -473,6 +483,7 @@ class TelegramChannel(BaseChannel):
                     chat_id=chat_id,
                     text=text,
                     reply_parameters=reply_params,
+                    disable_notification=disable_notification,
                     **(thread_kwargs or {}),
                 )
             except Exception as e2:
