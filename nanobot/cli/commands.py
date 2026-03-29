@@ -271,7 +271,7 @@ def gateway(
     session_manager = SessionManager(config.workspace_path)
     
     # Create cron service first (callback set after agent creation)
-    cron_store_path = get_data_dir() / "cron" / "jobs.json"
+    cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
     
     # Create agent with cron service
@@ -440,7 +440,7 @@ def agent(
     provider = _make_provider(config)
 
     # Create cron service for tool usage (no callback needed for CLI unless running)
-    cron_store_path = get_data_dir() / "cron" / "jobs.json"
+    cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
     if logs:
@@ -782,16 +782,20 @@ def channels_login():
 cron_app = typer.Typer(help="Manage scheduled tasks")
 app.add_typer(cron_app, name="cron")
 
+_cron_config_option = typer.Option(None, "--config", help="Path to config file")
+
 
 @cron_app.command("list")
 def cron_list(
     all: bool = typer.Option(False, "--all", "-a", help="Include disabled jobs"),
+    config: str = _cron_config_option,
 ):
     """List scheduled jobs."""
-    from nanobot.config.loader import get_data_dir
+    from nanobot.config.loader import load_config
     from nanobot.cron.service import CronService
-    
-    store_path = get_data_dir() / "cron" / "jobs.json"
+
+    cfg = load_config(Path(config) if config else None)
+    store_path = cfg.workspace_path / "cron" / "jobs.json"
     service = CronService(store_path)
     
     jobs = service.list_jobs(include_disabled=all)
@@ -847,12 +851,13 @@ def cron_add(
     deliver: bool = typer.Option(False, "--deliver", "-d", help="Deliver response to channel"),
     to: str = typer.Option(None, "--to", help="Recipient for delivery"),
     channel: str = typer.Option(None, "--channel", help="Channel for delivery (e.g. 'telegram', 'whatsapp')"),
+    config: str = _cron_config_option,
 ):
     """Add a scheduled job."""
-    from nanobot.config.loader import get_data_dir
+    from nanobot.config.loader import load_config
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronSchedule
-    
+
     if tz and not cron_expr:
         console.print("[red]Error: --tz can only be used with --cron[/red]")
         raise typer.Exit(1)
@@ -869,8 +874,9 @@ def cron_add(
     else:
         console.print("[red]Error: Must specify --every, --cron, or --at[/red]")
         raise typer.Exit(1)
-    
-    store_path = get_data_dir() / "cron" / "jobs.json"
+
+    cfg = load_config(Path(config) if config else None)
+    store_path = cfg.workspace_path / "cron" / "jobs.json"
     service = CronService(store_path)
     
     try:
@@ -892,12 +898,14 @@ def cron_add(
 @cron_app.command("remove")
 def cron_remove(
     job_id: str = typer.Argument(..., help="Job ID to remove"),
+    config: str = _cron_config_option,
 ):
     """Remove a scheduled job."""
-    from nanobot.config.loader import get_data_dir
+    from nanobot.config.loader import load_config
     from nanobot.cron.service import CronService
-    
-    store_path = get_data_dir() / "cron" / "jobs.json"
+
+    cfg = load_config(Path(config) if config else None)
+    store_path = cfg.workspace_path / "cron" / "jobs.json"
     service = CronService(store_path)
     
     if service.remove_job(job_id):
@@ -910,12 +918,14 @@ def cron_remove(
 def cron_enable(
     job_id: str = typer.Argument(..., help="Job ID"),
     disable: bool = typer.Option(False, "--disable", help="Disable instead of enable"),
+    config: str = _cron_config_option,
 ):
     """Enable or disable a job."""
-    from nanobot.config.loader import get_data_dir
+    from nanobot.config.loader import load_config
     from nanobot.cron.service import CronService
-    
-    store_path = get_data_dir() / "cron" / "jobs.json"
+
+    cfg = load_config(Path(config) if config else None)
+    store_path = cfg.workspace_path / "cron" / "jobs.json"
     service = CronService(store_path)
     
     job = service.enable_job(job_id, enabled=not disable)
@@ -930,17 +940,18 @@ def cron_enable(
 def cron_run(
     job_id: str = typer.Argument(..., help="Job ID to run"),
     force: bool = typer.Option(False, "--force", "-f", help="Run even if disabled"),
+    config: str = _cron_config_option,
 ):
     """Manually run a job."""
     from loguru import logger
-    from nanobot.config.loader import load_config, get_data_dir
+    from nanobot.config.loader import load_config
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.bus.queue import MessageBus
     from nanobot.agent.loop import AgentLoop
     logger.disable("nanobot")
 
-    config = load_config()
+    config = load_config(Path(config) if config else None)
     provider = _make_provider(config)
     bus = MessageBus()
     agent_loop = AgentLoop(
@@ -963,7 +974,7 @@ def cron_run(
         model_router=config.agents.defaults.model_router,
     )
 
-    store_path = get_data_dir() / "cron" / "jobs.json"
+    store_path = config.workspace_path / "cron" / "jobs.json"
     service = CronService(store_path)
 
     result_holder = []
