@@ -619,8 +619,7 @@ class TelegramChannel(BaseChannel):
             "reply_to_message_id": getattr(reply_to, "message_id", None) if reply_to else None,
         }
 
-    @staticmethod
-    def _extract_reply_context(message) -> str | None:
+    async def _extract_reply_context(self, message) -> str | None:
         """Extract text from the message being replied to, if any."""
         reply = getattr(message, "reply_to_message", None)
         if not reply:
@@ -628,7 +627,21 @@ class TelegramChannel(BaseChannel):
         text = getattr(reply, "text", None) or getattr(reply, "caption", None) or ""
         if len(text) > TELEGRAM_REPLY_CONTEXT_MAX_LEN:
             text = text[:TELEGRAM_REPLY_CONTEXT_MAX_LEN] + "..."
-        return f"[Reply to: {text}]" if text else None
+            
+        if not text:
+            return None
+            
+        bot_id, _ = await self._ensure_bot_identity()
+        reply_user = getattr(reply, "from_user", None)
+        
+        if bot_id and reply_user and reply_user.id == bot_id:
+            return f"[Reply to bot: {text}]"
+        elif reply_user and reply_user.username:
+            return f"[Reply to @{reply_user.username}: {text}]"
+        elif reply_user and reply_user.first_name:
+            return f"[Reply to {reply_user.first_name}: {text}]"
+        else:
+            return f"[Reply to: {text}]"
 
     async def _download_message_media(
         self, msg, *, add_failure_content: bool = False
@@ -812,7 +825,7 @@ class TelegramChannel(BaseChannel):
         # Reply context: text and/or media from the replied-to message
         reply = getattr(message, "reply_to_message", None)
         if reply is not None:
-            reply_ctx = self._extract_reply_context(message)
+            reply_ctx = await self._extract_reply_context(message)
             reply_media, reply_media_parts = await self._download_message_media(reply)
             if reply_media:
                 media_paths = reply_media + media_paths
