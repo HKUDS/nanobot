@@ -169,10 +169,10 @@ async def test_group_policy_mention_accepts_mentioned_group_message():
 async def test_start_typing_sends_composing_true():
     """_start_typing should send composing=true to the bridge."""
     ch = _make_channel()
-    ch._start_typing("chat1@lid")
+    await ch._start_typing("chat1@lid")
     # Let the typing loop run once
     await asyncio.sleep(0.05)
-    ch._stop_typing("chat1@lid")
+    await ch._stop_typing("chat1@lid")
     await asyncio.sleep(0.05)
 
     payloads = _sent_payloads(ch)
@@ -186,7 +186,7 @@ async def test_send_clears_typing_indicator():
     """send() must send composing=false before the actual message."""
     ch = _make_channel()
     # Start typing as if an inbound message arrived
-    ch._start_typing("chat1@lid")
+    await ch._start_typing("chat1@lid")
     await asyncio.sleep(0.05)
 
     # Now send the response
@@ -219,8 +219,39 @@ async def test_send_paused_without_active_typing():
 async def test_typing_task_cancelled_on_stop():
     """_stop_typing should cancel the typing loop task."""
     ch = _make_channel()
-    ch._start_typing("chat1@lid")
+    await ch._start_typing("chat1@lid")
     assert "chat1@lid" in ch._typing_tasks
 
-    ch._stop_typing("chat1@lid")
+    await ch._stop_typing("chat1@lid")
     assert "chat1@lid" not in ch._typing_tasks
+
+
+@pytest.mark.asyncio
+async def test_typing_not_started_for_disallowed_sender():
+    """Typing indicator should NOT start for senders not in allow_from."""
+    bus = MagicMock()
+    ch = WhatsAppChannel({"enabled": True, "allow_from": ["99999"]}, bus)
+    ch._ws = AsyncMock()
+    ch._connected = True
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_bridge_message(
+        json.dumps({
+            "type": "message",
+            "id": "m1",
+            "sender": "other@lid",
+            "pn": "12345@s.whatsapp.net",
+            "content": "hello",
+            "timestamp": 1,
+        })
+    )
+
+    # Typing should NOT have been started for a disallowed sender
+    assert "other@lid" not in ch._typing_tasks
+    # No composing=true should have been sent
+    composing_calls = [
+        c for c in ch._ws.send.call_args_list
+        if "composing" in (c[0][0] if c[0] else "")
+        and '"composing": true' in (c[0][0] if c[0] else "")
+    ]
+    assert len(composing_calls) == 0

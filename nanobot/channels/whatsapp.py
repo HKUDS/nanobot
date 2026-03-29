@@ -133,28 +133,30 @@ class WhatsAppChannel(BaseChannel):
         self._connected = False
 
         for chat_id in list(self._typing_tasks):
-            self._stop_typing(chat_id)
+            await self._stop_typing(chat_id)
 
         if self._ws:
             await self._ws.close()
             self._ws = None
 
-    def _start_typing(self, chat_id: str) -> None:
-        self._stop_typing(chat_id)
+    async def _start_typing(self, chat_id: str) -> None:
+        await self._stop_typing(chat_id)
         self._typing_tasks[chat_id] = asyncio.create_task(self._typing_loop(chat_id))
 
-    def _stop_typing(self, chat_id: str) -> None:
+    async def _stop_typing(self, chat_id: str) -> None:
         task = self._typing_tasks.pop(chat_id, None)
         if task and not task.done():
             task.cancel()
-
-    async def _send_paused(self, chat_id: str) -> None:
-        """Send composing=false to clear the typing indicator."""
-        try:
-            if self._ws and self._connected:
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+        # Send explicit paused so WhatsApp clears the indicator
+        if self._ws and self._connected:
+            try:
                 await self._ws.send(json.dumps({"type": "typing", "to": chat_id, "composing": False}))
-        except Exception:
-            pass
+            except Exception:
+                pass
 
     async def _typing_loop(self, chat_id: str) -> None:
         """Send 'composing' presence every 10 seconds until cancelled."""
@@ -174,8 +176,7 @@ class WhatsAppChannel(BaseChannel):
             return
 
         chat_id = msg.chat_id
-        self._stop_typing(chat_id)
-        await self._send_paused(chat_id)
+        await self._stop_typing(chat_id)
 
         if msg.content and not msg.media:
             try:
@@ -256,7 +257,8 @@ class WhatsAppChannel(BaseChannel):
                     media_tag = f"[{media_type}: {p}]"
                     content = f"{content}\n{media_tag}" if content else media_tag
 
-            self._start_typing(sender)
+            if self.is_allowed(sender_id):
+                await self._start_typing(sender)
 
             await self._handle_message(
                 sender_id=sender_id,
