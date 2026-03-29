@@ -191,7 +191,7 @@ Should show `twilio_whatsapp` as enabled.
 
 ## Running with Docker
 
-The project includes `Dockerfile.twilio` and `docker-compose.twilio.yml` — a slim, pure-Python setup with no Node.js.
+The project includes a unified `Dockerfile` and `docker-compose.yml` with a `twilio` profile — a slim, pure-Python setup with no Node.js.
 
 ### 1\. Configure nanobot
 
@@ -200,13 +200,13 @@ Create or edit `~/.nanobot/config.json` on your host machine with the Twilio set
 ### 2\. Build and start
 
 ```
-docker compose -f docker-compose.twilio.yml up -d --build
+docker compose --profile twilio up -d --build
 ```
 
 Check the logs:
 
 ```
-docker compose -f docker-compose.twilio.yml logs -f
+docker compose --profile twilio logs -f
 ```
 
 You should see:
