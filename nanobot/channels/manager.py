@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from typing import Any
 
 from loguru import logger
@@ -12,7 +11,6 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
-from nanobot.providers.transcription import create_transcription_provider
 
 # Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
 _SEND_RETRY_DELAYS = (1, 2, 4)
@@ -40,21 +38,26 @@ class ChannelManager:
         """Initialize channels discovered via pkgutil scan + entry_points plugins."""
         from nanobot.channels.registry import discover_all
 
-        # Build transcription provider once; inject into any channel that handles voice.
-        t = self.config.providers.transcription
-        t_model = t.model or os.environ.get("VOICE_TRANSCRIPTION_MODEL") or self.config.agents.defaults.model
-        t_provider = None
-        if t_model:
-            # Simple model-to-provider routing
-            from nanobot.providers.registry import find_by_model
-            spec = find_by_model(t_model)
-            if spec:
-                cfg = getattr(self.config.providers, spec.name)
-                t_provider = spec.cls(
-                    api_key=t.api_key or cfg.api_key or "",
-                    api_base=cfg.api_base or spec.default_api_base or "",
-                    default_model=t_model,
-                )
+        groq_key = self.config.providers.groq.api_key
+
+        for name, cls in discover_all().items():
+            section = getattr(self.config.channels, name, None)
+            if section is None:
+                continue
+            enabled = (
+                section.get("enabled", False)
+                if isinstance(section, dict)
+                else getattr(section, "enabled", False)
+            )
+            if not enabled:
+                continue
+            try:
+                channel = cls(section, self.bus)
+                channel.transcription_api_key = groq_key
+                self.channels[name] = channel
+                logger.info("{} channel enabled", cls.display_name)
+            except Exception as e:
+                logger.warning("{} channel not available: {}", name, e)
 
         self._validate_allow_from()
 
