@@ -78,8 +78,8 @@ class HeartbeatService:
         self.on_notify = on_notify
         self.interval_s = interval_s
         self.enabled = enabled
-        last_run_tracking: bool = False,
-        timezone: str | None = None,
+        self.last_run_tracking = last_run_tracking
+        self.timezone = timezone
         self._running = False
         self._task: asyncio.Task | None = None
 

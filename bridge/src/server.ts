@@ -119,7 +119,6 @@ export class BridgeServer {
     } else if (cmd.type === 'typing') {
       await this.wa.sendTyping(cmd.to, cmd.composing);
     }
-    }
   }
 
   private broadcast(msg: BridgeMessage): void {

@@ -149,7 +149,7 @@ class WhatsAppChannel(BaseChannel):
         except Exception as e:
             logger.debug("WhatsApp typing indicator stopped for {}: {}", chat_id, e)
 
-        async def send(self, msg: OutboundMessage) -> None:
+    async def send(self, msg: OutboundMessage) -> None:
         """Send a message through WhatsApp."""
         if not self._ws or not self._connected:
             logger.warning("WhatsApp bridge not connected")

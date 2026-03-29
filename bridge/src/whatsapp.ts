@@ -333,7 +333,6 @@ export class WhatsAppClient {
       const name = fileName || basename(filePath);
       await this.sock.sendMessage(to, { document: buffer, mimetype, fileName: name });
     }
-    }
   }
 
   async disconnect(): Promise<void> {
