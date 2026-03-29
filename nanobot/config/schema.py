@@ -238,6 +238,7 @@ class TTSConfig(Base):
     # Fish Audio specific
     fish_api_key: str = ""
     fish_reference_id: str = ""
+    fish_speed: float = 1.2
 
 
 class Config(BaseSettings):

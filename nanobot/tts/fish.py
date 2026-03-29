@@ -15,10 +15,11 @@ FISH_API_BASE = "https://api.fish.audio"
 class FishTTSProvider(TTSProvider):
     """Fish Audio TTS — high-quality Chinese voice cloning."""
 
-    def __init__(self, api_key: str, reference_id: str, model: str = "s2-pro"):
+    def __init__(self, api_key: str, reference_id: str, model: str = "s2-pro", speed: float = 1.2):
         self.api_key = api_key
         self.reference_id = reference_id
         self.model = model
+        self.speed = speed
 
     async def synthesize(self, text: str, output_path: Path) -> Path:
         if not text or not text.strip():
@@ -37,6 +38,7 @@ class FishTTSProvider(TTSProvider):
                         "text": text,
                         "reference_id": self.reference_id,
                         "format": "mp3",
+                        "prosody": {"speed": self.speed},
                     },
                 )
 
