@@ -51,9 +51,19 @@ export class BridgeServer {
 
     // Handle WebSocket connections
     this.wss.on('connection', (ws) => {
+      ws.on('error', (error) => {
+        console.error('WebSocket client connection error:', error);
+        this.clients.delete(ws);
+      });
+
       if (this.token) {
         // Require auth handshake as first message
-        const timeout = setTimeout(() => ws.close(4001, 'Auth timeout'), 5000);
+        const timeout = setTimeout(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.close(4001, 'Auth timeout');
+          }
+        }, 5000);
+
         ws.once('message', (data) => {
           clearTimeout(timeout);
           try {
@@ -64,7 +74,8 @@ export class BridgeServer {
             } else {
               ws.close(4003, 'Invalid token');
             }
-          } catch {
+          } catch (error) {
+            console.error('Auth message parse error:', error);
             ws.close(4003, 'Invalid auth message');
           }
         });
@@ -75,7 +86,12 @@ export class BridgeServer {
     });
 
     // Connect to WhatsApp
-    await this.wa.connect();
+    try {
+      await this.wa.connect();
+    } catch (error) {
+      console.error('Failed to connect to WhatsApp:', error);
+      throw error;
+    }
   }
 
   private setupClient(ws: WebSocket): void {
