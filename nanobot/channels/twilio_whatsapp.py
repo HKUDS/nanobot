@@ -9,9 +9,9 @@ Install:  pip install nanobot-ai[twilio]
 
 from __future__ import annotations
 
+import asyncio
 import mimetypes
 import os
-import tempfile
 from typing import Any, Literal
 
 from loguru import logger
@@ -20,6 +20,7 @@ from pydantic import Field
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.utils.helpers import split_message
 
@@ -35,6 +36,8 @@ except ImportError:
 
 # Twilio WhatsApp body limit (1600 chars)
 TWILIO_MAX_MESSAGE_LEN = 1600
+# Default gateway port (matches GatewayConfig.port in config/schema.py)
+DEFAULT_GATEWAY_PORT = 18790
 
 
 class TwilioWhatsAppConfig(Base):
@@ -47,7 +50,8 @@ class TwilioWhatsAppConfig(Base):
     webhook_path: str = "/twilio/whatsapp"
     webhook_port: int = 0  # 0 = use gateway port (config.gateway.port)
     validate_signature: bool = False
-    allow_from: list[str] = Field(default_factory=list)  # ["whatsapp:+1234567890"] or ["*"]
+    public_url: str = ""  # e.g. "https://abcd.ngrok-free.app" — used to reconstruct the signed URL
+    allow_from: list[str] = Field(default_factory=list)  # ["+1234567890"] or ["*"]
     group_policy: Literal["open", "mention"] = "open"
 
 
@@ -79,6 +83,7 @@ class TwilioWhatsAppChannel(BaseChannel):
         self._auth_token: str = config.auth_token
         self._from_number: str = config.from_number
         self._validate_sig: bool = config.validate_signature
+        self._public_url: str = config.public_url.rstrip("/")
         self._webhook_path: str = config.webhook_path
         self._webhook_port: int = config.webhook_port
 
@@ -94,8 +99,6 @@ class TwilioWhatsAppChannel(BaseChannel):
 
     async def start(self) -> None:
         """Start an aiohttp server to receive Twilio webhooks."""
-        import asyncio
-
         from aiohttp import web
 
         app = web.Application()
@@ -105,27 +108,26 @@ class TwilioWhatsAppChannel(BaseChannel):
         self._runner = web.AppRunner(app)
         await self._runner.setup()
 
-        port = self._webhook_port or 18790
+        port = self._webhook_port or DEFAULT_GATEWAY_PORT
         site = web.TCPSite(self._runner, "0.0.0.0", port)
         await site.start()
 
         self._running = True
+        self._stop_event = asyncio.Event()
         logger.info(
             "Twilio WhatsApp webhook listening on :{}{}", port, self._webhook_path,
         )
 
-        # Block until stopped
-        while self._running:
-            await asyncio.sleep(1)
+        # Block until stop() is called
+        await self._stop_event.wait()
 
         await self._runner.cleanup()
+        self._runner = None
 
     async def stop(self) -> None:
         """Stop the channel."""
         self._running = False
-        if self._runner:
-            await self._runner.cleanup()
-            self._runner = None
+        self._stop_event.set()
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message via the Twilio REST API."""
@@ -137,26 +139,22 @@ class TwilioWhatsAppChannel(BaseChannel):
         # Send text (split if over Twilio limit)
         if msg.content:
             for chunk in split_message(msg.content, max_len=TWILIO_MAX_MESSAGE_LEN):
-                try:
-                    self._twilio.messages.create(
-                        from_=self._from_number,
-                        to=to,
-                        body=chunk,
-                    )
-                except Exception as e:
-                    logger.error("Twilio send error to {}: {}", to, e)
+                await asyncio.to_thread(
+                    self._twilio.messages.create,
+                    from_=self._from_number,
+                    to=to,
+                    body=chunk,
+                )
 
         # Send media (Twilio accepts publicly-accessible URLs)
         for media_path in msg.media or []:
             if media_path.startswith(("http://", "https://")):
-                try:
-                    self._twilio.messages.create(
-                        from_=self._from_number,
-                        to=to,
-                        media_url=[media_path],
-                    )
-                except Exception as e:
-                    logger.error("Twilio media send error: {}", e)
+                await asyncio.to_thread(
+                    self._twilio.messages.create,
+                    from_=self._from_number,
+                    to=to,
+                    media_url=[media_path],
+                )
             else:
                 logger.warning(
                     "Twilio WhatsApp cannot send local files directly ({}). "
@@ -177,7 +175,12 @@ class TwilioWhatsAppChannel(BaseChannel):
         # Signature validation
         if self._validator:
             signature = request.headers.get("X-Twilio-Signature", "")
-            url = str(request.url)
+            # Use public_url if configured (needed behind proxies/ngrok),
+            # otherwise fall back to the request URL as seen by the server.
+            if self._public_url:
+                url = self._public_url + request.path
+            else:
+                url = str(request.url)
             if not self._validator.validate(url, dict(form), signature):
                 logger.warning("Invalid Twilio signature — rejecting request")
                 return web.Response(status=403, text="Invalid signature")
@@ -188,7 +191,10 @@ class TwilioWhatsAppChannel(BaseChannel):
         profile_name = form.get("ProfileName", "")
 
         # Download media attachments
-        num_media = int(form.get("NumMedia", "0"))
+        try:
+            num_media = int(form.get("NumMedia", "0"))
+        except (ValueError, TypeError):
+            num_media = 0
         media_files: list[str] = []
         if num_media > 0:
             media_urls = [form.get(f"MediaUrl{i}", "") for i in range(num_media)]
@@ -238,8 +244,11 @@ class TwilioWhatsAppChannel(BaseChannel):
     # ------------------------------------------------------------------
 
     async def _download_media(self, media_urls: list[str]) -> list[str]:
-        """Download Twilio media attachments (requires Basic Auth) to temp files."""
+        """Download Twilio media attachments (requires Basic Auth) to media dir."""
         import httpx
+
+        media_dir = get_media_dir("twilio_whatsapp")
+        media_dir.mkdir(parents=True, exist_ok=True)
 
         paths: list[str] = []
         try:
@@ -258,11 +267,12 @@ class TwilioWhatsAppChannel(BaseChannel):
                         )
                         ext = mimetypes.guess_extension(content_type) or ".bin"
 
-                        fd, path = tempfile.mkstemp(suffix=ext, prefix="twilio_wa_")
-                        os.write(fd, resp.content)
-                        os.close(fd)
-                        paths.append(path)
-                        logger.debug("Downloaded media to {} ({})", path, content_type)
+                        # Use message SID from URL as a stable filename
+                        sid = url.rstrip("/").rsplit("/", 1)[-1]
+                        file_path = media_dir / f"{sid}{ext}"
+                        file_path.write_bytes(resp.content)
+                        paths.append(str(file_path))
+                        logger.debug("Downloaded media to {} ({})", file_path, content_type)
                     except Exception as e:
                         logger.error("Failed to download media {}: {}", url, e)
         except Exception as e:

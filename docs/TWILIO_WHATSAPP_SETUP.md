@@ -82,10 +82,11 @@ Edit `~/.nanobot/config.json` and set the `twilio_whatsapp` section:
 | `webhook_path` | `"/twilio/whatsapp"` | URL path for the incoming webhook |
 | `webhook_port` | `0` | Port for the webhook server. `0` uses the gateway port (default `18790`) |
 | `validate_signature` | `false` | Validate the `X-Twilio-Signature` header on incoming requests |
-| `allow_from` | `[]` | List of allowed sender numbers, or `["*"]` to allow all |
+| `public_url` | `""` | Public base URL (e.g. `https://abcd.ngrok-free.app`). Required for signature validation behind proxies/ngrok |
+| `allow_from` | `[]` | List of allowed sender phone numbers without the `whatsapp:` prefix (e.g. `["+14155238886"]`), or `["*"]` to allow all |
 | `group_policy` | `"open"` | `"open"` responds to all messages; `"mention"` only responds when the bot is @mentioned |
 
-> **Security note:** For production, set `validate_signature` to `true` and restrict `allow_from` to specific numbers instead of `["*"]`.
+> **Security note:** For production, set `validate_signature` to `true`, set `public_url` to your public-facing URL, and restrict `allow_from` to specific numbers instead of `["*"]`.
 
 ## 4. Start ngrok
 

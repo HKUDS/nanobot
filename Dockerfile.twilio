@@ -8,13 +8,13 @@ WORKDIR /app
 
 # Install Python dependencies first (cached layer)
 COPY pyproject.toml README.md LICENSE ./
-RUN mkdir -p nanobot && touch nanobot/__init__.py && \
+RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
     uv pip install --system --no-cache ".[twilio]" && \
-    rm -rf nanobot
+    rm -rf nanobot bridge
 
-# Copy the full source and install
+# Copy the full source and install (empty bridge/ satisfies hatch force-include)
 COPY nanobot/ nanobot/
-RUN uv pip install --system --no-cache ".[twilio]"
+RUN mkdir -p bridge && uv pip install --system --no-cache ".[twilio]"
 
 # Create config directory
 RUN mkdir -p /root/.nanobot
