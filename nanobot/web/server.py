@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request, HTTPException, Response
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -287,8 +287,12 @@ def register_api_routes(app: FastAPI):
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.post("/api/chat")
-    async def chat(request: Request):
-        """Send a message to the agent."""
+    async def chat(request: Request, stream: bool = False):
+        """Send a message to the agent.
+        
+        Args:
+            stream: If True, returns streaming SSE response. If False, returns complete response.
+        """
         await check_auth(request)
         try:
             data = await request.json()
@@ -298,17 +302,28 @@ def register_api_routes(app: FastAPI):
             if not message:
                 raise HTTPException(status_code=400, detail="Message is required")
 
-            response = await run_agent_message(
-                message, 
-                session_id, 
-                request.app.state.config_path
-            )
-            
-            return {
-                "success": True,
-                "response": response.content if response else "",
-                "metadata": response.metadata if response else {}
-            }
+            if stream:
+                return StreamingResponse(
+                    stream_agent_message(message, session_id, request.app.state.config_path),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "X-Accel-Buffering": "no",
+                        "Connection": "keep-alive",
+                    }
+                )
+            else:
+                response = await run_agent_message(
+                    message,
+                    session_id,
+                    request.app.state.config_path
+                )
+
+                return {
+                    "success": True,
+                    "response": response.content if response else "",
+                    "metadata": response.metadata if response else {}
+                }
         except HTTPException:
             raise
         except Exception as e:
@@ -319,9 +334,9 @@ def register_api_routes(app: FastAPI):
 
     @app.post("/api/chat/stream")
     async def chat_stream(request: Request):
-        """Stream a message to the agent using SSE."""
+        """Stream a message to the agent using SSE (deprecated, use /api/chat?stream=true)."""
         await check_auth(request)
-        
+
         data = await request.json()
         message = data.get("message", "")
         session_id = data.get("session_id", "web:default")
@@ -329,28 +344,15 @@ def register_api_routes(app: FastAPI):
         if not message:
             raise HTTPException(status_code=400, detail="Message is required")
 
-        try:
-            response = await run_agent_message(
-                message, 
-                session_id, 
-                request.app.state.config_path
-            )
-
-            return Response(
-                content=f"data: {json.dumps({'response': response.content if response else '', 'metadata': response.metadata if response else {}})}\n\ndata: [DONE]\n\n",
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "X-Accel-Buffering": "no",
-                }
-            )
-        except HTTPException:
-            raise
-        except Exception as e:
-            print(f"Error in /api/chat/stream: {e}")
-            import traceback
-            traceback.print_exc()
-            raise HTTPException(status_code=500, detail=str(e))
+        return StreamingResponse(
+            stream_agent_message(message, session_id, request.app.state.config_path),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            }
+        )
 
     # Health check endpoint (not authenticated for monitoring)
     @app.get("/health")
@@ -388,6 +390,97 @@ def register_auth_routes(app: FastAPI):
             return {"authenticated": True}
         else:
             raise HTTPException(status_code=401, detail="Invalid token")
+
+
+async def stream_agent_message(message: str, session_id: str, config_path: Path):
+    """Stream agent message processing with SSE."""
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.cron.service import CronService
+    from nanobot.cli.commands import _make_provider
+    import asyncio
+
+    config = load_config(config_path)
+    bus = MessageBus()
+    provider = _make_provider(config)
+
+    cron_store_path = config.workspace_path / "cron" / "jobs.json"
+    cron = CronService(cron_store_path)
+
+    agent_loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=config.workspace_path,
+        model=config.agents.defaults.model,
+        max_iterations=config.agents.defaults.max_tool_iterations,
+        context_window_tokens=config.agents.defaults.context_window_tokens,
+        web_search_config=config.tools.web.search,
+        web_proxy=config.tools.web.proxy or None,
+        exec_config=config.tools.exec,
+        cron_service=cron,
+        restrict_to_workspace=config.tools.restrict_to_workspace,
+        mcp_servers=config.tools.mcp_servers,
+        channels_config=config.channels,
+        timezone=config.agents.defaults.timezone,
+    )
+
+    accumulated_content = ""
+    metadata = {}
+
+    try:
+        stream_queue = asyncio.Queue()
+        
+        async def on_stream_cb(delta: str):
+            """Callback for streaming content chunks."""
+            await stream_queue.put(('content', delta))
+        
+        async def on_stream_end_cb(resuming: bool = False):
+            """Callback when streaming ends."""
+            await stream_queue.put(('stream_end', {'resuming': resuming}))
+        
+        async def run_agent():
+            """Run agent processing in background."""
+            nonlocal accumulated_content, metadata
+            try:
+                response = await agent_loop.process_direct(
+                    message,
+                    session_id,
+                    on_progress=lambda c, t=False: None,
+                    on_stream=on_stream_cb,
+                    on_stream_end=on_stream_end_cb,
+                )
+                if response:
+                    metadata['final_content'] = response.content
+                    metadata['metadata'] = getattr(response, 'metadata', {})
+                await stream_queue.put(('done', None))
+            except Exception as e:
+                await stream_queue.put(('error', str(e)))
+
+        # Start agent processing in background
+        agent_task = asyncio.create_task(run_agent())
+        
+        try:
+            while True:
+                event_type, data = await stream_queue.get()
+                
+                if event_type == 'content':
+                    accumulated_content += data
+                    yield f"data: {json.dumps({'type': 'content', 'content': data})}\n\n"
+                elif event_type == 'stream_end':
+                    yield f"data: {json.dumps({'type': 'stream_end', **data})}\n\n"
+                elif event_type == 'done':
+                    yield f"data: {json.dumps({'type': 'done', 'content': accumulated_content, 'metadata': metadata})}\n\n"
+                    yield "data: [DONE]\n\n"
+                    break
+                elif event_type == 'error':
+                    yield f"data: {json.dumps({'type': 'error', 'error': data})}\n\n"
+                    yield "data: [DONE]\n\n"
+                    break
+        finally:
+            await agent_task
+            
+    finally:
+        await agent_loop.close_mcp()
 
 
 async def run_agent_message(message: str, session_id: str, config_path: Path):
