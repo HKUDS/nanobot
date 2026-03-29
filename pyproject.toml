@@ -66,6 +66,7 @@ matrix = [
 ]
 memory = [
     "sqlite-vec>=0.1.0",
+    "watchdog>=3.0.0",
 ]
 langsmith = [
     "langsmith>=0.1.0",
