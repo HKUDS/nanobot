@@ -231,7 +231,7 @@ Added: 2026-03-09
 
 async def test_tick_notifies_when_evaluator_says_yes(tmp_path, monkeypatch) -> None:
     """Phase 1 run -> Phase 2 execute -> Phase 3 evaluate=notify -> on_notify called."""
-    (tmp_path / "HEARTBEAT.md").write_text("- [ ] check deployments", encoding="utf-8")tests/agent/test_heartbeat_service.py
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] check deployments", encoding="utf-8")
 
     provider = DummyProvider([
         LLMResponse(
@@ -254,7 +254,7 @@ async def test_tick_notifies_when_evaluator_says_yes(tmp_path, monkeypatch) -> N
         return "deployment failed on staging"
 
     async def _on_notify(response: str) -> None:
-        notified.append(response)tests/agent/test_heartbeat_service.py
+        notified.append(response)
 
     service = HeartbeatService(
         workspace=tmp_path,
@@ -317,7 +317,7 @@ async def test_tick_suppresses_when_evaluator_says_no(tmp_path, monkeypatch) -> 
 
     await service._tick()
     assert executed == ["check status"]
-    assert notified == []tests/agent/test_heartbeat_service.py
+    assert notified == []
 
 
 @pytest.mark.asyncio
@@ -740,4 +740,3 @@ async def test_decide_prompt_includes_current_time(tmp_path) -> None:
     user_msg = captured_messages[1]
     assert user_msg["role"] == "user"
     assert "Current Time:" in user_msg["content"]
-tests/agent/test_heartbeat_service.py

@@ -263,19 +263,17 @@ class HeartbeatService:
         except (KeyError, Exception):
             tz = None
         now = datetime.now(tz=tz) if tz else datetime.now().astimezone()
-        now_str = current_time_str(self.timezone)
-        last_run_instruction = ""
-        if self.last_run_tracking:
-            computed = self._compute_task_statuses(content, now)
-            if computed:
-                last_run_instruction = computed + "\n"
-            else:
-                today_str = now.strftime("%Y-%m-%d")
-                last_run_instruction = (
-                    f"It is currently {now.strftime('%A')}. If a task's 'Last-run' field matches today ({today_str}), "
-                    "that specific task already ran today — skip it. Other tasks are unaffected. "
-                )
 
+        if self.last_run_tracking:
+            due = self._compute_due_tasks(content, now.replace(tzinfo=None))
+            if not due:
+                return "skip", ""
+            summary = ", ".join(f"{t.name} ({t.task_type})" for t in due)
+            logger.debug("Heartbeat: {} due task(s) — {}", len(due), summary)
+            return "run", summary
+
+        # LLM fallback when last_run_tracking is disabled
+        now_str = current_time_str(self.timezone)
         response = await self.provider.chat_with_retry(
             messages=[
                 {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
@@ -283,8 +281,7 @@ class HeartbeatService:
                     f"Current Time: {now_str}\n\n"
                     "Review the following HEARTBEAT.md and decide whether there are tasks DUE NOW "
                     "(scheduled date/time has already passed or is within the next 5 minutes). "
-                    "Tasks scheduled for a future date are NOT due — choose 'skip' for those. "
-                    f"{last_run_instruction}\n\n"
+                    "Tasks scheduled for a future date are NOT due — choose 'skip' for those. \n\n"
                     f"{content}"
                 )},
             ],
