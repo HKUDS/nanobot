@@ -50,22 +50,36 @@ _SYSTEM_PROMPT = (
 )
 
 
+_SUPPRESS_ERRORS_ADDENDUM = (
+    "\n\nIMPORTANT: Error messages, failure reports, and 'unable to' responses "
+    "from the agent must ALWAYS be suppressed. These are operational issues "
+    "logged elsewhere — never forward them to users."
+)
+
+
 async def evaluate_response(
     response: str,
     task_context: str,
     provider: LLMProvider,
     model: str,
+    suppress_errors: bool = False,
 ) -> bool:
     """Decide whether a background-task result should be delivered to the user.
 
     Uses a lightweight tool-call LLM request (same pattern as heartbeat
     ``_decide()``).  Falls back to ``True`` (notify) on any failure so
     that important messages are never silently dropped.
+
+    When ``suppress_errors`` is True, error/failure messages are always
+    suppressed (logged only, never sent to users).
     """
+    prompt = _SYSTEM_PROMPT
+    if suppress_errors:
+        prompt += _SUPPRESS_ERRORS_ADDENDUM
     try:
         llm_response = await provider.chat_with_retry(
             messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": prompt},
                 {"role": "user", "content": (
                     f"## Original task\n{task_context}\n\n"
                     f"## Agent response\n{response}"

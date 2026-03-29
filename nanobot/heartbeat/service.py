@@ -70,6 +70,7 @@ class HeartbeatService:
         enabled: bool = True,
         last_run_tracking: bool = False,
         timezone: str | None = None,
+        suppress_errors: bool = False,
     ):
         self.workspace = workspace
         self.provider = provider
@@ -80,6 +81,7 @@ class HeartbeatService:
         self.enabled = enabled
         self.last_run_tracking = last_run_tracking
         self.timezone = timezone
+        self.suppress_errors = suppress_errors
         self._running = False
         self._task: asyncio.Task | None = None
 
@@ -352,6 +354,7 @@ class HeartbeatService:
                 if response:
                     should_notify = await evaluate_response(
                         response, tasks, self.provider, self.model,
+                        suppress_errors=self.suppress_errors,
                     )
                     if should_notify and self.on_notify:
                         logger.info("Heartbeat: completed, delivering response")

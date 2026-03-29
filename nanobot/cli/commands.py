@@ -663,6 +663,7 @@ def gateway(
         enabled=hb_cfg.enabled,
         last_run_tracking=hb_cfg.last_run_tracking,
         timezone=config.agents.defaults.timezone,
+        suppress_errors=hb_cfg.suppress_errors,
     )
 
     if channels.enabled_channels:

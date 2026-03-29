@@ -105,6 +105,7 @@ class HeartbeatConfig(Base):
     send_reasoning: bool = False  # Auto-deliver full agent response; when False only explicit message tool calls reach the user
     last_run_tracking: bool = False  # When True, Phase 1 skips tasks whose Last-run field matches today (requires agent to write Last-run after executing each task)
     keep_recent_messages: int = 8
+    suppress_errors: bool = False  # When True, error/failure messages from heartbeat are silenced (logged only, never sent to users)
 
 
 class GatewayConfig(Base):
