@@ -239,6 +239,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Gemini",
         backend="openai_compat",
         default_api_base="https://generativelanguage.googleapis.com/v1beta/openai/",
+        strip_model_prefix=True,
     ),
     # Zhipu (智谱): OpenAI-compatible at open.bigmodel.cn
     ProviderSpec(
