@@ -169,7 +169,7 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-Auth-Token': localStorage.getItem('nanobot_token') || ''
+                        'X-Auth-Token': api.getToken() || ''
                     },
                     body: JSON.stringify({ message: message, session_id: sessionId }),
                     signal: signal
