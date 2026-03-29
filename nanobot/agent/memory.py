@@ -137,22 +137,29 @@ class MemoryStore:
 
         try:
             forced = {"type": "function", "function": {"name": "save_memory"}}
-            response = await provider.chat_with_retry(
-                messages=chat_messages,
-                tools=_SAVE_MEMORY_TOOL,
-                model=model,
-                tool_choice=forced,
+            # Global HTTP timeout protection: 120s timeout with RAW archive fallback
+            response = await asyncio.wait_for(
+                provider.chat_with_retry(
+                    messages=chat_messages,
+                    tools=_SAVE_MEMORY_TOOL,
+                    model=model,
+                    tool_choice=forced,
+                ),
+                timeout=120.0
             )
 
             if response.finish_reason == "error" and _is_tool_choice_unsupported(
                 response.content
             ):
                 logger.warning("Forced tool_choice unsupported, retrying with auto")
-                response = await provider.chat_with_retry(
-                    messages=chat_messages,
-                    tools=_SAVE_MEMORY_TOOL,
-                    model=model,
-                    tool_choice="auto",
+                response = await asyncio.wait_for(
+                    provider.chat_with_retry(
+                        messages=chat_messages,
+                        tools=_SAVE_MEMORY_TOOL,
+                        model=model,
+                        tool_choice="auto",
+                    ),
+                    timeout=120.0
                 )
 
             if not response.has_tool_calls:
@@ -194,6 +201,12 @@ class MemoryStore:
             self._consecutive_failures = 0
             logger.info("Memory consolidation done for {} messages", len(messages))
             return True
+        except asyncio.TimeoutError:
+            # Force RAW archive on HTTP timeout to prevent session blocking
+            logger.warning("Memory consolidation timeout (120s), forcing raw archive")
+            self._raw_archive(messages)
+            self._consecutive_failures = 0
+            return True  # Return True to indicate handled (degraded to RAW archive)
         except Exception:
             logger.exception("Memory consolidation failed")
             return self._fail_or_raw_archive(messages)
