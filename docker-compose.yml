@@ -1,18 +1,43 @@
-x-common-config: &common-config
+x-common: &common
   build:
     context: .
     dockerfile: Dockerfile
   volumes:
     - ~/.nanobot:/root/.nanobot
+  command: ["gateway"]
+  restart: unless-stopped
+  ports:
+    - 18790:18790
 
 services:
+  # Slim: Twilio only (no Node.js)
+  nanobot-twilio:
+    <<: *common
+    profiles:
+      - twilio
+    build:
+      context: .
+      args:
+        EXTRAS: twilio
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Full: all channels + WhatsApp bridge
   nanobot-gateway:
-    container_name: nanobot-gateway
-    <<: *common-config
-    command: ["gateway"]
-    restart: unless-stopped
-    ports:
-      - 18790:18790
+    <<: *common
+    profiles:
+      - gateway
+    build:
+      context: .
+      args:
+        INSTALL_NODE: "true"
+        INSTALL_BRIDGE: "true"
     deploy:
       resources:
         limits:
@@ -21,9 +46,13 @@ services:
         reservations:
           cpus: '0.25'
           memory: 256M
-  
+
+  # CLI (interactive)
   nanobot-cli:
-    <<: *common-config
+    build:
+      context: .
+    volumes:
+      - ~/.nanobot:/root/.nanobot
     profiles:
       - cli
     command: ["status"]
