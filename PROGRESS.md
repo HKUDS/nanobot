@@ -190,3 +190,23 @@
 - Remaining blockers / follow-up:
   - The worker can launch, but nanobot still does not poll pane output or synthesize progress from live tmux output yet, so feature `#20` is the next integration gap
   - Telegram `继续` still updates persisted state only; it does not yet invoke the live worker launcher
+
+## Session update - 2026-03-29 (features #20, #21, #22, #23, #24)
+- Completed features:
+  - Added asynchronous pane polling that captures tmux output via `asyncio.to_thread`, which is ready to be called from gateway/background loops without blocking the event loop
+  - Added persisted progress refresh so newly observed pane output updates each coding task's `last_progress_summary` and timestamp without forcing a status transition
+  - Added `PROGRESS.md` summarization that extracts the newest session note for reporting
+  - Added `PLAN.json` summarization that counts completed versus remaining features
+  - Added combined live reporting that synthesizes harness files plus current pane output, and surfaced that report through the CLI `coding-task status` path
+- Verification:
+  - `.venv/bin/pytest tests/coding_tasks/test_progress.py tests/coding_tasks/test_worker.py tests/coding_tasks/test_harness.py tests/coding_tasks/test_manager.py` -> passed (15 tests)
+  - `.venv/bin/pytest tests/cli/test_commands.py -k "coding_task_status_shows_details_and_recent_events or coding_task_run_launches_tmux_worker or coding_task_create_persists_task or coding_task_create_rejects_missing_repo or coding_task_list_shows_status_and_recoverability or test_coding_task_cancel_updates_status_and_reason or test_coding_task_resume_moves_failed_task_back_to_starting"` -> passed (7 selected tests)
+  - `.venv/bin/pytest tests/agent/test_coding_task_routing.py tests/coding_tasks/test_router.py` -> passed (11 tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks nanobot/cli/commands.py tests/coding_tasks/test_progress.py` -> passed
+- Key decisions:
+  - Keep pane polling and summarization in a separate `progress` module so later gateway recovery and Telegram reporting can reuse the same report builder
+  - Update task progress summaries via a dedicated manager method instead of overloading `mark_running`, which keeps lifecycle transitions distinct from reporting refreshes
+  - Surface the synthesized report first in the CLI status command, since that is the narrowest existing reporting path and gives us an immediate verification surface
+- Remaining blockers / follow-up:
+  - Gateway restart recovery is not implemented yet, so feature `#25` is the next gap before long-lived tasks survive nanobot restarts cleanly
+  - Telegram `继续` / `停止` still do not drive the live tmux worker session itself; they only update persisted task state today

@@ -792,6 +792,8 @@ def coding_task_status(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Show detailed status for one coding task."""
+    from nanobot.coding_tasks import CodexProgressMonitor, CodexWorkerLauncher
+
     config_obj = _load_runtime_config(config, workspace)
     store, manager = _load_coding_task_runtime(config_obj)
     task = store.get_task(task_id)
@@ -811,6 +813,10 @@ def coding_task_status(
     console.print(f"Harness state: {task.harness_state}")
     console.print(f"Recoverable: {recoverable}")
     console.print(f"Last progress: {task.last_progress_summary or '-'}")
+    monitor = CodexProgressMonitor(manager, CodexWorkerLauncher(config_obj.workspace_path, manager))
+    report = monitor.build_task_report(task.id)
+    if report.summary:
+        console.print(f"Live report: {report.summary}")
 
     events = store.read_run_events(task.id, limit=5)
     if not events:

@@ -217,7 +217,7 @@
       "Invoke the pane polling logic while the task continues running.",
       "Verify nanobot retrieves recent output without freezing cron, heartbeat, or chat handling."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 21,
@@ -228,7 +228,7 @@
       "Verify the task's last progress summary changes to reflect the new work.",
       "Confirm the progress timestamp updates at the same time."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 22,
@@ -239,7 +239,7 @@
       "Run the progress summarizer against that repo.",
       "Verify the latest session note appears in the coding task report."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 23,
@@ -250,7 +250,7 @@
       "Run the summarizer against that repo.",
       "Verify the resulting report includes accurate completed and remaining counts."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 24,
@@ -261,7 +261,7 @@
       "Request task status through the reporting path.",
       "Verify the response includes what was completed, what is in progress, and the next blocker or next step."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 25,

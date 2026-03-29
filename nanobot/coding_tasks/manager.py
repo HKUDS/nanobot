@@ -129,6 +129,27 @@ class CodexWorkerManager:
         )
         return updated
 
+    def update_progress(self, task_id: str, summary: str) -> CodingTask:
+        """Refresh the last visible progress summary without changing status."""
+        task = self.require_task(task_id)
+        timestamp = now_ms()
+        updated = replace(
+            task,
+            last_progress_summary=summary,
+            last_progress_at_ms=timestamp,
+            updated_at_ms=timestamp,
+        )
+        self.store.upsert_task(updated)
+        self.store.append_run_event(
+            CodingRunEvent(
+                task_id=task_id,
+                event="progress_updated",
+                status=updated.status,
+                message=summary,
+            )
+        )
+        return updated
+
     def mark_starting(
         self,
         task_id: str,

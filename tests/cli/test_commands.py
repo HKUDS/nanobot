@@ -1136,6 +1136,18 @@ def test_coding_task_status_shows_details_and_recent_events(monkeypatch, tmp_pat
 
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands._load_coding_task_runtime", lambda _config: (store, manager))
+
+    class _FakeLauncher:
+        def __init__(self, workspace_path, worker_manager):
+            assert workspace_path == workspace
+            assert worker_manager is manager
+
+        def capture_pane(self, session: str) -> str:
+            assert session == task.tmux_session
+            return "Running pytest tests/coding_tasks\n"
+
+    monkeypatch.setattr("nanobot.coding_tasks.CodexWorkerLauncher", _FakeLauncher)
 
     result = runner.invoke(app, ["coding-task", "status", task.id, "--config", str(config_file)])
 
@@ -1147,6 +1159,7 @@ def test_coding_task_status_shows_details_and_recent_events(monkeypatch, tmp_pat
     assert "Goal: Inspect" in output
     assert "Recoverable: yes" in output
     assert "Last progress: Working" in output
+    assert "Live report:" in output
     assert "Recent events:" in output
     assert "created" in output
     assert "status_changed" in output
