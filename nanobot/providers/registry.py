@@ -259,6 +259,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
     ),
+    # DashScope Coding Plan (通义灵码): dedicated coding endpoint
+    ProviderSpec(
+        name="dashscope_coding_plan",
+        keywords=("dashscope-coding-plan", "dashscope_coding_plan"),
+        env_key="DASHSCOPE_API_KEY",
+        display_name="DashScope Coding Plan",
+        backend="openai_compat",
+        detect_by_base_keyword="coding.dashscope",
+        default_api_base="https://coding.dashscope.aliyuncs.com/v1",
+    ),
     # Moonshot (月之暗面): Kimi models. K2.5 enforces temperature >= 1.0.
     ProviderSpec(
         name="moonshot",
@@ -353,3 +363,17 @@ def find_by_name(name: str) -> ProviderSpec | None:
         if spec.name == normalized:
             return spec
     return None
+
+
+def resolve_provider_name(name: str | None, api_base: str | None = None) -> str | None:
+    """Resolve provider aliases that depend on configured endpoint details."""
+    if name != "dashscope" or not api_base:
+        return name
+
+    lowered = api_base.lower()
+    if (
+        "coding.dashscope.aliyuncs.com" in lowered
+        or "coding-intl.dashscope.aliyuncs.com" in lowered
+    ):
+        return "dashscope_coding_plan"
+    return name

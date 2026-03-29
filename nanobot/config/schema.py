@@ -70,6 +70,7 @@ class ProvidersConfig(Base):
     groq: ProviderConfig = Field(default_factory=ProviderConfig)
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
     dashscope: ProviderConfig = Field(default_factory=ProviderConfig)
+    dashscope_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # DashScope Coding Plan
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     ollama: ProviderConfig = Field(default_factory=ProviderConfig)  # Ollama local models
     ovms: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenVINO Model Server (OVMS)
@@ -168,14 +169,15 @@ class Config(BaseSettings):
         self, model: str | None = None
     ) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
-        from nanobot.providers.registry import PROVIDERS, find_by_name
+        from nanobot.providers.registry import PROVIDERS, find_by_name, resolve_provider_name
 
         forced = self.agents.defaults.provider
         if forced != "auto":
             spec = find_by_name(forced)
             if spec:
                 p = getattr(self.providers, spec.name, None)
-                return (p, spec.name) if p else (None, None)
+                resolved_name = resolve_provider_name(spec.name, p.api_base if p else None)
+                return (p, resolved_name) if p else (None, None)
             return None, None
 
         model_lower = (model or self.agents.defaults.model).lower()
@@ -192,14 +194,14 @@ class Config(BaseSettings):
             p = getattr(self.providers, spec.name, None)
             if p and model_prefix and normalized_prefix == spec.name:
                 if spec.is_oauth or spec.is_local or p.api_key:
-                    return p, spec.name
+                    return p, resolve_provider_name(spec.name, p.api_base)
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
                 if spec.is_oauth or spec.is_local or p.api_key:
-                    return p, spec.name
+                    return p, resolve_provider_name(spec.name, p.api_base)
 
         # Fallback: configured local providers can route models without
         # provider-specific keywords (for example plain "llama3.2" on Ollama).
@@ -226,7 +228,7 @@ class Config(BaseSettings):
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and p.api_key:
-                return p, spec.name
+                return p, resolve_provider_name(spec.name, p.api_base)
         return None, None
 
     def get_provider(self, model: str | None = None) -> ProviderConfig | None:
@@ -245,17 +247,26 @@ class Config(BaseSettings):
         return p.api_key if p else None
 
     def get_api_base(self, model: str | None = None) -> str | None:
-        """Get API base URL for the given model. Applies default URLs for gateway/local providers."""
+        """Get API base URL for the given model.
+
+        Gateways/local providers always expose their default base URLs here.
+        Some dedicated coding endpoints also need a stable default base URL so
+        CLI tests, onboarding, and explicit provider selection can surface the
+        resolved endpoint before provider construction.
+        """
         from nanobot.providers.registry import find_by_name
 
         p, name = self._match_provider(model)
         if p and p.api_base:
             return p.api_base
-        # Only gateways get a default api_base here. Standard providers
-        # resolve their base URL from the registry in the provider constructor.
+        # Most standard providers resolve their base URL in the provider
+        # constructor, but dedicated coding endpoints should still surface
+        # their defaults here when explicitly selected.
         if name:
             spec = find_by_name(name)
-            if spec and (spec.is_gateway or spec.is_local) and spec.default_api_base:
+            if spec and spec.default_api_base and (
+                spec.is_gateway or spec.is_local or spec.detect_by_base_keyword
+            ):
                 return spec.default_api_base
         return None
 

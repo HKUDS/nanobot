@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from nanobot.providers.base import ToolCallRequest
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.registry import find_by_name
 
@@ -171,6 +172,45 @@ async def test_standard_provider_passes_model_through() -> None:
 
     call_kwargs = mock_create.call_args.kwargs
     assert call_kwargs["model"] == "deepseek-chat"
+
+
+@pytest.mark.asyncio
+async def test_dashscope_coding_plan_uses_coding_base_url_and_keeps_model_name() -> None:
+    mock_create = AsyncMock(return_value=_fake_chat_response())
+    spec = find_by_name("dashscope_coding_plan")
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+        client_instance = MockClient.return_value
+        client_instance.chat.completions.create = mock_create
+
+        provider = OpenAICompatProvider(
+            api_key="sk-dashscope-test-key",
+            api_base="https://coding.dashscope.aliyuncs.com/v1",
+            default_model="qwen3-coder-plus",
+            spec=spec,
+        )
+        await provider.chat(
+            messages=[{"role": "user", "content": "hello"}],
+            model="qwen3-coder-plus",
+        )
+
+    init_kwargs = MockClient.call_args.kwargs
+    assert init_kwargs["base_url"] == "https://coding.dashscope.aliyuncs.com/v1"
+    call_kwargs = mock_create.call_args.kwargs
+    assert call_kwargs["model"] == "qwen3-coder-plus"
+
+
+def test_tool_call_replay_serializes_function_arguments_as_json_text() -> None:
+    tool_call = ToolCallRequest(
+        id="call_123",
+        name="write_file",
+        arguments={"path": "hello.py", "content": "print('hi')"},
+    )
+
+    payload = tool_call.to_openai_tool_call()
+
+    assert isinstance(payload["function"]["arguments"], str)
+    assert payload["function"]["arguments"] == '{"path": "hello.py", "content": "print(\'hi\')"}'
 
 
 @pytest.mark.asyncio
