@@ -15,8 +15,10 @@ interface SendCommand {
 interface SendMediaCommand {
   type: 'send_media';
   to: string;
-  path: string;
+  filePath: string;
+  mimetype: string;
   caption?: string;
+  fileName?: string;
 }
 
 interface TypingCommand {
@@ -24,6 +26,8 @@ interface TypingCommand {
   to: string;
   composing: boolean;
 }
+
+type BridgeCommand = SendCommand | SendMediaCommand | TypingCommand;
 
 interface BridgeMessage {
   type: 'message' | 'status' | 'qr' | 'error';
@@ -85,7 +89,7 @@ export class BridgeServer {
 
     ws.on('message', async (data) => {
       try {
-        const cmd = JSON.parse(data.toString()) as SendCommand;
+        const cmd = JSON.parse(data.toString()) as BridgeCommand;
         await this.handleCommand(cmd);
         ws.send(JSON.stringify({ type: 'sent', to: cmd.to }));
       } catch (error) {
@@ -105,12 +109,14 @@ export class BridgeServer {
     });
   }
 
-  private async handleCommand(cmd: SendCommand | SendMediaCommand | TypingCommand): Promise<void> {
-    if (cmd.type === 'send' && this.wa) {
+  private async handleCommand(cmd: BridgeCommand): Promise<void> {
+    if (!this.wa) return;
+
+    if (cmd.type === 'send') {
       await this.wa.sendMessage(cmd.to, cmd.text);
-    } else if (cmd.type === 'send_media' && this.wa) {
-      await this.wa.sendMediaMessage(cmd.to, cmd.path, cmd.caption);
-    } else if (cmd.type === 'typing' && this.wa) {
+    } else if (cmd.type === 'send_media') {
+      await this.wa.sendMedia(cmd.to, cmd.filePath, cmd.mimetype, cmd.caption, cmd.fileName);
+    } else if (cmd.type === 'typing') {
       await this.wa.sendTyping(cmd.to, cmd.composing);
     }
   }

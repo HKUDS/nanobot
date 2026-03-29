@@ -4,9 +4,15 @@ import asyncio
 import base64
 import json
 import mimetypes
+import os
+import shutil
+import subprocess
 from collections import OrderedDict
+from pathlib import Path
+from typing import Any, Literal
 
 from loguru import logger
+from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -24,6 +30,7 @@ class WhatsAppChannel(BaseChannel):
     """
 
     name = "whatsapp"
+    display_name = "WhatsApp"
 
     def __init__(
         self,
@@ -38,6 +45,37 @@ class WhatsAppChannel(BaseChannel):
         self._connected = False
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
         self._typing_tasks: dict[str, asyncio.Task] = {}
+
+    async def login(self, force: bool = False) -> bool:
+        """
+        Set up and run the WhatsApp bridge for QR code login.
+
+        This spawns the Node.js bridge process which handles the WhatsApp
+        authentication flow. The process blocks until the user scans the QR code
+        or interrupts with Ctrl+C.
+        """
+        from nanobot.config.paths import get_runtime_subdir
+
+        try:
+            bridge_dir = _ensure_bridge_setup()
+        except RuntimeError as e:
+            logger.error("{}", e)
+            return False
+
+        env = {**os.environ}
+        if self.config.bridge_token:
+            env["BRIDGE_TOKEN"] = self.config.bridge_token
+        env["AUTH_DIR"] = str(get_runtime_subdir("whatsapp-auth"))
+
+        logger.info("Starting WhatsApp bridge for QR login...")
+        try:
+            subprocess.run(
+                [shutil.which("npm"), "start"], cwd=bridge_dir, check=True, env=env
+            )
+        except subprocess.CalledProcessError:
+            return False
+
+        return True
 
     async def start(self) -> None:
         """Start the WhatsApp channel by connecting to the bridge."""
@@ -55,7 +93,9 @@ class WhatsAppChannel(BaseChannel):
                     self._ws = ws
                     # Send auth token if configured
                     if self.config.bridge_token:
-                        await ws.send(json.dumps({"type": "auth", "token": self.config.bridge_token}))
+                        await ws.send(
+                            json.dumps({"type": "auth", "token": self.config.bridge_token})
+                        )
                     self._connected = True
                     logger.info("Connected to WhatsApp bridge")
 
@@ -115,27 +155,33 @@ class WhatsAppChannel(BaseChannel):
             logger.warning("WhatsApp bridge not connected")
             return
 
-        self._stop_typing(msg.chat_id)
+        chat_id = msg.chat_id
+        self._stop_typing(chat_id)
 
-        try:
-            if msg.media:
-                for media_path in msg.media:
-                    payload = {
-                        "type": "send_media",
-                        "to": msg.chat_id,
-                        "path": media_path,
-                        "caption": msg.content or "",
-                    }
-                    await self._ws.send(json.dumps(payload, ensure_ascii=False))
-            else:
-                payload = {
-                    "type": "send",
-                    "to": msg.chat_id,
-                    "text": msg.content
-                }
+        if msg.content and not msg.media:
+            try:
+                payload = {"type": "send", "to": chat_id, "text": msg.content}
                 await self._ws.send(json.dumps(payload, ensure_ascii=False))
-        except Exception as e:
-            logger.error("Error sending WhatsApp message: {}", e)
+            except Exception as e:
+                logger.error("Error sending WhatsApp message: {}", e)
+                raise
+
+        for i, media_path in enumerate(msg.media or []):
+            try:
+                mime, _ = mimetypes.guess_type(media_path)
+                payload = {
+                    "type": "send_media",
+                    "to": chat_id,
+                    "filePath": media_path,
+                    "mimetype": mime or "application/octet-stream",
+                    "fileName": media_path.rsplit("/", 1)[-1],
+                }
+                if i == 0 and msg.content:
+                    payload["caption"] = msg.content
+                await self._ws.send(json.dumps(payload, ensure_ascii=False))
+            except Exception as e:
+                logger.error("Error sending WhatsApp media {}: {}", media_path, e)
+                raise
 
     async def _handle_bridge_message(self, raw: str) -> None:
         """Handle a message from the bridge."""
@@ -164,6 +210,13 @@ class WhatsAppChannel(BaseChannel):
                     self._processed_message_ids.popitem(last=False)
 
             # Extract just the phone number or lid as chat_id
+            is_group = data.get("isGroup", False)
+            was_mentioned = data.get("wasMentioned", False)
+
+            if is_group and getattr(self.config, "group_policy", "open") == "mention":
+                if not was_mentioned:
+                    return
+
             user_id = pn if pn else sender
             sender_id = user_id.split("@")[0] if "@" in user_id else user_id
             logger.info("Sender {}", sender)
@@ -194,8 +247,8 @@ class WhatsAppChannel(BaseChannel):
                 metadata={
                     "message_id": message_id,
                     "timestamp": data.get("timestamp"),
-                    "is_group": data.get("isGroup", False)
-                }
+                    "is_group": data.get("isGroup", False),
+                },
             )
 
         elif msg_type == "status":

@@ -16,7 +16,8 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_runtime_subdir
-from nanobot.config.schema import MochatConfig
+from nanobot.config.schema import Base
+from pydantic import Field
 
 try:
     import socketio
@@ -209,6 +210,49 @@ def parse_timestamp(value: Any) -> int | None:
 
 
 # ---------------------------------------------------------------------------
+# Config classes
+# ---------------------------------------------------------------------------
+
+class MochatMentionConfig(Base):
+    """Mochat mention behavior configuration."""
+
+    require_in_groups: bool = False
+
+
+class MochatGroupRule(Base):
+    """Mochat per-group mention requirement."""
+
+    require_mention: bool = False
+
+
+class MochatConfig(Base):
+    """Mochat channel configuration."""
+
+    enabled: bool = False
+    base_url: str = "https://mochat.io"
+    socket_url: str = ""
+    socket_path: str = "/socket.io"
+    socket_disable_msgpack: bool = False
+    socket_reconnect_delay_ms: int = 1000
+    socket_max_reconnect_delay_ms: int = 10000
+    socket_connect_timeout_ms: int = 10000
+    refresh_interval_ms: int = 30000
+    watch_timeout_ms: int = 25000
+    watch_limit: int = 100
+    retry_delay_ms: int = 500
+    max_retry_attempts: int = 0
+    claw_token: str = ""
+    agent_user_id: str = ""
+    sessions: list[str] = Field(default_factory=list)
+    panels: list[str] = Field(default_factory=list)
+    allow_from: list[str] = Field(default_factory=list)
+    mention: MochatMentionConfig = Field(default_factory=MochatMentionConfig)
+    groups: dict[str, MochatGroupRule] = Field(default_factory=dict)
+    reply_delay_mode: str = "non-mention"
+    reply_delay_ms: int = 120000
+
+
+# ---------------------------------------------------------------------------
 # Channel
 # ---------------------------------------------------------------------------
 
@@ -216,8 +260,15 @@ class MochatChannel(BaseChannel):
     """Mochat channel using socket.io with fallback polling workers."""
 
     name = "mochat"
+    display_name = "Mochat"
 
-    def __init__(self, config: MochatConfig, bus: MessageBus):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return MochatConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = MochatConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: MochatConfig = config
         self._http: httpx.AsyncClient | None = None
@@ -323,6 +374,7 @@ class MochatChannel(BaseChannel):
                                      content, msg.reply_to)
         except Exception as e:
             logger.error("Failed to send Mochat message: {}", e)
+            raise
 
     # ---- config / init helpers ---------------------------------------------
 

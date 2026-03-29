@@ -69,6 +69,7 @@ class HeartbeatService:
         interval_s: int = 30 * 60,
         enabled: bool = True,
         last_run_tracking: bool = False,
+        timezone: str | None = None,
     ):
         self.workspace = workspace
         self.provider = provider
@@ -78,6 +79,7 @@ class HeartbeatService:
         self.interval_s = interval_s
         self.enabled = enabled
         self.last_run_tracking = last_run_tracking
+        self.timezone = timezone
         self._running = False
         self._task: asyncio.Task | None = None
 
@@ -174,26 +176,35 @@ class HeartbeatService:
 
         Returns (action, tasks) where action is 'skip' or 'run'.
         """
-        now = datetime.now()
-
+        from nanobot.utils.helpers import current_time_str
+        from zoneinfo import ZoneInfo
+        try:
+            tz = ZoneInfo(self.timezone) if self.timezone else None
+        except (KeyError, Exception):
+            tz = None
+        now = datetime.now(tz=tz) if tz else datetime.now().astimezone()
+        now_str = current_time_str(self.timezone)
+        last_run_instruction = ""
         if self.last_run_tracking:
-            due = self._compute_due_tasks(content, now)
-            if not due:
-                return "skip", ""
-            summary = ", ".join(f"{t.name} ({t.task_type})" for t in due)
-            logger.debug("Heartbeat: {} due task(s) — {}", len(due), summary)
-            return "run", summary
+            computed = self._compute_task_statuses(content, now)
+            if computed:
+                last_run_instruction = computed + "\n"
+            else:
+                today_str = now.strftime("%Y-%m-%d")
+                last_run_instruction = (
+                    f"It is currently {now.strftime('%A')}. If a task's 'Last-run' field matches today ({today_str}), "
+                    "that specific task already ran today — skip it. Other tasks are unaffected. "
+                )
 
-        # LLM fallback when last_run_tracking is disabled
-        now_str = now.strftime("%Y-%m-%d %H:%M")
         response = await self.provider.chat_with_retry(
             messages=[
                 {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
                 {"role": "user", "content": (
-                    f"Current date/time: {now_str}\n\n"
+                    f"Current Time: {now_str}\n\n"
                     "Review the following HEARTBEAT.md and decide whether there are tasks DUE NOW "
                     "(scheduled date/time has already passed or is within the next 5 minutes). "
-                    "Tasks scheduled for a future date are NOT due — choose 'skip' for those. \n\n"
+                    "Tasks scheduled for a future date are NOT due — choose 'skip' for those. "
+                    f"{last_run_instruction}\n\n"
                     f"{content}"
                 )},
             ],
@@ -241,6 +252,8 @@ class HeartbeatService:
 
     async def _tick(self) -> None:
         """Execute a single heartbeat tick."""
+        from nanobot.utils.evaluator import evaluate_response
+
         content = self._read_heartbeat_file()
         if not content:
             logger.debug("Heartbeat: HEARTBEAT.md missing or empty")
@@ -258,9 +271,16 @@ class HeartbeatService:
             logger.info("Heartbeat: tasks found, executing...")
             if self.on_execute:
                 response = await self.on_execute(tasks)
-                if response and self.on_notify:
-                    logger.info("Heartbeat: completed, delivering response")
-                    await self.on_notify(response)
+
+                if response:
+                    should_notify = await evaluate_response(
+                        response, tasks, self.provider, self.model,
+                    )
+                    if should_notify and self.on_notify:
+                        logger.info("Heartbeat: completed, delivering response")
+                        await self.on_notify(response)
+                    else:
+                        logger.info("Heartbeat: silenced by post-run evaluation")
         except Exception:
             logger.exception("Heartbeat execution failed")
 
