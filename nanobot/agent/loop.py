@@ -66,6 +66,7 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         web_fetch_config: Any | None = None,
         max_tokens_per_turn: int = 0,
+        model_router: Any | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -84,6 +85,7 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
         self.web_fetch_config = web_fetch_config
         self.max_tokens_per_turn = max_tokens_per_turn
+        self.model_router = model_router
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -195,6 +197,55 @@ class AgentLoop:
                 return tc.name
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
+
+    _CLASSIFY_TOOL = [
+        {
+            "type": "function",
+            "function": {
+                "name": "classify",
+                "description": "Classify the user request complexity.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "complexity": {
+                            "type": "string",
+                            "enum": ["simple", "complex"],
+                            "description": "simple = greeting, short question, acknowledgement, casual chat. complex = analysis, multi-step reasoning, research, writing, summarisation, anything requiring tool use.",
+                        },
+                    },
+                    "required": ["complexity"],
+                },
+            },
+        }
+    ]
+
+    async def _classify_request(self, message: str) -> str:
+        """Classify a user message as simple or complex using a cheap model.
+
+        Returns 'simple' or 'complex'. Defaults to 'complex' on any error.
+        """
+        try:
+            response = await self.provider.chat(
+                messages=[
+                    {"role": "system", "content": (
+                        "Classify the user's message. Call the classify tool. "
+                        "Default to complex if uncertain."
+                    )},
+                    {"role": "user", "content": message},
+                ],
+                tools=self._CLASSIFY_TOOL,
+                model=self.model_router.classifier_model,
+            )
+            if response.has_tool_calls:
+                args = response.tool_calls[0].arguments
+                complexity = args.get("complexity", "complex")
+                logger.info("Model router: classified as '{}' → {}", complexity,
+                            self.model_router.simple_model if complexity == "simple"
+                            else self.model_router.complex_model)
+                return complexity
+        except Exception:
+            logger.warning("Model router: classification failed, defaulting to complex")
+        return "complex"
 
     async def _run_agent_loop(
         self,
@@ -451,6 +502,13 @@ class AgentLoop:
         if (wf := self.tools.get("web_fetch")) and isinstance(wf, WebFetchTool):
             wf.add_user_urls(msg.content)
 
+        # Model routing: classify and select model for this turn
+        original_model = self.model
+        if self.model_router and self.model_router.enabled:
+            complexity = await self._classify_request(msg.content)
+            self.model = (self.model_router.simple_model if complexity == "simple"
+                          else self.model_router.complex_model)
+
         history = session.get_history(max_messages=self.memory_window)
         meta = msg.metadata or {}
         sender_name = meta.get("first_name") or meta.get("username")
@@ -470,25 +528,28 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
-        )
+        try:
+            final_content, _, all_msgs = await self._run_agent_loop(
+                initial_messages, on_progress=on_progress or _bus_progress,
+            )
 
-        if final_content is None:
-            final_content = "I've completed processing but have no response to give."
+            if final_content is None:
+                final_content = "I've completed processing but have no response to give."
 
-        self._save_turn(session, all_msgs, 1 + len(history))
-        self.sessions.save(session)
+            self._save_turn(session, all_msgs, 1 + len(history))
+            self.sessions.save(session)
 
-        if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
-            return None
+            if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
+                return None
 
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
-        return OutboundMessage(
-            channel=msg.channel, chat_id=msg.chat_id, content=final_content,
-            metadata=msg.metadata or {},
-        )
+            preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
+            logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id, content=final_content,
+                metadata=msg.metadata or {},
+            )
+        finally:
+            self.model = original_model
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""

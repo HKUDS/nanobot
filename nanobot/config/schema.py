@@ -216,6 +216,15 @@ class ChannelsConfig(Base):
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
 
 
+class ModelRouterConfig(Base):
+    """Model routing configuration — classify requests and route to cheap/expensive model."""
+
+    enabled: bool = False
+    classifier_model: str = "anthropic/claude-haiku-4-5"  # Cheap model for classification
+    simple_model: str = "anthropic/claude-haiku-4-5"  # Model for simple requests
+    complex_model: str = "anthropic/claude-sonnet-4-6"  # Model for complex requests
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -228,6 +237,7 @@ class AgentDefaults(Base):
     memory_window: int = 100
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
     max_tokens_per_turn: int = 0  # 0 = unlimited; hard cap on total tokens per message turn
+    model_router: ModelRouterConfig = Field(default_factory=ModelRouterConfig)
 
 
 class AgentsConfig(Base):
