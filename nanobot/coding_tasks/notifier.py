@@ -8,7 +8,7 @@ from pathlib import Path
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.coding_tasks.manager import CodexWorkerManager
-from nanobot.coding_tasks.progress import TaskProgressReport, build_notification_progress
+from nanobot.coding_tasks.progress import TaskProgressReport
 from nanobot.coding_tasks.reporting import (
     build_completion_report,
     build_failure_report,
@@ -66,23 +66,22 @@ class CodingTaskNotifier:
             return build_failure_report(task)
         if task.status == "waiting_user":
             return build_waiting_user_report(task)
-        return self._build_progress_notification(task, report)
-
-    def _build_progress_notification(self, task, report: TaskProgressReport) -> str:
-        progress = build_notification_progress(report, last_progress_summary=task.last_progress_summary)
-        if not progress:
+        if task.status == "starting":
+            return self._build_start_notification(task)
+        if task.status == "running":
             return ""
+        return ""
+
+    def _build_start_notification(self, task) -> str:
         repo_name = Path(task.repo_path).name or task.repo_path
-        goal = _truncate_line(task.goal, limit=48)
-        status_label = "启动中" if task.status == "starting" else "进行中"
+        goal = _truncate_line(task.goal, limit=64)
         return "\n".join(
             [
-                f"编程任务{status_label} · {repo_name}",
+                f"已开始编程任务 · {repo_name}",
+                f"任务ID: {task.id}",
                 f"目标: {goal}",
-                f"进展: {progress}",
             ]
         )
-
 
 def _truncate_line(text: str, *, limit: int) -> str:
     compact = " ".join(text.split())

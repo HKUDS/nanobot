@@ -196,13 +196,12 @@ async def test_private_telegram_start_coding_waits_for_confirmation_when_repo_ha
     )
 
     assert response is not None
-    assert "仓库里已有已完成的 harness" in response.content
-    assert "历史摘要: Finish the prior plan" in response.content
+    assert "已创建并启动编程任务" in response.content
     tasks = store.list_tasks()
     assert len(tasks) == 1
-    assert launcher.launched_ids == []
-    assert tasks[0].status == "waiting_user"
-    assert tasks[0].metadata["harness_conflict_reason"] == "repo_completed_harness"
+    assert launcher.launched_ids == [tasks[0].id]
+    assert tasks[0].status == "starting"
+    assert tasks[0].metadata.get("harness_conflict_reason") is None
 
 
 @pytest.mark.asyncio
@@ -354,6 +353,28 @@ async def test_private_telegram_status_routes_to_latest_origin_task(tmp_path: Pa
     assert "状态: running" in response.content
     assert "最近进展: 正在修改登录逻辑" in response.content
     assert "可恢复: yes" in response.content
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_slash_coding_status_routes_to_latest_origin_task(tmp_path: Path) -> None:
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
+    _manager, task = _create_origin_task(store, tmp_path, status="running", summary="正在修改登录逻辑")
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="/coding status",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert "当前编程任务状态" in response.content
+    assert f"任务ID: {task.id}" in response.content
+    assert "状态: running" in response.content
+    assert "最近进展: 正在修改登录逻辑" in response.content
 
 
 @pytest.mark.asyncio

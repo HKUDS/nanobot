@@ -18,6 +18,7 @@ from nanobot.coding_tasks.worker import CodexWorkerLauncher
 
 _START_PREFIX = "开始编程"
 _SLASH_START_PATTERN = re.compile(r"^/coding(?:@[A-Za-z0-9_]+)?(?:\s|$)")
+_SLASH_STATUS_PATTERN = re.compile(r"^/coding(?:@[A-Za-z0-9_]+)?\s+status\s*$", re.IGNORECASE)
 _STATUS_COMMANDS = {"状态"}
 _RESUME_COMMANDS = {"继续"}
 _RESUME_EXISTING_COMMANDS = {"继续旧任务"}
@@ -51,6 +52,11 @@ def is_explicit_coding_entry(text: str) -> bool:
     """Return True when a message explicitly enters coding-task mode."""
     body = text.strip()
     return body.startswith(_START_PREFIX) or _SLASH_START_PATTERN.match(body) is not None
+
+
+def is_coding_status_request(text: str) -> bool:
+    """Return True when a message explicitly asks for coding-task status."""
+    return _SLASH_STATUS_PATTERN.match(text.strip()) is not None
 
 
 def is_start_coding_request(text: str) -> bool:
@@ -206,6 +212,8 @@ def _make_start_coding_handler(
             return None
         if msg.metadata.get("is_group", True):
             return None
+        if is_coding_status_request(ctx.raw):
+            return None
         if not is_explicit_coding_entry(ctx.raw):
             return None
         if not detect_coding_task_intent(ctx.raw, repo_resolver=resolver):
@@ -268,17 +276,9 @@ def _make_start_coding_handler(
                 "message_id": msg.metadata.get("message_id"),
             },
         )
-        if harness.harness_state in {"active", "completed"}:
-            conflict_reason = (
-                _COMPLETED_HARNESS_CONFLICT_REASON
-                if harness.harness_state == "completed"
-                else _ACTIVE_HARNESS_CONFLICT_REASON
-            )
-            waiting_summary = (
-                "仓库里已有已完成的 harness，可作为历史上下文参考，等待你确认沿用旧上下文还是按新任务开始。"
-                if conflict_reason == _COMPLETED_HARNESS_CONFLICT_REASON
-                else "仓库里已有未完成的 harness，等待你确认继续旧任务还是按新任务开始。"
-            )
+        if harness.harness_state == "active":
+            conflict_reason = _ACTIVE_HARNESS_CONFLICT_REASON
+            waiting_summary = "仓库里已有未完成的 harness，等待你确认继续旧任务还是按新任务开始。"
             task = manager.update_metadata(
                 task.id,
                 updates={
@@ -368,7 +368,8 @@ def _make_control_handler(
             return None
 
         command = ctx.raw.strip()
-        if command not in _STATUS_COMMANDS | _RESUME_COMMANDS | _RESUME_EXISTING_COMMANDS | _START_NEW_GOAL_COMMANDS | _CANCEL_COMMANDS | _STOP_COMMANDS:
+        is_status_request = command in _STATUS_COMMANDS or is_coding_status_request(command)
+        if not is_status_request and command not in _RESUME_COMMANDS | _RESUME_EXISTING_COMMANDS | _START_NEW_GOAL_COMMANDS | _CANCEL_COMMANDS | _STOP_COMMANDS:
             return None
 
         task = policy.select_control_task(msg.channel, msg.chat_id)
@@ -392,7 +393,7 @@ def _make_control_handler(
                 metadata={"render_as": "text"},
             )
 
-        if command in _STATUS_COMMANDS:
+        if is_status_request:
             report = monitor.build_task_report(task.id) if monitor else None
             return OutboundMessage(
                 channel=msg.channel,

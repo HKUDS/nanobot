@@ -8,7 +8,7 @@
       "Open PROGRESS.md and verify the reboot entry records the three target changes: completed-harness direct launch, `/coding status`, and push-notification suppression.",
       "Confirm the scope remains limited to nanobot orchestration and Telegram behavior, without changing the target repo harness format or Codex worker execution model."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 2,
@@ -19,7 +19,7 @@
       "Verify the task goes directly to `starting` instead of `waiting_user` and that no `repo_completed_harness` conflict metadata is written.",
       "Confirm an active unfinished harness still follows the explicit confirmation path before launch."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 3,
@@ -30,7 +30,7 @@
       "Verify `/coding status` does not create a new coding task or get parsed as repo `status`.",
       "Verify `/coding ...` with a real repo name still creates and launches a task as before."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 4,
@@ -41,7 +41,7 @@
       "Advance a task to `running` and verify notifier sends no new progress push from poll-loop updates alone.",
       "Verify `waiting_user`, `completed`, and `failed` continue to emit their dedicated notifications."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 5,
@@ -52,7 +52,7 @@
       "Send Telegram `状态` and `/coding status` for the same task and verify both return the detailed diagnostic view.",
       "Confirm the notification policy change only affects background push behavior, not explicit status inspection."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 6,
@@ -63,7 +63,7 @@
       "Verify tests cover the completed-harness direct-launch path, `/coding status` lookup, and suppression of running-task pushes.",
       "Confirm `python -m compileall` still succeeds for the touched coding-task modules and tests."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 7,
@@ -74,6 +74,6 @@
       "Open PROGRESS.md and verify it records the baseline, implementation decisions, and verification evidence for this harness task.",
       "Confirm PLAN.json is fully marked complete after the implementation and verification pass."
     ],
-    "passes": false
+    "passes": true
   }
 ]

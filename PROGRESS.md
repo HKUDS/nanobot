@@ -13,6 +13,21 @@
   - Add `/coding status` as a Telegram-only status alias while preserving the existing Chinese `状态` command for backward compatibility.
   - Treat `waiting_user` as a must-notify lifecycle event even under the reduced push policy, because it requires the user to act.
 
+## Session update - 2026-03-29 (coding-task behavior convergence)
+- Completed features:
+  - Changed Telegram coding-task routing so repos with completed harnesses now launch new tasks immediately, while unfinished harnesses still require the explicit `继续旧任务 / 按新任务开始` confirmation path.
+  - Added `/coding status` as a Telegram status alias that reuses the same detailed task view as the existing Chinese `状态` command instead of being parsed as a repo name.
+  - Tightened notifier policy so Telegram only gets lifecycle pushes for `starting`, `waiting_user`, `completed`, and `failed`; `running` progress now stays query-only behind `状态` and `/coding status`.
+  - Updated Telegram help text and README examples to document `/coding status`, the direct-launch behavior for completed harnesses, and the new push-notification policy.
+- Verification:
+  - `.venv/bin/pytest tests/agent/test_coding_task_routing.py tests/coding_tasks/test_notifier.py` -> passed (26 tests)
+  - `.venv/bin/pytest tests/cli/test_commands.py -k "coding_task_status_shows_details_and_recent_events or coding_task_status_reads_report_without_persisting_metadata"` -> passed (2 selected tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks nanobot/channels/telegram.py tests/agent/test_coding_task_routing.py tests/coding_tasks/test_notifier.py` -> passed
+  - `.venv/bin/python` local smoke -> passed: a repo with a fully completed harness launched directly from `/coding ...`, and `/coding status` returned the detailed status payload for the same task without writing a new task
+- Remaining blockers / follow-up:
+  - `bash ~/.codex/scripts/global-init.sh` still reports the existing repo-wide pytest warning from `/tmp/nanobot-harness-pytest.log`; this harness did not expand into that unrelated baseline cleanup
+  - Gateway health was down at session start, but this task's validation stayed at focused test and local runtime-smoke level rather than reconfiguring the live Telegram gateway
+
 ## Harness initialized - 2026-03-28
 - Project type: Python CLI / gateway application (`pyproject.toml`, `nanobot gateway`, pytest)
 - Features planned: 52

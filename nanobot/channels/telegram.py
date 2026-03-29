@@ -588,7 +588,7 @@ class TelegramChannel(BaseChannel):
         await update.message.reply_text(
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
-            "/coding — Start a coding task\n"
+            "/coding — Start a coding task (`/coding status` shows coding progress)\n"
             "/stop — Stop the current task\n"
             "/restart — Restart the bot\n"
             "/status — Show bot status\n"

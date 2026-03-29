@@ -117,7 +117,7 @@ The user-visible control flow is:
    The worker now starts inside a workspace-scoped private tmux socket and an isolated `/bin/sh` environment, so it does not inherit the user's interactive zsh or global Codex shell noise.
 3. Codex restores or initializes the target repo harness before editing.
 4. nanobot polls tmux output and harness files to build status summaries.
-5. Telegram controls such as `状态`, `继续`, `停止`, and `取消` act on the same tracked coding task instead of creating duplicate work.
+5. Telegram controls such as `状态`, `/coding status`, `继续`, `停止`, and `取消` act on the same tracked coding task instead of creating duplicate work.
 
 Telegram start commands now use explicit entry words plus natural slot extraction. They accept both explicit paths and lightweight repo aliases, for example:
 
@@ -126,12 +126,14 @@ Telegram start commands now use explicit entry words plus natural slot extractio
 - `开始编程 codex-remote 设置 icon 换一个`
 - `/coding codex-remote 的 设置 icon 换一个`
 - `/coding codex-remote 设置 icon 换一个`
+- `/coding status`
 
 Repo resolution is alias-first:
 
 - If `gateway.codingTaskRepos` defines an alias, nanobot uses that absolute path first.
 - Otherwise nanobot falls back to `~/Documents/<repo>`.
-- If the target repo already has an in-repo harness, nanobot now pauses before launch and distinguishes between unfinished work and completed historical context before asking you to choose between `继续旧任务` and `按新任务开始`.
+- If the target repo already has an unfinished in-repo harness, nanobot pauses before launch and asks you to choose between `继续旧任务` and `按新任务开始`.
+- If the target repo only has a completed harness, nanobot treats it as historical context and launches the new task directly.
 
 Example config:
 
@@ -145,13 +147,20 @@ Example config:
 }
 ```
 
-Conflict confirmation example:
+Conflict confirmation example for unfinished harnesses:
 
 - `开始编程 codex-remote 底部设置icon换个新的`
 - nanobot replies with the current harness summary and waits for:
   - `继续旧任务`
   - `按新任务开始`
-  - `取消`
+- `取消`
+
+Telegram push policy is now lifecycle-oriented:
+
+- `starting` sends one start message
+- `waiting_user` sends one confirmation-needed message
+- `completed` and `failed` still send their dedicated reports
+- `running` progress is no longer pushed continuously; use `状态` or `/coding status` for detailed live progress
 
 Internally, the coding-task orchestration now has a dedicated composition root:
 
