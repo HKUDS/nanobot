@@ -102,15 +102,19 @@ class DiscordChannel(BaseChannel):
             logger.warning("Discord HTTP client not initialized")
             return
 
-        # TTS: generate audio if triggered
+        # TTS: generate audio and send as voice message (skip text)
         if self._tts_service and msg.content and not msg.metadata.get("_progress"):
             session_tts = msg.metadata.get("_session_tts", False)
             if self._tts_service.should_trigger(session_tts=session_tts):
                 audio_path = await self._tts_service.synthesize(msg.content)
                 if audio_path:
-                    if not msg.media:
-                        msg.media = []
-                    msg.media.append(str(audio_path))
+                    ogg_path = await self._convert_to_ogg(audio_path)
+                    if ogg_path:
+                        url = f"{DISCORD_API_BASE}/channels/{msg.chat_id}/messages"
+                        headers = {"Authorization": f"Bot {self.config.token}"}
+                        await self._send_voice_message(url, headers, ogg_path, reply_to=msg.reply_to)
+                        await self._stop_typing(msg.chat_id)
+                        return  # Voice message sent, skip text
 
         url = f"{DISCORD_API_BASE}/channels/{msg.chat_id}/messages"
         headers = {"Authorization": f"Bot {self.config.token}"}
@@ -215,6 +219,59 @@ class DiscordChannel(BaseChannel):
             except Exception as e:
                 if attempt == 2:
                     logger.error("Error sending Discord file {}: {}", path.name, e)
+                else:
+                    await asyncio.sleep(1)
+        return False
+
+    @staticmethod
+    async def _convert_to_ogg(mp3_path: Path) -> Path | None:
+        """Convert audio file to ogg/opus for Discord voice messages."""
+        ogg_path = mp3_path.with_suffix(".ogg")
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-y", "-i", str(mp3_path),
+                "-c:a", "libopus", "-b:a", "64k", "-ar", "48000", "-ac", "1",
+                str(ogg_path),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+            if proc.returncode == 0 and ogg_path.exists():
+                return ogg_path
+            logger.error("ffmpeg conversion failed (code {})", proc.returncode)
+            return None
+        except Exception as e:
+            logger.error("Audio conversion error: {}", e)
+            return None
+
+    async def _send_voice_message(
+        self, url: str, headers: dict[str, str], ogg_path: Path, reply_to: str | None = None,
+    ) -> bool:
+        """Send an audio file as a Discord voice message."""
+        VOICE_MESSAGE_FLAG = 1 << 13  # IS_VOICE_MESSAGE
+
+        payload_json: dict[str, Any] = {"flags": VOICE_MESSAGE_FLAG}
+        if reply_to:
+            payload_json["message_reference"] = {"message_id": reply_to}
+            payload_json["allowed_mentions"] = {"replied_user": False}
+
+        for attempt in range(3):
+            try:
+                with open(ogg_path, "rb") as f:
+                    files = {"files[0]": ("voice-message.ogg", f, "audio/ogg")}
+                    data: dict[str, Any] = {"payload_json": json.dumps(payload_json)}
+                    response = await self._http.post(url, headers=headers, files=files, data=data)
+                if response.status_code == 429:
+                    resp_data = response.json()
+                    retry_after = float(resp_data.get("retry_after", 1.0))
+                    await asyncio.sleep(retry_after)
+                    continue
+                response.raise_for_status()
+                logger.info("Discord voice message sent: {}", ogg_path.name)
+                return True
+            except Exception as e:
+                if attempt == 2:
+                    logger.error("Error sending voice message: {}", e)
                 else:
                     await asyncio.sleep(1)
         return False
