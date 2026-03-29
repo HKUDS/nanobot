@@ -23,6 +23,11 @@ def test_create_task_assigns_tmux_session_and_logs_creation(tmp_path) -> None:
     assert events[0].event == "created"
     assert events[0].status == "queued"
 
+    reloaded = store.get_task(task.id)
+    assert reloaded is not None
+    assert reloaded.id == task.id
+    assert reloaded.tmux_session == task.tmux_session
+
 
 def test_lifecycle_transitions_update_task_and_recoverable_view(tmp_path) -> None:
     store = CodingTaskStore(tmp_path / "automation" / "coding" / "tasks.json")

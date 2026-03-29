@@ -61,3 +61,14 @@
 - Remaining blockers / follow-up:
   - Full-repo pytest is still red because `tests/test_repo_sync_service.py` imports missing `nanobot.repo_sync.service`
   - The next feature should move from startup visibility into user control, most likely by adding CLI creation/listing commands or Telegram command routing for coding tasks
+
+## Session update - 2026-03-29 (feature #3)
+- Completed feature:
+  - Locked down coding-task id and default tmux session stability by extending the manager test to verify the stored task reloads with the same session name
+- Verification:
+  - `.venv/bin/pytest tests/coding_tasks/test_manager.py tests/coding_tasks/test_store.py` -> passed (6 tests)
+- Key decisions:
+  - Keep `feature #3` deliberately narrow and verification-driven instead of reshaping the naming scheme before real Codex launch exists
+  - Use store reload as the proof point because restart/recovery will consume persisted task state rather than in-memory objects
+- Remaining blockers / follow-up:
+  - The next highest-value feature is now `#4` or `#5`: a real user-facing way to create and inspect coding tasks through the active CLI/runtime path

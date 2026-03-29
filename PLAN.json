@@ -30,7 +30,7 @@
       "Verify the generated tmux session name includes the repo basename and task id in a shell-safe format.",
       "Confirm reloading the stored task preserves the same session name rather than deriving a new one."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 4,
