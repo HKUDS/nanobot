@@ -194,6 +194,90 @@ class TestRepeatedStrategyDetection:
         assert result is not None
         assert result.severity == "override"
 
+    def test_mixed_type_args_no_crash(self) -> None:
+        """Real tool arguments have mixed types (str, int, None, list, dict)."""
+        from nanobot.agent.turn_guardrails import RepeatedStrategyDetection
+
+        g = RepeatedStrategyDetection()
+        real_args = {
+            "command": 'obsidian search query="DS10540"',
+            "working_dir": None,
+            "timeout": 60,
+        }
+        attempts = [
+            _attempt(tool="exec", args=real_args),
+            _attempt(tool="exec", args=real_args),
+            _attempt(tool="exec", args=real_args),
+        ]
+        result = g.check(attempts, [attempts[-1]])
+        assert result is not None
+        assert result.severity == "override"
+
+    def test_nested_dict_args_no_crash(self) -> None:
+        """Tool arguments may contain nested dicts and lists."""
+        from nanobot.agent.turn_guardrails import RepeatedStrategyDetection
+
+        g = RepeatedStrategyDetection()
+        nested_args = {
+            "options": {"recursive": True, "depth": 3},
+            "tags": ["urgent", "bug"],
+            "path": "/foo",
+        }
+        attempts = [
+            _attempt(tool="exec", args=nested_args),
+            _attempt(tool="exec", args=nested_args),
+            _attempt(tool="exec", args=nested_args),
+        ]
+        result = g.check(attempts, [attempts[-1]])
+        assert result is not None
+
+    def test_empty_args(self) -> None:
+        from nanobot.agent.turn_guardrails import RepeatedStrategyDetection
+
+        g = RepeatedStrategyDetection()
+        attempts = [
+            _attempt(tool="list_dir", args={}),
+            _attempt(tool="list_dir", args={}),
+            _attempt(tool="list_dir", args={}),
+        ]
+        result = g.check(attempts, [attempts[-1]])
+        assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# _canonical_args
+# ---------------------------------------------------------------------------
+
+
+class TestCanonicalArgs:
+    def test_deterministic_key_order(self) -> None:
+        from nanobot.agent.turn_guardrails import _canonical_args
+
+        a = {"z": 1, "a": 2}
+        b = {"a": 2, "z": 1}
+        assert _canonical_args(a) == _canonical_args(b)
+
+    def test_mixed_types(self) -> None:
+        from nanobot.agent.turn_guardrails import _canonical_args
+
+        args = {"command": "obsidian search", "working_dir": None, "timeout": 60}
+        result = _canonical_args(args)
+        assert isinstance(result, str)
+        assert "null" in result  # None -> null in JSON
+
+    def test_nested_structures(self) -> None:
+        from nanobot.agent.turn_guardrails import _canonical_args
+
+        args = {"options": {"recursive": True}, "tags": ["a", "b"]}
+        result = _canonical_args(args)
+        assert "recursive" in result
+        assert '["a", "b"]' in result
+
+    def test_empty_dict(self) -> None:
+        from nanobot.agent.turn_guardrails import _canonical_args
+
+        assert _canonical_args({}) == "{}"
+
 
 # ---------------------------------------------------------------------------
 # SkillTunnelVision

@@ -26,7 +26,7 @@ if [ -z "$NEW_STRING" ]; then
 fi
 
 if echo "$NEW_STRING" | grep -qE '(__version__|^version[[:space:]]*=)'; then
-  echo "{\"systemMessage\": \"WARNING: You are editing a version string. python-semantic-release manages versions automatically. Do not manually edit __version__ or pyproject.toml version fields.\"}"
+  echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "WARNING: You are editing a version string. python-semantic-release manages versions automatically. Do not manually edit __version__ or pyproject.toml version fields."}}'
 fi
 
 exit 0

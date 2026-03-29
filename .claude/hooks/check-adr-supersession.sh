@@ -11,5 +11,5 @@ case "$FILE" in
   *) exit 0 ;;
 esac
 
-echo '{"systemMessage": "You modified an architecture document. Review docs/adr/ — does this change supersede an existing ADR or require a new one?"}'
+echo '{"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "You modified an architecture document. Review docs/adr/ — does this change supersede an existing ADR or require a new one?"}}'
 exit 0

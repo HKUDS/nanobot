@@ -378,14 +378,14 @@ class Strategy:
 4. Infers domain from tool names (obsidian > github > web > filesystem)
 5. Saves with confidence=0.5
 
-**Read by:** `ContextBuilder.build_system_prompt()` — retrieves relevant strategies from `StrategyStore` and injects them as "Relevant Strategies" section in the system prompt, ordered by confidence descending.
+**Read by:** `ContextBuilder.build_system_prompt()` — retrieves relevant strategies from `StrategyAccess` and injects them as "Relevant Strategies" section in the system prompt, ordered by confidence descending.
 
-**In LLM context:** Yes — when `StrategyStore` is wired, strategies appear in the system prompt before declarative memory.
+**In LLM context:** Yes — when `StrategyAccess` is wired, strategies appear in the system prompt before declarative memory.
 
 **Confidence dynamics:**
 - **Turn succeeded (no guardrail fired):** confidence += 0.1 (max 1.0)
 - **Turn failed (guardrail fired again):** confidence -= 0.05 (min 0.0)
-- **Pruning:** Strategies below 0.1 confidence are pruned via `StrategyStore.prune()`
+- **Pruning:** Strategies below 0.1 confidence are pruned via `StrategyAccess.prune()`
 
 **Learning feedback loop:**
 ```

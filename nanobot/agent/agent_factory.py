@@ -266,12 +266,10 @@ def build_agent(
         memory_config=config.memory,
     )
 
-    # 3.5 Construct StrategyStore for procedural memory
-    from nanobot.memory.strategy import StrategyStore
+    # 3.5 Construct StrategyAccess for procedural memory (shares UnifiedMemoryDB connection)
+    from nanobot.memory.strategy import StrategyAccess
 
-    _memory_dir = config.workspace_path / ".nanobot" / "memory"
-    _memory_dir.mkdir(parents=True, exist_ok=True)
-    strategy_store = StrategyStore(_memory_dir / "strategies.db")
+    strategy_store = StrategyAccess(memory.db.connection)
 
     # 4. Construct ContextBuilder
     context = ContextBuilder(

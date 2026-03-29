@@ -162,6 +162,16 @@ Do NOT use only simple `{"cmd": "ls"}` fixtures. Real tool arguments look like:
 These rules exist because the 2026-03-28 post-refactor audit found every critical
 issue would have been caught by following them:
 
+- **Diagnose before fixing**: when something fails, ask "why does this fail?" before
+  "how do I make it pass?" Never revert working code to satisfy a metric. Never bypass
+  a validation gate. Fix the underlying issue, not the symptom.
+- **Correctness over efficiency**: when choosing between a quick fix and a proper fix,
+  state why the quick fix is also the *correct* one. If the justification is only
+  efficiency ("avoids extra work", "simpler"), choose the proper fix.
+- **Question existing patterns**: when encountering defensive code (guards, lazy imports,
+  backwards-compatible aliases), ask "what concrete scenario does this defend against?"
+  If the answer is unclear, investigate before preserving. Existing code written by
+  previous LLM sessions may contain the same shortcuts.
 - **Never skip code quality review** on implementation tasks — dispatch a code-reviewer
   subagent after implementation, before committing
 - **Subagent convention context**: when dispatching implementer subagents, include
