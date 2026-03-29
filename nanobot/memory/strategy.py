@@ -15,6 +15,26 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+# Schema DDL — single source of truth for the strategies table.
+# Used by UnifiedMemoryDB._init_schema() and test fixtures.
+STRATEGIES_DDL = """
+CREATE TABLE IF NOT EXISTS strategies (
+    id            TEXT PRIMARY KEY,
+    domain        TEXT NOT NULL,
+    task_type     TEXT NOT NULL,
+    strategy      TEXT NOT NULL,
+    context       TEXT NOT NULL,
+    source        TEXT NOT NULL DEFAULT 'guardrail_recovery',
+    confidence    REAL NOT NULL DEFAULT 0.5,
+    created_at    TEXT NOT NULL,
+    last_used     TEXT NOT NULL,
+    use_count     INTEGER NOT NULL DEFAULT 0,
+    success_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_strategies_domain ON strategies(domain);
+CREATE INDEX IF NOT EXISTS idx_strategies_task_type ON strategies(task_type);
+"""
+
 
 @dataclass(slots=True)
 class Strategy:
@@ -46,26 +66,26 @@ class StrategyAccess:
 
     def save(self, strategy: Strategy) -> None:
         """Insert or replace a strategy record."""
-        self._conn.execute(
-            """INSERT OR REPLACE INTO strategies
-            (id, domain, task_type, strategy, context, source, confidence,
-             created_at, last_used, use_count, success_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                strategy.id,
-                strategy.domain,
-                strategy.task_type,
-                strategy.strategy,
-                strategy.context,
-                strategy.source,
-                strategy.confidence,
-                strategy.created_at.isoformat(),
-                strategy.last_used.isoformat(),
-                strategy.use_count,
-                strategy.success_count,
-            ),
-        )
-        self._conn.commit()
+        with self._conn:
+            self._conn.execute(
+                """INSERT OR REPLACE INTO strategies
+                (id, domain, task_type, strategy, context, source, confidence,
+                 created_at, last_used, use_count, success_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    strategy.id,
+                    strategy.domain,
+                    strategy.task_type,
+                    strategy.strategy,
+                    strategy.context,
+                    strategy.source,
+                    strategy.confidence,
+                    strategy.created_at.isoformat(),
+                    strategy.last_used.isoformat(),
+                    strategy.use_count,
+                    strategy.success_count,
+                ),
+            )
 
     def retrieve(
         self,
@@ -90,37 +110,36 @@ class StrategyAccess:
 
     def update_confidence(self, strategy_id: str, confidence: float) -> None:
         """Set the confidence score for a strategy."""
-        self._conn.execute(
-            "UPDATE strategies SET confidence = ? WHERE id = ?",
-            (confidence, strategy_id),
-        )
-        self._conn.commit()
+        with self._conn:
+            self._conn.execute(
+                "UPDATE strategies SET confidence = ? WHERE id = ?",
+                (confidence, strategy_id),
+            )
 
     def record_usage(self, strategy_id: str, *, success: bool) -> None:
         """Increment use_count (and success_count if successful)."""
         now = datetime.now(timezone.utc).isoformat()
-        if success:
-            self._conn.execute(
-                "UPDATE strategies SET use_count = use_count + 1, "
-                "success_count = success_count + 1, last_used = ? WHERE id = ?",
-                (now, strategy_id),
-            )
-        else:
-            self._conn.execute(
-                "UPDATE strategies SET use_count = use_count + 1, last_used = ? WHERE id = ?",
-                (now, strategy_id),
-            )
-        self._conn.commit()
+        with self._conn:
+            if success:
+                self._conn.execute(
+                    "UPDATE strategies SET use_count = use_count + 1, "
+                    "success_count = success_count + 1, last_used = ? WHERE id = ?",
+                    (now, strategy_id),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE strategies SET use_count = use_count + 1, last_used = ? WHERE id = ?",
+                    (now, strategy_id),
+                )
 
     def prune(self, min_confidence: float = 0.1) -> int:
         """Delete strategies below the confidence threshold. Returns count deleted."""
-        cursor = self._conn.execute(
-            "DELETE FROM strategies WHERE confidence < ?",
-            (min_confidence,),
-        )
-        pruned = cursor.rowcount
-        self._conn.commit()
-        return pruned
+        with self._conn:
+            cursor = self._conn.execute(
+                "DELETE FROM strategies WHERE confidence < ?",
+                (min_confidence,),
+            )
+            return cursor.rowcount
 
     @staticmethod
     def _row_to_strategy(row: tuple) -> Strategy:

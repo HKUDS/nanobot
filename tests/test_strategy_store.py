@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from nanobot.memory.strategy import Strategy, StrategyAccess
+from nanobot.memory.strategy import STRATEGIES_DDL, Strategy, StrategyAccess
 
 
 def _sample_strategy(**overrides: object) -> Strategy:
@@ -29,31 +29,10 @@ def _sample_strategy(**overrides: object) -> Strategy:
     return Strategy(**defaults)
 
 
-def _create_schema(conn: sqlite3.Connection) -> None:
-    """Create the strategies table (normally owned by UnifiedMemoryDB)."""
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS strategies (
-            id            TEXT PRIMARY KEY,
-            domain        TEXT NOT NULL,
-            task_type     TEXT NOT NULL,
-            strategy      TEXT NOT NULL,
-            context       TEXT NOT NULL,
-            source        TEXT NOT NULL DEFAULT 'guardrail_recovery',
-            confidence    REAL NOT NULL DEFAULT 0.5,
-            created_at    TEXT NOT NULL,
-            last_used     TEXT NOT NULL,
-            use_count     INTEGER NOT NULL DEFAULT 0,
-            success_count INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE INDEX IF NOT EXISTS idx_strategies_domain ON strategies(domain);
-        CREATE INDEX IF NOT EXISTS idx_strategies_task_type ON strategies(task_type);
-    """)
-
-
 @pytest.fixture()
 def store() -> StrategyAccess:
     conn = sqlite3.connect(":memory:")
-    _create_schema(conn)
+    conn.executescript(STRATEGIES_DDL)
     return StrategyAccess(conn)
 
 
