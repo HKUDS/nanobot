@@ -13,8 +13,11 @@ import tiktoken
 
 def strip_think(text: str) -> str:
     """Remove <think>…</think> blocks and any unclosed trailing <think> tag."""
+    # Remove fully closed <think>...</think> blocks
     text = re.sub(r"<think>[\s\S]*?</think>", "", text)
-    text = re.sub(r"<think>[\s\S]*$", "", text)
+    # Remove unclosed trailing <think> tag, but ONLY if it's not part of inline code (e.g. `<think>`)
+    # We do this by checking if there's a backtick right before it.
+    text = re.sub(r"(?<!`)<think>[\s\S]*$", "", text)
     return text.strip()
 
 
