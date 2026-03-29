@@ -13,12 +13,14 @@ services:
     command: ["gateway"]
     volumes:
       - ./nanobot:/app/nanobot
-      - ./data:/root/.nanobot
+      - ./xiaozhi_proxy.py:/app/xiaozhi_proxy.py
+      - /home/alexander/.nanobot:/root/.nanobot
     dns:
       - 8.8.8.8
       - 1.1.1.1
     restart: unless-stopped
     environment:
+      - TZ=Europe/Moscow
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
     ports:

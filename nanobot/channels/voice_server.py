@@ -1,3 +1,4 @@
+import re, httpx
 """Voice server channel for ESP32/XiaoZhi devices."""
 
 import asyncio
@@ -44,33 +45,64 @@ class WhisperTranscriber:
         self.api_base = api_base
         self.model = model or "whisper-large-v3"
         self.api_key = api_key
+        self._client = None
+    
+    async def get_client(self):
+        import httpx
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=60.0)
+        return self._client
 
     async def transcribe(self, file_path):
         import httpx
-        try:
-            async with httpx.AsyncClient() as client:
+        max_retries = 3
+        retry_delay = 1.0
+        
+        client = await self.get_client()
+        for attempt in range(max_retries):
+            try:
+                # Use shared client instead of 'async with'
                 with open(file_path, "rb") as f:
-                    files = {
-                        "file": (Path(file_path).name, f),
-                        "model": (None, self.model),
-                        "language": (None, "ru"),
-                    }
-                    headers = {}
-                    if self.api_key:
-                        headers["Authorization"] = f"Bearer {self.api_key}"
-                    
-                    response = await client.post(
-                        self.api_base,
-                        headers=headers,
-                        files=files,
-                        timeout=60.0
-                    )
-                    response.raise_for_status()
-                    data = response.json()
-                    return data.get("text", "")
-        except Exception as e:
-            logger.error(f"Whisper transcription error: {e}")
-            return ""
+                        files = {
+                            "file": (Path(file_path).name, f),
+                            "model": (None, self.model),
+                            "language": (None, "ru"),
+                        }
+                        headers = {}
+                        if self.api_key:
+                            headers["Authorization"] = f"Bearer {self.api_key}"
+                        
+                        response = await client.post(
+                            self.api_base,
+                            headers=headers,
+                            files=files
+                        )
+                        
+                        # If server is still loading model (500/503/404), wait and retry
+                        if response.status_code in [500, 503, 404] and attempt < max_retries - 1:
+                            logger.info(f"STT server warming up (attempt {attempt+1}/{max_retries})...")
+                            await asyncio.sleep(retry_delay)
+                            continue
+                            
+                        response.raise_for_status()
+                        data = response.json()
+                        text = data.get("text", "")
+                        
+                        # If we get text, return it. If empty (and not the last attempt), maybe retry?
+                        # No, if it's 200 OK but empty, it might be silence or hallucination.
+                        return text
+            except Exception as e:
+                # If it's a connection error, reset client
+                if "closed" in str(e).lower() or "connection" in str(e).lower():
+                    self._client = None
+                
+                if attempt < max_retries - 1:
+                    logger.debug(f"Transcription retry {attempt+1} due to: {e}")
+                    await asyncio.sleep(retry_delay)
+                else:
+                    logger.error(f"Whisper transcription error: {e}")
+                    return ""
+        return ""
 
 # Since opuslib might not be installed in all environments
 try:
@@ -167,6 +199,11 @@ class VoiceServerChannel(BaseChannel):
         self.clients.clear()
 
     async def send(self, message: OutboundMessage) -> None:
+        # Emoji and Special Char Filter
+        if hasattr(message, 'content') and message.content:
+            message.content = re.sub(r'[\U00010000-\U0010ffff]', '', message.content)
+            message.content = re.sub(r'[^\w\s\.,!\?\-]', '', message.content)
+
         """Send an outbound message to the device."""
         client_id = message.chat_id
         ws = self.clients.get(client_id)
@@ -612,11 +649,19 @@ class VoiceServerChannel(BaseChannel):
                             if "silent_frames" not in state:
                                 state["silent_frames"] = 0
                                 
+<<<<<<< Updated upstream
                             if rms < 300:  # Threshold for silence, adjust if needed
+=======
+                            # VAD/Silence Auto-Stop logic
+                            is_enrolling = state.get("pending_enrollment")
+                            
+                            if rms < self.config.rms_threshold:  # Use configured threshold instead of hardcoded 300
+>>>>>>> Stashed changes
                                 state["silent_frames"] += 1
                             else:
                                 state["silent_frames"] = 0
                                 
+<<<<<<< Updated upstream
                             # 20 consecutive frames * 60ms = 1.2 seconds of silence
                             # AND ensure we buffered at least 0.5s of audio to avoid instant warm-up crashes
                             if state["silent_frames"] >= 20 and len(state["pcm_buffer"]) >= 16000 * 2 * 0.5:
@@ -627,10 +672,36 @@ class VoiceServerChannel(BaseChannel):
                             # Auto-stop failsafe fallback after 8 seconds 
                             elif len(state["pcm_buffer"]) >= 16000 * 2 * 8:
                                 logger.warning(f"Client {client_id} streamed 8s without stop. Forcing stop.")
+=======
+                            # Silence detection rule:
+                            # 1. NOT enrolling (normal command)
+                            # 2. 30 consecutive frames * 60ms = 1.8 seconds of silence
+                            # 3. and ensure we buffered at least 0.5s of audio to avoid instant warm-up crashes
+                            if not is_enrolling and state["silent_frames"] >= 30 and len(state["pcm_buffer"]) >= 16000 * 2 * 0.5:
+                                logger.info(f"Silence detected from {client_id} (rms: {rms:.1f}). Auto-stopping.")
+                                state["is_listening"] = False
+                                import asyncio
+                                asyncio.create_task(self._process_audio_buffer(client_id))
+                                continue
+
+                            # Enrollment-specific completion: 
+                            # Exact 5-second sample
+                            if is_enrolling and len(state["pcm_buffer"]) >= 16000 * 2 * 5.5:
+                                logger.info(f"Enrollment sample full for {client_id}. Processing.")
+                                state["is_listening"] = False
+                                import asyncio
+                                asyncio.create_task(self._process_audio_buffer(client_id))
+                                continue
+
+                            # Auto-stop failsafe fallback after 30 seconds for non-enrollment
+                            elif not is_enrolling and len(state["pcm_buffer"]) >= 16000 * 2 * 30:
+                                logger.warning(f"Client {client_id} reached max record time. Forcing stop.")
+>>>>>>> Stashed changes
                                 state["is_listening"] = False
                                 # Run processing outside current cycle async
                                 import asyncio
                                 asyncio.create_task(self._process_audio_buffer(client_id))
+                                continue
                             elif len(state["pcm_buffer"]) % 32000 == 0:
                                 logger.info(f"Buffered {len(state['pcm_buffer'])} bytes for {client_id}")
                         except (opuslib.OpusError, AttributeError) as e:
@@ -687,9 +758,57 @@ class VoiceServerChannel(BaseChannel):
             temp_wav_path = temp_wav.name
             
         try:
-            # Transcribe
-            text = await self.transcriber.transcribe(temp_wav_path)
-            Path(temp_wav_path).unlink(missing_ok=True)
+            import httpx
+            
+            # Shared static client for Speaker ID to avoid session overhead
+            if not hasattr(self, "_speaker_client"):
+                self._speaker_client = httpx.AsyncClient(timeout=10.0)
+                
+            async def _identify_speaker(wav_path):
+                max_retries = 2
+                for attempt in range(max_retries):
+                    try:
+                        with open(wav_path, "rb") as f:
+                            files = {"file": (Path(wav_path).name, f, "audio/wav")}
+                            response = await self._speaker_client.post("http://192.168.22.111:8001/identify", files=files)
+                            if response.status_code == 200:
+                                data = response.json()
+                                identified = data.get("identified", "Unknown")
+                                if identified != "Unknown":
+                                    return identified
+                                # If 500/404, might be OOM or restart, retry once
+                                if response.status_code in [500, 404] and attempt < max_retries - 1:
+                                    await asyncio.sleep(1.0)
+                                    continue
+                    except Exception as e:
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(0.5)
+                        else:
+                            logger.debug(f"Speaker ID final failure: {e}")
+                return "Unknown"
+
+            # Run STT and Speaker ID with priority to STT
+            transcribe_task = asyncio.create_task(self.transcriber.transcribe(temp_wav_path))
+            speaker_task = asyncio.create_task(_identify_speaker(temp_wav_path))
+            
+            # Wait for STT first, as it's critical
+            text = await transcribe_task
+            
+            # For speaker, give it a 1s grace period, otherwise proceed as Unknown
+            speaker = "Unknown"
+            try:
+                done, pending = await asyncio.wait([speaker_task], timeout=2.0)
+                if speaker_task in done:
+                    speaker = speaker_task.result()
+                else:
+                    # Task still running, don't wait further
+                    logger.debug(f"Speaker ID still running, proceeding with {client_id} as Unknown")
+                    # We'll cancel it later to save GPU resources
+                    speaker_task.cancel()
+            # Path(temp_wav_path).unlink(missing_ok=True) # Moved to end
+            except Exception as e:
+                logger.debug(f"Speaker ID wait error: {e}")
+            
             
             # Discard Whisper hallucinations for silence
             if text:
@@ -708,14 +827,72 @@ class VoiceServerChannel(BaseChannel):
                 await send_tts_stop()
                 return
                 
-            logger.info(f"STT: '{text}' from {client_id}")
+            # 1. Check for Enrollment Intent (e.g., "Запомни меня как [имя]")
+            import re
+            # Much more flexible regex: "запомни (мой голос|меня)? как [имя]"
+            enroll_pattern = r"(?:запомни|запиши|сохрани|измени|зарегистрируй)[\s,]+(?:меня[\s,]+|мой[\s,]+голос[\s,]+)?(?:как|под[\s,]+именем)[\s,]+([а-яё\s,a-z0-9]+)"
+            # Strip punctuation for cleaner matching
+            clean_text = text.strip().rstrip(".!?…")
+            enroll_match = re.search(enroll_pattern, clean_text, re.IGNORECASE)
             
+            if enroll_match:
+                new_user_id = enroll_match.group(1).capitalize()
+                logger.info(f"Enrolling new user: {new_user_id}")
+                try:
+                    with open(temp_wav_path, 'rb') as f:
+                        async with httpx.AsyncClient() as client:
+                            await client.post('http://192.168.22.111:8001/enroll', 
+                                              files={'file': ('audio.wav', f, 'audio/wav')}, 
+                                              data={'user_id': new_user_id}, timeout=5.0)
+                            await self.send(OutboundMessage(channel=self.name, chat_id=client_id, content=f'Запомнила тебя, {new_user_id}.'))
+                except Exception as e:
+                    logger.error(f'Enrollment failed: {e}')
+                Path(temp_wav_path).unlink(missing_ok=True)
+                return
+            if state.get("pending_enrollment"):
+                enroll_user = state.pop("pending_enrollment")
+                logger.info(f"Uploading enrollment for {enroll_user} from {client_id}")
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        with open(temp_wav_path, "rb") as f:
+                            files = {"file": (Path(temp_wav_path).name, f, "audio/wav")}
+                            data = {"user_id": enroll_user}
+                            # Send to .111 enrollment endpoint
+                            resp = await client.post("http://192.168.22.111:8001/enroll", files=files, data=data)
+                            if resp.status_code == 200:
+                                feedback = f"Готово, {enroll_user}! Теперь я вас узнаю."
+                            else:
+                                feedback = "Извините, не удалось сохранить ваш голос. Попробуйте еще раз позже."
+                                logger.error(f"Enrollment failed: {resp.text}")
+                except Exception as e:
+                    feedback = "Произошла ошибка при сохранении голоса."
+                    logger.error(f"Enrollment exception: {e}")
+                
+                await self.bus.publish_outbound(OutboundMessage(
+                    channel=self.name,
+                    chat_id=client_id,
+                    content=feedback
+                ))
+                return
+
+            # 3. Normal logic: Prepend identity (Parentheses, no asterisks, no brackets) and send to LLM
+            prompt_prefix = f"(This is {speaker} speaking): " if speaker != "Unknown" else ""
+            inbound_text = f"{prompt_prefix}{text}"
+            
+            logger.info(f"Inbound from {client_id} ({speaker}): {text}")
+            
+<<<<<<< Updated upstream
             # Send STT to device display
             if ws and state:
+=======
+            # Send STT to device display (if enabled)
+            display_text = f"[{speaker}]: {text}" if speaker != "Unknown" else text
+            if ws and state and self.config.show_debug_on_display:
+>>>>>>> Stashed changes
                 try:
                     await ws.send(json.dumps({
                         "type": "stt",
-                        "text": text
+                        "text": display_text
                     }))
                 except Exception as e:
                     logger.error(f"Failed to send stt text to display: {e}")
@@ -725,15 +902,15 @@ class VoiceServerChannel(BaseChannel):
                 channel=self.name,
                 sender_id=client_id,
                 chat_id=client_id,
-                content=text,
+                content=inbound_text,
                 metadata={
                     "is_voice": True,
                     "session_id": state["session_id"]
                 }
             )
             await self.bus.publish_inbound(msg)
+            Path(temp_wav_path).unlink(missing_ok=True)
             
         except Exception as e:
             logger.error(f"Error processing audio for {client_id}: {e}")
-            Path(temp_wav_path).unlink(missing_ok=True)
             await send_tts_stop()
