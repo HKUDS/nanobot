@@ -16,6 +16,7 @@ from loguru import logger
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.pruner import ContextPruner
+from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
@@ -93,6 +94,7 @@ class AgentLoop:
         self.context = ContextBuilder(workspace, timezone=timezone)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
+        self.runner = AgentRunner(provider)
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
@@ -231,11 +233,6 @@ class AgentLoop:
         ``resuming=True`` means tool calls follow (spinner should restart);
         ``resuming=False`` means this is the final response.
         """
-        messages = initial_messages
-        iteration = 0
-        final_content = None
-        tools_used: list[str] = []
-
         # Wrap on_stream with stateful think-tag filter so downstream
         # consumers (CLI, channels) never see <think> blocks.
         _raw_stream = on_stream
@@ -251,110 +248,51 @@ class AgentLoop:
             if incremental and _raw_stream:
                 await _raw_stream(incremental)
 
-        while iteration < self.max_iterations:
-            iteration += 1
+        async def _wrapped_stream_end(*, resuming: bool = False) -> None:
+            nonlocal _stream_buf
+            if on_stream_end:
+                await on_stream_end(resuming=resuming)
+            _stream_buf = ""
 
-            tool_defs = self.tools.get_definitions()
+        async def _handle_tool_calls(response) -> None:
+            if not on_progress:
+                return
+            if not on_stream:
+                thought = self._strip_think(response.content)
+                if thought:
+                    await on_progress(thought)
+            tool_hint = self._strip_think(self._tool_hint(response.tool_calls))
+            await on_progress(tool_hint, tool_hint=True)
 
-            # transient context pruning（每次 LLM call 前轻量修剪 tool results）
-            if self.pruner:
-                messages = self.pruner.prune(
-                    messages, context_window_chars=self.context_window_tokens * 4
-                )
+        async def _prepare_tools(tool_calls) -> None:
+            for tc in tool_calls:
+                args_str = json.dumps(tc.arguments, ensure_ascii=False)
+                logger.info("Tool call: {}({})", tc.name, args_str[:200])
+            # Preserve session_metadata already set by _process_message
+            existing_meta = getattr(self.tools.get("message"), "_session_metadata", None)
+            self._set_tool_context(channel, chat_id, message_id, session_metadata=existing_meta)
 
-            if on_stream:
-                response = await self.provider.chat_stream_with_retry(
-                    messages=messages,
-                    tools=tool_defs,
-                    model=self.model,
-                    on_content_delta=_filtered_stream,
-                )
-            else:
-                response = await self.provider.chat_with_retry(
-                    messages=messages,
-                    tools=tool_defs,
-                    model=self.model,
-                )
-
-            usage = response.usage or {}
-            self._last_usage = {
-                "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
-                "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
-            }
-
-            if response.has_tool_calls:
-                if on_stream and on_stream_end:
-                    await on_stream_end(resuming=True)
-                    _stream_buf = ""
-
-                if on_progress:
-                    if not on_stream:
-                        thought = self._strip_think(response.content)
-                        if thought:
-                            await on_progress(thought)
-                    tool_hint = self._tool_hint(response.tool_calls)
-                    tool_hint = self._strip_think(tool_hint)
-                    await on_progress(tool_hint, tool_hint=True)
-
-                tool_call_dicts = [
-                    tc.to_openai_tool_call()
-                    for tc in response.tool_calls
-                ]
-                messages = self.context.add_assistant_message(
-                    messages, response.content, tool_call_dicts,
-                    reasoning_content=response.reasoning_content,
-                    thinking_blocks=response.thinking_blocks,
-                )
-
-                for tc in response.tool_calls:
-                    tools_used.append(tc.name)
-                    args_str = json.dumps(tc.arguments, ensure_ascii=False)
-                    logger.info("Tool call: {}({})", tc.name, args_str[:200])
-
-                # Re-bind tool context right before execution so that
-                # concurrent sessions don't clobber each other's routing.
-                self._set_tool_context(channel, chat_id, message_id)
-
-                # Execute all tool calls concurrently — the LLM batches
-                # independent calls in a single response on purpose.
-                # return_exceptions=True ensures all results are collected
-                # even if one tool is cancelled or raises BaseException.
-                results = await asyncio.gather(*(
-                    self.tools.execute(tc.name, tc.arguments)
-                    for tc in response.tool_calls
-                ), return_exceptions=True)
-
-                for tool_call, result in zip(response.tool_calls, results):
-                    if isinstance(result, BaseException):
-                        result = f"Error: {type(result).__name__}: {result}"
-                    messages = self.context.add_tool_result(
-                        messages, tool_call.id, tool_call.name, result
-                    )
-            else:
-                if on_stream and on_stream_end:
-                    await on_stream_end(resuming=False)
-                    _stream_buf = ""
-
-                clean = self._strip_think(response.content)
-                if response.finish_reason == "error":
-                    logger.error("LLM returned error: {}", (clean or "")[:200])
-                    final_content = clean or "Sorry, I encountered an error calling the AI model."
-                    break
-                messages = self.context.add_assistant_message(
-                    messages, clean, reasoning_content=response.reasoning_content,
-                    thinking_blocks=response.thinking_blocks,
-                )
-                final_content = clean
-                break
-
-        if final_content is None and iteration >= self.max_iterations:
+        result = await self.runner.run(AgentRunSpec(
+            initial_messages=initial_messages,
+            tools=self.tools,
+            model=self.model,
+            max_iterations=self.max_iterations,
+            on_stream=_filtered_stream if on_stream else None,
+            on_stream_end=_wrapped_stream_end if on_stream else None,
+            on_tool_calls=_handle_tool_calls,
+            before_execute_tools=_prepare_tools,
+            finalize_content=self._strip_think,
+            error_message="Sorry, I encountered an error calling the AI model.",
+            concurrent_tools=True,
+            pruner=self.pruner,
+            context_window_chars=self.context_window_tokens * 4,
+        ))
+        self._last_usage = result.usage
+        if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
-            final_content = (
-                f"I reached the maximum number of tool call iterations ({self.max_iterations}) "
-                "without completing the task. You can try breaking the task into smaller steps."
-            )
-
-        return final_content, tools_used, messages
+        elif result.stop_reason == "error":
+            logger.error("LLM returned error: {}", (result.final_content or "")[:200])
+        return result.final_content, result.tools_used, result.messages
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""

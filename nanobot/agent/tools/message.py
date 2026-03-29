@@ -33,6 +33,7 @@ class MessageTool(Tool):
         self._default_channel = default_channel
         self._default_chat_id = default_chat_id
         self._default_message_id = default_message_id
+        self._session_metadata: dict = {}
         self._sent_in_turn: bool = False
 
     def set_context(
