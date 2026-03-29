@@ -520,26 +520,6 @@ class TelegramChannel(BaseChannel):
                     return
                 logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
                 try:
-                    html = _markdown_to_telegram_html(buf.text)
-                    await self._app.bot.send_message(
-                        chat_id=chat_id,
-                        text=html,
-                        parse_mode="HTML",
-                        reply_parameters=reply_params,
-                        message_thread_id=thread_id,
-                    )
-                except Exception as e:
-                    logger.warning("HTML parse failed, falling back to plain text: {}", e)
-                    try:
-                        await self._app.bot.send_message(
-                            chat_id=chat_id,
-                            text=buf.text,
-                            reply_parameters=reply_params,
-                            message_thread_id=thread_id,
-                        )
-                    except Exception as e2:
-                        logger.error("Error sending Telegram message: {}", e2)
-    
                     await self._call_with_retry(
                         self._app.bot.edit_message_text,
                         chat_id=int_chat_id, message_id=buf.message_id,
