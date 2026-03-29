@@ -25,6 +25,7 @@ def test_build_runtime_assembles_shared_workspace_collaborators(tmp_path: Path) 
     assert runtime.recovery.manager is runtime.manager
     assert runtime.recovery.launcher is runtime.launcher
     assert runtime.recovery.monitor is runtime.monitor
+    assert runtime.policy.manager is runtime.manager
     assert runtime.notifier is None
 
 
@@ -35,4 +36,5 @@ def test_build_runtime_can_attach_optional_notifier_without_rewiring_store(tmp_p
     assert runtime.notifier.manager is runtime.manager
     assert runtime.notifier.send_callback is _noop
     assert runtime.notifier.throttle_s == 45
+    assert runtime.policy.manager is runtime.manager
     assert runtime.store.store_path == tmp_path / "automation" / "coding" / "tasks.json"

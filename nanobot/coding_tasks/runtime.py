@@ -9,6 +9,7 @@ from typing import Awaitable, Callable
 from nanobot.bus.events import OutboundMessage
 from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.notifier import CodingTaskNotifier
+from nanobot.coding_tasks.policy import CodingTaskPolicy
 from nanobot.coding_tasks.progress import CodexProgressMonitor
 from nanobot.coding_tasks.recovery import CodexTaskRecovery
 from nanobot.coding_tasks.store import CodingTaskStore
@@ -25,6 +26,7 @@ class CodingTaskRuntime:
     launcher: CodexWorkerLauncher
     monitor: CodexProgressMonitor
     recovery: CodexTaskRecovery
+    policy: CodingTaskPolicy
     notifier: CodingTaskNotifier | None = None
 
 
@@ -46,6 +48,7 @@ def build_coding_task_runtime(
     task_launcher = launcher or CodexWorkerLauncher(resolved_workspace, task_manager)
     task_monitor = CodexProgressMonitor(task_manager, task_launcher)
     task_recovery = CodexTaskRecovery(task_manager, task_launcher, task_monitor)
+    task_policy = CodingTaskPolicy(task_manager)
     task_notifier = (
         CodingTaskNotifier(task_manager, send_callback, throttle_s=throttle_s)
         if send_callback is not None
@@ -58,5 +61,6 @@ def build_coding_task_runtime(
         launcher=task_launcher,
         monitor=task_monitor,
         recovery=task_recovery,
+        policy=task_policy,
         notifier=task_notifier,
     )

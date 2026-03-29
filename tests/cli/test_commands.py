@@ -1199,6 +1199,7 @@ def test_coding_task_list_distinguishes_all_major_statuses(monkeypatch, tmp_path
 
 def test_coding_task_status_shows_details_and_recent_events(monkeypatch, tmp_path: Path) -> None:
     from nanobot.coding_tasks.progress import CodexProgressMonitor
+    from nanobot.coding_tasks.policy import CodingTaskPolicy
     from nanobot.coding_tasks.runtime import CodingTaskRuntime
     from nanobot.coding_tasks.manager import CodexWorkerManager
     from nanobot.coding_tasks.store import CodingTaskStore
@@ -1229,6 +1230,7 @@ def test_coding_task_status_shows_details_and_recent_events(monkeypatch, tmp_pat
         launcher=_FakeLauncher(),
         monitor=CodexProgressMonitor(manager, _FakeLauncher()),  # type: ignore[arg-type]
         recovery=type("R", (), {"recover_tasks": lambda self: None})(),
+        policy=CodingTaskPolicy(manager),
         notifier=None,
     )
 
@@ -1250,6 +1252,64 @@ def test_coding_task_status_shows_details_and_recent_events(monkeypatch, tmp_pat
     assert "Recent events:" in output
     assert "created" in output
     assert "status_changed" in output
+
+
+def test_coding_task_status_reads_report_without_persisting_metadata(monkeypatch, tmp_path: Path) -> None:
+    from nanobot.coding_tasks.policy import CodingTaskPolicy
+    from nanobot.coding_tasks.progress import PlanProgress, TaskProgressReport
+    from nanobot.coding_tasks.runtime import CodingTaskRuntime
+    from nanobot.coding_tasks.manager import CodexWorkerManager
+    from nanobot.coding_tasks.store import CodingTaskStore
+
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    workspace = tmp_path / "workspace"
+    config = Config()
+    config.agents.defaults.workspace = str(workspace)
+
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, store)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    task = manager.create_task(repo_path=str(repo), goal="Inspect")
+    manager.mark_starting(task.id, summary="Boot")
+    manager.mark_running(task.id, summary="Working")
+
+    report = TaskProgressReport(
+        latest_note="latest note",
+        plan_progress=PlanProgress(completed=1, remaining=1, total=2),
+        live_output="Running pytest",
+        branch_name="feature/test",
+        recent_commit_summary="abc1234 commit summary",
+        summary="已完成 1/2 项，剩余 1 项 | 当前输出: Running pytest",
+    )
+    runtime = CodingTaskRuntime(
+        workspace=workspace,
+        store=store,
+        manager=manager,
+        launcher=type("L", (), {})(),
+        monitor=type("M", (), {"build_task_report": lambda self, task_id: report})(),
+        recovery=type("R", (), {"recover_tasks": lambda self: None})(),
+        policy=CodingTaskPolicy(manager),
+        notifier=None,
+    )
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands._load_coding_task_runtime", lambda _config, send_callback=None: runtime)
+
+    result = runner.invoke(app, ["coding-task", "status", task.id, "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    output = _strip_ansi(result.stdout)
+    assert "Branch: feature/test" in output
+    assert "Recent commit: abc1234 commit summary" in output
+    reloaded = store.get_task(task.id)
+    assert reloaded is not None
+    assert reloaded.branch_name is None
+    assert reloaded.metadata.get("recent_commit_summary") is None
 
 
 def test_coding_task_cancel_updates_status_and_reason(monkeypatch, tmp_path: Path) -> None:
@@ -1327,6 +1387,7 @@ def test_coding_task_resume_moves_failed_task_back_to_starting(monkeypatch, tmp_
 
 def test_coding_task_run_launches_tmux_worker(monkeypatch, tmp_path: Path) -> None:
     from nanobot.coding_tasks.manager import CodexWorkerManager
+    from nanobot.coding_tasks.policy import CodingTaskPolicy
     from nanobot.coding_tasks.runtime import CodingTaskRuntime
     from nanobot.coding_tasks.store import CodingTaskStore
     from nanobot.coding_tasks.worker import CodexLaunchResult
@@ -1365,6 +1426,7 @@ def test_coding_task_run_launches_tmux_worker(monkeypatch, tmp_path: Path) -> No
         launcher=_FakeLauncher(),
         monitor=type("M", (), {"build_task_report": lambda self, task_id: None})(),
         recovery=type("R", (), {"recover_tasks": lambda self: None})(),
+        policy=CodingTaskPolicy(manager),
         notifier=None,
     )
 

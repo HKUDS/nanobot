@@ -337,3 +337,18 @@
   - Keep the shared runtime builder as the one sanctioned composition root for new coding-task collaborators, even when only part of the runtime is needed by a given command path
   - Preserve backward compatibility for existing tests and call sites by allowing `AgentLoop` to accept either a full runtime or just a manager, but normalize onto the runtime contract internally
   - Leave policy extraction and read/write separation for follow-up features so the first cleanup checkpoint only attacks wiring duplication
+
+## Session update - 2026-03-29 (features #6, #7, #8, #9, #10, #11, #12, #13, #14)
+- Completed features:
+  - Added a dedicated `nanobot.coding_tasks.policy` layer and rewired the Telegram router to delegate workspace-wide blocking and origin-chat task selection there instead of hardcoding those rules inline
+  - Split progress handling into a pure read path (`build_task_report`) and an explicit persistence path (`refresh_task`), so status views no longer mutate task state as a side effect
+  - Updated recovery to use the explicit refresh path, keeping repo metadata and live progress persistence localized to lifecycle code instead of leaking through read-only views
+  - Updated CLI `coding-task status` to render branch and commit details from the pure report result without persisting them back to the task record
+  - Added focused tests for policy behavior, read-only status/reporting, and explicit refresh persistence, while keeping existing Telegram routing behavior unchanged
+- Verification:
+  - `.venv/bin/pytest tests/coding_tasks/test_policy.py tests/coding_tasks/test_progress.py tests/coding_tasks/test_recovery.py tests/coding_tasks/test_notifier.py tests/coding_tasks/test_router.py tests/agent/test_coding_task_routing.py tests/cli/test_commands.py -k "policy or status or recovery or notifier or private_telegram or refresh_task or build_task_report_is_read_only"` -> passed (22 selected tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks/policy.py nanobot/coding_tasks/progress.py nanobot/coding_tasks/router.py nanobot/coding_tasks/runtime.py nanobot/cli/commands.py nanobot/agent/loop.py tests/coding_tasks/test_policy.py tests/coding_tasks/test_progress.py tests/cli/test_commands.py` -> passed
+- Key decisions:
+  - Keep the current MVP behavior intact by making the new policy layer a pure extraction of existing selection rules, not a semantics change
+  - Treat `status` as a strictly read-only surface from this point on, even if that means duplicating some display-time merge logic between persisted state and the ephemeral report
+  - Use the explicit `refresh_task` API as the only sanctioned mutation path for repo metadata and progress summaries outside the manager itself

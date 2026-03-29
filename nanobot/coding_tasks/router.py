@@ -10,6 +10,7 @@ from pathlib import Path
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.coding_tasks.manager import CodexWorkerManager
+from nanobot.coding_tasks.policy import CodingTaskPolicy
 from nanobot.coding_tasks.progress import CodexProgressMonitor
 from nanobot.coding_tasks.worker import CodexWorkerLauncher
 
@@ -109,13 +110,15 @@ def register_coding_task_commands(
     *,
     launcher: CodexWorkerLauncher | None = None,
     monitor: CodexProgressMonitor | None = None,
+    policy: CodingTaskPolicy | None = None,
 ) -> None:
     """Register chat-level interceptors for coding-task lifecycle actions."""
-    router.intercept(_make_start_coding_handler(manager))
-    router.intercept(_make_control_handler(manager, launcher=launcher, monitor=monitor))
+    task_policy = policy or CodingTaskPolicy(manager)
+    router.intercept(_make_start_coding_handler(manager, task_policy))
+    router.intercept(_make_control_handler(manager, task_policy, launcher=launcher, monitor=monitor))
 
 
-def _make_start_coding_handler(manager: CodexWorkerManager):
+def _make_start_coding_handler(manager: CodexWorkerManager, policy: CodingTaskPolicy):
     async def _handle_start_coding(ctx: CommandContext) -> OutboundMessage | None:
         msg = ctx.msg
         if msg.channel != "telegram":
@@ -141,7 +144,7 @@ def _make_start_coding_handler(manager: CodexWorkerManager):
                 metadata={"render_as": "text"},
             )
 
-        if active_task := manager.latest_active_task():
+        if active_task := policy.blocking_active_task():
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
@@ -194,6 +197,7 @@ def _make_start_coding_handler(manager: CodexWorkerManager):
 
 def _make_control_handler(
     manager: CodexWorkerManager,
+    policy: CodingTaskPolicy,
     *,
     launcher: CodexWorkerLauncher | None = None,
     monitor: CodexProgressMonitor | None = None,
@@ -209,10 +213,9 @@ def _make_control_handler(
         if command not in _STATUS_COMMANDS | _RESUME_COMMANDS | _CANCEL_COMMANDS | _STOP_COMMANDS:
             return None
 
-        task = manager.latest_active_task_for_origin(msg.channel, msg.chat_id)
+        task = policy.select_control_task(msg.channel, msg.chat_id)
         if task is None:
-            latest_origin_tasks = manager.tasks_for_origin(msg.channel, msg.chat_id)
-            latest_origin = latest_origin_tasks[0] if latest_origin_tasks else None
+            latest_origin = policy.latest_origin_task(msg.channel, msg.chat_id)
             if command in _RESUME_COMMANDS and latest_origin and latest_origin.status == "cancelled":
                 return OutboundMessage(
                     channel=msg.channel,

@@ -104,18 +104,7 @@ class CodexProgressMonitor:
         pane_output = ""
         if task.tmux_session:
             pane_output = await asyncio.to_thread(self.launcher.capture_pane, task.tmux_session)
-        report = build_task_progress_report(task.repo_path, pane_output)
-        self.manager.update_repo_metadata(
-            task_id,
-            branch_name=report.branch_name or None,
-            recent_commit_summary=report.recent_commit_summary or None,
-            latest_note=report.latest_note or None,
-        )
-        if waiting_reason := detect_waiting_reason(report.live_output):
-            self.manager.mark_waiting_user(task_id, summary=waiting_reason)
-        if report.summary:
-            self.manager.update_progress(task_id, report.summary)
-        return report
+        return self.refresh_task(task_id, pane_output=pane_output)
 
     def build_task_report(self, task_id: str) -> TaskProgressReport:
         """Build a report synchronously for status views and diagnostics."""
@@ -126,13 +115,28 @@ class CodexProgressMonitor:
                 pane_output = self.launcher.capture_pane(task.tmux_session)
             except Exception:
                 pane_output = ""
-        report = build_task_progress_report(task.repo_path, pane_output)
+        return build_task_progress_report(task.repo_path, pane_output)
+
+    def refresh_task(self, task_id: str, *, pane_output: str | None = None) -> TaskProgressReport:
+        """Persist repo metadata and visible progress for lifecycle code paths."""
+        task = self.manager.require_task(task_id)
+        current_output = pane_output
+        if current_output is None and task.tmux_session:
+            try:
+                current_output = self.launcher.capture_pane(task.tmux_session)
+            except Exception:
+                current_output = ""
+        report = build_task_progress_report(task.repo_path, current_output or "")
         self.manager.update_repo_metadata(
             task_id,
             branch_name=report.branch_name or None,
             recent_commit_summary=report.recent_commit_summary or None,
             latest_note=report.latest_note or None,
         )
+        if waiting_reason := detect_waiting_reason(report.live_output):
+            self.manager.mark_waiting_user(task_id, summary=waiting_reason)
+        if report.summary:
+            self.manager.update_progress(task_id, report.summary)
         return report
 
 

@@ -149,6 +149,7 @@ class AgentLoop:
                 runtime.manager,
                 launcher=runtime.launcher,
                 monitor=runtime.monitor,
+                policy=runtime.policy,
             )
 
     def _register_default_tools(self) -> None:

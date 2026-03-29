@@ -3,6 +3,7 @@
 from nanobot.coding_tasks.harness import RepoHarnessState, build_codex_bootstrap_prompt, detect_repo_harness
 from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.notifier import CodingTaskNotifier
+from nanobot.coding_tasks.policy import CodingTaskPolicy
 from nanobot.coding_tasks.progress import (
     CodexProgressMonitor,
     PlanProgress,
@@ -28,6 +29,7 @@ from nanobot.coding_tasks.worker import CodexLaunchResult, CodexWorkerLauncher
 __all__ = [
     "CodexLaunchResult",
     "CodingTaskNotifier",
+    "CodingTaskPolicy",
     "CodingTaskRuntime",
     "CodexProgressMonitor",
     "CodexTaskRecovery",

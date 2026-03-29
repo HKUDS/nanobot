@@ -879,17 +879,17 @@ def coding_task_status(
     console.print(f"Recoverable: {recoverable}")
     console.print(f"Last progress: {task.last_progress_summary or '-'}")
     report = runtime.monitor.build_task_report(task.id)
-    refreshed = store.get_task(task.id) or task
-    console.print(f"Branch: {refreshed.branch_name or '-'}")
-    console.print(f"Recent commit: {refreshed.metadata.get('recent_commit_summary', '-')}")
+    current = store.get_task(task.id) or task
+    console.print(f"Branch: {report.branch_name or current.branch_name or '-'}")
+    console.print(f"Recent commit: {report.recent_commit_summary or current.metadata.get('recent_commit_summary', '-')}")
     if report.summary:
         console.print(f"Live report: {report.summary}")
-    if refreshed.status == "completed":
-        console.print(build_completion_report(refreshed))
-    elif refreshed.status == "failed":
-        console.print(build_failure_report(refreshed))
-    elif refreshed.status == "waiting_user":
-        console.print(build_waiting_user_report(refreshed))
+    if current.status == "completed":
+        console.print(build_completion_report(current))
+    elif current.status == "failed":
+        console.print(build_failure_report(current))
+    elif current.status == "waiting_user":
+        console.print(build_waiting_user_report(current))
 
     events = store.read_run_events(task.id, limit=5)
     if not events:

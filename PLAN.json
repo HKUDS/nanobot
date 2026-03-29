@@ -63,7 +63,7 @@
       "Verify the policy chooses the same active task as today's behavior for the current MVP rules.",
       "Confirm the router delegates selection and single-active enforcement to the policy helper instead of embedding those rules inline."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 7,
@@ -74,7 +74,7 @@
       "Attempt to start a second task from the same workspace while the first stays non-terminal.",
       "Verify the same rejection behavior and user-facing explanation are preserved after the policy extraction."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 8,
@@ -85,7 +85,7 @@
       "Send `状态` or `继续` from one chat in a focused test.",
       "Verify nanobot still targets the newest non-terminal task for that origin chat only."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 9,
@@ -96,7 +96,7 @@
       "Verify the returned report includes branch, commit, harness-note, and live-output summaries.",
       "Confirm the task record on disk is unchanged by the pure read call."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 10,
@@ -107,7 +107,7 @@
       "Verify branch metadata, recent commit summary, and progress summary are persisted.",
       "Confirm waiting-user detection and other lifecycle updates happen only through the explicit refresh path."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 11,
@@ -118,7 +118,7 @@
       "Run `nanobot coding-task status <id>`.",
       "Verify the output still includes branch, commit, and live report details while the underlying task record is unchanged unless an explicit refresh ran earlier."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 12,
@@ -129,7 +129,7 @@
       "Verify polling still refreshes persisted progress and repo metadata for active tasks.",
       "Confirm the gateway watch loop does not rely on status-view side effects to keep task state current."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 13,
@@ -140,7 +140,7 @@
       "Verify the reply still includes task id, status, repo, recent progress, and live report content.",
       "Confirm the reply path does not rely on hidden persistence side effects from a read-only report builder."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 14,
@@ -151,7 +151,7 @@
       "Verify the new tests would fail if runtime assembly drift or report-side mutation were reintroduced.",
       "Confirm the test suite remains explicitly scoped away from the unrelated repo_sync baseline failure."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 15,

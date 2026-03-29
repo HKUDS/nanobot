@@ -45,8 +45,6 @@ class CodexTaskRecovery:
                 result.failed_ids.append(task.id)
                 continue
 
-            report = self.monitor.build_task_report(task.id)
-            if report.summary:
-                self.manager.update_progress(task.id, report.summary)
+            report = self.monitor.refresh_task(task.id)
             result.recovered_ids.append(task.id)
         return result
