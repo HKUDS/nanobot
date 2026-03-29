@@ -70,7 +70,7 @@ class ReadFileTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Read the contents of a file at the given path. Supports PDF files."
+        return "Read the contents of a file at the given path. Extracts text from PDF files automatically — use this tool for PDFs, do not use exec."
     
     @property
     def parameters(self) -> dict[str, Any]:
