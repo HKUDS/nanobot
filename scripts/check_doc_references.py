@@ -4,7 +4,9 @@ Checks all living docs for:
 1. Class names (backtick-wrapped) that no longer exist in nanobot/
 2. File paths referenced that no longer exist on disk
 
-Also checks ADR status consistency (supersession chains, file/class refs).
+Also checks ADR supersession chain integrity (ADRs are historical records —
+class/file references inside them are NOT validated since they reflect
+the state at decision time, not current code).
 
 Exit 0 if clean, exit 1 if stale references found.
 """
@@ -20,6 +22,7 @@ from pathlib import Path
 LIVING_DOCS = [
     "CLAUDE.md",
     ".claude/rules/architecture.md",
+    ".claude/rules/cognitive-architecture.md",
     "docs/memory-system-reference.md",
     "docs/deployment.md",
 ]
@@ -63,22 +66,10 @@ KNOWN_EXCEPTIONS = frozenset(
         "SettingsConfigDict",
         "TracerProvider",
         "MetricsCollector",
-        # ADR references to removed/evolved classes (ADRs are historical records)
-        "BeliefStore",
-        "ProfileManager",
-        "RetrievalPlanner",
-        "EvalRunner",
-        "MemoryStore",
-        "PromptLoader",
-        "AgentRegistry",
-        "CheckEmailTool",
-        "WebSearchTool",
-        "UnknownRoleError",
-        "FeaturesConfig",
-        "LLMConfig",
-        "BaseChannel",
-        "ChannelsConfig",
-        "OutboundMessage",
+        # Cognitive architecture design targets (not yet implemented)
+        "ContextContributor",
+        "MemoryServices",
+        "ProceduralMemoryContributor",
         # Docker / deployment terms
         "Docker",
         "Dockerfile",
@@ -96,6 +87,9 @@ KNOWN_EXCEPTIONS = frozenset(
 KNOWN_FILE_EXCEPTIONS = frozenset(
     {
         "nanobot/skills/your-skill/SKILL.md",
+        # Cognitive architecture design targets (not yet implemented)
+        "context/contributors/procedural_memory.py",
+        "context/contributors/reasoning.py",
     }
 )
 
@@ -195,11 +189,12 @@ def check_document(
 
 
 def check_adr_status(adr_dir: Path, project_root: Path) -> list[str]:
-    """Check ADR status consistency.
+    """Check ADR supersession chain integrity.
 
-    Verifies:
+    ADRs are historical records — class names and file paths inside them
+    are NOT validated (they reflect the state at decision time, not current
+    code). Only structural integrity is checked:
     - Superseded-by references point to existing ADR files
-    - File paths in ADRs exist on disk
     """
     issues: list[str] = []
 

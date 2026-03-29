@@ -85,6 +85,11 @@
             "type": "command",
             "command": ".claude/hooks/check-doc-staleness.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/check-adr-supersession.sh",
+            "timeout": 5
           }
         ]
       }

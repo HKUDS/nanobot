@@ -18,7 +18,7 @@ esac
 
 # Check living docs for references to this file/module
 MATCHES=""
-for doc in CLAUDE.md .claude/rules/architecture.md docs/memory-system-reference.md docs/deployment.md; do
+for doc in CLAUDE.md .claude/rules/architecture.md .claude/rules/cognitive-architecture.md docs/memory-system-reference.md docs/deployment.md; do
   if [ -f "$doc" ] && grep -qi "$BASENAME" "$doc" 2>/dev/null; then
     MATCHES="$MATCHES $doc"
   fi
