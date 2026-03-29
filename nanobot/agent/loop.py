@@ -7,9 +7,7 @@ import json
 import re
 import os
 import time
-import weakref
 from contextlib import AsyncExitStack, nullcontext
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -35,7 +33,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import AuditConfig, ChannelsConfig, ExecToolConfig, WebSearchConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
     from nanobot.cron.service import CronService
 
 
@@ -64,7 +62,6 @@ class AgentLoop:
         web_search_config: WebSearchConfig | None = None,
         web_proxy: str | None = None,
         exec_config: ExecToolConfig | None = None,
-        audit_config: AuditConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
@@ -72,7 +69,8 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
     ):
-        from nanobot.config.schema import AuditConfig, ExecToolConfig, WebSearchConfig
+        from nanobot.config.schema import ExecToolConfig, WebSearchConfig
+
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
@@ -83,7 +81,6 @@ class AgentLoop:
         self.web_search_config = web_search_config or WebSearchConfig()
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
-        self.audit_config = audit_config or AuditConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
         self._start_time = time.time()
@@ -119,6 +116,16 @@ class AgentLoop:
         self._concurrency_gate: asyncio.Semaphore | None = (
             asyncio.Semaphore(_max) if _max > 0 else None
         )
+        self.memory_consolidator = MemoryConsolidator(
+            workspace=workspace,
+            provider=provider,
+            model=self.model,
+            sessions=self.sessions,
+            context_window_tokens=context_window_tokens,
+            build_messages=self.context.build_messages,
+            get_tool_definitions=self.tools.get_definitions,
+            max_completion_tokens=provider.generation.max_tokens,
+        )
         self._register_default_tools()
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
@@ -145,6 +152,28 @@ class AgentLoop:
             self.tools.register(
                 CronTool(self.cron_service, default_timezone=self.context.timezone or "UTC")
             )
+
+    async def _connect_mcp(self) -> None:
+        """Connect to configured MCP servers (one-time, lazy)."""
+        if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
+            return
+        self._mcp_connecting = True
+        from nanobot.agent.tools.mcp import connect_mcp_servers
+        try:
+            self._mcp_stack = AsyncExitStack()
+            await self._mcp_stack.__aenter__()
+            await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
+            self._mcp_connected = True
+        except BaseException as e:
+            logger.error("Failed to connect MCP servers (will retry next message): {}", e)
+            if self._mcp_stack:
+                try:
+                    await self._mcp_stack.aclose()
+                except Exception:
+                    pass
+                self._mcp_stack = None
+        finally:
+            self._mcp_connecting = False
 
     def _resolve_guest_agent_workspace(self, sender_id: str) -> tuple[ContextBuilder, SessionManager, frozenset[str]] | None:
         """Check if sender_id is a guest and return guest-specific context + sessions.
@@ -199,28 +228,6 @@ class AgentLoop:
         except (json.JSONDecodeError, OSError, TypeError):
             return frozenset()
 
-    async def _connect_mcp(self) -> None:
-        """Connect to configured MCP servers (one-time, lazy)."""
-        if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
-            return
-        self._mcp_connecting = True
-        from nanobot.agent.tools.mcp import connect_mcp_servers
-        try:
-            self._mcp_stack = AsyncExitStack()
-            await self._mcp_stack.__aenter__()
-            await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
-            self._mcp_connected = True
-        except BaseException as e:
-            logger.error("Failed to connect MCP servers (will retry next message): {}", e)
-            if self._mcp_stack:
-                try:
-                    await self._mcp_stack.aclose()
-                except Exception:
-                    pass
-                self._mcp_stack = None
-        finally:
-            self._mcp_connecting = False
-
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
         for name in ("message", "spawn", "cron"):
@@ -247,53 +254,18 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
-    def _audit_tool_call(
-        self,
-        name: str,
-        arguments: Any,
-        result: str,
-        tool_call_id: str | None = None,
-        session_key: str | None = None,
-    ) -> None:
-        """Append a full tool call record to the audit log if auditing is enabled.
-
-        The tool_call_id matches the id stored in the session JSONL, allowing
-        audit entries to be joined to session history for debugging.
-        """
-        if not self.audit_config.enabled:
-            return
-        try:
-            audit_path = (
-                Path(self.audit_config.path)
-                if self.audit_config.path
-                else self.workspace / "tool_audit.jsonl"
-            )
-            entry = {
-                "timestamp": datetime.now().isoformat(),
-                "session_key": session_key,
-                "tool_call_id": tool_call_id,
-                "tool": name,
-                "arguments": arguments,
-                "result": result,
-            }
-            with open(audit_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        except Exception as e:
-            logger.warning("Failed to write tool audit log: {}", e)
-
-        async def _run_agent_loop(
+    async def _run_agent_loop(
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
-        on_stream_end: Callable[[], Awaitable[None]] | None = None,
-        session_key: str | None = None,
-        context: ContextBuilder | None = None,
-        blocked_tools: frozenset[str] = frozenset(),
-        channel: str | None = None,
-        chat_id: str | None = None,
+        on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        *,
+        channel: str = "cli",
+        chat_id: str = "direct",
         message_id: str | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
+        """Run the agent iteration loop.
 
         *on_stream*: called with each content delta during streaming.
         *on_stream_end(resuming)*: called when a streaming session finishes.
@@ -337,7 +309,20 @@ class AgentLoop:
                     logger.info("Tool call: {}({})", tc.name, args_str[:200])
                 loop_self._set_tool_context(channel, chat_id, message_id)
 
+            def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
+                return loop_self._strip_think(content)
 
+        result = await self.runner.run(AgentRunSpec(
+            initial_messages=initial_messages,
+            tools=self.tools,
+            model=self.model,
+            max_iterations=self.max_iterations,
+            hook=_LoopHook(),
+            error_message="Sorry, I encountered an error calling the AI model.",
+            concurrent_tools=True,
+        ))
+        self._last_usage = result.usage
+        if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
         elif result.stop_reason == "error":
             logger.error("LLM returned error: {}", (result.final_content or "")[:200])
@@ -485,7 +470,6 @@ class AgentLoop:
                 messages, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
             )
-
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
@@ -510,32 +494,7 @@ class AgentLoop:
         if result := await self.commands.dispatch(ctx):
             return result
 
-            session.clear()
-            sessions.save(session)
-            sessions.invalidate(session.key)
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="New session started.")
-        if cmd == "/help":
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
-
-        unconsolidated = len(session.messages) - session.last_consolidated
-        if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
-            self._consolidating.add(session.key)
-            lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
-
-            async def _consolidate_and_unlock():
-                try:
-                    async with lock:
-                        await self._consolidate_memory(session)
-                finally:
-                    self._consolidating.discard(session.key)
-                    _task = asyncio.current_task()
-                    if _task is not None:
-                        self._consolidation_tasks.discard(_task)
-
-            _task = asyncio.create_task(_consolidate_and_unlock())
-            self._consolidation_tasks.add(_task)        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
