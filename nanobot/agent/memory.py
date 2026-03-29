@@ -277,6 +277,60 @@ class MemoryConsolidator:
 
         return last_boundary
 
+    async def trim_for_budget(self, session: Session) -> list[list[dict]]:
+        """Advance last_consolidated without LLM calls to fit within token budget.
+
+        Returns a list of message chunks trimmed from the active context.
+        Each chunk should be scheduled for background LLM consolidation by the caller.
+        """
+        if not session.messages or self.context_window_tokens <= 0:
+            return []
+
+        lock = self.get_lock(session.key)
+        async with lock:
+            budget = self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
+            estimated, source = self.estimate_session_prompt_tokens(session)
+            if estimated <= 0 or estimated < budget:
+                return []
+
+            target = budget // 2
+            chunks: list[list[dict]] = []
+
+            for round_num in range(self._MAX_CONSOLIDATION_ROUNDS):
+                if estimated <= target:
+                    break
+
+                boundary = self.pick_consolidation_boundary(session, max(1, estimated - target))
+                if boundary is None:
+                    logger.debug(
+                        "Token trim: no safe boundary for {} (round {})", session.key, round_num
+                    )
+                    break
+
+                end_idx = boundary[0]
+                chunk = session.messages[session.last_consolidated : end_idx]
+                if not chunk:
+                    break
+
+                logger.info(
+                    "Token trim (fast) round {} for {}: {}/{} via {}, chunk={} msgs — deferring LLM consolidation",
+                    round_num,
+                    session.key,
+                    estimated,
+                    self.context_window_tokens,
+                    source,
+                    len(chunk),
+                )
+                chunks.append(list(chunk))
+                session.last_consolidated = end_idx
+                self.sessions.save(session)
+
+                estimated, source = self.estimate_session_prompt_tokens(session)
+                if estimated <= 0:
+                    break
+
+            return chunks
+
     def estimate_session_prompt_tokens(self, session: Session) -> tuple[int, str]:
         """Estimate current prompt size for the normal session history view."""
         history = session.get_history(max_messages=0)

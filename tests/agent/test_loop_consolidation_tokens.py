@@ -55,7 +55,9 @@ async def test_prompt_above_threshold_triggers_consolidation(tmp_path, monkeypat
 
     await loop.process_direct("hello", session_key="cli:test")
 
-    assert loop.memory_consolidator.consolidate_messages.await_count >= 1
+    # trim_for_budget advances last_consolidated immediately (fast path);
+    # the actual LLM consolidation is deferred to background.
+    assert session.last_consolidated > 0
 
 
 @pytest.mark.asyncio
@@ -158,23 +160,20 @@ async def test_consolidation_continues_below_trigger_until_half_target(tmp_path,
 
 @pytest.mark.asyncio
 async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) -> None:
-    """Verify preflight consolidation runs before the LLM call in process_direct."""
-    order: list[str] = []
+    """Verify preflight token trim runs before the LLM call in process_direct."""
+    last_consolidated_at_llm: list[int] = []
 
     loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
+    loop.memory_consolidator.consolidate_messages = AsyncMock(return_value=True)  # type: ignore[method-assign]
 
-    async def track_consolidate(messages):
-        order.append("consolidate")
-        return True
-    loop.memory_consolidator.consolidate_messages = track_consolidate  # type: ignore[method-assign]
+    session = loop.sessions.get_or_create("cli:test")
 
     async def track_llm(*args, **kwargs):
-        order.append("llm")
+        last_consolidated_at_llm.append(session.last_consolidated)
         return LLMResponse(content="ok", tool_calls=[])
     loop.provider.chat_with_retry = track_llm
     loop.provider.chat_stream_with_retry = track_llm
 
-    session = loop.sessions.get_or_create("cli:test")
     session.messages = [
         {"role": "user", "content": "u1", "timestamp": "2026-01-01T00:00:00"},
         {"role": "assistant", "content": "a1", "timestamp": "2026-01-01T00:00:01"},
@@ -191,6 +190,30 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
 
     await loop.process_direct("hello", session_key="cli:test")
 
-    assert "consolidate" in order
-    assert "llm" in order
-    assert order.index("consolidate") < order.index("llm")
+    # trim_for_budget advances last_consolidated before the LLM is invoked
+    assert last_consolidated_at_llm, "LLM was never called"
+    assert last_consolidated_at_llm[0] > 0
+
+
+@pytest.mark.asyncio
+async def test_token_probe_estimate_does_not_trigger_relevant_memory_lookup(tmp_path) -> None:
+    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
+    search_calls = {"count": 0}
+
+    def fake_get_memory_context(*, query=None, include_relevant=True):
+        if include_relevant:
+            search_calls["count"] += 1
+        return ""
+
+    loop.memory_consolidator.store.get_memory_context = fake_get_memory_context  # type: ignore[method-assign]
+
+    session = loop.sessions.get_or_create("cli:test")
+    session.messages = [
+        {"role": "user", "content": "u1", "timestamp": "2026-01-01T00:00:00"},
+    ]
+
+    estimated, source = loop.memory_consolidator.estimate_session_prompt_tokens(session)
+
+    assert estimated == 100
+    assert source == "test-counter"
+    assert search_calls["count"] == 0
