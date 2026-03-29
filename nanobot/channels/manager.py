@@ -11,7 +11,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
-from nanobot.utils.restart import consume_restart_notice_from_env, format_restart_completed_message
+from nanobot.tts.service import TTSService
 
 # Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
 _SEND_RETRY_DELAYS = (1, 2, 4)
@@ -39,8 +39,7 @@ class ChannelManager:
         """Initialize channels discovered via pkgutil scan + entry_points plugins."""
         from nanobot.channels.registry import discover_all
 
-        transcription_provider = self.config.channels.transcription_provider
-        transcription_key = self._resolve_transcription_key(transcription_provider)
+        groq_key = self.config.providers.groq.api_key
 
         for name, cls in discover_all().items():
             section = getattr(self.config.channels, name, None)
@@ -54,24 +53,24 @@ class ChannelManager:
             if not enabled:
                 continue
             try:
-                channel = cls(section, self.bus)
-                channel.transcription_provider = transcription_provider
-                channel.transcription_api_key = transcription_key
+                # Inject TTS service for channels that support it
+                kwargs: dict = {}
+                if name == "discord" and self.config.tts.enabled:
+                    try:
+                        tts_svc = TTSService(self.config.tts)
+                        kwargs["tts_service"] = tts_svc
+                        logger.info("TTS service enabled for {}", name)
+                    except Exception as e:
+                        logger.warning("TTS service init failed: {}", e)
+
+                channel = cls(section, self.bus, **kwargs)
+                channel.transcription_api_key = groq_key
                 self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)
             except Exception as e:
                 logger.warning("{} channel not available: {}", name, e)
 
         self._validate_allow_from()
-
-    def _resolve_transcription_key(self, provider: str) -> str:
-        """Pick the API key for the configured transcription provider."""
-        try:
-            if provider == "openai":
-                return self.config.providers.openai.api_key
-            return self.config.providers.groq.api_key
-        except AttributeError:
-            return ""
 
     def _validate_allow_from(self) -> None:
         for name, ch in self.channels.items():
@@ -103,27 +102,8 @@ class ChannelManager:
             logger.info("Starting {} channel...", name)
             tasks.append(asyncio.create_task(self._start_channel(name, channel)))
 
-        self._notify_restart_done_if_needed()
-
         # Wait for all to complete (they should run forever)
         await asyncio.gather(*tasks, return_exceptions=True)
-
-    def _notify_restart_done_if_needed(self) -> None:
-        """Send restart completion message when runtime env markers are present."""
-        notice = consume_restart_notice_from_env()
-        if not notice:
-            return
-        target = self.channels.get(notice.channel)
-        if not target:
-            return
-        asyncio.create_task(self._send_with_retry(
-            target,
-            OutboundMessage(
-                channel=notice.channel,
-                chat_id=notice.chat_id,
-                content=format_restart_completed_message(notice.started_at_raw),
-            ),
-        ))
 
     async def stop_all(self) -> None:
         """Stop all channels and the dispatcher."""
@@ -149,32 +129,18 @@ class ChannelManager:
         """Dispatch outbound messages to the appropriate channel."""
         logger.info("Outbound dispatcher started")
 
-        # Buffer for messages that couldn't be processed during delta coalescing
-        # (since asyncio.Queue doesn't support push_front)
-        pending: list[OutboundMessage] = []
-
         while True:
             try:
-                # First check pending buffer before waiting on queue
-                if pending:
-                    msg = pending.pop(0)
-                else:
-                    msg = await asyncio.wait_for(
-                        self.bus.consume_outbound(),
-                        timeout=1.0
-                    )
+                msg = await asyncio.wait_for(
+                    self.bus.consume_outbound(),
+                    timeout=1.0
+                )
 
                 if msg.metadata.get("_progress"):
                     if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
                         continue
                     if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
                         continue
-
-                # Coalesce consecutive _stream_delta messages for the same (channel, chat_id)
-                # to reduce API calls and improve streaming latency
-                if msg.metadata.get("_stream_delta") and not msg.metadata.get("_stream_end"):
-                    msg, extra_pending = self._coalesce_stream_deltas(msg)
-                    pending.extend(extra_pending)
 
                 channel = self.channels.get(msg.channel)
                 if channel:
@@ -194,56 +160,6 @@ class ChannelManager:
             await channel.send_delta(msg.chat_id, msg.content, msg.metadata)
         elif not msg.metadata.get("_streamed"):
             await channel.send(msg)
-
-    def _coalesce_stream_deltas(
-        self, first_msg: OutboundMessage
-    ) -> tuple[OutboundMessage, list[OutboundMessage]]:
-        """Merge consecutive _stream_delta messages for the same (channel, chat_id).
-
-        This reduces the number of API calls when the queue has accumulated multiple
-        deltas, which happens when LLM generates faster than the channel can process.
-
-        Returns:
-            tuple of (merged_message, list_of_non_matching_messages)
-        """
-        target_key = (first_msg.channel, first_msg.chat_id)
-        combined_content = first_msg.content
-        final_metadata = dict(first_msg.metadata or {})
-        non_matching: list[OutboundMessage] = []
-
-        # Only merge consecutive deltas. As soon as we hit any other message,
-        # stop and hand that boundary back to the dispatcher via `pending`.
-        while True:
-            try:
-                next_msg = self.bus.outbound.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-
-            # Check if this message belongs to the same stream
-            same_target = (next_msg.channel, next_msg.chat_id) == target_key
-            is_delta = next_msg.metadata and next_msg.metadata.get("_stream_delta")
-            is_end = next_msg.metadata and next_msg.metadata.get("_stream_end")
-
-            if same_target and is_delta and not final_metadata.get("_stream_end"):
-                # Accumulate content
-                combined_content += next_msg.content
-                # If we see _stream_end, remember it and stop coalescing this stream
-                if is_end:
-                    final_metadata["_stream_end"] = True
-                    # Stream ended - stop coalescing this stream
-                    break
-            else:
-                # First non-matching message defines the coalescing boundary.
-                non_matching.append(next_msg)
-                break
-
-        merged = OutboundMessage(
-            channel=first_msg.channel,
-            chat_id=first_msg.chat_id,
-            content=combined_content,
-            metadata=final_metadata,
-        )
-        return merged, non_matching
 
     async def _send_with_retry(self, channel: BaseChannel, msg: OutboundMessage) -> None:
         """Send a message with retry on failure using exponential backoff.
