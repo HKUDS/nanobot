@@ -20,19 +20,54 @@ def _gen_tool_id() -> str:
     return "toolu_" + "".join(secrets.choice(_ALNUM) for _ in range(22))
 
 
-# Beta headers injected for OAuth tokens (sk-ant-oat...) from Claude Code subscriptions.
+# Beta headers for OAuth tokens (sk-ant-oat...) from Claude Code subscriptions.
 # Context-1m beta is intentionally excluded: Anthropic rejects it with OAuth auth.
+# interleaved-thinking beta is not needed for adaptive-thinking models (opus-4-6, sonnet-4-6).
 _OAUTH_TOKEN_PREFIX = "sk-ant-oat"
-_OAUTH_BETAS = [
+_CLAUDE_CODE_VERSION = "2.1.75"
+
+# Models supporting adaptive thinking (no interleaved-thinking beta needed)
+_ADAPTIVE_THINKING_MODELS = ("opus-4-6", "opus-4.6", "sonnet-4-6", "sonnet-4.6")
+
+_OAUTH_BETAS_BASE = [
     "claude-code-20250219",
     "oauth-2025-04-20",
     "fine-grained-tool-streaming-2025-05-14",
-    "interleaved-thinking-2025-05-14",
 ]
+_OAUTH_BETAS_LEGACY_THINKING = [*_OAUTH_BETAS_BASE, "interleaved-thinking-2025-05-14"]
+
+# Claude Code canonical tool names (for name normalization in OAuth mode)
+_CLAUDE_CODE_TOOLS = [
+    "Read", "Write", "Edit", "Bash", "Grep", "Glob",
+    "AskUserQuestion", "EnterPlanMode", "ExitPlanMode", "KillShell",
+    "NotebookEdit", "Skill", "Task", "TaskOutput", "TodoWrite",
+    "WebFetch", "WebSearch",
+]
+_CC_TOOL_LOOKUP: dict[str, str] = {t.lower(): t for t in _CLAUDE_CODE_TOOLS}
+
+# Claude Code system prompt injected for all OAuth requests
+_CLAUDE_CODE_SYSTEM_PROMPT = "You are Claude Code, Anthropic's official CLI for Claude."
 
 
 def _is_oauth_token(api_key: str | None) -> bool:
     return bool(api_key and api_key.strip().startswith(_OAUTH_TOKEN_PREFIX))
+
+
+def _is_adaptive_thinking_model(model_id: str) -> bool:
+    lower = model_id.lower()
+    return any(tag in lower for tag in _ADAPTIVE_THINKING_MODELS)
+
+
+def _resolve_oauth_betas(model_id: str) -> list[str]:
+    """Return the correct beta list for an OAuth token request."""
+    if _is_adaptive_thinking_model(model_id):
+        return _OAUTH_BETAS_BASE
+    return _OAUTH_BETAS_LEGACY_THINKING
+
+
+def _to_claude_code_name(name: str) -> str:
+    """Convert tool name to Claude Code canonical casing."""
+    return _CC_TOOL_LOOKUP.get(name.lower(), name)
 
 
 def _merge_beta_header(headers: dict[str, str], betas: list[str]) -> dict[str, str]:
@@ -61,24 +96,34 @@ class AnthropicProvider(LLMProvider):
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
+        self._is_oauth = _is_oauth_token(api_key)
 
-        # Normalize headers and inject OAuth betas when using a Claude Code token
         merged_headers: dict[str, str] = dict(extra_headers or {})
-        if _is_oauth_token(api_key):
-            merged_headers = _merge_beta_header(merged_headers, _OAUTH_BETAS)
-            logger.debug("AnthropicProvider: OAuth token detected, injected Claude Code beta headers")
-
-        self.extra_headers = merged_headers
 
         from anthropic import AsyncAnthropic
 
         client_kw: dict[str, Any] = {}
-        if api_key:
-            client_kw["api_key"] = api_key
         if api_base:
             client_kw["base_url"] = api_base
+
+        if self._is_oauth:
+            # OAuth tokens use Bearer auth (auth_token), not api_key (x-api-key).
+            # Also inject Claude Code identity headers required by Anthropic's OAuth endpoint.
+            # Beta headers are model-dependent and injected per-request in _build_kwargs.
+            client_kw["auth_token"] = api_key
+            client_kw["api_key"] = "placeholder"  # SDK requires non-empty api_key field
+            merged_headers.update({
+                "user-agent": f"claude-cli/{_CLAUDE_CODE_VERSION}",
+                "x-app": "cli",
+            })
+            logger.debug("AnthropicProvider: OAuth token detected, using Bearer auth with Claude Code headers")
+        elif api_key:
+            client_kw["api_key"] = api_key
+
+        self.extra_headers = merged_headers
         if self.extra_headers:
             client_kw["default_headers"] = self.extra_headers
+
         self._client = AsyncAnthropic(**client_kw)
 
     @staticmethod
@@ -241,15 +286,17 @@ class AnthropicProvider(LLMProvider):
     # Tool definition conversion
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _convert_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    def _convert_tools(self, tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
         if not tools:
             return None
         result = []
         for tool in tools:
             func = tool.get("function", tool)
+            raw_name = func.get("name", "")
+            # OAuth mode: normalize to Claude Code canonical casing to avoid tool-call mismatches
+            name = _to_claude_code_name(raw_name) if self._is_oauth else raw_name
             entry: dict[str, Any] = {
-                "name": func.get("name", ""),
+                "name": name,
                 "input_schema": func.get("parameters", {"type": "object", "properties": {}}),
             }
             desc = func.get("description")
@@ -348,7 +395,17 @@ class AnthropicProvider(LLMProvider):
             "max_tokens": max_tokens,
         }
 
-        if system:
+        # OAuth mode: prepend Claude Code identity system prompt (required by Anthropic).
+        # The actual system prompt (if any) follows as a second block.
+        if self._is_oauth:
+            cc_block: dict[str, Any] = {"type": "text", "text": _CLAUDE_CODE_SYSTEM_PROMPT}
+            if isinstance(system, list) and system:
+                kwargs["system"] = [cc_block, *system]
+            elif isinstance(system, str) and system:
+                kwargs["system"] = [cc_block, {"type": "text", "text": system}]
+            else:
+                kwargs["system"] = [cc_block]
+        elif system:
             kwargs["system"] = system
 
         if thinking_enabled:
@@ -366,8 +423,14 @@ class AnthropicProvider(LLMProvider):
             if tc:
                 kwargs["tool_choice"] = tc
 
-        if self.extra_headers:
-            kwargs["extra_headers"] = self.extra_headers
+        # Inject model-dependent OAuth beta headers per-request
+        request_headers = dict(self.extra_headers)
+        if self._is_oauth:
+            oauth_betas = _resolve_oauth_betas(model_name)
+            request_headers = _merge_beta_header(request_headers, oauth_betas)
+
+        if request_headers:
+            kwargs["extra_headers"] = request_headers
 
         return kwargs
 
