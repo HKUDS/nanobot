@@ -91,11 +91,11 @@ class AnthropicProvider(LLMProvider):
             client_kw["base_url"] = api_base
 
         if self._is_oauth:
-            # OAuth tokens use Bearer auth (auth_token), not api_key (x-api-key).
-            # Also inject Claude Code identity headers required by Anthropic's OAuth endpoint.
-            # Beta headers are model-dependent and injected per-request in _build_kwargs.
+            # OAuth tokens use Bearer auth (auth_token=..., api_key=None).
+            # Setting api_key=None prevents SDK from sending X-Api-Key header,
+            # which Anthropic validates before Authorization and would cause 401.
             client_kw["auth_token"] = api_key
-            client_kw["api_key"] = "placeholder"  # SDK requires non-empty api_key field
+            client_kw["api_key"] = None
             merged_headers.update({
                 "user-agent": f"claude-cli/{_CLAUDE_CODE_VERSION}",
                 "x-app": "cli",

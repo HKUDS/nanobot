@@ -79,12 +79,14 @@ class TestToolNameNormalization:
 
 class TestProviderConstruction:
     def test_oauth_uses_bearer_auth(self):
-        """SDK must use Authorization: Bearer for OAuth tokens, not X-Api-Key."""
+        """SDK must use Authorization: Bearer for OAuth tokens, and must NOT send X-Api-Key."""
         provider = AnthropicProvider(api_key=_FAKE_OAUTH_TOKEN, default_model="claude-sonnet-4-6")
         auth_headers = provider._client.auth_headers
         assert "Authorization" in auth_headers
         assert auth_headers["Authorization"].startswith("Bearer ")
         assert _FAKE_OAUTH_TOKEN in auth_headers["Authorization"]
+        # X-Api-Key must be absent — Anthropic validates it before Authorization and returns 401
+        assert "X-Api-Key" not in auth_headers
 
     def test_oauth_injects_claude_code_identity_headers(self):
         """user-agent and x-app must identify the client as Claude Code."""
