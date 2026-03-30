@@ -1,5 +1,5 @@
 #!/bin/bash
-# Count core agent lines (excluding channels/, cli/, providers/ adapters)
+# Count core agent lines (excluding channels/, cli/, api/, providers/ adapters)
 cd "$(dirname "$0")" || exit 1
 
 echo "nanobot core agent line count"
@@ -15,7 +15,7 @@ root=$(cat nanobot/__init__.py nanobot/__main__.py | wc -l)
 printf "  %-16s %5s lines\n" "(root)" "$root"
 
 echo ""
-total=$(find nanobot -name "*.py" ! -path "*/channels/*" ! -path "*/cli/*" ! -path "*/command/*" ! -path "*/providers/*" ! -path "*/skills/*" | xargs cat | wc -l)
+total=$(find nanobot -name "*.py" ! -path "*/channels/*" ! -path "*/cli/*" ! -path "*/api/*" ! -path "*/command/*" ! -path "*/providers/*" ! -path "*/skills/*" | xargs cat | wc -l)
 echo "  Core total:     $total lines"
 echo ""
-echo "  (excludes: channels/, cli/, command/, providers/, skills/)"
+echo "  (excludes: channels/, cli/, api/, command/, providers/, skills/)"
