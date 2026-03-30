@@ -615,7 +615,6 @@ Master switches in the `features` config block. These override per-agent setting
 |------|---------|-----------------|
 | `planning_enabled` | `true` | Task decomposition and planning |
 | `verification_enabled` | `true` | Answer verification (master switch — distinct from `verification_mode` in agent defaults) |
-| `delegation_enabled` | `true` | Multi-agent delegation |
 | `memory_enabled` | `true` | Persistent memory |
 | `skills_enabled` | `true` | Skill discovery and loading |
 | `streaming_enabled` | `true` | Streaming LLM responses |
@@ -623,8 +622,7 @@ Master switches in the `features` config block. These override per-agent setting
 ```json
 {
   "features": {
-    "planning_enabled": false,
-    "delegation_enabled": false
+    "planning_enabled": false
   }
 }
 ```

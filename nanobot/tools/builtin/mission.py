@@ -17,8 +17,8 @@ class MissionStartTool(Tool):
     """Launch a background mission for tasks that benefit from asynchronous execution.
 
     A *mission* runs in the background using a specialist agent, structured contracts,
-    and the delegation engine's task taxonomy.  The user receives the result directly
-    when the mission completes — there is no need to poll.
+    and a task taxonomy.  The user receives the result directly when the mission
+    completes — there is no need to poll.
     """
 
     def __init__(self, manager: MissionManager):
