@@ -281,6 +281,8 @@ class DiscordCreateEmbedTool(DiscordBaseTool):
         }
 
     async def execute(self, **kwargs: Any) -> Any:
+        from nanobot.security.network import validate_url_target
+
         channel_id = kwargs["channel_id"]
         embed: dict[str, Any] = {}
         if kwargs.get("title"):
@@ -294,6 +296,9 @@ class DiscordCreateEmbedTool(DiscordBaseTool):
         if kwargs.get("footer"):
             embed["footer"] = {"text": kwargs["footer"]}
         if kwargs.get("image_url"):
+            ok, reason = validate_url_target(kwargs["image_url"])
+            if not ok:
+                return f"Error: image_url rejected — {reason}"
             embed["image"] = {"url": kwargs["image_url"]}
         if not embed:
             return "Error: must provide at least one embed field (title, description, etc.)"

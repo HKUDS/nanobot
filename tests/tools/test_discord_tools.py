@@ -6,6 +6,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+# Skip entire module if discord.py is not installed
+pytest.importorskip("discord")
+
 from nanobot.agent.tools.discord_tools import (
     DiscordCreateThreadTool,
     DiscordManageRolesTool,
