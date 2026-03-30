@@ -389,7 +389,7 @@ class DiscordPollTool(DiscordBaseTool):
         channel_id = kwargs["channel_id"]
         question = kwargs["question"]
         answers = kwargs["answers"]
-        duration_hours = kwargs.get("duration_hours", 24)
+        duration_hours = min(kwargs.get("duration_hours", 24), 168)
         allow_multiselect = kwargs.get("allow_multiselect", False)
 
         if len(answers) < 2:

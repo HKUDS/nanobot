@@ -4,12 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
-# Skip entire module if discord.py is not installed
-pytest.importorskip("discord")
-
 from nanobot.agent.tools.discord_tools import (
+    DiscordCreateChannelTool,
+    DiscordCreateEmbedTool,
     DiscordCreateThreadTool,
     DiscordManageRolesTool,
     DiscordPinMessageTool,
@@ -68,7 +65,7 @@ async def test_discord_manage_roles_remove():
         raise_for_status=MagicMock(),
     )
     tool = DiscordManageRolesTool(mock_http, "token")
-    result = await tool.execute(guild_id="g1", user_id="u1", role_id="r1", action="remove")
+    await tool.execute(guild_id="g1", user_id="u1", role_id="r1", action="remove")
     call = mock_http.request.call_args[0]
     assert call[0] == "DELETE"
 
@@ -90,7 +87,7 @@ async def test_discord_pin_message_uses_put():
         raise_for_status=MagicMock(),
     )
     tool = DiscordPinMessageTool(mock_http, "token")
-    result = await tool.execute(channel_id="c1", message_id="m1")
+    await tool.execute(channel_id="c1", message_id="m1")
     call = mock_http.request.call_args[0]
     assert call[0] == "PUT"
     assert "/channels/c1/pins/m1" in call[1]
@@ -109,3 +106,54 @@ async def test_discord_create_thread_from_message():
     assert "t1" in result
     call = mock_http.request.call_args[0]
     assert "/messages/msg1/threads" in call[1]
+
+
+async def test_discord_create_embed_sends_rich_embed():
+    mock_http = AsyncMock()
+    mock_http.request.return_value = MagicMock(
+        status_code=200,
+        content=b'{"id": "e1"}',
+        json=MagicMock(return_value={"id": "e1"}),
+        raise_for_status=MagicMock(),
+    )
+    tool = DiscordCreateEmbedTool(mock_http, "token")
+    result = await tool.execute(
+        channel_id="c1",
+        title="Hello",
+        description="World",
+        footer="Bot",
+        fields=[{"name": "f1", "value": "v1"}],
+    )
+    assert "e1" in result
+    call = mock_http.request.call_args[0]
+    assert call[0] == "POST"
+    assert "/channels/c1/messages" in call[1]
+
+
+async def test_discord_create_embed_rejects_private_image_url(monkeypatch):
+    mock_http = AsyncMock()
+    tool = DiscordCreateEmbedTool(mock_http, "token")
+    # Patch validate_url_target to simulate SSRF rejection
+    import nanobot.security.network as net_mod
+
+    monkeypatch.setattr(net_mod, "validate_url_target", lambda url: (False, "private IP blocked"))
+    result = await tool.execute(channel_id="c1", title="t", image_url="http://169.254.169.254/")
+    assert "Error" in result
+    assert "image_url" in result
+    mock_http.request.assert_not_called()
+
+
+async def test_discord_create_channel_posts_to_guild():
+    mock_http = AsyncMock()
+    mock_http.request.return_value = MagicMock(
+        status_code=200,
+        content=b'{"id": "ch1", "name": "general"}',
+        json=MagicMock(return_value={"id": "ch1", "name": "general"}),
+        raise_for_status=MagicMock(),
+    )
+    tool = DiscordCreateChannelTool(mock_http, "token")
+    result = await tool.execute(guild_id="g1", name="general")
+    assert "ch1" in result
+    call = mock_http.request.call_args[0]
+    assert call[0] == "POST"
+    assert "/guilds/g1/channels" in call[1]
