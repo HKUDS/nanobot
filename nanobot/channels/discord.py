@@ -301,7 +301,9 @@ class DiscordChannel(BaseChannel):
     async def _handle_message_create(self, payload: dict[str, Any]) -> None:
         """Handle incoming Discord messages."""
         author = payload.get("author") or {}
-        if author.get("bot"):
+        webhook_id = payload.get("webhook_id")
+        # 普通 bot 消息忽略，但 webhook 消息允许通过（author.id === webhook_id）
+        if author.get("bot") and not webhook_id:
             return
 
         sender_id = str(author.get("id", ""))
