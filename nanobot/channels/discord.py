@@ -29,6 +29,12 @@ class DiscordConfig(Base):
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377
     group_policy: Literal["mention", "open"] = "mention"
+    slash_commands_enabled: bool = True
+    threads_per_conversation: bool = False
+    ephemeral_commands: bool = True
+    admin_role_ids: list[str] = Field(default_factory=list)
+    application_id: str = ""
+    guild_ids: list[str] = Field(default_factory=list)
 
 
 class DiscordChannel(BaseChannel):
@@ -50,6 +56,8 @@ class DiscordChannel(BaseChannel):
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._http: httpx.AsyncClient | None = None
         self._bot_user_id: str | None = None
+        self._tree: discord.app_commands.CommandTree | None = None
+        self._pending_interactions: dict[str, discord.Interaction] = {}
 
     async def start(self) -> None:
         """Start the Discord client."""
@@ -61,11 +69,42 @@ class DiscordChannel(BaseChannel):
         self._http = httpx.AsyncClient(timeout=30.0)
         intents = discord.Intents._from_value(self.config.intents)
         self._client = discord.Client(intents=intents)
+        self._tree = discord.app_commands.CommandTree(self._client)
+
+        @self._tree.command(name="stop", description="Stop the current agent task")
+        async def slash_stop(interaction: discord.Interaction) -> None:
+            await self._inject_slash_as_message(interaction, "/stop")
+
+        @self._tree.command(name="restart", description="Restart the agent")
+        async def slash_restart(interaction: discord.Interaction) -> None:
+            await self._inject_slash_as_message(interaction, "/restart")
+
+        @self._tree.command(name="new", description="Start a new conversation")
+        async def slash_new(interaction: discord.Interaction) -> None:
+            await self._inject_slash_as_message(interaction, "/new")
+
+        @self._tree.command(name="status", description="Show agent status")
+        async def slash_status(interaction: discord.Interaction) -> None:
+            await self._inject_slash_as_message(interaction, "/status")
+
+        @self._tree.command(name="help", description="Show help information")
+        async def slash_help(interaction: discord.Interaction) -> None:
+            await self._inject_slash_as_message(interaction, "/help")
 
         @self._client.event
         async def on_ready() -> None:
             self._bot_user_id = str(self._client.user.id)
             logger.info("Discord ready as {}", self._client.user)
+            if self.config.slash_commands_enabled:
+                if self.config.guild_ids:
+                    for gid in self.config.guild_ids:
+                        guild_obj = discord.Object(id=int(gid))
+                        self._tree.copy_global_to(guild=guild_obj)
+                        await self._tree.sync(guild=guild_obj)
+                    logger.info("Discord slash commands synced to {} guilds", len(self.config.guild_ids))
+                else:
+                    await self._tree.sync()
+                    logger.warning("Discord slash commands synced globally (up to 1hr propagation delay)")
 
         @self._client.event
         async def on_message(message: discord.Message) -> None:
@@ -84,6 +123,7 @@ class DiscordChannel(BaseChannel):
         if self._typing_tasks:
             await asyncio.gather(*self._typing_tasks.values(), return_exceptions=True)
         self._typing_tasks.clear()
+        self._pending_interactions.clear()
         if self._client:
             await self._client.close()
             self._client = None
@@ -93,17 +133,20 @@ class DiscordChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message via discord.py, including file attachments."""
+        interaction = self._pending_interactions.pop(msg.chat_id, None)
+
         if not self._client:
             logger.warning("Discord client not initialized")
             return
 
-        channel = self._client.get_channel(int(msg.chat_id))
-        if channel is None:
-            try:
-                channel = await self._client.fetch_channel(int(msg.chat_id))
-            except Exception as e:
-                logger.error("Discord channel {} not found: {}", msg.chat_id, e)
-                return
+        if interaction is None:
+            channel = self._client.get_channel(int(msg.chat_id))
+            if channel is None:
+                try:
+                    channel = await self._client.fetch_channel(int(msg.chat_id))
+                except Exception as e:
+                    logger.error("Discord channel {} not found: {}", msg.chat_id, e)
+                    return
 
         try:
             sent_media = False
@@ -121,18 +164,21 @@ class DiscordChannel(BaseChannel):
                     failed_media.append(path.name)
                     continue
                 try:
-                    reference = None
-                    if msg.reply_to and not sent_media:
-                        reference = discord.MessageReference(
-                            message_id=int(msg.reply_to),
-                            channel_id=int(msg.chat_id),
-                            fail_if_not_exists=False,
+                    if interaction is not None:
+                        await interaction.followup.send(file=discord.File(path))
+                    else:
+                        reference = None
+                        if msg.reply_to and not sent_media:
+                            reference = discord.MessageReference(
+                                message_id=int(msg.reply_to),
+                                channel_id=int(msg.chat_id),
+                                fail_if_not_exists=False,
+                            )
+                        await channel.send(
+                            file=discord.File(path),
+                            reference=reference,
+                            mention_author=False,
                         )
-                    await channel.send(
-                        file=discord.File(path),
-                        reference=reference,
-                        mention_author=False,
-                    )
                     sent_media = True
                     logger.info("Discord file sent: {}", path.name)
                 except Exception as e:
@@ -150,24 +196,47 @@ class DiscordChannel(BaseChannel):
                 return
 
             for i, chunk in enumerate(chunks):
-                reference = None
-                if i == 0 and msg.reply_to and not sent_media:
-                    reference = discord.MessageReference(
-                        message_id=int(msg.reply_to),
-                        channel_id=int(msg.chat_id),
-                        fail_if_not_exists=False,
-                    )
                 try:
-                    await channel.send(
-                        content=chunk,
-                        reference=reference,
-                        mention_author=False,
-                    )
+                    if interaction is not None:
+                        await interaction.followup.send(content=chunk)
+                    else:
+                        reference = None
+                        if i == 0 and msg.reply_to and not sent_media:
+                            reference = discord.MessageReference(
+                                message_id=int(msg.reply_to),
+                                channel_id=int(msg.chat_id),
+                                fail_if_not_exists=False,
+                            )
+                        await channel.send(
+                            content=chunk,
+                            reference=reference,
+                            mention_author=False,
+                        )
                 except Exception as e:
                     logger.error("Error sending Discord message: {}", e)
                     break  # Abort remaining chunks on failure
         finally:
             await self._stop_typing(msg.chat_id)
+
+    async def _inject_slash_as_message(
+        self,
+        interaction: discord.Interaction,
+        text: str,
+    ) -> None:
+        """Defer interaction and inject text as InboundMessage to bus."""
+        channel_id = str(interaction.channel_id)
+        await interaction.response.defer(ephemeral=False)
+        self._pending_interactions[channel_id] = interaction
+        await self._handle_message(
+            sender_id=str(interaction.user.id),
+            chat_id=channel_id,
+            content=text,
+            metadata={
+                "message_id": "",
+                "guild_id": str(interaction.guild_id) if interaction.guild_id else None,
+                "reply_to": None,
+            },
+        )
 
     async def _handle_message_create(self, message: discord.Message) -> None:
         """Handle incoming Discord messages."""
