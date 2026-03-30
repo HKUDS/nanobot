@@ -261,6 +261,9 @@ class OpenAICompatProvider(LLMProvider):
                     kwargs.update(overrides)
                     break
 
+        if "max_completion_tokens" in kwargs and "max_tokens" in kwargs:
+            del kwargs["max_tokens"]
+
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
 
