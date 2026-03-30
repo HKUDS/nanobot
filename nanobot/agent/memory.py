@@ -103,11 +103,12 @@ class MemoryStore:
     def _format_messages(messages: list[dict]) -> str:
         lines = []
         for message in messages:
-            if not message.get("content"):
+            if not message or not message.get("content"):
                 continue
-            tools = f" [tools: {', '.join(message['tools_used'])}]" if message.get("tools_used") else ""
+            tools_used = message.get("tools_used")
+            tools = f" [tools: {', '.join(tools_used)}]" if isinstance(tools_used, list) and tools_used else ""
             lines.append(
-                f"[{message.get('timestamp', '?')[:16]}] {message['role'].upper()}{tools}: {message['content']}"
+                f"[{message.get('timestamp', '?')[:16]}] {message.get('role', 'UNKNOWN').upper()}{tools}: {message['content']}"
             )
         return "\n".join(lines)
 
