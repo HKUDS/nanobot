@@ -151,6 +151,12 @@ class ToolsConfig(Base):
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
+class ToolPermissionsConfig(Base):
+    """Tool-level permission overrides (require_approval / auto_approved)."""
+
+    tools: dict[str, str] = Field(default_factory=dict)
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
@@ -159,6 +165,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    tool_permissions: ToolPermissionsConfig = Field(default_factory=ToolPermissionsConfig)
 
     @property
     def workspace_path(self) -> Path:
@@ -258,4 +265,9 @@ class Config(BaseSettings):
                 return spec.default_api_base
         return None
 
-    model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
+    model_config = ConfigDict(
+        env_prefix="NANOBOT_",
+        env_nested_delimiter="__",
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
