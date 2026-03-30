@@ -63,6 +63,11 @@ class DiscordChannel(BaseChannel):
         self._pending_interactions: dict[str, discord.Interaction] = {}
         self._attach_stop_button: set[str] = set()
         self._thread_map: dict[str, str] = {}  # original channel_id -> thread_id
+        self._tool_registry: Any = None
+
+    def set_tool_registry(self, registry: Any) -> None:
+        """Inject the agent's ToolRegistry so Discord tools can be registered."""
+        self._tool_registry = registry
 
     async def start(self) -> None:
         """Start the Discord client."""
@@ -200,6 +205,7 @@ class DiscordChannel(BaseChannel):
         async def on_ready() -> None:
             self._bot_user_id = str(self._client.user.id)
             logger.info("Discord ready as {}", self._client.user)
+            self._register_discord_tools()
             if self.config.slash_commands_enabled:
                 if self.config.guild_ids:
                     for gid in self.config.guild_ids:
@@ -220,9 +226,51 @@ class DiscordChannel(BaseChannel):
         except asyncio.CancelledError:
             pass
 
+    def _register_discord_tools(self) -> None:
+        """Register Discord API tools into the tool registry."""
+        if self._tool_registry is None or self._http is None:
+            return
+        from nanobot.agent.tools.discord_tools import (  # noqa: PLC0415
+            DiscordCreateChannelTool,
+            DiscordCreateEmbedTool,
+            DiscordCreateThreadTool,
+            DiscordManageRolesTool,
+            DiscordPinMessageTool,
+            DiscordPollTool,
+            DiscordSendTool,
+        )
+        token = self.config.token
+        for tool in [
+            DiscordSendTool(self._http, token),
+            DiscordCreateThreadTool(self._http, token),
+            DiscordCreateChannelTool(self._http, token),
+            DiscordManageRolesTool(self._http, token),
+            DiscordCreateEmbedTool(self._http, token),
+            DiscordPinMessageTool(self._http, token),
+            DiscordPollTool(self._http, token),
+        ]:
+            self._tool_registry.register(tool)
+        logger.info("Discord: registered {} agent tools", 7)
+
+    def _unregister_discord_tools(self) -> None:
+        """Unregister Discord API tools from the tool registry."""
+        if self._tool_registry is None:
+            return
+        for name in [
+            "discord_send",
+            "discord_create_thread",
+            "discord_create_channel",
+            "discord_manage_roles",
+            "discord_create_embed",
+            "discord_pin_message",
+            "discord_poll",
+        ]:
+            self._tool_registry.unregister(name)
+
     async def stop(self) -> None:
         """Stop the Discord channel."""
         self._running = False
+        self._unregister_discord_tools()
         for task in self._typing_tasks.values():
             task.cancel()
         if self._typing_tasks:
