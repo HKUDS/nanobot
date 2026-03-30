@@ -350,11 +350,15 @@ class MemoryConsolidator:
                 return True
         return True
 
-    async def maybe_consolidate_by_tokens(self, session: Session) -> None:
+    async def maybe_consolidate_by_tokens(self, session: Session, skip_llm: bool = False) -> None:
         """Loop: archive old messages until prompt fits within safe budget.
 
         The budget reserves space for completion tokens and a safety buffer
         so the LLM request never exceeds the context window.
+
+        Args:
+            session: The session to consolidate.
+            skip_llm: If True, prune messages without calling LLM consolidation.
         """
         if not session.messages or self.context_window_tokens <= 0:
             return
@@ -403,8 +407,9 @@ class MemoryConsolidator:
                     source,
                     len(chunk),
                 )
-                if not await self.consolidate_messages(chunk):
-                    return
+                if not skip_llm:
+                    if not await self.consolidate_messages(chunk):
+                        return
                 session.last_consolidated = end_idx
                 self.sessions.save(session)
 
