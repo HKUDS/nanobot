@@ -18,10 +18,18 @@ from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 if TYPE_CHECKING:
     from nanobot.providers.registry import ProviderSpec
 
-_ALLOWED_MSG_KEYS = frozenset({
+# Standard keys allowed in ALL OpenAI-compatible API messages
+_STANDARD_MSG_KEYS = frozenset({
     "role", "content", "tool_calls", "tool_call_id", "name",
+})
+
+# Extended keys for providers that support reasoning/extra fields
+_EXTENDED_MSG_KEYS = _STANDARD_MSG_KEYS | frozenset({
     "reasoning_content", "extra_content",
 })
+
+# Backward-compatible alias — any code importing _ALLOWED_MSG_KEYS still works
+_ALLOWED_MSG_KEYS = _EXTENDED_MSG_KEYS
 _ALNUM = string.ascii_letters + string.digits
 
 _STANDARD_TC_KEYS = frozenset({"id", "type", "index", "function"})
@@ -194,7 +202,13 @@ class OpenAICompatProvider(LLMProvider):
 
     def _sanitize_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Strip non-standard keys, normalize tool_call IDs."""
-        sanitized = LLMProvider._sanitize_request_messages(messages, _ALLOWED_MSG_KEYS)
+        # Use extended key set only if provider spec explicitly supports reasoning fields.
+        # Default: strip everything except standard OpenAI keys.
+        if getattr(getattr(self, '_spec', None), 'supports_reasoning', False):
+            allowed = _EXTENDED_MSG_KEYS
+        else:
+            allowed = _STANDARD_MSG_KEYS
+        sanitized = LLMProvider._sanitize_request_messages(messages, allowed)
         id_map: dict[str, str] = {}
 
         def map_id(value: Any) -> Any:

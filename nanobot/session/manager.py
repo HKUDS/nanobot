@@ -66,6 +66,8 @@ class Session:
                                     declared.add(str(tc["id"]))
         return start
 
+    _STANDARD_HISTORY_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name"})
+
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
         """Return unconsolidated messages for LLM input, aligned to a legal tool-call boundary."""
         unconsolidated = self.messages[self.last_consolidated:]
@@ -85,10 +87,10 @@ class Session:
 
         out: list[dict[str, Any]] = []
         for message in sliced:
-            entry: dict[str, Any] = {"role": message["role"], "content": message.get("content", "")}
-            for key in ("tool_calls", "tool_call_id", "name"):
-                if key in message:
-                    entry[key] = message[key]
+            entry: dict[str, Any] = {k: message[k] for k in self._STANDARD_HISTORY_KEYS if k in message}
+            # Ensure content is always present (providers require it, even if None/empty)
+            if "content" not in entry:
+                entry["content"] = ""
             out.append(entry)
         return out
 

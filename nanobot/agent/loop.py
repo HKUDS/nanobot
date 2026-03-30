@@ -620,6 +620,10 @@ class AgentLoop:
         for m in messages[skip:]:
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
+            # Strip provider-internal reasoning fields before persistence (defense in depth)
+            entry.pop("reasoning_content", None)
+            entry.pop("thinking_blocks", None)
+            entry.pop("extra_content", None)
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
             if role == "tool":
