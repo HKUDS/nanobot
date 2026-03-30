@@ -61,7 +61,7 @@ def _make_retriever(
     scorer = RetrievalScorer(
         profile_mgr=profile_mgr,
         reranker=reranker,
-        memory_config_fn=lambda: _mc,
+        memory_config=_mc,
     )
     graph_aug = GraphAugmenter(
         graph=graph,
@@ -680,7 +680,7 @@ class TestGraphEntityCache:
         scorer = RetrievalScorer(
             profile_mgr=profile_mgr,
             reranker=reranker,
-            memory_config_fn=lambda: MemoryConfig(),
+            memory_config=MemoryConfig(),
         )
         graph_aug = GraphAugmenter(
             graph=graph,

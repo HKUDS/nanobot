@@ -9,7 +9,6 @@ import cycle is introduced.
 from __future__ import annotations
 
 import re
-from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -19,6 +18,8 @@ from nanobot.utils.paths import ensure_dir
 
 if TYPE_CHECKING:
     from nanobot.config.memory import MemoryConfig
+    from nanobot.memory.maintenance import MemoryMaintenance
+    from nanobot.memory.read.retriever import MemoryRetriever
     from nanobot.memory.unified_db import UnifiedMemoryDB
 
 
@@ -27,19 +28,19 @@ class EvalRunner:
 
     def __init__(
         self,
-        retrieve_fn: Callable[..., Awaitable[list[dict[str, Any]]]],
+        retriever: MemoryRetriever,
         workspace: Path,
         memory_dir: Path,
         *,
-        memory_config_fn: Callable[[], MemoryConfig],
-        get_backend_stats_fn: Callable[[], dict[str, Any]],
+        memory_config: MemoryConfig,
+        maintenance: MemoryMaintenance,
         db: UnifiedMemoryDB | None = None,
     ) -> None:
-        self._retrieve = retrieve_fn
+        self._retriever = retriever
         self.workspace = workspace
         self.memory_dir = memory_dir
-        self._memory_config_fn = memory_config_fn
-        self._get_backend_stats = get_backend_stats_fn
+        self._memory_config = memory_config
+        self._maintenance = maintenance
         self._db = db
 
     # ------------------------------------------------------------------
@@ -53,7 +54,7 @@ class EvalRunner:
         The ``metrics`` and ``kpis`` keys are kept empty for backward
         compatibility with callers that destructure the return value.
         """
-        stats = self._get_backend_stats()
+        stats = self._maintenance._backend_stats_for_eval()
         vector_points_count = stats["vector_points_count"]
         vector_search_count = stats["vector_search_count"]
         history_rows_count = stats["history_rows_count"]
@@ -77,7 +78,7 @@ class EvalRunner:
                 "history_rows_count": history_rows_count,
                 "vector_health_state": vector_health_state,
             },
-            "rollout": self._memory_config_fn().rollout_status(),
+            "rollout": self._memory_config.rollout_status(),
         }
 
     async def evaluate_retrieval_cases(
@@ -196,7 +197,7 @@ class EvalRunner:
 
             expected_any_norm = [_normalize_phrase(x) for x in expected_any if _normalize_phrase(x)]
 
-            retrieved = await self._retrieve(
+            retrieved = await self._retriever.retrieve(
                 query,
                 top_k=top_k,
                 recency_half_life_days=recency_half_life_days,
@@ -338,7 +339,7 @@ class EvalRunner:
             "generated_at": _utc_now_iso(),
             "evaluation": evaluation,
             "observability": observability,
-            "rollout": rollout or self._memory_config_fn().rollout_status(),
+            "rollout": rollout or self._memory_config.rollout_status(),
         }
         import json as _json
 
@@ -350,7 +351,7 @@ class EvalRunner:
         evaluation: dict[str, Any],
         observability: dict[str, Any],
     ) -> dict[str, Any]:
-        mc = self._memory_config_fn()
+        mc = self._memory_config
         min_recall = mc.rollout_gate_min_recall_at_k
         min_precision = mc.rollout_gate_min_precision_at_k
         max_tokens = mc.rollout_gate_max_avg_context_tokens

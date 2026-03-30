@@ -54,13 +54,13 @@ class TestSnapshotDBPath:
         # Seed snapshot so read_snapshot returns something
         db.write_snapshot("current", "# Old Memory\n")
 
+        profile_mgr.verify_beliefs = MagicMock(return_value={"summary": {}})
+        profile_mgr.write_profile = MagicMock()
+
         snap = MemorySnapshot(
             profile_mgr=profile_mgr,
-            read_events_fn=MagicMock(side_effect=AssertionError("should not be called")),
             profile_section_lines_fn=lambda p, **kw: [],
             recent_unresolved_fn=lambda e, **kw: [],
-            verify_beliefs_fn=lambda: {"summary": {}},
-            write_profile_fn=MagicMock(),
             db=db,
         )
 
@@ -97,14 +97,13 @@ class TestSnapshotDBPath:
             "meta": {},
         }
         profile_mgr._meta_section = MagicMock(return_value={})
+        profile_mgr.verify_beliefs = MagicMock(return_value={"summary": {}})
+        profile_mgr.write_profile = MagicMock()
 
         snap = MemorySnapshot(
             profile_mgr=profile_mgr,
-            read_events_fn=MagicMock(side_effect=AssertionError("should not be called")),
             profile_section_lines_fn=lambda p, **kw: [],
             recent_unresolved_fn=lambda e, **kw: [],
-            verify_beliefs_fn=lambda: {"summary": {}},
-            write_profile_fn=MagicMock(),
             db=db,
         )
 
@@ -309,18 +308,22 @@ class TestEvalDBPath:
     def test_save_report_uses_db_path(self, db: UnifiedMemoryDB, tmp_path: Path) -> None:
         from nanobot.eval.memory_eval import EvalRunner
 
+        mock_retriever = MagicMock()
+        mock_retriever.retrieve = MagicMock(return_value=[])
+        mock_maintenance = MagicMock()
+        mock_maintenance._backend_stats_for_eval.return_value = {
+            "vector_points_count": 0,
+            "vector_search_count": 0,
+            "history_rows_count": 0,
+            "vector_enabled": False,
+            "vector_mode": "disabled",
+        }
         runner = EvalRunner(
-            retrieve_fn=MagicMock(return_value=[]),
+            retriever=mock_retriever,
             workspace=tmp_path,
             memory_dir=tmp_path / "memory",
-            memory_config_fn=lambda: MemoryConfig(),
-            get_backend_stats_fn=lambda: {
-                "vector_points_count": 0,
-                "vector_search_count": 0,
-                "history_rows_count": 0,
-                "vector_enabled": False,
-                "vector_mode": "disabled",
-            },
+            memory_config=MemoryConfig(),
+            maintenance=mock_maintenance,
             db=db,
         )
 

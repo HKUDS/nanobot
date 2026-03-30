@@ -28,7 +28,7 @@ def _make_scorer(
     return RetrievalScorer(
         profile_mgr=profile_mgr,
         reranker=reranker,
-        memory_config_fn=lambda: mc,
+        memory_config=mc,
     )
 
 

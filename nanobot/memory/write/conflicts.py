@@ -11,7 +11,6 @@ go through ``UnifiedMemoryDB``.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from .._text import _norm_text, _safe_float, _tokenize, _utc_now_iso
@@ -27,6 +26,8 @@ from ..constants import (
 from ..persistence.profile_io import ProfileStore as ProfileManager
 
 if TYPE_CHECKING:
+    from nanobot.config.memory import MemoryConfig
+
     from ..persistence.profile_io import ProfileStore
     from ..unified_db import UnifiedMemoryDB
 
@@ -54,14 +55,12 @@ class ConflictManager:
         profile_store: ProfileStore | ProfileManager,
         *,
         db: UnifiedMemoryDB | None = None,
-        resolve_gap_fn: Callable[[], float] | None = None,
+        memory_config: MemoryConfig | None = None,
     ) -> None:
         # Stored as profile_mgr for backward compat with resolve_conflict_details callers.
         self.profile_mgr = profile_store
         self._db = db
-        # Live callback for auto-resolve confidence gap threshold — reads current
-        # rollout value instead of a stale copy captured at construction time.
-        self._resolve_gap_fn: Callable[[], float] = resolve_gap_fn or (lambda: 0.25)
+        self._memory_config = memory_config
 
     # -- Shared helpers imported from .helpers --------------------------------
     _norm_text = staticmethod(_norm_text)
@@ -285,7 +284,8 @@ class ConflictManager:
         old_conf = self._safe_float(conflict.get("old_confidence"), 0.0)
         new_conf = self._safe_float(conflict.get("new_confidence"), 0.0)
         gap = abs(old_conf - new_conf)
-        if gap >= self._resolve_gap_fn():
+        resolve_gap = self._memory_config.conflict_auto_resolve_gap if self._memory_config else 0.25
+        if gap >= resolve_gap:
             return "keep_new" if new_conf > old_conf else "keep_old"
 
         # Temporal recency: when the confidence gap is too narrow, use

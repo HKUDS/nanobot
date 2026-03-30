@@ -106,7 +106,7 @@ class MemoryStore:
 
         self.extractor = MemoryExtractor(
             to_str_list=_to_str_list,
-            coerce_event=lambda raw, **kw: self._coercer.coerce_event(raw, **kw),
+            coerce_event=self._coercer.coerce_event,
             utc_now_iso=_utc_now_iso,
         )
         # Profile manager (LAN-202) — delegates profile CRUD to ProfileManager.
@@ -116,7 +116,7 @@ class MemoryStore:
             db=self.db,
             conflict_mgr_fn=lambda: self.conflict_mgr,
             corrector_fn=lambda: self._corrector,
-            extractor_fn=lambda: self.extractor,
+            extractor=self.extractor,
             ingester_fn=lambda: self.ingester,
             snapshot_fn=lambda: self.snapshot,
         )
@@ -170,7 +170,7 @@ class MemoryStore:
         # EventDeduplicator + EventIngester: own the full event write path.
         self._dedup = EventDeduplicator(
             coercer=self._coercer,
-            conflict_pair_fn=lambda old, new: self.profile_mgr._conflict_pair(old, new),
+            conflict_pair_fn=self.profile_mgr._conflict_pair,
         )
         self.ingester = EventIngester(
             coercer=self._coercer,
@@ -184,14 +184,14 @@ class MemoryStore:
         self.conflict_mgr = ConflictManager(
             self.profile_mgr,
             db=self.db,
-            resolve_gap_fn=lambda: self._memory_config.conflict_auto_resolve_gap,
+            memory_config=self._memory_config,
         )
 
         # RetrievalScorer + GraphAugmenter + MemoryRetriever: read path.
         self._scorer = RetrievalScorer(
             profile_mgr=self.profile_mgr,
             reranker=self._reranker,
-            memory_config_fn=lambda: self._memory_config,
+            memory_config=self._memory_config,
         )
         self._graph_aug = GraphAugmenter(
             graph=self.graph,
@@ -210,25 +210,22 @@ class MemoryStore:
         from nanobot.eval.memory_eval import EvalRunner
 
         self.eval_runner = EvalRunner(
-            retrieve_fn=lambda *a, **kw: self.retriever.retrieve(*a, **kw),
+            retriever=self.retriever,
             workspace=self.workspace,
             memory_dir=self.memory_dir,
-            memory_config_fn=lambda: self._memory_config,
-            get_backend_stats_fn=lambda: self.maintenance._backend_stats_for_eval(),
+            memory_config=self._memory_config,
+            maintenance=self.maintenance,
         )
 
         # MemorySnapshot: rebuild memory snapshots + verify integrity.
         self.snapshot = MemorySnapshot(
             profile_mgr=self.profile_mgr,
-            read_events_fn=lambda **kw: self.ingester.read_events(**kw),
             profile_section_lines_fn=lambda profile, **kw: self._assembler._profile_section_lines(
                 profile, **kw
             ),
             recent_unresolved_fn=lambda events, **kw: self._assembler._recent_unresolved(
                 events, **kw
             ),
-            verify_beliefs_fn=lambda: self.profile_mgr.verify_beliefs(),
-            write_profile_fn=lambda profile: self.profile_mgr.write_profile(profile),
             profile_keys=PROFILE_KEYS,
             db=self.db,
         )

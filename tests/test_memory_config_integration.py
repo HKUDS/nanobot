@@ -14,7 +14,7 @@ def test_scorer_reads_reranker_mode_from_memory_config():
     scorer = RetrievalScorer(
         profile_mgr=MagicMock(),
         reranker=MagicMock(),
-        memory_config_fn=lambda: mc,
+        memory_config=mc,
     )
     items = [{"id": "1", "content": "test", "score": 1.0}]
     result = scorer.rerank_items("query", items)
@@ -28,7 +28,7 @@ def test_scorer_reranker_mode_enabled():
     scorer = RetrievalScorer(
         profile_mgr=MagicMock(),
         reranker=mock_reranker,
-        memory_config_fn=lambda: mc,
+        memory_config=mc,
     )
     items = [{"id": "1", "content": "test", "score": 1.0}]
     scorer.rerank_items("query", items)
@@ -42,12 +42,14 @@ def test_eval_runner_reads_gates_from_memory_config() -> None:
     )
     from nanobot.eval.memory_eval import EvalRunner
 
+    mock_retriever = MagicMock()
+    mock_maintenance = MagicMock()
     runner = EvalRunner(
-        retrieve_fn=lambda *a, **kw: [],
+        retriever=mock_retriever,
         workspace=Path("/tmp"),
         memory_dir=Path("/tmp"),
-        memory_config_fn=lambda: mc,
-        get_backend_stats_fn=lambda: {},
+        memory_config=mc,
+        maintenance=mock_maintenance,
     )
     result = runner.evaluate_rollout_gates(
         evaluation={"summary": {"recall_at_k": 0.8, "precision_at_k": 0.4}},

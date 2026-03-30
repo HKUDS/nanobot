@@ -31,20 +31,19 @@ def _make_snapshot(
 ) -> MemorySnapshot:
     """Create a MemorySnapshot with mocked collaborators."""
     profile_mgr = ProfileManager()
+    profile_mgr.verify_beliefs = lambda: {"summary": {"total": 0, "well_supported": 0}}  # type: ignore[attr-defined]
+    profile_mgr.write_profile = lambda p: None  # type: ignore[attr-defined]
 
     _events = events or []
 
     return MemorySnapshot(
         profile_mgr=profile_mgr,
-        read_events_fn=lambda **kw: _events[: kw.get("limit") or len(_events)],
         profile_section_lines_fn=lambda p, **kw: (
             ["## Preferences", "- test pref"] if p.get("preferences") else []
         ),
         recent_unresolved_fn=lambda evts, **kw: [e for e in evts if e.get("status") == "open"][
             : kw.get("max_items", 8)
         ],
-        verify_beliefs_fn=lambda: {"summary": {"total": 0, "well_supported": 0}},
-        write_profile_fn=lambda p: None,
         db=_make_db_mock(_events),
     )
 

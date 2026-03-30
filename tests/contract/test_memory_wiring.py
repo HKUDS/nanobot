@@ -38,17 +38,20 @@ def _make_store(tmp_path: Path) -> MemoryStore:
 
 
 def test_conflict_resolve_gap_follows_memory_config(tmp_path):
-    """ConflictManager reads the current MemoryConfig value, not a stale copy."""
+    """ConflictManager receives MemoryConfig directly at construction."""
     store = _make_store(tmp_path)
 
     # Default gap is 0.25
-    assert store.conflict_mgr._resolve_gap_fn() == 0.25
+    assert store.conflict_mgr._memory_config is not None
+    assert store.conflict_mgr._memory_config.conflict_auto_resolve_gap == 0.25
 
-    # Replace the memory config with a new gap value.
-    store._memory_config = MemoryConfig(graph_enabled=False, conflict_auto_resolve_gap=0.5)
-
-    # ConflictManager must see the new value — no stale copy.
-    assert store.conflict_mgr._resolve_gap_fn() == 0.5
+    # Construct a store with a custom gap value.
+    store2 = MemoryStore(
+        tmp_path / "store2",
+        embedding_provider="hash",
+        memory_config=MemoryConfig(graph_enabled=False, conflict_auto_resolve_gap=0.5),
+    )
+    assert store2.conflict_mgr._memory_config.conflict_auto_resolve_gap == 0.5
 
 
 def test_profile_mgr_has_conflict_mgr_at_construction(tmp_path):
@@ -56,6 +59,9 @@ def test_profile_mgr_has_conflict_mgr_at_construction(tmp_path):
     store = _make_store(tmp_path)
     assert store.profile_mgr._conflict_mgr_fn is not None
     assert store.profile_mgr._conflict_mgr_fn() is not None
+
+    # extractor is passed directly (not via lazy callback)
+    assert store.profile_mgr._extractor is store.extractor
 
 
 def test_profile_mgr_corrector_fn_resolves(tmp_path):
@@ -67,15 +73,12 @@ def test_profile_mgr_corrector_fn_resolves(tmp_path):
 
 
 def test_rollout_override_atomic_consistency(tmp_path):
-    """After updating memory_config, the scorer sees the updated values."""
+    """Scorer receives MemoryConfig directly at construction."""
     store = _make_store(tmp_path)
 
-    # Replace the memory config with one that has reranker disabled
-    store._memory_config = MemoryConfig(reranker={"mode": "disabled"})
-
-    # Scorer's memory_config_fn should reflect the update (lambda reads live attribute)
-    scorer_config = store._scorer._memory_config_fn()
-    assert scorer_config.reranker.mode == "disabled"
+    # Scorer holds a direct reference to the MemoryConfig passed at construction.
+    scorer_config = store._scorer._memory_config
+    assert scorer_config is store._memory_config
 
 
 def test_maintenance_reindex_runs_without_error(tmp_path):
