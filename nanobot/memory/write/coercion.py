@@ -10,24 +10,21 @@ import hashlib
 from typing import TYPE_CHECKING, Any
 
 from .._text import _norm_text, _safe_float, _to_str_list, _utc_now_iso
+from ..constants import (
+    EPISODIC_STATUS_OPEN,
+    EPISODIC_STATUS_RESOLVED,
+    EVENT_TYPES,
+    MEMORY_STABILITY,
+    MEMORY_TYPES,
+)
 from ..event import is_resolved_task_or_decision
 
 if TYPE_CHECKING:
     from .classification import EventClassifier
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-EPISODIC_STATUS_OPEN: str = "open"
-EPISODIC_STATUS_RESOLVED: str = "resolved"
-
 
 class EventCoercer:
     """Normalizes raw event dicts into canonical form."""
-
-    EPISODIC_STATUS_OPEN = EPISODIC_STATUS_OPEN
-    EPISODIC_STATUS_RESOLVED = EPISODIC_STATUS_RESOLVED
 
     def __init__(self, classifier: EventClassifier) -> None:
         self._classifier = classifier
@@ -46,12 +43,12 @@ class EventCoercer:
             return None
         if isinstance(raw_status, str):
             normalized = raw_status.strip().lower()
-            if normalized in {self.EPISODIC_STATUS_OPEN, self.EPISODIC_STATUS_RESOLVED}:
+            if normalized in {EPISODIC_STATUS_OPEN, EPISODIC_STATUS_RESOLVED}:
                 return normalized
         return (
-            self.EPISODIC_STATUS_RESOLVED
+            EPISODIC_STATUS_RESOLVED
             if is_resolved_task_or_decision(summary)
-            else self.EPISODIC_STATUS_OPEN
+            else EPISODIC_STATUS_OPEN
         )
 
     def coerce_event(
@@ -70,7 +67,7 @@ class EventCoercer:
         if not isinstance(summary, str) or not summary.strip():
             return None
         event_type = raw.get("type") if isinstance(raw.get("type"), str) else "fact"
-        event_type = event_type if event_type in self._classifier.EVENT_TYPES else "fact"
+        event_type = event_type if event_type in EVENT_TYPES else "fact"
         _raw_ts = raw.get("timestamp")
         timestamp: str = _raw_ts if isinstance(_raw_ts, str) else _utc_now_iso()
         salience = min(max(_safe_float(raw.get("salience"), 0.6), 0.0), 1.0)
@@ -162,7 +159,7 @@ class EventCoercer:
         current_memory_type = str(event_copy.get("memory_type", "")).strip().lower()
         event_copy["memory_type"] = (
             current_memory_type
-            if current_memory_type in self._classifier.MEMORY_TYPES
+            if current_memory_type in MEMORY_TYPES
             else str(metadata.get("memory_type", "episodic"))
         )
         event_copy["topic"] = str(
@@ -172,7 +169,7 @@ class EventCoercer:
         current_stability = str(event_copy.get("stability", "")).strip().lower()
         event_copy["stability"] = (
             current_stability
-            if current_stability in self._classifier.MEMORY_STABILITY
+            if current_stability in MEMORY_STABILITY
             else str(metadata.get("stability", "medium"))
         )
         event_copy["source"] = (

@@ -10,22 +10,16 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable
 
 from .._text import _to_datetime, _to_str_list, _utc_now_iso
+from ..constants import (
+    CONFLICT_STATUS_NEEDS_USER,
+    CONFLICT_STATUS_OPEN,
+    PROFILE_KEYS,
+    PROFILE_STATUS_STALE,
+)
 from .profile_io import ProfileStore as ProfileManager
 
 if TYPE_CHECKING:
     from ..unified_db import UnifiedMemoryDB
-
-# Constants previously on MemoryStore — shared with snapshot logic.
-PROFILE_KEYS = (
-    "preferences",
-    "stable_facts",
-    "active_projects",
-    "relationships",
-    "constraints",
-)
-PROFILE_STATUS_STALE = "stale"
-CONFLICT_STATUS_OPEN = "open"
-CONFLICT_STATUS_NEEDS_USER = "needs_user"
 
 
 class MemorySnapshot:

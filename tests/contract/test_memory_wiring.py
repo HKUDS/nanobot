@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from nanobot.config.memory import MemoryConfig
+from nanobot.memory.constants import PROFILE_KEYS
 from nanobot.memory.store import MemoryStore
 
 
@@ -95,7 +96,7 @@ def test_maintenance_reindex_runs_without_error(tmp_path):
             read_profile_fn=store.profile_mgr.read_profile,
             read_events_fn=store.ingester.read_events,
             ingester=store.ingester,
-            profile_keys=store.PROFILE_KEYS,
+            profile_keys=PROFILE_KEYS,
         )
     except Exception as e:
         # reindex may fail for other reasons in test context, but must NOT

@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from .constants import MEMORY_TYPES
+
 # ---------------------------------------------------------------------------
 # Enums as Literal types (matching MemoryStore class constants)
 # ---------------------------------------------------------------------------
@@ -13,9 +15,6 @@ from pydantic import BaseModel, Field, field_validator
 EventType = Literal["preference", "fact", "task", "decision", "constraint", "relationship"]
 MemoryType = Literal["semantic", "episodic", "reflection"]
 Stability = Literal["high", "medium", "low"]
-
-# Runtime set for membership checks (mirrors the MemoryType Literal above).
-MEMORY_TYPES: frozenset[str] = frozenset({"semantic", "episodic", "reflection"})
 
 _RESOLVED_MARKERS: tuple[str, ...] = (
     "done",

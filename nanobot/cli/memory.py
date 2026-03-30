@@ -11,6 +11,7 @@ from rich.table import Table
 
 from nanobot import __logo__
 from nanobot.cli._shared import console
+from nanobot.memory.constants import PROFILE_KEYS
 
 memory_app = typer.Typer(help="Manage memory system")
 
@@ -171,7 +172,7 @@ def memory_reindex(
         read_profile_fn=store.profile_mgr.read_profile,
         read_events_fn=store.ingester.read_events,
         ingester=store.ingester,
-        profile_keys=store.PROFILE_KEYS,
+        profile_keys=PROFILE_KEYS,
         vector_points_count_fn=None,
         vector_rows_fn=None,
     )
@@ -219,7 +220,7 @@ def memory_compact(
         read_profile_fn=store.profile_mgr.read_profile,
         read_events_fn=store.ingester.read_events,
         ingester=store.ingester,
-        profile_keys=store.PROFILE_KEYS,
+        profile_keys=PROFILE_KEYS,
         vector_points_count_fn=None,
         vector_rows_fn=None,
     )
@@ -325,7 +326,7 @@ def memory_eval(
             write_profile_fn=store.profile_mgr.write_profile,
             read_events_fn=store.ingester.read_events,
             ingester=store.ingester,
-            profile_keys=store.PROFILE_KEYS,
+            profile_keys=PROFILE_KEYS,
             vector_points_count_fn=None,
             vector_rows_fn=None,
         )

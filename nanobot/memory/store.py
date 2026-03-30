@@ -21,6 +21,7 @@ from nanobot.config.memory import MemoryConfig
 
 from ._text import _to_str_list, _utc_now_iso
 from .consolidation_pipeline import ConsolidationPipeline
+from .constants import PROFILE_KEYS
 from .embedder import HashEmbedder, LocalEmbedder, OpenAIEmbedder
 from .graph.graph import KnowledgeGraph
 from .maintenance import MemoryMaintenance
@@ -36,12 +37,7 @@ from .token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
 from .unified_db import UnifiedMemoryDB
 from .write.classification import EventClassifier
 from .write.coercion import EventCoercer
-from .write.conflicts import (
-    CONFLICT_STATUS_NEEDS_USER,
-    CONFLICT_STATUS_OPEN,
-    CONFLICT_STATUS_RESOLVED,
-    ConflictManager,
-)
+from .write.conflicts import ConflictManager
 from .write.dedup import EventDeduplicator
 from .write.extractor import MemoryExtractor
 from .write.ingester import EventIngester
@@ -55,25 +51,6 @@ if TYPE_CHECKING:
 
 class MemoryStore:
     """SQLite-backed memory store with structured profile/events maintenance."""
-
-    PROFILE_KEYS = (
-        "preferences",
-        "stable_facts",
-        "active_projects",
-        "relationships",
-        "constraints",
-    )
-    EVENT_TYPES = {"preference", "fact", "task", "decision", "constraint", "relationship"}
-    MEMORY_TYPES = {"semantic", "episodic", "reflection"}
-    MEMORY_STABILITY = {"high", "medium", "low"}
-    PROFILE_STATUS_ACTIVE = "active"
-    PROFILE_STATUS_CONFLICTED = "conflicted"
-    PROFILE_STATUS_STALE = "stale"
-    CONFLICT_STATUS_OPEN = CONFLICT_STATUS_OPEN
-    CONFLICT_STATUS_NEEDS_USER = CONFLICT_STATUS_NEEDS_USER
-    CONFLICT_STATUS_RESOLVED = CONFLICT_STATUS_RESOLVED
-    EPISODIC_STATUS_OPEN = "open"
-    EPISODIC_STATUS_RESOLVED = "resolved"
 
     def __init__(
         self,
@@ -252,7 +229,7 @@ class MemoryStore:
             ),
             verify_beliefs_fn=lambda: self.profile_mgr.verify_beliefs(),
             write_profile_fn=lambda profile: self.profile_mgr.write_profile(profile),
-            profile_keys=self.PROFILE_KEYS,
+            profile_keys=PROFILE_KEYS,
             db=self.db,
         )
 
@@ -296,7 +273,7 @@ class MemoryStore:
             read_profile_fn=self.profile_mgr.read_profile,
             read_events_fn=self.ingester.read_events,
             ingester=self.ingester,
-            profile_keys=self.PROFILE_KEYS,
+            profile_keys=PROFILE_KEYS,
         )
 
     # ------------------------------------------------------------------

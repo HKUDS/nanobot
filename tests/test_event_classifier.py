@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-from nanobot.memory.write.classification import (
-    EVENT_TYPES,
-    MEMORY_STABILITY,
-    MEMORY_TYPES,
-    EventClassifier,
-)
+from nanobot.memory.constants import EVENT_TYPES, MEMORY_STABILITY, MEMORY_TYPES
+from nanobot.memory.write.classification import EventClassifier
 
 
 class TestEventClassifier:

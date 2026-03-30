@@ -18,8 +18,6 @@ from typing import TYPE_CHECKING, Any
 from nanobot.observability.tracing import bind_trace
 
 from .._text import _utc_now_iso
-from .classification import EVENT_TYPES, MEMORY_STABILITY, MEMORY_TYPES
-from .coercion import EPISODIC_STATUS_OPEN, EPISODIC_STATUS_RESOLVED
 
 if TYPE_CHECKING:
     from ..embedder import Embedder
@@ -31,13 +29,6 @@ if TYPE_CHECKING:
 
 class EventIngester:
     """Owns the full event write path: coerce -> dedup -> persist -> sync."""
-
-    # Class-level aliases for backward compatibility.
-    EVENT_TYPES = EVENT_TYPES
-    MEMORY_TYPES = MEMORY_TYPES
-    MEMORY_STABILITY = MEMORY_STABILITY
-    EPISODIC_STATUS_OPEN = EPISODIC_STATUS_OPEN
-    EPISODIC_STATUS_RESOLVED = EPISODIC_STATUS_RESOLVED
 
     def __init__(
         self,

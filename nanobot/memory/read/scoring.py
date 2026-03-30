@@ -11,6 +11,7 @@ import copy
 from typing import TYPE_CHECKING, Any, Callable
 
 from .._text import _contains_any, _norm_text
+from ..constants import PROFILE_KEYS, PROFILE_STATUS_CONFLICTED, PROFILE_STATUS_STALE
 from .retrieval_planner import RetrievalPlan, RetrievalPlanner
 
 if TYPE_CHECKING:
@@ -38,17 +39,6 @@ _STABILITY_BOOST: dict[str, float] = {
     "medium": 0.01,
     "low": -0.02,
 }
-
-PROFILE_KEYS = (
-    "preferences",
-    "stable_facts",
-    "active_projects",
-    "relationships",
-    "constraints",
-)
-
-PROFILE_STATUS_STALE = "stale"
-PROFILE_STATUS_CONFLICTED = "conflicted"
 
 
 def _contains_norm_phrase(text: str, phrase_norm: str) -> bool:

@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Callable
 
 from .._text import _norm_text, _safe_float, _to_datetime, _to_str_list, _tokenize, _utc_now_iso
+from ..constants import EPISODIC_STATUS_OPEN, EPISODIC_STATUS_RESOLVED
 from ..event import memory_type_for_item
 
 if TYPE_CHECKING:
@@ -204,11 +205,11 @@ class EventDeduplicator:
             raw_status=candidate.get("status"),
         )
         if merged_status in {
-            self._coercer.EPISODIC_STATUS_OPEN,
-            self._coercer.EPISODIC_STATUS_RESOLVED,
+            EPISODIC_STATUS_OPEN,
+            EPISODIC_STATUS_RESOLVED,
         }:
-            if incoming_status == self._coercer.EPISODIC_STATUS_RESOLVED:
-                merged["status"] = self._coercer.EPISODIC_STATUS_RESOLVED
+            if incoming_status == EPISODIC_STATUS_RESOLVED:
+                merged["status"] = EPISODIC_STATUS_RESOLVED
                 merged["resolved_at"] = str(candidate.get("timestamp", _utc_now_iso()))
             else:
                 merged["status"] = merged_status

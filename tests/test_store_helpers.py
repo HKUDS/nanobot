@@ -10,6 +10,7 @@ import pytest
 from nanobot.config.memory import MemoryConfig
 from nanobot.memory import MemoryStore
 from nanobot.memory._text import _to_datetime
+from nanobot.memory.constants import PROFILE_KEYS
 from nanobot.memory.maintenance import MemoryMaintenance
 from nanobot.memory.read.retrieval_planner import RetrievalPlanner
 
@@ -325,7 +326,7 @@ class TestMemoryStoreExtraCorpusAndEvaluation:
             write_profile_fn=store.profile_mgr.write_profile,
             read_events_fn=store.ingester.read_events,
             ingester=store.ingester,
-            profile_keys=store.PROFILE_KEYS,
+            profile_keys=PROFILE_KEYS,
         )
         assert isinstance(seeded, dict)
 
@@ -333,7 +334,7 @@ class TestMemoryStoreExtraCorpusAndEvaluation:
             read_profile_fn=store.profile_mgr.read_profile,
             read_events_fn=store.ingester.read_events,
             ingester=store.ingester,
-            profile_keys=store.PROFILE_KEYS,
+            profile_keys=PROFILE_KEYS,
         )
         assert isinstance(reindexed, dict)
 

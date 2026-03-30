@@ -10,23 +10,11 @@ import re
 from typing import Any
 
 from .._text import _contains_any, _safe_float, _utc_now_iso
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-EVENT_TYPES: set[str] = {"preference", "fact", "task", "decision", "constraint", "relationship"}
-MEMORY_TYPES: set[str] = {"semantic", "episodic", "reflection"}
-MEMORY_STABILITY: set[str] = {"high", "medium", "low"}
+from ..constants import MEMORY_STABILITY, MEMORY_TYPES
 
 
 class EventClassifier:
     """Classifies events by memory type, stability, and topic."""
-
-    # Class-level aliases for backward compatibility.
-    EVENT_TYPES = EVENT_TYPES
-    MEMORY_TYPES = MEMORY_TYPES
-    MEMORY_STABILITY = MEMORY_STABILITY
 
     @staticmethod
     def default_topic_for_event_type(event_type: str) -> str:
@@ -129,11 +117,11 @@ class EventClassifier:
             event_type
         )
         raw_type = str(payload.get("memory_type", "")).strip().lower()
-        if raw_type in self.MEMORY_TYPES:
+        if raw_type in MEMORY_TYPES:
             memory_type = raw_type
 
         stability = str(payload.get("stability", default_stability)).strip().lower()
-        if stability not in self.MEMORY_STABILITY:
+        if stability not in MEMORY_STABILITY:
             stability = default_stability
 
         confidence = min(max(_safe_float(payload.get("confidence"), 0.7), 0.0), 1.0)

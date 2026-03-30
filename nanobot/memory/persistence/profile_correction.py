@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from ..constants import CONFLICT_STATUS_OPEN, PROFILE_STATUS_ACTIVE, PROFILE_STATUS_CONFLICTED
+
 if TYPE_CHECKING:
     from ..write.coercion import EventCoercer
     from ..write.conflicts import ConflictManager
@@ -100,7 +102,7 @@ class CorrectionOrchestrator:
                 self._profile_store._touch_meta_entry(
                     new_entry,
                     confidence_delta=0.08,
-                    status=self._profile_store.PROFILE_STATUS_ACTIVE,
+                    status=PROFILE_STATUS_ACTIVE,
                 )
 
                 if (
@@ -118,13 +120,13 @@ class CorrectionOrchestrator:
                         old_entry,
                         confidence_delta=-0.2,
                         min_confidence=0.35,
-                        status=self._profile_store.PROFILE_STATUS_CONFLICTED,
+                        status=PROFILE_STATUS_CONFLICTED,
                     )
                     self._profile_store._touch_meta_entry(
                         new_entry,
                         confidence_delta=-0.08,
                         min_confidence=0.35,
-                        status=self._profile_store.PROFILE_STATUS_CONFLICTED,
+                        status=PROFILE_STATUS_CONFLICTED,
                     )
                     profile["conflicts"].append(
                         {
@@ -138,7 +140,7 @@ class CorrectionOrchestrator:
                             "new_memory_id": self._profile_store._find_belief_id_for_text(
                                 by_norm[new_norm]
                             ),
-                            "status": self._profile_store.CONFLICT_STATUS_OPEN,
+                            "status": CONFLICT_STATUS_OPEN,
                             "old_confidence": old_entry.get("confidence"),
                             "new_confidence": new_entry.get("confidence"),
                             "source": "live_correction",

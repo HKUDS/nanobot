@@ -142,15 +142,6 @@ class TestConflictsDBPath:
         from nanobot.memory.write.conflicts import ConflictManager
 
         profile_mgr = MagicMock()
-        profile_mgr.PROFILE_KEYS = (
-            "preferences",
-            "stable_facts",
-            "active_projects",
-            "relationships",
-            "constraints",
-        )
-        profile_mgr.PROFILE_STATUS_ACTIVE = "active"
-        profile_mgr.PROFILE_STATUS_STALE = "stale"
         profile_mgr._validate_profile_field = MagicMock(return_value="preferences")
         profile_mgr._to_str_list = MagicMock(return_value=["old value", "new value"])
         profile_mgr._meta_entry = MagicMock(
@@ -189,15 +180,6 @@ class TestConflictsDBPath:
         from nanobot.memory.write.conflicts import ConflictManager
 
         profile_mgr = MagicMock()
-        profile_mgr.PROFILE_KEYS = (
-            "preferences",
-            "stable_facts",
-            "active_projects",
-            "relationships",
-            "constraints",
-        )
-        profile_mgr.PROFILE_STATUS_ACTIVE = "active"
-        profile_mgr.PROFILE_STATUS_STALE = "stale"
         profile_mgr._validate_profile_field = MagicMock(return_value="preferences")
         profile_mgr._to_str_list = MagicMock(return_value=["old value", "new value"])
         profile_mgr._meta_entry = MagicMock(
