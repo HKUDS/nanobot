@@ -136,6 +136,7 @@ class ExecToolConfig(Base):
     enable: bool = True
     timeout: int = 60
     path_append: str = ""
+    allowed_urls: list[str] = Field(default_factory=list)
 
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
