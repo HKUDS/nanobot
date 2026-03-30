@@ -42,6 +42,9 @@ class DiscordConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     intents: int = 37377
     group_policy: Literal["mention", "open"] = "mention"
+    read_receipt_emoji: str = "👀"
+    working_emoji: str = "🔧"
+    working_emoji_delay: float = 2.0
 
 
 if DISCORD_AVAILABLE:
@@ -258,6 +261,8 @@ class DiscordChannel(BaseChannel):
         self._client: DiscordBotClient | None = None
         self._typing_tasks: dict[str, asyncio.Task[None]] = {}
         self._bot_user_id: str | None = None
+        self._pending_reactions: dict[str, Any] = {}  # chat_id -> message object
+        self._working_emoji_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def start(self) -> None:
         """Start the Discord client."""
@@ -305,6 +310,7 @@ class DiscordChannel(BaseChannel):
             return
 
         is_progress = bool((msg.metadata or {}).get("_progress"))
+
         try:
             await client.send_outbound(msg)
         except Exception as e:
@@ -312,6 +318,7 @@ class DiscordChannel(BaseChannel):
         finally:
             if not is_progress:
                 await self._stop_typing(msg.chat_id)
+                await self._clear_reactions(msg.chat_id)
 
     async def _handle_discord_message(self, message: discord.Message) -> None:
         """Handle incoming Discord messages from discord.py."""
@@ -331,6 +338,24 @@ class DiscordChannel(BaseChannel):
 
         await self._start_typing(message.channel)
 
+        # Add read receipt reaction immediately, working emoji after delay
+        channel_id = self._channel_key(message.channel)
+        try:
+            await message.add_reaction(self.config.read_receipt_emoji)
+            self._pending_reactions[channel_id] = message
+        except Exception as e:
+            logger.debug("Failed to add read receipt reaction: {}", e)
+
+        # Delayed working indicator (cosmetic — not tied to subagent lifecycle)
+        async def _delayed_working_emoji() -> None:
+            await asyncio.sleep(self.config.working_emoji_delay)
+            try:
+                await message.add_reaction(self.config.working_emoji)
+            except Exception:
+                pass
+
+        self._working_emoji_tasks[channel_id] = asyncio.create_task(_delayed_working_emoji())
+
         try:
             await self._handle_message(
                 sender_id=sender_id,
@@ -340,6 +365,7 @@ class DiscordChannel(BaseChannel):
                 metadata=metadata,
             )
         except Exception:
+            await self._clear_reactions(channel_id)
             await self._stop_typing(channel_id)
             raise
 
@@ -453,6 +479,24 @@ class DiscordChannel(BaseChannel):
             await task
         except asyncio.CancelledError:
             pass
+
+
+    async def _clear_reactions(self, chat_id: str) -> None:
+        """Remove all pending reactions after bot replies."""
+        # Cancel delayed working emoji if it hasn't fired yet
+        task = self._working_emoji_tasks.pop(chat_id, None)
+        if task and not task.done():
+            task.cancel()
+
+        msg_obj = self._pending_reactions.pop(chat_id, None)
+        if msg_obj is None:
+            return
+        bot_user = self._client.user if self._client else None
+        for emoji in (self.config.read_receipt_emoji, self.config.working_emoji):
+            try:
+                await msg_obj.remove_reaction(emoji, bot_user)
+            except Exception:
+                pass
 
     async def _cancel_all_typing(self) -> None:
         """Stop all typing tasks."""
