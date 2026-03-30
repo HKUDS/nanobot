@@ -91,9 +91,12 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
     model_name: str = request.app.get("model_name", "nanobot")
     if (requested_model := body.get("model")) and requested_model != model_name:
         return _error_json(400, f"Only configured model '{model_name}' is available")
-    session_lock: asyncio.Lock = request.app["session_lock"]
 
-    logger.info("API request session_key={} content={}", API_SESSION_KEY, user_content[:80])
+    session_key = f"api:{body['session_id']}" if body.get("session_id") else API_SESSION_KEY
+    session_locks: dict[str, asyncio.Lock] = request.app["session_locks"]
+    session_lock = session_locks.setdefault(session_key, asyncio.Lock())
+
+    logger.info("API request session_key={} content={}", session_key, user_content[:80])
 
     _FALLBACK = "I've completed processing but have no response to give."
 
@@ -103,7 +106,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
                 response = await asyncio.wait_for(
                     agent_loop.process_direct(
                         content=user_content,
-                        session_key=API_SESSION_KEY,
+                        session_key=session_key,
                         channel="api",
                         chat_id=API_CHAT_ID,
                     ),
@@ -114,12 +117,12 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
                 if not response_text or not response_text.strip():
                     logger.warning(
                         "Empty response for session {}, retrying",
-                        API_SESSION_KEY,
+                        session_key,
                     )
                     retry_response = await asyncio.wait_for(
                         agent_loop.process_direct(
                             content=user_content,
-                            session_key=API_SESSION_KEY,
+                            session_key=session_key,
                             channel="api",
                             chat_id=API_CHAT_ID,
                         ),
@@ -129,17 +132,17 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
                     if not response_text or not response_text.strip():
                         logger.warning(
                             "Empty response after retry for session {}, using fallback",
-                            API_SESSION_KEY,
+                            session_key,
                         )
                         response_text = _FALLBACK
 
             except asyncio.TimeoutError:
                 return _error_json(504, f"Request timed out after {timeout_s}s")
             except Exception:
-                logger.exception("Error processing request for session {}", API_SESSION_KEY)
+                logger.exception("Error processing request for session {}", session_key)
                 return _error_json(500, "Internal server error", err_type="server_error")
     except Exception:
-        logger.exception("Unexpected API lock error for session {}", API_SESSION_KEY)
+        logger.exception("Unexpected API lock error for session {}", session_key)
         return _error_json(500, "Internal server error", err_type="server_error")
 
     return web.json_response(_chat_completion_response(response_text, model_name))
@@ -182,7 +185,7 @@ def create_app(agent_loop, model_name: str = "nanobot", request_timeout: float =
     app["agent_loop"] = agent_loop
     app["model_name"] = model_name
     app["request_timeout"] = request_timeout
-    app["session_lock"] = asyncio.Lock()
+    app["session_locks"] = {}  # per-user locks, keyed by session_key
 
     app.router.add_post("/v1/chat/completions", handle_chat_completions)
     app.router.add_get("/v1/models", handle_models)
