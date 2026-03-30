@@ -32,16 +32,18 @@ class _Retriever(Protocol):
         self,
         query: str,
         *,
-        top_k: int = ...,
-        recency_half_life_days: float | None = ...,
-        embedding_provider: str | None = ...,
-    ) -> list[dict[str, Any]]: ...
+        top_k: int = 6,
+        recency_half_life_days: float | None = None,
+        embedding_provider: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Retrieve memory items matching *query*."""
 
 
 class _EventReader(Protocol):
     """Structural type for the event read callable."""
 
-    def read_events(self, *, limit: int | None = ...) -> list[dict[str, Any]]: ...
+    def read_events(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+        """Read events from storage."""
 
 
 class _GraphAugmenter(Protocol):
@@ -52,7 +54,8 @@ class _GraphAugmenter(Protocol):
         query: str,
         retrieved: list[dict[str, Any]],
         budget: int,
-    ) -> list[str]: ...
+    ) -> list[str]:
+        """Build graph context lines for prompt injection."""
 
 
 # Intents that benefit from scanning recent unresolved events.
