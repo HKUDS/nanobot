@@ -17,6 +17,7 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
+from nanobot.agent.steering import InterruptionChecker
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
@@ -68,6 +69,7 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
+        enable_steering: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -100,6 +102,9 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
+
+        self.enable_steering = enable_steering
+        self._interrupt_checkers: dict[str, InterruptionChecker] = {}
 
         self._running = False
         self._mcp_servers = mcp_servers or {}
@@ -209,6 +214,8 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        interruption_checker: InterruptionChecker | None = None,
+        on_iteration_complete: Callable[[list[dict]], None] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop.
 
@@ -216,8 +223,18 @@ class AgentLoop:
         *on_stream_end(resuming)*: called when a streaming session finishes.
         ``resuming=True`` means tool calls follow (spinner should restart);
         ``resuming=False`` means this is the final response.
+        *interruption_checker*: if provided, pending user messages are
+        drained and injected before each LLM call (steering).
+        *on_iteration_complete*: called after each tool-using iteration
+        with the current messages list (for incremental saving).
         """
         loop_self = self
+
+        _INTERRUPT_PREFIX = (
+            "[The user just sent a new message while you were working. "
+            "Read it and decide: continue current work, switch to the "
+            "new request, or address both.]\n\n"
+        )
 
         class _LoopHook(AgentHook):
             def __init__(self) -> None:
@@ -225,6 +242,19 @@ class AgentLoop:
 
             def wants_streaming(self) -> bool:
                 return on_stream is not None
+
+            async def before_iteration(self, context: AgentHookContext) -> None:
+                if injection := self._drain_interruptions():
+                    context.messages.append({"role": "user", "content": injection})
+
+            def _drain_interruptions(self) -> str | None:
+                if not interruption_checker:
+                    return None
+                pending = interruption_checker.drain_all()
+                if not pending:
+                    return None
+                combined = "\n\n---\n\n".join(m.content for m in pending)
+                return _INTERRUPT_PREFIX + combined
 
             async def on_stream(self, context: AgentHookContext, delta: str) -> None:
                 from nanobot.utils.helpers import strip_think
@@ -253,6 +283,10 @@ class AgentLoop:
                     args_str = json.dumps(tc.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tc.name, args_str[:200])
                 loop_self._set_tool_context(channel, chat_id, message_id)
+
+            async def after_iteration(self, context: AgentHookContext) -> None:
+                if on_iteration_complete and context.tool_calls:
+                    on_iteration_complete(context.messages)
 
             def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
                 return loop_self._strip_think(content)
@@ -301,6 +335,14 @@ class AgentLoop:
                 if result:
                     await self.bus.publish_outbound(result)
                 continue
+
+            if self.enable_steering:
+                active = [t for t in self._active_tasks.get(msg.session_key, []) if not t.done()]
+                checker = self._interrupt_checkers.get(msg.session_key)
+                if active and checker:
+                    await checker.signal(msg)
+                    continue
+
             task = asyncio.create_task(self._dispatch(msg))
             self._active_tasks.setdefault(msg.session_key, []).append(task)
             task.add_done_callback(lambda t, k=msg.session_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
@@ -309,11 +351,16 @@ class AgentLoop:
         """Process a message: per-session serial, cross-session concurrent."""
         lock = self._session_locks.setdefault(msg.session_key, asyncio.Lock())
         gate = self._concurrency_gate or nullcontext()
+
+        checker: InterruptionChecker | None = None
+        if self.enable_steering:
+            checker = InterruptionChecker()
+            self._interrupt_checkers[msg.session_key] = checker
+
         async with lock, gate:
             try:
                 on_stream = on_stream_end = None
                 if msg.metadata.get("_wants_stream"):
-                    # Split one answer into distinct stream segments.
                     stream_base_id = f"{msg.session_key}:{time.time_ns()}"
                     stream_segment = 0
 
@@ -345,6 +392,7 @@ class AgentLoop:
 
                 response = await self._process_message(
                     msg, on_stream=on_stream, on_stream_end=on_stream_end,
+                    interruption_checker=checker,
                 )
                 if response is not None:
                     await self.bus.publish_outbound(response)
@@ -362,6 +410,12 @@ class AgentLoop:
                     channel=msg.channel, chat_id=msg.chat_id,
                     content="Sorry, I encountered an error.",
                 ))
+            finally:
+                if checker:
+                    self._interrupt_checkers.pop(msg.session_key, None)
+                    orphans = checker.drain_all()
+                    for orphan in orphans:
+                        await self.bus.publish_inbound(orphan)
 
     async def close_mcp(self) -> None:
         """Drain pending background archives, then close MCP connections."""
@@ -393,6 +447,7 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        interruption_checker: InterruptionChecker | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -411,11 +466,20 @@ class AgentLoop:
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
             )
+
+            save_offset = [1 + len(history)]
+
+            def _sys_incremental_save(msgs: list[dict]) -> None:
+                self._save_turn(session, msgs, save_offset[0])
+                save_offset[0] = len(msgs)
+                self.sessions.save(session)
+
             final_content, _, all_msgs = await self._run_agent_loop(
                 messages, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
+                on_iteration_complete=_sys_incremental_save,
             )
-            self._save_turn(session, all_msgs, 1 + len(history))
+            self._save_turn(session, all_msgs, save_offset[0])
             self.sessions.save(session)
             self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
             return OutboundMessage(channel=channel, chat_id=chat_id,
@@ -456,6 +520,13 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
+        save_offset = [1 + len(history)]
+
+        def _incremental_save(msgs: list[dict]) -> None:
+            self._save_turn(session, msgs, save_offset[0])
+            save_offset[0] = len(msgs)
+            self.sessions.save(session)
+
         final_content, _, all_msgs = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
@@ -463,12 +534,14 @@ class AgentLoop:
             on_stream_end=on_stream_end,
             channel=msg.channel, chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
+            interruption_checker=interruption_checker,
+            on_iteration_complete=_incremental_save,
         )
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        self._save_turn(session, all_msgs, 1 + len(history))
+        self._save_turn(session, all_msgs, save_offset[0])
         self.sessions.save(session)
         self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
 
