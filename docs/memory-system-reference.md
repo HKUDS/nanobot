@@ -337,7 +337,7 @@ Use cache_get_slice(cache_key="4056d3c2e3fc", start=0, end=25) for raw lines.
 
 **Written by:** `EventIngester.append_events()` — embeds each event's summary via `Embedder.embed()` (async via `asyncio.to_thread` for ONNX), stores with event. Vector cleanup on INSERT OR REPLACE: old vector deleted by rowid before new insert.
 
-**Read by:** `UnifiedMemoryDB.search_vector(query_vec, k)` — returns top-k events by cosine distance. Used in the retrieval pipeline's vector search stage.
+**Read by:** `MemoryDatabase.search_vector(query_vec, k)` — returns top-k events by cosine distance. Used in the retrieval pipeline's vector search stage.
 
 **In LLM context:** Indirectly — determines which events are retrieved. The embeddings themselves are never shown to the LLM.
 
@@ -585,7 +585,7 @@ This ensures short sessions (< consolidation window) persist learned information
 `MemoryMaintenance` provides operational health management:
 
 - **`ensure_health()`** — async health check
-- **`reindex_from_structured_memory()`** — full reindex (no-op with UnifiedMemoryDB)
+- **`reindex_from_structured_memory()`** — full reindex (no-op with MemoryDatabase)
 - **`seed_structured_corpus()`** — seed with external profile (JSON) and events (JSONL) files; validates structure, coerces events, inserts into DB
 - **`_compact_events_for_reindex()`** — removes superseded events and deduplicates by (summary, type, memory_type, topic) key, keeping newest timestamp per group
 - **`_backend_stats_for_eval()`** — collects vector_points_count, db_event_count for EvalRunner

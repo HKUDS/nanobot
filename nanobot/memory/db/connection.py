@@ -2,8 +2,8 @@
 
 Owns the SQLite connection (WAL mode, sqlite-vec extension), schema
 initialization for all tables, and profile/history/snapshot CRUD.
-Event and graph operations will be delegated to focused repository
-classes (EventStore, GraphStore) in subsequent tasks.
+Event and graph operations are delegated to ``EventStore`` and
+``GraphStore``, accessible via lazy properties.
 """
 
 from __future__ import annotations
