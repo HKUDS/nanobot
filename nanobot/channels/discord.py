@@ -62,6 +62,7 @@ class DiscordChannel(BaseChannel):
         self._tree: discord.app_commands.CommandTree | None = None
         self._pending_interactions: dict[str, discord.Interaction] = {}
         self._attach_stop_button: set[str] = set()
+        self._thread_map: dict[str, str] = {}  # original channel_id -> thread_id
 
     async def start(self) -> None:
         """Start the Discord client."""
@@ -229,6 +230,7 @@ class DiscordChannel(BaseChannel):
         self._typing_tasks.clear()
         self._pending_interactions.clear()
         self._attach_stop_button.clear()
+        self._thread_map.clear()
         if self._client:
             await self._client.close()
             self._client = None
@@ -392,6 +394,25 @@ class DiscordChannel(BaseChannel):
             if not self._should_respond_in_group(message, content):
                 return
 
+        # Thread-per-conversation: create a thread for each new conversation in a text channel
+        thread_id: str | None = None
+        if self.config.threads_per_conversation and guild_id is not None:
+            # Don't create a thread if we're already in one (message.channel is a Thread)
+            if not isinstance(message.channel, discord.Thread):
+                # Reuse existing thread for this channel if we have one
+                if channel_id in self._thread_map:
+                    thread_id = self._thread_map[channel_id]
+                else:
+                    try:
+                        thread = await message.create_thread(
+                            name=f"Chat with {message.author.display_name}"[:100]
+                        )
+                        thread_id = str(thread.id)
+                        self._thread_map[channel_id] = thread_id
+                        logger.info("Discord: created thread {} for channel {}", thread_id, channel_id)
+                    except Exception as e:
+                        logger.warning("Discord: failed to create thread: {}", e)
+
         content_parts = [content] if content else []
         media_paths: list[str] = []
         media_dir = get_media_dir("discord")
@@ -423,12 +444,20 @@ class DiscordChannel(BaseChannel):
             else None
         )
 
-        await self._start_typing(message.channel)
+        effective_chat_id = thread_id if thread_id else channel_id
+        session_key = f"discord:{effective_chat_id}" if thread_id else None
 
-        self._attach_stop_button.add(channel_id)
+        typing_target = message.channel
+        if thread_id:
+            thread_channel = self._client.get_channel(int(thread_id)) if self._client else None
+            if thread_channel:
+                typing_target = thread_channel
+        await self._start_typing(typing_target)
+
+        self._attach_stop_button.add(effective_chat_id)
         await self._handle_message(
             sender_id=sender_id,
-            chat_id=channel_id,
+            chat_id=effective_chat_id,
             content="\n".join(p for p in content_parts if p) or "[empty message]",
             media=media_paths,
             metadata={
@@ -436,6 +465,7 @@ class DiscordChannel(BaseChannel):
                 "guild_id": guild_id,
                 "reply_to": reply_to,
             },
+            session_key=session_key,
         )
 
     def _should_respond_in_group(self, message: discord.Message, content: str) -> bool:

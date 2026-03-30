@@ -338,3 +338,117 @@ async def test_send_with_interaction_followup_and_file(tmp_path):
     mock_discord_channel.send.assert_not_called()
     # followup.send should be called for both file and text
     assert mock_interaction.followup.send.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Group 5 — Thread-per-conversation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_thread_per_conversation_creates_thread_for_guild_message():
+    """When threads_per_conversation=True, a thread is created for non-thread guild messages."""
+    bus = MessageBus()
+    channel = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], threads_per_conversation=True, group_policy="open"),
+        bus,
+    )
+    channel._bot_user_id = "999"
+
+    # Create a mock guild message (not a thread)
+    message = MagicMock(spec=discord.Message)
+    message.author.bot = False
+    message.author.id = 123
+    message.author.display_name = "TestUser"
+    message.channel = MagicMock(spec=discord.TextChannel)  # NOT a Thread
+    message.channel.id = 456
+    message.channel.typing = MagicMock(return_value=AsyncMock().__aenter__.return_value)
+    message.channel.typing.return_value.__aenter__ = AsyncMock(return_value=None)
+    message.channel.typing.return_value.__aexit__ = AsyncMock(return_value=None)
+    message.guild.id = 789
+    message.content = "Hello"
+    message.attachments = []
+    message.mentions = []
+    message.reference = None
+
+    # Mock thread creation
+    mock_thread = MagicMock()
+    mock_thread.id = 1001
+    message.create_thread = AsyncMock(return_value=mock_thread)
+
+    await channel._handle_message_create(message)
+
+    # Thread was created
+    message.create_thread.assert_called_once()
+    # Thread id stored in map
+    assert channel._thread_map["456"] == "1001"
+    # Message was published with thread_id as chat_id
+    assert bus.inbound.qsize() == 1
+    msg = await bus.consume_inbound()
+    assert msg.chat_id == "1001"
+    assert msg.session_key == "discord:1001"
+
+
+@pytest.mark.asyncio
+async def test_thread_per_conversation_reuses_existing_thread():
+    """When a thread already exists for a channel, it reuses it."""
+    bus = MessageBus()
+    channel = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], threads_per_conversation=True, group_policy="open"),
+        bus,
+    )
+    channel._bot_user_id = "999"
+    channel._thread_map["456"] = "1001"  # Pre-existing thread
+
+    message = MagicMock(spec=discord.Message)
+    message.author.bot = False
+    message.author.id = 123
+    message.author.display_name = "TestUser"
+    message.channel = MagicMock(spec=discord.TextChannel)
+    message.channel.id = 456
+    message.channel.typing = MagicMock()
+    message.channel.typing.return_value.__aenter__ = AsyncMock(return_value=None)
+    message.channel.typing.return_value.__aexit__ = AsyncMock(return_value=None)
+    message.guild.id = 789
+    message.content = "Hello again"
+    message.attachments = []
+    message.mentions = []
+    message.reference = None
+    message.create_thread = AsyncMock()  # Should NOT be called
+
+    await channel._handle_message_create(message)
+
+    message.create_thread.assert_not_called()
+    msg = await bus.consume_inbound()
+    assert msg.chat_id == "1001"
+
+
+@pytest.mark.asyncio
+async def test_thread_per_conversation_disabled_uses_channel():
+    """When threads_per_conversation=False, the original channel_id is used."""
+    bus = MessageBus()
+    channel = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], threads_per_conversation=False, group_policy="open"),
+        bus,
+    )
+    channel._bot_user_id = "999"
+
+    message = MagicMock(spec=discord.Message)
+    message.author.bot = False
+    message.author.id = 123
+    message.author.display_name = "TestUser"
+    message.channel = MagicMock(spec=discord.TextChannel)
+    message.channel.id = 456
+    message.channel.typing.return_value.__aenter__ = AsyncMock(return_value=None)
+    message.channel.typing.return_value.__aexit__ = AsyncMock(return_value=None)
+    message.guild.id = 789
+    message.content = "Hello"
+    message.attachments = []
+    message.mentions = []
+    message.reference = None
+    message.create_thread = AsyncMock()
+
+    await channel._handle_message_create(message)
+
+    message.create_thread.assert_not_called()
+    msg = await bus.consume_inbound()
+    assert msg.chat_id == "456"
