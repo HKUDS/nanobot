@@ -13,6 +13,7 @@ class Base(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
+
 class TranscriptionConfig(Base):
     """Voice transcription configuration (channel input processing, not an agent tool)."""
 
