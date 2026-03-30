@@ -352,6 +352,36 @@ class TestWorkingMemory:
                     "system messages must be deferred until after all tool results"
                 )
 
+    @pytest.mark.asyncio
+    async def test_tool_call_preserves_assistant_content(self) -> None:
+        """When LLM returns text + tool_calls, content must be preserved.
+
+        Claude models emit reasoning text alongside tool_use blocks.
+        The assistant message must preserve this content, not discard it.
+        """
+        tc1 = _make_tool_call("exec", {"cmd": "ls"})
+        caller = ScriptedCaller(
+            [
+                _tool_response([tc1], content="[REASONING]\n1. Need: list files\n[/REASONING]"),
+                _text_response("done"),
+            ]
+        )
+        runner = _build_runner(caller)
+        state = _make_state()
+
+        await runner.run(state, on_progress=None)
+
+        # Find the assistant message with tool_calls
+        asst_msg = None
+        for m in state.messages:
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                asst_msg = m
+                break
+        assert asst_msg is not None, "No assistant message with tool_calls found"
+        assert asst_msg["content"] == "[REASONING]\n1. Need: list files\n[/REASONING]", (
+            "Assistant content was discarded when tool_calls were present"
+        )
+
 
 # ---------------------------------------------------------------------------
 # TestGuardrailIntegration
