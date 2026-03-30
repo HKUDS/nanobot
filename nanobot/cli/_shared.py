@@ -91,10 +91,31 @@ def _configure_log_sink(config: Config, log: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _export_all_provider_keys(config: Config) -> None:
+    """Export API keys for all configured providers as environment variables.
+
+    Subsystems like the OpenAI embedder need OPENAI_API_KEY regardless of
+    which model is selected as the default.  This ensures every configured
+    provider's key is available in the environment.
+    """
+    import os
+
+    from nanobot.config.providers_registry import find_by_name
+
+    for name, provider_config in config.providers:
+        if not provider_config.api_key:
+            continue
+        spec = find_by_name(name)
+        if spec and spec.env_key:
+            os.environ.setdefault(spec.env_key, provider_config.api_key)
+
+
 def _make_provider(config: Config) -> Any:
     """Create the appropriate LLM provider from config."""
     from nanobot.providers.custom_provider import CustomProvider
     from nanobot.providers.litellm_provider import LiteLLMProvider
+
+    _export_all_provider_keys(config)
 
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
