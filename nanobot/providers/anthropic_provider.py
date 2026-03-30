@@ -33,24 +33,39 @@ class AnthropicProvider(LLMProvider):
         api_base: str | None = None,
         default_model: str = "claude-sonnet-4-20250514",
         extra_headers: dict[str, str] | None = None,
+        use_bedrock: bool = False,
+        aws_profile: str | None = None,
+        aws_region: str | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
 
-        from anthropic import AsyncAnthropic
-
         client_kw: dict[str, Any] = {}
-        if api_key:
-            client_kw["api_key"] = api_key
-        if api_base:
-            client_kw["base_url"] = api_base
         if extra_headers:
             client_kw["default_headers"] = extra_headers
-        self._client = AsyncAnthropic(**client_kw)
+
+        if use_bedrock:
+            from anthropic import AsyncAnthropicBedrock
+
+            if aws_profile:
+                client_kw["aws_profile"] = aws_profile
+            if aws_region:
+                client_kw["aws_region"] = aws_region
+            self._client = AsyncAnthropicBedrock(**client_kw)
+        else:
+            from anthropic import AsyncAnthropic
+
+            if api_key:
+                client_kw["api_key"] = api_key
+            if api_base:
+                client_kw["base_url"] = api_base
+            self._client = AsyncAnthropic(**client_kw)
 
     @staticmethod
     def _strip_prefix(model: str) -> str:
+        if model.startswith("bedrock/"):
+            return model[len("bedrock/"):]
         if model.startswith("anthropic/"):
             return model[len("anthropic/"):]
         return model

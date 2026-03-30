@@ -423,6 +423,20 @@ def _make_provider(config: Config):
             default_model=model,
             extra_headers=p.extra_headers if p else None,
         )
+    elif backend == "anthropic_bedrock":
+        from nanobot.providers.anthropic_provider import AnthropicProvider
+
+        aws_region = getattr(p, "aws_region", None) if p else None
+        if not aws_region and p:
+            aws_region = p.api_base
+
+        provider = AnthropicProvider(
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+            use_bedrock=True,
+            aws_profile=(getattr(p, "aws_profile", "") or None) if p else None,
+            aws_region=aws_region,
+        )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
         provider = OpenAICompatProvider(

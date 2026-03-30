@@ -265,6 +265,29 @@ def test_find_by_name_accepts_camel_case_and_hyphen_aliases():
     assert find_by_name("volcengineCodingPlan").name == "volcengine_coding_plan"
     assert find_by_name("github-copilot") is not None
     assert find_by_name("github-copilot").name == "github_copilot"
+    assert find_by_name("bedrock") is not None
+    assert find_by_name("bedrock").name == "bedrock"
+
+
+def test_config_accepts_explicit_bedrock_provider_without_api_key():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "bedrock",
+                    "model": "bedrock/arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/test",
+                }
+            },
+            "providers": {
+                "bedrock": {
+                    "awsProfile": "default",
+                    "awsRegion": "us-west-2",
+                }
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "bedrock"
 
 
 def test_config_auto_detects_ollama_from_local_api_base():
@@ -347,6 +370,37 @@ def test_make_provider_passes_extra_headers_to_custom_provider():
     assert kwargs["base_url"] == "https://example.com/v1"
     assert kwargs["default_headers"]["APP-Code"] == "demo-app"
     assert kwargs["default_headers"]["x-session-affinity"] == "sticky-session"
+
+
+def test_make_provider_passes_bedrock_profile_and_region():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "bedrock",
+                    "model": "bedrock/arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/test",
+                }
+            },
+            "providers": {
+                "bedrock": {
+                    "awsProfile": "default",
+                    "awsRegion": "us-west-2",
+                    "extraHeaders": {"x-test-header": "enabled"},
+                }
+            },
+        }
+    )
+
+    with patch("anthropic.AsyncAnthropicBedrock") as mock_bedrock:
+        provider = _make_provider(config)
+
+    kwargs = mock_bedrock.call_args.kwargs
+    assert kwargs["aws_profile"] == "default"
+    assert kwargs["aws_region"] == "us-west-2"
+    assert kwargs["default_headers"]["x-test-header"] == "enabled"
+    assert provider.get_default_model() == (
+        "bedrock/arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/test"
+    )
 
 
 @pytest.fixture

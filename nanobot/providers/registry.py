@@ -184,6 +184,14 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
 
 
     # === Standard providers (matched by model-name keywords) ===============
+    # AWS Bedrock: Claude via Anthropic's Bedrock SDK
+    ProviderSpec(
+        name="bedrock",
+        keywords=("bedrock",),
+        env_key="",
+        display_name="AWS Bedrock",
+        backend="anthropic_bedrock",
+    ),
     # Anthropic: native Anthropic SDK
     ProviderSpec(
         name="anthropic",
