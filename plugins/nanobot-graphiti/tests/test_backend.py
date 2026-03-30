@@ -100,6 +100,7 @@ async def test_graphiti_backend_stop_is_safe_before_start():
 # ── consolidate() ────────────────────────────────────────────────────────────
 
 async def test_consolidate_calls_add_episode(mock_graphiti, mock_provider, session_key):
+    from graphiti_core.nodes import EpisodeType
     from nanobot_graphiti.backend import GraphitiMemoryBackend
     from nanobot_graphiti.config import GraphitiConfig
 
@@ -117,6 +118,9 @@ async def test_consolidate_calls_add_episode(mock_graphiti, mock_provider, sessi
     assert call_kwargs["group_id"] == "123456"   # scope="user" strips "telegram:"
     assert "Hello" in call_kwargs["episode_body"]
     assert "Hi there!" in call_kwargs["episode_body"]
+    assert call_kwargs["source"] is EpisodeType.message
+    assert call_kwargs["source_description"] == "nanobot conversation"
+    assert call_kwargs["name"] == session_key
 
 
 async def test_consolidate_uses_session_scope(mock_graphiti, mock_provider):
@@ -214,3 +218,60 @@ async def test_retrieve_formats_multiple_facts(mock_graphiti, mock_provider, ses
     assert "Works in Berlin" in result
     assert "Has a cat" in result
     assert "[Memory — 3 relevant facts]" in result
+
+
+# ── get_tools() ───────────────────────────────────────────────────────────────
+
+async def test_get_tools_returns_three_tools(mock_graphiti, mock_provider):
+    from nanobot_graphiti.backend import GraphitiMemoryBackend
+    from nanobot_graphiti.config import GraphitiConfig
+
+    backend = GraphitiMemoryBackend(GraphitiConfig(), _graphiti_factory=lambda **kw: mock_graphiti)
+    await backend.start(mock_provider)
+
+    tools = backend.get_tools()
+    tool_names = {t.name for t in tools}
+
+    assert len(tools) == 3
+    assert tool_names == {"memory_search", "memory_forget", "memory_list"}
+
+
+async def test_get_tools_returns_tool_instances_bound_to_backend(mock_graphiti, mock_provider):
+    from nanobot.agent.tools.base import Tool
+    from nanobot_graphiti.backend import GraphitiMemoryBackend
+    from nanobot_graphiti.config import GraphitiConfig
+
+    backend = GraphitiMemoryBackend(GraphitiConfig(), _graphiti_factory=lambda **kw: mock_graphiti)
+    await backend.start(mock_provider)
+
+    for tool in backend.get_tools():
+        assert isinstance(tool, Tool)
+        assert tool._backend is backend
+
+
+# ── Session scoping ───────────────────────────────────────────────────────────
+
+def test_group_id_user_scope_strips_channel_prefix():
+    from nanobot_graphiti.backend import GraphitiMemoryBackend
+    from nanobot_graphiti.config import GraphitiConfig
+
+    backend = GraphitiMemoryBackend(GraphitiConfig(scope="user"))
+    assert backend._get_group_id("telegram:123456") == "123456"
+    assert backend._get_group_id("discord:789") == "789"
+
+
+def test_group_id_session_scope_preserves_full_key():
+    from nanobot_graphiti.backend import GraphitiMemoryBackend
+    from nanobot_graphiti.config import GraphitiConfig
+
+    backend = GraphitiMemoryBackend(GraphitiConfig(scope="session"))
+    assert backend._get_group_id("telegram:123456") == "telegram:123456"
+    assert backend._get_group_id("discord:789") == "discord:789"
+
+
+def test_group_id_user_scope_handles_key_without_colon():
+    from nanobot_graphiti.backend import GraphitiMemoryBackend
+    from nanobot_graphiti.config import GraphitiConfig
+
+    backend = GraphitiMemoryBackend(GraphitiConfig(scope="user"))
+    assert backend._get_group_id("directuser") == "directuser"

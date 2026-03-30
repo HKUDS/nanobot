@@ -116,13 +116,7 @@ class GraphitiMemoryBackend(MemoryBackend):
         if not messages or self._graphiti is None:
             return
         try:
-            # Lazy-import EpisodeType to avoid hard dependency at module load time
-            try:
-                from graphiti_core.nodes import EpisodeType
-                episode_source = EpisodeType.message
-            except ImportError:
-                # If graphiti_core is not available, use a string sentinel
-                episode_source = "message"
+            from graphiti_core.nodes import EpisodeType
 
             lines = []
             for msg in messages:
@@ -147,7 +141,7 @@ class GraphitiMemoryBackend(MemoryBackend):
                 episode_body=episode_body,
                 source_description="nanobot conversation",
                 reference_time=datetime.now(timezone.utc),
-                source=episode_source,
+                source=EpisodeType.message,
                 group_id=group_id,
             )
         except Exception:
@@ -170,4 +164,10 @@ class GraphitiMemoryBackend(MemoryBackend):
             return ""
 
     def get_tools(self) -> list[Tool]:
-        return []  # implemented in Task 7
+        from nanobot_graphiti.tools import MemoryForgetTool, MemoryListTool, MemorySearchTool
+
+        return [
+            MemorySearchTool(backend=self),
+            MemoryForgetTool(backend=self),
+            MemoryListTool(backend=self),
+        ]
