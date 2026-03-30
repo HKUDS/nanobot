@@ -41,7 +41,7 @@ We adopt a **modular monolith** architecture with the following rules:
    `channels/`).
 
 4. **Refactor by seams, not by folders.** Extract internal sub-services (e.g.,
-   `ToolExecutor`, `DelegationDispatcher`) within `agent/` before considering package
+   `ToolExecutor`, `MissionManager`) within `agent/` before considering package
    splits.
 
 5. **No microservices or separate deployments** unless a specific scaling or isolation

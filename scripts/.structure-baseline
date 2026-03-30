@@ -7,7 +7,6 @@
 # --- File size >500 LOC ---
 nanobot/cli/memory.py: 614 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/config/schema.py: 523 LOC (limit 500, add '# size-exception: <reason>')
-nanobot/coordination/delegation.py: 508 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/memory/graph/entity_classifier.py: 543 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/memory/persistence/profile_io.py: 642 LOC (limit 500, add '# size-exception: <reason>')
 nanobot/memory/read/context_assembler.py: 507 LOC (limit 500, add '# size-exception: <reason>')

@@ -57,6 +57,17 @@ Confirm:
   with a test (both writer and reader agree on required keys, types, defaults)
 - If implementation deviates from the spec, update the spec IMMEDIATELY in the same
   commit. Add a `## Deviations` section. Stale specs mislead future sessions.
+- No backward compatibility artifacts: no re-export aliases, deprecation wrappers,
+  compatibility shims, dual-path code, or tombstone comments. If you renamed or moved
+  something, the old name must not exist anywhere.
+
+## After renaming or moving any symbol/module
+
+Update ALL callers in the same commit. Then grep for the old name across the entire repo:
+```bash
+grep -rn "\bOldName\b" nanobot/ tests/ --include="*.py"
+```
+Zero matches required. Never keep the old name as an alias, re-export, or comment.
 
 ## After deleting any module
 

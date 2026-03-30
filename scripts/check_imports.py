@@ -167,8 +167,6 @@ ALLOWLIST: set[tuple[str, str]] = {
     # ── Legitimate exceptions: data object imports (enums, dataclasses) ─
     # MissionStatus enum (data object, not service).
     ("nanobot/tools/builtin/mission.py", "nanobot.coordination.mission"),
-    # DelegationResult dataclass (data object, not service instantiation).
-    ("nanobot/coordination/delegation.py", "nanobot.tools.builtin.delegate"),
 }
 
 

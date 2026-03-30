@@ -849,8 +849,6 @@ nanobot/
 │   ├── consolidation.py            # Memory consolidation orchestration
 │   ├── context.py                  # Prompt assembly + token budgeting
 │   ├── coordinator.py              # Multi-agent intent routing
-│   ├── delegation.py               # Delegation routing + cycle detection
-│   ├── delegation_advisor.py       # Delegation decision advisor
 │   ├── tool_executor.py            # Tool batching (parallel/sequential)
 │   ├── tool_loop.py                # Think-act-observe loop
 │   ├── tool_setup.py               # Tool initialization
@@ -905,7 +903,6 @@ nanobot/
 │       ├── filesystem.py           # File read/write/edit/list
 │       ├── web.py                  # WebFetch + WebSearch
 │       ├── mcp.py                  # Model Context Protocol
-│       ├── delegate.py             # Multi-agent delegation
 │       ├── result_cache.py         # Result caching + summarization
 │       ├── email.py                # Email checking
 │       ├── excel.py                # Spreadsheet tools
