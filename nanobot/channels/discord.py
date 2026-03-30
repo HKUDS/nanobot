@@ -16,7 +16,6 @@ from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.utils.helpers import split_message
 
-DISCORD_API_BASE = "https://discord.com/api/v10"
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
 
@@ -60,7 +59,7 @@ class DiscordChannel(BaseChannel):
 
         self._running = True
         self._http = httpx.AsyncClient(timeout=30.0)
-        intents = discord.Intents(value=self.config.intents)
+        intents = discord.Intents._from_value(self.config.intents)
         self._client = discord.Client(intents=intents)
 
         @self._client.event
@@ -82,6 +81,8 @@ class DiscordChannel(BaseChannel):
         self._running = False
         for task in self._typing_tasks.values():
             task.cancel()
+        if self._typing_tasks:
+            await asyncio.gather(*self._typing_tasks.values(), return_exceptions=True)
         self._typing_tasks.clear()
         if self._client:
             await self._client.close()
@@ -97,9 +98,12 @@ class DiscordChannel(BaseChannel):
             return
 
         channel = self._client.get_channel(int(msg.chat_id))
-        if not channel:
-            logger.warning("Discord channel {} not found in cache", msg.chat_id)
-            return
+        if channel is None:
+            try:
+                channel = await self._client.fetch_channel(int(msg.chat_id))
+            except Exception as e:
+                logger.error("Discord channel {} not found: {}", msg.chat_id, e)
+                return
 
         try:
             sent_media = False
@@ -211,9 +215,13 @@ class DiscordChannel(BaseChannel):
                 logger.warning("Failed to download Discord attachment: {}", e)
                 content_parts.append(f"[attachment: {filename} - download failed]")
 
-        reply_to = str(message.reference.message_id) if message.reference else None
+        reply_to = (
+            str(message.reference.message_id)
+            if message.reference and message.reference.message_id is not None
+            else None
+        )
 
-        await self._start_typing(message.channel, channel_id)
+        await self._start_typing(message.channel)
 
         await self._handle_message(
             sender_id=sender_id,
@@ -243,10 +251,11 @@ class DiscordChannel(BaseChannel):
             logger.debug("Discord message in {} ignored (bot not mentioned)", str(message.channel.id))
             return False
 
-        return True
+        return False
 
-    async def _start_typing(self, channel: discord.abc.Messageable, channel_id: str) -> None:
+    async def _start_typing(self, channel: discord.abc.Messageable) -> None:
         """Start typing indicator for a channel using discord.py context manager."""
+        channel_id = str(channel.id)  # type: ignore[attr-defined]
         await self._stop_typing(channel_id)
 
         async def typing_loop() -> None:
