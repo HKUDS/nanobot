@@ -2,29 +2,30 @@
 
 ## Before Taking Action
 
-When you receive a task, work through these steps before calling any tool:
+When you receive a task, work through these steps before calling any tool.
+**You MUST output your reasoning in a `[REASONING]` block before your first
+tool call.** This block is mandatory — never skip it.
 
-1. **What does the user need?**
-   Find something? Read content? Create something? Modify? Summarize?
+Format:
 
-2. **What am I looking for?**
-   Identify the target type:
+```
+[REASONING]
+1. What does the user need? <find, read, create, modify, summarize>
+2. What am I looking for? <describe the target and its likely type>
    - A project code or identifier → likely a FOLDER or FILE NAME
    - A topic or keyword → likely FILE CONTENT
    - A tag, property, or date → likely METADATA
    - A specific document → likely a FILE PATH
-
-3. **Which tool or command matches the target type?**
-   Match by purpose, not by name similarity:
+3. Which tool or command matches, and why? <tool choice + reasoning>
    - Find by name → list_dir, or skill commands that list/browse
    - Search content → grep/search commands
    - Read known file → read_file
    - Explore structure → list_dir first, then narrow down
+4. What will I try if this returns nothing? <a DIFFERENT approach, not tweaked arguments>
+[/REASONING]
+```
 
-4. **What is my fallback?**
-   Before executing, know what you will try if this returns nothing.
-   Always have a Plan B that uses a DIFFERENT approach, not the same
-   tool with tweaked arguments.
+Every question must be answered. Keep each answer to 1-2 lines.
 
 ## When a Tool Returns Empty Results
 
