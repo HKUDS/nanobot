@@ -136,6 +136,25 @@ class TestFTSSearch:
         store.insert_event(_make_event(summary="hello world"))
         assert store.search_fts("zzzzzzz", k=10) == []
 
+    def test_replace_updates_fts_and_vector(self, store: EventStore) -> None:
+        """Replacing an event updates both FTS index and vector embedding."""
+        store.insert_event(
+            _make_event(id="r1", summary="User likes tea"), embedding=[1.0, 0.0, 0.0, 0.0]
+        )
+        store.insert_event(
+            _make_event(id="r1", summary="User likes coffee"), embedding=[0.0, 1.0, 0.0, 0.0]
+        )
+        # Old term gone from FTS
+        assert len(store.search_fts("tea", k=5)) == 0
+        # New term present
+        results = store.search_fts("coffee", k=5)
+        assert len(results) == 1
+        assert results[0]["id"] == "r1"
+        # Vector search finds new embedding
+        vec_results = store.search_vector([0.0, 1.0, 0.0, 0.0], k=5)
+        assert len(vec_results) == 1
+        assert vec_results[0]["id"] == "r1"
+
 
 class TestVectorSearch:
     def test_knn_returns_nearest(self, store: EventStore) -> None:
