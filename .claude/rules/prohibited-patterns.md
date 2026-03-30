@@ -58,6 +58,31 @@ Enforced by `check_structure.py`: crash-barrier comments, file size > 500 LOC.
   go through extension points (guardrails, context contributors, prompt templates),
   not by adding conditionals to `TurnRunner`.
 
+## Backward compatibility violations
+
+This project has no external consumers — backward compatibility is never needed.
+These patterns are always wrong:
+
+- **Re-export aliases** — keeping old names that forward to new locations
+  (`from new_module import X as OldX`). Delete the old name; update all callers.
+- **Deprecation wrappers** — functions/classes that exist only to warn and delegate
+  to a replacement. Delete the old API; migrate callers in the same commit.
+- **Dual-path code** — `if hasattr(obj, 'new_method') else obj.old_method()` or
+  checking for old vs new attribute names. Pick one path; remove the other.
+- **Compatibility shims** — adapter layers, translation dicts, or version-sniffing
+  code that bridges old and new interfaces. The old interface should not exist.
+- **`# removed` / `# deprecated` tombstone comments** — if code is removed, delete it
+  completely. Comments marking where something used to be add no value.
+- **Unused re-exports in `__init__.py`** — exports kept "in case something imports them."
+  Remove from `__all__` and delete. If something breaks, fix the import.
+- **Renamed-but-kept variables** — `_old_name = new_name` or `old_name = new_name` kept
+  for hypothetical importers. Delete the alias.
+
+**The rule:** When renaming, moving, or replacing anything, update ALL references in the
+same commit and delete the old version. Never keep both. `grep` for the old name across
+the entire repo before committing — zero matches required (same as the post-deletion
+checklist in change-protocol.md).
+
 ## Growth violations
 
 Enforced by `check_structure.py` — file count, LOC, and export limits are hard gates.

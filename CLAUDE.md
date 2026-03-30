@@ -168,6 +168,11 @@ issue would have been caught by following them:
 - **Correctness over efficiency**: when choosing between a quick fix and a proper fix,
   state why the quick fix is also the *correct* one. If the justification is only
   efficiency ("avoids extra work", "simpler"), choose the proper fix.
+- **No backward compatibility**: this project has no external consumers. Never introduce
+  re-export aliases, deprecation wrappers, compatibility shims, dual-path code, or
+  `# removed` tombstone comments. When renaming or moving anything, update all callers
+  and delete the old version in the same commit. See `prohibited-patterns.md` for the
+  full list.
 - **Question existing patterns**: when encountering defensive code (guards, lazy imports,
   backwards-compatible aliases), ask "what concrete scenario does this defend against?"
   If the answer is unclear, investigate before preserving. Existing code written by
