@@ -13,6 +13,7 @@ class Base(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
+
 class ChannelsConfig(Base):
     """Configuration for chat channels.
 
@@ -129,6 +130,31 @@ class ExecToolConfig(Base):
     timeout: int = 60
     path_append: str = ""
 
+
+class AgentLoopConfig(Base):
+    """Limits enforced by the main agent loop."""
+
+    persisted_tool_result_max_chars: int = 16_000
+
+
+class ToolOutputLimitsConfig(Base):
+    """Output-size limits for individual tools."""
+
+    exec_output_max_chars: int = 10_000
+    read_file_max_chars: int = 128_000
+    read_file_default_limit: int = 2_000
+    list_dir_default_max_entries: int = 200
+    web_fetch_max_chars: int = 50_000
+
+
+class MemoryConsolidationConfig(Base):
+    """Limits for memory consolidation prompt and completion size."""
+
+    prompt_memory_chars: int = 0
+    prompt_message_chars: int = 0
+    max_completion_tokens: int = 0
+
+
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
 
@@ -141,11 +167,13 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # seconds before a tool call is cancelled
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    output_limits: ToolOutputLimitsConfig = Field(default_factory=ToolOutputLimitsConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
@@ -154,7 +182,9 @@ class Config(BaseSettings):
     """Root configuration for nanobot."""
 
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
+    agent_loop: AgentLoopConfig = Field(default_factory=AgentLoopConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+    memory_consolidation: MemoryConsolidationConfig = Field(default_factory=MemoryConsolidationConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)

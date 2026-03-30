@@ -33,7 +33,14 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
+    from nanobot.config.schema import (
+        AgentLoopConfig,
+        ChannelsConfig,
+        ExecToolConfig,
+        MemoryConsolidationConfig,
+        ToolOutputLimitsConfig,
+        WebSearchConfig,
+    )
     from nanobot.cron.service import CronService
 
 
@@ -62,6 +69,9 @@ class AgentLoop:
         web_search_config: WebSearchConfig | None = None,
         web_proxy: str | None = None,
         exec_config: ExecToolConfig | None = None,
+        output_limits: ToolOutputLimitsConfig | None = None,
+        agent_loop_config: AgentLoopConfig | None = None,
+        memory_consolidation_config: MemoryConsolidationConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
@@ -69,7 +79,13 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig, WebSearchConfig
+        from nanobot.config.schema import (
+            AgentLoopConfig,
+            ExecToolConfig,
+            MemoryConsolidationConfig,
+            ToolOutputLimitsConfig,
+            WebSearchConfig,
+        )
 
         self.bus = bus
         self.channels_config = channels_config
@@ -81,10 +97,16 @@ class AgentLoop:
         self.web_search_config = web_search_config or WebSearchConfig()
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
+        self.output_limits = output_limits or ToolOutputLimitsConfig()
+        self.agent_loop_config = agent_loop_config or AgentLoopConfig()
+        self.memory_consolidation_config = (
+            memory_consolidation_config or MemoryConsolidationConfig()
+        )
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
+        self._tool_result_max_chars = self.agent_loop_config.persisted_tool_result_max_chars
 
         self.context = ContextBuilder(workspace, timezone=timezone)
         self.sessions = session_manager or SessionManager(workspace)
@@ -98,6 +120,7 @@ class AgentLoop:
             web_search_config=self.web_search_config,
             web_proxy=web_proxy,
             exec_config=self.exec_config,
+            output_limits=self.output_limits,
             restrict_to_workspace=restrict_to_workspace,
         )
 
@@ -123,6 +146,7 @@ class AgentLoop:
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
+            memory_config=self.memory_consolidation_config,
         )
         self._register_default_tools()
         self.commands = CommandRouter()
@@ -132,18 +156,33 @@ class AgentLoop:
         """Register the default set of tools."""
         allowed_dir = self.workspace if self.restrict_to_workspace else None
         extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
-        self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
-        for cls in (WriteFileTool, EditFileTool, ListDirTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
+        self.tools.register(ReadFileTool(
+            workspace=self.workspace,
+            allowed_dir=allowed_dir,
+            extra_allowed_dirs=extra_read,
+            max_chars=self.output_limits.read_file_max_chars,
+            default_limit=self.output_limits.read_file_default_limit,
+        ))
+        self.tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
+        self.tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
+        self.tools.register(ListDirTool(
+            workspace=self.workspace,
+            allowed_dir=allowed_dir,
+            default_max_entries=self.output_limits.list_dir_default_max_entries,
+        ))
         if self.exec_config.enable:
             self.tools.register(ExecTool(
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,
                 restrict_to_workspace=self.restrict_to_workspace,
                 path_append=self.exec_config.path_append,
+                max_output_chars=self.output_limits.exec_output_max_chars,
             ))
         self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
-        self.tools.register(WebFetchTool(proxy=self.web_proxy))
+        self.tools.register(WebFetchTool(
+            max_chars=self.output_limits.web_fetch_max_chars,
+            proxy=self.web_proxy,
+        ))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
@@ -523,8 +562,8 @@ class AgentLoop:
 
             if block.get("type") == "text" and isinstance(block.get("text"), str):
                 text = block["text"]
-                if truncate_text and len(text) > self._TOOL_RESULT_MAX_CHARS:
-                    text = text[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+                if truncate_text and len(text) > self._tool_result_max_chars:
+                    text = text[:self._tool_result_max_chars] + "\n... (truncated)"
                 filtered.append({**block, "text": text})
                 continue
 
@@ -541,8 +580,8 @@ class AgentLoop:
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
             if role == "tool":
-                if isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
-                    entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+                if isinstance(content, str) and len(content) > self._tool_result_max_chars:
+                    entry["content"] = content[:self._tool_result_max_chars] + "\n... (truncated)"
                 elif isinstance(content, list):
                     filtered = self._sanitize_persisted_blocks(content, truncate_text=True)
                     if not filtered:

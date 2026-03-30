@@ -23,6 +23,7 @@ class ExecTool(Tool):
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
         path_append: str = "",
+        max_output_chars: int | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -40,6 +41,7 @@ class ExecTool(Tool):
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
+        self.max_output_chars = max_output_chars or self._MAX_OUTPUT
 
     @property
     def name(self) -> str:
@@ -136,7 +138,7 @@ class ExecTool(Tool):
             result = "\n".join(output_parts) if output_parts else "(no output)"
 
             # Head + tail truncation to preserve both start and end of output
-            max_len = self._MAX_OUTPUT
+            max_len = self.max_output_chars
             if len(result) > max_len:
                 half = max_len // 2
                 result = (

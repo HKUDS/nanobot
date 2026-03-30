@@ -69,9 +69,32 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
 
 def _migrate_config(data: dict) -> dict:
     """Migrate old config formats to current."""
+    if "agentLoop" in data and "agent_loop" not in data:
+        data["agent_loop"] = data.pop("agentLoop")
+    if "memoryConsolidation" in data and "memory_consolidation" not in data:
+        data["memory_consolidation"] = data.pop("memoryConsolidation")
+
     # Move tools.exec.restrictToWorkspace → tools.restrictToWorkspace
     tools = data.get("tools", {})
     exec_cfg = tools.get("exec", {})
     if "restrictToWorkspace" in exec_cfg and "restrictToWorkspace" not in tools:
         tools["restrictToWorkspace"] = exec_cfg.pop("restrictToWorkspace")
+
+    agents = data.get("agents", {})
+    agent_defaults = agents.get("defaults", {})
+    legacy_memory = agent_defaults.pop("memory", None)
+    if isinstance(legacy_memory, dict) and "memory_consolidation" not in data:
+        data["memory_consolidation"] = legacy_memory
+
+    output_limits = tools.get("outputLimits")
+    if output_limits is None:
+        output_limits = tools.get("output_limits")
+    if isinstance(output_limits, dict):
+        persisted = output_limits.pop("persistedToolResultMaxChars", None)
+        if persisted is None:
+            persisted = output_limits.pop("persisted_tool_result_max_chars", None)
+        if persisted is not None:
+            agent_loop = data.setdefault("agent_loop", {})
+            if "persistedToolResultMaxChars" not in agent_loop and "persisted_tool_result_max_chars" not in agent_loop:
+                agent_loop["persisted_tool_result_max_chars"] = persisted
     return data

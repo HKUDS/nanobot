@@ -62,6 +62,18 @@ class ReadFileTool(_FsTool):
     _MAX_CHARS = 128_000
     _DEFAULT_LIMIT = 2000
 
+    def __init__(
+        self,
+        workspace: Path | None = None,
+        allowed_dir: Path | None = None,
+        extra_allowed_dirs: list[Path] | None = None,
+        max_chars: int | None = None,
+        default_limit: int | None = None,
+    ):
+        super().__init__(workspace=workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_allowed_dirs)
+        self.max_chars = max_chars or self._MAX_CHARS
+        self.default_limit = default_limit or self._DEFAULT_LIMIT
+
     @property
     def name(self) -> str:
         return "read_file"
@@ -125,15 +137,15 @@ class ReadFileTool(_FsTool):
                 return f"Error: offset {offset} is beyond end of file ({total} lines)"
 
             start = offset - 1
-            end = min(start + (limit or self._DEFAULT_LIMIT), total)
+            end = min(start + (limit or self.default_limit), total)
             numbered = [f"{start + i + 1}| {line}" for i, line in enumerate(all_lines[start:end])]
             result = "\n".join(numbered)
 
-            if len(result) > self._MAX_CHARS:
+            if len(result) > self.max_chars:
                 trimmed, chars = [], 0
                 for line in numbered:
                     chars += len(line) + 1
-                    if chars > self._MAX_CHARS:
+                    if chars > self.max_chars:
                         break
                     trimmed.append(line)
                 end = start + len(trimmed)
@@ -376,7 +388,7 @@ class ListDirTool(_FsTool):
             if not dp.is_dir():
                 return f"Error: Not a directory: {path}"
 
-            cap = max_entries or self._DEFAULT_MAX
+            cap = max_entries or self.default_max_entries
             items: list[str] = []
             total = 0
 
@@ -408,3 +420,12 @@ class ListDirTool(_FsTool):
             return f"Error: {e}"
         except Exception as e:
             return f"Error listing directory: {e}"
+    def __init__(
+        self,
+        workspace: Path | None = None,
+        allowed_dir: Path | None = None,
+        extra_allowed_dirs: list[Path] | None = None,
+        default_max_entries: int | None = None,
+    ):
+        super().__init__(workspace=workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_allowed_dirs)
+        self.default_max_entries = default_max_entries or self._DEFAULT_MAX
