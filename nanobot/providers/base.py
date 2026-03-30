@@ -309,7 +309,14 @@ class LLMProvider(ABC):
             )
             await asyncio.sleep(delay)
 
-        return await self._safe_chat_stream(**kw)
+        response = await self._safe_chat_stream(**kw)
+        if response.finish_reason == "error" and fallback_models:
+            for fb in fallback_models:
+                logger.warning("Primary model failed, trying fallback '{}'", fb)
+                response = await self._safe_chat_stream(**{**kw, "model": fb})
+                if response.finish_reason != "error":
+                    return response
+        return response
 
     async def chat_with_retry(
         self,
@@ -320,6 +327,7 @@ class LLMProvider(ABC):
         temperature: object = _SENTINEL,
         reasoning_effort: object = _SENTINEL,
         tool_choice: str | dict[str, Any] | None = None,
+        fallback_models: list[str] | None = None,
     ) -> LLMResponse:
         """Call chat() with retry on transient provider failures.
 
@@ -360,7 +368,14 @@ class LLMProvider(ABC):
             )
             await asyncio.sleep(delay)
 
-        return await self._safe_chat(**kw)
+        response = await self._safe_chat(**kw)
+        if response.finish_reason == "error" and fallback_models:
+            for fb in fallback_models:
+                logger.warning("Primary model failed, trying fallback '{}'", fb)
+                response = await self._safe_chat(**{**kw, "model": fb})
+                if response.finish_reason != "error":
+                    return response
+        return response
 
     @abstractmethod
     def get_default_model(self) -> str:

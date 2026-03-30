@@ -72,6 +72,7 @@ class AgentRunner:
                 "messages": messages,
                 "tools": spec.tools.get_definitions(),
                 "model": spec.model,
+                "fallback_models": spec.fallback_models,
             }
             if spec.temperature is not None:
                 kwargs["temperature"] = spec.temperature

@@ -41,6 +41,7 @@ class AgentDefaults(Base):
     temperature: float = 0.1
     max_tool_iterations: int = 40
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
+    fallback_models: list[str] = Field(default_factory=list)  # Fallback models tried in order when primary fails
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
 
 
