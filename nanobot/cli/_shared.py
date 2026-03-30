@@ -151,8 +151,6 @@ def _make_agent_config(config: Config) -> AgentConfig:
         overrides["planning_enabled"] = False
     if not feat.verification_enabled:
         overrides["verification_mode"] = "off"
-    if not feat.delegation_enabled:
-        overrides["delegation_enabled"] = False
     if not feat.memory_enabled:
         overrides["memory_enabled"] = False
     if not feat.skills_enabled:

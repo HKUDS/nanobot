@@ -17,7 +17,7 @@ from collapsing back into a monolith.
 | Package | Owns | Must never import from |
 |---------|------|----------------------|
 | `agent/` | Orchestration engine (tool-use loop, guardrails, message processing) | `channels/`, `cli/` |
-| `coordination/` | Multi-agent delegation, missions, scratchpad | `channels/`, `cli/` |
+| `coordination/` | Mission management and scratchpad | `channels/`, `cli/` |
 | `memory/` | Persistent memory, retrieval, knowledge graph | `channels/`, `tools/` |
 | `tools/` | Tool infrastructure + domain implementations | `channels/` |
 | `context/` | Prompt assembly, compression, skill discovery | `channels/`, `cli/` |
@@ -37,7 +37,7 @@ Every file belongs to exactly one package. Every concern has exactly one authori
 location. If logic is expressed in two packages, one of them is wrong — deduplicate.
 
 - **`agent/`** is only orchestration. If you're adding a tool, it goes in `tools/`. If you're
-  adding delegation logic, it goes in `coordination/`. If you're adding memory logic, it
+  adding mission logic, it goes in `coordination/`. If you're adding memory logic, it
   goes in `memory/`. Agent orchestrates — it never owns domain logic for other concerns.
 - **`tools/builtin/`** is for domain tool implementations. Tool infrastructure (base, registry,
   executor, capability) stays at `tools/` level. Never mix infrastructure with implementations.
@@ -70,10 +70,9 @@ value object), it's a violation.
 ## Dependency Inversion — No Cross-Package Instantiation
 
 **No package may import concrete classes from another package for the purpose of
-instantiation.** This rule exists because `coordination/delegation.py` and
-`coordination/mission.py` previously imported 8+ concrete tool classes from
-`tools/builtin/` to construct tool registries — coupling coordination to specific
-tool implementations.
+instantiation.** This rule exists because `coordination/mission.py` previously
+imported concrete tool classes from `tools/builtin/` to construct tool registries —
+coupling coordination to specific tool implementations.
 
 **Allowed cross-package dependencies:**
 
@@ -88,13 +87,13 @@ tool implementations.
 **Forbidden:**
 
 ```python
-# In coordination/delegation.py — WRONG
+# In coordination/mission.py — WRONG
 from nanobot.tools.builtin.filesystem import ReadFileTool
 registry.register(ReadFileTool(workspace=self.workspace))  # cross-package instantiation
 
-# CORRECT — receive a factory from the composition root
-def __init__(self, ..., build_tools: Callable[..., ToolRegistry]):
-    self._build_tools = build_tools
+# CORRECT — receive tools from the composition root
+def __init__(self, ..., mcp_tools: list[Tool]):
+    self.mcp_tools = mcp_tools
 ```
 
 **Enforcement:** `scripts/check_imports.py` flags runtime imports from `tools/builtin/`

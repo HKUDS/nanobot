@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from nanobot.context.context import ContextBuilder
-    from nanobot.coordination.delegation import DelegationDispatcher
     from nanobot.coordination.mission import MissionManager
     from nanobot.coordination.scratchpad import Scratchpad
     from nanobot.tools.executor import ToolExecutor
@@ -27,13 +26,11 @@ class TurnContextManager:
         self,
         *,
         tools: ToolExecutor,
-        dispatcher: DelegationDispatcher,
         missions: MissionManager,
         context: ContextBuilder,
         scratchpad_factory: Callable[[Path], Scratchpad] | None = None,
     ) -> None:
         self._tools = tools
-        self._dispatcher = dispatcher
         self._missions = missions
         self._context = context
         self._scratchpad_factory = scratchpad_factory
@@ -73,8 +70,6 @@ class TurnContextManager:
             self._scratchpad = self._scratchpad_factory(session_dir)
 
         # Update subsystem references via public setters
-        self._dispatcher.scratchpad = self._scratchpad
-        self._dispatcher.set_trace_path(session_dir / "routing_trace.jsonl")
         self._missions.scratchpad = self._scratchpad
 
         # Update scratchpad on all tools via lifecycle hook

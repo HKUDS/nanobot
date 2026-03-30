@@ -37,7 +37,7 @@ multi-channel messaging.
 | Package | Concern | Key Classes |
 |---------|---------|-------------|
 | `agent/` | Orchestration engine (tool-use loop, guardrails) | `AgentLoop`, `TurnRunner`, `GuardrailChain`, `MessageProcessor` |
-| `coordination/` | Multi-agent delegation and missions | `DelegationDispatcher`, `MissionManager` |
+| `coordination/` | Mission management and scratchpad | `MissionManager`, `Scratchpad` |
 | `memory/` | Persistent memory with hybrid retrieval | `MemoryStore`, `UnifiedMemoryDB`, `KnowledgeGraph` |
 | `tools/` | Tool infrastructure + domain implementations | `Tool`, `ToolRegistry`, `ToolExecutor`, `CapabilityRegistry` |
 | `context/` | Prompt assembly and skill discovery | `ContextBuilder`, `SkillsLoader`, `PromptLoader` |
@@ -105,7 +105,6 @@ runtime-only rules — they construct and wire subsystems by design.
 |-----------|----------|--------|
 | `config/schema.py` → `providers.registry` | Deferred import | Config resolves model-to-key mappings |
 | `tools/builtin/mission.py` → `coordination.mission` | Data object | MissionStatus enum |
-| `coordination/delegation.py` → `tools.builtin.delegate` | Data object | DelegationResult dataclass |
 
 ### Tool Lifecycle Hooks
 
@@ -177,15 +176,6 @@ Channel.start() → bus.publish_inbound(InboundMessage)
 → Channel.send() delivers response
 ```
 
-### Multi-Agent Delegation
-
-```
-Parent AgentLoop → DelegateTool.execute()
-  → DelegationDispatcher.execute_delegated_agent() runs child agent
-  → Result written to Scratchpad
-  → Parent reads via read_scratchpad tool
-```
-
 ### Memory Write Path
 
 ```
@@ -217,7 +207,7 @@ See [docs/adr/](adr/) for Architecture Decision Records:
 - **Langfuse tracing** (`observability/langfuse.py`): OTEL-based integration via Langfuse v4
   - `trace_request()` — per-request root span
   - `tool_span()` — wraps each tool execution (in `tools/registry.py`)
-  - `span()` — wraps context assembly, verification, coordination, delegation
+  - `span()` — wraps context assembly, verification, coordination
   - `score_current_trace()` — attaches verification confidence scores
   - litellm auto-instrumented via `"otel"` callback
 - **Lifecycle**: `init_langfuse()` at CLI startup, `shutdown_langfuse()` in all `finally` blocks

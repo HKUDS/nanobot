@@ -43,8 +43,8 @@ CLAUDE_TOOL_MAPPING: dict[str, tuple[str, str]] = {
     "WebFetch": ("web_fetch", "use the `web_fetch` tool"),
     "WebSearch": ("web_search", "use the `web_search` tool"),
     "Agent": (
-        "delegate",
-        "use the `delegate` tool (approximate — nanobot delegation, not autonomous sub-agents)",
+        "mission_start",
+        "use the `mission_start` tool to launch a background mission",
     ),
     "TodoWrite": ("write_scratchpad", "use the `write_scratchpad` tool"),
     "TodoRead": ("read_scratchpad", "use the `read_scratchpad` tool"),

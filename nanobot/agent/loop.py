@@ -75,7 +75,6 @@ class AgentLoop:
         self.result_cache = components.subsystems.result_cache
         self.missions = components.subsystems.missions
         self._consolidator = components.subsystems.consolidator
-        self._dispatcher = components.subsystems.dispatcher
         self._llm_caller = components.subsystems.llm_caller
         self._orchestrator = components.subsystems.orchestrator
         self._processor: MessageProcessor = components.subsystems.processor  # type: ignore[assignment]
@@ -90,7 +89,6 @@ class AgentLoop:
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
-        self._delegation_stack: list[str] = []
         self._turn_tokens_prompt = 0
         self._turn_tokens_completion = 0
         self._turn_llm_calls = 0
@@ -111,7 +109,7 @@ class AgentLoop:
                 self._mcp_stack,
             )
             self._mcp_connected = True
-            # Share MCP tools with missions and delegation
+            # Share MCP tools with missions
             mcp_tools = [
                 t
                 for name in self._capabilities.tool_registry.tool_names
@@ -119,7 +117,6 @@ class AgentLoop:
             ]
             if mcp_tools:
                 self.missions.mcp_tools = mcp_tools
-                self._dispatcher.mcp_tools = mcp_tools
         except (RuntimeError, ConnectionError, OSError, TimeoutError, ImportError) as e:
             logger.error("Failed to connect MCP servers (will retry next message): {}", e)
             if self._mcp_stack:

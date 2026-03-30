@@ -1,4 +1,4 @@
-"""Multi-agent coordination: delegation and mission management."""
+"""Multi-agent coordination: mission management and scratchpad."""
 
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
 """Shared sub-agent execution parameters.
 
 ``SubAgentConfig`` captures the parameters that govern how a sub-agent
-tool loop runs — shared by ``DelegationDispatcher`` and ``MissionManager``.
+tool loop runs — used by ``MissionManager``.
 """
 
 from __future__ import annotations

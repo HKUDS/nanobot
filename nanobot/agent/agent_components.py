@@ -28,7 +28,6 @@ if TYPE_CHECKING:
         ExecToolConfig,
     )
     from nanobot.context.context import ContextBuilder
-    from nanobot.coordination.delegation import DelegationDispatcher
     from nanobot.coordination.mission import MissionManager
     from nanobot.cron.service import CronService
     from nanobot.memory import MemoryStore
@@ -79,7 +78,6 @@ class _Subsystems:
     result_cache: ToolResultCache
     missions: MissionManager
     consolidator: ConsolidationOrchestrator
-    dispatcher: DelegationDispatcher
     llm_caller: StreamingLLMCaller
     orchestrator: Orchestrator
     processor: Processor
@@ -90,7 +88,6 @@ class _ProcessorServices:
     """Subsystems consumed by MessageProcessor. Internal to agent/ package."""
 
     orchestrator: Orchestrator
-    dispatcher: DelegationDispatcher
     missions: MissionManager
     context: ContextBuilder
     sessions: SessionManager

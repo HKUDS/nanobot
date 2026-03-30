@@ -60,31 +60,6 @@ def test_heuristic_summary_preview_length():
     )
 
 
-# ── Task 3: Scratchpad injection cap ─────────────────────────────────────────
-
-_SCRATCHPAD_INJECTION_LIMIT = 4000
-
-
-def test_scratchpad_injection_is_capped():
-    """_cap_scratchpad_for_injection must truncate content over _SCRATCHPAD_INJECTION_LIMIT chars."""
-    from nanobot.coordination.delegation_contract import _cap_scratchpad_for_injection
-
-    large_content = "data. " * 5000  # ~30,000 chars
-    result = _cap_scratchpad_for_injection(large_content, limit=_SCRATCHPAD_INJECTION_LIMIT)
-    assert "[truncated" in result
-    assert len(result) <= _SCRATCHPAD_INJECTION_LIMIT + 200  # +200 for truncation notice
-
-
-def test_scratchpad_injection_unchanged_when_small():
-    """_cap_scratchpad_for_injection must not modify content under the limit."""
-    from nanobot.coordination.delegation_contract import _cap_scratchpad_for_injection
-
-    small_content = "short content"
-    result = _cap_scratchpad_for_injection(small_content, limit=_SCRATCHPAD_INJECTION_LIMIT)
-    assert result == small_content
-    assert "[truncated" not in result
-
-
 # ── Task 4: Gate unresolved events scan on intent ────────────────────────────
 
 

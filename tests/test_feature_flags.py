@@ -16,7 +16,6 @@ class TestFeaturesConfigDefaults:
         fc = FeaturesConfig()
         assert fc.planning_enabled is True
         assert fc.verification_enabled is True
-        assert fc.delegation_enabled is True
         assert fc.memory_enabled is True
         assert fc.skills_enabled is True
         assert fc.streaming_enabled is True
@@ -24,21 +23,17 @@ class TestFeaturesConfigDefaults:
     def test_disable_individual_flag(self):
         fc = FeaturesConfig(planning_enabled=False)
         assert fc.planning_enabled is False
-        # Others remain default
-        assert fc.delegation_enabled is True
 
     def test_all_disabled(self):
         fc = FeaturesConfig(
             planning_enabled=False,
             verification_enabled=False,
-            delegation_enabled=False,
             memory_enabled=False,
             skills_enabled=False,
             streaming_enabled=False,
         )
         assert not fc.planning_enabled
         assert not fc.verification_enabled
-        assert not fc.delegation_enabled
         assert not fc.memory_enabled
         assert not fc.skills_enabled
         assert not fc.streaming_enabled
@@ -69,7 +64,6 @@ class TestAgentConfigFlags:
     def test_default_flags(self):
         ac = AgentConfig(workspace="/tmp/test", model="test")
         assert ac.planning_enabled is True
-        assert ac.delegation_enabled is True
         assert ac.memory_enabled is True
         assert ac.skills_enabled is True
         assert ac.streaming_enabled is True
@@ -78,10 +72,8 @@ class TestAgentConfigFlags:
         ac = AgentConfig(
             workspace="/tmp/test",
             model="test",
-            delegation_enabled=False,
             memory_enabled=False,
         )
-        assert ac.delegation_enabled is False
         assert ac.memory_enabled is False
 
 
@@ -115,7 +107,6 @@ class TestDirectConstruction:
         """Feature flags have correct defaults."""
         ac = AgentConfig(workspace="/tmp/test", model="test")
         assert ac.planning_enabled is True
-        assert ac.delegation_enabled is True
 
     def test_graph_enabled(self):
         ac = AgentConfig(

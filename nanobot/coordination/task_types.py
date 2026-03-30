@@ -1,7 +1,7 @@
-"""Task type taxonomy and classification for delegation contracts.
+"""Task type taxonomy and classification.
 
-Provides ``TASK_TYPES`` — a taxonomy of delegation task categories — and two
-classifier functions extracted from ``DelegationDispatcher``:
+Provides ``TASK_TYPES`` — a taxonomy of task categories — and two
+classifier functions:
 
 - ``classify_task_type`` — map a role + task description to a task type key.
 - ``has_parallel_structure`` — detect enumerated independent subtasks in text.

@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from nanobot.coordination.scratchpad import Scratchpad
 from nanobot.tools.builtin.cron import CronTool
-from nanobot.tools.builtin.delegate import DelegateParallelTool, DelegateTool
 from nanobot.tools.builtin.email import CheckEmailTool
 from nanobot.tools.builtin.excel import (
     DescribeDataTool,
@@ -57,7 +56,6 @@ def register_default_tools(  # noqa: PLR0913
     brave_api_key: str | None,
     publish_outbound: Callable[..., Awaitable[Any]],
     cron_service: CronService | None,
-    delegation_enabled: bool,
     missions: MissionManager,
     result_cache: ToolResultCache,
     skills_enabled: bool,
@@ -143,26 +141,11 @@ def register_default_tools(  # noqa: PLR0913
         if _should_register(cron_tool.name):
             capabilities.register_tool(cron_tool)
 
-    # Delegation tools
-    if delegation_enabled:
-        delegate_tool = DelegateTool()
-        if _should_register(delegate_tool.name):
-            capabilities.register_tool(delegate_tool)
-        delegate_parallel_tool = DelegateParallelTool()
-        if _should_register(delegate_parallel_tool.name):
-            capabilities.register_tool(delegate_parallel_tool)
-        mission_tool = MissionStartTool(manager=missions)
+    # Mission tools
+    for mission_cls in (MissionStartTool, MissionStatusTool, MissionListTool, MissionCancelTool):
+        mission_tool = mission_cls(manager=missions)
         if _should_register(mission_tool.name):
             capabilities.register_tool(mission_tool)
-        mission_status = MissionStatusTool(manager=missions)
-        if _should_register(mission_status.name):
-            capabilities.register_tool(mission_status)
-        mission_list = MissionListTool(manager=missions)
-        if _should_register(mission_list.name):
-            capabilities.register_tool(mission_list)
-        mission_cancel = MissionCancelTool(manager=missions)
-        if _should_register(mission_cancel.name):
-            capabilities.register_tool(mission_cancel)
 
     # Scratchpad tools (scratchpad instance swapped per session in _ensure_scratchpad)
     placeholder_pad = Scratchpad(workspace / "sessions" / "_placeholder")
@@ -207,14 +190,14 @@ def register_default_tools(  # noqa: PLR0913
         capabilities.register_tool(describe_tool)
 
 
-def build_delegation_tools(
+def build_mission_tools(
     *,
     workspace: Path,
     restrict_to_workspace: bool = True,
     exec_config: ExecToolConfig | None = None,
     brave_api_key: str | None = None,
 ) -> dict[str, Any]:
-    """Build the restricted tool set used by delegated agents and missions.
+    """Build the restricted tool set used by mission sub-agents.
 
     Returns a dict mapping tool name to Tool instance. This factory keeps
     concrete tool imports inside ``tools/`` — coordination modules receive

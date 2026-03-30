@@ -206,10 +206,6 @@ class ToolCallTracker:
         return self._total_failures >= self.GLOBAL_BUDGET
 
 
-class _CycleError(Exception):
-    """Raised when a delegation cycle or depth/budget limit is reached."""
-
-
 def _build_failure_prompt(
     failed_tools: list[tuple[str, FailureClass]],
     permanent_failures: frozenset[str],
@@ -252,6 +248,5 @@ def _build_failure_prompt(
 __all__ = [
     "FailureClass",
     "ToolCallTracker",
-    "_CycleError",
     "_build_failure_prompt",
 ]

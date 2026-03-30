@@ -6,9 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage, ReactionEvent
-from nanobot.coordination.delegation import _delegation_ancestry
 from nanobot.memory.graph.graph import KnowledgeGraph
 from nanobot.memory.read.retrieval_planner import RetrievalPlanner
 from nanobot.memory.write.extractor import MemoryExtractor
@@ -244,7 +242,7 @@ async def test_loop_run_agent_loop_malformed_then_final_nudge(tmp_path: Path) ->
     assert any(m.get("role") == "tool" for m in messages)
 
 
-async def test_loop_run_agent_loop_delegation_and_failure_reflection_paths(
+async def test_loop_run_agent_loop_failure_reflection_paths(
     tmp_path: Path,
 ) -> None:
     provider = ScriptedProvider([])
@@ -253,33 +251,15 @@ async def test_loop_run_agent_loop_delegation_and_failure_reflection_paths(
     responses = [
         LLMResponse(
             content=None,
-            tool_calls=[SimpleNamespace(id="d1", name="delegate", arguments={"task": "a"})],
+            tool_calls=[SimpleNamespace(id="x1", name="read_file", arguments={"path": "x"})],
             finish_reason="stop",
         ),
         LLMResponse(content="done", tool_calls=[], finish_reason="stop"),
     ]
-
-    async def _exec(_calls):
-        loop._dispatcher.delegation_count = loop._dispatcher.max_delegations
-        return [ToolResult.ok("delegated")]
-
     loop._llm_caller.call = AsyncMock(side_effect=responses)  # type: ignore[method-assign]
-    loop.tools.execute_batch = _exec  # type: ignore[method-assign]
-    final, _tools, msgs = await loop._run_agent_loop([{"role": "user", "content": "Do A then B."}])
-    assert final == "done"
-
-    responses2 = [
-        LLMResponse(
-            content=None,
-            tool_calls=[SimpleNamespace(id="x1", name="read_file", arguments={"path": "x"})],
-            finish_reason="stop",
-        ),
-        LLMResponse(content="done2", tool_calls=[], finish_reason="stop"),
-    ]
-    loop._llm_caller.call = AsyncMock(side_effect=responses2)  # type: ignore[method-assign]
     loop.tools.execute_batch = AsyncMock(return_value=[ToolResult.fail("boom")])  # type: ignore[method-assign]
-    final2, _tools2, msgs2 = await loop._run_agent_loop([{"role": "user", "content": "Read file."}])
-    assert final2 == "done2"
+    final, _tools, msgs = await loop._run_agent_loop([{"role": "user", "content": "Read file."}])
+    assert final == "done"
 
 
 def test_store_reads_memory_config_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -345,49 +325,6 @@ async def test_loop_run_agent_nudge_and_reaction_and_close_paths(
     loop.provider.aclose = _provider_close_fail  # type: ignore[method-assign]
     await loop.close_mcp()
     assert loop._mcp_stack is None
-
-
-async def test_loop_dispatch_delegation_route_and_exception_paths(tmp_path: Path) -> None:
-    from nanobot.coordination.delegation import DelegationDispatcher
-
-    loop = object.__new__(AgentLoop)
-    loop.role_name = "general"
-    dispatcher = object.__new__(DelegationDispatcher)
-    dispatcher.delegation_count = 0
-    dispatcher.routing_trace = []
-    dispatcher.coordinator = None
-    dispatcher.active_messages = None
-    dispatcher.role_name = "general"
-    dispatcher.on_progress = None
-    dispatcher.record_route_trace = MagicMock()
-    loop._dispatcher = dispatcher
-
-    with pytest.raises(Exception, match="."):  # noqa: B017
-        await loop._dispatcher.dispatch("", "task", None)
-
-    class _Coord:
-        @staticmethod
-        def route_direct(_name: str):
-            return None
-
-        @staticmethod
-        async def route(_task: str):
-            return SimpleNamespace(name="code")
-
-    dispatcher.coordinator = _Coord()
-
-    async def _explode(_role, _task, _context):
-        raise RuntimeError("delegated fail")
-
-    dispatcher.execute_delegated_agent = _explode  # type: ignore[method-assign]
-    token = _delegation_ancestry.set(tuple())
-    try:
-        with pytest.raises(RuntimeError):
-            await loop._dispatcher.dispatch("missing", "find bug", "ctx")
-    finally:
-        _delegation_ancestry.reset(token)
-
-    assert dispatcher.record_route_trace.call_count >= 2
 
 
 def test_extractor_entity_and_graph_exception_paths(tmp_path: Path) -> None:

@@ -28,8 +28,6 @@ EXPECTED_PROMPTS: dict[str, list[str]] = {
     "consolidation": ["consolidat", "memory", "save_memory"],
     "critique": ["crit", "review", "evaluat"],
     "deck_synthesis": ["synthesiz", "deck", "slide"],
-    "delegation_agent": ["specialist", "tool"],
-    "delegation_schema": ["Findings", "Evidence", "Confidence"],
     "extractor": ["extractor", "save_events"],
     "failure_strategy": ["fail", "alternative"],
     "heartbeat": ["heartbeat", "tool"],

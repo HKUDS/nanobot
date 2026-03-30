@@ -55,7 +55,6 @@ class _ToolBuildResult:
     capabilities: CapabilityRegistry
     result_cache: ToolResultCache
     missions: MissionManager
-    delegation_tools: dict
 
 
 def _mcp_connector_fn() -> Any:
@@ -91,7 +90,7 @@ def _build_tools(
     from nanobot.tools.executor import ToolExecutor
     from nanobot.tools.registry import ToolRegistry as _ToolRegistry
     from nanobot.tools.result_cache import ToolResultCache
-    from nanobot.tools.setup import build_delegation_tools, register_default_tools
+    from nanobot.tools.setup import build_mission_tools, register_default_tools
 
     if tool_registry is not None:
         _tool_registry = tool_registry
@@ -110,7 +109,7 @@ def _build_tools(
         summary_model=config.tool_summary_model or None,
     )
     context.set_unavailable_tools_fn(capabilities.get_unavailable_summary)
-    _delegation_tools = build_delegation_tools(
+    _mission_tools = build_mission_tools(
         workspace=workspace,
         restrict_to_workspace=config.restrict_to_workspace,
         exec_config=exec_config,
@@ -123,7 +122,7 @@ def _build_tools(
         max_iterations=config.mission.max_iterations,
         max_concurrent=config.mission.max_concurrent,
         result_max_chars=config.mission.result_max_chars,
-        delegation_tools=_delegation_tools,
+        base_tools=_mission_tools,
     )
     if tool_registry is None:
         register_default_tools(
@@ -137,7 +136,6 @@ def _build_tools(
             brave_api_key=brave_api_key,
             publish_outbound=bus.publish_outbound,
             cron_service=cron_service,
-            delegation_enabled=config.delegation_enabled,
             missions=missions,
             result_cache=result_cache,
             skills_enabled=config.skills_enabled,
@@ -151,7 +149,6 @@ def _build_tools(
         capabilities=capabilities,
         result_cache=result_cache,
         missions=missions,
-        delegation_tools=_delegation_tools,
     )
 
 
@@ -229,7 +226,6 @@ def build_agent(
     from nanobot.agent.turn_runner import TurnRunner
     from nanobot.config.schema import ExecToolConfig as _ExecToolConfig
     from nanobot.context.context import ContextBuilder
-    from nanobot.coordination.delegation import DelegationConfig, DelegationDispatcher
     from nanobot.memory import MemoryStore
     from nanobot.session.manager import SessionManager as _SessionManager
 
@@ -300,25 +296,6 @@ def build_agent(
     # 7. Wire memory
     consolidator = _wire_memory(context=context, config=config)
 
-    # 8. Construct DelegationDispatcher (tools wired at construction)
-    from nanobot.tools.builtin.delegate import DelegateTool
-
-    dispatcher = DelegationDispatcher(
-        config=DelegationConfig(
-            sub_agent=sub_agent_config,
-            role_name=role_config.name if role_config else "",
-            max_iterations=max_iterations,
-            restrict_to_workspace=config.restrict_to_workspace,
-            brave_api_key=brave_api_key,
-            exec_config=resolved_exec_config,
-        ),
-        provider=provider,
-        tools=_tool_build.tools,
-        max_delegation_depth=config.max_delegation_depth,
-        delegation_tools=_tool_build.delegation_tools,
-        delegate_tool_factory=DelegateTool,
-    )
-
     # 9. Construct StreamingLLMCaller
     llm_caller = StreamingLLMCaller(
         provider=provider,
@@ -352,7 +329,6 @@ def build_agent(
 
     turn_context = TurnContextManager(
         tools=_tool_build.tools,
-        dispatcher=dispatcher,
         missions=_tool_build.missions,
         context=context,
         scratchpad_factory=Scratchpad,
@@ -384,7 +360,6 @@ def build_agent(
 
     services = _ProcessorServices(
         orchestrator=orchestrator,
-        dispatcher=dispatcher,
         missions=_tool_build.missions,
         context=context,
         sessions=sessions,
@@ -432,7 +407,6 @@ def build_agent(
         result_cache=_tool_build.result_cache,
         missions=_tool_build.missions,
         consolidator=consolidator,
-        dispatcher=dispatcher,
         llm_caller=llm_caller,
         orchestrator=orchestrator,
         processor=processor,
