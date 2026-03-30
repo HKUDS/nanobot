@@ -4,6 +4,39 @@ from __future__ import annotations
 
 from typing import Any
 
+# ---------------------------------------------------------------------------
+# Domain constants — single source of truth for the memory subsystem.
+# All consumers import from here. No re-definitions elsewhere.
+# ---------------------------------------------------------------------------
+
+PROFILE_KEYS: tuple[str, ...] = (
+    "preferences",
+    "stable_facts",
+    "active_projects",
+    "relationships",
+    "constraints",
+)
+
+EVENT_TYPES: frozenset[str] = frozenset(
+    {"preference", "fact", "task", "decision", "constraint", "relationship"}
+)
+MEMORY_TYPES: frozenset[str] = frozenset({"semantic", "episodic", "reflection"})
+MEMORY_STABILITY: frozenset[str] = frozenset({"high", "medium", "low"})
+
+# Profile belief statuses
+PROFILE_STATUS_ACTIVE: str = "active"
+PROFILE_STATUS_CONFLICTED: str = "conflicted"
+PROFILE_STATUS_STALE: str = "stale"
+
+# Conflict resolution statuses
+CONFLICT_STATUS_OPEN: str = "open"
+CONFLICT_STATUS_NEEDS_USER: str = "needs_user"
+CONFLICT_STATUS_RESOLVED: str = "resolved"
+
+# Episodic event statuses
+EPISODIC_STATUS_OPEN: str = "open"
+EPISODIC_STATUS_RESOLVED: str = "resolved"
+
 _SAVE_EVENTS_TOOL: list[dict[str, Any]] = [
     {
         "type": "function",
