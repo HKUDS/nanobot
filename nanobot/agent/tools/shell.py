@@ -89,6 +89,12 @@ class ExecTool(Tool):
 
         effective_timeout = min(timeout or self.timeout, self._MAX_TIMEOUT)
 
+        # Escape $<digits> to prevent shell variable expansion.
+        # LLMs often pass values like "$2000" which the shell interprets as
+        # positional parameter $2 + "000". Legitimate env vars ($HOME, $PATH)
+        # start with a letter and are left untouched.
+        command = re.sub(r'\$(\d)', r'\\$\1', command)
+
         env = os.environ.copy()
         if self.path_append:
             env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
