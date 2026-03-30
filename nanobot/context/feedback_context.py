@@ -6,7 +6,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from nanobot.memory.unified_db import UnifiedMemoryDB
+    from nanobot.memory.db.connection import MemoryDatabase
 
 
 def _unpack_metadata(event: dict[str, Any]) -> dict[str, Any]:
@@ -23,13 +23,13 @@ def _unpack_metadata(event: dict[str, Any]) -> dict[str, Any]:
     return event
 
 
-def load_feedback_events(db: UnifiedMemoryDB) -> list[dict[str, Any]]:
+def load_feedback_events(db: MemoryDatabase) -> list[dict[str, Any]]:
     """Load all feedback-type events from the database."""
-    rows = db.read_events(type="feedback", limit=1000)
+    rows = db.event_store.read_events(type="feedback", limit=1000)
     return [_unpack_metadata(row) for row in rows]
 
 
-def feedback_summary(db: UnifiedMemoryDB, *, max_recent: int = 20) -> str:
+def feedback_summary(db: MemoryDatabase, *, max_recent: int = 20) -> str:
     """Build a concise summary of feedback events for system-prompt injection.
 
     Returns an empty string when there is no feedback to report.

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from nanobot.tools.base import Tool, ToolResult
 
 if TYPE_CHECKING:
-    from nanobot.memory.unified_db import UnifiedMemoryDB
+    from nanobot.memory.db.connection import MemoryDatabase
 
 
 class FeedbackTool(Tool):
@@ -22,7 +22,7 @@ class FeedbackTool(Tool):
 
     readonly = False  # mutates persistent state
 
-    def __init__(self, db: UnifiedMemoryDB | None = None):
+    def __init__(self, db: MemoryDatabase | None = None):
         self._db = db
         # Set by the agent loop before each turn
         self._channel: str = ""
@@ -118,7 +118,7 @@ class FeedbackTool(Tool):
         # Persist to SQLite (single INSERT, fast enough for sync call)
         if self._db is not None:
             try:
-                self._db.insert_event(event)
+                self._db.event_store.insert_event(event)
             except Exception as exc:  # crash-barrier: db write errors should not crash the agent
                 return ToolResult.fail(f"Failed to persist feedback: {exc}")
 

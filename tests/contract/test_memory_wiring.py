@@ -10,15 +10,15 @@ from nanobot.memory.store import MemoryStore
 
 
 def test_strategies_ddl_importable():
-    """STRATEGIES_DDL is a public constant in unified_db, used by test fixtures."""
-    from nanobot.memory.unified_db import STRATEGIES_DDL
+    """STRATEGIES_DDL is a public constant in constants, used by test fixtures."""
+    from nanobot.memory.constants import STRATEGIES_DDL
 
     assert "CREATE TABLE" in STRATEGIES_DDL
     assert "strategies" in STRATEGIES_DDL
 
 
-def test_unified_db_connection_property(tmp_path):
-    """UnifiedMemoryDB exposes a shared connection for subsystem components."""
+def test_memory_database_connection_property(tmp_path):
+    """MemoryDatabase exposes a shared connection for subsystem components."""
     import sqlite3
 
     store = _make_store(tmp_path)

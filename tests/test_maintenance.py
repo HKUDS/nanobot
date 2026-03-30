@@ -31,11 +31,11 @@ class TestEnsureHealth:
 
 
 class TestReindexReturnsNoOp:
-    def test_reindex_returns_unified_db_active(self, tmp_path: Path) -> None:
+    def test_reindex_returns_sqlite_active(self, tmp_path: Path) -> None:
         maint = _make_maintenance(tmp_path)
         result = maint.reindex_from_structured_memory()
         assert result["ok"] is True
-        assert result["reason"] == "unified_db_active"
+        assert result["reason"] == "sqlite_active"
 
 
 class TestCompactEvents:

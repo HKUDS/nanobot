@@ -20,9 +20,9 @@ from nanobot.observability.tracing import bind_trace
 from .._text import _utc_now_iso
 
 if TYPE_CHECKING:
+    from ..db.event_store import EventStore
     from ..embedder import Embedder
     from ..graph.graph import KnowledgeGraph
-    from ..unified_db import UnifiedMemoryDB
     from .coercion import EventCoercer
     from .dedup import EventDeduplicator
 
@@ -36,7 +36,7 @@ class EventIngester:
         coercer: EventCoercer,
         dedup: EventDeduplicator,
         graph: KnowledgeGraph | None,
-        db: UnifiedMemoryDB | None = None,
+        db: EventStore | None = None,
         embedder: Embedder | None = None,
     ) -> None:
         self._coercer = coercer
@@ -46,7 +46,7 @@ class EventIngester:
         self._embedder = embedder
 
     def read_events(self, limit: int | None = None) -> list[dict[str, Any]]:
-        """Read events from UnifiedMemoryDB.
+        """Read events from EventStore.
 
         Extra fields packed into metadata._extra on write are unpacked back
         to top-level keys so callers see the same dict shape as was stored.
@@ -148,7 +148,7 @@ class EventIngester:
         if written <= 0 and merged <= 0:
             return 0
 
-        # Write to UnifiedMemoryDB
+        # Write to EventStore
         if self._db is not None:
             import json as _json
 

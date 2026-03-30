@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from nanobot.context.skills import SkillsLoader
     from nanobot.coordination.mission import MissionManager
     from nanobot.cron.service import CronService
-    from nanobot.memory.unified_db import UnifiedMemoryDB
+    from nanobot.memory.db.connection import MemoryDatabase
     from nanobot.tools.capability import CapabilityRegistry
 
 
@@ -60,7 +60,7 @@ def register_default_tools(  # noqa: PLR0913
     result_cache: ToolResultCache,
     skills_enabled: bool,
     skills_loader: SkillsLoader,
-    feedback_db: UnifiedMemoryDB | None = None,
+    feedback_db: MemoryDatabase | None = None,
 ) -> None:
     """Register the default set of tools, filtered by role config.
 

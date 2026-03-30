@@ -262,7 +262,7 @@ def build_agent(
         memory_config=config.memory,
     )
 
-    # 3.5 Construct StrategyAccess for procedural memory (shares UnifiedMemoryDB connection)
+    # 3.5 Construct StrategyAccess for procedural memory (shares MemoryDatabase connection)
     from nanobot.memory.strategy import StrategyAccess
 
     strategy_store = StrategyAccess(memory.db.connection)

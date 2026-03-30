@@ -6,7 +6,7 @@
 pin/stale management, contradiction detection, and live user corrections.
 
 All file I/O is delegated to ``MemoryPersistence``; vector lookups go
-through ``UnifiedMemoryDB``.
+through ``MemoryDatabase``.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from ..constants import (
 from ..event import BeliefRecord
 
 if TYPE_CHECKING:
-    from ..unified_db import UnifiedMemoryDB
+    from ..db.connection import MemoryDatabase
 
 __all__ = [
     "ProfileCache",
@@ -74,7 +74,7 @@ class ProfileStore:
     def __init__(
         self,
         *,
-        db: UnifiedMemoryDB | None = None,
+        db: MemoryDatabase | None = None,
         conflict_mgr_fn: Callable[[], Any] | None = None,
         corrector_fn: Callable[[], Any] | None = None,
         extractor: Any | None = None,
@@ -678,7 +678,7 @@ class ProfileStore:
             return None
 
         if self._db is not None:
-            rows = self._db.search_fts(text, k=top_k)
+            rows = self._db.event_store.search_fts(text, k=top_k)
             if rows:
                 value = str(rows[0].get("id", "")).strip()
                 return value or None

@@ -23,7 +23,7 @@ from ..token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
 from .retrieval_planner import RetrievalPlanner
 
 if TYPE_CHECKING:
-    from ..unified_db import UnifiedMemoryDB
+    from ..db.connection import MemoryDatabase
 
 # Intents that benefit from scanning recent unresolved events.
 # For all other intents (fact_lookup, chitchat, …) the scan is skipped.
@@ -62,7 +62,7 @@ class ContextAssembler:
         profile_section_lines_fn: Callable[[dict[str, Any]], list[str]] | None = None,
         read_profile_fn: Callable[[], dict[str, Any]] | None = None,
         budget_allocator: TokenBudgetAllocator | None = None,
-        db: UnifiedMemoryDB,
+        db: MemoryDatabase,
         embedder_available: bool = True,
     ) -> None:
         self._profile_mgr = profile_mgr

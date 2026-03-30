@@ -11,11 +11,18 @@ from nanobot.memory.persistence.snapshot import MemorySnapshot
 
 
 def _make_db_mock(events: list[dict[str, Any]] | None = None) -> MagicMock:
-    """Create a mock UnifiedMemoryDB for snapshot tests."""
+    """Create a mock MemoryDatabase for snapshot tests."""
     db = MagicMock()
     _events = events or []
     _snapshot: dict[str, str] = {"current": ""}
-    db.read_events = MagicMock(side_effect=lambda limit=None: _events[:limit] if limit else _events)
+
+    # MemorySnapshot accesses events via db.event_store.read_events()
+    event_store = MagicMock()
+    event_store.read_events = MagicMock(
+        side_effect=lambda limit=None, **kw: _events[:limit] if limit else _events
+    )
+    db.event_store = event_store
+
     db.read_snapshot = MagicMock(side_effect=lambda key: _snapshot.get(key, ""))
     db.write_snapshot = MagicMock(
         side_effect=lambda key, content: _snapshot.__setitem__(key, content)

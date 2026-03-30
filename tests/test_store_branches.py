@@ -29,8 +29,8 @@ def _store(
 
 
 class TestReindexBranches:
-    def test_reindex_returns_unified_db_active(self, tmp_path: Path) -> None:
-        """With UnifiedMemoryDB, reindex is a no-op success."""
+    def test_reindex_returns_sqlite_active(self, tmp_path: Path) -> None:
+        """With MemoryDatabase, reindex is a no-op success."""
         store = _store(tmp_path)
         out = store.maintenance.reindex_from_structured_memory(
             read_profile_fn=store.profile_mgr.read_profile,
@@ -39,7 +39,7 @@ class TestReindexBranches:
             profile_keys=PROFILE_KEYS,
         )
         assert out["ok"] is True
-        assert out["reason"] == "unified_db_active"
+        assert out["reason"] == "sqlite_active"
 
     def test_seed_structured_corpus_invalid_profile(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
@@ -244,7 +244,7 @@ class TestVerifyAndContextBranches:
         ]
         if store.db:
             for evt in events:
-                store.db.insert_event(evt)
+                store.db.event_store.insert_event(evt)
 
         report = store.snapshot.verify_memory(stale_days=30, update_profile=True)
         assert report["stale_events"] >= 1
@@ -390,11 +390,11 @@ class TestStoreCoreBranchHelpers:
         assert total == 1
 
     def test_find_belief_id_for_text_via_fts(self, tmp_path: Path) -> None:
-        """_find_belief_id_for_text searches FTS via UnifiedMemoryDB."""
+        """_find_belief_id_for_text searches FTS via MemoryDatabase."""
         store = _store(tmp_path)
         # Insert an event so FTS has something to search
         if store.db:
-            store.db.insert_event(
+            store.db.event_store.insert_event(
                 {
                     "id": "m2",
                     "type": "fact",
@@ -439,7 +439,7 @@ class TestStoreCoreBranchHelpers:
             return_value=[("Alice", "WORKS_ON", "Nanobot")]
         )
         if store.db:
-            store.db.insert_event(
+            store.db.event_store.insert_event(
                 {
                     "id": "e1",
                     "type": "fact",
@@ -463,7 +463,7 @@ class TestRetrieveAndContextBranches:
         profile["preferences"] = ["Prefer concise output"]
         store.profile_mgr.write_profile(profile)
         if store.db:
-            store.db.insert_event(
+            store.db.event_store.insert_event(
                 {
                     "id": "e1",
                     "type": "task",
@@ -473,7 +473,7 @@ class TestRetrieveAndContextBranches:
                     "entities": ["deploy"],
                 }
             )
-            store.db.insert_event(
+            store.db.event_store.insert_event(
                 {
                     "id": "e2",
                     "type": "fact",

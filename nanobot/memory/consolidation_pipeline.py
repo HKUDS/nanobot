@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 if TYPE_CHECKING:
-    from nanobot.memory.unified_db import UnifiedMemoryDB
+    from nanobot.memory.db.connection import MemoryDatabase
 
 from nanobot.context.prompt_loader import prompts
 from nanobot.observability.tracing import bind_trace
@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
 class ConsolidationPipeline:
     """Multi-stage pipeline that consolidates old conversation messages into
-    persistent memory (SQLite database via UnifiedMemoryDB).
+    persistent memory (SQLite database via MemoryDatabase).
     """
 
     def __init__(
@@ -52,7 +52,7 @@ class ConsolidationPipeline:
         profile_mgr: ProfileManager,
         conflict_mgr: ConflictManager,
         snapshot: MemorySnapshot,
-        db: UnifiedMemoryDB,
+        db: MemoryDatabase,
         rollout: dict[str, Any] | None = None,
     ) -> None:
         self._extractor = extractor

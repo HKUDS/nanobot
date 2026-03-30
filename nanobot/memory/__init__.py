@@ -10,7 +10,7 @@ Organized into subdirectories by concern:
 
 Top-level modules:
 - **store.py**      — MemoryStore facade (composes all subsystems)
-- **unified_db.py** — SQLite + FTS5 + sqlite-vec storage backend
+- **db/**           — SQLite storage layer (MemoryDatabase, EventStore, GraphStore)
 - **embedder.py**   — Embedding protocol and implementations
 - **event.py**      — MemoryEvent Pydantic model + shared classifiers
 - **constants.py**  — Shared constants and tool schemas
@@ -27,17 +27,17 @@ Evaluation (moved to nanobot/eval/):
 
 from __future__ import annotations
 
+from .db import MemoryDatabase
 from .embedder import Embedder, HashEmbedder, LocalEmbedder, OpenAIEmbedder
 from .event import MemoryEvent
 from .store import MemoryStore
-from .unified_db import UnifiedMemoryDB
 
 __all__ = [
     "Embedder",
     "HashEmbedder",
     "LocalEmbedder",
+    "MemoryDatabase",
     "MemoryEvent",
     "MemoryStore",
     "OpenAIEmbedder",
-    "UnifiedMemoryDB",
 ]

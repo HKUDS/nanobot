@@ -122,7 +122,7 @@ class MicroExtractor:
             self._ingester.append_events(events)
             logger.info("Micro-extraction: {} event(s) ingested", len(events))
         except Exception:  # crash-barrier: best-effort background extraction
-            logger.warning("Micro-extraction failed (will be caught by consolidation)")
+            logger.opt(exception=True).warning("Micro-extraction failed")
 
     @staticmethod
     def _parse_events(response: Any) -> list[dict[str, Any]]:

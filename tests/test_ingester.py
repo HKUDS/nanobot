@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
-from nanobot.memory.unified_db import UnifiedMemoryDB
+from nanobot.memory.db import MemoryDatabase
+from nanobot.memory.db.event_store import EventStore
 from nanobot.memory.write.classification import EventClassifier
 from nanobot.memory.write.coercion import EventCoercer
 from nanobot.memory.write.dedup import EventDeduplicator
@@ -18,7 +19,7 @@ def _make_ingester(
     rollout: dict[str, Any] | None = None,
     conflict_pair_fn: Any = None,
     graph_enabled: bool = False,
-    db: UnifiedMemoryDB | None = None,
+    db: EventStore | None = None,
 ) -> tuple[EventIngester, EventCoercer, EventDeduplicator, MagicMock]:
     """Build an ``EventIngester`` with mocked dependencies."""
     graph = MagicMock()
@@ -216,7 +217,7 @@ class TestMergeEvents:
 
 class TestAppendEventsDedup:
     def test_duplicate_merged_on_append(self, tmp_path: Path) -> None:
-        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
+        db = MemoryDatabase(tmp_path / "memory.db", dims=4)
         existing_event = {
             "id": "abc123",
             "type": "fact",
@@ -227,14 +228,14 @@ class TestAppendEventsDedup:
             "source": "chat",
             "timestamp": "2025-01-01T00:00:00+00:00",
         }
-        db.insert_event(existing_event)
+        db.event_store.insert_event(existing_event)
 
         graph = MagicMock()
         graph.enabled = False
         classifier = EventClassifier()
         coercer = EventCoercer(classifier)
         dedup = EventDeduplicator(coercer=coercer)
-        ing = EventIngester(coercer=coercer, dedup=dedup, graph=graph, db=db)
+        ing = EventIngester(coercer=coercer, dedup=dedup, graph=graph, db=db.event_store)
 
         # Append a very similar event.
         new_event = {
@@ -249,15 +250,15 @@ class TestAppendEventsDedup:
         }
         ing.append_events([new_event])
         # The event should be merged (duplicate detected).
-        events = db.read_events(limit=100)
+        events = db.event_store.read_events(limit=100)
         assert len(events) >= 1
         db.close()
 
 
 class TestReadEvents:
     def test_read_events_from_db(self, tmp_path: Path) -> None:
-        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
-        db.insert_event(
+        db = MemoryDatabase(tmp_path / "memory.db", dims=4)
+        db.event_store.insert_event(
             {"id": "1", "summary": "test", "type": "fact", "timestamp": "2026-01-01T00:00:00Z"}
         )
         classifier = EventClassifier()
@@ -267,7 +268,7 @@ class TestReadEvents:
             coercer=coercer,
             dedup=dedup,
             graph=MagicMock(enabled=False),
-            db=db,
+            db=db.event_store,
         )
         events = ing.read_events(limit=10)
         assert len(events) >= 1
@@ -335,11 +336,11 @@ class TestDistillSemanticSummary:
         assert EventClassifier.distill_semantic_summary("") == ""
 
 
-class TestIngesterWithUnifiedDB:
-    """Tests for ingester writing to UnifiedMemoryDB."""
+class TestIngesterWithDB:
+    """Tests for ingester writing to MemoryDatabase."""
 
     def _make_ingester_with_db(self, tmp_path: Path) -> tuple[EventIngester, Any, MagicMock]:
-        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
+        db = MemoryDatabase(tmp_path / "memory.db", dims=4)
         graph = MagicMock()
         graph.enabled = False
 
@@ -350,7 +351,7 @@ class TestIngesterWithUnifiedDB:
             coercer=coercer,
             dedup=dedup,
             graph=graph,
-            db=db,
+            db=db.event_store,
             embedder=None,
         )
         return ingester, db, MagicMock()  # third return for compat
@@ -367,7 +368,7 @@ class TestIngesterWithUnifiedDB:
                 }
             ]
         )
-        events = db.read_events(limit=10)
+        events = db.event_store.read_events(limit=10)
         assert len(events) >= 1
         assert any("coffee" in e["summary"] for e in events)
         db.close()

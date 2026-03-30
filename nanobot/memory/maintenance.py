@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from ._text import _norm_text, _to_str_list, _utc_now_iso
 
 if TYPE_CHECKING:
-    from .unified_db import UnifiedMemoryDB
+    from .db.connection import MemoryDatabase
 
 
 class MemoryMaintenance:
@@ -26,7 +26,7 @@ class MemoryMaintenance:
     def __init__(
         self,
         *,
-        db: UnifiedMemoryDB | None = None,
+        db: MemoryDatabase | None = None,
         reindex_fn: Callable[[], None] | None = None,
     ) -> None:
         self._db = db
@@ -37,7 +37,7 @@ class MemoryMaintenance:
     def _backend_stats_for_eval(self) -> dict[str, Any]:
         """Collect backend stats needed by EvalRunner.get_observability_report."""
         if self._db is not None:
-            event_count = len(self._db.read_events(limit=500))
+            event_count = len(self._db.event_store.read_events(limit=500))
         else:
             event_count = 0
         return {
@@ -58,7 +58,7 @@ class MemoryMaintenance:
         Called by ``AgentLoop.run()`` at startup instead of running
         synchronously in ``__init__`` (LAN-101).
         """
-        # With UnifiedMemoryDB, no vector store health check is needed.
+        # With MemoryDatabase, no vector store health check is needed.
         pass
 
     # ── Compaction / reindex ──────────────────────────────────────────
@@ -135,12 +135,12 @@ class MemoryMaintenance:
     ) -> dict[str, Any]:
         """Full reindex from structured memory.
 
-        With UnifiedMemoryDB, events are already in SQLite; return a no-op
+        With MemoryDatabase, events are already in SQLite; return a no-op
         success result.  Legacy vector reindex has been removed.
         """
         return {
             "ok": True,
-            "reason": "unified_db_active",
+            "reason": "sqlite_active",
             "written": 0,
             "failed": 0,
         }
@@ -205,10 +205,10 @@ class MemoryMaintenance:
         except (json.JSONDecodeError, OSError) as exc:
             return {"ok": False, "reason": f"invalid_events_seed:{exc}"}
 
-        # With UnifiedMemoryDB, events are inserted directly.
+        # With MemoryDatabase, events are inserted directly via EventStore.
         if self._db is not None:
             for event in seeded_events:
-                self._db.insert_event(event)
+                self._db.event_store.insert_event(event)
 
         return {
             "ok": True,
@@ -219,7 +219,7 @@ class MemoryMaintenance:
             "seeded_events": len(seeded_events),
             "reindex": {
                 "ok": True,
-                "reason": "unified_db_active",
+                "reason": "sqlite_active",
                 "written": 0,
                 "failed": 0,
             },

@@ -62,7 +62,7 @@ class TestMemoryConsolidationTypeHandling:
         assert store.db is not None
         history_rows = store.db.read_history(limit=10)
         assert any("[2026-01-01] User discussed testing." in r["entry"] for r in history_rows)
-        # LAN-206: MEMORY.md is now a deterministic rebuild stored in UnifiedMemoryDB
+        # LAN-206: MEMORY.md is now a deterministic rebuild stored in MemoryDatabase
         snapshot = store.db.read_snapshot("current") if store.db else ""
         assert "# Memory" in snapshot
 

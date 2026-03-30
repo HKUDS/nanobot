@@ -1,4 +1,4 @@
-"""Tests for KnowledgeGraph networkx implementation — write/read paths and lifecycle."""
+"""Tests for KnowledgeGraph SQLite implementation — write/read paths and lifecycle."""
 
 from __future__ import annotations
 
@@ -8,8 +8,16 @@ from types import SimpleNamespace
 
 import pytest
 
+from nanobot.memory.db import MemoryDatabase
 from nanobot.memory.graph.graph import KnowledgeGraph
 from nanobot.memory.graph.ontology_types import Entity, EntityType, RelationType, Triple
+
+
+def _make_graph(tmp_path: Path) -> KnowledgeGraph:
+    """Create a KnowledgeGraph backed by a fresh MemoryDatabase."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    db = MemoryDatabase(tmp_path / "memory.db", dims=384)
+    return KnowledgeGraph(db=db.graph_store)
 
 
 @dataclass
@@ -19,7 +27,7 @@ class _Validation:
 
 
 async def test_init_verify_and_close(tmp_path: Path) -> None:
-    g = KnowledgeGraph(workspace=tmp_path)
+    g = _make_graph(tmp_path)
     assert g.enabled is True
 
     assert await g.verify_connectivity() is True
@@ -32,7 +40,7 @@ async def test_init_verify_and_close(tmp_path: Path) -> None:
 
 
 async def test_write_and_read_paths(tmp_path: Path) -> None:
-    g = KnowledgeGraph(workspace=tmp_path)
+    g = _make_graph(tmp_path)
 
     # Upsert entities
     await g.upsert_entity(Entity(name="Carlos", entity_type=EntityType.PERSON, aliases=["C"]))
@@ -73,7 +81,7 @@ async def test_write_and_read_paths(tmp_path: Path) -> None:
 async def test_ingest_event_triples_and_resolve_entity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    g = KnowledgeGraph(workspace=tmp_path)
+    g = _make_graph(tmp_path)
 
     upserts: list[str] = []
     rel_conf: list[float] = []
@@ -111,7 +119,7 @@ async def test_ingest_event_triples_and_resolve_entity(
 async def test_sync_helpers_paths_and_error_handling(tmp_path: Path) -> None:
     from nanobot.memory.graph.ontology_types import Relationship
 
-    g = KnowledgeGraph(workspace=tmp_path)
+    g = _make_graph(tmp_path)
 
     await g.add_relationship(
         Relationship(

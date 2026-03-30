@@ -1,9 +1,9 @@
-"""In-process knowledge graph backed by SQLite (UnifiedMemoryDB).
+"""In-process knowledge graph backed by SQLite (GraphStore).
 
 Architecture
 ------------
 - **KnowledgeGraph** -- Primary public API.  Delegates all storage to
-  ``UnifiedMemoryDB`` entity/edge tables.
+  ``GraphStore`` entity/edge tables.
 - Write path: ``upsert_entity``, ``add_relationship``,
   ``ingest_event_triples`` (batch).
 - Read path: ``get_neighbors``, ``find_paths``, ``query_subgraph``,
@@ -22,9 +22,7 @@ from .ontology_rules import validate_triple_types
 from .ontology_types import Entity, EntityType, Relationship, Triple
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-    from ..unified_db import UnifiedMemoryDB
+    from ..db.graph_store import GraphStore
 
 
 def _norm(name: str) -> str:
@@ -33,26 +31,12 @@ def _norm(name: str) -> str:
 
 
 class KnowledgeGraph:
-    """In-process knowledge graph backed by SQLite (UnifiedMemoryDB)."""
+    """In-process knowledge graph backed by SQLite (GraphStore)."""
 
     def __init__(
         self,
-        db: UnifiedMemoryDB | None = None,
-        *,
-        workspace: Path | None = None,
+        db: GraphStore | None = None,
     ) -> None:
-        # Preferred: pass db= directly.
-        # Backward compat: workspace= creates an internal UnifiedMemoryDB so
-        # existing callers (store.py, tests) keep working until Task 3 wires
-        # the db= parameter through store.py.
-        if db is None and workspace is not None:
-            from pathlib import Path as _P  # noqa: N814
-
-            from ..unified_db import UnifiedMemoryDB
-
-            mem_dir = _P(str(workspace)) / "memory"
-            mem_dir.mkdir(parents=True, exist_ok=True)
-            db = UnifiedMemoryDB(mem_dir / "knowledge_graph.db", dims=4)
         self._db = db
         self.enabled: bool = db is not None
         self.error: str | None = None

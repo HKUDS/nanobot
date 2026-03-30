@@ -20,7 +20,7 @@ from ..constants import (
 from .profile_io import ProfileStore as ProfileManager
 
 if TYPE_CHECKING:
-    from ..unified_db import UnifiedMemoryDB
+    from ..db.connection import MemoryDatabase
 
 
 class MemorySnapshot:
@@ -40,7 +40,7 @@ class MemorySnapshot:
         profile_section_lines_fn: Callable[..., list[str]],
         recent_unresolved_fn: Callable[..., list[dict[str, Any]]],
         profile_keys: tuple[str, ...] = PROFILE_KEYS,
-        db: UnifiedMemoryDB,
+        db: MemoryDatabase,
     ) -> None:
         self.profile_mgr = profile_mgr
         self._profile_section_lines = profile_section_lines_fn
@@ -80,7 +80,7 @@ class MemorySnapshot:
     def rebuild_memory_snapshot(self, *, max_events: int = 30, write: bool = True) -> str:
         """Rebuild memory snapshot from profile + events."""
         profile = self.profile_mgr.read_profile()
-        events = self._db.read_events(limit=max_events)
+        events = self._db.event_store.read_events(limit=max_events)
 
         # Preserve user-pinned sections across rebuilds (LAN-199 / LAN-206).
         existing_memory = self._db.read_snapshot("current")
@@ -118,7 +118,7 @@ class MemorySnapshot:
     ) -> dict[str, Any]:
         """Produce a verification report on memory health."""
         profile = self.profile_mgr.read_profile()
-        events = self._db.read_events(limit=1000)
+        events = self._db.event_store.read_events(limit=1000)
         now = datetime.now(timezone.utc)
         stale = 0
         total_ttl = 0
