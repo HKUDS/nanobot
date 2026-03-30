@@ -471,7 +471,6 @@ class DiscordChannel(BaseChannel):
 
     async def _clear_reactions(self, chat_id: str) -> None:
         """Remove all pending reactions after bot replies."""
-        self._subagent_active.discard(chat_id)
         msg_obj = self._pending_reactions.pop(chat_id, None)
         if msg_obj is None:
             return
