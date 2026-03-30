@@ -35,7 +35,7 @@ class ChannelManager:
         from nanobot.channels.registry import discover_all
 
         transcription_cfg = self.config.tools.transcription
-        transcription_provider = transcription_cfg.provider  # "groq" or "paraformer"
+        transcription_provider = transcription_cfg.provider  # "groq" or "qwen3-asr"
         if transcription_cfg.api_key:
             transcription_key = transcription_cfg.api_key
         elif transcription_provider == "qwen3-asr":

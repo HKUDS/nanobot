@@ -1,6 +1,7 @@
 """Voice transcription providers."""
 
 import asyncio
+import base64
 import os
 from pathlib import Path
 
@@ -108,15 +109,12 @@ class Qwen3ASRTranscriptionProvider:
             return ""
 
         try:
-            import base64
             import dashscope
         except ImportError:
             logger.error("dashscope not installed. Run: pip install dashscope")
             return ""
 
         try:
-            dashscope.api_key = self.api_key
-
             mime = self._MIME.get(path.suffix.lower(), "audio/mpeg")
             audio_data = base64.b64encode(path.read_bytes()).decode()
             data_url = f"data:{mime};base64,{audio_data}"
@@ -124,6 +122,7 @@ class Qwen3ASRTranscriptionProvider:
             response = await asyncio.to_thread(
                 dashscope.MultiModalConversation.call,
                 model=self.MODEL,
+                api_key=self.api_key,
                 messages=[{
                     "role": "user",
                     "content": [{"audio": data_url}],
@@ -134,7 +133,14 @@ class Qwen3ASRTranscriptionProvider:
                 logger.error("Qwen3-ASR failed: {} {}", response.status_code, response.message)
                 return ""
 
-            return response.output.choices[0].message.content[0].get("text", "")
+            choices = getattr(response.output, "choices", None)
+            if not choices:
+                logger.error("Qwen3-ASR returned empty choices")
+                return ""
+            content = getattr(choices[0].message, "content", None)
+            if not content:
+                return ""
+            return content[0].get("text", "") if isinstance(content[0], dict) else ""
 
         except Exception as e:
             logger.error("Qwen3-ASR transcription error: {}", e)

@@ -23,7 +23,7 @@ class BaseChannel(ABC):
     name: str = "base"
     display_name: str = "Base"
     transcription_api_key: str = ""
-    transcription_provider: str = "groq"  # "groq" or "paraformer"
+    transcription_provider: str = "groq"  # "groq" or "qwen3-asr"
 
     def __init__(self, config: Any, bus: MessageBus):
         """
