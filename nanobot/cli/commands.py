@@ -668,8 +668,10 @@ def gateway(
         response = resp.content if resp else ""
 
         message_tool = agent.tools.get("message")
-        if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
-            return response
+        if isinstance(message_tool, MessageTool):
+            sent_targets = set(message_tool.get_turn_sends())
+            if (job.payload.channel or "cli", job.payload.to or "direct") in sent_targets:
+                return response
 
         if job.payload.deliver and job.payload.to and response:
             should_notify = await evaluate_response(

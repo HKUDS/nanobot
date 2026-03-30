@@ -1,5 +1,6 @@
 """Test message tool suppress logic for final replies."""
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -46,6 +47,35 @@ class TestMessageToolSuppressLogic:
 
         assert len(sent) == 1
         assert result is None  # suppressed
+
+    @pytest.mark.asyncio
+    async def test_suppress_keeps_inbound_topic_metadata(self, tmp_path: Path) -> None:
+        loop = _make_loop(tmp_path)
+        tool_call = ToolCallRequest(id="call1", name="message", arguments={"content": "Hello"})
+        calls = iter([
+            LLMResponse(content="", tool_calls=[tool_call]),
+            LLMResponse(content="Done", tool_calls=[]),
+        ])
+        loop.provider.chat_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.tools.get_definitions = MagicMock(return_value=[])
+
+        sent: list[OutboundMessage] = []
+        mt = loop.tools.get("message")
+        if isinstance(mt, MessageTool):
+            mt.set_send_callback(AsyncMock(side_effect=lambda m: sent.append(m)))
+
+        msg = InboundMessage(
+            channel="telegram",
+            sender_id="user1",
+            chat_id="123",
+            content="Send",
+            metadata={"message_id": 10, "message_thread_id": 42},
+        )
+        result = await loop._process_message(msg)
+
+        assert result is None  # suppressed
+        assert len(sent) == 1
+        assert sent[0].metadata == {"message_id": 10, "message_thread_id": 42}
 
     @pytest.mark.asyncio
     async def test_not_suppress_when_sent_to_different_target(self, tmp_path: Path) -> None:
@@ -118,15 +148,122 @@ class TestMessageToolSuppressLogic:
 
 class TestMessageToolTurnTracking:
 
-    def test_sent_in_turn_tracks_same_target(self) -> None:
+    @pytest.mark.asyncio
+    async def test_default_context_isolated_across_concurrent_tasks(self) -> None:
+        sent: list[OutboundMessage] = []
+        tool = MessageTool(send_callback=AsyncMock(side_effect=lambda msg: sent.append(msg)))
+        allow_first_send = asyncio.Event()
+        second_ready = asyncio.Event()
+
+        async def first_turn() -> str:
+            tool.set_context("feishu", "chat1", "msg1", {"message_id": "msg1", "message_thread_id": "thread1"})
+            tool.start_turn()
+            allow_first_send.set()
+            await second_ready.wait()
+            return await tool.execute("hello")
+
+        async def second_turn() -> None:
+            await allow_first_send.wait()
+            tool.set_context("telegram", "chat2", "msg2", {"message_id": "msg2", "message_thread_id": "thread2"})
+            tool.start_turn()
+            second_ready.set()
+
+        result, _ = await asyncio.gather(first_turn(), second_turn())
+
+        assert result == "Message sent to feishu:chat1"
+        assert len(sent) == 1
+        assert sent[0].channel == "feishu"
+        assert sent[0].chat_id == "chat1"
+        assert sent[0].metadata["message_id"] == "msg1"
+        assert sent[0].metadata["message_thread_id"] == "thread1"
+
+    @pytest.mark.asyncio
+    async def test_metadata_isolated_across_concurrent_tasks(self) -> None:
+        sent: list[OutboundMessage] = []
+        first_ready = asyncio.Event()
+        allow_both_send = asyncio.Event()
+
+        async def send_callback(msg: OutboundMessage) -> None:
+            sent.append(msg)
+
+        tool = MessageTool(send_callback=AsyncMock(side_effect=send_callback))
+
+        async def first_turn() -> str:
+            tool.set_context("telegram", "chat1", "msg1", {"message_id": "msg1", "message_thread_id": 101})
+            tool.start_turn()
+            first_ready.set()
+            await allow_both_send.wait()
+            return await tool.execute("hello")
+
+        async def second_turn() -> str:
+            await first_ready.wait()
+            tool.set_context("telegram", "chat2", "msg2", {"message_id": "msg2", "message_thread_id": 202})
+            tool.start_turn()
+            allow_both_send.set()
+            return await tool.execute("hi")
+
+        result1, result2 = await asyncio.gather(first_turn(), second_turn())
+
+        assert result1 == "Message sent to telegram:chat1"
+        assert result2 == "Message sent to telegram:chat2"
+        assert len(sent) == 2
+        sent_by_chat = {msg.chat_id: msg for msg in sent}
+        assert sent_by_chat["chat1"] == OutboundMessage(
+            channel="telegram",
+            chat_id="chat1",
+            content="hello",
+            metadata={"message_id": "msg1", "message_thread_id": 101},
+        )
+        assert sent_by_chat["chat2"] == OutboundMessage(
+            channel="telegram",
+            chat_id="chat2",
+            content="hi",
+            metadata={"message_id": "msg2", "message_thread_id": 202},
+        )
+
+    @pytest.mark.asyncio
+    async def test_sent_targets_isolated_across_concurrent_tasks(self) -> None:
+        sent: list[OutboundMessage] = []
+        send_started = asyncio.Event()
+        allow_send_finish = asyncio.Event()
+        second_ready = asyncio.Event()
+
+        async def send_callback(msg: OutboundMessage) -> None:
+            sent.append(msg)
+            send_started.set()
+            await allow_send_finish.wait()
+
+        tool = MessageTool(send_callback=AsyncMock(side_effect=send_callback))
+
+        async def first_turn() -> list[tuple[str, str]]:
+            tool.set_context("feishu", "chat1")
+            tool.start_turn()
+            await tool.execute("hello", channel="feishu", chat_id="chat1")
+            return tool.get_turn_sends()
+
+        async def second_turn() -> None:
+            await send_started.wait()
+            tool.set_context("feishu", "chat2")
+            tool.start_turn()
+            second_ready.set()
+
+        first_task = asyncio.create_task(first_turn())
+        second_task = asyncio.create_task(second_turn())
+        await second_ready.wait()
+        allow_send_finish.set()
+        sent_targets = await first_task
+        await second_task
+
+        assert len(sent) == 1
+        assert sent[0].chat_id == "chat1"
+        assert sent_targets == [("feishu", "chat1")]
+
+    @pytest.mark.asyncio
+    async def test_start_turn_resets_sent_targets(self) -> None:
         tool = MessageTool()
         tool.set_context("feishu", "chat1")
-        assert not tool._sent_in_turn
-        tool._sent_in_turn = True
-        assert tool._sent_in_turn
-
-    def test_start_turn_resets(self) -> None:
-        tool = MessageTool()
-        tool._sent_in_turn = True
+        tool.set_send_callback(AsyncMock())
+        await tool.execute("hello")
+        assert tool.get_turn_sends() == [("feishu", "chat1")]
         tool.start_turn()
-        assert not tool._sent_in_turn
+        assert tool.get_turn_sends() == []
