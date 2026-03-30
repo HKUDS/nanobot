@@ -34,6 +34,7 @@ class AgentRunSpec:
     max_iterations_message: str | None = None
     concurrent_tools: bool = False
     fail_on_tool_error: bool = False
+    blocked_tools: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass(slots=True)
@@ -70,7 +71,7 @@ class AgentRunner:
             await hook.before_iteration(context)
             kwargs: dict[str, Any] = {
                 "messages": messages,
-                "tools": spec.tools.get_definitions(),
+                "tools": spec.tools.get_definitions(exclude=spec.blocked_tools or None),
                 "model": spec.model,
             }
             if spec.temperature is not None:
@@ -205,6 +206,9 @@ class AgentRunner:
         spec: AgentRunSpec,
         tool_call: ToolCallRequest,
     ) -> tuple[Any, dict[str, str], BaseException | None]:
+        if spec.blocked_tools and tool_call.name in spec.blocked_tools:
+            msg = f"Error: Tool '{tool_call.name}' is not available."
+            return msg, {"name": tool_call.name, "status": "blocked", "detail": msg}, None
         try:
             result = await spec.tools.execute(tool_call.name, tool_call.arguments)
         except asyncio.CancelledError:

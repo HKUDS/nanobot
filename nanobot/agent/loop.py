@@ -7,7 +7,7 @@ import json
 import re
 import os
 import time
-from contextlib import AsyncExitStack, nullcontext
+from contextlib import AsyncExitStack, contextmanager, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -68,10 +68,12 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
+        guest_workspace: Path | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
         self.bus = bus
+        self._guest_workspace = guest_workspace
         self.channels_config = channels_config
         self.provider = provider
         self.workspace = workspace
@@ -202,7 +204,7 @@ class AgentLoop:
         if not matched:
             return None
 
-        guest_agent_workspace = self.workspace / "guest_agent"
+        guest_agent_workspace = self._guest_workspace or self.workspace / "guest_agent"
         if not guest_agent_workspace.exists():
             logger.warning("Guest agent ACL matched sender {} but guest_agent workspace missing", sender_id)
             return None
@@ -227,6 +229,34 @@ class AgentLoop:
             return frozenset(json.loads(path.read_text(encoding="utf-8")))
         except (json.JSONDecodeError, OSError, TypeError):
             return frozenset()
+
+    @contextmanager
+    def _restrict_fs_tools(self, guest_workspace: Path):
+        """Temporarily restrict filesystem tools to a guest workspace."""
+        from nanobot.agent.tools.filesystem import _FsTool
+        from nanobot.agent.tools.shell import ExecTool
+
+        saved: list[tuple[_FsTool, Path | None, Path | None]] = []
+        saved_exec: list[tuple[ExecTool, str, bool]] = []
+
+        for tool in self.tools._tools.values():
+            if isinstance(tool, _FsTool):
+                saved.append((tool, tool._workspace, tool._allowed_dir))
+                tool._workspace = guest_workspace
+                tool._allowed_dir = guest_workspace
+            elif isinstance(tool, ExecTool):
+                saved_exec.append((tool, tool.working_dir, tool.restrict_to_workspace))
+                tool.working_dir = str(guest_workspace)
+                tool.restrict_to_workspace = True
+        try:
+            yield
+        finally:
+            for tool, ws, ad in saved:
+                tool._workspace = ws
+                tool._allowed_dir = ad
+            for tool, wd, rw in saved_exec:
+                tool.working_dir = wd
+                tool.restrict_to_workspace = rw
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
@@ -264,6 +294,7 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        blocked_tools: frozenset[str] = frozenset(),
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop.
 
@@ -320,6 +351,7 @@ class AgentLoop:
             hook=_LoopHook(),
             error_message="Sorry, I encountered an error calling the AI model.",
             concurrent_tools=True,
+            blocked_tools=blocked_tools,
         ))
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
@@ -502,7 +534,7 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=0)
-        initial_messages = self.context.build_messages(
+        initial_messages = context.build_messages(
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
@@ -517,14 +549,18 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages,
-            on_progress=on_progress or _bus_progress,
-            on_stream=on_stream,
-            on_stream_end=on_stream_end,
-            channel=msg.channel, chat_id=msg.chat_id,
-            message_id=msg.metadata.get("message_id"),
-        )
+        # Restrict file tools to guest workspace for the duration of the agent loop
+        fs_ctx = self._restrict_fs_tools(context.workspace) if guest else nullcontext()
+        with fs_ctx:
+            final_content, _, all_msgs = await self._run_agent_loop(
+                initial_messages,
+                on_progress=on_progress or _bus_progress,
+                on_stream=on_stream,
+                on_stream_end=on_stream_end,
+                channel=msg.channel, chat_id=msg.chat_id,
+                message_id=msg.metadata.get("message_id"),
+                blocked_tools=blocked_tools,
+            )
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
@@ -632,13 +668,14 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
+        sender_id: str = "user",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+        msg = InboundMessage(channel=channel, sender_id=sender_id, chat_id=chat_id, content=content)
         return await self._process_message(
             msg, session_key=session_key, on_progress=on_progress,
             on_stream=on_stream, on_stream_end=on_stream_end,

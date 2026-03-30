@@ -534,6 +534,7 @@ def gateway(
     cron = CronService(cron_store_path)
 
     # Create agent with cron service
+    _gw = config.agents.defaults.guest_workspace
     agent = AgentLoop(
         bus=bus,
         provider=provider,
@@ -550,6 +551,7 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        guest_workspace=Path(_gw) if _gw else None,
     )
 
     # Set cron callback (needs agent)
@@ -743,6 +745,7 @@ def agent(
     else:
         logger.disable("nanobot")
 
+    _gw_cli = config.agents.defaults.guest_workspace
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
@@ -758,6 +761,7 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        guest_workspace=Path(_gw_cli) if _gw_cli else None,
     )
 
     # Shared reference for progress callbacks
