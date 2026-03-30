@@ -366,7 +366,7 @@ class TurnRunner:
         ]
         reasoning = response.reasoning_content or response.content
         new_msgs = self._context.add_assistant_message(
-            state.messages, None, tool_call_dicts, reasoning_content=reasoning
+            state.messages, response.content, tool_call_dicts, reasoning_content=reasoning
         )
         state.last_tool_call_msg_idx = len(new_msgs) - 1
         state.messages[:] = new_msgs
