@@ -591,6 +591,7 @@ def gateway(
         if job.payload.deliver and job.payload.to and response:
             should_notify = await evaluate_response(
                 response, job.payload.message, provider, agent.model,
+                suppress_errors=hb_cfg.suppress_errors,
             )
             if should_notify:
                 from nanobot.bus.events import OutboundMessage
