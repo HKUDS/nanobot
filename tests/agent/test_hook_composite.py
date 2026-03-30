@@ -309,6 +309,27 @@ async def test_agent_loop_extra_hook_error_isolation(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_agent_loop_extra_hooks_do_not_swallow_loop_hook_errors(tmp_path):
+    """Extra hooks must not change the core LoopHook failure behavior."""
+    from nanobot.providers.base import LLMResponse, ToolCallRequest
+
+    loop = _make_loop(tmp_path, hooks=[AgentHook()])
+    loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="working",
+        tool_calls=[ToolCallRequest(id="c1", name="list_dir", arguments={"path": "."})],
+        usage={},
+    ))
+    loop.tools.get_definitions = MagicMock(return_value=[])
+    loop.tools.execute = AsyncMock(return_value="ok")
+
+    async def bad_progress(*args, **kwargs):
+        raise RuntimeError("progress failed")
+
+    with pytest.raises(RuntimeError, match="progress failed"):
+        await loop._run_agent_loop([], on_progress=bad_progress)
+
+
+@pytest.mark.asyncio
 async def test_agent_loop_no_hooks_backward_compat(tmp_path):
     """Without hooks param, behavior is identical to before."""
     from nanobot.providers.base import LLMResponse, ToolCallRequest

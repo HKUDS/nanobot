@@ -102,6 +102,47 @@ class LoopHook(AgentHook):
         return self._loop._strip_think(content)
 
 
+class _LoopHookChain(AgentHook):
+    """Run the core loop hook first, then best-effort extra hooks.
+
+    This preserves the historical failure behavior of ``LoopHook`` while still
+    letting user-supplied hooks opt into ``CompositeHook`` isolation.
+    """
+
+    __slots__ = ("_primary", "_extras")
+
+    def __init__(self, primary: AgentHook, extra_hooks: list[AgentHook]) -> None:
+        self._primary = primary
+        self._extras = CompositeHook(extra_hooks)
+
+    def wants_streaming(self) -> bool:
+        return self._primary.wants_streaming() or self._extras.wants_streaming()
+
+    async def before_iteration(self, context: AgentHookContext) -> None:
+        await self._primary.before_iteration(context)
+        await self._extras.before_iteration(context)
+
+    async def on_stream(self, context: AgentHookContext, delta: str) -> None:
+        await self._primary.on_stream(context, delta)
+        await self._extras.on_stream(context, delta)
+
+    async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
+        await self._primary.on_stream_end(context, resuming=resuming)
+        await self._extras.on_stream_end(context, resuming=resuming)
+
+    async def before_execute_tools(self, context: AgentHookContext) -> None:
+        await self._primary.before_execute_tools(context)
+        await self._extras.before_execute_tools(context)
+
+    async def after_iteration(self, context: AgentHookContext) -> None:
+        await self._primary.after_iteration(context)
+        await self._extras.after_iteration(context)
+
+    def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
+        content = self._primary.finalize_content(context, content)
+        return self._extras.finalize_content(context, content)
+
+
 class AgentLoop:
     """
     The agent loop is the core processing engine.
@@ -294,7 +335,7 @@ class AgentLoop:
             message_id=message_id,
         )
         hook: AgentHook = (
-            CompositeHook([loop_hook, *self._extra_hooks])
+            _LoopHookChain(loop_hook, self._extra_hooks)
             if self._extra_hooks
             else loop_hook
         )
