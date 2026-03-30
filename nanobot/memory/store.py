@@ -109,13 +109,9 @@ class MemoryStore:
             coerce_event=self._coercer.coerce_event,
             utc_now_iso=_utc_now_iso,
         )
-        # Profile manager — lazy callbacks break circular dependency:
-        # ProfileStore is constructed before conflict_mgr/corrector exist.
-        self.profile_mgr = ProfileStore(
-            db=self.db,
-            conflict_mgr_fn=lambda: self.conflict_mgr,
-            corrector_fn=lambda: self._corrector,
-        )
+        # Profile manager — conflict_mgr and corrector wired after construction
+        # (circular dependency: ConflictManager needs ProfileStore and vice versa).
+        self.profile_mgr = ProfileStore(db=self.db)
 
         # Retrieval planner (LAN-207) — intent classification + policy + routing.
         self._planner = RetrievalPlanner()
@@ -176,12 +172,14 @@ class MemoryStore:
             embedder=self._embedder,
         )
 
-        # Conflict manager (LAN-203) — now that ingester is built, wire callables.
+        # Conflict manager — now wire into ProfileStore (circular dep resolved
+        # via post-construction wiring instead of lambda callbacks).
         self.conflict_mgr = ConflictManager(
             self.profile_mgr,
             db=self.db,
             memory_config=self._memory_config,
         )
+        self.profile_mgr.set_conflict_mgr(self.conflict_mgr)
 
         # RetrievalScorer + GraphAugmenter + MemoryRetriever: read path.
         self._scorer = RetrievalScorer(
@@ -226,8 +224,7 @@ class MemoryStore:
             db=self.db,
         )
 
-        # CorrectionOrchestrator — constructed after all subsystems are available.
-        # ProfileStore accesses it via the corrector_fn callback passed above.
+        # CorrectionOrchestrator — wire into ProfileStore (post-construction).
         from .persistence.profile_correction import (
             CorrectionOrchestrator as _CorrectionOrchestrator,
         )
@@ -240,6 +237,7 @@ class MemoryStore:
             conflict_mgr=self.conflict_mgr,
             snapshot=self.snapshot,
         )
+        self.profile_mgr.set_corrector(self._corrector)
 
         # ConsolidationPipeline: full consolidate workflow (LAN-215).
         self._consolidation = ConsolidationPipeline(
