@@ -1,7 +1,7 @@
 """Tests for memory tools."""
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 @pytest.fixture
@@ -71,18 +71,41 @@ async def test_memory_forget_tool_name():
     assert tool.name == "memory_forget"
 
 
-async def test_memory_forget_calls_delete(mock_graphiti):
-    """memory_forget deletes the fact by UUID."""
+async def test_memory_forget_calls_delete_by_uuids(mock_graphiti):
     from nanobot_graphiti.tools import MemoryForgetTool
+    from graphiti_core.nodes import EntityEdge
+
+    # Stub search to return an edge owned by this group
+    owned_edge = _make_edge("Some fact", "abc-123")
+    mock_graphiti.search.return_value = [owned_edge]
 
     backend = MagicMock()
     backend._graphiti = mock_graphiti
+    backend._get_group_id.return_value = "123456"
+
+    with patch.object(EntityEdge, "delete_by_uuids", new_callable=AsyncMock) as mock_delete:
+        tool = MemoryForgetTool(backend=backend)
+        result = await tool.execute(fact_id="abc-123", reason="incorrect info", session_key="telegram:123456")
+
+    mock_delete.assert_awaited_once_with(mock_graphiti.driver, ["abc-123"])
+    assert "abc-123" in result
+
+
+async def test_memory_forget_rejects_unowned_uuid(mock_graphiti):
+    from nanobot_graphiti.tools import MemoryForgetTool
+
+    # Search returns nothing — UUID not in this session's group
+    mock_graphiti.search.return_value = []
+
+    backend = MagicMock()
+    backend._graphiti = mock_graphiti
+    backend._get_group_id.return_value = "123456"
 
     tool = MemoryForgetTool(backend=backend)
-    result = await tool.execute(fact_id="abc-123", reason="incorrect info", session_key="telegram:123456")
+    result = await tool.execute(fact_id="foreign-uuid", reason="test", session_key="telegram:123456")
 
-    # Should have called some delete method on graphiti or its driver
-    assert "abc-123" in result or "deleted" in result.lower() or "forgotten" in result.lower()
+    assert "not found" in result.lower()
+    mock_graphiti.delete_fact = MagicMock()  # ensure no delete was attempted
 
 
 # ── MemoryListTool ───────────────────────────────────────────────────────────

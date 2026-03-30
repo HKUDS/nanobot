@@ -84,14 +84,18 @@ class MemoryForgetTool(Tool):
         }
 
     async def execute(self, fact_id: str, reason: str, session_key: str, **_: Any) -> str:
+        from graphiti_core.nodes import EntityEdge
+
         graphiti = self._backend._graphiti
         if graphiti is None:
             return "Memory backend not started."
-        try:
-            from graphiti_core.nodes import EntityEdge
-            await EntityEdge.delete_by_uuids(graphiti.driver, [fact_id])
-        except Exception as e:
-            return f"Error deleting fact {fact_id!r}: {e}"
+        group_id = self._backend._get_group_id(session_key)
+        # Verify ownership: ensure fact_id belongs to this session's group
+        results = await graphiti.search(fact_id, group_ids=[group_id], num_results=50)
+        owned = any(e.uuid == fact_id for e in results)
+        if not owned:
+            return f"Fact {fact_id!r} not found in your memory."
+        await EntityEdge.delete_by_uuids(graphiti.driver, [fact_id])
         return f"Fact {fact_id!r} deleted. Reason: {reason}"
 
 
