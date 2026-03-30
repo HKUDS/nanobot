@@ -89,7 +89,7 @@ def routing_trace(
 
 @routing_app.command("metrics")
 def routing_metrics_cmd() -> None:
-    """Show routing metrics (classifications, delegations, latencies).
+    """Show routing metrics (classifications, latencies).
 
     Routing metrics are now captured by Langfuse.  Use the Langfuse dashboard
     for real-time metrics.  This command reads any legacy metrics JSON file
@@ -122,7 +122,6 @@ def routing_metrics_cmd() -> None:
     # Core counters
     for key in (
         "routing_classifications",
-        "routing_delegations",
         "routing_cycles_blocked",
     ):
         table.add_row(key, str(data.get(key, 0)))
@@ -131,14 +130,8 @@ def routing_metrics_cmd() -> None:
     cls_count = int(data.get("routing_classifications", 0) or 0)
     cls_sum = float(data.get("routing_classify_latency_sum_ms", 0) or 0)
     cls_max = float(data.get("routing_classify_latency_max_ms", 0) or 0)
-    del_count = int(data.get("routing_delegations", 0) or 0)
-    del_sum = float(data.get("delegation_latency_sum_ms", 0) or 0)
-    del_max = float(data.get("delegation_latency_max_ms", 0) or 0)
-
     table.add_row("classify_latency_avg_ms", f"{cls_sum / cls_count:.0f}" if cls_count else "—")
     table.add_row("classify_latency_max_ms", f"{cls_max:.0f}" if cls_max else "—")
-    table.add_row("delegation_latency_avg_ms", f"{del_sum / del_count:.0f}" if del_count else "—")
-    table.add_row("delegation_latency_max_ms", f"{del_max:.0f}" if del_max else "—")
 
     console.print(table)
 
@@ -171,8 +164,8 @@ def routing_dlq(
 ) -> None:
     """Show failed or low-confidence routing decisions (dead-letter queue).
 
-    Scans routing_trace.jsonl for delegation failures, cycle blocks, depth
-    blocks, and classifications below the confidence threshold.
+    Scans routing_trace.jsonl for cycle blocks, depth blocks, and
+    classifications below the confidence threshold.
     """
     import json
 

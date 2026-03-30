@@ -14,8 +14,6 @@ import pytest
 from rich.console import Console
 
 from nanobot.agent.callbacks import (
-    DelegateEndEvent,
-    DelegateStartEvent,
     StatusEvent,
     TextChunk,
     ToolCallEvent,
@@ -29,9 +27,6 @@ ALL_EVENT_VARIANTS = [
     TextChunk(content=""),
     ToolCallEvent(tool_call_id="tc1", tool_name="read_file", args={"path": "/tmp"}),
     ToolResultEvent(tool_call_id="tc1", result="contents", tool_name="read_file"),
-    DelegateStartEvent(delegation_id="d1", child_role="research", task_title="Find info"),
-    DelegateEndEvent(delegation_id="d1", success=True),
-    DelegateEndEvent(delegation_id="d1", success=False),
     StatusEvent(status_code="thinking"),
     StatusEvent(status_code="retrying"),
     StatusEvent(status_code="calling_tool"),

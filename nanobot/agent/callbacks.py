@@ -39,23 +39,6 @@ class ToolResultEvent:
 
 
 @dataclass(frozen=True, slots=True)
-class DelegateStartEvent:
-    """Agent is delegating to a child agent."""
-
-    delegation_id: str
-    child_role: str
-    task_title: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class DelegateEndEvent:
-    """Child agent delegation completed."""
-
-    delegation_id: str
-    success: bool
-
-
-@dataclass(frozen=True, slots=True)
 class StatusEvent:
     """Lifecycle signal: thinking, retrying, calling_tool."""
 
@@ -63,20 +46,11 @@ class StatusEvent:
     label: str = ""
 
 
-ProgressEvent = (
-    TextChunk
-    | ToolCallEvent
-    | ToolResultEvent
-    | DelegateStartEvent
-    | DelegateEndEvent
-    | StatusEvent
-)
+ProgressEvent = TextChunk | ToolCallEvent | ToolResultEvent | StatusEvent
 
 ProgressCallback = Callable[[ProgressEvent], Awaitable[None]]
 
 __all__ = [
-    "DelegateEndEvent",
-    "DelegateStartEvent",
     "ProgressCallback",
     "ProgressEvent",
     "StatusEvent",

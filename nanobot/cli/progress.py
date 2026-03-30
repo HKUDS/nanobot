@@ -12,8 +12,6 @@ from typing import TYPE_CHECKING
 from rich.console import Console
 
 from nanobot.agent.callbacks import (
-    DelegateEndEvent,
-    DelegateStartEvent,
     ProgressEvent,
     StatusEvent,
     TextChunk,
@@ -54,5 +52,5 @@ class CliProgressHandler:
                 if ch and not ch.send_tool_hints:
                     return
                 self._console.print(f"  [dim]↳ {name}(…)[/dim]")
-            case StatusEvent() | ToolResultEvent() | DelegateStartEvent() | DelegateEndEvent():
+            case StatusEvent() | ToolResultEvent():
                 pass  # CLI does not render these; ignored explicitly

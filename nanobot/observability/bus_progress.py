@@ -13,8 +13,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.callbacks import (
-    DelegateEndEvent,
-    DelegateStartEvent,
     ProgressCallback,
     ProgressEvent,
     StatusEvent,
@@ -65,14 +63,6 @@ def make_bus_progress(
                 meta["_tool_result"] = {"toolCallId": tcid, "result": result}
                 meta["_canonical"] = canonical_builder.tool_result(
                     tool_call_id=tcid, tool_name=name, result=result
-                )
-            case DelegateStartEvent(delegation_id=did, child_role=role, task_title=title):
-                meta["_canonical"] = canonical_builder.delegate_start(
-                    delegation_id=did, child_role=role, task_title=title
-                )
-            case DelegateEndEvent(delegation_id=did, success=success):
-                meta["_canonical"] = canonical_builder.delegate_end(
-                    delegation_id=did, success=success
                 )
             case StatusEvent(status_code=code, label=label):
                 meta["_canonical"] = canonical_builder.status(code, label=label)

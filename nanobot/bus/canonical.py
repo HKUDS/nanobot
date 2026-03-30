@@ -184,42 +184,6 @@ class CanonicalEventBuilder:
         )
 
     # ------------------------------------------------------------------
-    # Delegation lifecycle
-    # ------------------------------------------------------------------
-
-    def delegate_start(
-        self,
-        delegation_id: str,
-        child_role: str,
-        task_title: str = "",
-    ) -> dict[str, Any]:
-        """Emit when delegating work to a sub-agent."""
-        return self._envelope(
-            "agent.delegate.start",
-            {
-                "delegation_id": delegation_id,
-                "parent_agent_id": self.actor_id,
-                "child_agent_id": child_role,
-                "task": {"title": task_title},
-            },
-        )
-
-    def delegate_end(
-        self,
-        delegation_id: str,
-        *,
-        success: bool = True,
-    ) -> dict[str, Any]:
-        """Emit when a delegated sub-agent finishes."""
-        return self._envelope(
-            "agent.delegate.end",
-            {
-                "delegation_id": delegation_id,
-                "status": "success" if success else "error",
-            },
-        )
-
-    # ------------------------------------------------------------------
     # Status / metadata
     # ------------------------------------------------------------------
 

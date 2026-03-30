@@ -124,23 +124,6 @@ class TestCanonicalEventBuilderTypes:
         evt = _builder().tool_result("tc_001", "read_file", "not found", is_error=True)
         assert evt["payload"]["status"] == "error"
 
-    def test_delegate_start(self):
-        evt = _builder().delegate_start("del_001", "web", "Search for X")
-        assert evt["type"] == "agent.delegate.start"
-        p = evt["payload"]
-        assert p["delegation_id"] == "del_001"
-        assert p["child_agent_id"] == "web"
-        assert p["task"]["title"] == "Search for X"
-
-    def test_delegate_end_success(self):
-        evt = _builder().delegate_end("del_001", success=True)
-        assert evt["type"] == "agent.delegate.end"
-        assert evt["payload"]["status"] == "success"
-
-    def test_delegate_end_failure(self):
-        evt = _builder().delegate_end("del_001", success=False)
-        assert evt["payload"]["status"] == "error"
-
     def test_keepalive(self):
         evt = _builder().keepalive()
         assert evt["type"] == "keepalive"
@@ -331,12 +314,6 @@ class TestProjectToSseRunLifecycle:
         state = _fresh_state()
         chunks = project_to_sse(b.keepalive(), text_state=state)
         assert chunks == []
-
-    def test_delegate_events_emit_nothing(self):
-        b = _builder()
-        state = _fresh_state()
-        assert project_to_sse(b.delegate_start("d1", "web", "task"), text_state=state) == []
-        assert project_to_sse(b.delegate_end("d1"), text_state=state) == []
 
     def test_unknown_type_emits_nothing(self):
         state = _fresh_state()
