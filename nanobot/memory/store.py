@@ -22,6 +22,7 @@ from nanobot.config.memory import MemoryConfig
 from ._text import _to_str_list, _utc_now_iso
 from .consolidation_pipeline import ConsolidationPipeline
 from .constants import PROFILE_KEYS
+from .db import MemoryDatabase
 from .embedder import HashEmbedder, LocalEmbedder, OpenAIEmbedder
 from .graph.graph import KnowledgeGraph
 from .maintenance import MemoryMaintenance
@@ -34,7 +35,6 @@ from .read.retrieval_planner import RetrievalPlanner
 from .read.retriever import MemoryRetriever
 from .read.scoring import RetrievalScorer
 from .token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
-from .unified_db import UnifiedMemoryDB
 from .write.classification import EventClassifier
 from .write.coercion import EventCoercer
 from .write.conflicts import ConflictManager
@@ -93,7 +93,7 @@ class MemoryStore:
 
         # Construct unified SQLite database.
         _dims = self._embedder.dims if self._embedder is not None else 384
-        self.db: UnifiedMemoryDB = UnifiedMemoryDB(self.memory_dir / "memory.db", dims=_dims)
+        self.db: MemoryDatabase = MemoryDatabase(self.memory_dir / "memory.db", dims=_dims)
 
         self.retriever: MemoryRetriever  # set after graph/ingester init
         # EventIngester is constructed after graph is ready.
@@ -160,10 +160,10 @@ class MemoryStore:
         else:
             self._reranker = CompositeReranker(alpha=reranker_alpha)
 
-        # Knowledge graph (SQLite-backed via UnifiedMemoryDB).
+        # Knowledge graph (SQLite-backed via GraphStore).
         graph_enabled = self._memory_config.graph_enabled
         if graph_enabled:
-            self.graph = KnowledgeGraph(db=self.db)
+            self.graph = KnowledgeGraph(db=self.db.graph_store)
         else:
             self.graph = KnowledgeGraph()  # disabled — all methods return empty
 
@@ -176,7 +176,7 @@ class MemoryStore:
             coercer=self._coercer,
             dedup=self._dedup,
             graph=self.graph,
-            db=self.db,
+            db=self.db.event_store,
             embedder=self._embedder,
         )
 
@@ -202,7 +202,7 @@ class MemoryStore:
             scorer=self._scorer,
             graph_aug=self._graph_aug,
             planner=self._planner,
-            db=self.db,
+            db=self.db.event_store,
             embedder=self._embedder,
         )
 

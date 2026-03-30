@@ -193,8 +193,13 @@ async def test_loop_connect_mcp_and_tool_parallel_error_path(
 async def test_graph_query_subgraph_dedupe_and_get_entity_none(tmp_path: object) -> None:
     from pathlib import Path
 
+    from nanobot.memory.db import MemoryDatabase
+
     workspace = Path(str(tmp_path))
-    g = KnowledgeGraph(workspace=workspace)
+    db_dir = workspace / "memory"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    db = MemoryDatabase(db_dir / "memory.db", dims=384)
+    g = KnowledgeGraph(db=db.graph_store)
 
     async def _neighbors(name: str, depth: int = 1, relation_types: list[str] | None = None):
         if name == "a":
@@ -209,8 +214,8 @@ async def test_graph_query_subgraph_dedupe_and_get_entity_none(tmp_path: object)
     assert set(sub["nodes"]) == {"A", "B", "C"}
     assert len(sub["edges"]) == 2
 
-    # get_entity returns None for non-existent entity
-    g2 = KnowledgeGraph(workspace=workspace)
+    # get_entity returns None for non-existent entity (reuse same db)
+    g2 = KnowledgeGraph(db=db.graph_store)
     assert await g2.get_entity("Missing") is None
 
 
@@ -331,7 +336,10 @@ def test_extractor_entity_and_graph_exception_paths(tmp_path: Path) -> None:
     entities = MemoryExtractor._extract_entities('met "Project Alpha" with Google Chrome in Paris')
     assert entities
 
-    graph = KnowledgeGraph(workspace=tmp_path)
+    from nanobot.memory.db import MemoryDatabase
+
+    db = MemoryDatabase(tmp_path / "memory.db", dims=384)
+    graph = KnowledgeGraph(db=db.graph_store)
 
     import asyncio
 

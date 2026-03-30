@@ -2,11 +2,11 @@
 
 Strategies are extracted from successful guardrail recoveries and user
 corrections. They persist across sessions in the ``strategies`` table
-(owned by ``UnifiedMemoryDB``) and are injected into the system prompt
+(owned by ``MemoryDatabase``) and are injected into the system prompt
 to prevent repeating past failures.
 
 ``StrategyAccess`` operates on a shared SQLite connection provided by
-``UnifiedMemoryDB`` — it never opens or closes connections itself.
+``MemoryDatabase`` — it never opens or closes connections itself.
 """
 
 from __future__ import annotations
@@ -36,8 +36,8 @@ class Strategy:
 class StrategyAccess:
     """CRUD operations for the strategies table.
 
-    Receives a shared SQLite connection from ``UnifiedMemoryDB``.
-    The table schema is owned by ``UnifiedMemoryDB._init_schema()`` —
+    Receives a shared SQLite connection from ``MemoryDatabase``.
+    The table schema is owned by ``MemoryDatabase._init_schema()`` —
     this class only reads and writes rows.
     """
 

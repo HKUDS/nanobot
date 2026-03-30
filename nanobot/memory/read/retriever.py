@@ -22,8 +22,8 @@ from .retrieval_planner import RetrievalPlanner
 from .scoring import RetrievalScorer
 
 if TYPE_CHECKING:
+    from ..db.event_store import EventStore
     from ..embedder import Embedder
-    from ..unified_db import UnifiedMemoryDB
 
 
 class MemoryRetriever:
@@ -40,7 +40,7 @@ class MemoryRetriever:
         scorer: RetrievalScorer,
         graph_aug: GraphAugmenter,
         planner: RetrievalPlanner,
-        db: UnifiedMemoryDB | None = None,
+        db: EventStore | None = None,
         embedder: Embedder | None = None,
     ) -> None:
         self._scorer = scorer
@@ -89,7 +89,7 @@ class MemoryRetriever:
     ) -> list[dict[str, Any]]:
         """Single fused retrieval: vector + FTS5 + RRF.
 
-        Used when ``UnifiedMemoryDB`` and ``Embedder`` are injected.  Runs
+        Used when ``EventStore`` and ``Embedder`` are injected.  Runs
         embedding and dual-source search (vector KNN + FTS5), fuses via
         Reciprocal Rank Fusion, then applies the standard scoring pipeline.
         """

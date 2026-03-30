@@ -244,7 +244,7 @@ class TestVerifyAndContextBranches:
         ]
         if store.db:
             for evt in events:
-                store.db.insert_event(evt)
+                store.db.event_store.insert_event(evt)
 
         report = store.snapshot.verify_memory(stale_days=30, update_profile=True)
         assert report["stale_events"] >= 1
@@ -394,7 +394,7 @@ class TestStoreCoreBranchHelpers:
         store = _store(tmp_path)
         # Insert an event so FTS has something to search
         if store.db:
-            store.db.insert_event(
+            store.db.event_store.insert_event(
                 {
                     "id": "m2",
                     "type": "fact",
@@ -439,7 +439,7 @@ class TestStoreCoreBranchHelpers:
             return_value=[("Alice", "WORKS_ON", "Nanobot")]
         )
         if store.db:
-            store.db.insert_event(
+            store.db.event_store.insert_event(
                 {
                     "id": "e1",
                     "type": "fact",
@@ -463,7 +463,7 @@ class TestRetrieveAndContextBranches:
         profile["preferences"] = ["Prefer concise output"]
         store.profile_mgr.write_profile(profile)
         if store.db:
-            store.db.insert_event(
+            store.db.event_store.insert_event(
                 {
                     "id": "e1",
                     "type": "task",
@@ -473,7 +473,7 @@ class TestRetrieveAndContextBranches:
                     "entities": ["deploy"],
                 }
             )
-            store.db.insert_event(
+            store.db.event_store.insert_event(
                 {
                     "id": "e2",
                     "type": "fact",

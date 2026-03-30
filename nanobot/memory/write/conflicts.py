@@ -6,7 +6,7 @@ auto-resolution, user-facing prompts, and final resolution with database
 synchronisation.
 
 All profile access is delegated to ``ProfileManager``; vector operations
-go through ``UnifiedMemoryDB``.
+go through ``MemoryDatabase``.
 """
 
 from __future__ import annotations
@@ -28,8 +28,8 @@ from ..persistence.profile_io import ProfileStore as ProfileManager
 if TYPE_CHECKING:
     from nanobot.config.memory import MemoryConfig
 
+    from ..db.connection import MemoryDatabase
     from ..persistence.profile_io import ProfileStore
-    from ..unified_db import UnifiedMemoryDB
 
 # ---------------------------------------------------------------------------
 # ConflictManager
@@ -54,7 +54,7 @@ class ConflictManager:
         self,
         profile_store: ProfileStore | ProfileManager,
         *,
-        db: UnifiedMemoryDB | None = None,
+        db: MemoryDatabase | None = None,
         memory_config: MemoryConfig | None = None,
     ) -> None:
         # Stored as profile_mgr for backward compat with resolve_conflict_details callers.
