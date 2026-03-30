@@ -1,11 +1,6 @@
 import json
 
-from typer.testing import CliRunner
-
-from nanobot.cli.commands import app
 from nanobot.config.loader import load_config, save_config
-
-runner = CliRunner()
 
 
 def test_load_config_keeps_max_tokens_and_ignores_legacy_memory_window(tmp_path) -> None:
@@ -28,8 +23,7 @@ def test_load_config_keeps_max_tokens_and_ignores_legacy_memory_window(tmp_path)
 
     assert config.agents.defaults.max_tokens == 1234
     assert config.agents.defaults.context_window_tokens == 65_536
-    # Legacy memoryWindow is accepted for migration but does not drive context window.
-    assert config.agents.defaults.memory_window == 42
+    assert not hasattr(config.agents.defaults, "memory_window")
 
 
 def test_save_config_writes_context_window_tokens_but_not_memory_window(tmp_path) -> None:
@@ -78,7 +72,10 @@ def test_onboard_does_not_crash_with_legacy_memory_window(tmp_path, monkeypatch)
     monkeypatch.setattr("nanobot.config.loader.get_config_path", lambda: config_path)
     monkeypatch.setattr("nanobot.cli.commands.get_workspace_path", lambda _workspace=None: workspace)
 
-    result = runner.invoke(app, ["onboard", "--non-interactive"], input="n\n")
+    from typer.testing import CliRunner
+    from nanobot.cli.commands import app
+    runner = CliRunner()
+    result = runner.invoke(app, ["onboard"], input="n\n")
 
     assert result.exit_code == 0
 
@@ -121,7 +118,10 @@ def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch)
         },
     )
 
-    result = runner.invoke(app, ["onboard", "--non-interactive"], input="n\n")
+    from typer.testing import CliRunner
+    from nanobot.cli.commands import app
+    runner = CliRunner()
+    result = runner.invoke(app, ["onboard"], input="n\n")
 
     assert result.exit_code == 0
     saved = json.loads(config_path.read_text(encoding="utf-8"))

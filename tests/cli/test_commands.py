@@ -1,6 +1,5 @@
 import json
 import re
-import shutil
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -16,14 +15,13 @@ from nanobot.providers.registry import find_by_name
 runner = CliRunner()
 
 
-def _strip_ansi(text):
-    """Remove ANSI escape codes from text."""
-    ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
-    return ansi_escape.sub('', text)
-
-
 class _StopGatewayError(RuntimeError):
     pass
+
+
+import shutil
+
+import pytest
 
 
 @pytest.fixture
@@ -59,11 +57,11 @@ def mock_paths():
             shutil.rmtree(base_dir)
 
 
-def test_onboard_fresh_install_non_interactive(mock_paths):
-    """No existing config — should create from scratch in non-interactive mode."""
+def test_onboard_fresh_install(mock_paths):
+    """No existing config — should create from scratch."""
     config_file, workspace_dir, mock_ws = mock_paths
 
-    result = runner.invoke(app, ["onboard", "--non-interactive"])
+    result = runner.invoke(app, ["onboard"])
 
     assert result.exit_code == 0
     assert "Created config" in result.stdout
@@ -76,12 +74,12 @@ def test_onboard_fresh_install_non_interactive(mock_paths):
     assert mock_ws.call_args.args == (expected_workspace,)
 
 
-def test_onboard_existing_config_refresh_non_interactive(mock_paths):
+def test_onboard_existing_config_refresh(mock_paths):
     """Config exists, user declines overwrite — should refresh (load-merge-save)."""
     config_file, workspace_dir, _ = mock_paths
     config_file.write_text('{"existing": true}')
 
-    result = runner.invoke(app, ["onboard", "--non-interactive"], input="n\n")
+    result = runner.invoke(app, ["onboard"], input="n\n")
 
     assert result.exit_code == 0
     assert "Config already exists" in result.stdout
@@ -90,12 +88,12 @@ def test_onboard_existing_config_refresh_non_interactive(mock_paths):
     assert (workspace_dir / "AGENTS.md").exists()
 
 
-def test_onboard_existing_config_overwrite_non_interactive(mock_paths):
+def test_onboard_existing_config_overwrite(mock_paths):
     """Config exists, user confirms overwrite — should reset to defaults."""
     config_file, workspace_dir, _ = mock_paths
     config_file.write_text('{"existing": true}')
 
-    result = runner.invoke(app, ["onboard", "--non-interactive"], input="y\n")
+    result = runner.invoke(app, ["onboard"], input="y\n")
 
     assert result.exit_code == 0
     assert "Config already exists" in result.stdout
@@ -103,18 +101,24 @@ def test_onboard_existing_config_overwrite_non_interactive(mock_paths):
     assert workspace_dir.exists()
 
 
-def test_onboard_existing_workspace_safe_create_non_interactive(mock_paths):
+def test_onboard_existing_workspace_safe_create(mock_paths):
     """Workspace exists — should not recreate, but still add missing templates."""
     config_file, workspace_dir, _ = mock_paths
     workspace_dir.mkdir(parents=True)
     config_file.write_text("{}")
 
-    result = runner.invoke(app, ["onboard", "--non-interactive"], input="n\n")
+    result = runner.invoke(app, ["onboard"], input="n\n")
 
     assert result.exit_code == 0
     assert "Created workspace" not in result.stdout
     assert "Created AGENTS.md" in result.stdout
     assert (workspace_dir / "AGENTS.md").exists()
+
+
+def _strip_ansi(text):
+    """Remove ANSI escape codes from text."""
+    ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+    return ansi_escape.sub('', text)
 
 
 def test_onboard_help_shows_workspace_and_config_options():
@@ -126,7 +130,6 @@ def test_onboard_help_shows_workspace_and_config_options():
     assert "-w" in stripped_output
     assert "--config" in stripped_output
     assert "-c" in stripped_output
-    assert "--non-interactive" in stripped_output
     assert "--wizard" in stripped_output
     assert "--dir" not in stripped_output
 
@@ -157,7 +160,7 @@ def test_onboard_uses_explicit_config_and_workspace_paths(tmp_path, monkeypatch)
 
     result = runner.invoke(
         app,
-        ["onboard", "--config", str(config_path), "--workspace", str(workspace_path), "--non-interactive"],
+        ["onboard", "--config", str(config_path), "--workspace", str(workspace_path)],
     )
 
     assert result.exit_code == 0

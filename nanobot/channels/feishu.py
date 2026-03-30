@@ -256,6 +256,7 @@ class FeishuConfig(Base):
 
 _STREAM_ELEMENT_ID = "streaming_md"
 
+
 @dataclass
 class _FeishuStreamBuf:
     """Per-chat streaming accumulator using CardKit streaming API."""
@@ -972,11 +973,14 @@ class FeishuChannel(BaseChannel):
                 return None
             card_id = getattr(response.data, "card_id", None)
             if card_id:
-                self._send_message_sync(
+                message_id = self._send_message_sync(
                     receive_id_type, chat_id, "interactive",
                     json.dumps({"type": "card", "data": {"card_id": card_id}}),
                 )
-            return card_id
+                if message_id:
+                    return card_id
+                logger.warning("Created streaming card {} but failed to send it to {}", card_id, chat_id)
+            return None
         except Exception as e:
             logger.warning("Error creating streaming card: {}", e)
             return None
@@ -1002,9 +1006,9 @@ class FeishuChannel(BaseChannel):
             return False
 
     def _close_streaming_mode_sync(self, card_id: str, sequence: int) -> bool:
-        """Turn off CardKit streaming_mode so chat preview leaves [生成中...].
+        """Turn off CardKit streaming_mode so the chat list preview exits the streaming placeholder.
 
-        Per Feishu docs, streaming cards show "[生成中...]" in the session list until
+        Per Feishu docs, streaming cards keep a generating-style summary in the session list until
         streaming_mode is set to false via card settings (after final content update).
         Sequence must strictly exceed the previous card OpenAPI operation on this entity.
         """
@@ -1050,7 +1054,7 @@ class FeishuChannel(BaseChannel):
                 await loop.run_in_executor(
                     None, self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence,
                 )
-                # Required so chat list preview stops showing [生成中...] (Feishu streaming overview).
+                # Required so the chat list preview exits the streaming placeholder (Feishu streaming card docs).
                 buf.sequence += 1
                 await loop.run_in_executor(
                     None, self._close_streaming_mode_sync, buf.card_id, buf.sequence,

@@ -281,6 +281,52 @@ async def test_send_text_gives_up_after_max_retries() -> None:
 
 
 @pytest.mark.asyncio
+async def test_on_error_logs_network_issues_as_warning(monkeypatch) -> None:
+    from telegram.error import NetworkError
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    recorded: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.logger.warning",
+        lambda message, error: recorded.append(("warning", message.format(error))),
+    )
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.logger.error",
+        lambda message, error: recorded.append(("error", message.format(error))),
+    )
+
+    await channel._on_error(object(), SimpleNamespace(error=NetworkError("proxy disconnected")))
+
+    assert recorded == [("warning", "Telegram network issue: proxy disconnected")]
+
+
+@pytest.mark.asyncio
+async def test_on_error_keeps_non_network_exceptions_as_error(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    recorded: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.logger.warning",
+        lambda message, error: recorded.append(("warning", message.format(error))),
+    )
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.logger.error",
+        lambda message, error: recorded.append(("error", message.format(error))),
+    )
+
+    await channel._on_error(object(), SimpleNamespace(error=RuntimeError("boom")))
+
+    assert recorded == [("error", "Telegram error: boom")]
+
+
+@pytest.mark.asyncio
 async def test_send_delta_stream_end_raises_and_keeps_buffer_on_failure() -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),

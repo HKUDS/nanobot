@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -55,9 +54,6 @@ async def test_prompt_above_threshold_triggers_consolidation(tmp_path, monkeypat
     monkeypatch.setattr(memory_module, "estimate_message_tokens", lambda _message: 500)
 
     await loop.process_direct("hello", session_key="cli:test")
-    # Pre-request consolidation is now background-scheduled; drain tasks.
-    if loop._background_tasks:
-        await asyncio.gather(*loop._background_tasks, return_exceptions=True)
 
     assert loop.memory_consolidator.consolidate_messages.await_count >= 1
 
@@ -161,8 +157,8 @@ async def test_consolidation_continues_below_trigger_until_half_target(tmp_path,
 
 
 @pytest.mark.asyncio
-async def test_preflight_consolidation_runs_in_background(tmp_path, monkeypatch) -> None:
-    """Verify preflight consolidation is background-scheduled so the LLM call proceeds immediately."""
+async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) -> None:
+    """Verify preflight consolidation runs before the LLM call in process_direct."""
     order: list[str] = []
 
     loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
@@ -190,19 +186,11 @@ async def test_preflight_consolidation_runs_in_background(tmp_path, monkeypatch)
     call_count = [0]
     def mock_estimate(_session):
         call_count[0] += 1
-        # First two calls must exceed threshold: one from _maybe_consolidate_bg
-        # (pre-request check) and one from maybe_consolidate_by_tokens (background
-        # task initial check).  Subsequent calls return below-target so the
-        # consolidation loop exits.
-        return (1000 if call_count[0] <= 2 else 80, "test")
+        return (1000 if call_count[0] <= 1 else 80, "test")
     loop.memory_consolidator.estimate_session_prompt_tokens = mock_estimate  # type: ignore[method-assign]
 
     await loop.process_direct("hello", session_key="cli:test")
 
-    # LLM call should proceed without waiting for consolidation
-    assert "llm" in order
-
-    # Drain background tasks, then verify consolidation was executed
-    if loop._background_tasks:
-        await asyncio.gather(*loop._background_tasks, return_exceptions=True)
     assert "consolidate" in order
+    assert "llm" in order
+    assert order.index("consolidate") < order.index("llm")

@@ -157,20 +157,23 @@ class TestGetFieldTypeInfo:
         assert inner is str
 
     def test_extracts_list_type_without_item_type(self):
+        # Plain list without type param falls back to str
         class Model(BaseModel):
             items: list  # type: ignore
 
-        # Bare `list` / `dict` annotations fall through to str in introspection.
+        # Plain list annotation doesn't match list check, returns str
         type_name, inner = _get_field_type_info(Model.model_fields["items"])
-        assert type_name == "str"
+        assert type_name == "str"  # Falls back to str for untyped list
         assert inner is None
 
     def test_extracts_dict_type(self):
+        # Plain dict without type param falls back to str
         class Model(BaseModel):
             data: dict  # type: ignore
 
+        # Plain dict annotation doesn't match dict check, returns str
         type_name, inner = _get_field_type_info(Model.model_fields["data"])
-        assert type_name == "str"
+        assert type_name == "str"  # Falls back to str for untyped dict
         assert inner is None
 
     def test_extracts_optional_type(self):
