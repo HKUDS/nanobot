@@ -77,16 +77,10 @@ class ProfileStore:
         db: MemoryDatabase | None = None,
         conflict_mgr_fn: Callable[[], Any] | None = None,
         corrector_fn: Callable[[], Any] | None = None,
-        extractor: Any | None = None,
-        ingester_fn: Callable[[], Any] | None = None,
-        snapshot_fn: Callable[[], Any] | None = None,
     ) -> None:
         self._db = db
         self._conflict_mgr_fn = conflict_mgr_fn
         self._corrector_fn = corrector_fn
-        self._extractor = extractor
-        self._ingester_fn = ingester_fn
-        self._snapshot_fn = snapshot_fn
         self._cache = ProfileCache()
 
     # -- Shared helpers imported from .helpers --------------------------------

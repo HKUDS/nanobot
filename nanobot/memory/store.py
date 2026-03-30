@@ -109,16 +109,12 @@ class MemoryStore:
             coerce_event=self._coercer.coerce_event,
             utc_now_iso=_utc_now_iso,
         )
-        # Profile manager (LAN-202) — delegates profile CRUD to ProfileManager.
-        # Lazy callbacks break the circular dependency: ProfileStore is constructed
-        # before conflict_mgr/snapshot exist, but callbacks resolve at call time.
+        # Profile manager — lazy callbacks break circular dependency:
+        # ProfileStore is constructed before conflict_mgr/corrector exist.
         self.profile_mgr = ProfileStore(
             db=self.db,
             conflict_mgr_fn=lambda: self.conflict_mgr,
             corrector_fn=lambda: self._corrector,
-            extractor=self.extractor,
-            ingester_fn=lambda: self.ingester,
-            snapshot_fn=lambda: self.snapshot,
         )
 
         # Retrieval planner (LAN-207) — intent classification + policy + routing.
