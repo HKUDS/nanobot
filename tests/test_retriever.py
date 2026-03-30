@@ -8,9 +8,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from nanobot.config.memory import MemoryConfig
+from nanobot.memory.constants import PROFILE_KEYS
 from nanobot.memory.read.graph_augmentation import GraphAugmenter
 from nanobot.memory.read.retriever import MemoryRetriever
-from nanobot.memory.read.scoring import PROFILE_KEYS, RetrievalScorer
+from nanobot.memory.read.scoring import RetrievalScorer
 
 
 def _make_retriever(
@@ -60,7 +61,7 @@ def _make_retriever(
     scorer = RetrievalScorer(
         profile_mgr=profile_mgr,
         reranker=reranker,
-        memory_config_fn=lambda: _mc,
+        memory_config=_mc,
     )
     graph_aug = GraphAugmenter(
         graph=graph,
@@ -679,7 +680,7 @@ class TestGraphEntityCache:
         scorer = RetrievalScorer(
             profile_mgr=profile_mgr,
             reranker=reranker,
-            memory_config_fn=lambda: MemoryConfig(),
+            memory_config=MemoryConfig(),
         )
         graph_aug = GraphAugmenter(
             graph=graph,

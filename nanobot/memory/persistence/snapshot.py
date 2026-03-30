@@ -6,26 +6,21 @@ operations from the main store orchestration.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from .._text import _to_datetime, _to_str_list, _utc_now_iso
+from ..constants import (
+    CONFLICT_STATUS_NEEDS_USER,
+    CONFLICT_STATUS_OPEN,
+    PROFILE_KEYS,
+    PROFILE_STATUS_STALE,
+)
 from .profile_io import ProfileStore as ProfileManager
 
 if TYPE_CHECKING:
     from ..unified_db import UnifiedMemoryDB
-
-# Constants previously on MemoryStore — shared with snapshot logic.
-PROFILE_KEYS = (
-    "preferences",
-    "stable_facts",
-    "active_projects",
-    "relationships",
-    "constraints",
-)
-PROFILE_STATUS_STALE = "stale"
-CONFLICT_STATUS_OPEN = "open"
-CONFLICT_STATUS_NEEDS_USER = "needs_user"
 
 
 class MemorySnapshot:
@@ -42,20 +37,14 @@ class MemorySnapshot:
         self,
         *,
         profile_mgr: ProfileManager,
-        read_events_fn: Callable[..., list[dict[str, Any]]],
         profile_section_lines_fn: Callable[..., list[str]],
         recent_unresolved_fn: Callable[..., list[dict[str, Any]]],
-        verify_beliefs_fn: Callable[[], dict[str, Any]],
-        write_profile_fn: Callable[[dict[str, Any]], None],
         profile_keys: tuple[str, ...] = PROFILE_KEYS,
         db: UnifiedMemoryDB,
     ) -> None:
         self.profile_mgr = profile_mgr
-        self._read_events = read_events_fn
         self._profile_section_lines = profile_section_lines_fn
         self._recent_unresolved = recent_unresolved_fn
-        self._verify_beliefs = verify_beliefs_fn
-        self._write_profile = write_profile_fn
         self._profile_keys = profile_keys
         self._db = db
 
@@ -171,7 +160,7 @@ class MemorySnapshot:
             profile["last_verified_at"] = _utc_now_iso()
             profile_touched = True
             if profile_touched:
-                self._write_profile(profile)
+                self.profile_mgr.write_profile(profile)
 
         open_conflicts = [
             c
@@ -180,7 +169,7 @@ class MemorySnapshot:
             and str(c.get("status", CONFLICT_STATUS_OPEN)).strip().lower()
             in {CONFLICT_STATUS_OPEN, CONFLICT_STATUS_NEEDS_USER}
         ]
-        belief_quality = self._verify_beliefs()
+        belief_quality = self.profile_mgr.verify_beliefs()
 
         return {
             "events": len(events),

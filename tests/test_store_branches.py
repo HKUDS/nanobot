@@ -11,6 +11,7 @@ import pytest
 
 from nanobot.config.memory import MemoryConfig
 from nanobot.memory import MemoryStore
+from nanobot.memory.constants import PROFILE_KEYS
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 
@@ -35,7 +36,7 @@ class TestReindexBranches:
             read_profile_fn=store.profile_mgr.read_profile,
             read_events_fn=store.ingester.read_events,
             ingester=store.ingester,
-            profile_keys=store.PROFILE_KEYS,
+            profile_keys=PROFILE_KEYS,
         )
         assert out["ok"] is True
         assert out["reason"] == "unified_db_active"
@@ -54,7 +55,7 @@ class TestReindexBranches:
             write_profile_fn=store.profile_mgr.write_profile,
             read_events_fn=store.ingester.read_events,
             ingester=store.ingester,
-            profile_keys=store.PROFILE_KEYS,
+            profile_keys=PROFILE_KEYS,
         )
         assert out["ok"] is False
         assert "invalid_profile_seed" in out["reason"]
@@ -94,7 +95,7 @@ class TestReindexBranches:
             write_profile_fn=store.profile_mgr.write_profile,
             read_events_fn=store.ingester.read_events,
             ingester=store.ingester,
-            profile_keys=store.PROFILE_KEYS,
+            profile_keys=PROFILE_KEYS,
         )
         assert out["ok"] is True
         assert out["seeded_events"] >= 1

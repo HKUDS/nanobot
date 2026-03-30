@@ -18,32 +18,20 @@ from typing import TYPE_CHECKING, Any, Callable
 from loguru import logger
 
 from .._text import _norm_text, _safe_float, _to_str_list, _tokenize, _utc_now_iso
+from ..constants import (
+    CONFLICT_STATUS_NEEDS_USER,
+    CONFLICT_STATUS_OPEN,
+    PROFILE_KEYS,
+    PROFILE_STATUS_ACTIVE,
+    PROFILE_STATUS_CONFLICTED,
+    PROFILE_STATUS_STALE,
+)
 from ..event import BeliefRecord
 
 if TYPE_CHECKING:
     from ..unified_db import UnifiedMemoryDB
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-PROFILE_KEYS = (
-    "preferences",
-    "stable_facts",
-    "active_projects",
-    "relationships",
-    "constraints",
-)
-
-PROFILE_STATUS_ACTIVE = "active"
-PROFILE_STATUS_CONFLICTED = "conflicted"
-PROFILE_STATUS_STALE = "stale"
-
 __all__ = [
-    "PROFILE_KEYS",
-    "PROFILE_STATUS_ACTIVE",
-    "PROFILE_STATUS_CONFLICTED",
-    "PROFILE_STATUS_STALE",
     "ProfileCache",
     "ProfileStore",
 ]
@@ -81,19 +69,7 @@ class ProfileCache:
 class ProfileStore:
     """Profile/belief CRUD, metadata bookkeeping, and live corrections."""
 
-    # Duplicate constants as class attributes so call-sites using
-    # ``self.PROFILE_KEYS`` etc. continue to work.
-    PROFILE_KEYS = PROFILE_KEYS
-    PROFILE_STATUS_ACTIVE = PROFILE_STATUS_ACTIVE
-    PROFILE_STATUS_CONFLICTED = PROFILE_STATUS_CONFLICTED
-    PROFILE_STATUS_STALE = PROFILE_STATUS_STALE
     _MAX_EVIDENCE_REFS = 10  # Cap evidence_event_ids to avoid unbounded growth.
-
-    # Conflict status constants (referenced by _apply_profile_updates /
-    # _has_open_conflict / apply_live_user_correction).
-    CONFLICT_STATUS_OPEN = "open"
-    CONFLICT_STATUS_NEEDS_USER = "needs_user"
-    CONFLICT_STATUS_RESOLVED = "resolved"
 
     def __init__(
         self,
@@ -101,14 +77,14 @@ class ProfileStore:
         db: UnifiedMemoryDB | None = None,
         conflict_mgr_fn: Callable[[], Any] | None = None,
         corrector_fn: Callable[[], Any] | None = None,
-        extractor_fn: Callable[[], Any] | None = None,
+        extractor: Any | None = None,
         ingester_fn: Callable[[], Any] | None = None,
         snapshot_fn: Callable[[], Any] | None = None,
     ) -> None:
         self._db = db
         self._conflict_mgr_fn = conflict_mgr_fn
         self._corrector_fn = corrector_fn
-        self._extractor_fn = extractor_fn
+        self._extractor = extractor
         self._ingester_fn = ingester_fn
         self._snapshot_fn = snapshot_fn
         self._cache = ProfileCache()
@@ -137,14 +113,14 @@ class ProfileStore:
             data = self._cache.read() or {}
         if isinstance(data, dict) and data:
             # normalise legacy entries — same logic as before
-            for key in self.PROFILE_KEYS:
+            for key in PROFILE_KEYS:
                 data.setdefault(key, [])
                 if not isinstance(data[key], list):
                     data[key] = []
             data.setdefault("conflicts", [])
             data.setdefault("last_verified_at", None)
             data.setdefault("meta", {})
-            for key in self.PROFILE_KEYS:
+            for key in PROFILE_KEYS:
                 section_meta = data["meta"].get(key)
                 if not isinstance(section_meta, dict):
                     section_meta = {}
@@ -161,7 +137,7 @@ class ProfileStore:
                             "text": item,
                             "confidence": 0.65,
                             "evidence_count": 1,
-                            "status": self.PROFILE_STATUS_ACTIVE,
+                            "status": PROFILE_STATUS_ACTIVE,
                             "created_at": fallback_ts,
                             "last_seen_at": fallback_ts,
                         }
@@ -180,7 +156,7 @@ class ProfileStore:
             "constraints": [],
             "conflicts": [],
             "last_verified_at": None,
-            "meta": {key: {} for key in self.PROFILE_KEYS},
+            "meta": {key: {} for key in PROFILE_KEYS},
             "updated_at": self._utc_now_iso(),
         }
 
@@ -210,7 +186,7 @@ class ProfileStore:
                 "text": text,
                 "confidence": 0.65,
                 "evidence_count": 1,
-                "status": self.PROFILE_STATUS_ACTIVE,
+                "status": PROFILE_STATUS_ACTIVE,
                 "created_at": now,
                 "last_seen_at": now,
             }
@@ -251,9 +227,9 @@ class ProfileStore:
 
     def _validate_profile_field(self, field: str) -> str:
         key = str(field or "").strip()
-        if key not in self.PROFILE_KEYS:
+        if key not in PROFILE_KEYS:
             raise ValueError(
-                f"Invalid profile field '{field}'. Expected one of: {', '.join(self.PROFILE_KEYS)}"
+                f"Invalid profile field '{field}'. Expected one of: {', '.join(PROFILE_KEYS)}"
             )
         return key
 
@@ -285,7 +261,7 @@ class ProfileStore:
 
         Returns ``(section_key, norm_text, entry_dict)`` or ``None``.
         """
-        for section_key in self.PROFILE_KEYS:
+        for section_key in PROFILE_KEYS:
             section = self._meta_section(profile, section_key)
             for norm_text, entry in section.items():
                 if isinstance(entry, dict) and entry.get("id") == belief_id:
@@ -614,8 +590,8 @@ class ProfileStore:
         entry = self._meta_entry(profile, key, canonical)
         entry["pinned"] = bool(pinned)
         entry["last_seen_at"] = self._utc_now_iso()
-        if entry.get("status") == self.PROFILE_STATUS_STALE and pinned:
-            entry["status"] = self.PROFILE_STATUS_ACTIVE
+        if entry.get("status") == PROFILE_STATUS_STALE and pinned:
+            entry["status"] = PROFILE_STATUS_ACTIVE
         self.write_profile(profile)
         return True
 
@@ -638,7 +614,7 @@ class ProfileStore:
             return False
 
         entry = self._meta_entry(profile, key, existing)
-        entry["status"] = self.PROFILE_STATUS_STALE
+        entry["status"] = PROFILE_STATUS_STALE
         entry["last_seen_at"] = self._utc_now_iso()
         self.write_profile(profile)
         return True
@@ -675,8 +651,8 @@ class ProfileStore:
         for item in profile.get("conflicts", []):
             if not isinstance(item, dict):
                 continue
-            status = str(item.get("status", self.CONFLICT_STATUS_OPEN)).strip().lower()
-            if status not in {self.CONFLICT_STATUS_OPEN, self.CONFLICT_STATUS_NEEDS_USER}:
+            status = str(item.get("status", CONFLICT_STATUS_OPEN)).strip().lower()
+            if status not in {CONFLICT_STATUS_OPEN, CONFLICT_STATUS_NEEDS_USER}:
                 continue
             if item.get("field") != field:
                 continue

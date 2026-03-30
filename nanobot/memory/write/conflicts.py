@@ -11,23 +11,25 @@ go through ``UnifiedMemoryDB``.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from .._text import _norm_text, _safe_float, _tokenize, _utc_now_iso
+from ..constants import (
+    CONFLICT_STATUS_NEEDS_USER,
+    CONFLICT_STATUS_OPEN,
+    CONFLICT_STATUS_RESOLVED,
+    PROFILE_KEYS,
+    PROFILE_STATUS_ACTIVE,
+    PROFILE_STATUS_CONFLICTED,
+    PROFILE_STATUS_STALE,
+)
 from ..persistence.profile_io import ProfileStore as ProfileManager
 
 if TYPE_CHECKING:
+    from nanobot.config.memory import MemoryConfig
+
     from ..persistence.profile_io import ProfileStore
     from ..unified_db import UnifiedMemoryDB
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-CONFLICT_STATUS_OPEN = "open"
-CONFLICT_STATUS_NEEDS_USER = "needs_user"
-CONFLICT_STATUS_RESOLVED = "resolved"
 
 # ---------------------------------------------------------------------------
 # ConflictManager
@@ -53,14 +55,12 @@ class ConflictManager:
         profile_store: ProfileStore | ProfileManager,
         *,
         db: UnifiedMemoryDB | None = None,
-        resolve_gap_fn: Callable[[], float] | None = None,
+        memory_config: MemoryConfig | None = None,
     ) -> None:
         # Stored as profile_mgr for backward compat with resolve_conflict_details callers.
         self.profile_mgr = profile_store
         self._db = db
-        # Live callback for auto-resolve confidence gap threshold — reads current
-        # rollout value instead of a stale copy captured at construction time.
-        self._resolve_gap_fn: Callable[[], float] = resolve_gap_fn or (lambda: 0.25)
+        self._memory_config = memory_config
 
     # -- Shared helpers imported from .helpers --------------------------------
     _norm_text = staticmethod(_norm_text)
@@ -109,7 +109,7 @@ class ConflictManager:
         profile.setdefault("conflicts", [])
         evidence_ids = [source_event_ids[0]] if source_event_ids else None
 
-        for key in self.profile_mgr.PROFILE_KEYS:
+        for key in PROFILE_KEYS:
             values = self.profile_mgr._to_str_list(profile.get(key))
             seen = {self.profile_mgr._norm_text(v) for v in values}
             for candidate in self.profile_mgr._to_str_list(updates.get(key)):
@@ -127,13 +127,13 @@ class ConflictManager:
                             belief_id,
                             confidence_delta=0.03,
                             new_evidence_ids=evidence_ids,
-                            status=self.profile_mgr.PROFILE_STATUS_ACTIVE,
+                            status=PROFILE_STATUS_ACTIVE,
                         )
                     else:
                         self.profile_mgr._touch_meta_entry(
                             entry,
                             confidence_delta=0.03,
-                            status=self.profile_mgr.PROFILE_STATUS_ACTIVE,
+                            status=PROFILE_STATUS_ACTIVE,
                             evidence_event_id=evidence_ids[0] if evidence_ids else None,
                         )
                     touched += 1
@@ -167,14 +167,14 @@ class ConflictManager:
                             self.profile_mgr._touch_meta_entry(
                                 old_entry,
                                 confidence_delta=-0.12,
-                                status=self.profile_mgr.PROFILE_STATUS_CONFLICTED,
+                                status=PROFILE_STATUS_CONFLICTED,
                             )
                             new_entry = self.profile_mgr._meta_entry(profile, key, candidate)
                             self.profile_mgr._touch_meta_entry(
                                 new_entry,
                                 confidence_delta=-0.2,
                                 min_confidence=0.35,
-                                status=self.profile_mgr.PROFILE_STATUS_CONFLICTED,
+                                status=PROFILE_STATUS_CONFLICTED,
                                 evidence_event_id=evidence_ids[0] if evidence_ids else None,
                             )
                             # Include belief IDs in conflict record (LAN-198).
@@ -192,7 +192,7 @@ class ConflictManager:
                                     ),
                                     "belief_id_old": old_entry.get("id", ""),
                                     "belief_id_new": new_entry.get("id", ""),
-                                    "status": self.profile_mgr.CONFLICT_STATUS_OPEN,
+                                    "status": CONFLICT_STATUS_OPEN,
                                     "old_confidence": old_entry.get("confidence"),
                                     "new_confidence": new_entry.get("confidence"),
                                     "old_last_seen_at": old_entry.get("last_seen_at", ""),
@@ -209,7 +209,7 @@ class ConflictManager:
                     self.profile_mgr._touch_meta_entry(
                         entry,
                         confidence_delta=0.1,
-                        status=self.profile_mgr.PROFILE_STATUS_ACTIVE,
+                        status=PROFILE_STATUS_ACTIVE,
                         evidence_event_id=evidence_ids[0] if evidence_ids else None,
                     )
                     touched += 1
@@ -284,7 +284,8 @@ class ConflictManager:
         old_conf = self._safe_float(conflict.get("old_confidence"), 0.0)
         new_conf = self._safe_float(conflict.get("new_confidence"), 0.0)
         gap = abs(old_conf - new_conf)
-        if gap >= self._resolve_gap_fn():
+        resolve_gap = self._memory_config.conflict_auto_resolve_gap if self._memory_config else 0.25
+        if gap >= resolve_gap:
             return "keep_new" if new_conf > old_conf else "keep_old"
 
         # Temporal recency: when the confidence gap is too narrow, use
@@ -532,10 +533,10 @@ class ConflictManager:
                 profile,
                 old_belief_id,
                 confidence_delta=0.08,
-                status=self.profile_mgr.PROFILE_STATUS_ACTIVE,
+                status=PROFILE_STATUS_ACTIVE,
             )
             # Mark loser as stale.
-            new_entry["status"] = self.profile_mgr.PROFILE_STATUS_STALE
+            new_entry["status"] = PROFILE_STATUS_STALE
             new_entry["last_seen_at"] = self._utc_now_iso()
             # Supersession chain (LAN-198).
             if old_belief_id and new_belief_id:
@@ -550,10 +551,10 @@ class ConflictManager:
                 profile,
                 new_belief_id,
                 confidence_delta=0.08,
-                status=self.profile_mgr.PROFILE_STATUS_ACTIVE,
+                status=PROFILE_STATUS_ACTIVE,
             )
             # Mark loser as stale.
-            old_entry["status"] = self.profile_mgr.PROFILE_STATUS_STALE
+            old_entry["status"] = PROFILE_STATUS_STALE
             old_entry["last_seen_at"] = self._utc_now_iso()
             # Supersession chain (LAN-198).
             if new_belief_id and old_belief_id:
@@ -565,12 +566,12 @@ class ConflictManager:
             self.profile_mgr._update_belief_in_profile(
                 profile,
                 old_belief_id,
-                status=self.profile_mgr.PROFILE_STATUS_ACTIVE,
+                status=PROFILE_STATUS_ACTIVE,
             )
             self.profile_mgr._update_belief_in_profile(
                 profile,
                 new_belief_id,
-                status=self.profile_mgr.PROFILE_STATUS_ACTIVE,
+                status=PROFILE_STATUS_ACTIVE,
             )
         else:
             return result

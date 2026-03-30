@@ -8,9 +8,10 @@ and type boosts, and cross-encoder re-ranking delegation.
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from .._text import _contains_any, _norm_text
+from ..constants import PROFILE_KEYS, PROFILE_STATUS_CONFLICTED, PROFILE_STATUS_STALE
 from .retrieval_planner import RetrievalPlan, RetrievalPlanner
 
 if TYPE_CHECKING:
@@ -39,17 +40,6 @@ _STABILITY_BOOST: dict[str, float] = {
     "low": -0.02,
 }
 
-PROFILE_KEYS = (
-    "preferences",
-    "stable_facts",
-    "active_projects",
-    "relationships",
-    "constraints",
-)
-
-PROFILE_STATUS_STALE = "stale"
-PROFILE_STATUS_CONFLICTED = "conflicted"
-
 
 def _contains_norm_phrase(text: str, phrase_norm: str) -> bool:
     if not phrase_norm:
@@ -73,11 +63,11 @@ class RetrievalScorer:
         *,
         profile_mgr: ProfileManager,
         reranker: Reranker,
-        memory_config_fn: Callable[[], MemoryConfig],
+        memory_config: MemoryConfig,
     ) -> None:
         self._profile_mgr = profile_mgr
         self._reranker = reranker
-        self._memory_config_fn = memory_config_fn
+        self._memory_config = memory_config
 
     # ------------------------------------------------------------------
     # Pipeline stage: load profile scoring data
@@ -405,7 +395,7 @@ class RetrievalScorer:
         items: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         """Apply cross-encoder reranking (enabled/shadow/disabled)."""
-        reranker_mode = self._memory_config_fn().reranker.mode
+        reranker_mode = self._memory_config.reranker.mode
         if reranker_mode not in ("enabled", "shadow") or not items:
             return items
 

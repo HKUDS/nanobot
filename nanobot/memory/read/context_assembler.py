@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from loguru import logger
 
 from .._text import _estimate_tokens, _norm_text, _safe_float, _to_str_list
+from ..constants import EPISODIC_STATUS_RESOLVED, PROFILE_KEYS, PROFILE_STATUS_STALE
 from ..event import is_resolved_task_or_decision
 from ..persistence.profile_io import ProfileStore as ProfileManager
 from ..token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
@@ -37,21 +38,6 @@ class ContextAssembler:
     Delegates data access through injected callables / collaborators so that
     it never depends on ``MemoryStore`` directly.
     """
-
-    # ------------------------------------------------------------------
-    # Class-level constants (moved from MemoryStore)
-    # ------------------------------------------------------------------
-
-    PROFILE_KEYS = (
-        "preferences",
-        "stable_facts",
-        "active_projects",
-        "relationships",
-        "constraints",
-    )
-
-    PROFILE_STATUS_STALE = "stale"
-    EPISODIC_STATUS_RESOLVED = "resolved"
 
     # Minimum token allocation per section — ensures every section gets at
     # least this much budget regardless of priority weight, as long as the
@@ -333,7 +319,7 @@ class ContextAssembler:
             "relationships": "Relationships",
             "constraints": "Constraints",
         }
-        for key in self.PROFILE_KEYS:
+        for key in PROFILE_KEYS:
             values = self._to_str_list(profile.get(key))
             if not values:
                 continue
@@ -347,7 +333,7 @@ class ContextAssembler:
                 )
                 status = meta.get("status") if isinstance(meta, dict) else None
                 pinned = bool(meta.get("pinned")) if isinstance(meta, dict) else False
-                if status == self.PROFILE_STATUS_STALE and not pinned:
+                if status == PROFILE_STATUS_STALE and not pinned:
                     continue
                 conf = self._safe_float(
                     meta.get("confidence") if isinstance(meta, dict) else None, 0.65
@@ -373,7 +359,7 @@ class ContextAssembler:
             if event_type not in {"task", "decision"}:
                 continue
             status = str(event.get("status", "")).strip().lower()
-            if status == self.EPISODIC_STATUS_RESOLVED:
+            if status == EPISODIC_STATUS_RESOLVED:
                 continue
             summary = str(event.get("summary", "")).strip()
             if not summary or is_resolved_task_or_decision(summary):
