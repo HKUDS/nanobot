@@ -119,20 +119,6 @@ class MemoryStore:
         # TODO: pass config.memory_section_weights when MemoryStore receives config
         self._budget_allocator = TokenBudgetAllocator(DEFAULT_SECTION_WEIGHTS)
 
-        # Context assembler (LAN-210) — prompt rendering extracted from MemoryStore.
-        self._assembler = ContextAssembler(
-            profile_mgr=self.profile_mgr,
-            retrieve_fn=lambda *a, **kw: self.retriever.retrieve(*a, **kw),
-            planner=self._planner,
-            read_events_fn=lambda **kw: self.ingester.read_events(**kw),
-            build_graph_context_lines_fn=lambda *a, **kw: self._graph_aug.build_graph_context_lines(
-                *a, **kw
-            ),
-            budget_allocator=self._budget_allocator,
-            db=self.db,
-            embedder_available=self._embedder is not None,
-        )
-
         # MemoryMaintenance: reindex, seed, health checks, backend stats.
         self.maintenance = MemoryMaintenance(
             db=self.db,
@@ -200,6 +186,20 @@ class MemoryStore:
             embedder=self._embedder,
         )
 
+        # Context assembler (LAN-210) — prompt rendering extracted from MemoryStore.
+        # Constructed after retriever/ingester/graph_aug so all dependencies
+        # are direct references (no lambda callbacks needed).
+        self._assembler = ContextAssembler(
+            profile_mgr=self.profile_mgr,
+            retriever=self.retriever,
+            planner=self._planner,
+            event_reader=self.ingester,
+            graph_augmenter=self._graph_aug,
+            budget_allocator=self._budget_allocator,
+            db=self.db,
+            embedder_available=self._embedder is not None,
+        )
+
         # Evaluation / observability helper (LAN-204)
         from nanobot.eval.memory_eval import EvalRunner
 
@@ -214,12 +214,8 @@ class MemoryStore:
         # MemorySnapshot: rebuild memory snapshots + verify integrity.
         self.snapshot = MemorySnapshot(
             profile_mgr=self.profile_mgr,
-            profile_section_lines_fn=lambda profile, **kw: self._assembler._profile_section_lines(
-                profile, **kw
-            ),
-            recent_unresolved_fn=lambda events, **kw: self._assembler._recent_unresolved(
-                events, **kw
-            ),
+            profile_section_lines_fn=self._assembler._profile_section_lines,
+            recent_unresolved_fn=self._assembler._recent_unresolved,
             profile_keys=PROFILE_KEYS,
             db=self.db,
         )
@@ -268,39 +264,8 @@ class MemoryStore:
         )
 
     # ------------------------------------------------------------------
-    # get_memory_context — facade method (lazy assembler init)
+    # get_memory_context — facade method
     # ------------------------------------------------------------------
-
-    def _ensure_assembler(self) -> ContextAssembler:
-        """Return a ``ContextAssembler``, creating it lazily if needed.
-
-        Lazy creation supports test code that constructs ``MemoryStore`` via
-        ``__new__`` (bypassing ``__init__``) and then monkeypatches methods
-        before calling ``get_memory_context``.
-        """
-        # Fast path: already initialised (either by __init__ or a previous call).
-        assembler = getattr(self, "_assembler", None)
-        if isinstance(assembler, ContextAssembler):
-            return assembler
-
-        # Use getattr for attrs that may be missing when __init__ was bypassed
-        # (e.g. test code using MemoryStore.__new__).
-        profile_mgr = getattr(self, "profile_mgr", None)
-        planner = getattr(self, "_planner", None) or RetrievalPlanner()
-
-        self._assembler = ContextAssembler(
-            profile_mgr=profile_mgr,  # type: ignore[arg-type]
-            retrieve_fn=lambda *a, **kw: self.retriever.retrieve(*a, **kw),
-            planner=planner,
-            read_events_fn=lambda **kw: self.ingester.read_events(**kw),
-            build_graph_context_lines_fn=lambda *a, **kw: self._graph_aug.build_graph_context_lines(
-                *a, **kw
-            ),
-            budget_allocator=getattr(self, "_budget_allocator", None),
-            db=self.db,
-            embedder_available=getattr(self, "_embedder", None) is not None,
-        )
-        return self._assembler
 
     async def get_memory_context(
         self,
@@ -313,7 +278,7 @@ class MemoryStore:
         recency_half_life_days: float | None = None,
         embedding_provider: str | None = None,
     ) -> str:
-        return await self._ensure_assembler().build(
+        return await self._assembler.build(
             query=query,
             retrieval_k=retrieval_k,
             token_budget=token_budget,
