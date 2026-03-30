@@ -116,21 +116,27 @@ class Qwen3ASRTranscriptionProvider:
 
         try:
             mime = self._MIME.get(path.suffix.lower(), "audio/mpeg")
-            audio_data = base64.b64encode(path.read_bytes()).decode()
-            data_url = f"data:{mime};base64,{audio_data}"
+
+            def _build_request(_path: Path, _mime: str) -> dict:
+                audio_data = base64.b64encode(_path.read_bytes()).decode()
+                data_url = f"data:{_mime};base64,{audio_data}"
+                return {"role": "user", "content": [{"audio": data_url}]}
+
+            message = await asyncio.to_thread(_build_request, path, mime)
 
             response = await asyncio.to_thread(
                 dashscope.MultiModalConversation.call,
                 model=self.MODEL,
                 api_key=self.api_key,
-                messages=[{
-                    "role": "user",
-                    "content": [{"audio": data_url}],
-                }],
+                messages=[message],
             )
 
             if response.status_code != 200:
-                logger.error("Qwen3-ASR failed: {} {}", response.status_code, response.message)
+                logger.error(
+                    "Qwen3-ASR failed: {} {}",
+                    response.status_code,
+                    getattr(response, "message", ""),
+                )
                 return ""
 
             choices = getattr(response.output, "choices", None)

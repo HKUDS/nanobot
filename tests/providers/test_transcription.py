@@ -16,9 +16,9 @@ from nanobot.providers.transcription import Qwen3ASRTranscriptionProvider
 
 
 @pytest.mark.asyncio
-async def test_qwen3_asr_no_api_key_returns_empty():
+async def test_qwen3_asr_no_api_key_returns_empty(tmp_path):
     provider = Qwen3ASRTranscriptionProvider(api_key=None)
-    result = await provider.transcribe("/tmp/audio.mp3")
+    result = await provider.transcribe(tmp_path / "audio.mp3")
     assert result == ""
 
 
@@ -123,7 +123,11 @@ async def test_qwen3_asr_passes_api_key_per_call(tmp_path):
 
     captured: list[dict] = []
 
-    async def fake_to_thread(fn, **kwargs):
+    async def fake_to_thread(fn, *args, **kwargs):
+        # First call: _build_request(path, mime) — run it for real to produce the message
+        if args:
+            return fn(*args, **kwargs)
+        # Second call: dashscope.MultiModalConversation.call(..., api_key=...) — capture kwargs
         captured.append(kwargs)
         return mock_response
 
@@ -133,8 +137,8 @@ async def test_qwen3_asr_passes_api_key_per_call(tmp_path):
             result = await provider.transcribe(audio_file)
 
     assert result == "hello"
-    # api_key must appear as a kwarg in the call, not set globally
-    assert captured, "asyncio.to_thread was not called"
+    # api_key must appear as a kwarg in the dashscope call, not set globally
+    assert captured, "asyncio.to_thread was not called for dashscope"
     assert captured[0].get("api_key") == "my-secret-key"
 
 
