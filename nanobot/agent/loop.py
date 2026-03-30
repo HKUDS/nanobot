@@ -244,9 +244,12 @@ class AgentLoop:
             async def before_execute_tools(self, context: AgentHookContext) -> None:
                 if on_progress:
                     if not on_stream:
-                        thought = loop_self._strip_think(context.response.content if context.response else None)
-                        if thought:
-                            await on_progress(thought)
+                        # Show only user-visible text before executing tools.
+                        display_text = loop_self._strip_think(
+                            context.response.content if context.response else None
+                        )
+                        if display_text:
+                            await on_progress(display_text)
                     tool_hint = loop_self._strip_think(loop_self._tool_hint(context.tool_calls))
                     await on_progress(tool_hint, tool_hint=True)
                 for tc in context.tool_calls:
