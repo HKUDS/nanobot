@@ -36,11 +36,7 @@ class ContextBuilder:
     def set_viking_client(self, client: VikingClient) -> None:
         self._viking_client = client
 
-    async def build_system_prompt(
-        self,
-        skill_names: list[str] | None = None,
-        current_message: str = "",
-    ) -> str:
+    async def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
 
@@ -183,9 +179,7 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
-        system_prompt = await self.build_system_prompt(
-            skill_names, current_message=current_message,
-        )
+        system_prompt = await self.build_system_prompt(skill_names)
 
         if self._viking_client and current_message:
             viking_mem = await self.memory.get_viking_memory_context(
