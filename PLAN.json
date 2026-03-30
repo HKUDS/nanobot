@@ -2,89 +2,67 @@
   {
     "id": 1,
     "category": "setup",
-    "description": "The `/coding` slash-command expansion and auto-complete work is tracked as its own harness task so future sessions can resume from the new command grammar, index selection, and harness-completion semantics without rediscovering them live.",
+    "description": "The failed/cancelled coding-task visibility cleanup is tracked as its own harness task so future sessions can resume from the new Telegram task-selection rules without re-deriving the visibility policy.",
     "steps": [
-      "Open PLAN.json and verify it only tracks the `/coding` slash-command and auto-complete harness.",
-      "Open PROGRESS.md and verify the reboot entry records the current baseline: `/coding status` already exists, `running` pushes are disabled, and completed harness creation already skips confirmation.",
-      "Confirm the scope remains limited to Telegram `/coding` orchestration, task lifecycle, and status reporting rather than changing the Codex worker model or target-repo harness file format."
+      "Open PLAN.json and verify it only tracks the failed/cancelled visibility cleanup harness.",
+      "Open PROGRESS.md and verify the reboot entry records the current baseline: failed tasks still block new `/coding` starts and `/coding list` still shows failed/cancelled tasks.",
+      "Confirm the scope remains limited to Telegram `/coding` orchestration, active-task semantics, task-list visibility, and documentation rather than changing persistence formats or deleting task history."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 2,
     "category": "functional",
-    "description": "Telegram `/coding` recognizes explicit slash subcommands for list, status, pause, resume, and stop without regressing the existing `/coding <repo> <goal>` start flow.",
+    "description": "Workspace-wide and per-origin active-task selection treat only `starting`, `running`, and `waiting_user` as active so failed/cancelled tasks no longer block new `/coding` starts.",
     "steps": [
-      "Send `/coding list`, `/coding status`, `/coding pause`, `/coding resume`, and `/coding stop` and verify each routes to the correct control path instead of the start-command parser.",
-      "Send `/coding <repo> <goal>` and verify it still creates and launches a coding task.",
-      "Verify malformed or unsupported slash subcommands return a clear coding-task usage error instead of creating a task."
+      "Create failed and cancelled tasks and verify the workspace active-task selector ignores them.",
+      "Verify a running or waiting task still blocks new `/coding <repo> <goal>` creation.",
+      "Verify a failed task in the same Telegram chat no longer occupies the active slot used by default control selection."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 3,
     "category": "functional",
-    "description": "Telegram `/coding list` shows the current private-chat task list with 1-based indexes, and indexed slash commands resolve against that list newest-first.",
+    "description": "Telegram `/coding list` hides failed/cancelled tasks and renumbers the visible list newest-first with 1-based indexes.",
     "steps": [
-      "Create multiple coding tasks for the same Telegram private chat and verify `/coding list` shows them newest-first with index, task id, status, repo, goal summary, and recoverability.",
-      "Run `/coding status 2`, `/coding pause 2`, `/coding resume 2`, and `/coding stop 2` and verify each targets the second listed task.",
-      "Verify non-numeric or out-of-range indexes return a clear error without mutating any task."
+      "Create running, completed, failed, and cancelled tasks for one Telegram private chat and verify `/coding list` only shows the visible tasks newest-first.",
+      "Verify failed and cancelled tasks remain persisted in the store and artifacts even though they disappear from Telegram list output.",
+      "Verify the empty-state message is clear when a chat only has hidden terminal tasks."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 4,
     "category": "functional",
-    "description": "Pause and resume use recoverable lifecycle semantics while slash stop ends the selected task as a terminal state.",
+    "description": "Slash index selection and default Telegram control targeting operate only on the visible task set, so hidden failed/cancelled tasks can no longer be targeted or chosen implicitly.",
     "steps": [
-      "Pause a running task and verify the worker is interrupted and the task becomes `waiting_user` so it can be resumed later.",
-      "Resume a paused or failed task and verify the launcher relaunches it back into `starting`.",
-      "Stop a task and verify it becomes terminal (`cancelled`) rather than merely recoverable."
+      "Verify `/coding status 1`, `/coding pause 1`, `/coding resume 1`, and `/coding stop 1` target the first visible task rather than a hidden failed/cancelled task.",
+      "Verify out-of-range indexes return a clear error after visibility filtering.",
+      "Verify `/coding status` without an index returns a no-manageable-task message when a chat only has hidden terminal tasks."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 5,
-    "category": "functional",
-    "description": "When the target repo harness reports all work complete, nanobot automatically marks the coding task as completed without requiring any user confirmation.",
+    "category": "testing",
+    "description": "Focused tests cover the new active-slot semantics, hidden list behavior, filtered index selection, and the unchanged ability to inspect hidden tasks directly by task id through CLI tooling.",
     "steps": [
-      "Prepare a repo whose `PLAN.json` has all `passes=true`, refresh a task in `starting`, `running`, or `waiting_user`, and verify nanobot transitions it to `completed` automatically.",
-      "Verify the auto-complete path does not require a Telegram confirmation message or an extra control command from the user.",
-      "Verify unfinished harnesses do not trigger the completed transition."
+      "Run focused pytest for coding-task routing, policy, and manager behavior touching failed/cancelled visibility and selection.",
+      "Verify tests cover new `/coding list` hiding behavior and that failed tasks no longer block new starts.",
+      "Confirm `.venv/bin/python -m compileall` still succeeds for the touched coding-task modules and tests."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 6,
-    "category": "functional",
-    "description": "Telegram proactive pushes stay lifecycle-only: starting, waiting_user, completed, and failed still notify, while running progress remains query-only behind status commands.",
-    "steps": [
-      "Trigger a starting task and verify Telegram sends one start notification.",
-      "Advance a task to `running` and verify poll-loop progress refreshes do not emit proactive Telegram messages.",
-      "Verify `waiting_user`, `completed`, and `failed` continue to send their dedicated lifecycle notifications."
-    ],
-    "passes": true
-  },
-  {
-    "id": 7,
-    "category": "testing",
-    "description": "Focused tests cover slash-command parsing, list/index selection, lifecycle transitions, auto-complete behavior, and status reporting without regressing the current coding-task routing.",
-    "steps": [
-      "Run focused pytest for routing, policy or selection behavior, progress monitoring, notifier behavior, and CLI status coverage.",
-      "Verify the suite covers `/coding list`, indexed slash commands, slash stop terminal semantics, and automatic completion when the repo harness is finished.",
-      "Confirm `.venv/bin/python -m compileall` still succeeds for the touched coding-task modules and tests."
-    ],
-    "passes": true
-  },
-  {
-    "id": 8,
     "category": "docs",
-    "description": "README and PROGRESS.md document the new `/coding` subcommands, index-based targeting, and automatic completion semantics for finished harnesses.",
+    "description": "README and PROGRESS.md document that failed/cancelled coding tasks are hidden from Telegram `/coding` task management without being deleted from persisted history.",
     "steps": [
-      "Open README.md and verify it documents `/coding list`, indexed status or control commands, and the lifecycle-only Telegram push policy.",
-      "Open PROGRESS.md and verify it records the baseline, the new slash-command decisions, and the auto-complete behavior for finished repo harnesses.",
-      "Confirm PLAN.json is fully marked complete after implementation and verification pass."
+      "Open README.md and verify it documents the hidden-terminal-task behavior for `/coding list` and active-slot selection.",
+      "Open PROGRESS.md and verify it records the baseline, the no-delete decision, and the completed implementation summary.",
+      "Confirm PLAN.json is fully marked complete after the implementation and verification pass."
     ],
-    "passes": true
+    "passes": false
   }
 ]

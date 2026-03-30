@@ -1,3 +1,18 @@
+## Harness reboot - 2026-03-31 (coding-task hidden terminal tasks)
+- Task pivot:
+  - Superseded the prior completed `/coding` slash-controls harness with a follow-up task focused on hiding `failed` and `cancelled` Telegram coding tasks without deleting their persisted history.
+- Existing work detected before re-planning:
+  - `/coding list` still shows every origin task newest-first, including `failed` and `cancelled`.
+  - Workspace and per-origin active-task selection still treat `failed` as non-terminal, so failed tasks can block new `/coding <repo> <goal>` requests.
+  - Indexed slash controls resolve against the full origin task list rather than a Telegram-visible subset.
+- Baseline validation before edits:
+  - `bash ~/.codex/scripts/global-init.sh` -> exited 0 with the known repo-wide pytest warning still present in `/tmp/nanobot-harness-pytest.log`
+  - `.venv/bin/pytest tests/agent/test_coding_task_routing.py tests/coding_tasks/test_notifier.py tests/coding_tasks/test_progress.py` -> passed (51 tests)
+- Key decisions:
+  - Interpret the user's “删除掉” request as “hide from Telegram `/coding` management, do not physically delete persisted tasks or run logs”.
+  - Treat only `starting`, `running`, and `waiting_user` as active for workspace blocking and default Telegram control targeting.
+  - Keep completed tasks visible in `/coding list`; hide only `failed` and `cancelled`.
+
 ## Harness reboot - 2026-03-30 (coding-task slash commands and auto-complete)
 - Task pivot:
   - Superseded the prior `/coding` behavior convergence harness with a new follow-up task focused on slash-command parity (`list/pause/resume/stop`), index-based task selection, and automatically completing coding tasks when the target repo harness itself is fully complete.
