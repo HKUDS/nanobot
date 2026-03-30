@@ -47,12 +47,12 @@ def test_system_prompt_stays_stable_when_clock_changes(tmp_path, monkeypatch) ->
     assert prompt1 == prompt2
 
 
-def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
+async def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     """Runtime metadata should be merged with the user message."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
-    messages = builder.build_messages(
+    messages = await builder.build_messages(
         history=[],
         current_message="Return exactly: OK",
         channel="cli",

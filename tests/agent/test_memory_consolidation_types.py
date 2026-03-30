@@ -73,7 +73,7 @@ class TestMemoryConsolidationTypeHandling:
         provider.chat_with_retry = provider.chat
         messages = _make_messages(message_count=60)
 
-        result = await store.consolidate(messages, provider, "test-model")
+        result = await store._consolidate_with_provider(messages, provider, "test-model")
 
         assert result is True
         assert store.history_file.exists()
@@ -94,7 +94,7 @@ class TestMemoryConsolidationTypeHandling:
         provider.chat_with_retry = provider.chat
         messages = _make_messages(message_count=60)
 
-        result = await store.consolidate(messages, provider, "test-model")
+        result = await store._consolidate_with_provider(messages, provider, "test-model")
 
         assert result is True
         assert store.history_file.exists()
@@ -129,7 +129,7 @@ class TestMemoryConsolidationTypeHandling:
         provider.chat_with_retry = provider.chat
         messages = _make_messages(message_count=60)
 
-        result = await store.consolidate(messages, provider, "test-model")
+        result = await store._consolidate_with_provider(messages, provider, "test-model")
 
         assert result is True
         assert "User discussed testing." in store.history_file.read_text()
@@ -145,7 +145,7 @@ class TestMemoryConsolidationTypeHandling:
         provider.chat_with_retry = provider.chat
         messages = _make_messages(message_count=60)
 
-        result = await store.consolidate(messages, provider, "test-model")
+        result = await store._consolidate_with_provider(messages, provider, "test-model")
 
         assert result is False
         assert not store.history_file.exists()
@@ -158,7 +158,7 @@ class TestMemoryConsolidationTypeHandling:
         provider.chat_with_retry = provider.chat
         messages: list[dict] = []
 
-        result = await store.consolidate(messages, provider, "test-model")
+        result = await store._consolidate_with_provider(messages, provider, "test-model")
 
         assert result is True
         provider.chat.assert_not_called()
@@ -186,7 +186,7 @@ class TestMemoryConsolidationTypeHandling:
         provider.chat_with_retry = provider.chat
         messages = _make_messages(message_count=60)
 
-        result = await store.consolidate(messages, provider, "test-model")
+        result = await store._consolidate_with_provider(messages, provider, "test-model")
 
         assert result is True
         assert "User discussed testing." in store.history_file.read_text()
@@ -212,7 +212,7 @@ class TestMemoryConsolidationTypeHandling:
         provider.chat_with_retry = provider.chat
         messages = _make_messages(message_count=60)
 
-        result = await store.consolidate(messages, provider, "test-model")
+        result = await store._consolidate_with_provider(messages, provider, "test-model")
 
         assert result is False
 
@@ -236,7 +236,7 @@ class TestMemoryConsolidationTypeHandling:
         provider.chat_with_retry = provider.chat
         messages = _make_messages(message_count=60)
 
-        result = await store.consolidate(messages, provider, "test-model")
+        result = await store._consolidate_with_provider(messages, provider, "test-model")
 
         assert result is False
 
@@ -259,7 +259,7 @@ class TestMemoryConsolidationTypeHandling:
         )
         messages = _make_messages(message_count=60)
 
-        result = await store.consolidate(messages, provider, "test-model")
+        result = await store._consolidate_with_provider(messages, provider, "test-model")
 
         assert result is False
         assert not store.history_file.exists()
@@ -284,7 +284,7 @@ class TestMemoryConsolidationTypeHandling:
         )
         messages = _make_messages(message_count=60)
 
-        result = await store.consolidate(messages, provider, "test-model")
+        result = await store._consolidate_with_provider(messages, provider, "test-model")
 
         assert result is False
         assert not store.history_file.exists()
@@ -303,7 +303,7 @@ class TestMemoryConsolidationTypeHandling:
         )
         messages = _make_messages(message_count=60)
 
-        result = await store.consolidate(messages, provider, "test-model")
+        result = await store._consolidate_with_provider(messages, provider, "test-model")
 
         assert result is False
         assert not store.history_file.exists()
@@ -322,7 +322,7 @@ class TestMemoryConsolidationTypeHandling:
         )
         messages = _make_messages(message_count=60)
 
-        result = await store.consolidate(messages, provider, "test-model")
+        result = await store._consolidate_with_provider(messages, provider, "test-model")
 
         assert result is False
         assert not store.history_file.exists()
@@ -346,7 +346,7 @@ class TestMemoryConsolidationTypeHandling:
 
         monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
 
-        result = await store.consolidate(messages, provider, "test-model")
+        result = await store._consolidate_with_provider(messages, provider, "test-model")
 
         assert result is True
         assert provider.calls == 2
@@ -365,7 +365,7 @@ class TestMemoryConsolidationTypeHandling:
         )
         messages = _make_messages(message_count=60)
 
-        result = await store.consolidate(messages, provider, "test-model")
+        result = await store._consolidate_with_provider(messages, provider, "test-model")
 
         assert result is True
         provider.chat_with_retry.assert_awaited_once()
@@ -400,7 +400,7 @@ class TestMemoryConsolidationTypeHandling:
         provider.chat_with_retry = AsyncMock(side_effect=_tracking_chat)
         messages = _make_messages(message_count=60)
 
-        result = await store.consolidate(messages, provider, "test-model")
+        result = await store._consolidate_with_provider(messages, provider, "test-model")
 
         assert result is True
         assert len(call_log) == 2
@@ -427,7 +427,7 @@ class TestMemoryConsolidationTypeHandling:
         provider.chat_with_retry = AsyncMock(side_effect=[error_resp, no_tool_resp])
         messages = _make_messages(message_count=60)
 
-        result = await store.consolidate(messages, provider, "test-model")
+        result = await store._consolidate_with_provider(messages, provider, "test-model")
 
         assert result is False
         assert not store.history_file.exists()
@@ -441,9 +441,9 @@ class TestMemoryConsolidationTypeHandling:
         provider.chat_with_retry = AsyncMock(return_value=no_tool)
         messages = _make_messages(message_count=10)
 
-        assert await store.consolidate(messages, provider, "m") is False
-        assert await store.consolidate(messages, provider, "m") is False
-        assert await store.consolidate(messages, provider, "m") is True
+        assert await store._consolidate_with_provider(messages, provider, "m") is False
+        assert await store._consolidate_with_provider(messages, provider, "m") is False
+        assert await store._consolidate_with_provider(messages, provider, "m") is True
 
         assert store.history_file.exists()
         content = store.history_file.read_text()
@@ -465,14 +465,14 @@ class TestMemoryConsolidationTypeHandling:
 
         provider = AsyncMock()
         provider.chat_with_retry = AsyncMock(return_value=no_tool)
-        assert await store.consolidate(messages, provider, "m") is False
-        assert await store.consolidate(messages, provider, "m") is False
+        assert await store._consolidate_with_provider(messages, provider, "m") is False
+        assert await store._consolidate_with_provider(messages, provider, "m") is False
         assert store._consecutive_failures == 2
 
         provider.chat_with_retry = AsyncMock(return_value=ok_resp)
-        assert await store.consolidate(messages, provider, "m") is True
+        assert await store._consolidate_with_provider(messages, provider, "m") is True
         assert store._consecutive_failures == 0
 
         provider.chat_with_retry = AsyncMock(return_value=no_tool)
-        assert await store.consolidate(messages, provider, "m") is False
+        assert await store._consolidate_with_provider(messages, provider, "m") is False
         assert store._consecutive_failures == 1

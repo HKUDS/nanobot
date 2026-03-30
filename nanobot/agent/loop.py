@@ -33,8 +33,38 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
+    from nanobot.agent.memory import MemoryBackend
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
     from nanobot.cron.service import CronService
+
+
+def load_memory_backend(config: Any) -> "MemoryBackend":
+    """Discover and instantiate the configured memory backend from installed entry-points.
+
+    Falls back to the built-in MemoryStore when:
+    - ``config.memory.backend`` is ``"default"``
+    - No matching entry-point is registered
+    """
+    from importlib.metadata import entry_points
+    from nanobot.agent.memory import MemoryStore
+
+    backend_name = getattr(getattr(config, "memory", None), "backend", "default")
+    if backend_name == "default":
+        return MemoryStore(config.workspace_path)
+
+    for ep in entry_points(group="nanobot.memory"):
+        if ep.name == backend_name:
+            backend_cls = ep.load()
+            if hasattr(backend_cls, "from_nanobot_config"):
+                return backend_cls.from_nanobot_config(config)
+            return backend_cls(config)
+
+    logger.warning(
+        "Memory backend '{}' not found in nanobot.memory entry-points; "
+        "falling back to default MemoryStore",
+        backend_name,
+    )
+    return MemoryStore(config.workspace_path)
 
 
 class AgentLoop:
@@ -68,6 +98,7 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
+        memory_backend: "MemoryBackend | None" = None,  # NEW
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -86,7 +117,11 @@ class AgentLoop:
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
 
-        self.context = ContextBuilder(workspace, timezone=timezone)
+        from nanobot.agent.memory import MemoryStore
+        self.memory_backend = memory_backend if memory_backend is not None else MemoryStore(workspace)
+        self._backend_started = False
+
+        self.context = ContextBuilder(workspace, timezone=timezone, memory_backend=self.memory_backend)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)
@@ -125,6 +160,8 @@ class AgentLoop:
             max_completion_tokens=provider.generation.max_tokens,
         )
         self._register_default_tools()
+        for tool in self.memory_backend.get_tools():
+            self.tools.register(tool)
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
 
@@ -150,6 +187,12 @@ class AgentLoop:
             self.tools.register(
                 CronTool(self.cron_service, default_timezone=self.context.timezone or "UTC")
             )
+
+    async def _start_backend(self) -> None:
+        """Start the memory backend once (deferred to avoid event-loop issues at __init__)."""
+        if not self._backend_started:
+            await self.memory_backend.start(self.provider)
+            self._backend_started = True
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -277,6 +320,7 @@ class AgentLoop:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
         await self._connect_mcp()
+        await self._start_backend()
         logger.info("Agent loop started")
 
         while self._running:
@@ -406,10 +450,11 @@ class AgentLoop:
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
-            messages = self.context.build_messages(
+            messages = await self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
+                session_key=key,
             )
             final_content, _, all_msgs = await self._run_agent_loop(
                 messages, channel=channel, chat_id=chat_id,
@@ -417,7 +462,16 @@ class AgentLoop:
             )
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
-            self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+            if self.memory_backend.consolidates_per_turn:
+                turn_messages = all_msgs[1 + len(history):]
+                self._schedule_background(
+                    self.memory_backend.consolidate(turn_messages, key)
+                )
+            self._schedule_background(
+                self.memory_consolidator.maybe_consolidate_by_tokens(
+                    session, skip_llm=self.memory_backend.consolidates_per_turn
+                )
+            )
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
 
@@ -441,11 +495,12 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=0)
-        initial_messages = self.context.build_messages(
+        initial_messages = await self.context.build_messages(
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            session_key=key,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -470,7 +525,16 @@ class AgentLoop:
 
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
-        self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+        if self.memory_backend.consolidates_per_turn:
+            turn_messages = all_msgs[1 + len(history):]
+            self._schedule_background(
+                self.memory_backend.consolidate(turn_messages, key)
+            )
+        self._schedule_background(
+            self.memory_consolidator.maybe_consolidate_by_tokens(
+                session, skip_llm=self.memory_backend.consolidates_per_turn
+            )
+        )
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
@@ -577,6 +641,7 @@ class AgentLoop:
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
+        await self._start_backend()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         return await self._process_message(
             msg, session_key=session_key, on_progress=on_progress,

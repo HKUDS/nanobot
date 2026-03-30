@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import weakref
+from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
@@ -72,7 +73,44 @@ def _is_tool_choice_unsupported(content: str | None) -> bool:
     return any(m in text for m in _TOOL_CHOICE_ERROR_MARKERS)
 
 
-class MemoryStore:
+class MemoryBackend(ABC):
+    """Abstract base class for nanobot memory backends.
+
+    Backends are discovered via the ``nanobot.memory`` entry-point group.
+    The default backend is ``MemoryStore`` (flat-file MEMORY.md).
+    """
+
+    @property
+    def consolidates_per_turn(self) -> bool:
+        """True if this backend captures facts after every turn.
+
+        When True, AgentLoop fires ``consolidate()`` as a background task
+        after each turn, and MemoryConsolidator skips its LLM archival step.
+        When False (default), MemoryConsolidator governs consolidation under
+        token-pressure.
+        """
+        return False
+
+    def get_tools(self) -> list:
+        """Return extra Tool instances to register in AgentLoop. Default: none."""
+        return []
+
+    async def start(self, provider: Any) -> None:
+        """Lifecycle: called once at agent startup (after the event loop is running)."""
+
+    async def stop(self) -> None:
+        """Lifecycle: called on graceful shutdown."""
+
+    @abstractmethod
+    async def consolidate(self, messages: list[dict], session_key: str) -> None:
+        """Post-turn: extract and store facts from the completed turn's messages."""
+
+    @abstractmethod
+    async def retrieve(self, query: str, session_key: str, top_k: int = 5) -> str:
+        """Pre-turn: return a formatted context block of relevant memories, or '' if none."""
+
+
+class MemoryStore(MemoryBackend):
     """Two-layer memory: MEMORY.md (long-term facts) + HISTORY.md (grep-searchable log)."""
 
     _MAX_FAILURES_BEFORE_RAW_ARCHIVE = 3
@@ -111,7 +149,7 @@ class MemoryStore:
             )
         return "\n".join(lines)
 
-    async def consolidate(
+    async def _consolidate_with_provider(
         self,
         messages: list[dict],
         provider: LLMProvider,
@@ -218,6 +256,15 @@ class MemoryStore:
             "Memory consolidation degraded: raw-archived {} messages", len(messages)
         )
 
+    # --- MemoryBackend interface ---
+
+    async def consolidate(self, messages: list[dict], session_key: str) -> None:
+        """No-op: MemoryConsolidator handles consolidation for the MemoryStore path."""
+
+    async def retrieve(self, query: str, session_key: str, top_k: int = 5) -> str:
+        """Return full MEMORY.md content (query-independent, preserves current behaviour)."""
+        return self.get_memory_context()
+
 
 class MemoryConsolidator:
     """Owns consolidation policy, locking, and session offset updates."""
@@ -253,7 +300,7 @@ class MemoryConsolidator:
 
     async def consolidate_messages(self, messages: list[dict[str, object]]) -> bool:
         """Archive a selected message chunk into persistent memory."""
-        return await self.store.consolidate(messages, self.provider, self.model)
+        return await self.store._consolidate_with_provider(messages, self.provider, self.model)
 
     def pick_consolidation_boundary(
         self,
@@ -277,11 +324,11 @@ class MemoryConsolidator:
 
         return last_boundary
 
-    def estimate_session_prompt_tokens(self, session: Session) -> tuple[int, str]:
+    async def estimate_session_prompt_tokens(self, session: Session) -> tuple[int, str]:
         """Estimate current prompt size for the normal session history view."""
         history = session.get_history(max_messages=0)
         channel, chat_id = (session.key.split(":", 1) if ":" in session.key else (None, None))
-        probe_messages = self._build_messages(
+        probe_messages = await self._build_messages(
             history=history,
             current_message="[token-probe]",
             channel=channel,
@@ -303,11 +350,15 @@ class MemoryConsolidator:
                 return True
         return True
 
-    async def maybe_consolidate_by_tokens(self, session: Session) -> None:
+    async def maybe_consolidate_by_tokens(self, session: Session, skip_llm: bool = False) -> None:
         """Loop: archive old messages until prompt fits within safe budget.
 
         The budget reserves space for completion tokens and a safety buffer
         so the LLM request never exceeds the context window.
+
+        Args:
+            session: The session to consolidate.
+            skip_llm: If True, prune messages without calling LLM consolidation.
         """
         if not session.messages or self.context_window_tokens <= 0:
             return
@@ -316,7 +367,7 @@ class MemoryConsolidator:
         async with lock:
             budget = self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
             target = budget // 2
-            estimated, source = self.estimate_session_prompt_tokens(session)
+            estimated, source = await self.estimate_session_prompt_tokens(session)
             if estimated <= 0:
                 return
             if estimated < budget:
@@ -356,11 +407,12 @@ class MemoryConsolidator:
                     source,
                     len(chunk),
                 )
-                if not await self.consolidate_messages(chunk):
-                    return
+                if not skip_llm:
+                    if not await self.consolidate_messages(chunk):
+                        return
                 session.last_consolidated = end_idx
                 self.sessions.save(session)
 
-                estimated, source = self.estimate_session_prompt_tokens(session)
+                estimated, source = await self.estimate_session_prompt_tokens(session)
                 if estimated <= 0:
                     return

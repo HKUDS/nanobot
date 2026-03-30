@@ -504,7 +504,7 @@ def gateway(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Start the nanobot gateway."""
-    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.loop import AgentLoop, load_memory_backend
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
     from nanobot.cron.service import CronService
@@ -550,6 +550,7 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        memory_backend=load_memory_backend(config),
     )
 
     # Set cron callback (needs agent)
@@ -717,7 +718,7 @@ def agent(
     """Interact with the agent directly."""
     from loguru import logger
 
-    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.loop import AgentLoop, load_memory_backend
     from nanobot.bus.queue import MessageBus
     from nanobot.cron.service import CronService
 
@@ -755,6 +756,7 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        memory_backend=load_memory_backend(config),
     )
 
     # Shared reference for progress callbacks
