@@ -38,7 +38,7 @@ multi-channel messaging.
 |---------|---------|-------------|
 | `agent/` | Orchestration engine (tool-use loop, guardrails) | `AgentLoop`, `TurnRunner`, `GuardrailChain`, `MessageProcessor` |
 | `coordination/` | Mission management and scratchpad | `MissionManager`, `Scratchpad` |
-| `memory/` | Persistent memory with hybrid retrieval | `MemoryStore`, `UnifiedMemoryDB`, `KnowledgeGraph` |
+| `memory/` | Persistent memory with hybrid retrieval | `MemoryStore`, `MemoryDatabase`, `KnowledgeGraph` |
 | `tools/` | Tool infrastructure + domain implementations | `Tool`, `ToolRegistry`, `ToolExecutor`, `CapabilityRegistry` |
 | `context/` | Prompt assembly and skill discovery | `ContextBuilder`, `SkillsLoader`, `PromptLoader` |
 | `observability/` | Instrumentation and tracing | `init_langfuse()`, `TraceContext`, `bind_trace()` |
@@ -181,7 +181,7 @@ Channel.start() → bus.publish_inbound(InboundMessage)
 ```
 Session ends → AgentLoop triggers consolidation
   → MemoryExtractor.extract_structured_memory(messages) → list[MemoryEvent]
-  → EventIngester.append_events() → UnifiedMemoryDB (SQLite)
+  → EventIngester.append_events() → MemoryDatabase (SQLite)
   → ConsolidationPipeline.consolidate() → update profile + snapshot
 ```
 
@@ -214,7 +214,7 @@ See [docs/adr/](adr/) for Architecture Decision Records:
 
 ## Storage Layer
 
-- **`memory/unified_db.py`** — Single SQLite database (`memory.db`) with FTS5 + sqlite-vec
+- **`memory/db/`** — `MemoryDatabase` (connection + profile/history/snapshot), `EventStore` (events + FTS5 + vector), `GraphStore` (entities + edges + BFS)
 - **`memory/embedder.py`** — `Embedder` protocol with `OpenAIEmbedder` and `LocalEmbedder`
 - **Knowledge graph** — entities and edges in SQLite tables; BFS via recursive CTE
 
@@ -223,7 +223,10 @@ See [docs/adr/](adr/) for Architecture Decision Records:
 ```
 memory/
 ├── store.py                  # Facade composing all subsystems
-├── unified_db.py             # SQLite backend
+├── db/                       # Storage layer (shared SQLite connection)
+│   ├── connection.py         # MemoryDatabase — connection + profile/history/snapshot
+│   ├── event_store.py        # EventStore — events + FTS5 + vector search
+│   └── graph_store.py        # GraphStore — entities + edges + BFS traversal
 ├── embedder.py               # Embedding protocol + implementations
 ├── event.py                  # MemoryEvent model
 ├── write/                    # Ingestion pipeline

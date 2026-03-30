@@ -1015,7 +1015,7 @@ CREATE INDEX IF NOT EXISTS idx_strategies_domain ON strategies(domain);
 CREATE INDEX IF NOT EXISTS idx_strategies_task_type ON strategies(task_type);
 ```
 
-This lives in the existing `UnifiedMemoryDB` — one new table, no schema changes to
+This lives in the existing `MemoryDatabase` — one new table, no schema changes to
 existing tables.
 
 #### Write Path: Strategy Extraction

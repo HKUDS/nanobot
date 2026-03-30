@@ -190,9 +190,9 @@ issue would have been caught by following them:
 
 The memory subsystem (`nanobot/memory/`) uses a **unified SQLite storage** strategy:
 
-1. **Write path**: Events extracted by `MemoryExtractor` (LLM-based) -> stored in `UnifiedMemoryDB` (SQLite + FTS5 + sqlite-vec)
+1. **Write path**: Events extracted by `MemoryExtractor` (LLM-based) -> stored in `MemoryDatabase` (SQLite + FTS5 + sqlite-vec)
 2. **Read path**: Vector search (sqlite-vec) + full-text search (FTS5) -> RRF fusion -> cross-encoder re-ranking via ONNX Runtime (`reranker.py`, `onnx_reranker.py`)
-3. **Persistence**: `UnifiedMemoryDB` manages all storage in a single SQLite database (events, profile, embeddings, knowledge graph)
+3. **Persistence**: `MemoryDatabase` manages all storage in a single SQLite database (events, profile, embeddings, knowledge graph)
 4. **Consolidation**: Periodic pass merges events, updates profile, compacts snapshots
 
 **Note**: `case/memory_eval_cases.json` is used by the advisory trend benchmark (`make memory-eval`). Behavioral correctness is enforced by contract tests in `tests/contract/` and LLM round-trip tests in `tests/test_memory_roundtrip.py`.
