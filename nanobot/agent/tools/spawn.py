@@ -16,6 +16,7 @@ class SpawnTool(Tool):
         self._origin_channel = "cli"
         self._origin_chat_id = "direct"
         self._session_key = "cli:direct"
+        self._mcp_tool_names: list[str] = []
 
     def set_context(self, channel: str, chat_id: str) -> None:
         """Set the origin context for subagent announcements."""
@@ -23,19 +24,31 @@ class SpawnTool(Tool):
         self._origin_chat_id = chat_id
         self._session_key = f"{channel}:{chat_id}"
 
+    def set_mcp_tools(self, names: list[str]) -> None:
+        self._mcp_tool_names = names
+
     @property
     def name(self) -> str:
         return "spawn"
 
     @property
     def description(self) -> str:
-        return (
+        base = (
             "Spawn a subagent to handle a task in the background. "
             "Use this for complex or time-consuming tasks that can run independently. "
             "The subagent will complete the task and report back when done. "
             "For deliverables or existing projects, inspect the workspace first "
             "and use a dedicated subdirectory when helpful."
         )
+        if self._mcp_tool_names:
+            base += (
+                "\n\nIMPORTANT: Subagents do NOT have access to MCP tools. "
+                "The following tools are ONLY available to the main agent and "
+                "must NOT be delegated to subagents: "
+                + ", ".join(self._mcp_tool_names)
+                + ". Tasks requiring these tools must be handled directly."
+            )
+        return base
 
     @property
     def parameters(self) -> dict[str, Any]:

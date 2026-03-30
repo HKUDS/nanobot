@@ -162,6 +162,9 @@ class AgentLoop:
             await self._mcp_stack.__aenter__()
             await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
             self._mcp_connected = True
+            mcp_names = [n for n in self.tools.tool_names if n.startswith("mcp_")]
+            if mcp_names and (spawn := self.tools.get("spawn")):
+                spawn.set_mcp_tools(mcp_names)
         except BaseException as e:
             logger.error("Failed to connect MCP servers (will retry next message): {}", e)
             if self._mcp_stack:
@@ -403,10 +406,15 @@ class AgentLoop:
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
-            current_role = "assistant" if msg.sender_id == "subagent" else "user"
+            if msg.sender_id == "subagent":
+                current_role = "user"
+                subagent_content = f"[Subagent Result]\n{msg.content}"
+            else:
+                current_role = "user"
+                subagent_content = msg.content
             messages = self.context.build_messages(
                 history=history,
-                current_message=msg.content, channel=channel, chat_id=chat_id,
+                current_message=subagent_content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
             )
             final_content, _, all_msgs = await self._run_agent_loop(
