@@ -10,8 +10,7 @@ it into a single Markdown string suitable for inclusion in the system prompt.
 from __future__ import annotations
 
 import re
-from collections.abc import Awaitable
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 from loguru import logger
 
@@ -24,6 +23,40 @@ from .retrieval_planner import RetrievalPlanner
 
 if TYPE_CHECKING:
     from ..db.connection import MemoryDatabase
+
+
+class _Retriever(Protocol):
+    """Structural type for the retrieval callable."""
+
+    async def retrieve(
+        self,
+        query: str,
+        *,
+        top_k: int = 6,
+        recency_half_life_days: float | None = None,
+        embedding_provider: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Retrieve memory items matching *query*."""
+
+
+class _EventReader(Protocol):
+    """Structural type for the event read callable."""
+
+    def read_events(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+        """Read events from storage."""
+
+
+class _GraphAugmenter(Protocol):
+    """Structural type for the graph context builder."""
+
+    def build_graph_context_lines(
+        self,
+        query: str,
+        retrieved: list[dict[str, Any]],
+        budget: int,
+    ) -> list[str]:
+        """Build graph context lines for prompt injection."""
+
 
 # Intents that benefit from scanning recent unresolved events.
 # For all other intents (fact_lookup, chitchat, …) the scan is skipped.
@@ -51,13 +84,11 @@ class ContextAssembler:
     def __init__(
         self,
         profile_mgr: ProfileManager,
-        retrieve_fn: Callable[..., Awaitable[list[dict[str, Any]]]],
+        retriever: _Retriever,
         planner: RetrievalPlanner,
         *,
-        read_events_fn: Callable[..., list[dict[str, Any]]] | None = None,
-        build_graph_context_lines_fn: (
-            Callable[[str, list[dict[str, Any]], int], list[str]] | None
-        ) = None,
+        event_reader: _EventReader | None = None,
+        graph_augmenter: _GraphAugmenter | None = None,
         cap_long_term_text_fn: Callable[[str, int, str], str] | None = None,
         profile_section_lines_fn: Callable[[dict[str, Any]], list[str]] | None = None,
         read_profile_fn: Callable[[], dict[str, Any]] | None = None,
@@ -66,10 +97,10 @@ class ContextAssembler:
         embedder_available: bool = True,
     ) -> None:
         self._profile_mgr = profile_mgr
-        self._retrieve_fn = retrieve_fn
+        self._retriever = retriever
         self._planner = planner
-        self._read_events_fn = read_events_fn
-        self._build_graph_context_lines_fn = build_graph_context_lines_fn
+        self._event_reader = event_reader
+        self._graph_augmenter = graph_augmenter
         self._cap_long_term_text_fn = cap_long_term_text_fn
         self._profile_section_lines_fn = profile_section_lines_fn
         self._read_profile_fn = read_profile_fn
@@ -112,7 +143,7 @@ class ContextAssembler:
         )
 
         try:
-            retrieved = await self._retrieve_fn(
+            retrieved = await self._retriever.retrieve(
                 query or "",
                 top_k=retrieval_k,
                 recency_half_life_days=recency_half_life_days,
@@ -156,8 +187,8 @@ class ContextAssembler:
         raw_reflection = [self._memory_item_line(item) for item in reflection_items]
 
         raw_graph: list[str] = []
-        if query and self._build_graph_context_lines_fn is not None:
-            raw_graph = self._build_graph_context_lines_fn(
+        if query and self._graph_augmenter is not None:
+            raw_graph = self._graph_augmenter.build_graph_context_lines(
                 query,
                 retrieved,
                 budget,
@@ -300,8 +331,8 @@ class ContextAssembler:
         return self._db.read_snapshot("current")
 
     def _read_events(self, limit: int | None = None) -> list[dict[str, Any]]:
-        if self._read_events_fn is not None:
-            return self._read_events_fn(limit=limit)
+        if self._event_reader is not None:
+            return self._event_reader.read_events(limit=limit)
         return []
 
     # ------------------------------------------------------------------

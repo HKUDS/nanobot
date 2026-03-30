@@ -54,22 +54,17 @@ def test_conflict_resolve_gap_follows_memory_config(tmp_path):
     assert store2.conflict_mgr._memory_config.conflict_auto_resolve_gap == 0.5
 
 
-def test_profile_mgr_has_conflict_mgr_at_construction(tmp_path):
-    """ProfileStore._conflict_mgr_fn resolves immediately after MemoryStore construction."""
+def test_profile_mgr_has_conflict_mgr_after_construction(tmp_path):
+    """ProfileStore._conflict_mgr is wired after MemoryStore construction."""
     store = _make_store(tmp_path)
-    assert store.profile_mgr._conflict_mgr_fn is not None
-    assert store.profile_mgr._conflict_mgr_fn() is not None
-
-    # extractor is passed directly (not via lazy callback)
-    assert store.profile_mgr._extractor is store.extractor
+    assert store.profile_mgr._conflict_mgr is not None
+    assert store.profile_mgr._conflict_mgr is store.conflict_mgr
 
 
-def test_profile_mgr_corrector_fn_resolves(tmp_path):
-    """ProfileStore._corrector_fn resolves to a CorrectionOrchestrator after construction."""
+def test_profile_mgr_corrector_wired(tmp_path):
+    """ProfileStore._corrector is wired to CorrectionOrchestrator after construction."""
     store = _make_store(tmp_path)
-    assert store.profile_mgr._corrector_fn is not None
-    corrector = store.profile_mgr._corrector_fn()
-    assert corrector is not None
+    assert store.profile_mgr._corrector is not None
 
 
 def test_rollout_override_atomic_consistency(tmp_path):

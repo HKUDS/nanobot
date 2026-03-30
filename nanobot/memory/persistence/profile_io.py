@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -75,19 +75,19 @@ class ProfileStore:
         self,
         *,
         db: MemoryDatabase | None = None,
-        conflict_mgr_fn: Callable[[], Any] | None = None,
-        corrector_fn: Callable[[], Any] | None = None,
-        extractor: Any | None = None,
-        ingester_fn: Callable[[], Any] | None = None,
-        snapshot_fn: Callable[[], Any] | None = None,
     ) -> None:
         self._db = db
-        self._conflict_mgr_fn = conflict_mgr_fn
-        self._corrector_fn = corrector_fn
-        self._extractor = extractor
-        self._ingester_fn = ingester_fn
-        self._snapshot_fn = snapshot_fn
+        self._conflict_mgr: Any | None = None  # set via set_conflict_mgr() after construction
+        self._corrector: Any | None = None  # set via set_corrector() after construction
         self._cache = ProfileCache()
+
+    def set_conflict_mgr(self, conflict_mgr: Any) -> None:
+        """Post-construction wiring: set conflict manager (breaks circular dep)."""
+        self._conflict_mgr = conflict_mgr
+
+    def set_corrector(self, corrector: Any) -> None:
+        """Post-construction wiring: set correction orchestrator (breaks circular dep)."""
+        self._corrector = corrector
 
     # -- Shared helpers imported from .helpers --------------------------------
     _utc_now_iso = staticmethod(_utc_now_iso)
@@ -621,8 +621,8 @@ class ProfileStore:
 
     def _conflict_pair(self, old_value: str, new_value: str) -> bool:
         """Delegate to ConflictManager._conflict_pair."""
-        assert self._conflict_mgr_fn is not None, "_conflict_mgr_fn not wired"
-        return bool(self._conflict_mgr_fn()._conflict_pair(old_value, new_value))
+        assert self._conflict_mgr is not None, "conflict_mgr not wired — call set_conflict_mgr()"
+        return bool(self._conflict_mgr._conflict_pair(old_value, new_value))
 
     def _apply_profile_updates(
         self,
@@ -633,8 +633,8 @@ class ProfileStore:
         source_event_ids: list[str] | None = None,
     ) -> tuple[int, int, int]:
         """Delegate to ConflictManager._apply_profile_updates."""
-        assert self._conflict_mgr_fn is not None, "_conflict_mgr_fn not wired"
-        result: tuple[int, int, int] = self._conflict_mgr_fn()._apply_profile_updates(
+        assert self._conflict_mgr is not None, "conflict_mgr not wired — call set_conflict_mgr()"
+        result: tuple[int, int, int] = self._conflict_mgr._apply_profile_updates(
             profile,
             updates,
             enable_contradiction_check=enable_contradiction_check,
@@ -665,8 +665,8 @@ class ProfileStore:
 
     def _has_open_conflict(self, profile: dict[str, Any], key: str) -> bool:
         """Delegating wrapper — see ConflictManager.has_open_conflict."""
-        assert self._conflict_mgr_fn is not None, "_conflict_mgr_fn not wired"
-        return bool(self._conflict_mgr_fn().has_open_conflict(profile, key))
+        assert self._conflict_mgr is not None, "conflict_mgr not wired — call set_conflict_mgr()"
+        return bool(self._conflict_mgr.has_open_conflict(profile, key))
 
     # ------------------------------------------------------------------
     # belief lookup helpers
@@ -697,9 +697,8 @@ class ProfileStore:
         enable_contradiction_check: bool = True,
     ) -> dict[str, Any]:
         """Facade — delegates to CorrectionOrchestrator wired by MemoryStore."""
-        corrector = self._corrector_fn() if self._corrector_fn else None
-        assert corrector is not None, "_corrector_fn not wired by MemoryStore"
-        result: dict[str, Any] = corrector.apply_live_user_correction(
+        assert self._corrector is not None, "corrector not wired — call set_corrector()"
+        result: dict[str, Any] = self._corrector.apply_live_user_correction(
             content,
             channel=channel,
             chat_id=chat_id,
