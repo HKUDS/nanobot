@@ -10,6 +10,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
+import httpx
 import json_repair
 from openai import AsyncOpenAI
 
@@ -134,6 +135,8 @@ class OpenAICompatProvider(LLMProvider):
         self._client = AsyncOpenAI(
             api_key=api_key or "no-key",
             base_url=effective_base,
+            max_retries=0,
+            timeout=httpx.Timeout(180.0, connect=10.0),
             default_headers=default_headers,
         )
 

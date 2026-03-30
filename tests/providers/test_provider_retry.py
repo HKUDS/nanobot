@@ -5,6 +5,10 @@ import pytest
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse
 
 
+async def _noop_sleep(_delay: float) -> None:
+    pass
+
+
 class ScriptedProvider(LLMProvider):
     def __init__(self, responses):
         super().__init__()
@@ -192,6 +196,71 @@ async def test_image_fallback_returns_error_on_second_failure() -> None:
     assert provider.calls == 2
     assert response.content == "still failing"
     assert response.finish_reason == "error"
+
+
+@pytest.mark.asyncio
+async def test_on_retry_callback_invoked_on_transient_errors(monkeypatch) -> None:
+    """on_retry callback fires before each retry sleep with (attempt, total)."""
+    provider = ScriptedProvider([
+        LLMResponse(content="503 server error", finish_reason="error"),
+        LLMResponse(content="504 gateway timeout", finish_reason="error"),
+        LLMResponse(content="ok"),
+    ])
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _noop_sleep)
+
+    retry_calls: list[tuple[int, int]] = []
+
+    async def _on_retry(attempt: int, total: int) -> None:
+        retry_calls.append((attempt, total))
+
+    response = await provider.chat_with_retry(
+        messages=[{"role": "user", "content": "hello"}],
+        on_retry=_on_retry,
+    )
+
+    assert response.content == "ok"
+    assert retry_calls == [(1, 3), (2, 3)]
+
+
+@pytest.mark.asyncio
+async def test_on_retry_callback_not_called_on_success() -> None:
+    """on_retry is never invoked when the first attempt succeeds."""
+    provider = ScriptedProvider([LLMResponse(content="ok")])
+    retry_calls: list[tuple[int, int]] = []
+
+    async def _on_retry(attempt: int, total: int) -> None:
+        retry_calls.append((attempt, total))
+
+    response = await provider.chat_with_retry(
+        messages=[{"role": "user", "content": "hello"}],
+        on_retry=_on_retry,
+    )
+
+    assert response.content == "ok"
+    assert retry_calls == []
+
+
+@pytest.mark.asyncio
+async def test_on_retry_callback_stream_variant(monkeypatch) -> None:
+    """on_retry also works with chat_stream_with_retry."""
+    provider = ScriptedProvider([
+        LLMResponse(content="429 rate limit", finish_reason="error"),
+        LLMResponse(content="ok"),
+    ])
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _noop_sleep)
+
+    retry_calls: list[tuple[int, int]] = []
+
+    async def _on_retry(attempt: int, total: int) -> None:
+        retry_calls.append((attempt, total))
+
+    response = await provider.chat_stream_with_retry(
+        messages=[{"role": "user", "content": "hello"}],
+        on_retry=_on_retry,
+    )
+
+    assert response.content == "ok"
+    assert retry_calls == [(1, 3)]
 
 
 @pytest.mark.asyncio

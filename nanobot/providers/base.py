@@ -273,8 +273,13 @@ class LLMProvider(ABC):
         reasoning_effort: object = _SENTINEL,
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_retry: Callable[[int, int], Awaitable[None]] | None = None,
     ) -> LLMResponse:
-        """Call chat_stream() with retry on transient provider failures."""
+        """Call chat_stream() with retry on transient provider failures.
+
+        *on_retry(attempt, total)*: optional async callback invoked before each
+        retry sleep, allowing callers to surface progress to the user.
+        """
         if max_tokens is self._SENTINEL:
             max_tokens = self.generation.max_tokens
         if temperature is self._SENTINEL:
@@ -307,6 +312,8 @@ class LLMProvider(ABC):
                 attempt, len(self._CHAT_RETRY_DELAYS), delay,
                 (response.content or "")[:120].lower(),
             )
+            if on_retry:
+                await on_retry(attempt, len(self._CHAT_RETRY_DELAYS))
             await asyncio.sleep(delay)
 
         return await self._safe_chat_stream(**kw)
@@ -320,12 +327,16 @@ class LLMProvider(ABC):
         temperature: object = _SENTINEL,
         reasoning_effort: object = _SENTINEL,
         tool_choice: str | dict[str, Any] | None = None,
+        on_retry: Callable[[int, int], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         """Call chat() with retry on transient provider failures.
 
         Parameters default to ``self.generation`` when not explicitly passed,
         so callers no longer need to thread temperature / max_tokens /
         reasoning_effort through every layer.
+
+        *on_retry(attempt, total)*: optional async callback invoked before each
+        retry sleep, allowing callers to surface progress to the user.
         """
         if max_tokens is self._SENTINEL:
             max_tokens = self.generation.max_tokens
@@ -358,6 +369,8 @@ class LLMProvider(ABC):
                 attempt, len(self._CHAT_RETRY_DELAYS), delay,
                 (response.content or "")[:120].lower(),
             )
+            if on_retry:
+                await on_retry(attempt, len(self._CHAT_RETRY_DELAYS))
             await asyncio.sleep(delay)
 
         return await self._safe_chat(**kw)

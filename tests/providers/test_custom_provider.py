@@ -53,3 +53,16 @@ def test_custom_provider_parse_chunks_accepts_plain_text_chunks() -> None:
 
     assert result.finish_reason == "stop"
     assert result.content == "hello world"
+
+
+def test_openai_compat_provider_disables_sdk_retries() -> None:
+    """AsyncOpenAI must be created with max_retries=0 to avoid stacking."""
+    provider = OpenAICompatProvider(api_key="test-key")
+    assert provider._client.max_retries == 0
+
+
+def test_openai_compat_provider_sets_custom_timeout() -> None:
+    """AsyncOpenAI must have explicit read timeout < SDK default 600s."""
+    provider = OpenAICompatProvider(api_key="test-key")
+    assert provider._client.timeout.read == 180.0
+    assert provider._client.timeout.connect == 10.0

@@ -77,6 +77,12 @@ class _LoopHook(AgentHook):
         if incremental and self._on_stream:
             await self._on_stream(incremental)
 
+    async def on_llm_retry(self, context: AgentHookContext, attempt: int, total: int) -> None:
+        if self._on_progress:
+            await self._on_progress(
+                f"AI service temporarily unavailable, retrying ({attempt}/{total})…",
+            )
+
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
         if self._on_stream_end:
             await self._on_stream_end(resuming=resuming)
