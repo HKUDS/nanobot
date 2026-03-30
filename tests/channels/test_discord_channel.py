@@ -264,7 +264,8 @@ async def test_slash_stop_injects_to_bus() -> None:
 
     await channel._inject_slash_as_message(interaction, "/stop")
 
-    interaction.response.defer.assert_called_once_with(ephemeral=False)
+    interaction.response.defer.assert_called_once_with(thinking=True, ephemeral=True)
+    # (True because DiscordConfig.ephemeral_commands defaults to True)
     assert bus.inbound.qsize() == 1
     msg = await bus.consume_inbound()
     assert msg.content == "/stop"
@@ -280,3 +281,60 @@ async def test_slash_new_injects_to_bus() -> None:
     assert bus.inbound.qsize() == 1
     msg = await bus.consume_inbound()
     assert msg.content == "/new"
+
+
+@pytest.mark.asyncio
+async def test_slash_denied_sender_does_not_inject_or_store_interaction():
+    bus = MessageBus()
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["999"]), bus)
+
+    interaction = AsyncMock()
+    interaction.user.id = 456  # not in allow_from
+    interaction.channel_id = 789
+    interaction.guild_id = None
+
+    await channel._inject_slash_as_message(interaction, "/stop")
+
+    # No bus message published
+    assert bus.inbound.qsize() == 0
+    # No stale interaction stored
+    assert "789" not in channel._pending_interactions
+    # Ephemeral "Not authorized" response sent
+    interaction.response.send_message.assert_called_once_with("Not authorized.", ephemeral=True)
+
+
+@pytest.mark.asyncio
+async def test_send_with_interaction_followup_and_file(tmp_path):
+    """Interaction followup path must also route file attachments."""
+    bus = MessageBus()
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), bus)
+
+    # Set up fake client with a channel
+    mock_client = MagicMock()
+    mock_discord_channel = MagicMock()
+    mock_discord_channel.send = AsyncMock()
+    mock_client.get_channel.return_value = mock_discord_channel
+    channel._client = mock_client
+
+    # Create a real temp file
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("hello")
+
+    # Pre-populate pending interaction
+    mock_interaction = AsyncMock()
+    mock_interaction.followup.send = AsyncMock()
+    channel._pending_interactions["123"] = mock_interaction
+
+    await channel.send(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="here is your file",
+            media=[str(test_file)],
+        )
+    )
+
+    # channel.send should NOT be called (interaction path)
+    mock_discord_channel.send.assert_not_called()
+    # followup.send should be called for both file and text
+    assert mock_interaction.followup.send.call_count == 2

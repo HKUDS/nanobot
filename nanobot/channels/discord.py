@@ -30,10 +30,10 @@ class DiscordConfig(Base):
     intents: int = 37377
     group_policy: Literal["mention", "open"] = "mention"
     slash_commands_enabled: bool = True
-    threads_per_conversation: bool = False
+    threads_per_conversation: bool = False  # used in Phase 4: thread-per-conversation feature
     ephemeral_commands: bool = True
-    admin_role_ids: list[str] = Field(default_factory=list)
-    application_id: str = ""
+    admin_role_ids: list[str] = Field(default_factory=list)  # used in Phase 3: Path B admin commands
+    application_id: str = ""    # reserved for Phase 3 introspection
     guild_ids: list[str] = Field(default_factory=list)
 
 
@@ -71,25 +71,26 @@ class DiscordChannel(BaseChannel):
         self._client = discord.Client(intents=intents)
         self._tree = discord.app_commands.CommandTree(self._client)
 
-        @self._tree.command(name="stop", description="Stop the current agent task")
-        async def slash_stop(interaction: discord.Interaction) -> None:
-            await self._inject_slash_as_message(interaction, "/stop")
+        if self.config.slash_commands_enabled:
+            @self._tree.command(name="stop", description="Stop the current agent task")
+            async def slash_stop(interaction: discord.Interaction) -> None:
+                await self._inject_slash_as_message(interaction, "/stop")
 
-        @self._tree.command(name="restart", description="Restart the agent")
-        async def slash_restart(interaction: discord.Interaction) -> None:
-            await self._inject_slash_as_message(interaction, "/restart")
+            @self._tree.command(name="restart", description="Restart the agent")
+            async def slash_restart(interaction: discord.Interaction) -> None:
+                await self._inject_slash_as_message(interaction, "/restart")
 
-        @self._tree.command(name="new", description="Start a new conversation")
-        async def slash_new(interaction: discord.Interaction) -> None:
-            await self._inject_slash_as_message(interaction, "/new")
+            @self._tree.command(name="new", description="Start a new conversation")
+            async def slash_new(interaction: discord.Interaction) -> None:
+                await self._inject_slash_as_message(interaction, "/new")
 
-        @self._tree.command(name="status", description="Show agent status")
-        async def slash_status(interaction: discord.Interaction) -> None:
-            await self._inject_slash_as_message(interaction, "/status")
+            @self._tree.command(name="status", description="Show agent status")
+            async def slash_status(interaction: discord.Interaction) -> None:
+                await self._inject_slash_as_message(interaction, "/status")
 
-        @self._tree.command(name="help", description="Show help information")
-        async def slash_help(interaction: discord.Interaction) -> None:
-            await self._inject_slash_as_message(interaction, "/help")
+            @self._tree.command(name="help", description="Show help information")
+            async def slash_help(interaction: discord.Interaction) -> None:
+                await self._inject_slash_as_message(interaction, "/help")
 
         @self._client.event
         async def on_ready() -> None:
@@ -193,6 +194,8 @@ class DiscordChannel(BaseChannel):
                     MAX_MESSAGE_LEN,
                 )
             if not chunks:
+                if interaction is not None:
+                    await interaction.followup.send(content="✓", ephemeral=self.config.ephemeral_commands)
                 return
 
             for i, chunk in enumerate(chunks):
@@ -224,9 +227,15 @@ class DiscordChannel(BaseChannel):
         text: str,
     ) -> None:
         """Defer interaction and inject text as InboundMessage to bus."""
+        if not self.is_allowed(str(interaction.user.id)):
+            await interaction.response.send_message("Not authorized.", ephemeral=True)
+            return
         channel_id = str(interaction.channel_id)
-        await interaction.response.defer(ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=self.config.ephemeral_commands)
         self._pending_interactions[channel_id] = interaction
+        # TODO: Phase 3 — if two slash commands fire before the first is answered, the second
+        # overwrites _pending_interactions[channel_id] and the first deferred interaction
+        # will never get a followup (Discord marks it failed). Consider per-channel locking.
         await self._handle_message(
             sender_id=str(interaction.user.id),
             chat_id=channel_id,
