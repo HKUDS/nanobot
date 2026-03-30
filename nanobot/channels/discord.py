@@ -34,7 +34,8 @@ class DiscordConfig(Base):
     slash_commands_enabled: bool = True
     threads_per_conversation: bool = False  # used in Phase 4: thread-per-conversation feature
     ephemeral_commands: bool = True
-    admin_role_ids: list[str] = Field(default_factory=list)  # used in Phase 3: Path B admin commands
+    admin_role_ids: list[str] = Field(default_factory=list)
+    # used in Phase 3: Path B admin commands. Empty = open access to all users.
     application_id: str = ""    # reserved for Phase 3 introspection
     guild_ids: list[str] = Field(default_factory=list)
 
@@ -112,7 +113,14 @@ class DiscordChannel(BaseChannel):
                 providers = [(spec.name, spec.label) for spec in PROVIDERS][:20]
 
                 async def on_model_confirm(provider: str, model_name: str) -> None:
-                    pass  # Phase 6 can wire to config update; UI confirmation shown by ModelModal itself
+                    from nanobot.bus.events import InboundMessage  # noqa: PLC0415
+                    await self.bus.publish_inbound(InboundMessage(
+                        channel=self.name,
+                        sender_id="__model_picker__",
+                        chat_id=str(interaction.channel_id),
+                        content=f"/model {provider}/{model_name}",
+                        metadata={"message_id": "", "guild_id": str(interaction.guild_id) if interaction.guild_id else None, "reply_to": None},
+                    ))
 
                 view = ModelPickerView(providers=providers, on_confirm=on_model_confirm)
                 embed = discord.Embed(
@@ -139,6 +147,8 @@ class DiscordChannel(BaseChannel):
 
             @self._tree.command(name="config", description="View Discord channel configuration")
             async def slash_config(interaction: discord.Interaction) -> None:
+                # admin_role_ids guard: empty list = open access. In DMs, user has no roles, so DM users
+                # always pass when admin_role_ids is non-empty (user.roles is []).
                 if self.config.admin_role_ids:
                     member_roles = [
                         str(r.id)
@@ -158,6 +168,8 @@ class DiscordChannel(BaseChannel):
 
             @self._tree.command(name="mcp", description="List registered MCP servers")
             async def slash_mcp(interaction: discord.Interaction) -> None:
+                # admin_role_ids guard: empty list = open access. In DMs, user has no roles, so DM users
+                # always pass when admin_role_ids is non-empty (user.roles is []).
                 if self.config.admin_role_ids:
                     member_roles = [
                         str(r.id)
@@ -310,9 +322,11 @@ class DiscordChannel(BaseChannel):
 
                             async def _stop_cb() -> None:
                                 from nanobot.bus.events import InboundMessage  # noqa: PLC0415
+                                # sender_id is a sentinel — stop is a priority command processed before is_allowed()
+                                # in AgentLoop.run(), so no real user ID is needed here.
                                 await self.bus.publish_inbound(InboundMessage(
                                     channel=self.name,
-                                    sender_id="",
+                                    sender_id="__stop_button__",
                                     chat_id=chat_id_capture,
                                     content="/stop",
                                     metadata={"message_id": "", "guild_id": None, "reply_to": None},
@@ -411,6 +425,7 @@ class DiscordChannel(BaseChannel):
 
         await self._start_typing(message.channel)
 
+        self._attach_stop_button.add(channel_id)
         await self._handle_message(
             sender_id=sender_id,
             chat_id=channel_id,
@@ -422,7 +437,6 @@ class DiscordChannel(BaseChannel):
                 "reply_to": reply_to,
             },
         )
-        self._attach_stop_button.add(channel_id)
 
     def _should_respond_in_group(self, message: discord.Message, content: str) -> bool:
         """Check if bot should respond in a group channel based on policy."""

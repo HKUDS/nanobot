@@ -15,7 +15,6 @@ from nanobot.channels.discord_ui import (
     McpView,
     ModelPickerView,
     StatusView,
-    StopButton,
 )
 
 
@@ -44,16 +43,21 @@ async def test_model_picker_confirm_without_selection_sends_error():
 
 async def test_stop_button_triggers_callback():
     on_stop = AsyncMock()
-    button = StopButton(on_stop=on_stop)
+    # Use a real StatusView so the button has a proper parent
+    view = StatusView(on_stop=on_stop)
+    button = next(item for item in view.children if isinstance(item, discord.ui.Button))
+
     interaction = MagicMock()
     interaction.response.defer = AsyncMock()
     interaction.followup.send = AsyncMock()
     interaction.message.edit = AsyncMock()
-    # Give the button a parent view so self.view is not None
-    StatusView(on_stop=on_stop)
+
     await button.callback(interaction)
+
+    # Verify defer called, button disabled, and stop callback invoked
     interaction.response.defer.assert_called_once_with(ephemeral=True)
     assert button.disabled is True
+    on_stop.assert_called_once()
 
 
 async def test_mcp_view_with_empty_servers():

@@ -1,6 +1,5 @@
 """Discord UI components for nanobot slash commands."""
 
-import asyncio
 from collections.abc import Awaitable, Callable
 
 import discord
@@ -52,6 +51,10 @@ class ModelPickerView(discord.ui.View):
         self._select = ProviderSelect(providers, self)
         self.add_item(self._select)
 
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True  # type: ignore[union-attr]
+
     @discord.ui.button(label="Set Model", style=discord.ButtonStyle.primary, row=1)
     async def confirm_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
@@ -72,10 +75,10 @@ class StopButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
-        asyncio.create_task(self._on_stop())
         self.disabled = True
         if self.view:
             await interaction.message.edit(view=self.view)
+        await self._on_stop()
         await interaction.followup.send("Stopping…", ephemeral=True)
 
 
@@ -83,6 +86,10 @@ class StatusView(discord.ui.View):
     def __init__(self, on_stop: Callable[[], Awaitable[None]]) -> None:
         super().__init__(timeout=300.0)
         self.add_item(StopButton(on_stop))
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True  # type: ignore[union-attr]
 
 
 class McpServerSelect(discord.ui.Select):
