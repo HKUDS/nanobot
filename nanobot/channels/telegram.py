@@ -557,6 +557,31 @@ class TelegramChannel(BaseChannel):
             return
 
         now = time.monotonic()
+        
+        # If the accumulated text exceeds Telegram's limit, we need to finalize the current message
+        # and start a new one for the remaining text.
+        if len(buf.text) > TELEGRAM_MAX_MESSAGE_LEN:
+            # Split the text into the part that fits and the remainder
+            fits = buf.text[:TELEGRAM_MAX_MESSAGE_LEN]
+            remainder = buf.text[TELEGRAM_MAX_MESSAGE_LEN:]
+            
+            # Finalize the current message with the part that fits
+            if buf.message_id is not None:
+                try:
+                    await self._call_with_retry(
+                        self._app.bot.edit_message_text,
+                        chat_id=int_chat_id, message_id=buf.message_id,
+                        text=fits,
+                    )
+                except Exception as e:
+                    if not self._is_not_modified_error(e):
+                        logger.warning("Stream edit failed (too long split): {}", e)
+            
+            # Reset the buffer for the new message
+            buf.text = remainder
+            buf.message_id = None
+            buf.last_edit = now
+
         if buf.message_id is None:
             try:
                 sent = await self._call_with_retry(
