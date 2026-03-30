@@ -2,67 +2,89 @@
   {
     "id": 1,
     "category": "setup",
-    "description": "The failed/cancelled coding-task visibility cleanup is tracked as its own harness task so future sessions can resume from the new Telegram task-selection rules without re-deriving the visibility policy.",
+    "description": "The `/coding` help, markdown presentation, and stale-task recovery work is tracked as its own harness task so future sessions can resume from the new Telegram UX and worker-liveness behavior without rediscovering the current gaps.",
     "steps": [
-      "Open PLAN.json and verify it only tracks the failed/cancelled visibility cleanup harness.",
-      "Open PROGRESS.md and verify the reboot entry records the current baseline: failed tasks still block new `/coding` starts and `/coding list` still shows failed/cancelled tasks.",
-      "Confirm the scope remains limited to Telegram `/coding` orchestration, active-task semantics, task-list visibility, and documentation rather than changing persistence formats or deleting task history."
+      "Open PLAN.json and verify it only tracks the `/coding` help, markdown presentation, and stale-task recovery harness.",
+      "Open PROGRESS.md and verify the reboot entry records the current baseline: `/coding help` does not exist, Telegram coding replies still force plain-text rendering, and stale tasks like `681ee161` can remain stuck in `starting` after their tmux session disappears.",
+      "Confirm the scope remains limited to Telegram `/coding` orchestration, presentation templates, and worker-liveness recovery rather than changing target-repo harness files or the Codex worker execution model."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 2,
     "category": "functional",
-    "description": "Workspace-wide and per-origin active-task selection treat only `starting`, `running`, and `waiting_user` as active so failed/cancelled tasks no longer block new `/coding` starts.",
+    "description": "Telegram `/coding` supports `help` and uses one shared usage/help template for `/coding help`, bare `/coding`, unknown subcommands, and malformed control commands.",
     "steps": [
-      "Create failed and cancelled tasks and verify the workspace active-task selector ignores them.",
-      "Verify a running or waiting task still blocks new `/coding <repo> <goal>` creation.",
-      "Verify a failed task in the same Telegram chat no longer occupies the active slot used by default control selection."
+      "Send `/coding help` and verify it returns the complete command list for start, help, list, status, pause, resume, and stop.",
+      "Send bare `/coding` and an unknown subcommand such as `/coding nope` and verify both return the same help or usage surface instead of entering the start-command path.",
+      "Verify malformed indexed commands still return the unified usage guidance instead of a mismatched one-off error."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 3,
     "category": "functional",
-    "description": "Telegram `/coding list` hides failed/cancelled tasks and renumbers the visible list newest-first with 1-based indexes.",
+    "description": "Telegram `/coding` replies use markdown-friendly templates through the existing Telegram HTML rendering path instead of forcing plain-text layout for task start, status, list, waiting-user, completed, and failed messages.",
     "steps": [
-      "Create running, completed, failed, and cancelled tasks for one Telegram private chat and verify `/coding list` only shows the visible tasks newest-first.",
-      "Verify failed and cancelled tasks remain persisted in the store and artifacts even though they disappear from Telegram list output.",
-      "Verify the empty-state message is clear when a chat only has hidden terminal tasks."
+      "Trigger `/coding list`, `/coding status`, `/coding help`, a start response, a waiting-user response, and a lifecycle notification and verify each renders as concise markdown-friendly content in Telegram.",
+      "Verify the channel still uses the existing Markdown-to-HTML conversion path and does not introduce a new parse-mode branch.",
+      "Confirm the output avoids unsupported heavy structures such as large tables or long fenced code blocks."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 4,
     "category": "functional",
-    "description": "Slash index selection and default Telegram control targeting operate only on the visible task set, so hidden failed/cancelled tasks can no longer be targeted or chosen implicitly.",
+    "description": "Telegram `/coding` responses are trimmed to user-facing essentials, removing low-value diagnostics while keeping concise status, repo name, goal, and next-step context.",
     "steps": [
-      "Verify `/coding status 1`, `/coding pause 1`, `/coding resume 1`, and `/coding stop 1` target the first visible task rather than a hidden failed/cancelled task.",
-      "Verify out-of-range indexes return a clear error after visibility filtering.",
-      "Verify `/coding status` without an index returns a no-manageable-task message when a chat only has hidden terminal tasks."
+      "Verify start, waiting-user, completed, failed, list, and status responses no longer include absolute repo paths, tmux session ids, harness-state debug fields, or tmux reuse markers.",
+      "Verify `/coding status` still shows a concise diagnosis: current status, repo name, goal, and the latest meaningful progress or blocking reason.",
+      "Verify CLI `coding-task status <task_id>` still retains the detailed diagnostics path even after Telegram responses are simplified."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 5,
-    "category": "testing",
-    "description": "Focused tests cover the new active-slot semantics, hidden list behavior, filtered index selection, and the unchanged ability to inspect hidden tasks directly by task id through CLI tooling.",
+    "category": "functional",
+    "description": "The steady-state coding-task poll loop detects missing tmux sessions for tasks in `starting`, `running`, or `waiting_user` and closes them out as `completed` or `failed` instead of leaving stale tasks stuck forever.",
     "steps": [
-      "Run focused pytest for coding-task routing, policy, and manager behavior touching failed/cancelled visibility and selection.",
-      "Verify tests cover new `/coding list` hiding behavior and that failed tasks no longer block new starts.",
-      "Confirm `.venv/bin/python -m compileall` still succeeds for the touched coding-task modules and tests."
+      "Create a `starting` or `running` task whose tmux session is missing and verify the next refresh marks it `failed` with a recovery hint instead of leaving it in-place.",
+      "Create a task with a missing tmux session whose target repo harness is already fully complete and verify the task transitions to `completed` instead of `failed`.",
+      "Verify the resulting lifecycle transition still emits the correct completed or failed notification through the notifier."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 6,
-    "category": "docs",
-    "description": "README and PROGRESS.md document that failed/cancelled coding tasks are hidden from Telegram `/coding` task management without being deleted from persisted history.",
+    "category": "functional",
+    "description": "Task `681ee161`-style stale coding tasks no longer remain indefinitely in `starting` after the worker session disappears; recovery either completes them from harness evidence or marks them failed with an explicit explanation.",
     "steps": [
-      "Open README.md and verify it documents the hidden-terminal-task behavior for `/coding list` and active-slot selection.",
-      "Open PROGRESS.md and verify it records the baseline, the no-delete decision, and the completed implementation summary.",
-      "Confirm PLAN.json is fully marked complete after the implementation and verification pass."
+      "Use the same stale-task shape as `681ee161`—task state `starting`, missing tmux session, existing run log and repo harness—and verify refresh changes it to `failed` or `completed` deterministically.",
+      "Verify the stale-task summary explains that the worker session disappeared and what the operator should do next if manual recovery is needed.",
+      "Confirm the task no longer appears as indefinitely active after the fix is applied."
     ],
-    "passes": true
+    "passes": false
+  },
+  {
+    "id": 7,
+    "category": "testing",
+    "description": "Focused tests cover `/coding help`, markdown-friendly formatting, simplified Telegram responses, and stale-task closure on missing tmux sessions without regressing the current `/coding` command set.",
+    "steps": [
+      "Run focused pytest for coding-task routing, notifier, progress/recovery, and Telegram help rendering relevant to the new `/coding` surfaces.",
+      "Verify the tests cover stale `starting` tasks with missing sessions, unified help/usage handling, and markdown-friendly response content.",
+      "Confirm `.venv/bin/python -m compileall` still succeeds for the touched coding-task and Telegram modules plus their updated tests."
+    ],
+    "passes": false
+  },
+  {
+    "id": 8,
+    "category": "docs",
+    "description": "README and PROGRESS.md document `/coding help`, the markdown-first Telegram presentation, and the new stale-task recovery behavior for missing worker sessions.",
+    "steps": [
+      "Open README.md and verify it documents `/coding help`, the trimmed Telegram `/coding` response style, and the operator-visible stale-task behavior.",
+      "Open PROGRESS.md and verify it records the baseline, the markdown/presentation decisions, and the stale-task recovery fix.",
+      "Confirm PLAN.json is fully marked complete after implementation and verification."
+    ],
+    "passes": false
   }
 ]

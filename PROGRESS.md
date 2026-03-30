@@ -1,3 +1,19 @@
+## Harness reboot - 2026-03-31 (coding-task help, markdown, and stale recovery)
+- Task pivot:
+  - Superseded the prior completed hidden-terminal-task harness with a follow-up task focused on `/coding help`, Telegram markdown-first presentation, simplified `/coding` replies, and automatic stale-task closure when a worker session disappears after launch.
+- Existing work detected before re-planning:
+  - `/coding help` does not exist; Telegram only exposes the top-level `/help`, and `/coding` parse errors still fan out into inconsistent one-off strings.
+  - Telegram already supports Markdown -> HTML rendering centrally, but coding-task router/notifier responses still force `render_as: text`, so `/coding` replies bypass the richer formatting path.
+  - Stale coding tasks like `681ee161` can remain in `starting` forever after their tmux session disappears because startup recovery checks liveness only once, while the steady-state watch loop only polls pane output and never re-checks `has_session`.
+  - `681ee161` evidence shows the worker did run and emit Codex JSON events, but its tmux session is now gone while the persisted task still reports `starting`.
+- Baseline validation before edits:
+  - `bash ~/.codex/scripts/global-init.sh` -> exited 0 with the known repo-wide pytest warning still present in `/tmp/nanobot-harness-pytest.log`
+  - Existing `/coding` gaps confirmed by static inspection of `nanobot/channels/telegram.py`, `nanobot/coding_tasks/router.py`, `nanobot/coding_tasks/notifier.py`, `nanobot/coding_tasks/progress.py`, and the persisted `681ee161` task artifacts
+- Key decisions:
+  - Reuse the existing Telegram Markdown -> HTML rendering path rather than adding a new parse-mode branch.
+  - Simplify Telegram `/coding` responses while preserving CLI `coding-task status <task_id>` as the deep-diagnostics path.
+  - Default stale-task closure to `failed` unless repo harness evidence clearly proves the target work completed, because silent auto-relaunch risks repeating edits or tests.
+
 ## Harness reboot - 2026-03-31 (coding-task hidden terminal tasks)
 - Task pivot:
   - Superseded the prior completed `/coding` slash-controls harness with a follow-up task focused on hiding `failed` and `cancelled` Telegram coding tasks without deleting their persisted history.
