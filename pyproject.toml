@@ -19,6 +19,7 @@ classifiers = [
 
 dependencies = [
     "typer>=0.20.0,<1.0.0",
+    "discord.py>=2.4.0,<3.0.0",
     "anthropic>=0.45.0,<1.0.0",
     "pydantic>=2.12.0,<3.0.0",
     "pydantic-settings>=2.12.0,<3.0.0",
@@ -51,6 +52,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+discord = [
+    "discord.py>=2.4.0,<3.0.0",
+]
 wecom = [
     "wecom-aibot-sdk-python>=0.1.5",
 ]
