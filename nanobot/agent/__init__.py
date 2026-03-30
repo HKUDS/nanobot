@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from nanobot.agent.agent_factory import build_agent
 from nanobot.agent.callbacks import (
-    DelegateEndEvent,
-    DelegateStartEvent,
     ProgressCallback,
     ProgressEvent,
     StatusEvent,
@@ -18,8 +16,6 @@ from nanobot.agent.turn_types import TurnResult
 
 __all__ = [
     "AgentLoop",
-    "DelegateEndEvent",
-    "DelegateStartEvent",
     "ProgressCallback",
     "ProgressEvent",
     "StatusEvent",

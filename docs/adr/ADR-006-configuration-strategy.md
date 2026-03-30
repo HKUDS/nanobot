@@ -53,7 +53,6 @@ that "just work" locally.
    |------|------------------|--------|
    | `planning_enabled` | `planning_enabled` | Skip planning prompt |
    | `verification_enabled` | `verification_mode="off"` | Skip self-critique |
-   | `delegation_enabled` | `delegation_enabled` | Skip delegate tool registration |
    | `memory_enabled` | `memory_enabled` | Zero-out memory params, skip consolidation |
    | `skills_enabled` | `skills_enabled` | Skip skill tool discovery |
    | `streaming_enabled` | `streaming_enabled` | Suppress progress callbacks |

@@ -20,7 +20,6 @@ Canonical type                         SSE output
                                        + tool-call-delta + tool-call-end
 ``tool.result``                        tool-result
 ``run.end``                            stored in *text_state* for later ``finish``
-``agent.delegate.*``                   silently skipped (no matching SSE event)
 ``run.start`` / ``keepalive``          silently skipped (handled at transport layer)
 =====================================  ==========================================
 """
@@ -167,6 +166,6 @@ def project_to_sse(event_dict: dict[str, Any], *, text_state: dict[str, Any]) ->
         label = payload.get("label", "")
         chunks.append(_sse({"type": "status", "code": code, "label": label}))
 
-    # run.start, keepalive, agent.delegate.*, unknown → no SSE output
+    # run.start, keepalive, unknown → no SSE output
 
     return chunks

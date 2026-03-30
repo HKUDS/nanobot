@@ -39,7 +39,6 @@ class TestFullConfig:
             planning_enabled=False,
             verification_mode="off",
             memory_enabled=True,
-            delegation_enabled=True,
             skills_enabled=True,
         )
         loop = build_agent(bus=MessageBus(), provider=provider, config=config)
@@ -47,14 +46,13 @@ class TestFullConfig:
         assert isinstance(loop, AgentLoop)
 
     def test_full_config_has_tools(self, tmp_path: Path, provider: LiteLLMProvider) -> None:
-        """Agent built with delegation enabled has a tool registry with tools."""
+        """Agent built with full config has a tool registry with tools."""
         config = AgentConfig(
             workspace=str(tmp_path),
             model=MODEL,
             max_iterations=5,
             planning_enabled=False,
             verification_mode="off",
-            delegation_enabled=True,
         )
         loop = build_agent(bus=MessageBus(), provider=provider, config=config)
 
@@ -64,24 +62,20 @@ class TestFullConfig:
 
 
 class TestMinimalConfig:
-    def test_minimal_config_no_delegate_tool(
-        self, tmp_path: Path, provider: LiteLLMProvider
-    ) -> None:
-        """With delegation disabled, no 'delegate' tool is registered."""
+    def test_minimal_config_builds(self, tmp_path: Path, provider: LiteLLMProvider) -> None:
+        """Agent builds with minimal config (optional features disabled)."""
         config = AgentConfig(
             workspace=str(tmp_path),
             model=MODEL,
             max_iterations=5,
             planning_enabled=False,
             verification_mode="off",
-            delegation_enabled=False,
             memory_enabled=False,
             skills_enabled=False,
         )
         loop = build_agent(bus=MessageBus(), provider=provider, config=config)
 
         assert isinstance(loop, AgentLoop)
-        assert not loop.tools.has("delegate")
 
     def test_memory_disabled_still_builds(self, tmp_path: Path, provider: LiteLLMProvider) -> None:
         """Agent builds successfully even with memory disabled."""

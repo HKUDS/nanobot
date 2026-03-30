@@ -157,7 +157,7 @@ class CapabilityRegistry:
         *,
         intents: list[str] | None = None,
     ) -> None:
-        """Register a delegation role as a capability."""
+        """Register an agent role as a capability."""
         if self._agents is None:
             logger.warning("register_role called without AgentRegistry; skipping")
             return
@@ -249,7 +249,7 @@ class CapabilityRegistry:
         return "\n".join(lines)
 
     def role_names(self) -> list[str]:
-        """Return names of all healthy delegation roles."""
+        """Return names of all healthy agent roles."""
         return [
             c.name
             for c in self._capabilities.values()

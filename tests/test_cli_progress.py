@@ -13,8 +13,6 @@ from typing import cast
 from rich.console import Console
 
 from nanobot.agent.callbacks import (
-    DelegateEndEvent,
-    DelegateStartEvent,
     StatusEvent,
     TextChunk,
     ToolCallEvent,
@@ -99,16 +97,4 @@ async def test_status_event_silent() -> None:
 async def test_tool_result_event_silent() -> None:
     h, buf = _handler()
     await h(ToolResultEvent(tool_call_id="tc1", result="ok", tool_name="read_file"))
-    assert buf.getvalue() == ""
-
-
-async def test_delegate_start_event_silent() -> None:
-    h, buf = _handler()
-    await h(DelegateStartEvent(delegation_id="d1", child_role="research"))
-    assert buf.getvalue() == ""
-
-
-async def test_delegate_end_event_silent() -> None:
-    h, buf = _handler()
-    await h(DelegateEndEvent(delegation_id="d1", success=True))
     assert buf.getvalue() == ""

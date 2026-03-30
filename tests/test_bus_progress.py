@@ -3,8 +3,6 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 from nanobot.agent.callbacks import (
-    DelegateEndEvent,
-    DelegateStartEvent,
     StatusEvent,
     TextChunk,
     ToolCallEvent,
@@ -20,8 +18,6 @@ def _make_deps():
     canonical.text_flush = MagicMock(return_value={"type": "text"})
     canonical.tool_call = MagicMock(return_value={"type": "tool_call"})
     canonical.tool_result = MagicMock(return_value={"type": "tool_result"})
-    canonical.delegate_start = MagicMock(return_value={"type": "delegate_start"})
-    canonical.delegate_end = MagicMock(return_value={"type": "delegate_end"})
     canonical.status = MagicMock(return_value={"type": "status"})
     base_meta = {"_progress": True, "session_id": "s1"}
     return bus, canonical, base_meta
@@ -65,18 +61,6 @@ async def test_tool_result_sets_result_meta():
     msg = await _call(ToolResultEvent(tool_call_id="tc1", result="ok", tool_name="read_file"))
     assert msg.metadata["_tool_result"]["toolCallId"] == "tc1"
     assert "_tool_hint" not in msg.metadata
-
-
-async def test_delegate_start_sets_canonical():
-    msg = await _call(
-        DelegateStartEvent(delegation_id="d1", child_role="research", task_title="Find X")
-    )
-    assert msg.metadata["_canonical"] == {"type": "delegate_start"}
-
-
-async def test_delegate_end_sets_canonical():
-    msg = await _call(DelegateEndEvent(delegation_id="d1", success=True))
-    assert msg.metadata["_canonical"] == {"type": "delegate_end"}
 
 
 async def test_status_event_sets_canonical():
