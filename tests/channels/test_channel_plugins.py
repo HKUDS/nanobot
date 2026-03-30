@@ -174,7 +174,6 @@ async def test_manager_loads_plugin_from_dict_config():
             "fakeplugin": {"enabled": True, "allowFrom": ["*"]},
         }),
         providers=SimpleNamespace(groq=SimpleNamespace(api_key=""), dashscope=SimpleNamespace(api_key="")),
-        tools=SimpleNamespace(transcription=SimpleNamespace(provider="groq", api_key="")),
     )
 
     with patch(
@@ -227,7 +226,6 @@ async def test_manager_skips_disabled_plugin():
             "fakeplugin": {"enabled": False},
         }),
         providers=SimpleNamespace(groq=SimpleNamespace(api_key=""), dashscope=SimpleNamespace(api_key="")),
-        tools=SimpleNamespace(transcription=SimpleNamespace(provider="groq", api_key="")),
     )
 
     with patch(

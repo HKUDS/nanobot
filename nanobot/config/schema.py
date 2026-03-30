@@ -13,6 +13,13 @@ class Base(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
+class TranscriptionConfig(Base):
+    """Voice transcription configuration (channel input processing, not an agent tool)."""
+
+    provider: str = "groq"  # "groq" or "qwen3-asr"
+    api_key: str = ""       # provider-specific key; falls back to providers.groq / providers.dashscope
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels.
 
@@ -25,6 +32,7 @@ class ChannelsConfig(Base):
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
+    transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
 
 
 class AgentDefaults(Base):
@@ -139,13 +147,6 @@ class MCPServerConfig(Base):
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
 
-class TranscriptionConfig(Base):
-    """Voice transcription configuration."""
-
-    provider: str = "groq"  # "groq" or "qwen3-asr"
-    api_key: str = ""       # provider-specific key; falls back to providers.groq / providers.dashscope
-
-
 class ToolsConfig(Base):
     """Tools configuration."""
 
@@ -153,7 +154,6 @@ class ToolsConfig(Base):
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
-    transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
 
 
 class Config(BaseSettings):

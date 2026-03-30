@@ -34,7 +34,7 @@ class ChannelManager:
         """Initialize channels discovered via pkgutil scan + entry_points plugins."""
         from nanobot.channels.registry import discover_all
 
-        transcription_cfg = self.config.tools.transcription
+        transcription_cfg = self.config.channels.transcription
         transcription_provider = transcription_cfg.provider  # "groq" or "qwen3-asr"
         if transcription_cfg.api_key:
             transcription_key = transcription_cfg.api_key
