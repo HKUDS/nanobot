@@ -321,25 +321,23 @@ class AgentLoop:
                         return f"{stream_base_id}:{stream_segment}"
 
                     async def on_stream(delta: str) -> None:
+                        meta = dict(msg.metadata or {})
+                        meta["_stream_delta"] = True
+                        meta["_stream_id"] = _current_stream_id()
                         await self.bus.publish_outbound(OutboundMessage(
                             channel=msg.channel, chat_id=msg.chat_id,
-                            content=delta,
-                            metadata={
-                                "_stream_delta": True,
-                                "_stream_id": _current_stream_id(),
-                            },
+                            content=delta, metadata=meta,
                         ))
 
                     async def on_stream_end(*, resuming: bool = False) -> None:
                         nonlocal stream_segment
+                        meta = dict(msg.metadata or {})
+                        meta["_stream_end"] = True
+                        meta["_resuming"] = resuming
+                        meta["_stream_id"] = _current_stream_id()
                         await self.bus.publish_outbound(OutboundMessage(
                             channel=msg.channel, chat_id=msg.chat_id,
-                            content="",
-                            metadata={
-                                "_stream_end": True,
-                                "_resuming": resuming,
-                                "_stream_id": _current_stream_id(),
-                            },
+                            content="", metadata=meta,
                         ))
                         stream_segment += 1
 
