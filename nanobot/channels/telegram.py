@@ -865,20 +865,21 @@ class TelegramChannel(BaseChannel):
         self._start_typing(str_chat_id)
         await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
 
+        metadata={
+            "message_id": message.message_id,
+            "user_id": user.id,
+            "username": user.username,
+            "first_name": user.first_name,
+            "is_group": message.chat.type != "private",
+            "message_thread_id": message.message_thread_id,  # For forum topics
+            }
+
         # Forward to the message bus
         await self._handle_message(
             sender_id=sender_id,
             chat_id=str_chat_id,
             content=content,
             media=media_paths,
-            metadata={
-                "message_id": message.message_id,
-                "user_id": user.id,
-                "username": user.username,
-                "first_name": user.first_name,
-                "is_group": message.chat.type != "private",
-                "message_thread_id": message.message_thread_id,  # For forum topics
-            },
             metadata=metadata,
             session_key=session_key,
         )
