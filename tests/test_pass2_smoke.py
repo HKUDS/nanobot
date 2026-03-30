@@ -26,7 +26,6 @@ from nanobot.context.compression import (
 from nanobot.coordination.scratchpad import Scratchpad
 from nanobot.errors import DeliverySkippedError
 from nanobot.providers.base import LLMProvider
-from nanobot.tools.builtin.delegate import DelegateTool, DelegationResult
 from tests.helpers import ScriptedProvider
 
 # ---------------------------------------------------------------------------
@@ -326,41 +325,7 @@ class TestPhaseBSmoke:
 
 
 class TestPhaseDSmoke:
-    """Smoke tests for delegation result verification and attestation."""
-
-    async def test_grounded_delegation_attestation(self) -> None:
-        """Delegation that used tools → grounded tag in output."""
-        tool = DelegateTool()
-
-        async def dispatch(role: str, task: str, ctx: str | None) -> DelegationResult:
-            return DelegationResult(
-                content="Found 3 relevant documents",
-                tools_used=["web_search", "read_file"],
-            )
-
-        tool.set_dispatch(dispatch)
-        result = await tool.execute(task="search for security advisories")
-        assert result.success
-        assert "grounded=True" in result.output
-        assert "tools_used=2" in result.output
-        assert "Found 3 relevant documents" in result.output
-
-    async def test_ungrounded_investigation_warning(self) -> None:
-        """Delegation without tools on investigation task → warning."""
-        tool = DelegateTool()
-
-        async def dispatch(role: str, task: str, ctx: str | None) -> DelegationResult:
-            return DelegationResult(
-                content="I believe the answer is yes",
-                tools_used=[],
-            )
-
-        tool.set_dispatch(dispatch)
-        result = await tool.execute(task="search for the user's order status")
-        assert result.success
-        assert "grounded=False" in result.output
-        assert "⚠️" in result.output
-        assert "not be verified" in result.output
+    """Smoke tests for scratchpad grounded tags and verification."""
 
     async def test_scratchpad_grounded_tags_roundtrip(self, tmp_path: Path) -> None:
         """Scratchpad entries show verification status on read."""

@@ -47,7 +47,6 @@ class MessageProcessor:
         model: str,
     ) -> None:
         self.orchestrator = services.orchestrator
-        self._dispatcher = services.dispatcher
         self._missions = services.missions
         self.context = services.context
         self.sessions = services.sessions

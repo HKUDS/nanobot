@@ -171,3 +171,11 @@ Executed across 6 phases:
 - AnswerVerifier — replaced by configurable self-check
 - Multi-role routing (MessageRouter, TurnRoleManager) — removed entirely
 - DelegationAdvisor — removed; delegation via tools only
+
+## Subsequent Changes
+
+- **2026-03-29**: Delegation subsystem removed entirely. `DelegationDispatcher`,
+  `DelegationConfig`, `DelegateTool`, `DelegateParallelTool`, and
+  `delegation_contract.py` deleted (~1,100 LOC). Delegation was non-functional
+  after the routing removal in Phase 1 — every call crashed with NanobotError.
+  Mission-based multi-agent execution remains via `MissionManager`.

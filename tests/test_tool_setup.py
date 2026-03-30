@@ -36,7 +36,6 @@ def _register(
     workspace: Path,
     *,
     role_config: AgentRoleConfig | None = None,
-    delegation_enabled: bool = True,
     cron_service: Any = None,
     skills_loader: Any = None,
 ) -> CapabilityRegistry:
@@ -53,7 +52,6 @@ def _register(
         brave_api_key=None,
         publish_outbound=_noop_publish,
         cron_service=cron_service,
-        delegation_enabled=delegation_enabled,
         missions=Mock(),
         result_cache=Mock(spec=ToolResultCache),
         skills_enabled=bool(skills_loader),
@@ -81,32 +79,18 @@ class TestRegisterDefaultTools:
         ):
             assert expected in names, f"Missing expected tool: {expected}"
 
-    def test_delegation_tools_present_when_enabled(self, tmp_workspace: Path) -> None:
-        capabilities = _register(tmp_workspace, delegation_enabled=True)
-        names = capabilities.tool_registry.tool_names
-        for expected in (
-            "delegate",
-            "delegate_parallel",
-            "mission_start",
-            "mission_status",
-            "mission_list",
-            "mission_cancel",
-        ):
-            assert expected in names, f"Missing delegation tool: {expected}"
-
     def test_expected_tool_count(self, tmp_workspace: Path) -> None:
         """Regression guard: total tool count from auditing tool_setup.py."""
         capabilities = _register(tmp_workspace)
-        # Count derived from manual audit of tool_setup.py at commit 7470a43:
         # filesystem(4) + spreadsheet(1) + pptx_read(1) + pptx_analyze(1) +
         # exec(1) + web_search(1) + web_fetch(1) + message(1) + feedback(1) +
-        # email(1) + delegation(6) + scratchpad(2) + cache_get_slice(1) +
+        # email(1) + mission(4) + scratchpad(2) + cache_get_slice(1) +
         # excel_get_rows(1) + excel_find(1) + pptx_get_slide(1) +
-        # query_data(1) + describe_data(1) = 27
-        # (no cron — cron_service=None)
+        # query_data(1) + describe_data(1) = 25
+        # (no cron — cron_service=None, delegation removed)
         count = len(capabilities.tool_registry)
-        assert count == 27, (
-            f"Expected 27 tools, got {count}: {sorted(capabilities.tool_registry.tool_names)}"
+        assert count == 25, (
+            f"Expected 25 tools, got {count}: {sorted(capabilities.tool_registry.tool_names)}"
         )
 
     def test_allowed_tools_whitelist(self, tmp_workspace: Path) -> None:
@@ -123,19 +107,6 @@ class TestRegisterDefaultTools:
         names = capabilities.tool_registry.tool_names
         assert "exec" not in names
         assert "read_file" in names
-
-    def test_delegation_disabled_skips_tools(self, tmp_workspace: Path) -> None:
-        capabilities = _register(tmp_workspace, delegation_enabled=False)
-        names = capabilities.tool_registry.tool_names
-        for absent in (
-            "delegate",
-            "delegate_parallel",
-            "mission_start",
-            "mission_status",
-            "mission_list",
-            "mission_cancel",
-        ):
-            assert absent not in names, f"Should not register: {absent}"
 
     def test_no_cron_service_skips_cron(self, tmp_workspace: Path) -> None:
         capabilities = _register(tmp_workspace, cron_service=None)

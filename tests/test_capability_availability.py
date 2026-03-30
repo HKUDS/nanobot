@@ -9,7 +9,6 @@ import pytest
 
 from nanobot.context.context import ContextBuilder
 from nanobot.tools.base import Tool, ToolResult
-from nanobot.tools.builtin.delegate import DelegateParallelTool, DelegateTool
 from nanobot.tools.builtin.email import CheckEmailTool
 from nanobot.tools.builtin.web import WebSearchTool
 from nanobot.tools.registry import ToolRegistry
@@ -112,46 +111,6 @@ class TestCheckEmailToolAvailability:
         available, reason = tool.check_available()
         assert available is False
         assert "not configured" in (reason or "").lower()
-
-
-# ---------------------------------------------------------------------------
-# DelegateTool.check_available()
-# ---------------------------------------------------------------------------
-
-
-class TestDelegateToolAvailability:
-    def test_unavailable_without_dispatch(self) -> None:
-        tool = DelegateTool()
-        available, reason = tool.check_available()
-        assert available is False
-        assert reason is not None
-
-    def test_available_with_dispatch(self) -> None:
-        tool = DelegateTool()
-
-        async def fake_dispatch(role: str, task: str, ctx: str | None) -> None:
-            pass
-
-        tool.set_dispatch(fake_dispatch)  # type: ignore[arg-type]
-        available, reason = tool.check_available()
-        assert available is True
-
-
-class TestDelegateParallelToolAvailability:
-    def test_unavailable_without_dispatch(self) -> None:
-        tool = DelegateParallelTool()
-        available, reason = tool.check_available()
-        assert available is False
-
-    def test_available_with_dispatch(self) -> None:
-        tool = DelegateParallelTool()
-
-        async def fake_dispatch(role: str, task: str, ctx: str | None) -> None:
-            pass
-
-        tool.set_dispatch(fake_dispatch)  # type: ignore[arg-type]
-        available, reason = tool.check_available()
-        assert available is True
 
 
 # ---------------------------------------------------------------------------

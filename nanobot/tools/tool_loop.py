@@ -1,8 +1,8 @@
 """Shared lightweight agent loop for background execution contexts.
 
 ``run_tool_loop`` is the reusable think→act→observe engine used by both
-``MissionManager`` and ``DelegationDispatcher``.  It was extracted from
-``subagent.py`` to decouple it from the deprecated ``SubagentManager``.
+``MissionManager``.  It was extracted from ``subagent.py`` to decouple it
+from the deprecated ``SubagentManager``.
 """
 
 from __future__ import annotations

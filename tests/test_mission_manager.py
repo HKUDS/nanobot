@@ -59,10 +59,10 @@ def _make_bus() -> SimpleNamespace:
     return SimpleNamespace(publish_outbound=AsyncMock())
 
 
-def _default_delegation_tools(workspace: Path | None = None) -> dict:
-    from nanobot.tools.setup import build_delegation_tools
+def _default_base_tools(workspace: Path | None = None) -> dict:
+    from nanobot.tools.setup import build_mission_tools
 
-    return build_delegation_tools(workspace=workspace or Path("/tmp/test-workspace"))
+    return build_mission_tools(workspace=workspace or Path("/tmp/test-workspace"))
 
 
 def _make_manager(
@@ -78,7 +78,7 @@ def _make_manager(
         provider=_DummyProvider(responses),
         bus=bus or _make_bus(),
         max_iterations=3,
-        delegation_tools=_default_delegation_tools(),
+        base_tools=_default_base_tools(),
     )
 
 
@@ -108,10 +108,10 @@ async def test_mission_completes_with_result() -> None:
             workspace=Path("/tmp/test-workspace"),
             model="openai/gpt-4.1",
         ),
+        base_tools=_default_base_tools(),
         provider=provider,
         bus=bus,
         max_iterations=2,
-        delegation_tools=_default_delegation_tools(),
     )
     mission = await mgr.start("check health")
     # Await the background task directly (Pattern A)
@@ -140,10 +140,10 @@ async def test_mission_delivers_on_failure() -> None:
             workspace=Path("/tmp/test-workspace"),
             model="openai/gpt-4.1",
         ),
+        base_tools=_default_base_tools(),
         provider=_FailProvider(),  # type: ignore[arg-type]
         bus=bus,
         max_iterations=2,
-        delegation_tools=_default_delegation_tools(),
     )
 
     mission = await mgr.start("some task")
@@ -171,10 +171,10 @@ async def test_mission_grounded_when_tools_used() -> None:
             workspace=Path("/tmp/test-workspace"),
             model="openai/gpt-4.1",
         ),
+        base_tools=_default_base_tools(),
         provider=_DummyProvider(responses),
         bus=bus,
         max_iterations=3,
-        delegation_tools=_default_delegation_tools(),
     )
 
     mission = await mgr.start("echo test")
@@ -277,10 +277,10 @@ async def test_cancel_sets_cancelled_status() -> None:
             workspace=Path("/tmp/test-workspace"),
             model="openai/gpt-4.1",
         ),
+        base_tools=_default_base_tools(),
         provider=_SlowProvider(),  # type: ignore[arg-type]
         bus=bus,
         max_iterations=3,
-        delegation_tools=_default_delegation_tools(),
     )
 
     mission = await mgr.start("long task")
@@ -338,10 +338,10 @@ async def test_concurrent_missions_complete_independently() -> None:
             workspace=Path("/tmp/test-workspace"),
             model="openai/gpt-4.1",
         ),
+        base_tools=_default_base_tools(),
         provider=_DummyProvider(responses),
         bus=bus,
         max_iterations=2,
-        delegation_tools=_default_delegation_tools(),
     )
 
     missions = [await mgr.start(f"task {i}", label=f"t{i}") for i in range(3)]
@@ -363,10 +363,10 @@ async def test_result_truncation_in_delivery() -> None:
             workspace=Path("/tmp/test-workspace"),
             model="openai/gpt-4.1",
         ),
+        base_tools=_default_base_tools(),
         provider=_DummyProvider([LLMResponse(content=long_content)]),
         bus=bus,
         max_iterations=2,
-        delegation_tools=_default_delegation_tools(),
     )
 
     mission = await mgr.start("long task")
@@ -393,10 +393,10 @@ async def test_bus_delivery_failure_does_not_crash() -> None:
             workspace=Path("/tmp/test-workspace"),
             model="openai/gpt-4.1",
         ),
+        base_tools=_default_base_tools(),
         provider=_DummyProvider([LLMResponse(content="ok")]),
         bus=bus,
         max_iterations=2,
-        delegation_tools=_default_delegation_tools(),
     )
 
     mission = await mgr.start("test")
@@ -426,10 +426,10 @@ async def test_retry_when_no_tools_used() -> None:
             workspace=Path("/tmp/test-workspace"),
             model="openai/gpt-4.1",
         ),
+        base_tools=_default_base_tools(),
         provider=_DummyProvider(responses),
         bus=bus,
         max_iterations=5,
-        delegation_tools=_default_delegation_tools(),
     )
 
     mission = await mgr.start("investigate something")
@@ -579,10 +579,10 @@ async def test_mission_cancel_tool_success() -> None:
             workspace=Path("/tmp/test-workspace"),
             model="openai/gpt-4.1",
         ),
+        base_tools=_default_base_tools(),
         provider=_SlowProvider(),  # type: ignore[arg-type]
         bus=bus,
         max_iterations=2,
-        delegation_tools=_default_delegation_tools(),
     )
     mission = await mgr.start("slow task")
     # Yield to event loop so background task starts running

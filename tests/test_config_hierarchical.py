@@ -37,7 +37,6 @@ class TestAgentConfigHierarchical:
     def test_feature_flags(self):
         ac = AgentConfig(workspace="/tmp/test", model="test")
         assert ac.planning_enabled is True
-        assert ac.delegation_enabled is True
         assert ac.memory_enabled is True
         assert ac.skills_enabled is True
         assert ac.streaming_enabled is True
@@ -95,7 +94,6 @@ class TestConfigRoundTrip:
             "context_window_tokens": 64_000,
             "planning_enabled": False,
             "verification_mode": "always",
-            "delegation_enabled": False,
             "memory_enabled": False,
             "skills_enabled": False,
             "streaming_enabled": False,
@@ -109,7 +107,6 @@ class TestConfigRoundTrip:
             "message_timeout": 60,
             "max_session_cost_usd": 1.5,
             "max_session_wall_time_seconds": 600,
-            "max_delegation_depth": 3,
             "memory": {
                 "window": 50,
                 "retrieval_k": 10,
@@ -171,7 +168,6 @@ class TestConfigCompleteness:
             "context_window_tokens": 64_000,
             "planning_enabled": False,
             "verification_mode": "always",
-            "delegation_enabled": False,
             "memory_enabled": False,
             "skills_enabled": False,
             "streaming_enabled": False,
@@ -185,7 +181,6 @@ class TestConfigCompleteness:
             "message_timeout": 60,
             "max_session_cost_usd": 1.5,
             "max_session_wall_time_seconds": 600,
-            "max_delegation_depth": 3,
             "memory": {"graph_enabled": True},
         }
         ac = AgentConfig.from_raw(data)
@@ -197,7 +192,6 @@ class TestConfigCompleteness:
         assert ac.context_window_tokens == 64_000
         assert ac.planning_enabled is False
         assert ac.verification_mode == "always"
-        assert ac.delegation_enabled is False
         assert ac.memory_enabled is False
         assert ac.skills_enabled is False
         assert ac.streaming_enabled is False
@@ -211,7 +205,6 @@ class TestConfigCompleteness:
         assert ac.message_timeout == 60
         assert ac.max_session_cost_usd == 1.5
         assert ac.max_session_wall_time_seconds == 600
-        assert ac.max_delegation_depth == 3
         assert ac.memory.graph_enabled is True
 
     def test_all_memory_fields_settable(self):

@@ -92,7 +92,7 @@ class MissionManager:
         max_iterations: int = 15,
         max_concurrent: int = 3,
         result_max_chars: int = 4000,
-        delegation_tools: dict[str, Any] | None = None,
+        base_tools: dict[str, Any] | None = None,
     ) -> None:
         self.sub_agent_config = sub_agent_config
         self.provider = provider
@@ -105,7 +105,7 @@ class MissionManager:
         self.max_iterations = max_iterations
         self.max_concurrent = max_concurrent
         self.result_max_chars = result_max_chars
-        self._delegation_tools: dict[str, Any] = delegation_tools or {}
+        self._base_tools: dict[str, Any] = base_tools or {}
 
         # Coordinator removed — missions always use the default "general" role.
         # Set per-session by AgentLoop
@@ -342,8 +342,8 @@ class MissionManager:
         """Build an isolated tool set for the mission, filtered by role."""
         tools = ToolRegistry()
 
-        # Register pre-built delegation tools (injected by composition root).
-        for tool in self._delegation_tools.values():
+        # Register base tools (injected by composition root)
+        for tool in self._base_tools.values():
             tools.register(tool)
 
         # MCP tools (shared instances, injected by AgentLoop)

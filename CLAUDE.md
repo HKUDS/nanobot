@@ -87,7 +87,7 @@ templates) — the loop itself rarely changes. Orchestrates subsystems — never
 domain logic for tools, memory, or coordination.
 
 **Domain subsystems** — each owns a single bounded context:
-- `coordination/` — Multi-agent delegation, missions, scratchpad
+- `coordination/` — Mission management and scratchpad
 - `memory/` — Persistent memory with SQLite storage, hybrid retrieval, knowledge graph
   (internal subdirs: `write/`, `read/`, `ranking/`, `persistence/`, `graph/`)
 - `tools/` — Tool infrastructure (`base`, `registry`, `executor`) and domain

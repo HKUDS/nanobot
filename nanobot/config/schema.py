@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from nanobot.config.base import Base  # noqa: F401 — re-exported for consumers
@@ -258,15 +258,25 @@ class ToolsConfig(Base):
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
+# Removed 2026-03-29: delegation_enabled (delegation subsystem removed)
+_FEATURES_REMOVED_FIELDS = frozenset({"delegation_enabled"})
+
+
 class FeaturesConfig(Base):
     """Feature flags for toggling agent capabilities without code changes."""
 
     planning_enabled: bool = True
     verification_enabled: bool = True  # master switch; mode set in AgentConfig
-    delegation_enabled: bool = True
     memory_enabled: bool = True
     skills_enabled: bool = True
     streaming_enabled: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _strip_removed(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items() if k not in _FEATURES_REMOVED_FIELDS}
+        return data
 
 
 class LogConfig(Base):
