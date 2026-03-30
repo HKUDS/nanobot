@@ -33,8 +33,14 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
-    from nanobot.config.schema import MemoryConsolidationConfig, ToolOutputLimitsConfig
+    from nanobot.config.schema import (
+        AgentLoopConfig,
+        ChannelsConfig,
+        ExecToolConfig,
+        MemoryConsolidationConfig,
+        ToolOutputLimitsConfig,
+        WebSearchConfig,
+    )
     from nanobot.cron.service import CronService
 
 
@@ -50,7 +56,7 @@ class AgentLoop:
     5. Sends responses back
     """
 
-    _TOOL_RESULT_MAX_CHARS = 8_000
+    _TOOL_RESULT_MAX_CHARS = 16_000
 
     def __init__(
         self,
@@ -64,7 +70,8 @@ class AgentLoop:
         web_proxy: str | None = None,
         exec_config: ExecToolConfig | None = None,
         output_limits: ToolOutputLimitsConfig | None = None,
-        memory_config: MemoryConsolidationConfig | None = None,
+        agent_loop_config: AgentLoopConfig | None = None,
+        memory_consolidation_config: MemoryConsolidationConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
@@ -72,8 +79,13 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig, WebSearchConfig
-        from nanobot.config.schema import ExecToolConfig, MemoryConsolidationConfig, ToolOutputLimitsConfig, WebSearchConfig
+        from nanobot.config.schema import (
+            AgentLoopConfig,
+            ExecToolConfig,
+            MemoryConsolidationConfig,
+            ToolOutputLimitsConfig,
+            WebSearchConfig,
+        )
 
         self.bus = bus
         self.channels_config = channels_config
@@ -86,12 +98,15 @@ class AgentLoop:
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
         self.output_limits = output_limits or ToolOutputLimitsConfig()
-        self.memory_config = memory_config or MemoryConsolidationConfig()
+        self.agent_loop_config = agent_loop_config or AgentLoopConfig()
+        self.memory_consolidation_config = (
+            memory_consolidation_config or MemoryConsolidationConfig()
+        )
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
-        self._tool_result_max_chars = self.output_limits.persisted_tool_result_max_chars
+        self._tool_result_max_chars = self.agent_loop_config.persisted_tool_result_max_chars
 
         self.context = ContextBuilder(workspace, timezone=timezone)
         self.sessions = session_manager or SessionManager(workspace)
@@ -131,7 +146,7 @@ class AgentLoop:
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
-            memory_config=self.memory_config,
+            memory_config=self.memory_consolidation_config,
         )
         self._register_default_tools()
         self.commands = CommandRouter()

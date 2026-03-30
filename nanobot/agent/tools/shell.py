@@ -48,7 +48,7 @@ class ExecTool(Tool):
         return "exec"
 
     _MAX_TIMEOUT = 600
-    _MAX_OUTPUT = 5_000
+    _MAX_OUTPUT = 10_000
 
     @property
     def description(self) -> str:

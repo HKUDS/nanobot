@@ -77,8 +77,8 @@ class MemoryStore:
     """Two-layer memory: MEMORY.md (long-term facts) + HISTORY.md (grep-searchable log)."""
 
     _MAX_FAILURES_BEFORE_RAW_ARCHIVE = 3
-    _MAX_MEMORY_CONTEXT_CHARS = 4_000
-    _MAX_MESSAGE_CONTENT_CHARS = 4_000
+    _PROMPT_MEMORY_CHARS_DISABLED = 0
+    _PROMPT_MESSAGE_CHARS_DISABLED = 0
 
     def __init__(
         self,
@@ -90,14 +90,22 @@ class MemoryStore:
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "HISTORY.md"
         self._consecutive_failures = 0
-        self._prompt_memory_chars = prompt_memory_chars or self._MAX_MEMORY_CONTEXT_CHARS
-        self._prompt_message_chars = prompt_message_chars or self._MAX_MESSAGE_CONTENT_CHARS
+        self._prompt_memory_chars = (
+            self._PROMPT_MEMORY_CHARS_DISABLED
+            if prompt_memory_chars is None
+            else prompt_memory_chars
+        )
+        self._prompt_message_chars = (
+            self._PROMPT_MESSAGE_CHARS_DISABLED
+            if prompt_message_chars is None
+            else prompt_message_chars
+        )
 
     @staticmethod
     def _truncate_for_prompt(value: Any, max_chars: int) -> str:
         """Keep consolidation prompts bounded even when persisted history is large."""
         text = _ensure_text(value)
-        if len(text) <= max_chars:
+        if max_chars <= 0 or len(text) <= max_chars:
             return text
         omitted = len(text) - max_chars
         half = max_chars // 2
@@ -140,7 +148,7 @@ class MemoryStore:
         messages: list[dict],
         provider: LLMProvider,
         model: str,
-        max_completion_tokens: int,
+        max_completion_tokens: int | None = None,
     ) -> bool:
         """Consolidate the provided message chunk into MEMORY.md + HISTORY.md."""
         if not messages:
@@ -162,25 +170,23 @@ class MemoryStore:
 
         try:
             forced = {"type": "function", "function": {"name": "save_memory"}}
+            request_kwargs: dict[str, Any] = {
+                "messages": chat_messages,
+                "tools": _SAVE_MEMORY_TOOL,
+                "model": model,
+                "tool_choice": forced,
+            }
+            if max_completion_tokens and max_completion_tokens > 0:
+                request_kwargs["max_tokens"] = max_completion_tokens
             response = await provider.chat_with_retry(
-                messages=chat_messages,
-                tools=_SAVE_MEMORY_TOOL,
-                model=model,
-                max_tokens=max_completion_tokens,
-                tool_choice=forced,
+                **request_kwargs,
             )
 
             if response.finish_reason == "error" and _is_tool_choice_unsupported(
                 response.content
             ):
                 logger.warning("Forced tool_choice unsupported, retrying with auto")
-                response = await provider.chat_with_retry(
-                    messages=chat_messages,
-                    tools=_SAVE_MEMORY_TOOL,
-                    model=model,
-                    max_tokens=max_completion_tokens,
-                    tool_choice="auto",
-                )
+                response = await provider.chat_with_retry(**{**request_kwargs, "tool_choice": "auto"})
 
             if not response.has_tool_calls:
                 logger.warning(
@@ -278,7 +284,11 @@ class MemoryConsolidator:
         self.sessions = sessions
         self.context_window_tokens = context_window_tokens
         self.max_completion_tokens = max_completion_tokens
-        self.memory_max_completion_tokens = max(512, min(cfg.max_completion_tokens, max_completion_tokens // 2))
+        self.memory_max_completion_tokens = (
+            min(cfg.max_completion_tokens, max_completion_tokens)
+            if cfg.max_completion_tokens > 0
+            else None
+        )
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
@@ -300,7 +310,6 @@ class MemoryConsolidator:
         self,
         session: Session,
         tokens_to_remove: int,
-        max_chunk_tokens: int | None = None,
     ) -> tuple[int, int] | None:
         """Pick a user-turn boundary that removes enough old prompt tokens."""
         start = session.last_consolidated
@@ -313,9 +322,7 @@ class MemoryConsolidator:
             message = session.messages[idx]
             if idx > start and message.get("role") == "user":
                 last_boundary = (idx, removed_tokens)
-                if removed_tokens >= tokens_to_remove or (
-                    max_chunk_tokens is not None and removed_tokens >= max_chunk_tokens
-                ):
+                if removed_tokens >= tokens_to_remove:
                     return last_boundary
             removed_tokens += estimate_message_tokens(message)
 
@@ -360,7 +367,6 @@ class MemoryConsolidator:
         async with lock:
             budget = self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
             target = budget // 2
-            max_chunk_tokens = max(512, budget // 2)
             estimated, source = self.estimate_session_prompt_tokens(session)
             if estimated <= 0:
                 return
@@ -378,11 +384,7 @@ class MemoryConsolidator:
                 if estimated <= target:
                     return
 
-                boundary = self.pick_consolidation_boundary(
-                    session,
-                    max(1, estimated - target),
-                    max_chunk_tokens=max_chunk_tokens,
-                )
+                boundary = self.pick_consolidation_boundary(session, max(1, estimated - target))
                 if boundary is None:
                     logger.debug(
                         "Token consolidation: no safe boundary for {} (round {})",
@@ -397,14 +399,13 @@ class MemoryConsolidator:
                     return
 
                 logger.info(
-                    "Token consolidation round {} for {}: {}/{} via {}, chunk={} msgs/{} toks",
+                    "Token consolidation round {} for {}: {}/{} via {}, chunk={} msgs",
                     round_num,
                     session.key,
                     estimated,
                     self.context_window_tokens,
                     source,
                     len(chunk),
-                    boundary[1],
                 )
                 if not await self.consolidate_messages(chunk):
                     return

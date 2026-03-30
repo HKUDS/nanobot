@@ -59,8 +59,8 @@ class _FsTool(Tool):
 class ReadFileTool(_FsTool):
     """Read file contents with optional line-based pagination."""
 
-    _MAX_CHARS = 64_000
-    _DEFAULT_LIMIT = 1000
+    _MAX_CHARS = 128_000
+    _DEFAULT_LIMIT = 2000
 
     def __init__(
         self,
@@ -98,7 +98,7 @@ class ReadFileTool(_FsTool):
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of lines to read (default 1000)",
+                    "description": "Maximum number of lines to read (default 2000)",
                     "minimum": 1,
                 },
             },
@@ -337,7 +337,7 @@ class EditFileTool(_FsTool):
 class ListDirTool(_FsTool):
     """List directory contents with optional recursion."""
 
-    _DEFAULT_MAX = 100
+    _DEFAULT_MAX = 200
     _IGNORE_DIRS = {
         ".git", "node_modules", "__pycache__", ".venv", "venv",
         "dist", "build", ".tox", ".mypy_cache", ".pytest_cache",
@@ -368,7 +368,7 @@ class ListDirTool(_FsTool):
                 },
                 "max_entries": {
                     "type": "integer",
-                    "description": "Maximum entries to return (default 100)",
+                    "description": "Maximum entries to return (default 200)",
                     "minimum": 1,
                 },
             },
