@@ -95,3 +95,122 @@ async def test_graphiti_backend_stop_is_safe_before_start():
 
     backend = GraphitiMemoryBackend(GraphitiConfig())
     await backend.stop()  # no exception
+
+
+# ── consolidate() ────────────────────────────────────────────────────────────
+
+async def test_consolidate_calls_add_episode(mock_graphiti, mock_provider, session_key):
+    from nanobot_graphiti.backend import GraphitiMemoryBackend
+    from nanobot_graphiti.config import GraphitiConfig
+
+    backend = GraphitiMemoryBackend(GraphitiConfig(), _graphiti_factory=lambda **kw: mock_graphiti)
+    await backend.start(mock_provider)
+
+    messages = [
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": "Hi there!"},
+    ]
+    await backend.consolidate(messages, session_key)
+
+    mock_graphiti.add_episode.assert_awaited_once()
+    call_kwargs = mock_graphiti.add_episode.call_args.kwargs
+    assert call_kwargs["group_id"] == "123456"   # scope="user" strips "telegram:"
+    assert "Hello" in call_kwargs["episode_body"]
+    assert "Hi there!" in call_kwargs["episode_body"]
+
+
+async def test_consolidate_uses_session_scope(mock_graphiti, mock_provider):
+    from nanobot_graphiti.backend import GraphitiMemoryBackend
+    from nanobot_graphiti.config import GraphitiConfig
+
+    backend = GraphitiMemoryBackend(
+        GraphitiConfig(scope="session"),
+        _graphiti_factory=lambda **kw: mock_graphiti,
+    )
+    await backend.start(mock_provider)
+    await backend.consolidate([{"role": "user", "content": "hi"}], "telegram:123456")
+
+    call_kwargs = mock_graphiti.add_episode.call_args.kwargs
+    assert call_kwargs["group_id"] == "telegram:123456"
+
+
+async def test_consolidate_swallows_errors(mock_graphiti, mock_provider, session_key):
+    """consolidate() must not raise even if graphiti.add_episode() fails."""
+    from nanobot_graphiti.backend import GraphitiMemoryBackend
+    from nanobot_graphiti.config import GraphitiConfig
+
+    mock_graphiti.add_episode.side_effect = RuntimeError("graph unavailable")
+
+    backend = GraphitiMemoryBackend(GraphitiConfig(), _graphiti_factory=lambda **kw: mock_graphiti)
+    await backend.start(mock_provider)
+    await backend.consolidate([{"role": "user", "content": "hi"}], session_key)
+    # No exception raised — test passes if we reach here
+
+
+async def test_consolidate_skips_empty_messages(mock_graphiti, mock_provider, session_key):
+    from nanobot_graphiti.backend import GraphitiMemoryBackend
+    from nanobot_graphiti.config import GraphitiConfig
+
+    backend = GraphitiMemoryBackend(GraphitiConfig(), _graphiti_factory=lambda **kw: mock_graphiti)
+    await backend.start(mock_provider)
+    await backend.consolidate([], session_key)
+
+    mock_graphiti.add_episode.assert_not_awaited()
+
+
+# ── retrieve() ───────────────────────────────────────────────────────────────
+
+async def test_retrieve_calls_search_with_group_id(mock_graphiti, mock_provider, session_key):
+    from unittest.mock import MagicMock
+    from nanobot_graphiti.backend import GraphitiMemoryBackend
+    from nanobot_graphiti.config import GraphitiConfig
+
+    edge = MagicMock()
+    edge.fact = "User likes coffee"
+    edge.uuid = "abc-123"
+    mock_graphiti.search.return_value = [edge]
+
+    backend = GraphitiMemoryBackend(GraphitiConfig(), _graphiti_factory=lambda **kw: mock_graphiti)
+    await backend.start(mock_provider)
+
+    result = await backend.retrieve("coffee", session_key, top_k=3)
+
+    mock_graphiti.search.assert_awaited_once_with("coffee", group_ids=["123456"], num_results=3)
+    assert "User likes coffee" in result
+    assert "[Memory" in result
+
+
+async def test_retrieve_returns_empty_string_when_no_results(mock_graphiti, mock_provider, session_key):
+    from nanobot_graphiti.backend import GraphitiMemoryBackend
+    from nanobot_graphiti.config import GraphitiConfig
+
+    mock_graphiti.search.return_value = []
+
+    backend = GraphitiMemoryBackend(GraphitiConfig(), _graphiti_factory=lambda **kw: mock_graphiti)
+    await backend.start(mock_provider)
+
+    result = await backend.retrieve("anything", session_key)
+    assert result == ""
+
+
+async def test_retrieve_formats_multiple_facts(mock_graphiti, mock_provider, session_key):
+    from unittest.mock import MagicMock
+    from nanobot_graphiti.backend import GraphitiMemoryBackend
+    from nanobot_graphiti.config import GraphitiConfig
+
+    edges = []
+    for i, fact in enumerate(["Likes coffee", "Works in Berlin", "Has a cat"]):
+        edge = MagicMock()
+        edge.fact = fact
+        edge.uuid = f"uuid-{i}"
+        edges.append(edge)
+    mock_graphiti.search.return_value = edges
+
+    backend = GraphitiMemoryBackend(GraphitiConfig(), _graphiti_factory=lambda **kw: mock_graphiti)
+    await backend.start(mock_provider)
+
+    result = await backend.retrieve("tell me about user", session_key)
+    assert "Likes coffee" in result
+    assert "Works in Berlin" in result
+    assert "Has a cat" in result
+    assert "[Memory — 3 relevant facts]" in result

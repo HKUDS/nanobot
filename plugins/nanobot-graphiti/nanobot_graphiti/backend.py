@@ -113,10 +113,61 @@ class GraphitiMemoryBackend(MemoryBackend):
         return session_key
 
     async def consolidate(self, messages: list[dict], session_key: str) -> None:
-        raise NotImplementedError  # implemented in Task 4
+        if not messages or self._graphiti is None:
+            return
+        try:
+            # Lazy-import EpisodeType to avoid hard dependency at module load time
+            try:
+                from graphiti_core.nodes import EpisodeType
+                episode_source = EpisodeType.message
+            except ImportError:
+                # If graphiti_core is not available, use a string sentinel
+                episode_source = "message"
+
+            lines = []
+            for msg in messages:
+                role = msg.get("role", "unknown").capitalize()
+                content = msg.get("content") or ""
+                if isinstance(content, list):
+                    # Handle multi-part content blocks (e.g. tool results)
+                    content = " ".join(
+                        part.get("text", "") if isinstance(part, dict) else str(part)
+                        for part in content
+                    )
+                if content:
+                    lines.append(f"{role}: {content}")
+
+            episode_body = "\n".join(lines)
+            if not episode_body.strip():
+                return
+
+            group_id = self._get_group_id(session_key)
+            await self._graphiti.add_episode(
+                name=session_key,
+                episode_body=episode_body,
+                source_description="nanobot conversation",
+                reference_time=datetime.now(timezone.utc),
+                source=episode_source,
+                group_id=group_id,
+            )
+        except Exception:
+            logger.exception("GraphitiMemoryBackend.consolidate() failed — memory not updated")
 
     async def retrieve(self, query: str, session_key: str, top_k: int = 5) -> str:
-        raise NotImplementedError  # implemented in Task 5
+        if self._graphiti is None:
+            return ""
+        try:
+            group_id = self._get_group_id(session_key)
+            results = await self._graphiti.search(query, group_ids=[group_id], num_results=top_k)
+            if not results:
+                return ""
+            lines = [f"[Memory — {len(results)} relevant facts]"]
+            for edge in results:
+                lines.append(f"• {edge.fact}")
+            return "\n".join(lines)
+        except Exception:
+            logger.exception("GraphitiMemoryBackend.retrieve() failed — no memory injected")
+            return ""
 
     def get_tools(self) -> list[Tool]:
         return []  # implemented in Task 7
