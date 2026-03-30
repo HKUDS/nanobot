@@ -38,6 +38,35 @@ if TYPE_CHECKING:
     from nanobot.cron.service import CronService
 
 
+def load_memory_backend(config: Any) -> "MemoryBackend":
+    """Discover and instantiate the configured memory backend from installed entry-points.
+
+    Falls back to the built-in MemoryStore when:
+    - ``config.memory.backend`` is ``"default"``
+    - No matching entry-point is registered
+    """
+    from importlib.metadata import entry_points
+    from nanobot.agent.memory import MemoryStore
+
+    backend_name = getattr(getattr(config, "memory", None), "backend", "default")
+    if backend_name == "default":
+        return MemoryStore(config.workspace_path)
+
+    for ep in entry_points(group="nanobot.memory"):
+        if ep.name == backend_name:
+            backend_cls = ep.load()
+            if hasattr(backend_cls, "from_nanobot_config"):
+                return backend_cls.from_nanobot_config(config)
+            return backend_cls(config)
+
+    logger.warning(
+        "Memory backend '{}' not found in nanobot.memory entry-points; "
+        "falling back to default MemoryStore",
+        backend_name,
+    )
+    return MemoryStore(config.workspace_path)
+
+
 class AgentLoop:
     """
     The agent loop is the core processing engine.
