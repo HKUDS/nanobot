@@ -34,6 +34,7 @@ class AgentRunSpec:
     max_iterations_message: str | None = None
     concurrent_tools: bool = False
     fail_on_tool_error: bool = False
+    chat_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -70,7 +71,7 @@ class AgentRunner:
             await hook.before_iteration(context)
             kwargs: dict[str, Any] = {
                 "messages": messages,
-                "tools": spec.tools.get_definitions(),
+                "tools": spec.tools.get_definitions(chat_id=spec.chat_id),
                 "model": spec.model,
             }
             if spec.temperature is not None:
@@ -206,7 +207,7 @@ class AgentRunner:
         tool_call: ToolCallRequest,
     ) -> tuple[Any, dict[str, str], BaseException | None]:
         try:
-            result = await spec.tools.execute(tool_call.name, tool_call.arguments)
+            result = await spec.tools.execute(tool_call.name, tool_call.arguments, chat_id=spec.chat_id)
         except asyncio.CancelledError:
             raise
         except BaseException as exc:

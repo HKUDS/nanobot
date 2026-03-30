@@ -77,7 +77,8 @@ def _normalize_schema_for_openai(schema: Any) -> dict[str, Any]:
 class MCPToolWrapper(Tool):
     """Wraps a single MCP server tool as a nanobot Tool."""
 
-    def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30):
+    def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30,
+                 allowed_chats: list[str] | None = None):
         self._session = session
         self._original_name = tool_def.name
         self._name = f"mcp_{server_name}_{tool_def.name}"
@@ -85,6 +86,16 @@ class MCPToolWrapper(Tool):
         raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
         self._parameters = _normalize_schema_for_openai(raw_schema)
         self._tool_timeout = tool_timeout
+        self._allowed_chats: frozenset[str] | None = (
+            frozenset(allowed_chats) if allowed_chats is not None else None
+        )
+
+    def is_allowed_for(self, chat_id: str | None) -> bool:
+        if self._allowed_chats is None:
+            return True
+        if not chat_id:
+            return True
+        return chat_id in self._allowed_chats
 
     @property
     def name(self) -> str:
@@ -145,6 +156,10 @@ async def connect_mcp_servers(
     from mcp.client.streamable_http import streamable_http_client
 
     for name, cfg in mcp_servers.items():
+        if cfg.allowed_chats is not None and len(cfg.allowed_chats) == 0:
+            logger.info("MCP server '{}': allowedChats is empty, skipping", name)
+            continue
+
         try:
             transport_type = cfg.type
             if not transport_type:
@@ -221,7 +236,8 @@ async def connect_mcp_servers(
                         name,
                     )
                     continue
-                wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
+                wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout,
+                                        allowed_chats=cfg.allowed_chats)
                 registry.register(wrapper)
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
                 registered_count += 1

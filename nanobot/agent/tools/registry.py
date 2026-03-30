@@ -31,17 +31,23 @@ class ToolRegistry:
         """Check if a tool is registered."""
         return name in self._tools
 
-    def get_definitions(self) -> list[dict[str, Any]]:
-        """Get all tool definitions in OpenAI format."""
-        return [tool.to_schema() for tool in self._tools.values()]
+    def get_definitions(self, chat_id: str | None = None) -> list[dict[str, Any]]:
+        """Get tool definitions in OpenAI format, optionally filtered by chat scope."""
+        return [
+            tool.to_schema()
+            for tool in self._tools.values()
+            if not hasattr(tool, "is_allowed_for") or tool.is_allowed_for(chat_id)
+        ]
 
-    async def execute(self, name: str, params: dict[str, Any]) -> Any:
+    async def execute(self, name: str, params: dict[str, Any], chat_id: str | None = None) -> Any:
         """Execute a tool by name with given parameters."""
         _HINT = "\n\n[Analyze the error above and try a different approach.]"
 
         tool = self._tools.get(name)
         if not tool:
             return f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
+        if hasattr(tool, "is_allowed_for") and not tool.is_allowed_for(chat_id):
+            return f"Error: Tool '{name}' is not available in this chat." + _HINT
 
         try:
             # Attempt to cast parameters to match schema types

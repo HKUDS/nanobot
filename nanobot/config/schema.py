@@ -140,6 +140,7 @@ class MCPServerConfig(Base):
     headers: dict[str, str] = Field(default_factory=dict)  # HTTP/SSE: custom headers
     tool_timeout: int = 30  # seconds before a tool call is cancelled
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
+    allowed_chats: list[str] | None = None  # Restrict to specific chat IDs; None = available everywhere; [] = disabled
 
 class ToolsConfig(Base):
     """Tools configuration."""

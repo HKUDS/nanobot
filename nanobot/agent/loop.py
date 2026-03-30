@@ -265,6 +265,7 @@ class AgentLoop:
             hook=_LoopHook(),
             error_message="Sorry, I encountered an error calling the AI model.",
             concurrent_tools=True,
+            chat_id=chat_id,
         ))
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
