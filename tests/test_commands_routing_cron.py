@@ -70,12 +70,9 @@ def test_routing_metrics_branches(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
         json.dumps(
             {
                 "routing_classifications": 2,
-                "routing_delegations": 1,
                 "routing_cycles_blocked": 0,
                 "routing_classify_latency_sum_ms": 30,
                 "routing_classify_latency_max_ms": 20,
-                "delegation_latency_sum_ms": 50,
-                "delegation_latency_max_ms": 50,
                 "role_invocations:general": 2,
                 "role_tool_calls:general": 3,
             }

@@ -107,7 +107,7 @@ TASK_TYPES: dict[str, dict[str, Any]] = {
 
 
 def classify_task_type(role: str, task: str) -> str:
-    """Classify a delegation task into a task type from the taxonomy.
+    """Classify a task into a task type from the taxonomy.
 
     Returns one of the keys from ``TASK_TYPES``: ``report_writing``,
     ``bug_investigation``, ``hybrid``, ``repo_architecture``,

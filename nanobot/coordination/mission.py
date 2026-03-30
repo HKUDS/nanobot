@@ -1,9 +1,9 @@
-"""Background mission manager — asynchronous delegated task execution.
+"""Background mission manager — asynchronous task execution.
 
-A *mission* is an asynchronous task that runs in the background using the
-delegation engine's structured contracts, task taxonomy, and grounding
-verification.  Results are delivered directly to the user via
-``OutboundMessage`` (not re-injected through the agent loop).
+A *mission* is an asynchronous task that runs in the background using
+structured contracts, task taxonomy, and grounding verification.
+Results are delivered directly to the user via ``OutboundMessage``
+(not re-injected through the agent loop).
 
 Works with or without a coordinator: when ``routing.enabled=True`` the
 coordinator classifies the task into a specialist role; otherwise a
@@ -56,7 +56,7 @@ class MissionStatus(Enum):
 
 @dataclass(slots=True)
 class Mission:
-    """A background task executed through the delegation engine."""
+    """A background task executed asynchronously."""
 
     id: str
     task: str
@@ -73,11 +73,10 @@ class Mission:
 
 
 class MissionManager:
-    """Manages background mission execution using the delegation engine.
+    """Manages background mission execution.
 
-    Missions are asynchronous delegated tasks that:
-    - Route through the coordinator for role classification (when available)
-    - Use structured delegation contracts with task taxonomy
+    Missions are asynchronous tasks that:
+    - Use structured contracts with task taxonomy
     - Track grounding (tool usage) for result verification
     - Deliver results directly via ``OutboundMessage``
     - Write results to the session scratchpad for main-agent access
@@ -196,7 +195,7 @@ class MissionManager:
     # ------------------------------------------------------------------
 
     async def _execute_mission(self, mission: Mission, context: str | None) -> None:
-        """Run the mission through the delegation engine."""
+        """Run the mission in a background tool-use loop."""
         mission.status = MissionStatus.RUNNING
 
         TraceContext.set(request_id=mission.id, agent_id=mission.role)
@@ -363,11 +362,11 @@ class MissionManager:
         return tools
 
     # ------------------------------------------------------------------
-    # Prompt construction (reuses delegation contract patterns)
+    # Prompt construction
     # ------------------------------------------------------------------
 
     def _build_system_prompt(self, role: AgentRoleConfig, task_type: str) -> str:
-        """Build a structured system prompt using the delegation contract pattern."""
+        """Build a structured system prompt for the mission."""
         tt = TASK_TYPES.get(task_type, TASK_TYPES["general"])
 
         evidence_type = tt.get("evidence", "tool output excerpts")
