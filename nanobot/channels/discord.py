@@ -61,6 +61,8 @@ class DiscordChannel(BaseChannel):
         self._bot_user_id: str | None = None
         self._tree: discord.app_commands.CommandTree | None = None
         self._pending_interactions: dict[str, discord.Interaction] = {}
+        self._interaction_timestamps: dict[str, float] = {}
+        self._cleanup_interactions_task: asyncio.Task | None = None
         self._attach_stop_button: set[str] = set()
         self._thread_map: dict[str, str] = {}  # original channel_id -> thread_id
         self._tool_registry: Any = None
@@ -100,6 +102,7 @@ class DiscordChannel(BaseChannel):
 
             @self._tree.command(name="help", description="Show available commands")
             async def slash_help(interaction: discord.Interaction) -> None:
+                logger.info("Discord slash command: /help from user={} channel={}", interaction.user.id, interaction.channel_id)
                 embed = discord.Embed(title="nanobot Commands", color=discord.Color.blurple())
                 embed.add_field(name="/stop", value="Stop the current agent task", inline=False)
                 embed.add_field(name="/restart", value="Restart the bot process", inline=False)
@@ -113,6 +116,7 @@ class DiscordChannel(BaseChannel):
             @self._tree.command(name="model", description="View or change the LLM model")
             @discord.app_commands.describe(model="Model name (e.g. claude-opus-4-6)")
             async def slash_model(interaction: discord.Interaction, model: str | None = None) -> None:
+                logger.info("Discord slash command: /model from user={} channel={}", interaction.user.id, interaction.channel_id)
                 if model:
                     await self._inject_slash_as_message(interaction, f"/model {model}")
                     return
@@ -163,6 +167,7 @@ class DiscordChannel(BaseChannel):
                     if not any(r in member_roles for r in self.config.admin_role_ids):
                         await interaction.response.send_message("Admin access required.", ephemeral=True)
                         return
+                logger.info("Discord slash command: /config from user={} channel={}", interaction.user.id, interaction.channel_id)
                 embed = discord.Embed(title="Discord Channel Config", color=discord.Color.blue())
                 embed.add_field(name="group_policy", value=self.config.group_policy, inline=True)
                 embed.add_field(name="slash_commands_enabled", value=str(self.config.slash_commands_enabled), inline=True)
@@ -184,6 +189,7 @@ class DiscordChannel(BaseChannel):
                     if not any(r in member_roles for r in self.config.admin_role_ids):
                         await interaction.response.send_message("Admin access required.", ephemeral=True)
                         return
+                logger.info("Discord slash command: /mcp from user={} channel={}", interaction.user.id, interaction.channel_id)
                 mcp_servers: list[str] = []
                 try:
                     from nanobot.config.loader import load_config  # noqa: PLC0415
@@ -205,6 +211,7 @@ class DiscordChannel(BaseChannel):
         async def on_ready() -> None:
             self._bot_user_id = str(self._client.user.id)
             logger.info("Discord ready as {}", self._client.user)
+            self._cleanup_interactions_task = asyncio.ensure_future(self._cleanup_interactions())
             self._register_discord_tools()
             if self.config.slash_commands_enabled:
                 if self.config.guild_ids:
@@ -267,9 +274,33 @@ class DiscordChannel(BaseChannel):
         ]:
             self._tool_registry.unregister(name)
 
+    async def _cleanup_interactions(self) -> None:
+        """Periodically remove stale pending interactions (>840s old)."""
+        while True:
+            try:
+                await asyncio.sleep(60)
+                now = asyncio.get_running_loop().time()
+                stale = [cid for cid, ts in self._interaction_timestamps.items() if now - ts > 840]
+                for cid in stale:
+                    self._pending_interactions.pop(cid, None)
+                    self._interaction_timestamps.pop(cid, None)
+                    logger.debug("Discord: expired stale interaction for channel {}", cid)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning("Discord: interaction cleanup error: {}", e)
+
     async def stop(self) -> None:
         """Stop the Discord channel."""
         self._running = False
+        if self._cleanup_interactions_task:
+            self._cleanup_interactions_task.cancel()
+            try:
+                await self._cleanup_interactions_task
+            except asyncio.CancelledError:
+                pass
+            self._cleanup_interactions_task = None
+        self._interaction_timestamps.clear()
         self._unregister_discord_tools()
         for task in self._typing_tasks.values():
             task.cancel()
@@ -404,9 +435,11 @@ class DiscordChannel(BaseChannel):
         if not self.is_allowed(str(interaction.user.id)):
             await interaction.response.send_message("Not authorized.", ephemeral=True)
             return
+        logger.info("Discord slash command: {} from user={} channel={}", text, interaction.user.id, interaction.channel_id)
         channel_id = str(interaction.channel_id)
         await interaction.response.defer(thinking=True, ephemeral=self.config.ephemeral_commands)
         self._pending_interactions[channel_id] = interaction
+        self._interaction_timestamps[channel_id] = asyncio.get_running_loop().time()
         # TODO: Phase 3 — if two slash commands fire before the first is answered, the second
         # overwrites _pending_interactions[channel_id] and the first deferred interaction
         # will never get a followup (Discord marks it failed). Consider per-channel locking.
