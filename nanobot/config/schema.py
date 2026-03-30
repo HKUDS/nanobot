@@ -150,6 +150,12 @@ class ToolsConfig(Base):
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
+class MemoryConfig(Base):
+    """Memory backend configuration."""
+
+    backend: str = "default"
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
@@ -158,6 +164,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
 
     @property
     def workspace_path(self) -> Path:
