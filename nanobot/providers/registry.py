@@ -203,6 +203,17 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="anthropic",
         supports_prompt_caching=True,
     ),
+    # Anthropic Claude Code: OAuth token from Claude Code subscription (claude auth login)
+    # Uses sk-ant-oat01-... token with special beta headers. Requires explicit provider selection.
+    ProviderSpec(
+        name="anthropic_claude_code",
+        keywords=("claude-code",),
+        env_key="ANTHROPIC_OAUTH_TOKEN",
+        display_name="Anthropic (Claude Code OAuth)",
+        backend="anthropic",
+        is_oauth=True,
+        supports_prompt_caching=True,
+    ),
     # OpenAI: SDK default base URL (no override needed)
     ProviderSpec(
         name="openai",

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import os
 import re
 import secrets
 import string
@@ -11,6 +9,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import json_repair
+from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
@@ -21,11 +20,36 @@ def _gen_tool_id() -> str:
     return "toolu_" + "".join(secrets.choice(_ALNUM) for _ in range(22))
 
 
+# Beta headers injected for OAuth tokens (sk-ant-oat...) from Claude Code subscriptions.
+# Context-1m beta is intentionally excluded: Anthropic rejects it with OAuth auth.
+_OAUTH_TOKEN_PREFIX = "sk-ant-oat"
+_OAUTH_BETAS = [
+    "claude-code-20250219",
+    "oauth-2025-04-20",
+    "fine-grained-tool-streaming-2025-05-14",
+    "interleaved-thinking-2025-05-14",
+]
+
+
+def _is_oauth_token(api_key: str | None) -> bool:
+    return bool(api_key and api_key.strip().startswith(_OAUTH_TOKEN_PREFIX))
+
+
+def _merge_beta_header(headers: dict[str, str], betas: list[str]) -> dict[str, str]:
+    existing = headers.get("anthropic-beta", "")
+    existing_list = [b.strip() for b in existing.split(",") if b.strip()]
+    merged = list(dict.fromkeys(existing_list + betas))  # deduplicate, preserve order
+    return {**headers, "anthropic-beta": ",".join(merged)}
+
+
 class AnthropicProvider(LLMProvider):
     """LLM provider using the native Anthropic SDK for Claude models.
 
     Handles message format conversion (OpenAI → Anthropic Messages API),
     prompt caching, extended thinking, tool calls, and streaming.
+
+    When an OAuth token (sk-ant-oat...) is used (Claude Code subscription),
+    the required beta headers are injected automatically.
     """
 
     def __init__(
@@ -37,7 +61,14 @@ class AnthropicProvider(LLMProvider):
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
-        self.extra_headers = extra_headers or {}
+
+        # Normalize headers and inject OAuth betas when using a Claude Code token
+        merged_headers: dict[str, str] = dict(extra_headers or {})
+        if _is_oauth_token(api_key):
+            merged_headers = _merge_beta_header(merged_headers, _OAUTH_BETAS)
+            logger.debug("AnthropicProvider: OAuth token detected, injected Claude Code beta headers")
+
+        self.extra_headers = merged_headers
 
         from anthropic import AsyncAnthropic
 
@@ -46,67 +77,9 @@ class AnthropicProvider(LLMProvider):
             client_kw["api_key"] = api_key
         if api_base:
             client_kw["base_url"] = api_base
-        if extra_headers:
-            client_kw["default_headers"] = extra_headers
-        # Keep retries centralized in LLMProvider._run_with_retry to avoid retry amplification.
-        client_kw["max_retries"] = 0
+        if self.extra_headers:
+            client_kw["default_headers"] = self.extra_headers
         self._client = AsyncAnthropic(**client_kw)
-
-    @classmethod
-    def _handle_error(cls, e: Exception) -> LLMResponse:
-        response = getattr(e, "response", None)
-        headers = getattr(response, "headers", None)
-        payload = (
-            getattr(e, "body", None)
-            or getattr(e, "doc", None)
-            or getattr(response, "text", None)
-        )
-        if payload is None and response is not None:
-            response_json = getattr(response, "json", None)
-            if callable(response_json):
-                try:
-                    payload = response_json()
-                except Exception:
-                    payload = None
-        payload_text = payload if isinstance(payload, str) else str(payload) if payload is not None else ""
-        msg = f"Error: {payload_text.strip()[:500]}" if payload_text.strip() else f"Error calling LLM: {e}"
-        retry_after = cls._extract_retry_after_from_headers(headers)
-        if retry_after is None:
-            retry_after = LLMProvider._extract_retry_after(msg)
-
-        status_code = getattr(e, "status_code", None)
-        if status_code is None and response is not None:
-            status_code = getattr(response, "status_code", None)
-
-        should_retry: bool | None = None
-        if headers is not None:
-            raw = headers.get("x-should-retry")
-            if isinstance(raw, str):
-                lowered = raw.strip().lower()
-                if lowered == "true":
-                    should_retry = True
-                elif lowered == "false":
-                    should_retry = False
-
-        error_kind: str | None = None
-        error_name = e.__class__.__name__.lower()
-        if "timeout" in error_name:
-            error_kind = "timeout"
-        elif "connection" in error_name:
-            error_kind = "connection"
-        error_type, error_code = LLMProvider._extract_error_type_code(payload)
-
-        return LLMResponse(
-            content=msg,
-            finish_reason="error",
-            retry_after=retry_after,
-            error_status_code=int(status_code) if status_code is not None else None,
-            error_kind=error_kind,
-            error_type=error_type,
-            error_code=error_code,
-            error_retry_after_s=retry_after,
-            error_should_retry=should_retry,
-        )
 
     @staticmethod
     def _strip_prefix(model: str) -> str:
@@ -310,9 +283,8 @@ class AnthropicProvider(LLMProvider):
     # Prompt caching
     # ------------------------------------------------------------------
 
-    @classmethod
+    @staticmethod
     def _apply_cache_control(
-        cls,
         system: str | list[dict[str, Any]],
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
@@ -339,8 +311,7 @@ class AnthropicProvider(LLMProvider):
         new_tools = tools
         if tools:
             new_tools = list(tools)
-            for idx in cls._tool_cache_marker_indices(new_tools):
-                new_tools[idx] = {**new_tools[idx], "cache_control": marker}
+            new_tools[-1] = {**new_tools[-1], "cache_control": marker}
 
         return system, new_msgs, new_tools
 
@@ -431,22 +402,15 @@ class AnthropicProvider(LLMProvider):
 
         usage: dict[str, int] = {}
         if response.usage:
-            input_tokens = response.usage.input_tokens
-            cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
-            cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
-            total_prompt_tokens = input_tokens + cache_creation + cache_read
             usage = {
-                "prompt_tokens": total_prompt_tokens,
+                "prompt_tokens": response.usage.input_tokens,
                 "completion_tokens": response.usage.output_tokens,
-                "total_tokens": total_prompt_tokens + response.usage.output_tokens,
+                "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
             }
             for attr in ("cache_creation_input_tokens", "cache_read_input_tokens"):
                 val = getattr(response.usage, attr, 0)
                 if val:
                     usage[attr] = val
-            # Normalize to cached_tokens for downstream consistency.
-            if cache_read:
-                usage["cached_tokens"] = cache_read
 
         return LLMResponse(
             content="".join(content_parts) or None,
@@ -478,7 +442,7 @@ class AnthropicProvider(LLMProvider):
             response = await self._client.messages.create(**kwargs)
             return self._parse_response(response)
         except Exception as e:
-            return self._handle_error(e)
+            return LLMResponse(content=f"Error calling LLM: {e}", finish_reason="error")
 
     async def chat_stream(
         self,
@@ -495,36 +459,15 @@ class AnthropicProvider(LLMProvider):
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
         )
-        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
         try:
             async with self._client.messages.stream(**kwargs) as stream:
                 if on_content_delta:
-                    stream_iter = stream.text_stream.__aiter__()
-                    while True:
-                        try:
-                            text = await asyncio.wait_for(
-                                stream_iter.__anext__(),
-                                timeout=idle_timeout_s,
-                            )
-                        except StopAsyncIteration:
-                            break
+                    async for text in stream.text_stream:
                         await on_content_delta(text)
-                response = await asyncio.wait_for(
-                    stream.get_final_message(),
-                    timeout=idle_timeout_s,
-                )
+                response = await stream.get_final_message()
             return self._parse_response(response)
-        except asyncio.TimeoutError:
-            return LLMResponse(
-                content=(
-                    f"Error calling LLM: stream stalled for more than "
-                    f"{idle_timeout_s} seconds"
-                ),
-                finish_reason="error",
-                error_kind="timeout",
-            )
         except Exception as e:
-            return self._handle_error(e)
+            return LLMResponse(content=f"Error calling LLM: {e}", finish_reason="error")
 
     def get_default_model(self) -> str:
         return self.default_model
