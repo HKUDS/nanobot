@@ -366,7 +366,7 @@ class TurnRunner:
         ]
         reasoning = response.reasoning_content or response.content
         new_msgs = self._context.add_assistant_message(
-            state.messages, None, tool_call_dicts, reasoning_content=reasoning
+            state.messages, response.content, tool_call_dicts, reasoning_content=reasoning
         )
         state.last_tool_call_msg_idx = len(new_msgs) - 1
         state.messages[:] = new_msgs
@@ -377,6 +377,7 @@ class TurnRunner:
 
         latest_attempts: list[ToolAttempt] = []
         to_remove: list[str] = []
+        deferred_messages: list[dict[str, str]] = []
 
         for tc, result in zip(response.tool_calls, results):
             state.turn_tool_calls += 1
@@ -395,11 +396,11 @@ class TurnRunner:
                 state.messages, tc.id, tc.name, result.to_llm_string()
             )
 
-            # Skill content injection
+            # Skill content injection (deferred to after all tool results)
             sk = result.metadata.get("skill_content")
             if sk:
                 sk_name = result.metadata.get("skill_name", "unknown")
-                state.messages.append(
+                deferred_messages.append(
                     {
                         "role": "system",
                         "content": (
@@ -431,7 +432,7 @@ class TurnRunner:
                         if fc.is_permanent
                         else f"failed {count} times with identical arguments"
                     )
-                    state.messages.append(
+                    deferred_messages.append(
                         {
                             "role": "system",
                             "content": (
@@ -440,7 +441,7 @@ class TurnRunner:
                         }
                     )
                 elif count >= ToolCallTracker.WARN_THRESHOLD:
-                    state.messages.append(
+                    deferred_messages.append(
                         {
                             "role": "system",
                             "content": (
@@ -453,7 +454,7 @@ class TurnRunner:
                 sc = state.tracker.record_success(tc.name, tc.arguments)
                 if sc >= ToolCallTracker.REPEAT_SUCCESS_THRESHOLD:
                     to_remove.append(tc.name)
-                    state.messages.append(
+                    deferred_messages.append(
                         {
                             "role": "system",
                             "content": (
@@ -462,6 +463,10 @@ class TurnRunner:
                             ),
                         }
                     )
+
+        # Append deferred system messages AFTER all tool results to maintain
+        # contiguous tool-result message ordering required by OpenAI API.
+        state.messages.extend(deferred_messages)
 
         state.disabled_tools.update(to_remove)
 

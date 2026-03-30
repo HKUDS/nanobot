@@ -301,6 +301,87 @@ class TestWorkingMemory:
         names = [a.tool_name for a in state.tool_results_log]
         assert names == ["exec", "exec", "exec"]
 
+    @pytest.mark.asyncio
+    async def test_parallel_tools_system_messages_after_results(self) -> None:
+        """System messages (skill injection) must come AFTER all tool results.
+
+        When 2+ tool calls are batched, OpenAI requires all tool-role messages
+        to be contiguous after the assistant message. System messages injected
+        between tool results cause BadRequestError.
+        """
+        tc1 = ToolCallRequest(id="c1", name="load_skill", arguments={"name": "obsidian-cli"})
+        tc2 = ToolCallRequest(id="c2", name="load_skill", arguments={"name": "missing"})
+        caller = ScriptedCaller(
+            [
+                _tool_response([tc1, tc2]),
+                _text_response("done"),
+            ]
+        )
+        executor = FakeExecutor(
+            results=[
+                ToolResult.ok(
+                    "Skill loaded.",
+                    skill_content="# Obsidian CLI\nInstructions here.",
+                    skill_name="obsidian-cli",
+                ),
+                ToolResult.fail("Skill 'missing' not found.", error_type="not_found"),
+            ]
+        )
+        runner = _build_runner(caller, executor=executor)
+        state = _make_state()
+
+        await runner.run(state, on_progress=None)
+
+        # Find the assistant message with tool_calls
+        asst_idx = None
+        for i, m in enumerate(state.messages):
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                asst_idx = i
+                break
+        assert asst_idx is not None, "No assistant message with tool_calls found"
+
+        # All messages after assistant: tool results must come before system messages
+        after_asst = state.messages[asst_idx + 1 :]
+        seen_system = False
+        for m in after_asst:
+            if m["role"] == "system":
+                seen_system = True
+            elif m["role"] == "tool":
+                assert not seen_system, (
+                    "Tool result message found after system message — "
+                    "system messages must be deferred until after all tool results"
+                )
+
+    @pytest.mark.asyncio
+    async def test_tool_call_preserves_assistant_content(self) -> None:
+        """When LLM returns text + tool_calls, content must be preserved.
+
+        Claude models emit reasoning text alongside tool_use blocks.
+        The assistant message must preserve this content, not discard it.
+        """
+        tc1 = _make_tool_call("exec", {"cmd": "ls"})
+        caller = ScriptedCaller(
+            [
+                _tool_response([tc1], content="[REASONING]\n1. Need: list files\n[/REASONING]"),
+                _text_response("done"),
+            ]
+        )
+        runner = _build_runner(caller)
+        state = _make_state()
+
+        await runner.run(state, on_progress=None)
+
+        # Find the assistant message with tool_calls
+        asst_msg = None
+        for m in state.messages:
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                asst_msg = m
+                break
+        assert asst_msg is not None, "No assistant message with tool_calls found"
+        assert asst_msg["content"] == "[REASONING]\n1. Need: list files\n[/REASONING]", (
+            "Assistant content was discarded when tool_calls were present"
+        )
+
 
 # ---------------------------------------------------------------------------
 # TestGuardrailIntegration
