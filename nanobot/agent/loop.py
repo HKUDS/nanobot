@@ -37,12 +37,11 @@ if TYPE_CHECKING:
     from nanobot.cron.service import CronService
 
 
-class LoopHook(AgentHook):
+class _LoopHook(AgentHook):
     """Core lifecycle hook for the main agent loop.
 
     Handles streaming delta relay, progress reporting, tool-call logging,
-    and think-tag stripping.  Public so downstream users can subclass or
-    compose it via :class:`CompositeHook`.
+    and think-tag stripping for the built-in agent path.
     """
 
     def __init__(
@@ -105,7 +104,7 @@ class LoopHook(AgentHook):
 class _LoopHookChain(AgentHook):
     """Run the core loop hook first, then best-effort extra hooks.
 
-    This preserves the historical failure behavior of ``LoopHook`` while still
+    This preserves the historical failure behavior of ``_LoopHook`` while still
     letting user-supplied hooks opt into ``CompositeHook`` isolation.
     """
 
@@ -325,7 +324,7 @@ class AgentLoop:
         ``resuming=True`` means tool calls follow (spinner should restart);
         ``resuming=False`` means this is the final response.
         """
-        loop_hook = LoopHook(
+        loop_hook = _LoopHook(
             self,
             on_progress=on_progress,
             on_stream=on_stream,

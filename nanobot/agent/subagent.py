@@ -21,11 +21,8 @@ from nanobot.config.schema import ExecToolConfig
 from nanobot.providers.base import LLMProvider
 
 
-class SubagentHook(AgentHook):
-    """Logging-only hook for subagent execution.
-
-    Public so downstream users can subclass or compose via :class:`CompositeHook`.
-    """
+class _SubagentHook(AgentHook):
+    """Logging-only hook for subagent execution."""
 
     def __init__(self, task_id: str) -> None:
         self._task_id = task_id
@@ -138,7 +135,7 @@ class SubagentManager:
                 tools=tools,
                 model=self.model,
                 max_iterations=15,
-                hook=SubagentHook(task_id),
+                hook=_SubagentHook(task_id),
                 max_iterations_message="Task completed but no final response was generated.",
                 error_message=None,
                 fail_on_tool_error=True,
