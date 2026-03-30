@@ -16,9 +16,13 @@ from nanobot.providers.transcription import Qwen3ASRTranscriptionProvider
 
 
 @pytest.mark.asyncio
-async def test_qwen3_asr_no_api_key_returns_empty(tmp_path):
+async def test_qwen3_asr_no_api_key_returns_empty(tmp_path, monkeypatch):
+    audio_file = tmp_path / "audio.mp3"
+    audio_file.write_bytes(b"fake audio data")
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+
     provider = Qwen3ASRTranscriptionProvider(api_key=None)
-    result = await provider.transcribe(tmp_path / "audio.mp3")
+    result = await provider.transcribe(audio_file)
     assert result == ""
 
 
