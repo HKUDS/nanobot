@@ -354,6 +354,7 @@ class DiscordChannel(BaseChannel):
                 metadata=metadata,
             )
         except Exception:
+            await self._clear_reactions(channel_id)
             await self._stop_typing(channel_id)
             raise
 
