@@ -199,7 +199,7 @@ class TestAllowlist:
 
     def test_allowlist_size(self):
         """ALLOWLIST should contain only legitimate exceptions (no known violations)."""
-        assert len(ALLOWLIST) == 3, f"Expected 3 allowlist entries, got {len(ALLOWLIST)}"
+        assert len(ALLOWLIST) == 2, f"Expected 2 allowlist entries, got {len(ALLOWLIST)}"
 
     def test_no_known_violations_in_allowlist(self):
         """All entries should be legitimate — no 'known violation' entries."""
