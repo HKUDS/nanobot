@@ -11,11 +11,15 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import sqlite_vec  # type: ignore[import-untyped]
 
 from .._text import _utc_now_iso
+
+if TYPE_CHECKING:
+    from .event_store import EventStore
+    from .graph_store import GraphStore
 from ..unified_db import STRATEGIES_DDL
 
 __all__ = ["MemoryDatabase"]
@@ -70,8 +74,8 @@ class MemoryDatabase:
         self._init_schema()
 
         # Lazy references set by Tasks 2-3 (EventStore, GraphStore).
-        self._event_store: Any | None = None
-        self._graph_store: Any | None = None
+        self._event_store: EventStore | None = None
+        self._graph_store: GraphStore | None = None
 
     # ------------------------------------------------------------------
     # Schema
@@ -155,6 +159,24 @@ class MemoryDatabase:
         operate on the same database but manage their own table logic.
         """
         return self._conn
+
+    @property
+    def event_store(self) -> EventStore:
+        """Focused repository for event CRUD and search operations."""
+        if self._event_store is None:
+            from .event_store import EventStore
+
+            self._event_store = EventStore(self._conn)
+        return self._event_store
+
+    @property
+    def graph_store(self) -> GraphStore:
+        """Focused repository for entity/edge CRUD and graph traversal."""
+        if self._graph_store is None:
+            from .graph_store import GraphStore
+
+            self._graph_store = GraphStore(self._conn)
+        return self._graph_store
 
     # ------------------------------------------------------------------
     # Profile CRUD
