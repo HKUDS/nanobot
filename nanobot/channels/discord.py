@@ -42,6 +42,8 @@ class DiscordConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     intents: int = 37377
     group_policy: Literal["mention", "open"] = "mention"
+    read_receipt_emoji: str = "👀"
+    subagent_emoji: str = "🔧"
 
 
 if DISCORD_AVAILABLE:
@@ -258,6 +260,8 @@ class DiscordChannel(BaseChannel):
         self._client: DiscordBotClient | None = None
         self._typing_tasks: dict[str, asyncio.Task[None]] = {}
         self._bot_user_id: str | None = None
+        self._pending_reactions: dict[str, Any] = {}  # chat_id -> message object
+        self._subagent_active: set[str] = set()  # chat_id set for subagent indicator
 
     async def start(self) -> None:
         """Start the Discord client."""
@@ -305,6 +309,12 @@ class DiscordChannel(BaseChannel):
             return
 
         is_progress = bool((msg.metadata or {}).get("_progress"))
+
+        # Add subagent indicator on first progress message
+        if is_progress and msg.chat_id not in self._subagent_active:
+            self._subagent_active.add(msg.chat_id)
+            await self._add_subagent_reaction(msg.chat_id)
+
         try:
             await client.send_outbound(msg)
         except Exception as e:
@@ -312,6 +322,7 @@ class DiscordChannel(BaseChannel):
         finally:
             if not is_progress:
                 await self._stop_typing(msg.chat_id)
+                await self._clear_reactions(msg.chat_id)
 
     async def _handle_discord_message(self, message: discord.Message) -> None:
         """Handle incoming Discord messages from discord.py."""
@@ -330,6 +341,14 @@ class DiscordChannel(BaseChannel):
         metadata = self._build_inbound_metadata(message)
 
         await self._start_typing(message.channel)
+
+        # Add read receipt reaction
+        channel_id = self._channel_key(message.channel)
+        try:
+            await message.add_reaction(self.config.read_receipt_emoji)
+            self._pending_reactions[channel_id] = message
+        except Exception as e:
+            logger.debug("Failed to add read receipt reaction: {}", e)
 
         try:
             await self._handle_message(
@@ -453,6 +472,28 @@ class DiscordChannel(BaseChannel):
             await task
         except asyncio.CancelledError:
             pass
+
+    async def _add_subagent_reaction(self, chat_id: str) -> None:
+        """Add subagent working indicator reaction to pending message."""
+        msg_obj = self._pending_reactions.get(chat_id)
+        if msg_obj is None:
+            return
+        try:
+            await msg_obj.add_reaction(self.config.subagent_emoji)
+        except Exception as e:
+            logger.debug("Failed to add subagent reaction: {}", e)
+
+    async def _clear_reactions(self, chat_id: str) -> None:
+        """Remove all pending reactions after bot replies."""
+        self._subagent_active.discard(chat_id)
+        msg_obj = self._pending_reactions.pop(chat_id, None)
+        if msg_obj is None:
+            return
+        for emoji in (self.config.read_receipt_emoji, self.config.subagent_emoji):
+            try:
+                await msg_obj.remove_reaction(emoji, self._client.user if self._client else None)
+            except Exception:
+                pass
 
     async def _cancel_all_typing(self) -> None:
         """Stop all typing tasks."""
