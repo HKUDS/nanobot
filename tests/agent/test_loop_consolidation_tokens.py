@@ -102,7 +102,7 @@ async def test_consolidation_loops_until_target_met(tmp_path, monkeypatch) -> No
     loop.sessions.save(session)
 
     call_count = [0]
-    def mock_estimate(_session):
+    async def mock_estimate(_session):
         call_count[0] += 1
         if call_count[0] == 1:
             return (500, "test")
@@ -139,7 +139,7 @@ async def test_consolidation_continues_below_trigger_until_half_target(tmp_path,
 
     call_count = [0]
 
-    def mock_estimate(_session):
+    async def mock_estimate(_session):
         call_count[0] += 1
         if call_count[0] == 1:
             return (500, "test")
@@ -184,7 +184,7 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
     monkeypatch.setattr(memory_module, "estimate_message_tokens", lambda _m: 500)
 
     call_count = [0]
-    def mock_estimate(_session):
+    async def mock_estimate(_session):
         call_count[0] += 1
         return (1000 if call_count[0] <= 1 else 80, "test")
     loop.memory_consolidator.estimate_session_prompt_tokens = mock_estimate  # type: ignore[method-assign]

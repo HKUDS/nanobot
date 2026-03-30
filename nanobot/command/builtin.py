@@ -47,7 +47,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
     ctx_est = 0
     try:
-        ctx_est, _ = loop.memory_consolidator.estimate_session_prompt_tokens(session)
+        ctx_est, _ = await loop.memory_consolidator.estimate_session_prompt_tokens(session)
     except Exception:
         pass
     if ctx_est <= 0:

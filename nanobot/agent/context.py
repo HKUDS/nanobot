@@ -19,9 +19,16 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
 
-    def __init__(self, workspace: Path, timezone: str | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        timezone: str | None = None,
+        memory_backend=None,  # MemoryBackend | None
+    ):
         self.workspace = workspace
         self.timezone = timezone
+        self.memory_backend = memory_backend
+        # Keep self.memory for MemoryConsolidator probe calls that still need MemoryStore
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
@@ -32,10 +39,6 @@ class ContextBuilder:
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
             parts.append(bootstrap)
-
-        memory = self.memory.get_memory_context()
-        if memory:
-            parts.append(f"# Memory\n\n{memory}")
 
         always_skills = self.skills.get_always_skills()
         if always_skills:
@@ -73,6 +76,11 @@ Skills with available="false" need dependencies installed first - you can try in
 - Use file tools when they are simpler or more reliable than shell commands.
 """
 
+        if self.memory_backend is not None and self.memory_backend.consolidates_per_turn:
+            memory_tip = "- Memory: Relevant facts from past conversations are automatically surfaced each turn.\n  Use memory_search for targeted recall, memory_forget to correct errors, memory_list to audit stored facts."
+        else:
+            memory_tip = f"- Long-term memory: {workspace_path}/memory/MEMORY.md (write important facts here)\n- History log: {workspace_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM]."
+
         return f"""# nanobot 🐈
 
 You are nanobot, a helpful AI assistant.
@@ -82,8 +90,7 @@ You are nanobot, a helpful AI assistant.
 
 ## Workspace
 Your workspace is at: {workspace_path}
-- Long-term memory: {workspace_path}/memory/MEMORY.md (write important facts here)
-- History log: {workspace_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
+{memory_tip}
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
 {platform_policy}
@@ -122,7 +129,7 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
 
         return "\n\n".join(parts) if parts else ""
 
-    def build_messages(
+    async def build_messages(
         self,
         history: list[dict[str, Any]],
         current_message: str,
@@ -131,6 +138,7 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         channel: str | None = None,
         chat_id: str | None = None,
         current_role: str = "user",
+        session_key: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id, self.timezone)
@@ -143,8 +151,15 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
+        memory_block: list[dict[str, Any]] = []
+        if self.memory_backend is not None and session_key is not None:
+            retrieved = await self.memory_backend.retrieve(current_message, session_key, 5)
+            if retrieved:
+                memory_block = [{"role": "system", "content": retrieved}]
+
         return [
             {"role": "system", "content": self.build_system_prompt(skill_names)},
+            *memory_block,
             *history,
             {"role": current_role, "content": merged},
         ]

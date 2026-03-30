@@ -406,10 +406,11 @@ class AgentLoop:
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
-            messages = self.context.build_messages(
+            messages = await self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
+                session_key=key,
             )
             final_content, _, all_msgs = await self._run_agent_loop(
                 messages, channel=channel, chat_id=chat_id,
@@ -441,11 +442,12 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=0)
-        initial_messages = self.context.build_messages(
+        initial_messages = await self.context.build_messages(
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            session_key=key,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
