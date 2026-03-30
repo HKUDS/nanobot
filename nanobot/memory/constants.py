@@ -1,4 +1,12 @@
-"""Tool schemas used by memory consolidation and event extraction."""
+"""Memory subsystem constants and tool schemas.
+
+Domain constants (single source of truth for the memory subsystem):
+- ``PROFILE_KEYS``, ``EVENT_TYPES``, ``MEMORY_TYPES``, ``MEMORY_STABILITY``
+- Profile, conflict, and episodic status constants
+
+Tool schemas used by memory consolidation and event extraction:
+- ``_SAVE_EVENTS_TOOL``, ``_CONSOLIDATE_MEMORY_TOOL``
+"""
 
 from __future__ import annotations
 
