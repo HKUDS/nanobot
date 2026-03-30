@@ -20,7 +20,7 @@ from .._text import _utc_now_iso
 if TYPE_CHECKING:
     from .event_store import EventStore
     from .graph_store import GraphStore
-from ..unified_db import STRATEGIES_DDL
+from ..constants import STRATEGIES_DDL
 
 __all__ = ["MemoryDatabase"]
 

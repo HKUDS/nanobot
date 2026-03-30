@@ -1,4 +1,4 @@
-"""Tests for the knowledge graph adapter (SQLite via UnifiedMemoryDB)."""
+"""Tests for the knowledge graph adapter (SQLite via MemoryDatabase)."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from nanobot.memory.db import MemoryDatabase
 from nanobot.memory.graph.graph import KnowledgeGraph
 from nanobot.memory.graph.ontology_types import (
     Entity,
@@ -14,13 +15,12 @@ from nanobot.memory.graph.ontology_types import (
     RelationType,
     Triple,
 )
-from nanobot.memory.unified_db import UnifiedMemoryDB
 
 
-def _make_graph(tmp_path: Path) -> tuple[KnowledgeGraph, UnifiedMemoryDB]:
+def _make_graph(tmp_path: Path) -> tuple[KnowledgeGraph, MemoryDatabase]:
     """Create a KnowledgeGraph backed by an in-tmp SQLite DB."""
-    db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
-    return KnowledgeGraph(db=db), db
+    db = MemoryDatabase(tmp_path / "memory.db", dims=4)
+    return KnowledgeGraph(db=db.graph_store), db
 
 
 # ---------------------------------------------------------------------------
@@ -430,8 +430,8 @@ class TestGraphOperations:
 
 class TestPersistenceRoundTrip:
     async def test_data_survives_reopen(self, tmp_path: Path) -> None:
-        db = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
-        g1 = KnowledgeGraph(db=db)
+        db = MemoryDatabase(tmp_path / "memory.db", dims=4)
+        g1 = KnowledgeGraph(db=db.graph_store)
         await g1.upsert_entity(
             Entity(
                 name="Carlos",
@@ -455,8 +455,8 @@ class TestPersistenceRoundTrip:
         db.close()
 
         # Reopen with a new DB instance
-        db2 = UnifiedMemoryDB(tmp_path / "memory.db", dims=4)
-        g2 = KnowledgeGraph(db=db2)
+        db2 = MemoryDatabase(tmp_path / "memory.db", dims=4)
+        g2 = KnowledgeGraph(db=db2.graph_store)
         entity = await g2.get_entity("Carlos")
         assert entity is not None
         assert entity.name == "Carlos"

@@ -96,13 +96,13 @@ class TestHashEmbedder:
         assert len(results[0]) == 4
 
     async def test_works_with_sqlite_vec(self, tmp_path):
-        """HashEmbedder vectors work with UnifiedMemoryDB KNN search."""
-        from nanobot.memory.unified_db import UnifiedMemoryDB
+        """HashEmbedder vectors work with MemoryDatabase KNN search."""
+        from nanobot.memory.db import MemoryDatabase
 
         e = HashEmbedder(dims=4)
-        db = UnifiedMemoryDB(tmp_path / "test.db", dims=4)
+        db = MemoryDatabase(tmp_path / "test.db", dims=4)
         v1 = await e.embed("coffee lover")
-        db.insert_event(
+        db.event_store.insert_event(
             {
                 "id": "e1",
                 "type": "fact",
@@ -114,7 +114,7 @@ class TestHashEmbedder:
         )
         # Search with same text should find it
         query_vec = await e.embed("coffee lover")
-        results = db.search_vector(query_vec, k=1)
+        results = db.event_store.search_vector(query_vec, k=1)
         assert len(results) == 1
         assert results[0]["id"] == "e1"
         db.close()

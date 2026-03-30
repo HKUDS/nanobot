@@ -71,7 +71,7 @@ class TestHybridMemoryStore:
         )
 
         assert ok is True
-        # Storage redesign: events and profile now live in UnifiedMemoryDB,
+        # Storage redesign: events and profile now live in MemoryDatabase,
         # not events.jsonl / profile.json files.
         assert store.db is not None
 
@@ -165,7 +165,7 @@ class TestHybridMemoryStore:
         snapshot = store.snapshot.rebuild_memory_snapshot(max_events=10, write=True)
         assert "Prefer concise summaries." in snapshot
         assert "Adopt hybrid memory mode in staging." in snapshot
-        # Storage redesign: MEMORY.md snapshot is now in UnifiedMemoryDB
+        # Storage redesign: MEMORY.md snapshot is now in MemoryDatabase
         assert store.db.read_snapshot("current")
 
     def test_profile_conflict_tracking_updates_meta_confidence(self, tmp_path: Path) -> None:
@@ -826,6 +826,6 @@ class TestHybridMemoryStore:
             ]
         )
 
-        # With UnifiedMemoryDB, events are read directly from SQLite.
+        # With MemoryDatabase, events are read directly from SQLite.
         # Just verify retrieve doesn't crash.
         await store.retriever.retrieve("test event", top_k=3, embedding_provider="hash")

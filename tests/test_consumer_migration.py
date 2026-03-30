@@ -127,7 +127,7 @@ class TestMaintenanceDBPath:
 
         result = maint.reindex_from_structured_memory()
         assert result["ok"] is True
-        assert result["reason"] == "unified_db_active"
+        assert result["reason"] == "sqlite_active"
         assert result["written"] == 0
 
 

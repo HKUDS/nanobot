@@ -10,11 +10,11 @@ from nanobot.memory.persistence.profile_io import ProfileStore
 
 
 def _make_profile_store(tmp_path: Path) -> ProfileStore:
-    from nanobot.memory.unified_db import UnifiedMemoryDB
+    from nanobot.memory.db import MemoryDatabase
 
     mem_dir = tmp_path / "memory"
     mem_dir.mkdir(exist_ok=True)
-    db = UnifiedMemoryDB(mem_dir / "memory.db", dims=32)
+    db = MemoryDatabase(mem_dir / "memory.db", dims=32)
     return ProfileStore(db=db)
 
 

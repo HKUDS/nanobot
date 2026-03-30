@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from nanobot.memory.db import MemoryDatabase
 from nanobot.memory.persistence.profile_io import ProfileCache, ProfileStore
-from nanobot.memory.unified_db import UnifiedMemoryDB
 
 
 class TestProfileCache:
@@ -46,7 +46,7 @@ class TestProfileStoreReadWrite:
     def _make_store(self, tmp_path: Path) -> ProfileStore:
         mem_dir = tmp_path / "memory"
         mem_dir.mkdir(exist_ok=True)
-        db = UnifiedMemoryDB(mem_dir / "memory.db", dims=32)
+        db = MemoryDatabase(mem_dir / "memory.db", dims=32)
         return ProfileStore(db=db)
 
     def test_read_profile_returns_dict(self, tmp_path: Path):

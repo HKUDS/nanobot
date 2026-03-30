@@ -18,9 +18,9 @@ from nanobot.utils.paths import ensure_dir
 
 if TYPE_CHECKING:
     from nanobot.config.memory import MemoryConfig
+    from nanobot.memory.db import MemoryDatabase
     from nanobot.memory.maintenance import MemoryMaintenance
     from nanobot.memory.read.retriever import MemoryRetriever
-    from nanobot.memory.unified_db import UnifiedMemoryDB
 
 
 class EvalRunner:
@@ -34,7 +34,7 @@ class EvalRunner:
         *,
         memory_config: MemoryConfig,
         maintenance: MemoryMaintenance,
-        db: UnifiedMemoryDB | None = None,
+        db: MemoryDatabase | None = None,
     ) -> None:
         self._retriever = retriever
         self.workspace = workspace

@@ -35,7 +35,7 @@ def test_coerce_event_adds_normalized_metadata(tmp_path: Path) -> None:
 
 
 def test_append_events_writes_to_db(tmp_path: Path) -> None:
-    """append_events writes events to UnifiedMemoryDB."""
+    """append_events writes events to MemoryDatabase."""
     store = MemoryStore(tmp_path)
 
     written = store.ingester.append_events(

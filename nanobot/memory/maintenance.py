@@ -140,7 +140,7 @@ class MemoryMaintenance:
         """
         return {
             "ok": True,
-            "reason": "unified_db_active",
+            "reason": "sqlite_active",
             "written": 0,
             "failed": 0,
         }
@@ -219,7 +219,7 @@ class MemoryMaintenance:
             "seeded_events": len(seeded_events),
             "reindex": {
                 "ok": True,
-                "reason": "unified_db_active",
+                "reason": "sqlite_active",
                 "written": 0,
                 "failed": 0,
             },

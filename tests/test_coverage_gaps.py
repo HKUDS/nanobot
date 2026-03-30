@@ -111,9 +111,9 @@ class TestStrategyExtractorHelpers:
 
     @pytest.mark.asyncio
     async def test_llm_summarize_success(self) -> None:
+        from nanobot.memory.constants import STRATEGIES_DDL
         from nanobot.memory.strategy import StrategyAccess
         from nanobot.memory.strategy_extractor import StrategyExtractor
-        from nanobot.memory.unified_db import STRATEGIES_DDL
 
         mock_provider = AsyncMock()
         mock_response = AsyncMock()
@@ -133,9 +133,9 @@ class TestStrategyExtractorHelpers:
 
     @pytest.mark.asyncio
     async def test_llm_summarize_fallback_on_error(self) -> None:
+        from nanobot.memory.constants import STRATEGIES_DDL
         from nanobot.memory.strategy import StrategyAccess
         from nanobot.memory.strategy_extractor import StrategyExtractor
-        from nanobot.memory.unified_db import STRATEGIES_DDL
 
         mock_provider = AsyncMock()
         mock_provider.chat = AsyncMock(side_effect=RuntimeError("API down"))
@@ -153,9 +153,9 @@ class TestStrategyExtractorHelpers:
 
     @pytest.mark.asyncio
     async def test_llm_summarize_empty_content_fallback(self) -> None:
+        from nanobot.memory.constants import STRATEGIES_DDL
         from nanobot.memory.strategy import StrategyAccess
         from nanobot.memory.strategy_extractor import StrategyExtractor
-        from nanobot.memory.unified_db import STRATEGIES_DDL
 
         mock_provider = AsyncMock()
         mock_response = AsyncMock()
@@ -229,9 +229,9 @@ class TestStrategyExtractorWithLLM:
     @pytest.mark.asyncio
     async def test_extract_with_llm_provider(self) -> None:
         from nanobot.agent.turn_types import ToolAttempt
+        from nanobot.memory.constants import STRATEGIES_DDL
         from nanobot.memory.strategy import StrategyAccess
         from nanobot.memory.strategy_extractor import StrategyExtractor
-        from nanobot.memory.unified_db import STRATEGIES_DDL
 
         mock_provider = AsyncMock()
         mock_response = AsyncMock()
