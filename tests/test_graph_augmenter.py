@@ -7,6 +7,8 @@ from unittest.mock import MagicMock, patch
 
 from nanobot.memory.read.graph_augmentation import GraphAugmenter
 
+_EXTRACT_ENTITIES_PATH = "nanobot.memory.read.graph_augmentation.extract_entities"
+
 
 def _make_augmenter(
     *,
@@ -39,43 +41,43 @@ class TestCollectGraphEntityNames:
 
     def test_returns_empty_when_no_query_entities(self) -> None:
         aug = _make_augmenter()
-        aug._extractor._extract_entities.return_value = []
-        result = aug.collect_graph_entity_names("query", [])
+        with patch(_EXTRACT_ENTITIES_PATH, return_value=[]):
+            result = aug.collect_graph_entity_names("query", [])
         assert result == set()
 
     def test_collects_from_event_triples(self) -> None:
         aug = _make_augmenter()
-        aug._extractor._extract_entities.return_value = ["Alice"]
-        events = [
-            {
-                "triples": [
-                    {"subject": "Alice", "predicate": "knows", "object": "Bob"},
-                ]
-            }
-        ]
-        result = aug.collect_graph_entity_names("query", events)
+        with patch(_EXTRACT_ENTITIES_PATH, return_value=["Alice"]):
+            events = [
+                {
+                    "triples": [
+                        {"subject": "Alice", "predicate": "knows", "object": "Bob"},
+                    ]
+                }
+            ]
+            result = aug.collect_graph_entity_names("query", events)
         assert "bob" in result
 
     def test_augments_with_graph_neighbors(self) -> None:
         aug = _make_augmenter()
-        aug._extractor._extract_entities.return_value = ["Web"]
         aug._graph.get_related_entity_names_sync.return_value = {"python", "fastapi"}
-        result = aug.collect_graph_entity_names("web framework", [])
+        with patch(_EXTRACT_ENTITIES_PATH, return_value=["Web"]):
+            result = aug.collect_graph_entity_names("web framework", [])
         assert "python" in result or "fastapi" in result
 
     def test_cache_prevents_duplicate_traversal(self) -> None:
         aug = _make_augmenter()
-        aug._extractor._extract_entities.return_value = ["Alice"]
-        aug.collect_graph_entity_names("query", [])
-        aug.collect_graph_entity_names("query", [])
+        with patch(_EXTRACT_ENTITIES_PATH, return_value=["Alice"]):
+            aug.collect_graph_entity_names("query", [])
+            aug.collect_graph_entity_names("query", [])
         assert aug._graph.get_related_entity_names_sync.call_count == 1
 
     def test_reset_cache_allows_fresh_traversal(self) -> None:
         aug = _make_augmenter()
-        aug._extractor._extract_entities.return_value = ["Alice"]
-        aug.collect_graph_entity_names("query", [])
-        aug.reset_cache()
-        aug.collect_graph_entity_names("query", [])
+        with patch(_EXTRACT_ENTITIES_PATH, return_value=["Alice"]):
+            aug.collect_graph_entity_names("query", [])
+            aug.reset_cache()
+            aug.collect_graph_entity_names("query", [])
         assert aug._graph.get_related_entity_names_sync.call_count == 2
 
 
@@ -118,7 +120,6 @@ class TestBuildGraphContextLines:
 
     def test_formats_lines(self) -> None:
         aug = _make_augmenter()
-        aug._extractor._extract_entities.return_value = ["Alice"]
         aug._read_events_fn = lambda **kw: [
             {
                 "entities": ["Alice", "Bob"],
@@ -127,7 +128,10 @@ class TestBuildGraphContextLines:
                 ],
             }
         ]
-        with patch("nanobot.memory.graph.entity_classifier.classify_entity_type") as mock_cls:
+        with (
+            patch(_EXTRACT_ENTITIES_PATH, return_value=["Alice"]),
+            patch("nanobot.memory.graph.entity_classifier.classify_entity_type") as mock_cls,
+        ):
             mock_type = MagicMock()
             mock_type.value = "unknown"
             mock_cls.return_value = mock_type
@@ -138,20 +142,22 @@ class TestBuildGraphContextLines:
 
     def test_empty_when_no_entities(self) -> None:
         aug = _make_augmenter()
-        aug._extractor._extract_entities.return_value = []
         aug._read_events_fn = lambda **kw: []
-        lines = aug.build_graph_context_lines("random query", [])
+        with patch(_EXTRACT_ENTITIES_PATH, return_value=[]):
+            lines = aug.build_graph_context_lines("random query", [])
         assert lines == []
 
     def test_respects_token_budget(self) -> None:
         aug = _make_augmenter()
-        aug._extractor._extract_entities.return_value = ["A"]
         # Many triples to test budget truncation
         triples = [
             {"subject": "A", "predicate": f"rel_{i}", "object": f"entity_{i}"} for i in range(50)
         ]
         aug._read_events_fn = lambda **kw: [{"entities": ["A"], "triples": triples}]
-        with patch("nanobot.memory.graph.entity_classifier.classify_entity_type") as mock_cls:
+        with (
+            patch(_EXTRACT_ENTITIES_PATH, return_value=["A"]),
+            patch("nanobot.memory.graph.entity_classifier.classify_entity_type") as mock_cls,
+        ):
             mock_type = MagicMock()
             mock_type.value = "unknown"
             mock_cls.return_value = mock_type

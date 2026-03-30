@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -431,9 +431,12 @@ class TestStoreCoreBranchHelpers:
         dismissed = store.conflict_mgr.resolve_conflict_details(0, "dismiss")
         assert dismissed["ok"] is True
 
-    def test_build_graph_context_lines_with_graph(self, tmp_path: Path) -> None:
+    @patch(
+        "nanobot.memory.read.graph_augmentation.extract_entities",
+        return_value=["Alice"],
+    )
+    def test_build_graph_context_lines_with_graph(self, _mock_entities, tmp_path: Path) -> None:
         store = _store(tmp_path)
-        store.extractor._extract_entities = MagicMock(return_value=["Alice"])
         store.graph.enabled = True
         store.graph.get_triples_for_entities_sync = MagicMock(
             return_value=[("Alice", "WORKS_ON", "Nanobot")]
