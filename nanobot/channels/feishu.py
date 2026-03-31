@@ -1046,6 +1046,17 @@ class FeishuChannel(BaseChannel):
 
         # --- stream end: final update or fallback ---
         if meta.get("_stream_end"):
+            # Intermediate segment (tool calls follow): keep buffer so content
+            # accumulates across segments into a single Feishu message.
+            if meta.get("_resuming"):
+                buf = self._stream_bufs.get(chat_id)
+                if buf and buf.card_id:
+                    buf.sequence += 1
+                    await loop.run_in_executor(
+                        None, self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence,
+                    )
+                return
+
             buf = self._stream_bufs.pop(chat_id, None)
             if not buf or not buf.text:
                 return
