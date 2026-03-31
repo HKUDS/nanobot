@@ -492,22 +492,22 @@ class TestConsumeSdkStream:
 
     @pytest.mark.asyncio
     async def test_error_event_raises(self):
-        ev = MagicMock(type="error")
+        ev = MagicMock(type="error", error="rate_limit_exceeded")
 
         async def stream():
             yield ev
 
-        with pytest.raises(RuntimeError, match="Response failed"):
+        with pytest.raises(RuntimeError, match="Response failed.*rate_limit_exceeded"):
             await consume_sdk_stream(stream())
 
     @pytest.mark.asyncio
     async def test_failed_event_raises(self):
-        ev = MagicMock(type="response.failed")
+        ev = MagicMock(type="response.failed", error="server_error")
 
         async def stream():
             yield ev
 
-        with pytest.raises(RuntimeError, match="Response failed"):
+        with pytest.raises(RuntimeError, match="Response failed.*server_error"):
             await consume_sdk_stream(stream())
 
     @pytest.mark.asyncio
