@@ -193,6 +193,7 @@ class TestRepeatedStrategyDetection:
         result = g.check(attempts, [attempts[-1]])
         assert result is not None
         assert result.severity == "override"
+        assert result.strategy_tag == "repeated_strategy"
 
     def test_mixed_type_args_no_crash(self) -> None:
         """Real tool arguments have mixed types (str, int, None, list, dict)."""
@@ -300,6 +301,7 @@ class TestSkillTunnelVision:
         result = g.check(attempts, [attempts[-1]], iteration=3)
         assert result is not None
         assert result.severity == "directive"
+        assert result.strategy_tag == "skill_tunnel_vision"
 
     def test_no_fire_when_data_returned(self) -> None:
         from nanobot.agent.turn_guardrails import SkillTunnelVision
@@ -339,6 +341,7 @@ class TestNoProgressBudget:
         result = g.check(attempts, [attempts[-1]], iteration=4)
         assert result is not None
         assert result.severity == "override"
+        assert result.strategy_tag == "no_progress_budget"
 
     def test_no_fire_some_data(self) -> None:
         from nanobot.agent.turn_guardrails import NoProgressBudget
