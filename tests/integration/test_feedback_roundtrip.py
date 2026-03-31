@@ -208,7 +208,7 @@ class TestFeedbackEdgeCases:
             await tool.execute(rating="positive")
 
         events = load_feedback_events(db)
-        ids = [e.id for e in events]
+        ids = [e["id"] for e in events]
         assert len(set(ids)) == 10  # all unique
 
     async def test_context_switch_between_sessions(self, db: MemoryDatabase) -> None:
