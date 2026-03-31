@@ -12,6 +12,9 @@ from __future__ import annotations
 import asyncio
 import mimetypes
 import os
+import shutil
+import uuid
+from pathlib import Path
 from typing import Any, Literal
 
 from loguru import logger
@@ -95,6 +98,11 @@ class TwilioWhatsAppChannel(BaseChannel):
         )
         self._runner: Any = None  # aiohttp.web.AppRunner
 
+        # Outbound media staging — files are copied here with UUID names and
+        # served via /twilio/whatsapp/media/{filename} for Twilio to fetch.
+        self._outbound_media_dir: Path = get_media_dir("twilio_whatsapp") / "outbound"
+        self._outbound_media_dir.mkdir(parents=True, exist_ok=True)
+
     # ------------------------------------------------------------------
     # BaseChannel interface
     # ------------------------------------------------------------------
@@ -106,6 +114,9 @@ class TwilioWhatsAppChannel(BaseChannel):
         app = web.Application()
         app.router.add_post(self._webhook_path, self._handle_webhook)
         app.router.add_get("/health", self._health)
+        app.router.add_get(
+            "/twilio/whatsapp/media/{filename}", self._serve_media,
+        )
 
         self._runner = web.AppRunner(app)
         await self._runner.setup()
@@ -119,6 +130,11 @@ class TwilioWhatsAppChannel(BaseChannel):
         logger.info(
             "Twilio WhatsApp webhook listening on :{}{}", port, self._webhook_path,
         )
+        if self._public_url:
+            logger.debug(
+                "Media serving enabled at {}/twilio/whatsapp/media/...",
+                self._public_url,
+            )
 
         # Block until stop() is called
         await self._stop_event.wait()
@@ -151,17 +167,15 @@ class TwilioWhatsAppChannel(BaseChannel):
         # Send media (Twilio accepts publicly-accessible URLs)
         for media_path in msg.media or []:
             if media_path.startswith(("http://", "https://")):
+                media_url = media_path
+            else:
+                media_url = self._stage_media(media_path)
+            if media_url:
                 await asyncio.to_thread(
                     self._twilio.messages.create,
                     from_=self._from_number,
                     to=to,
-                    media_url=[media_path],
-                )
-            else:
-                logger.warning(
-                    "Twilio WhatsApp cannot send local files directly ({}). "
-                    "Provide a public URL instead.",
-                    media_path,
+                    media_url=[media_url],
                 )
 
     # ------------------------------------------------------------------
@@ -244,6 +258,39 @@ class TwilioWhatsAppChannel(BaseChannel):
         from aiohttp import web
 
         return web.json_response({"status": "ok", "channel": self.name})
+
+    # ------------------------------------------------------------------
+    # Outbound media serving
+    # ------------------------------------------------------------------
+
+    async def _serve_media(self, request: Any) -> Any:
+        """Serve a staged outbound media file for Twilio to fetch."""
+        from aiohttp import web
+
+        filename = request.match_info["filename"]
+        file_path = (self._outbound_media_dir / filename).resolve()
+        if file_path.parent != self._outbound_media_dir.resolve():
+            return web.Response(status=404)
+        if file_path.is_file():
+            return web.FileResponse(file_path)
+        return web.Response(status=404)
+
+    def _stage_media(self, local_path: str) -> str | None:
+        """Copy a local file to the outbound dir and return its public URL."""
+        if not self._public_url:
+            logger.warning(
+                "Cannot serve local media '{}': public_url not configured. "
+                "Set public_url in twilio_whatsapp config to enable media delivery.",
+                local_path,
+            )
+            return None
+        src = Path(local_path).expanduser()
+        if not src.is_file():
+            logger.warning("Media file not found: {}", local_path)
+            return None
+        filename = f"{uuid.uuid4().hex}{src.suffix}"
+        shutil.copy2(src, self._outbound_media_dir / filename)
+        return f"{self._public_url}/twilio/whatsapp/media/{filename}"
 
     # ------------------------------------------------------------------
     # Media helpers

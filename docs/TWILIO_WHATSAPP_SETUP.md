@@ -84,7 +84,7 @@ Edit `~/.nanobot/config.json` and set the `twilio_whatsapp` section:
 | `webhook_path` | `"/twilio/whatsapp"` | URL path for the incoming webhook |
 | `webhook_port` | `0` | Port for the webhook server. `0` uses the gateway port (default `18790`) |
 | `validate_signature` | `false` | Validate the `X-Twilio-Signature` header on incoming requests |
-| `public_url` | `""` | Public base URL (e.g. `https://abcd.ngrok-free.app`). Required for signature validation behind proxies/ngrok |
+| `public_url` | `""` | Public base URL (e.g. `https://abcd.ngrok-free.app`). Required for signature validation behind proxies/ngrok and for sending local media files (images, documents) via Twilio |
 | `allow_from` | `[]` | List of allowed sender phone numbers without the `whatsapp:` prefix (e.g. `["+14155238886"]`), or `["*"]` to allow all |
 | `immediate_response` | `""` | If set, the webhook immediately replies with this text (e.g. `"Thinking..."`) before the agent processes the message |
 | `group_policy` | `"open"` | `"open"` responds to all messages; `"mention"` only responds when the bot is @mentioned |
