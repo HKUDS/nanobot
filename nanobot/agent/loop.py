@@ -131,6 +131,8 @@ class _LoopHook(AgentHook):
         self._loop._set_tool_context(self._channel, self._chat_id, self._message_id)
 
     async def after_iteration(self, context: AgentHookContext) -> None:
+        if self._on_turn_saved and context.tool_calls:
+            self._on_turn_saved(context.messages)
         if (
             self._on_progress
             and context.tool_calls
@@ -152,8 +154,6 @@ class _LoopHook(AgentHook):
             u.get("completion_tokens", 0),
             u.get("cached_tokens", 0),
         )
-        if self._on_turn_saved and context.tool_calls:
-            self._on_turn_saved(context.messages)
 
     def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
         return self._loop._strip_think(content)

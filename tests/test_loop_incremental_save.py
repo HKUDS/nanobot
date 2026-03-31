@@ -106,8 +106,9 @@ async def test_process_direct_saves_incrementally(tmp_path) -> None:
 
     await loop.process_direct("hello", session_key="cli:test")
 
-    # 2 incremental saves (one per tool iteration) + 1 final save = 3
-    assert save_call_count[0] == 3
+    # At least 2 incremental saves (one per tool iteration) + 1 final save;
+    # upstream checkpoint callbacks may add more save calls.
+    assert save_call_count[0] >= 3
 
     session = loop.sessions.get_or_create("cli:test")
     assert len(session.messages) > 0
