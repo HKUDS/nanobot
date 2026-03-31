@@ -27,6 +27,7 @@ from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.agent.tools.todo_write import TodoWriteTool
 from nanobot.agent.tools.tool_search import ToolSearchTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -282,6 +283,7 @@ class AgentLoop:
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(ToolSearchTool(registry=self.tools))
         self.tools.register(AskQuestionTool(send_callback=self.bus.publish_outbound))
+        self.tools.register(TodoWriteTool(send_callback=self.bus.publish_outbound))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
@@ -313,10 +315,10 @@ class AgentLoop:
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
-        for name in ("message", "spawn", "cron", "ask_question"):
+        for name in ("message", "spawn", "cron", "ask_question", "todo_write"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
-                    if name in {"message", "ask_question"}:
+                    if name in {"message", "ask_question", "todo_write"}:
                         tool.set_context(channel, chat_id, message_id)
                     else:
                         tool.set_context(channel, chat_id)

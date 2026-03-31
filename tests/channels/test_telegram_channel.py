@@ -556,6 +556,35 @@ async def test_callback_query_sends_structured_selection_back_to_bus() -> None:
 
 
 @pytest.mark.asyncio
+async def test_progress_update_uses_single_editable_message() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="Step 1",
+            metadata={"_progress": True, "_progress_update": True},
+        )
+    )
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="Step 2",
+            metadata={"_progress": True, "_progress_update": True},
+        )
+    )
+
+    assert len(channel._app.bot.sent_messages) == 1
+    assert len(channel._app.bot.edited_messages) >= 1
+
+
+@pytest.mark.asyncio
 async def test_send_reply_infers_topic_from_message_id_cache() -> None:
     config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], reply_to_message=True)
     channel = TelegramChannel(config, MessageBus())

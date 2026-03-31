@@ -193,6 +193,13 @@ class _TextBuf:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class _ProgressBuf:
+    """One editable progress message per chat/thread."""
+    message_id: int | None = None
+    last_text: str = ""
+
+
 class TelegramConfig(Base):
     """Telegram channel configuration."""
 
@@ -255,6 +262,7 @@ class TelegramChannel(BaseChannel):
         self._text_buffer_tasks: dict[str, asyncio.Task] = {}
         self._delete_tasks: set[asyncio.Task] = set()
         self._ask_cards: dict[tuple[str, int], dict[str, Any]] = {}
+        self._progress_bufs: dict[tuple[str, int | None], _ProgressBuf] = {}
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -429,6 +437,19 @@ class TelegramChannel(BaseChannel):
                     allow_sending_without_reply=True
                 )
 
+        progress_key = (msg.chat_id, message_thread_id)
+        if msg.metadata.get("_progress") and msg.metadata.get("_progress_update"):
+            await self._send_or_update_progress(
+                chat_id=chat_id,
+                text=msg.content or "",
+                key=progress_key,
+                reply_params=reply_params,
+                thread_kwargs=thread_kwargs,
+            )
+            return
+        if not msg.metadata.get("_progress"):
+            self._progress_bufs.pop(progress_key, None)
+
         # Send media files
         for media_path in (msg.media or []):
             try:
@@ -537,6 +558,46 @@ class TelegramChannel(BaseChannel):
             except Exception as e2:
                 logger.error("Error sending Telegram message: {}", e2)
                 raise
+
+    async def _send_or_update_progress(
+        self,
+        *,
+        chat_id: int,
+        text: str,
+        key: tuple[str, int | None],
+        reply_params=None,
+        thread_kwargs: dict | None = None,
+    ) -> None:
+        """Edit one progress message in place, creating it on first update."""
+        if not text.strip():
+            return
+        buf = self._progress_bufs.get(key)
+        if buf is None or buf.message_id is None:
+            sent = await self._send_text(chat_id, text, reply_params, thread_kwargs)
+            self._progress_bufs[key] = _ProgressBuf(
+                message_id=getattr(sent, "message_id", None),
+                last_text=text,
+            )
+            return
+        if buf.last_text == text:
+            return
+        try:
+            html = _markdown_to_telegram_html(text)
+            await self._call_with_retry(
+                self._app.bot.edit_message_text,
+                chat_id=chat_id,
+                message_id=buf.message_id,
+                text=html,
+                parse_mode="HTML",
+            )
+        except Exception:
+            await self._call_with_retry(
+                self._app.bot.edit_message_text,
+                chat_id=chat_id,
+                message_id=buf.message_id,
+                text=text,
+            )
+        buf.last_text = text
 
     def _schedule_delete(self, chat_id: int, message_id: int, delay_s: float) -> None:
         """Best-effort delayed delete for ephemeral helper messages."""
