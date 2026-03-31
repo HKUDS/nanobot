@@ -51,6 +51,8 @@ class AgentRunResult:
     messages: list[dict[str, Any]]
     tools_used: list[str] = field(default_factory=list)
     usage: dict[str, int] = field(default_factory=dict)
+    elapsed_ms: int = 0
+    llm_elapsed_ms: int = 0
     stop_reason: str = "completed"
     error: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
@@ -63,6 +65,9 @@ class AgentRunner:
         self.provider = provider
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
+        import time as _time
+        _t0 = _time.monotonic()
+        _llm_ms = 0
         messages = list(spec.initial_messages)
         final_content: str | None = None
         tools_used: list[str] = []
@@ -88,6 +93,7 @@ class AgentRunner:
             if spec.reasoning_effort is not None:
                 kwargs["reasoning_effort"] = spec.reasoning_effort
 
+            _llm_t0 = _time.monotonic()
             if spec.on_stream:
                 response = await self.provider.chat_stream_with_retry(
                     **kwargs,
@@ -95,6 +101,7 @@ class AgentRunner:
                 )
             else:
                 response = await self.provider.chat_with_retry(**kwargs)
+            _llm_ms += int((_time.monotonic() - _llm_t0) * 1000)
 
             raw_usage = response.usage or {}
             for k, v in raw_usage.items():
@@ -159,11 +166,14 @@ class AgentRunner:
             template = spec.max_iterations_message or _DEFAULT_MAX_ITERATIONS_MESSAGE
             final_content = template.format(max_iterations=spec.max_iterations)
 
+        _elapsed_ms = int((_time.monotonic() - _t0) * 1000)
         return AgentRunResult(
             final_content=final_content,
             messages=messages,
             tools_used=tools_used,
             usage=usage,
+            elapsed_ms=_elapsed_ms,
+            llm_elapsed_ms=_llm_ms,
             stop_reason=stop_reason,
             error=error,
             tool_events=tool_events,

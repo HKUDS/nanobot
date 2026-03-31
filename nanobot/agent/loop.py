@@ -225,7 +225,7 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
-    ) -> tuple[str | None, list[str], list[dict], dict[str, int]]:
+    ) -> tuple[str | None, list[str], list[dict], dict[str, int], int, int]:
         """Run the agent iteration loop.
 
         *on_stream*: called with each content delta during streaming.
@@ -292,7 +292,7 @@ class AgentLoop:
             logger.warning("Max iterations ({}) reached", self.max_iterations)
         elif result.stop_reason == "error":
             logger.error("LLM returned error: {}", (result.final_content or "")[:200])
-        return result.final_content, result.tools_used, result.messages, result.usage
+        return result.final_content, result.tools_used, result.messages, result.usage, result.elapsed_ms, result.llm_elapsed_ms
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
@@ -440,11 +440,12 @@ class AgentLoop:
                 current_role=current_role,
                 channel_name=msg.metadata.get("channel_name"),
             )
-            final_content, _, all_msgs, turn_usage = await self._run_agent_loop(
+            final_content, _, all_msgs, turn_usage, elapsed, llm_elapsed = await self._run_agent_loop(
                 messages, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
             )
-            self._save_turn(session, all_msgs, 1 + len(history), usage=turn_usage)
+            self._save_turn(session, all_msgs, 1 + len(history), usage=turn_usage,
+                            elapsed_ms=elapsed, llm_elapsed_ms=llm_elapsed)
             self.sessions.save(session)
             self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
             return OutboundMessage(channel=channel, chat_id=chat_id,
@@ -498,7 +499,7 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs, turn_usage = await self._run_agent_loop(
+        final_content, _, all_msgs, turn_usage, elapsed, llm_elapsed = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
             on_stream=on_stream,
@@ -510,7 +511,8 @@ class AgentLoop:
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        self._save_turn(session, all_msgs, 1 + len(history), usage=turn_usage)
+        self._save_turn(session, all_msgs, 1 + len(history), usage=turn_usage,
+                        elapsed_ms=elapsed, llm_elapsed_ms=llm_elapsed)
         self.sessions.save(session)
         self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
 
@@ -576,7 +578,8 @@ class AgentLoop:
         return filtered
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int,
-                   usage: dict[str, int] | None = None) -> None:
+                   usage: dict[str, int] | None = None,
+                   elapsed_ms: int = 0, llm_elapsed_ms: int = 0) -> None:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
         new_msgs = messages[skip:]
@@ -594,8 +597,13 @@ class AgentLoop:
                 continue  # skip empty assistant messages — they poison session context
             if role == "assistant":
                 entry.setdefault("model", self.model)
-                if idx == last_assistant_idx and usage:
-                    entry["usage"] = usage
+                if idx == last_assistant_idx:
+                    if usage:
+                        entry["usage"] = usage
+                    if elapsed_ms:
+                        entry["elapsed_ms"] = elapsed_ms
+                    if llm_elapsed_ms:
+                        entry["llm_elapsed_ms"] = llm_elapsed_ms
             if role == "tool":
                 if isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
                     entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
