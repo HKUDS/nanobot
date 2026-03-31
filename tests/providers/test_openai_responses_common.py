@@ -1,9 +1,8 @@
 """Tests for the shared openai_responses_common converters and parsers."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-from loguru import logger
 
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.providers.openai_responses_common.converters import (
@@ -17,15 +16,6 @@ from nanobot.providers.openai_responses_common.parsing import (
     map_finish_reason,
     parse_response_output,
 )
-
-
-@pytest.fixture()
-def loguru_capture():
-    """Capture loguru messages into a list for assertion."""
-    messages: list[str] = []
-    handler_id = logger.add(lambda m: messages.append(str(m)), format="{message}", level="DEBUG")
-    yield messages
-    logger.remove(handler_id)
 
 
 # ======================================================================
@@ -332,7 +322,7 @@ class TestParseResponseOutput:
         assert result.tool_calls[0].arguments == {"city": "SF"}
         assert result.tool_calls[0].id == "call_1|fc_1"
 
-    def test_malformed_tool_arguments_logged(self, loguru_capture):
+    def test_malformed_tool_arguments_logged(self):
         """Malformed JSON arguments should log a warning and fallback."""
         resp = {
             "output": [{
@@ -342,9 +332,11 @@ class TestParseResponseOutput:
             }],
             "status": "completed", "usage": {},
         }
-        result = parse_response_output(resp)
+        with patch("nanobot.providers.openai_responses_common.parsing.logger") as mock_logger:
+            result = parse_response_output(resp)
         assert result.tool_calls[0].arguments == {"raw": "{bad json"}
-        assert any("Failed to parse tool call arguments" in m for m in loguru_capture)
+        mock_logger.warning.assert_called_once()
+        assert "Failed to parse tool call arguments" in str(mock_logger.warning.call_args)
 
     def test_reasoning_content_extracted(self):
         resp = {
@@ -507,7 +499,7 @@ class TestConsumeSdkStream:
             await consume_sdk_stream(stream())
 
     @pytest.mark.asyncio
-    async def test_malformed_tool_args_logged(self, loguru_capture):
+    async def test_malformed_tool_args_logged(self):
         """Malformed JSON in streaming tool args should log a warning."""
         item_added = MagicMock(type="function_call", call_id="c1", id="fc1", arguments="")
         item_added.name = "f"
@@ -523,6 +515,8 @@ class TestConsumeSdkStream:
             for e in [ev1, ev2, ev3, ev4]:
                 yield e
 
-        _, tool_calls, _, _, _ = await consume_sdk_stream(stream())
+        with patch("nanobot.providers.openai_responses_common.parsing.logger") as mock_logger:
+            _, tool_calls, _, _, _ = await consume_sdk_stream(stream())
         assert tool_calls[0].arguments == {"raw": "{bad"}
-        assert any("Failed to parse tool call arguments" in m for m in loguru_capture)
+        mock_logger.warning.assert_called_once()
+        assert "Failed to parse tool call arguments" in str(mock_logger.warning.call_args)
