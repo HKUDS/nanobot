@@ -33,6 +33,7 @@ class AgentRunSpec:
     error_message: str | None = _DEFAULT_ERROR_MESSAGE
     max_iterations_message: str | None = None
     concurrent_tools: bool = False
+    read_only_tool_names: set[str] | None = None
     fail_on_tool_error: bool = False
 
 
@@ -181,16 +182,36 @@ class AgentRunner:
         spec: AgentRunSpec,
         tool_calls: list[ToolCallRequest],
     ) -> tuple[list[Any], list[dict[str, str]], BaseException | None]:
-        if spec.concurrent_tools:
-            tool_results = await asyncio.gather(*(
-                self._run_tool(spec, tool_call)
-                for tool_call in tool_calls
-            ))
-        else:
+        if not spec.concurrent_tools:
             tool_results = [
                 await self._run_tool(spec, tool_call)
                 for tool_call in tool_calls
             ]
+        else:
+            # Policy: read-only tools can run in parallel batches.
+            # Any mutating tool is executed serially to preserve order and side effects.
+            read_only = set(spec.read_only_tool_names or ())
+            tool_results = []
+            batch: list[ToolCallRequest] = []
+
+            async def _flush_batch() -> None:
+                nonlocal batch
+                if not batch:
+                    return
+                batched = await asyncio.gather(*(
+                    self._run_tool(spec, tool_call)
+                    for tool_call in batch
+                ))
+                tool_results.extend(batched)
+                batch = []
+
+            for tool_call in tool_calls:
+                if tool_call.name in read_only:
+                    batch.append(tool_call)
+                    continue
+                await _flush_batch()
+                tool_results.append(await self._run_tool(spec, tool_call))
+            await _flush_batch()
 
         results: list[Any] = []
         events: list[dict[str, str]] = []

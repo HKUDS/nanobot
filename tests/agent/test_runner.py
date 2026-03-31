@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -23,6 +24,14 @@ def _make_loop(tmp_path):
         MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
     return loop
+
+
+def test_tool_summary_line_compacts_unique_names(tmp_path):
+    loop = _make_loop(tmp_path)
+
+    line = loop._tool_summary_line(["read_file", "read_file", "web_search", "exec"])
+
+    assert line == "Tools used (3): read_file, web_search, exec"
 
 
 @pytest.mark.asyncio
@@ -256,6 +265,60 @@ async def test_runner_returns_structured_tool_error():
     assert result.tool_events == [
         {"name": "list_dir", "status": "error", "detail": "boom"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_runner_orchestrates_read_only_parallel_mutating_serial():
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="working",
+        tool_calls=[
+            ToolCallRequest(id="call_1", name="read_file", arguments={"path": "a"}),
+            ToolCallRequest(id="call_2", name="list_dir", arguments={"path": "."}),
+            ToolCallRequest(id="call_3", name="write_file", arguments={"path": "b", "content": "x"}),
+            ToolCallRequest(id="call_4", name="web_search", arguments={"query": "q"}),
+            ToolCallRequest(id="call_5", name="exec", arguments={"command": "echo ok"}),
+        ],
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    starts: list[tuple[str, float]] = []
+    ends: list[tuple[str, float]] = []
+
+    async def execute(name: str, params: dict):
+        import time
+        starts.append((name, time.perf_counter()))
+        if name in {"read_file", "list_dir"}:
+            await asyncio.sleep(0.05)
+        elif name == "web_search":
+            await asyncio.sleep(0.02)
+        else:
+            await asyncio.sleep(0.01)
+        ends.append((name, time.perf_counter()))
+        return f"{name} ok"
+
+    tools.execute = execute
+
+    runner = AgentRunner(provider)
+    await runner.run(AgentRunSpec(
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        concurrent_tools=True,
+        read_only_tool_names={"read_file", "list_dir", "web_search"},
+    ))
+
+    start_map = {name: ts for name, ts in starts}
+    end_map = {name: ts for name, ts in ends}
+
+    assert abs(start_map["read_file"] - start_map["list_dir"]) < 0.02
+    assert start_map["write_file"] >= max(end_map["read_file"], end_map["list_dir"])
+    assert start_map["web_search"] >= end_map["write_file"]
+    assert start_map["exec"] >= end_map["web_search"]
 
 
 @pytest.mark.asyncio

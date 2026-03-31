@@ -19,12 +19,14 @@ from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
+from nanobot.agent.tools.ask_question import AskQuestionTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.agent.tools.tool_search import ToolSearchTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
@@ -164,6 +166,15 @@ class AgentLoop:
     """
 
     _TOOL_RESULT_MAX_CHARS = 16_000
+    _POST_SUMMARY_DELETE_AFTER_S = 12
+    _READ_ONLY_TOOLS = {
+        "read_file",
+        "list_dir",
+        "web_search",
+        "web_fetch",
+        "tool_search",
+        "ask_question",
+    }
 
     def __init__(
         self,
@@ -182,6 +193,7 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
+        tool_profile: str = "default",
         hooks: list[AgentHook] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
@@ -198,6 +210,7 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.tool_profile = tool_profile
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
@@ -260,15 +273,43 @@ class AgentLoop:
             ))
         self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
+        self.tools.register(ToolSearchTool(registry=self.tools))
+        self.tools.register(AskQuestionTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(
                 CronTool(self.cron_service, default_timezone=self.context.timezone or "UTC")
             )
+        self._apply_tool_profile()
+
+    def _apply_tool_profile(self) -> None:
+        """Apply profile-based tool filtering after default registration."""
+        profile = (self.tool_profile or "default").lower()
+        if profile not in {"safe", "default", "full"}:
+            logger.warning("Unknown tool profile '{}', using default", profile)
+            return
+        if profile in {"default", "full"}:
+            return
+
+        safe_tools = {
+            "read_file",
+            "list_dir",
+            "web_search",
+            "web_fetch",
+            "tool_search",
+            "ask_question",
+            "message",
+        }
+        for name in list(self.tools.tool_names):
+            if name not in safe_tools:
+                self.tools.unregister(name)
+        logger.info("Tool profile 'safe' active: {}", ", ".join(self.tools.tool_names))
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
+        if (self.tool_profile or "default").lower() == "safe":
+            return
         if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
             return
         self._mcp_connecting = True
@@ -315,6 +356,36 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    @staticmethod
+    def _tool_summary_line(tools_used: list[str]) -> str:
+        """Build a compact summary of tools used in one run."""
+        if not tools_used:
+            return ""
+        ordered_unique = list(dict.fromkeys(tools_used))
+        preview = ", ".join(ordered_unique[:5])
+        if len(ordered_unique) > 5:
+            preview += ", ..."
+        return f"Tools used ({len(ordered_unique)}): {preview}"
+
+    @staticmethod
+    def _accumulate_session_usage(session: Session, usage: dict[str, int]) -> None:
+        """Accumulate per-session token usage counters in session metadata."""
+        if not isinstance(session.metadata, dict):
+            session.metadata = {}
+        stats = session.metadata.get("usage")
+        if not isinstance(stats, dict):
+            stats = {}
+            session.metadata["usage"] = stats
+
+        prompt = int(usage.get("prompt_tokens", 0) or 0)
+        completion = int(usage.get("completion_tokens", 0) or 0)
+        total = prompt + completion
+
+        stats["prompt_tokens"] = int(stats.get("prompt_tokens", 0) or 0) + prompt
+        stats["completion_tokens"] = int(stats.get("completion_tokens", 0) or 0) + completion
+        stats["total_tokens"] = int(stats.get("total_tokens", 0) or 0) + total
+        stats["turns"] = int(stats.get("turns", 0) or 0) + 1
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -356,6 +427,7 @@ class AgentLoop:
             hook=hook,
             error_message="Sorry, I encountered an error calling the AI model.",
             concurrent_tools=True,
+            read_only_tool_names=set(self._READ_ONLY_TOOLS),
         ))
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
@@ -437,6 +509,18 @@ class AgentLoop:
                 )
                 if response is not None:
                     await self.bus.publish_outbound(response)
+                    summary_line = (response.metadata or {}).get("_tool_summary_line")
+                    if summary_line:
+                        meta = dict(msg.metadata or {})
+                        meta["_progress"] = True
+                        meta["_post_result_summary"] = True
+                        meta["_delete_after_s"] = self._POST_SUMMARY_DELETE_AFTER_S
+                        await self.bus.publish_outbound(OutboundMessage(
+                            channel=msg.channel,
+                            chat_id=msg.chat_id,
+                            content=summary_line,
+                            metadata=meta,
+                        ))
                 elif msg.channel == "cli":
                     await self.bus.publish_outbound(OutboundMessage(
                         channel=msg.channel, chat_id=msg.chat_id,
@@ -500,15 +584,21 @@ class AgentLoop:
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(
+            final_content, tools_used, all_msgs = await self._run_agent_loop(
                 messages, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
             )
+            summary_line = self._tool_summary_line(tools_used)
+            self._accumulate_session_usage(session, self._last_usage)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
-            return OutboundMessage(channel=channel, chat_id=chat_id,
-                                  content=final_content or "Background task completed.")
+            return OutboundMessage(
+                channel=channel,
+                chat_id=chat_id,
+                content=final_content or "Background task completed.",
+                metadata={"_tool_summary_line": summary_line} if summary_line else {},
+            )
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
@@ -545,7 +635,7 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
+        final_content, tools_used, all_msgs = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
             on_stream=on_stream,
@@ -553,6 +643,8 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
         )
+        summary_line = self._tool_summary_line(tools_used)
+        self._accumulate_session_usage(session, self._last_usage)
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
@@ -570,6 +662,8 @@ class AgentLoop:
         meta = dict(msg.metadata or {})
         if on_stream is not None:
             meta["_streamed"] = True
+        if summary_line:
+            meta["_tool_summary_line"] = summary_line
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=meta,
