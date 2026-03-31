@@ -44,3 +44,111 @@ def test_wants_voice_no_trigger_on_normal_text():
 def test_voice_sessions_initialised_empty():
     ch = _make_channel()
     assert ch._voice_sessions == {}
+
+
+@pytest.mark.asyncio
+async def test_inbound_voice_trigger_sets_session_flag():
+    """After processing a message with a voice trigger, _voice_sessions is marked."""
+    ch = _make_channel()
+    ch._token = "tok"
+    ch._context_tokens = {"wx-user": "ctx-1"}
+
+    text = "你说，帮我分析一下"
+    if ch._wants_voice(text):
+        ch._voice_sessions["wx-user"] = True
+
+    assert ch._voice_sessions.get("wx-user") is True
+
+
+@pytest.mark.asyncio
+async def test_send_calls_tts_and_sends_voice_when_session_flagged(tmp_path, monkeypatch):
+    """When _voice_sessions is set, send() calls TTS and sends the MP3."""
+    ch = _make_channel(tts_api_key="sk-test")
+    ch._token = "tok"
+    ch._context_tokens = {"wx-user": "ctx-1"}
+    ch._voice_sessions["wx-user"] = True
+
+    async def fake_synthesize(text: str, output_path) -> bool:
+        from pathlib import Path
+        Path(output_path).write_bytes(b"fake-mp3")
+        return True
+
+    ch._tts_provider.synthesize = fake_synthesize  # type: ignore
+
+    sent_media = []
+    sent_text = []
+
+    async def fake_send_media(to, path, ctx):
+        sent_media.append(str(path))
+
+    async def fake_send_text(to, text, ctx):
+        sent_text.append(text)
+
+    ch._send_media_file = fake_send_media  # type: ignore
+    ch._send_text = fake_send_text  # type: ignore
+    ch._client = MagicMock()
+
+    msg = OutboundMessage(channel="weixin", chat_id="wx-user", content="这是回复内容")
+    await ch.send(msg)
+
+    assert len(sent_media) == 1
+    assert sent_media[0].endswith(".mp3")
+    assert sent_text == ["这是回复内容"]
+    assert "wx-user" not in ch._voice_sessions
+
+
+@pytest.mark.asyncio
+async def test_send_text_still_sent_when_tts_fails(monkeypatch):
+    """If TTS synthesis fails, text is still sent normally."""
+    ch = _make_channel(tts_api_key="sk-test")
+    ch._token = "tok"
+    ch._context_tokens = {"wx-user": "ctx-1"}
+    ch._voice_sessions["wx-user"] = True
+    ch._client = MagicMock()
+
+    async def failing_synthesize(text, output_path) -> bool:
+        return False
+
+    ch._tts_provider.synthesize = failing_synthesize  # type: ignore
+
+    sent_text = []
+
+    async def fake_send_text(to, text, ctx):
+        sent_text.append(text)
+
+    ch._send_media_file = AsyncMock()
+    ch._send_text = fake_send_text  # type: ignore
+
+    msg = OutboundMessage(channel="weixin", chat_id="wx-user", content="回复")
+    await ch.send(msg)
+
+    assert sent_text == ["回复"]
+    ch._send_media_file.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_skips_tts_when_no_provider():
+    """If _tts_provider is None (no api_key), send() skips TTS silently."""
+    ch = _make_channel(tts_api_key="")
+    ch._token = "tok"
+    ch._context_tokens = {"wx-user": "ctx-1"}
+    ch._voice_sessions["wx-user"] = True
+    ch._client = MagicMock()
+
+    sent_media = []
+    sent_text = []
+
+    async def fake_send_media(to, path, ctx):  # pragma: no cover
+        sent_media.append(path)
+
+    async def fake_send_text(to, text, ctx):
+        sent_text.append(text)
+
+    ch._send_media_file = fake_send_media  # type: ignore
+    ch._send_text = fake_send_text  # type: ignore
+
+    msg = OutboundMessage(channel="weixin", chat_id="wx-user", content="回复")
+    await ch.send(msg)
+
+    assert sent_media == []
+    assert sent_text == ["回复"]

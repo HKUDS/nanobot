@@ -13,9 +13,9 @@ import asyncio
 import base64
 import hashlib
 import json
-import mimetypes
 import os
 import re
+import tempfile
 import time
 import uuid
 from collections import OrderedDict
@@ -73,10 +73,12 @@ DEFAULT_LONG_POLL_TIMEOUT_S = 35
 UPLOAD_MEDIA_IMAGE = 1
 UPLOAD_MEDIA_VIDEO = 2
 UPLOAD_MEDIA_FILE = 3
+UPLOAD_MEDIA_VOICE = 4          # value to verify against WeChat ilink API docs
 
-# File extensions considered as images / videos for outbound media
+# File extensions considered as images / videos / voices for outbound media
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".ico", ".svg"}
 _VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv"}
+_VOICE_EXTS = {".mp3", ".ogg", ".wav", ".m4a"}
 
 # Voice trigger patterns — user requests a spoken reply
 _VOICE_TRIGGER_PATTERNS = re.compile(
@@ -131,6 +133,12 @@ class WeixinChannel(BaseChannel):
         self._next_poll_timeout_s: int = DEFAULT_LONG_POLL_TIMEOUT_S
         self._session_pause_until: float = 0.0
         self._voice_sessions: dict[str, bool] = {}
+        from nanobot.providers.tts import CosyVoiceTTSProvider
+        self._tts_provider: CosyVoiceTTSProvider | None = (
+            CosyVoiceTTSProvider(self.config.tts)
+            if (self.config.tts.api_key or os.environ.get("DASHSCOPE_API_KEY"))
+            else None
+        )
 
     # ------------------------------------------------------------------
     # State persistence
@@ -740,6 +748,20 @@ class WeixinChannel(BaseChannel):
             )
             return
 
+        wants_voice = self._voice_sessions.pop(msg.chat_id, False)
+
+        # --- TTS voice message (before text, matching media-first pattern) ---
+        if wants_voice and content and self._tts_provider:
+            tmp = Path(tempfile.mktemp(suffix=".mp3", prefix="nanobot-tts-"))
+            ok = await self._tts_provider.synthesize(content, tmp)
+            if ok:
+                try:
+                    await self._send_media_file(msg.chat_id, str(tmp), ctx_token)
+                except Exception as e:
+                    logger.error("Failed to send WeChat TTS voice: {}", e)
+                finally:
+                    tmp.unlink(missing_ok=True)
+
         # --- Send media files first (following Telegram channel pattern) ---
         for media_path in (msg.media or []):
             try:
@@ -836,6 +858,10 @@ class WeixinChannel(BaseChannel):
             upload_type = UPLOAD_MEDIA_VIDEO
             item_type = ITEM_VIDEO
             item_key = "video_item"
+        elif ext in _VOICE_EXTS:
+            upload_type = UPLOAD_MEDIA_VOICE
+            item_type = ITEM_VOICE
+            item_key = "voice_item"
         else:
             upload_type = UPLOAD_MEDIA_FILE
             item_type = ITEM_FILE
@@ -914,6 +940,8 @@ class WeixinChannel(BaseChannel):
             media_item["mid_size"] = padded_size
         elif item_type == ITEM_VIDEO:
             media_item["video_size"] = padded_size
+        elif item_type == ITEM_VOICE:
+            media_item["voice_size"] = raw_size
         elif item_type == ITEM_FILE:
             media_item["file_name"] = p.name
             media_item["len"] = str(raw_size)
