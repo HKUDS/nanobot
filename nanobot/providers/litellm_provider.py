@@ -345,6 +345,12 @@ class LiteLLMProvider(LLMProvider):
                 "prompt_tokens": response.usage.prompt_tokens,
                 "completion_tokens": response.usage.completion_tokens,
                 "total_tokens": response.usage.total_tokens,
+                "cache_creation_input_tokens": getattr(
+                    response.usage, "cache_creation_input_tokens", 0
+                )
+                or 0,
+                "cache_read_input_tokens": getattr(response.usage, "cache_read_input_tokens", 0)
+                or 0,
             }
 
         reasoning_content = getattr(message, "reasoning_content", None) or None
@@ -454,6 +460,12 @@ class LiteLLMProvider(LLMProvider):
                         "prompt_tokens": getattr(raw_usage, "prompt_tokens", 0) or 0,
                         "completion_tokens": getattr(raw_usage, "completion_tokens", 0) or 0,
                         "total_tokens": getattr(raw_usage, "total_tokens", 0) or 0,
+                        "cache_creation_input_tokens": getattr(
+                            raw_usage, "cache_creation_input_tokens", 0
+                        )
+                        or 0,
+                        "cache_read_input_tokens": getattr(raw_usage, "cache_read_input_tokens", 0)
+                        or 0,
                     }
 
                 done = finish_reason is not None

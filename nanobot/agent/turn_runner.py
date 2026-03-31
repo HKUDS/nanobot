@@ -165,6 +165,8 @@ class TurnRunner:
         self._max_iterations: int = config.max_iterations
         self._turn_tokens_prompt = 0
         self._turn_tokens_completion = 0
+        self._turn_cache_creation_tokens = 0
+        self._turn_cache_read_tokens = 0
         self._turn_llm_calls = 0
 
     # ------------------------------------------------------------------
@@ -181,6 +183,8 @@ class TurnRunner:
         tools_used: list[str] = []
         self._turn_tokens_prompt = 0
         self._turn_tokens_completion = 0
+        self._turn_cache_creation_tokens = 0
+        self._turn_cache_read_tokens = 0
         self._turn_llm_calls = 0
 
         _raw_cw = getattr(self._config, "context_window_tokens", 0)
@@ -248,6 +252,8 @@ class TurnRunner:
             self._turn_llm_calls += 1
             self._turn_tokens_prompt += response.usage.get("prompt_tokens", 0)
             self._turn_tokens_completion += response.usage.get("completion_tokens", 0)
+            self._turn_cache_creation_tokens += response.usage.get("cache_creation_input_tokens", 0)
+            self._turn_cache_read_tokens += response.usage.get("cache_read_input_tokens", 0)
 
             # LLM error handling
             action, err_content = await self._handle_llm_error(state, response, on_progress)
@@ -336,6 +342,8 @@ class TurnRunner:
             messages=state.messages,
             tokens_prompt=self._turn_tokens_prompt,
             tokens_completion=self._turn_tokens_completion,
+            cache_creation_tokens=self._turn_cache_creation_tokens,
+            cache_read_tokens=self._turn_cache_read_tokens,
             llm_calls=self._turn_llm_calls,
             guardrail_activations=list(state.guardrail_activations),
             tool_results_log=list(state.tool_results_log),
@@ -558,6 +566,8 @@ class TurnRunner:
                 self._turn_llm_calls += 1
                 self._turn_tokens_prompt += resp.usage.get("prompt_tokens", 0)
                 self._turn_tokens_completion += resp.usage.get("completion_tokens", 0)
+                self._turn_cache_creation_tokens += resp.usage.get("cache_creation_input_tokens", 0)
+                self._turn_cache_read_tokens += resp.usage.get("cache_read_input_tokens", 0)
                 return revised
         except Exception:  # crash-barrier: self-check LLM call
             logger.debug("Self-check call failed, returning original answer")
