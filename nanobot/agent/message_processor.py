@@ -66,6 +66,8 @@ class MessageProcessor:
         # Per-turn token accumulators (populated from TurnResult).
         self._turn_tokens_prompt = 0
         self._turn_tokens_completion = 0
+        self._turn_cache_creation_tokens = 0
+        self._turn_cache_read_tokens = 0
         self._turn_llm_calls = 0
 
         # Last TurnResult from the orchestrator, used by _sync_token_counters.
@@ -297,6 +299,8 @@ class MessageProcessor:
                 "llm_calls": self._turn_llm_calls,
                 "prompt_tokens": self._turn_tokens_prompt,
                 "completion_tokens": self._turn_tokens_completion,
+                "cache_creation_tokens": self._turn_cache_creation_tokens,
+                "cache_read_tokens": self._turn_cache_read_tokens,
                 "duration_ms": round((time.monotonic() - t0_request) * 1000),
             },
         )
@@ -309,7 +313,8 @@ class MessageProcessor:
         bind_trace().info(
             "request_complete | {ch}:{cid} | {dur:.0f}ms | model={mdl}"
             " | tools={tc} | len={rlen}"
-            " | llm_calls={lc} | prompt_tokens={pt} | completion_tokens={ct}",
+            " | llm_calls={lc} | prompt_tokens={pt} | completion_tokens={ct}"
+            " | cache_write={cw} | cache_read={cr}",
             ch=msg.channel,
             cid=msg.chat_id,
             dur=duration_ms,
@@ -319,6 +324,8 @@ class MessageProcessor:
             lc=self._turn_llm_calls,
             pt=self._turn_tokens_prompt,
             ct=self._turn_tokens_completion,
+            cw=self._turn_cache_creation_tokens,
+            cr=self._turn_cache_read_tokens,
         )
 
         if isinstance(all_msgs, list):
@@ -386,6 +393,8 @@ class MessageProcessor:
             return
         self._turn_tokens_prompt = getattr(result, "tokens_prompt", 0)
         self._turn_tokens_completion = getattr(result, "tokens_completion", 0)
+        self._turn_cache_creation_tokens = getattr(result, "cache_creation_tokens", 0)
+        self._turn_cache_read_tokens = getattr(result, "cache_read_tokens", 0)
         self._turn_llm_calls = getattr(result, "llm_calls", 0)
 
     async def _run_orchestrator(
