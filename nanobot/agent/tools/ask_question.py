@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
+from nanobot.bus.events import OutboundMessage
 
 
 class AskQuestionTool(Tool):
@@ -56,6 +58,18 @@ class AskQuestionTool(Tool):
         "required": ["questions"],
     }
 
+    def __init__(self, send_callback=None):
+        self._send_callback = send_callback
+        self._channel = "cli"
+        self._chat_id = "direct"
+        self._message_id: int | None = None
+
+    def set_context(self, channel: str, chat_id: str, message_id: int | None = None) -> None:
+        """Set routing context so this tool can ask directly in chat channels."""
+        self._channel = channel
+        self._chat_id = chat_id
+        self._message_id = message_id
+
     async def execute(
         self,
         questions: list[dict[str, Any]],
@@ -92,4 +106,25 @@ class AskQuestionTool(Tool):
 
         lines.append("Reply with selected option IDs.")
         lines.append("Format example: q1=a,q2=b|c")
-        return "\n".join(lines).strip()
+        rendered = "\n".join(lines).strip()
+
+        # If channel callback is available, publish structured cards for UI-specific renderers.
+        if self._send_callback:
+            payload = {"title": (title or "").strip(), "questions": questions}
+            msg = OutboundMessage(
+                channel=self._channel,
+                chat_id=self._chat_id,
+                content=rendered,
+                metadata={
+                    "_ask_question": payload,
+                    "message_id": self._message_id,
+                },
+            )
+            try:
+                maybe = self._send_callback(msg)
+                if asyncio.iscoroutine(maybe):
+                    await maybe
+                return "Question sent to user. Wait for their selection before proceeding."
+            except Exception:
+                pass
+        return rendered

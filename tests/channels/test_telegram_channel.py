@@ -42,6 +42,8 @@ class _FakeBot:
         self.sent_messages: list[dict] = []
         self.sent_media: list[dict] = []
         self.deleted_messages: list[dict] = []
+        self.edited_messages: list[dict] = []
+        self.edited_reply_markups: list[dict] = []
         self.get_me_calls = 0
 
     async def get_me(self):
@@ -72,6 +74,12 @@ class _FakeBot:
 
     async def delete_message(self, **kwargs) -> None:
         self.deleted_messages.append(kwargs)
+
+    async def edit_message_text(self, **kwargs) -> None:
+        self.edited_messages.append(kwargs)
+
+    async def edit_message_reply_markup(self, **kwargs) -> None:
+        self.edited_reply_markups.append(kwargs)
 
     async def get_file(self, file_id: str):
         """Return a fake file that 'downloads' to a path (for reply-to-media tests)."""
@@ -474,6 +482,77 @@ async def test_send_with_delete_after_s_schedules_delayed_delete() -> None:
     await asyncio.sleep(0)
 
     channel._delete_later.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_ask_question_renders_inline_buttons() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="ignored fallback text",
+            metadata={
+                "_ask_question": {
+                    "title": "Choose one",
+                    "questions": [
+                        {
+                            "id": "q1",
+                            "prompt": "Pick mode",
+                            "options": [
+                                {"id": "a", "label": "Fast"},
+                                {"id": "b", "label": "Safe"},
+                            ],
+                        }
+                    ],
+                }
+            },
+        )
+    )
+
+    assert len(channel._app.bot.sent_messages) == 1
+    sent = channel._app.bot.sent_messages[0]
+    assert "Pick mode" in sent["text"]
+    assert sent.get("reply_markup") is not None
+
+
+@pytest.mark.asyncio
+async def test_callback_query_sends_structured_selection_back_to_bus() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._chat_ids["12345|alice"] = -100123
+
+    msg = SimpleNamespace(
+        chat=SimpleNamespace(type="private", is_forum=False),
+        chat_id=-100123,
+        message_id=7,
+        text="Pick mode",
+        message_thread_id=None,
+        reply_to_message=None,
+    )
+    cb = SimpleNamespace(
+        data="aq|q1|a",
+        message=msg,
+        answer=AsyncMock(),
+        edit_message_reply_markup=AsyncMock(),
+        edit_message_text=AsyncMock(),
+    )
+    update = SimpleNamespace(callback_query=cb, effective_user=SimpleNamespace(id=12345, username="alice", first_name="Alice"))
+    channel._ask_cards[(str(msg.chat_id), msg.message_id)] = {"qid": "q1", "valid": {"aq|q1|a": "a"}}
+
+    await channel._on_callback_query(update, None)
+
+    inbound = await asyncio.wait_for(channel.bus.consume_inbound(), timeout=1.0)
+    assert inbound.content == "q1=a"
+    cb.answer.assert_awaited_once()
 
 
 @pytest.mark.asyncio

@@ -11,9 +11,23 @@ from typing import Any, Literal
 
 from loguru import logger
 from pydantic import Field
-from telegram import BotCommand, ReactionTypeEmoji, ReplyParameters, Update
+from telegram import (
+    BotCommand,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReactionTypeEmoji,
+    ReplyParameters,
+    Update,
+)
 from telegram.error import BadRequest, TimedOut
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
@@ -240,6 +254,7 @@ class TelegramChannel(BaseChannel):
         self._text_buffers: dict[str, _TextBuf] = {}
         self._text_buffer_tasks: dict[str, asyncio.Task] = {}
         self._delete_tasks: set[asyncio.Task] = set()
+        self._ask_cards: dict[tuple[str, int], dict[str, Any]] = {}
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -301,6 +316,7 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("restart", self._forward_command))
         self._app.add_handler(CommandHandler("status", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
+        self._app.add_handler(CallbackQueryHandler(self._on_callback_query))
 
         # Add message handler for text, photos, voice, documents
         self._app.add_handler(
@@ -457,6 +473,16 @@ class TelegramChannel(BaseChannel):
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
+            ask_payload = msg.metadata.get("_ask_question")
+            if isinstance(ask_payload, dict):
+                handled = await self._send_ask_question_cards(
+                    chat_id=chat_id,
+                    ask_payload=ask_payload,
+                    reply_params=reply_params,
+                    thread_kwargs=thread_kwargs,
+                )
+                if handled:
+                    return
             delete_after_s = msg.metadata.get("_delete_after_s")
             for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
                 sent = await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
@@ -527,6 +553,108 @@ class TelegramChannel(BaseChannel):
             raise
         except Exception as e:
             logger.debug("Telegram delayed delete failed for {}:{}: {}", chat_id, message_id, e)
+
+    @staticmethod
+    def _pack_ask_callback_data(qid: str, oid: str) -> str:
+        return f"aq|{qid}|{oid}"[:64]
+
+    async def _send_ask_question_cards(
+        self,
+        *,
+        chat_id: int,
+        ask_payload: dict[str, Any],
+        reply_params=None,
+        thread_kwargs: dict[str, Any] | None = None,
+    ) -> bool:
+        """Render ask_question payload as Telegram inline keyboard cards."""
+        questions = ask_payload.get("questions")
+        if not isinstance(questions, list) or not questions:
+            return False
+
+        title = str(ask_payload.get("title") or "").strip()
+        rendered_any = False
+        for idx, q in enumerate(questions, 1):
+            qid = str(q.get("id") or f"q{idx}").strip()
+            prompt = str(q.get("prompt") or "").strip()
+            options = q.get("options") or []
+            allow_multiple = bool(q.get("allow_multiple", False))
+            if not qid or not prompt or not isinstance(options, list) or len(options) < 2:
+                continue
+
+            # MVP: single-select only via buttons; multi-select stays text fallback.
+            if allow_multiple:
+                continue
+
+            header = f"{title}\n\n" if title and idx == 1 else ""
+            text = f"{header}{prompt}"
+            rows: list[list[InlineKeyboardButton]] = []
+            valid_map: dict[str, str] = {}
+            for opt in options:
+                oid = str(opt.get("id", "")).strip()
+                label = str(opt.get("label", "")).strip()
+                if not oid or not label:
+                    continue
+                cb = self._pack_ask_callback_data(qid, oid)
+                rows.append([InlineKeyboardButton(text=label, callback_data=cb)])
+                valid_map[cb] = oid
+            if not rows:
+                continue
+            markup = InlineKeyboardMarkup(rows)
+            sent = await self._call_with_retry(
+                self._app.bot.send_message,
+                chat_id=chat_id,
+                text=text,
+                reply_parameters=reply_params,
+                reply_markup=markup,
+                **(thread_kwargs or {}),
+            )
+            self._ask_cards[(str(chat_id), sent.message_id)] = {
+                "qid": qid,
+                "valid": valid_map,
+            }
+            rendered_any = True
+        return rendered_any
+
+    async def _on_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle inline button selections from ask_question cards."""
+        query = update.callback_query
+        if not query or not query.message or not update.effective_user:
+            return
+        data = query.data or ""
+        if not data.startswith("aq|"):
+            return
+
+        key = (str(query.message.chat_id), query.message.message_id)
+        card = self._ask_cards.get(key)
+        if not card:
+            await query.answer("This question is no longer active.", show_alert=False)
+            return
+        if data not in card.get("valid", {}):
+            await query.answer("Invalid selection.", show_alert=False)
+            return
+        qid = card.get("qid", "q1")
+        oid = card["valid"][data]
+        await query.answer("Selection received.", show_alert=False)
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        try:
+            await query.edit_message_text(text=f"{query.message.text}\n\nSelected: {oid}")
+        except Exception:
+            pass
+        self._ask_cards.pop(key, None)
+
+        user = update.effective_user
+        sender_id = self._sender_id(user)
+        metadata = self._build_message_metadata(query.message, user)
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=str(query.message.chat_id),
+            content=f"{qid}={oid}",
+            metadata=metadata,
+            session_key=self._derive_topic_session_key(query.message),
+        )
 
     @staticmethod
     def _is_not_modified_error(exc: Exception) -> bool:

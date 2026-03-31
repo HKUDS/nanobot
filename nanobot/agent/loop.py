@@ -7,6 +7,7 @@ import json
 import re
 import os
 import time
+import textwrap
 from contextlib import AsyncExitStack, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -19,12 +20,14 @@ from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
+from nanobot.agent.tools.ask_question import AskQuestionTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.agent.tools.tool_search import ToolSearchTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
@@ -182,6 +185,13 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
+        tool_profile: str = "default",
+        mini_planner_enabled: bool = False,
+        mini_planner_max_steps: int = 5,
+        mini_planner_min_query_chars: int = 90,
+        retrieval_enabled: bool = False,
+        retrieval_max_chunks: int = 3,
+        retrieval_max_chars: int = 1800,
         hooks: list[AgentHook] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
@@ -198,11 +208,21 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.tool_profile = tool_profile
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
+        self.mini_planner_enabled = mini_planner_enabled
+        self.mini_planner_max_steps = max(2, mini_planner_max_steps)
+        self.mini_planner_min_query_chars = max(40, mini_planner_min_query_chars)
 
-        self.context = ContextBuilder(workspace, timezone=timezone)
+        self.context = ContextBuilder(
+            workspace,
+            timezone=timezone,
+            retrieval_enabled=retrieval_enabled,
+            retrieval_max_chunks=retrieval_max_chunks,
+            retrieval_max_chars=retrieval_max_chars,
+        )
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)
@@ -260,6 +280,8 @@ class AgentLoop:
             ))
         self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
+        self.tools.register(ToolSearchTool(registry=self.tools))
+        self.tools.register(AskQuestionTool(send_callback=self.bus.publish_outbound))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
@@ -291,10 +313,13 @@ class AgentLoop:
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
-        for name in ("message", "spawn", "cron"):
+        for name in ("message", "spawn", "cron", "ask_question"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
-                    tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+                    if name in {"message", "ask_question"}:
+                        tool.set_context(channel, chat_id, message_id)
+                    else:
+                        tool.set_context(channel, chat_id)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -314,6 +339,59 @@ class AgentLoop:
                 return tc.name
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
+
+    @staticmethod
+    def _should_plan(text: str, *, min_chars: int) -> bool:
+        if len(text.strip()) < min_chars:
+            return False
+        lowered = text.lower()
+        signals = (
+            "implement",
+            "refactor",
+            "migration",
+            "migrate",
+            "step by step",
+            "по шагам",
+            "сделай план",
+            "архитект",
+            "integrate",
+            "feature",
+            "workflow",
+        )
+        return any(s in lowered for s in signals) or text.count("\n") >= 3
+
+    async def _build_mini_plan(self, history: list[dict[str, Any]], user_text: str) -> str | None:
+        """Generate a concise execution plan before running tools."""
+        if not self.mini_planner_enabled:
+            return None
+        if not self._should_plan(user_text, min_chars=self.mini_planner_min_query_chars):
+            return None
+        plan_prompt = textwrap.dedent(
+            f"""
+            Create a concise execution plan for this request in at most {self.mini_planner_max_steps} numbered steps.
+            Rules:
+            - Keep it short and practical.
+            - Mention expected tools only when useful.
+            - Do NOT execute anything, only planning text.
+            """
+        ).strip()
+        messages = [
+            {"role": "system", "content": "You create compact implementation plans for an agent."},
+            *history[-8:],
+            {"role": "user", "content": f"{plan_prompt}\n\nRequest:\n{user_text}"},
+        ]
+        try:
+            resp = await self.provider.chat_with_retry(
+                messages=messages,
+                tools=[],
+                model=self.model,
+            )
+        except Exception:
+            return None
+        content = self._strip_think(resp.content)
+        if not content:
+            return None
+        return content.strip()
 
     async def _run_agent_loop(
         self,
@@ -529,14 +607,6 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(max_messages=0)
-        initial_messages = self.context.build_messages(
-            history=history,
-            current_message=msg.content,
-            media=msg.media if msg.media else None,
-            channel=msg.channel, chat_id=msg.chat_id,
-        )
-
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
@@ -544,6 +614,18 @@ class AgentLoop:
             await self.bus.publish_outbound(OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
+
+        history = session.get_history(max_messages=0)
+        plan_text = await self._build_mini_plan(history, msg.content)
+        if plan_text:
+            await (on_progress or _bus_progress)(f"Plan:\n{plan_text}")
+        initial_messages = self.context.build_messages(
+            history=history,
+            current_message=msg.content,
+            media=msg.media if msg.media else None,
+            channel=msg.channel, chat_id=msg.chat_id,
+            execution_plan=plan_text,
+        )
 
         final_content, _, all_msgs = await self._run_agent_loop(
             initial_messages,

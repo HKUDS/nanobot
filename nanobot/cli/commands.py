@@ -548,6 +548,12 @@ def serve(
         channels_config=runtime_config.channels,
         timezone=runtime_config.agents.defaults.timezone,
         tool_profile=runtime_config.tools.tool_profile,
+        mini_planner_enabled=runtime_config.agents.defaults.mini_planner_enabled,
+        mini_planner_max_steps=runtime_config.agents.defaults.mini_planner_max_steps,
+        mini_planner_min_query_chars=runtime_config.agents.defaults.mini_planner_min_query_chars,
+        retrieval_enabled=runtime_config.agents.defaults.retrieval_enabled,
+        retrieval_max_chunks=runtime_config.agents.defaults.retrieval_max_chunks,
+        retrieval_max_chars=runtime_config.agents.defaults.retrieval_max_chars,
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -637,6 +643,12 @@ def gateway(
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
         tool_profile=config.tools.tool_profile,
+        mini_planner_enabled=config.agents.defaults.mini_planner_enabled,
+        mini_planner_max_steps=config.agents.defaults.mini_planner_max_steps,
+        mini_planner_min_query_chars=config.agents.defaults.mini_planner_min_query_chars,
+        retrieval_enabled=config.agents.defaults.retrieval_enabled,
+        retrieval_max_chunks=config.agents.defaults.retrieval_max_chunks,
+        retrieval_max_chars=config.agents.defaults.retrieval_max_chars,
     )
 
     # Set cron callback (needs agent)
@@ -843,6 +855,12 @@ def agent(
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
         tool_profile=config.tools.tool_profile,
+        mini_planner_enabled=config.agents.defaults.mini_planner_enabled,
+        mini_planner_max_steps=config.agents.defaults.mini_planner_max_steps,
+        mini_planner_min_query_chars=config.agents.defaults.mini_planner_min_query_chars,
+        retrieval_enabled=config.agents.defaults.retrieval_enabled,
+        retrieval_max_chunks=config.agents.defaults.retrieval_max_chunks,
+        retrieval_max_chars=config.agents.defaults.retrieval_max_chars,
     )
 
     # Shared reference for progress callbacks
