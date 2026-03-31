@@ -115,11 +115,13 @@ class OpenAICompatProvider(LLMProvider):
         default_model: str = "gpt-4o",
         extra_headers: dict[str, str] | None = None,
         spec: ProviderSpec | None = None,
+        user: str | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
         self._spec = spec
+        self._user = user
 
         if api_key and spec and spec.env_key:
             self._setup_env(api_key, api_base)
@@ -264,6 +266,9 @@ class OpenAICompatProvider(LLMProvider):
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
+
+        if self._user:
+            kwargs.setdefault("extra_body", {})["user"] = self._user
 
         return kwargs
 
