@@ -160,13 +160,15 @@ class AzureOpenAIProvider(LLMProvider):
 
         try:
             stream = await self._client.responses.create(**body)
-            content, tool_calls, finish_reason = await consume_sdk_stream(
-                stream, on_content_delta,
+            content, tool_calls, finish_reason, usage, reasoning_content = (
+                await consume_sdk_stream(stream, on_content_delta)
             )
             return LLMResponse(
                 content=content or None,
                 tool_calls=tool_calls,
                 finish_reason=finish_reason,
+                usage=usage,
+                reasoning_content=reasoning_content,
             )
         except Exception as e:
             return self._handle_error(e)
