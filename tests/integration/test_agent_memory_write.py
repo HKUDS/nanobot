@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.memory.event import MemoryEvent
 from tests.integration.conftest import make_inbound
 
 pytestmark = pytest.mark.integration
@@ -28,12 +29,14 @@ class TestMemoryWriteFromAgentLoop:
         """Events stored in memory are retrievable via the retriever."""
         agent.memory.ingester.append_events(
             [
-                {
-                    "type": "fact",
-                    "summary": "User is a backend engineer specializing in distributed systems.",
-                    "timestamp": "2026-03-01T12:00:00+00:00",
-                    "source": "test",
-                }
+                MemoryEvent.from_dict(
+                    {
+                        "type": "fact",
+                        "summary": "User is a backend engineer specializing in distributed systems.",
+                        "timestamp": "2026-03-01T12:00:00+00:00",
+                        "source": "test",
+                    }
+                )
             ]
         )
         results = await agent.memory.retriever.retrieve("distributed systems", top_k=5)
@@ -44,18 +47,22 @@ class TestMemoryWriteFromAgentLoop:
         """Multiple seeded events all persist in the store."""
         agent.memory.ingester.append_events(
             [
-                {
-                    "type": "preference",
-                    "summary": "User prefers Python for backend work.",
-                    "timestamp": "2026-03-01T12:00:00+00:00",
-                    "source": "test",
-                },
-                {
-                    "type": "fact",
-                    "summary": "User works at a startup with 20 employees.",
-                    "timestamp": "2026-03-01T12:01:00+00:00",
-                    "source": "test",
-                },
+                MemoryEvent.from_dict(
+                    {
+                        "type": "preference",
+                        "summary": "User prefers Python for backend work.",
+                        "timestamp": "2026-03-01T12:00:00+00:00",
+                        "source": "test",
+                    }
+                ),
+                MemoryEvent.from_dict(
+                    {
+                        "type": "fact",
+                        "summary": "User works at a startup with 20 employees.",
+                        "timestamp": "2026-03-01T12:01:00+00:00",
+                        "source": "test",
+                    }
+                ),
             ]
         )
         all_events = agent.memory.ingester.read_events(limit=100)

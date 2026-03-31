@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.config.memory import MemoryConfig
+from nanobot.memory.event import MemoryEvent
 from nanobot.memory.store import MemoryStore
 
 pytestmark = pytest.mark.integration
@@ -41,18 +42,22 @@ class TestProfileConflicts:
 
         store.ingester.append_events(
             [
-                {
-                    "type": "preference",
-                    "summary": "User prefers coffee over tea.",
-                    "timestamp": "2026-03-01T10:00:00+00:00",
-                    "source": "test",
-                },
-                {
-                    "type": "preference",
-                    "summary": "User prefers tea over coffee.",
-                    "timestamp": "2026-03-01T11:00:00+00:00",
-                    "source": "test",
-                },
+                MemoryEvent.from_dict(
+                    {
+                        "type": "preference",
+                        "summary": "User prefers coffee over tea.",
+                        "timestamp": "2026-03-01T10:00:00+00:00",
+                        "source": "test",
+                    }
+                ),
+                MemoryEvent.from_dict(
+                    {
+                        "type": "preference",
+                        "summary": "User prefers tea over coffee.",
+                        "timestamp": "2026-03-01T11:00:00+00:00",
+                        "source": "test",
+                    }
+                ),
             ]
         )
 
@@ -70,12 +75,14 @@ class TestProfileConflicts:
 
         store.ingester.append_events(
             [
-                {
-                    "type": "preference",
-                    "summary": "User likes morning walks.",
-                    "timestamp": "2026-03-01T08:00:00+00:00",
-                    "source": "test",
-                },
+                MemoryEvent.from_dict(
+                    {
+                        "type": "preference",
+                        "summary": "User likes morning walks.",
+                        "timestamp": "2026-03-01T08:00:00+00:00",
+                        "source": "test",
+                    }
+                ),
             ]
         )
 
@@ -88,18 +95,22 @@ class TestProfileConflicts:
 
         store.ingester.append_events(
             [
-                {
-                    "type": "preference",
-                    "summary": "User prefers VS Code for editing.",
-                    "timestamp": "2026-03-01T09:00:00+00:00",
-                    "source": "test",
-                },
-                {
-                    "type": "preference",
-                    "summary": "User prefers Neovim for editing.",
-                    "timestamp": "2026-03-01T10:00:00+00:00",
-                    "source": "test",
-                },
+                MemoryEvent.from_dict(
+                    {
+                        "type": "preference",
+                        "summary": "User prefers VS Code for editing.",
+                        "timestamp": "2026-03-01T09:00:00+00:00",
+                        "source": "test",
+                    }
+                ),
+                MemoryEvent.from_dict(
+                    {
+                        "type": "preference",
+                        "summary": "User prefers Neovim for editing.",
+                        "timestamp": "2026-03-01T10:00:00+00:00",
+                        "source": "test",
+                    }
+                ),
             ]
         )
 
@@ -113,12 +124,14 @@ class TestProfileConflicts:
         store1 = _make_store(tmp_path)
         store1.ingester.append_events(
             [
-                {
-                    "type": "preference",
-                    "summary": "User prefers dark mode.",
-                    "timestamp": "2026-03-01T12:00:00+00:00",
-                    "source": "test",
-                },
+                MemoryEvent.from_dict(
+                    {
+                        "type": "preference",
+                        "summary": "User prefers dark mode.",
+                        "timestamp": "2026-03-01T12:00:00+00:00",
+                        "source": "test",
+                    }
+                ),
             ]
         )
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 from nanobot.memory import MemoryStore
+from nanobot.memory.event import MemoryEvent
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 
@@ -87,32 +88,36 @@ class TestHybridMemoryStore:
         store = MemoryStore(tmp_path, embedding_provider="hash")
         store.ingester.append_events(
             [
-                {
-                    "id": "e1",
-                    "timestamp": "2026-02-20T10:00:00+00:00",
-                    "channel": "cli",
-                    "chat_id": "direct",
-                    "type": "fact",
-                    "summary": "Project uses OAuth2 for API authentication.",
-                    "entities": ["project", "oauth2", "api"],
-                    "salience": 0.8,
-                    "confidence": 0.85,
-                    "source_span": [0, 2],
-                    "ttl_days": 365,
-                },
-                {
-                    "id": "e2",
-                    "timestamp": "2024-01-01T00:00:00+00:00",
-                    "channel": "cli",
-                    "chat_id": "direct",
-                    "type": "task",
-                    "summary": "Legacy migration task pending.",
-                    "entities": ["migration"],
-                    "salience": 0.4,
-                    "confidence": 0.6,
-                    "source_span": [3, 4],
-                    "ttl_days": 30,
-                },
+                MemoryEvent.from_dict(
+                    {
+                        "id": "e1",
+                        "timestamp": "2026-02-20T10:00:00+00:00",
+                        "channel": "cli",
+                        "chat_id": "direct",
+                        "type": "fact",
+                        "summary": "Project uses OAuth2 for API authentication.",
+                        "entities": ["project", "oauth2", "api"],
+                        "salience": 0.8,
+                        "confidence": 0.85,
+                        "source_span": [0, 2],
+                        "ttl_days": 365,
+                    }
+                ),
+                MemoryEvent.from_dict(
+                    {
+                        "id": "e2",
+                        "timestamp": "2024-01-01T00:00:00+00:00",
+                        "channel": "cli",
+                        "chat_id": "direct",
+                        "type": "task",
+                        "summary": "Legacy migration task pending.",
+                        "entities": ["migration"],
+                        "salience": 0.4,
+                        "confidence": 0.6,
+                        "source_span": [3, 4],
+                        "ttl_days": 30,
+                    }
+                ),
             ]
         )
 
@@ -146,19 +151,21 @@ class TestHybridMemoryStore:
 
         store.ingester.append_events(
             [
-                {
-                    "id": "e3",
-                    "timestamp": "2026-02-21T00:00:00+00:00",
-                    "channel": "cli",
-                    "chat_id": "direct",
-                    "type": "decision",
-                    "summary": "Adopt hybrid memory mode in staging.",
-                    "entities": ["hybrid memory", "staging"],
-                    "salience": 0.7,
-                    "confidence": 0.8,
-                    "source_span": [5, 6],
-                    "ttl_days": None,
-                }
+                MemoryEvent.from_dict(
+                    {
+                        "id": "e3",
+                        "timestamp": "2026-02-21T00:00:00+00:00",
+                        "channel": "cli",
+                        "chat_id": "direct",
+                        "type": "decision",
+                        "summary": "Adopt hybrid memory mode in staging.",
+                        "entities": ["hybrid memory", "staging"],
+                        "salience": 0.7,
+                        "confidence": 0.8,
+                        "source_span": [5, 6],
+                        "ttl_days": None,
+                    }
+                )
             ]
         )
 
@@ -216,32 +223,36 @@ class TestHybridMemoryStore:
 
         store.ingester.append_events(
             [
-                {
-                    "id": "t-open",
-                    "timestamp": "2026-02-21T00:00:00+00:00",
-                    "channel": "cli",
-                    "chat_id": "direct",
-                    "type": "task",
-                    "summary": "Review memory retrieval weights.",
-                    "entities": ["memory", "weights"],
-                    "salience": 0.7,
-                    "confidence": 0.8,
-                    "source_span": [0, 1],
-                    "ttl_days": None,
-                },
-                {
-                    "id": "t-done",
-                    "timestamp": "2026-02-22T00:00:00+00:00",
-                    "channel": "cli",
-                    "chat_id": "direct",
-                    "type": "task",
-                    "summary": "Migration completed and closed.",
-                    "entities": ["migration"],
-                    "salience": 0.6,
-                    "confidence": 0.8,
-                    "source_span": [2, 3],
-                    "ttl_days": None,
-                },
+                MemoryEvent.from_dict(
+                    {
+                        "id": "t-open",
+                        "timestamp": "2026-02-21T00:00:00+00:00",
+                        "channel": "cli",
+                        "chat_id": "direct",
+                        "type": "task",
+                        "summary": "Review memory retrieval weights.",
+                        "entities": ["memory", "weights"],
+                        "salience": 0.7,
+                        "confidence": 0.8,
+                        "source_span": [0, 1],
+                        "ttl_days": None,
+                    }
+                ),
+                MemoryEvent.from_dict(
+                    {
+                        "id": "t-done",
+                        "timestamp": "2026-02-22T00:00:00+00:00",
+                        "channel": "cli",
+                        "chat_id": "direct",
+                        "type": "task",
+                        "summary": "Migration completed and closed.",
+                        "entities": ["migration"],
+                        "salience": 0.6,
+                        "confidence": 0.8,
+                        "source_span": [2, 3],
+                        "ttl_days": None,
+                    }
+                ),
             ]
         )
 
@@ -349,32 +360,36 @@ class TestHybridMemoryStore:
         store = MemoryStore(tmp_path, embedding_provider="hash")
         store.ingester.append_events(
             [
-                {
-                    "id": "ev-oauth",
-                    "timestamp": "2026-02-20T10:00:00+00:00",
-                    "channel": "cli",
-                    "chat_id": "direct",
-                    "type": "fact",
-                    "summary": "API uses OAuth2 authentication.",
-                    "entities": ["api", "oauth2", "auth"],
-                    "salience": 0.9,
-                    "confidence": 0.9,
-                    "source_span": [0, 1],
-                    "ttl_days": 365,
-                },
-                {
-                    "id": "ev-cache",
-                    "timestamp": "2026-02-20T10:01:00+00:00",
-                    "channel": "cli",
-                    "chat_id": "direct",
-                    "type": "fact",
-                    "summary": "Cache TTL is 60 seconds.",
-                    "entities": ["cache", "ttl"],
-                    "salience": 0.6,
-                    "confidence": 0.8,
-                    "source_span": [2, 3],
-                    "ttl_days": 30,
-                },
+                MemoryEvent.from_dict(
+                    {
+                        "id": "ev-oauth",
+                        "timestamp": "2026-02-20T10:00:00+00:00",
+                        "channel": "cli",
+                        "chat_id": "direct",
+                        "type": "fact",
+                        "summary": "API uses OAuth2 authentication.",
+                        "entities": ["api", "oauth2", "auth"],
+                        "salience": 0.9,
+                        "confidence": 0.9,
+                        "source_span": [0, 1],
+                        "ttl_days": 365,
+                    }
+                ),
+                MemoryEvent.from_dict(
+                    {
+                        "id": "ev-cache",
+                        "timestamp": "2026-02-20T10:01:00+00:00",
+                        "channel": "cli",
+                        "chat_id": "direct",
+                        "type": "fact",
+                        "summary": "Cache TTL is 60 seconds.",
+                        "entities": ["cache", "ttl"],
+                        "salience": 0.6,
+                        "confidence": 0.8,
+                        "source_span": [2, 3],
+                        "ttl_days": 30,
+                    }
+                ),
             ]
         )
 
@@ -598,7 +613,7 @@ class TestHybridMemoryStore:
             },
         ]
         for evt in events:
-            store.ingester.append_events([evt])
+            store.ingester.append_events([MemoryEvent.from_dict(evt)])
         # rebuild_event_embeddings was a no-op on the old _Mem0RuntimeInfo.
         # After extraction, MemoryRetriever doesn't own this method; skip it.
 
@@ -634,36 +649,40 @@ class TestHybridMemoryStore:
 
         written_1 = store.ingester.append_events(
             [
-                {
-                    "id": "dup-1",
-                    "timestamp": "2026-02-23T10:00:00+00:00",
-                    "channel": "cli",
-                    "chat_id": "direct",
-                    "type": "fact",
-                    "summary": "API uses OAuth2 authentication for requests.",
-                    "entities": ["api", "oauth2"],
-                    "salience": 0.75,
-                    "confidence": 0.8,
-                    "source_span": [0, 1],
-                    "ttl_days": 365,
-                }
+                MemoryEvent.from_dict(
+                    {
+                        "id": "dup-1",
+                        "timestamp": "2026-02-23T10:00:00+00:00",
+                        "channel": "cli",
+                        "chat_id": "direct",
+                        "type": "fact",
+                        "summary": "API uses OAuth2 authentication for requests.",
+                        "entities": ["api", "oauth2"],
+                        "salience": 0.75,
+                        "confidence": 0.8,
+                        "source_span": [0, 1],
+                        "ttl_days": 365,
+                    }
+                )
             ]
         )
         written_2 = store.ingester.append_events(
             [
-                {
-                    "id": "dup-2",
-                    "timestamp": "2026-02-23T11:00:00+00:00",
-                    "channel": "cli",
-                    "chat_id": "direct",
-                    "type": "fact",
-                    "summary": "The API authenticates using OAuth2 tokens.",
-                    "entities": ["tokens", "oauth2"],
-                    "salience": 0.7,
-                    "confidence": 0.78,
-                    "source_span": [2, 4],
-                    "ttl_days": 365,
-                }
+                MemoryEvent.from_dict(
+                    {
+                        "id": "dup-2",
+                        "timestamp": "2026-02-23T11:00:00+00:00",
+                        "channel": "cli",
+                        "chat_id": "direct",
+                        "type": "fact",
+                        "summary": "The API authenticates using OAuth2 tokens.",
+                        "entities": ["tokens", "oauth2"],
+                        "salience": 0.7,
+                        "confidence": 0.78,
+                        "source_span": [2, 4],
+                        "ttl_days": 365,
+                    }
+                )
             ]
         )
 
@@ -689,32 +708,36 @@ class TestHybridMemoryStore:
         store = MemoryStore(tmp_path, embedding_provider="hash")
         written = store.ingester.append_events(
             [
-                {
-                    "id": "nd-1",
-                    "timestamp": "2026-02-23T10:00:00+00:00",
-                    "channel": "cli",
-                    "chat_id": "direct",
-                    "type": "fact",
-                    "summary": "Primary database is PostgreSQL.",
-                    "entities": ["postgresql", "database"],
-                    "salience": 0.7,
-                    "confidence": 0.8,
-                    "source_span": [0, 1],
-                    "ttl_days": 365,
-                },
-                {
-                    "id": "nd-2",
-                    "timestamp": "2026-02-23T10:05:00+00:00",
-                    "channel": "cli",
-                    "chat_id": "direct",
-                    "type": "fact",
-                    "summary": "Deployment region is eu-west-1.",
-                    "entities": ["region", "eu-west-1"],
-                    "salience": 0.7,
-                    "confidence": 0.8,
-                    "source_span": [2, 3],
-                    "ttl_days": 365,
-                },
+                MemoryEvent.from_dict(
+                    {
+                        "id": "nd-1",
+                        "timestamp": "2026-02-23T10:00:00+00:00",
+                        "channel": "cli",
+                        "chat_id": "direct",
+                        "type": "fact",
+                        "summary": "Primary database is PostgreSQL.",
+                        "entities": ["postgresql", "database"],
+                        "salience": 0.7,
+                        "confidence": 0.8,
+                        "source_span": [0, 1],
+                        "ttl_days": 365,
+                    }
+                ),
+                MemoryEvent.from_dict(
+                    {
+                        "id": "nd-2",
+                        "timestamp": "2026-02-23T10:05:00+00:00",
+                        "channel": "cli",
+                        "chat_id": "direct",
+                        "type": "fact",
+                        "summary": "Deployment region is eu-west-1.",
+                        "entities": ["region", "eu-west-1"],
+                        "salience": 0.7,
+                        "confidence": 0.8,
+                        "source_span": [2, 3],
+                        "ttl_days": 365,
+                    }
+                ),
             ]
         )
 
@@ -730,19 +753,21 @@ class TestHybridMemoryStore:
         # vector store removed — local path is the default
         store.ingester.append_events(
             [
-                {
-                    "id": "sql-ev-1",
-                    "timestamp": "2026-02-23T00:00:00+00:00",
-                    "channel": "cli",
-                    "chat_id": "direct",
-                    "type": "fact",
-                    "summary": "Primary database is PostgreSQL.",
-                    "entities": ["database", "postgresql"],
-                    "salience": 0.8,
-                    "confidence": 0.8,
-                    "source_span": [0, 1],
-                    "ttl_days": 365,
-                }
+                MemoryEvent.from_dict(
+                    {
+                        "id": "sql-ev-1",
+                        "timestamp": "2026-02-23T00:00:00+00:00",
+                        "channel": "cli",
+                        "chat_id": "direct",
+                        "type": "fact",
+                        "summary": "Primary database is PostgreSQL.",
+                        "entities": ["database", "postgresql"],
+                        "salience": 0.8,
+                        "confidence": 0.8,
+                        "source_span": [0, 1],
+                        "ttl_days": 365,
+                    }
+                )
             ]
         )
 
@@ -759,32 +784,36 @@ class TestHybridMemoryStore:
         # vector store removed — local recency scoring is the only path
         store.ingester.append_events(
             [
-                {
-                    "id": "old-ev",
-                    "timestamp": "2024-01-01T00:00:00+00:00",
-                    "channel": "cli",
-                    "chat_id": "direct",
-                    "type": "fact",
-                    "summary": "The legacy payment service uses PostgreSQL for persistence.",
-                    "entities": ["payment", "postgresql", "persistence"],
-                    "salience": 0.7,
-                    "confidence": 0.8,
-                    "source_span": [2, 3],
-                    "ttl_days": 365,
-                },
-                {
-                    "id": "new-ev",
-                    "timestamp": "2026-03-01T00:00:00+00:00",
-                    "channel": "cli",
-                    "chat_id": "direct",
-                    "type": "fact",
-                    "summary": "The new analytics pipeline also uses PostgreSQL for data warehouse.",
-                    "entities": ["analytics", "postgresql", "warehouse"],
-                    "salience": 0.7,
-                    "confidence": 0.8,
-                    "source_span": [4, 5],
-                    "ttl_days": 365,
-                },
+                MemoryEvent.from_dict(
+                    {
+                        "id": "old-ev",
+                        "timestamp": "2024-01-01T00:00:00+00:00",
+                        "channel": "cli",
+                        "chat_id": "direct",
+                        "type": "fact",
+                        "summary": "The legacy payment service uses PostgreSQL for persistence.",
+                        "entities": ["payment", "postgresql", "persistence"],
+                        "salience": 0.7,
+                        "confidence": 0.8,
+                        "source_span": [2, 3],
+                        "ttl_days": 365,
+                    }
+                ),
+                MemoryEvent.from_dict(
+                    {
+                        "id": "new-ev",
+                        "timestamp": "2026-03-01T00:00:00+00:00",
+                        "channel": "cli",
+                        "chat_id": "direct",
+                        "type": "fact",
+                        "summary": "The new analytics pipeline also uses PostgreSQL for data warehouse.",
+                        "entities": ["analytics", "postgresql", "warehouse"],
+                        "salience": 0.7,
+                        "confidence": 0.8,
+                        "source_span": [4, 5],
+                        "ttl_days": 365,
+                    }
+                ),
             ]
         )
 
@@ -810,19 +839,21 @@ class TestHybridMemoryStore:
 
         store.ingester.append_events(
             [
-                {
-                    "id": "bound-ev-1",
-                    "timestamp": "2026-03-01T00:00:00+00:00",
-                    "channel": "cli",
-                    "chat_id": "direct",
-                    "type": "fact",
-                    "summary": "Test event for I/O bound verification.",
-                    "entities": ["test"],
-                    "salience": 0.8,
-                    "confidence": 0.9,
-                    "source_span": [0, 1],
-                    "ttl_days": 365,
-                }
+                MemoryEvent.from_dict(
+                    {
+                        "id": "bound-ev-1",
+                        "timestamp": "2026-03-01T00:00:00+00:00",
+                        "channel": "cli",
+                        "chat_id": "direct",
+                        "type": "fact",
+                        "summary": "Test event for I/O bound verification.",
+                        "entities": ["test"],
+                        "salience": 0.8,
+                        "confidence": 0.9,
+                        "source_span": [0, 1],
+                        "ttl_days": 365,
+                    }
+                )
             ]
         )
 

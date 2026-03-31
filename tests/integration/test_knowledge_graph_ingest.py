@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.config.memory import MemoryConfig
+from nanobot.memory.event import MemoryEvent
 from nanobot.memory.store import MemoryStore
 
 pytestmark = pytest.mark.integration
@@ -20,25 +21,31 @@ pytestmark = pytest.mark.integration
 # Helpers
 # ---------------------------------------------------------------------------
 
-_RELATIONSHIP_EVENTS: list[dict[str, str]] = [
-    {
-        "type": "fact",
-        "summary": "Alice works at Acme Corp as a senior engineer.",
-        "timestamp": "2026-03-01T12:00:00+00:00",
-        "source": "test",
-    },
-    {
-        "type": "fact",
-        "summary": "Bob is Alice's manager at Acme Corp.",
-        "timestamp": "2026-03-01T12:01:00+00:00",
-        "source": "test",
-    },
-    {
-        "type": "fact",
-        "summary": "Acme Corp is headquartered in San Francisco.",
-        "timestamp": "2026-03-01T12:02:00+00:00",
-        "source": "test",
-    },
+_RELATIONSHIP_EVENTS: list[MemoryEvent] = [
+    MemoryEvent.from_dict(
+        {
+            "type": "fact",
+            "summary": "Alice works at Acme Corp as a senior engineer.",
+            "timestamp": "2026-03-01T12:00:00+00:00",
+            "source": "test",
+        }
+    ),
+    MemoryEvent.from_dict(
+        {
+            "type": "fact",
+            "summary": "Bob is Alice's manager at Acme Corp.",
+            "timestamp": "2026-03-01T12:01:00+00:00",
+            "source": "test",
+        }
+    ),
+    MemoryEvent.from_dict(
+        {
+            "type": "fact",
+            "summary": "Acme Corp is headquartered in San Francisco.",
+            "timestamp": "2026-03-01T12:02:00+00:00",
+            "source": "test",
+        }
+    ),
 ]
 
 

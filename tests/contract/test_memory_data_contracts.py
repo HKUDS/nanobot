@@ -36,7 +36,7 @@ class TestWriteReadEventContract:
             confidence=0.9,
             entities=["Python"],
         )
-        store.ingester.append_events([event.to_dict()])
+        store.ingester.append_events([event])
 
         rows = store.ingester.read_events(limit=10)
         assert len(rows) >= 1
@@ -58,7 +58,7 @@ class TestWriteReadEventContract:
                 type=event_type,  # type: ignore[arg-type]
                 summary=f"Test event of type {event_type}",
             )
-            store.ingester.append_events([event.to_dict()])
+            store.ingester.append_events([event])
 
         rows = store.ingester.read_events(limit=100)
         for row in rows:

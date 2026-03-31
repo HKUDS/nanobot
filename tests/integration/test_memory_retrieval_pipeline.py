@@ -8,10 +8,10 @@ RRF fusion, deduplication, and token-budget enforcement.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 
+from nanobot.memory.event import MemoryEvent
 from nanobot.memory.store import MemoryStore
 
 pytestmark = pytest.mark.integration
@@ -20,137 +20,177 @@ pytestmark = pytest.mark.integration
 # Diverse event corpus (20 events, all six types)
 # ---------------------------------------------------------------------------
 
-EVENTS: list[dict[str, Any]] = [
+EVENTS: list[MemoryEvent] = [
     # -- preferences --
-    {
-        "type": "preference",
-        "summary": "User prefers dark mode in all editors and terminals.",
-        "timestamp": "2026-03-01T08:00:00+00:00",
-        "source": "test",
-    },
-    {
-        "type": "preference",
-        "summary": "User prefers tabs over spaces for indentation.",
-        "timestamp": "2026-03-01T08:01:00+00:00",
-        "source": "test",
-    },
-    {
-        "type": "preference",
-        "summary": "User likes mechanical keyboards with Cherry MX switches.",
-        "timestamp": "2026-03-01T08:02:00+00:00",
-        "source": "test",
-    },
+    MemoryEvent.from_dict(
+        {
+            "type": "preference",
+            "summary": "User prefers dark mode in all editors and terminals.",
+            "timestamp": "2026-03-01T08:00:00+00:00",
+            "source": "test",
+        }
+    ),
+    MemoryEvent.from_dict(
+        {
+            "type": "preference",
+            "summary": "User prefers tabs over spaces for indentation.",
+            "timestamp": "2026-03-01T08:01:00+00:00",
+            "source": "test",
+        }
+    ),
+    MemoryEvent.from_dict(
+        {
+            "type": "preference",
+            "summary": "User likes mechanical keyboards with Cherry MX switches.",
+            "timestamp": "2026-03-01T08:02:00+00:00",
+            "source": "test",
+        }
+    ),
     # -- facts --
-    {
-        "type": "fact",
-        "summary": "User's primary programming language is Python.",
-        "timestamp": "2026-03-01T09:00:00+00:00",
-        "source": "test",
-    },
-    {
-        "type": "fact",
-        "summary": "User also writes TypeScript for frontend projects.",
-        "timestamp": "2026-03-01T09:01:00+00:00",
-        "source": "test",
-    },
-    {
-        "type": "fact",
-        "summary": "User's operating system is Ubuntu 22.04 LTS.",
-        "timestamp": "2026-03-01T09:02:00+00:00",
-        "source": "test",
-    },
-    {
-        "type": "fact",
-        "summary": "User works at a fintech startup in Berlin.",
-        "timestamp": "2026-03-01T09:03:00+00:00",
-        "source": "test",
-    },
+    MemoryEvent.from_dict(
+        {
+            "type": "fact",
+            "summary": "User's primary programming language is Python.",
+            "timestamp": "2026-03-01T09:00:00+00:00",
+            "source": "test",
+        }
+    ),
+    MemoryEvent.from_dict(
+        {
+            "type": "fact",
+            "summary": "User also writes TypeScript for frontend projects.",
+            "timestamp": "2026-03-01T09:01:00+00:00",
+            "source": "test",
+        }
+    ),
+    MemoryEvent.from_dict(
+        {
+            "type": "fact",
+            "summary": "User's operating system is Ubuntu 22.04 LTS.",
+            "timestamp": "2026-03-01T09:02:00+00:00",
+            "source": "test",
+        }
+    ),
+    MemoryEvent.from_dict(
+        {
+            "type": "fact",
+            "summary": "User works at a fintech startup in Berlin.",
+            "timestamp": "2026-03-01T09:03:00+00:00",
+            "source": "test",
+        }
+    ),
     # -- tasks --
-    {
-        "type": "task",
-        "summary": "Migrate the database from MySQL to PostgreSQL by end of quarter.",
-        "timestamp": "2026-03-01T10:00:00+00:00",
-        "source": "test",
-        "metadata": {"status": "active"},
-    },
-    {
-        "type": "task",
-        "summary": "Write unit tests for the payment processing module.",
-        "timestamp": "2026-03-01T10:01:00+00:00",
-        "source": "test",
-        "metadata": {"status": "active"},
-    },
-    {
-        "type": "task",
-        "summary": "Set up CI/CD pipeline with GitHub Actions.",
-        "timestamp": "2026-03-01T10:02:00+00:00",
-        "source": "test",
-        "metadata": {"status": "active"},
-    },
-    {
-        "type": "task",
-        "summary": "Refactor authentication service to use OAuth 2.0.",
-        "timestamp": "2026-03-01T10:03:00+00:00",
-        "source": "test",
-        "metadata": {"status": "active"},
-    },
+    MemoryEvent.from_dict(
+        {
+            "type": "task",
+            "summary": "Migrate the database from MySQL to PostgreSQL by end of quarter.",
+            "timestamp": "2026-03-01T10:00:00+00:00",
+            "source": "test",
+            "metadata": {"status": "active"},
+        }
+    ),
+    MemoryEvent.from_dict(
+        {
+            "type": "task",
+            "summary": "Write unit tests for the payment processing module.",
+            "timestamp": "2026-03-01T10:01:00+00:00",
+            "source": "test",
+            "metadata": {"status": "active"},
+        }
+    ),
+    MemoryEvent.from_dict(
+        {
+            "type": "task",
+            "summary": "Set up CI/CD pipeline with GitHub Actions.",
+            "timestamp": "2026-03-01T10:02:00+00:00",
+            "source": "test",
+            "metadata": {"status": "active"},
+        }
+    ),
+    MemoryEvent.from_dict(
+        {
+            "type": "task",
+            "summary": "Refactor authentication service to use OAuth 2.0.",
+            "timestamp": "2026-03-01T10:03:00+00:00",
+            "source": "test",
+            "metadata": {"status": "active"},
+        }
+    ),
     # -- decisions --
-    {
-        "type": "decision",
-        "summary": "Chose FastAPI over Flask for the new REST API project.",
-        "timestamp": "2026-03-01T11:00:00+00:00",
-        "source": "test",
-    },
-    {
-        "type": "decision",
-        "summary": "Decided to use Docker Compose for local development environment.",
-        "timestamp": "2026-03-01T11:01:00+00:00",
-        "source": "test",
-    },
-    {
-        "type": "decision",
-        "summary": "Selected Redis as the caching layer instead of Memcached.",
-        "timestamp": "2026-03-01T11:02:00+00:00",
-        "source": "test",
-    },
+    MemoryEvent.from_dict(
+        {
+            "type": "decision",
+            "summary": "Chose FastAPI over Flask for the new REST API project.",
+            "timestamp": "2026-03-01T11:00:00+00:00",
+            "source": "test",
+        }
+    ),
+    MemoryEvent.from_dict(
+        {
+            "type": "decision",
+            "summary": "Decided to use Docker Compose for local development environment.",
+            "timestamp": "2026-03-01T11:01:00+00:00",
+            "source": "test",
+        }
+    ),
+    MemoryEvent.from_dict(
+        {
+            "type": "decision",
+            "summary": "Selected Redis as the caching layer instead of Memcached.",
+            "timestamp": "2026-03-01T11:02:00+00:00",
+            "source": "test",
+        }
+    ),
     # -- constraints --
-    {
-        "type": "constraint",
-        "summary": "Budget limit is $5000 per month for cloud infrastructure.",
-        "timestamp": "2026-03-01T12:00:00+00:00",
-        "source": "test",
-    },
-    {
-        "type": "constraint",
-        "summary": "All API responses must complete within 200ms p99 latency.",
-        "timestamp": "2026-03-01T12:01:00+00:00",
-        "source": "test",
-    },
-    {
-        "type": "constraint",
-        "summary": "GDPR compliance required for all user data handling.",
-        "timestamp": "2026-03-01T12:02:00+00:00",
-        "source": "test",
-    },
+    MemoryEvent.from_dict(
+        {
+            "type": "constraint",
+            "summary": "Budget limit is $5000 per month for cloud infrastructure.",
+            "timestamp": "2026-03-01T12:00:00+00:00",
+            "source": "test",
+        }
+    ),
+    MemoryEvent.from_dict(
+        {
+            "type": "constraint",
+            "summary": "All API responses must complete within 200ms p99 latency.",
+            "timestamp": "2026-03-01T12:01:00+00:00",
+            "source": "test",
+        }
+    ),
+    MemoryEvent.from_dict(
+        {
+            "type": "constraint",
+            "summary": "GDPR compliance required for all user data handling.",
+            "timestamp": "2026-03-01T12:02:00+00:00",
+            "source": "test",
+        }
+    ),
     # -- relationships --
-    {
-        "type": "relationship",
-        "summary": "User collaborates with Alice on the backend team.",
-        "timestamp": "2026-03-01T13:00:00+00:00",
-        "source": "test",
-    },
-    {
-        "type": "relationship",
-        "summary": "User reports to Bob who is the engineering manager.",
-        "timestamp": "2026-03-01T13:01:00+00:00",
-        "source": "test",
-    },
-    {
-        "type": "relationship",
-        "summary": "User mentors Carol, a junior developer on the team.",
-        "timestamp": "2026-03-01T13:02:00+00:00",
-        "source": "test",
-    },
+    MemoryEvent.from_dict(
+        {
+            "type": "relationship",
+            "summary": "User collaborates with Alice on the backend team.",
+            "timestamp": "2026-03-01T13:00:00+00:00",
+            "source": "test",
+        }
+    ),
+    MemoryEvent.from_dict(
+        {
+            "type": "relationship",
+            "summary": "User reports to Bob who is the engineering manager.",
+            "timestamp": "2026-03-01T13:01:00+00:00",
+            "source": "test",
+        }
+    ),
+    MemoryEvent.from_dict(
+        {
+            "type": "relationship",
+            "summary": "User mentors Carol, a junior developer on the team.",
+            "timestamp": "2026-03-01T13:02:00+00:00",
+            "source": "test",
+        }
+    ),
 ]
 
 
@@ -250,12 +290,14 @@ class TestDeduplication:
 
     async def test_duplicate_events_not_doubled(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
-        duplicate_event = {
-            "type": "fact",
-            "summary": "User's primary programming language is Python.",
-            "timestamp": "2026-03-01T09:00:00+00:00",
-            "source": "test",
-        }
+        duplicate_event = MemoryEvent.from_dict(
+            {
+                "type": "fact",
+                "summary": "User's primary programming language is Python.",
+                "timestamp": "2026-03-01T09:00:00+00:00",
+                "source": "test",
+            }
+        )
         # Ingest the same event twice
         store.ingester.append_events([duplicate_event])
         store.ingester.append_events([duplicate_event])

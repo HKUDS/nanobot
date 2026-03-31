@@ -22,6 +22,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.agent import AgentConfig
 from nanobot.config.memory import MemoryConfig
+from nanobot.memory.event import MemoryEvent
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from tests.helpers import ScriptedProvider
 
@@ -238,13 +239,15 @@ class TestWorkflowMemoryRoundtrip:
 
         # Store an event
         events = [
-            {
-                "id": "evt-workflow-1",
-                "type": "preference",
-                "summary": "User prefers vim keybindings.",
-                "timestamp": "2026-03-01T12:00:00+00:00",
-                "source": "test",
-            }
+            MemoryEvent.from_dict(
+                {
+                    "id": "evt-workflow-1",
+                    "type": "preference",
+                    "summary": "User prefers vim keybindings.",
+                    "timestamp": "2026-03-01T12:00:00+00:00",
+                    "source": "test",
+                }
+            )
         ]
         store.ingester.append_events(events)
 

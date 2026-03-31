@@ -56,7 +56,7 @@ class _FakeIngester:
     def read_events(self, **kw: object) -> list[dict[str, object]]:
         return [{"id": "e1"}, {"id": "e2"}]
 
-    def append_events(self, events: list[dict[str, object]]) -> int:
+    def append_events(self, events: object) -> int:
         return len(events)
 
 
