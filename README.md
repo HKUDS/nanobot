@@ -21,13 +21,23 @@
 ## 📢 News
 
 > [!IMPORTANT]
-> **Security note:** Due to `litellm` supply chain poisoning, **please check your Python environment ASAP** and refer to this [advisory](https://github.com/HKUDS/nanobot/discussions/2445) for details. We have fully removed the `litellm` dependency in [this commit](https://github.com/HKUDS/nanobot/commit/3dfdab7).
+> **Security note:** Due to `litellm` supply chain poisoning, **please check your Python environment ASAP** and refer to this [advisory](https://github.com/HKUDS/nanobot/discussions/2445) for details. We have fully removed the `litellm` since **v0.1.4.post6**.
 
+- **2026-03-27** 🚀 Released **v0.1.4.post6** — architecture decoupling, litellm removal, end-to-end streaming, WeChat channel, and a security fix. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post6) for details.
+- **2026-03-26** 🏗️ Agent runner extracted and lifecycle hooks unified; stream delta coalescing at boundaries.
+- **2026-03-25** 🌏 StepFun provider, configurable timezone, Gemini thought signatures.
+- **2026-03-24** 🔧 WeChat compatibility, Feishu CardKit streaming, test suite restructured.
+- **2026-03-23** 🔧 Command routing refactored for plugins, WhatsApp/WeChat media, unified channel login CLI.
+- **2026-03-22** ⚡ End-to-end streaming, WeChat channel, Anthropic cache optimization, `/status` command.
 - **2026-03-21** 🔒 Replace `litellm` with native `openai` + `anthropic` SDKs. Please see [commit](https://github.com/HKUDS/nanobot/commit/3dfdab7).
 - **2026-03-20** 🧙 Interactive setup wizard — pick your provider, model autocomplete, and you're good to go.
 - **2026-03-19** 💬 Telegram gets more resilient under load; Feishu now renders code blocks properly.
 - **2026-03-18** 📷 Telegram can now send media via URL. Cron schedules show human-readable details.
 - **2026-03-17** ✨ Feishu formatting glow-up, Slack reacts when done, custom endpoints support extra headers, and image handling is more reliable.
+
+<details>
+<summary>Earlier news</summary>
+
 - **2026-03-16** 🚀 Released **v0.1.4.post5** — a refinement-focused release with stronger reliability and channel support, and a more dependable day-to-day experience. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post5) for details.
 - **2026-03-15** 🧩 DingTalk rich media, smarter built-in skills, and cleaner model compatibility.
 - **2026-03-14** 💬 Channel plugins, Feishu replies, and steadier MCP, QQ, and media handling.
@@ -39,10 +49,6 @@
 - **2026-03-08** 🚀 Released **v0.1.4.post4** — a reliability-packed release with safer defaults, better multi-instance support, sturdier MCP, and major channel and provider improvements. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post4) for details.
 - **2026-03-07** 🚀 Azure OpenAI provider, WhatsApp media, QQ group chats, and more Telegram/Feishu polish.
 - **2026-03-06** 🪄 Lighter providers, smarter media handling, and sturdier memory and CLI compatibility.
-
-<details>
-<summary>Earlier news</summary>
-
 - **2026-03-05** ⚡️ Telegram draft streaming, MCP SSE support, and broader channel reliability fixes.
 - **2026-03-04** 🛠️ Dependency cleanup, safer file reads, and another round of test and Cron fixes.
 - **2026-03-03** 🧠 Cleaner user-message merging, safer multimodal saves, and stronger Cron guards.
@@ -98,38 +104,23 @@
 
 ## Table of Contents
 
-- [📢 News](#-news)
-- [Key Features of nanobot:](#key-features-of-nanobot)
-- [🏗️ Architecture](#️-architecture)
-- [Table of Contents](#table-of-contents)
-- [✨ Features](#-features)
-- [📦 Install](#-install)
-  - [Update to latest version](#update-to-latest-version)
-- [🚀 Quick Start](#-quick-start)
-- [💬 Chat Apps](#-chat-apps)
-- [🌐 Agent Social Network](#-agent-social-network)
-- [⚙️ Configuration](#️-configuration)
-  - [Providers](#providers)
-  - [Web Search](#web-search)
-  - [MCP (Model Context Protocol)](#mcp-model-context-protocol)
-  - [Security](#security)
-- [🧩 Multiple Instances](#-multiple-instances)
-  - [Quick Start](#quick-start)
-  - [Path Resolution](#path-resolution)
-  - [How It Works](#how-it-works)
-  - [Minimal Setup](#minimal-setup)
-  - [Common Use Cases](#common-use-cases)
-  - [Notes](#notes)
-- [💻 CLI Reference](#-cli-reference)
-- [🐳 Docker](#-docker)
-  - [Docker Compose](#docker-compose)
-  - [Docker](#docker)
-- [🐧 Linux Service](#-linux-service)
-- [📁 Project Structure](#-project-structure)
-- [🤝 Contribute \& Roadmap](#-contribute--roadmap)
-  - [Branching Strategy](#branching-strategy)
-  - [Contributors](#contributors)
-- [⭐ Star History](#-star-history)
+- [News](#-news)
+- [Key Features](#key-features-of-nanobot)
+- [Architecture](#️-architecture)
+- [Features](#-features)
+- [Install](#-install)
+- [Quick Start](#-quick-start)
+- [Chat Apps](#-chat-apps)
+- [Agent Social Network](#-agent-social-network)
+- [Configuration](#️-configuration)
+- [Multiple Instances](#-multiple-instances)
+- [CLI Reference](#-cli-reference)
+- [OpenAI-Compatible API](#-openai-compatible-api)
+- [Docker](#-docker)
+- [Linux Service](#-linux-service)
+- [Project Structure](#-project-structure)
+- [Contribute & Roadmap](#-contribute--roadmap)
+- [Star History](#-star-history)
 
 ## ✨ Features
 
@@ -269,7 +260,7 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
 | **Email** | IMAP/SMTP credentials |
 | **QQ** | App ID + App Secret |
 | **Wecom** | Bot ID + Bot Secret |
-| **Wecom App** | Corp ID + Agent ID + Secret + Token + AES Key |
+| **iMessage** | macOS (local) or Photon server credentials (remote) |
 | **Mochat** | Claw token (auto-setup available) |
 
 <details>
@@ -756,14 +747,10 @@ nanobot gateway
 
 Uses **HTTP long-poll** with QR-code login via the ilinkai personal WeChat API. No local WeChat desktop client is required.
 
-> Weixin support is available from source checkout, but is not included in the current PyPI release yet.
-
-**1. Install from source**
+**1. Install with WeChat support**
 
 ```bash
-git clone https://github.com/HKUDS/nanobot.git
-cd nanobot
-pip install -e ".[weixin]"
+pip install "nanobot-ai[weixin]"
 ```
 
 **2. Configure**
@@ -846,73 +833,78 @@ nanobot gateway
 </details>
 
 <details>
-<summary><b>Wecom App (企业微信应用)</b></summary>
+<summary><b>iMessage</b></summary>
 
-> Uses **webhook callback** mode — requires a publicly accessible server or port forwarding.
->
-> Different from WeCom (WebSocket mode). Choose based on your network environment.
+Supports two modes via [Photon](https://photon.codes):
 
-**1. Install the optional dependency**
+- **Local mode**: macOS only. Reads the on-device iMessage database and sends via AppleScript. No external server needed.
+- **Remote mode**: Get your endpoint and API key from [Photon](https://photon.codes) and connect from any platform. Supports tapback reactions, typing indicators, mark-as-read, attachments, and inline replies.
 
-```bash
-pip install wecom-app-svr
-```
+**Local mode (macOS)**
 
-**2. Create a WeCom AI Bot**
-
-Go to the WeCom admin console → My Apps → Create App → Enable **API** mode. Copy the following credentials:
-- **Corp ID** (from the admin console)
-- **Agent ID** (from the app)
-- **Secret** (from the app)
-- **Token** (you set this when configuring the webhook)
-- **AES Key** (you set this when configuring the webhook)
-
-**3. Configure the callback URL**
-
-In the WeCom app configuration:
-- Set callback URL to: `http://<your-server>:<port>/wecom_app`
-- Set the Token and AES Key to match your config
-
-**4. Configure**
+1. Grant **Full Disk Access** to your terminal in **System Settings → Privacy & Security → Full Disk Access**
+2. Ensure iMessage is signed in and working on the Mac
 
 ```json
 {
   "channels": {
-    "wecom_app": {
+    "imessage": {
       "enabled": true,
-      "token": "your_token",
-      "corpId": "your_corp_id",
-      "secret": "your_secret",
-      "agentid": "your_agent_id",
-      "aesKey": "your_aes_key",
-      "host": "0.0.0.0",
-      "port": 18791,
-      "path": "/wecom_app",
-      "allowFrom": ["your_user_id"]
+      "local": true,
+      "allowFrom": ["+1234567890"]
     }
   }
 }
 ```
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `host` | `0.0.0.0` | Server bind address |
-| `port` | `18791` | Server listen port (must match WeCom callback URL) |
-| `path` | `/wecom_app` | Callback path |
-| `token` | - | Verification token from WeCom admin |
-| `aesKey` | - | AES key from WeCom admin |
-| `corpId` | - | Your WeCom Corp ID |
-| `agentid` | - | Your WeCom App Agent ID |
-| `secret` | - | Your WeCom App Secret |
-| `welcome_message` | - | Message sent when user enters the chat |
+```bash
+nanobot gateway
+```
 
-**5. Run**
+> Local mode supports sending/receiving text, images, and files. For reactions, typing indicators, and inline replies, use remote mode.
+
+**Remote mode**
+
+1. Get your **endpoint URL** and **API key** from [Photon](https://photon.codes)
+2. Configure:
+
+```json
+{
+  "channels": {
+    "imessage": {
+      "enabled": true,
+      "local": false,
+      "serverUrl": "https://xxxxx.imsgd.photon.codes",
+      "apiKey": "your-api-key",
+      "allowFrom": ["+1234567890"]
+    }
+  }
+}
+```
 
 ```bash
 nanobot gateway
 ```
 
-> **Note**: Wecom App requires the callback URL to be accessible from WeCom servers. If you're running locally, use port forwarding (e.g., ngrok, cloudflare tunnel) or deploy on a public server.
+> `allowFrom`: Add phone numbers or email addresses. Use `["*"]` to allow all senders.
+> `groupPolicy`: `"open"` (default — respond to all messages) or `"ignore"` (skip group chats entirely).
+> `proxy`: Optional HTTP proxy URL (e.g. `"http://127.0.0.1:7890"`).
+> `pollInterval`: Polling interval in seconds (default `2.0`).
+
+> **Note:** Remote mode routes messages through Photon's [advanced-imessage-http-proxy](https://github.com/photon-hq/advanced-imessage-http-proxy). Your messages and attachments transit Photon's infrastructure — the same provider that hosts your iMessage Kit server. If you need full on-device privacy, use local mode instead.
+
+**Feature comparison:**
+
+| Feature | Local | Remote |
+|---------|-------|--------|
+| Send/receive messages | ✅ | ✅ |
+| Images & files | ✅ | ✅ |
+| Message history | ✅ | ✅ |
+| Reactions (tapbacks) | ❌ | ✅ |
+| Typing indicators | ❌ | ✅ |
+| Mark as read | ❌ | ✅ |
+| Inline replies | ❌ | ✅ (`replyToMessage: true`) |
+| Runs on any platform | ❌ | ✅ |
 
 </details>
 
@@ -940,6 +932,7 @@ Config file: `~/.nanobot/config.json`
 > - **VolcEngine / BytePlus Coding Plan**: Use dedicated providers `volcengineCodingPlan` or `byteplusCodingPlan` instead of the pay-per-use `volcengine` / `byteplus` providers.
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **Alibaba Cloud BaiLian**: If you're using Alibaba Cloud BaiLian's OpenAI-compatible endpoint, set `"apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1"` in your dashscope provider config.
+> - **Step Fun (Mainland China)**: If your API key is from Step Fun's mainland China platform (stepfun.com), set `"apiBase": "https://api.stepfun.com/v1"` in your stepfun provider config.
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
@@ -961,6 +954,7 @@ Config file: `~/.nanobot/config.json`
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | `ollama` | LLM (local, Ollama) | — |
 | `mistral` | LLM | [docs.mistral.ai](https://docs.mistral.ai/) |
+| `stepfun` | LLM (Step Fun/阶跃星辰) | [platform.stepfun.com](https://platform.stepfun.com) |
 | `ovms` | LLM (local, OpenVINO Model Server) | [docs.openvino.ai](https://docs.openvino.ai/2026/model-server/ovms_docs_llm_quickstart.html) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
@@ -1248,6 +1242,7 @@ That's it! Environment variables, model routing, config matching, and `nanobot s
 | `detect_by_key_prefix` | Detect gateway by API key prefix | `"sk-or-"` |
 | `detect_by_base_keyword` | Detect gateway by API base URL | `"openrouter"` |
 | `strip_model_prefix` | Strip provider prefix before sending to gateway | `True` (for AiHubMix) |
+| `supports_max_completion_tokens` | Use `max_completion_tokens` instead of `max_tokens`; required for providers that reject both being set simultaneously (e.g. VolcEngine) | `True` |
 
 </details>
 
@@ -1472,6 +1467,28 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
 
 
+### Timezone
+
+Time is context. Context should be precise.
+
+By default, nanobot uses `UTC` for runtime time context. If you want the agent to think in your local time, set `agents.defaults.timezone` to a valid [IANA timezone name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones):
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "timezone": "Asia/Shanghai"
+    }
+  }
+}
+```
+
+This affects runtime time strings shown to the model, such as runtime context and heartbeat prompts. It also becomes the default timezone for cron schedules when a cron expression omits `tz`, and for one-shot `at` times when the ISO datetime has no explicit offset.
+
+Common examples: `UTC`, `America/New_York`, `America/Los_Angeles`, `Europe/London`, `Europe/Berlin`, `Asia/Tokyo`, `Asia/Shanghai`, `Asia/Singapore`, `Australia/Sydney`.
+
+> Need another timezone? Browse the full [IANA Time Zone Database](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
+
 ## 🧩 Multiple Instances
 
 Run multiple nanobot instances simultaneously with separate configs and runtime data. Use `--config` as the main entrypoint. Optionally pass `--workspace` during `onboard` when you want to initialize or update the saved workspace for a specific instance.
@@ -1603,6 +1620,7 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 | `nanobot agent` | Interactive chat mode |
 | `nanobot agent --no-markdown` | Show plain-text replies |
 | `nanobot agent --logs` | Show runtime logs during chat |
+| `nanobot serve` | Start the OpenAI-compatible API |
 | `nanobot gateway` | Start the gateway |
 | `nanobot status` | Show status |
 | `nanobot provider login openai-codex` | OAuth login for providers |
@@ -1630,6 +1648,80 @@ The agent can also manage this file itself — ask it to "add a periodic task" a
 > **Note:** The gateway must be running (`nanobot gateway`) and you must have chatted with the bot at least once so it knows which channel to deliver to.
 
 </details>
+
+## 🔌 OpenAI-Compatible API
+
+nanobot can expose a minimal OpenAI-compatible endpoint for local integrations:
+
+```bash
+pip install "nanobot-ai[api]"
+nanobot serve
+```
+
+By default, the API binds to `127.0.0.1:8900`.
+
+### Behavior
+
+- Fixed session: all requests share the same nanobot session (`api:default`)
+- Single-message input: each request must contain exactly one `user` message
+- Fixed model: omit `model`, or pass the same model shown by `/v1/models`
+- No streaming: `stream=true` is not supported
+
+### Endpoints
+
+- `GET /health`
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+
+### curl
+
+```bash
+curl http://127.0.0.1:8900/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {
+        "role": "user",
+        "content": "hi"
+      }
+    ]
+  }'
+```
+
+### Python (`requests`)
+
+```python
+import requests
+
+resp = requests.post(
+    "http://127.0.0.1:8900/v1/chat/completions",
+    json={
+        "messages": [
+            {"role": "user", "content": "hi"}
+        ]
+    },
+    timeout=120,
+)
+resp.raise_for_status()
+print(resp.json()["choices"][0]["message"]["content"])
+```
+
+### Python (`openai`)
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://127.0.0.1:8900/v1",
+    api_key="dummy",
+)
+
+resp = client.chat.completions.create(
+    model="MiniMax-M2.7",
+    messages=[{"role": "user", "content": "hi"}],
+)
+print(resp.choices[0].message.content)
+```
 
 ## 🐳 Docker
 

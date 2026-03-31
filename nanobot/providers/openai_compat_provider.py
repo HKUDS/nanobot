@@ -26,6 +26,11 @@ _ALNUM = string.ascii_letters + string.digits
 
 _STANDARD_TC_KEYS = frozenset({"id", "type", "index", "function"})
 _STANDARD_FN_KEYS = frozenset({"name", "arguments"})
+_DEFAULT_OPENROUTER_HEADERS = {
+    "HTTP-Referer": "https://github.com/HKUDS/nanobot",
+    "X-OpenRouter-Title": "nanobot",
+    "X-OpenRouter-Categories": "cli-agent,personal-agent",
+}
 
 
 def _short_tool_id() -> str:
@@ -89,6 +94,13 @@ def _extract_tc_extras(tc: Any) -> tuple[
     return extra_content, prov, fn_prov
 
 
+def _uses_openrouter_attribution(spec: "ProviderSpec | None", api_base: str | None) -> bool:
+    """Apply Nanobot attribution headers to OpenRouter requests by default."""
+    if spec and spec.name == "openrouter":
+        return True
+    return bool(api_base and "openrouter" in api_base.lower())
+
+
 class OpenAICompatProvider(LLMProvider):
     """Unified provider for all OpenAI-compatible APIs.
 
@@ -113,14 +125,16 @@ class OpenAICompatProvider(LLMProvider):
             self._setup_env(api_key, api_base)
 
         effective_base = api_base or (spec.default_api_base if spec else None) or None
+        default_headers = {"x-session-affinity": uuid.uuid4().hex}
+        if _uses_openrouter_attribution(spec, effective_base):
+            default_headers.update(_DEFAULT_OPENROUTER_HEADERS)
+        if extra_headers:
+            default_headers.update(extra_headers)
 
         self._client = AsyncOpenAI(
             api_key=api_key or "no-key",
             base_url=effective_base,
-            default_headers={
-                "x-session-affinity": uuid.uuid4().hex,
-                **(extra_headers or {}),
-            },
+            default_headers=default_headers,
         )
 
     def _setup_env(self, api_key: str, api_base: str | None) -> None:
@@ -229,10 +243,13 @@ class OpenAICompatProvider(LLMProvider):
         kwargs: dict[str, Any] = {
             "model": model_name,
             "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
-            "max_tokens": max(1, max_tokens),
-            "max_completion_tokens": max(1, max_tokens),
             "temperature": temperature,
         }
+
+        if spec and getattr(spec, "supports_max_completion_tokens", False):
+            kwargs["max_completion_tokens"] = max(1, max_tokens)
+        else:
+            kwargs["max_tokens"] = max(1, max_tokens)
 
         if spec:
             model_lower = model_name.lower()
@@ -291,6 +308,13 @@ class OpenAICompatProvider(LLMProvider):
 
     @classmethod
     def _extract_usage(cls, response: Any) -> dict[str, int]:
+        """Extract token usage from an OpenAI-compatible response.
+
+        Handles both dict-based (raw JSON) and object-based (SDK Pydantic)
+        responses.  Provider-specific ``cached_tokens`` fields are normalised
+        under a single key; see the priority chain inside for details.
+        """
+        # --- resolve usage object ---
         usage_obj = None
         response_map = cls._maybe_mapping(response)
         if response_map is not None:
@@ -300,19 +324,53 @@ class OpenAICompatProvider(LLMProvider):
 
         usage_map = cls._maybe_mapping(usage_obj)
         if usage_map is not None:
-            return {
+            result = {
                 "prompt_tokens": int(usage_map.get("prompt_tokens") or 0),
                 "completion_tokens": int(usage_map.get("completion_tokens") or 0),
                 "total_tokens": int(usage_map.get("total_tokens") or 0),
             }
-
-        if usage_obj:
-            return {
+        elif usage_obj:
+            result = {
                 "prompt_tokens": getattr(usage_obj, "prompt_tokens", 0) or 0,
                 "completion_tokens": getattr(usage_obj, "completion_tokens", 0) or 0,
                 "total_tokens": getattr(usage_obj, "total_tokens", 0) or 0,
             }
-        return {}
+        else:
+            return {}
+
+        # --- cached_tokens (normalised across providers) ---
+        # Try nested paths first (dict), fall back to attribute (SDK object).
+        # Priority order ensures the most specific field wins.
+        for path in (
+            ("prompt_tokens_details", "cached_tokens"),  # OpenAI/Zhipu/MiniMax/Qwen/Mistral/xAI
+            ("cached_tokens",),                          # StepFun/Moonshot (top-level)
+            ("prompt_cache_hit_tokens",),                # DeepSeek/SiliconFlow
+        ):
+            cached = cls._get_nested_int(usage_map, path)
+            if not cached and usage_obj:
+                cached = cls._get_nested_int(usage_obj, path)
+            if cached:
+                result["cached_tokens"] = cached
+                break
+
+        return result
+
+    @staticmethod
+    def _get_nested_int(obj: Any, path: tuple[str, ...]) -> int:
+        """Drill into *obj* by *path* segments and return an ``int`` value.
+
+        Supports both dict-key access and attribute access so it works
+        uniformly with raw JSON dicts **and** SDK Pydantic models.
+        """
+        current = obj
+        for segment in path:
+            if current is None:
+                return 0
+            if isinstance(current, dict):
+                current = current.get(segment)
+            else:
+                current = getattr(current, segment, None)
+        return int(current or 0) if current is not None else 0
 
     def _parse(self, response: Any) -> LLMResponse:
         if isinstance(response, str):

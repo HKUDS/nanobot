@@ -379,6 +379,10 @@ class AnthropicProvider(LLMProvider):
                 val = getattr(response.usage, attr, 0)
                 if val:
                     usage[attr] = val
+            # Normalize to cached_tokens for downstream consistency.
+            cache_read = usage.get("cache_read_input_tokens", 0)
+            if cache_read:
+                usage["cached_tokens"] = cache_read
 
         return LLMResponse(
             content="".join(content_parts) or None,
