@@ -70,6 +70,7 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
         context_pruning_config=None,  # ContextPruningConfig | None
+        provider_name: str | None = None,
     ):
         from nanobot.config.schema import ContextPruningConfig, ExecToolConfig, WebSearchConfig
 
@@ -78,6 +79,7 @@ class AgentLoop:
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
+        self.provider_name = provider_name or provider.__class__.__name__
         self.max_iterations = max_iterations
         self.context_window_tokens = context_window_tokens
         self.web_search_config = web_search_config or WebSearchConfig()
@@ -423,6 +425,14 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
+            session.metadata["runtime"] = {
+                "model": self.model,
+                "provider": self.provider_name,
+                "context_window": self.context_window_tokens,
+                "channel": channel,
+                "chat_id": chat_id,
+                "channel_name": msg.metadata.get("channel_name"),
+            }
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
@@ -448,6 +458,16 @@ class AgentLoop:
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
+
+        # Keep runtime context fresh on every turn
+        session.metadata["runtime"] = {
+            "model": self.model,
+            "provider": self.provider_name,
+            "context_window": self.context_window_tokens,
+            "channel": msg.channel,
+            "chat_id": msg.chat_id,
+            "channel_name": msg.metadata.get("channel_name"),
+        }
 
         # Slash commands
         raw = msg.content.strip()
@@ -567,6 +587,8 @@ class AgentLoop:
             role, content = entry.get("role"), entry.get("content")
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
+            if role == "assistant":
+                entry.setdefault("model", self.model)
             if role == "tool":
                 if isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
                     entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
