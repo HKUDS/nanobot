@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, AsyncGenerator
 
 import httpx
+from loguru import logger
 
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
@@ -39,6 +40,7 @@ async def iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], N
                 try:
                     yield json.loads(data)
                 except Exception:
+                    logger.warning("Failed to parse SSE event JSON: {}", data[:200])
                     continue
             continue
         buffer.append(line)
@@ -91,6 +93,8 @@ async def consume_sse(
                 try:
                     args = json.loads(args_raw)
                 except Exception:
+                    logger.warning("Failed to parse tool call arguments for '{}': {}",
+                                   buf.get("name") or item.get("name"), args_raw[:200])
                     args = {"raw": args_raw}
                 tool_calls.append(
                     ToolCallRequest(
@@ -152,6 +156,8 @@ def parse_response_output(response: Any) -> LLMResponse:
             try:
                 args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
             except Exception:
+                logger.warning("Failed to parse tool call arguments for '{}': {}",
+                               item.get("name"), str(args_raw)[:200])
                 args = {"raw": args_raw}
             tool_calls.append(ToolCallRequest(
                 id=f"{call_id}|{item_id}",
@@ -237,6 +243,9 @@ async def consume_sdk_stream(
                 try:
                     args = json.loads(args_raw)
                 except Exception:
+                    logger.warning("Failed to parse tool call arguments for '{}': {}",
+                                   buf.get("name") or getattr(item, "name", None),
+                                   str(args_raw)[:200])
                     args = {"raw": args_raw}
                 tool_calls.append(
                     ToolCallRequest(
