@@ -25,9 +25,21 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(self, skill_names: list[str] | None = None, user_mood: str | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
+
+        # Add mood-based response adjustment
+        if user_mood and user_mood != "neutral":
+            mood_instructions = {
+                "stressed": "# Current User State\n\nUser is STRESSED. Keep responses SHORT, DIRECT, and ACTIONABLE. No jokes, no fluff. Get straight to the solution.",
+                "frustrated": "# Current User State\n\nUser is FRUSTRATED. Be SUPPORTIVE. Focus on troubleshooting. Do NOT push back.",
+                "excited": "# Current User State\n\nUser is EXCITED. Match their energy! Be ENTHUSIASTIC. Explore deeper.",
+                "calm": "# Current User State\n\nUser is CALM. Default mode - thoughtful responses welcome.",
+            }
+            mood_text = mood_instructions.get(user_mood, "")
+            if mood_text:
+                parts.append(mood_text)
 
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
@@ -131,6 +143,7 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         channel: str | None = None,
         chat_id: str | None = None,
         current_role: str = "user",
+        user_mood: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id, self.timezone)
@@ -144,7 +157,7 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, user_mood)},
             *history,
             {"role": current_role, "content": merged},
         ]

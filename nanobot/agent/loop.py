@@ -242,12 +242,17 @@ class AgentLoop:
         finally:
             self._mcp_connecting = False
 
-    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
+    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None, thread_id: int | None = None) -> None:
         """Update context for all tools that need routing info."""
         for name in ("message", "spawn", "cron"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
-                    tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+                    kwargs = {}
+                    if name == "message":
+                        kwargs["message_id"] = message_id
+                        if thread_id is not None:
+                            kwargs["thread_id"] = thread_id
+                    tool.set_context(channel, chat_id, **kwargs)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -278,6 +283,7 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        message_thread_id: int | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop.
 
@@ -290,6 +296,7 @@ class AgentLoop:
 
         class _LoopHook(AgentHook):
             def __init__(self) -> None:
+                self._message_thread_id = message_thread_id
                 self._stream_buf = ""
 
             def wants_streaming(self) -> bool:
@@ -321,7 +328,7 @@ class AgentLoop:
                 for tc in context.tool_calls:
                     # Only log tool name, not full arguments (reduces log volume)
                     logger.debug("Tool call: {}", tc.name)
-                loop_self._set_tool_context(channel, chat_id, message_id)
+                loop_self._set_tool_context(channel, chat_id, message_id, self._message_thread_id)
 
             def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
                 return loop_self._strip_think(content)
@@ -480,7 +487,7 @@ class AgentLoop:
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
             await self._rag_consolidate_and_store(session)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"), msg.metadata.get("message_thread_id"))
             history = session.get_history(max_messages=0)
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
             messages = self.context.build_messages(
@@ -491,6 +498,7 @@ class AgentLoop:
             final_content, _, all_msgs = await self._run_agent_loop(
                 messages, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
+            message_thread_id=msg.metadata.get("message_thread_id"),
             )
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
@@ -513,7 +521,7 @@ class AgentLoop:
 
         await self._rag_consolidate_and_store(session)
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"), msg.metadata.get("message_thread_id"))
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
@@ -523,7 +531,8 @@ class AgentLoop:
         
         # Detect user mood for response adjustment
         user_mood = await self._detect_user_mood(msg.content, session)
-        
+        logger.debug("Detected user mood: {}", user_mood)
+
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
@@ -549,6 +558,7 @@ class AgentLoop:
             on_stream_end=on_stream_end,
             channel=msg.channel, chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
+            message_thread_id=msg.metadata.get("message_thread_id"),
         )
 
         if final_content is None:
@@ -659,14 +669,28 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
+        metadata: dict[str, Any] | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content, metadata=metadata or {})
         return await self._process_message(
             msg, session_key=session_key, on_progress=on_progress,
             on_stream=on_stream, on_stream_end=on_stream_end,
         )
+
+    async def _detect_user_mood(self, message_text: str, session: Session) -> str:
+        """Silent mood detection from user message. Never mention mood to user."""
+        recent = session.get_history(max_messages=5)
+        recent_text = ' | '.join([str(m.get('content', ''))[:50] for m in recent if m.get('role') == 'user'])[-200:]
+        time_of_day = time.strftime('%H:%M')
+        prompt = f'Detect user mood. Time: {time_of_day}. Recent: {recent_text}. Message: {message_text[:200]}. Return ONE word: stressed|excited|neutral|frustrated|calm. Mood:'
+        try:
+            response = await self.runner.complete(messages=[{'role': 'user', 'content': prompt}], model=self.model, max_tokens=10, temperature=0.1)
+            mood = (response.choices[0].message.content or 'neutral').strip().lower()
+            return mood if mood in {'stressed', 'excited', 'neutral', 'frustrated', 'calm'} else 'neutral'
+        except Exception:
+            return 'neutral'

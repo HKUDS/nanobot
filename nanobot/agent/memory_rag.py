@@ -62,9 +62,8 @@ class VectorMemoryStore:
             return False
 
     def _point_id(self, session_key: str, text: str) -> str:
-        """Deterministic point ID from session_key + text hash."""
-        raw = f"{session_key}:{text}"
-        return hashlib.md5(raw.encode()).hexdigest()
+        """Deterministic point ID from text hash only — dedup across sessions."""
+        return hashlib.md5(text.encode()).hexdigest()
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """Batch embed texts via OpenAI-compatible API."""
@@ -88,7 +87,7 @@ class VectorMemoryStore:
         return all_vectors
 
     async def store(self, session_key: str, chunks: list[str]) -> None:
-        """Embed chunks and upsert into Qdrant."""
+        """Embed chunks and upsert into Qdrant. Dedup by text hash (upsert)."""
         if not chunks:
             return
         try:
@@ -99,17 +98,16 @@ class VectorMemoryStore:
                     id=self._point_id(session_key, chunk),
                     vector=vector,
                     payload={
-                        "session_key": session_key,
                         "text": chunk,
+                        "source": "MEMORY.md",
                         "timestamp": ts,
                     },
                 )
                 for chunk, vector in zip(chunks, vectors)
             ]
             self._client.upsert(collection_name=self.collection, points=points)
-            # Only log if significant chunks stored
             if len(chunks) > 5:
-                logger.debug("RAG: stored {} chunks for {}", len(chunks), session_key)
+                logger.debug("RAG: upserted {} chunks (dedup by text hash)", len(chunks))
         except Exception:
             logger.warning("RAG: store failed for {}", session_key)
 
