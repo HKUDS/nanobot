@@ -427,15 +427,37 @@ def _make_provider(config: Config):
         )
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
-        # Resolve API key: config → ANTHROPIC_OAUTH_TOKEN env → ANTHROPIC_API_KEY env
-        anthropic_key = (p.api_key if p else None) \
-            or os.environ.get("ANTHROPIC_OAUTH_TOKEN") \
-            or os.environ.get("ANTHROPIC_API_KEY")
+        from nanobot.providers.oauth_store import OAuthCredentialStore
+
+        # Build credential store for OAuth providers (anthropic_claude_code)
+        is_oauth_provider = spec is not None and getattr(spec, "is_oauth", False)
+        credential_store = OAuthCredentialStore() if is_oauth_provider else None
+
+        # Bootstrap: migrate from Claude CLI credentials if nanobot store is empty
+        if credential_store:
+            stored = credential_store.load()
+            if stored is None:
+                # Try loading from Claude CLI and saving to nanobot store
+                cli_creds = credential_store._load_claude_cli()
+                if cli_creds:
+                    credential_store.save(cli_creds)
+                    logger.info("OAuth credentials migrated from Claude CLI to nanobot store")
+
+        # Resolve API key: config → credential store → ANTHROPIC_OAUTH_TOKEN env → ANTHROPIC_API_KEY env
+        anthropic_key = (p.api_key if p else None)
+        if not anthropic_key and credential_store:
+            stored = credential_store.load()
+            if stored:
+                anthropic_key = stored.access_token
+        if not anthropic_key:
+            anthropic_key = os.environ.get("ANTHROPIC_OAUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY")
+
         provider = AnthropicProvider(
             api_key=anthropic_key,
             api_base=config.get_api_base(model),
             default_model=model,
             extra_headers=p.extra_headers if p else None,
+            credential_store=credential_store,
         )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import secrets
 import string
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -12,6 +14,7 @@ import json_repair
 from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.oauth_store import OAuthCredentialStore, refresh_anthropic_token
 
 _ALNUM = string.ascii_letters + string.digits
 
@@ -77,10 +80,20 @@ class AnthropicProvider(LLMProvider):
         api_base: str | None = None,
         default_model: str = "claude-sonnet-4-20250514",
         extra_headers: dict[str, str] | None = None,
+        credential_store: OAuthCredentialStore | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self._is_oauth = _is_oauth_token(api_key)
+        self._credential_store = credential_store
+        self._token_expires_at_ms: int = 0
+        self._refresh_lock: asyncio.Lock = asyncio.Lock()
+
+        # Initialize expiry from stored credentials if available
+        if self._is_oauth and credential_store:
+            creds = credential_store.load()
+            if creds:
+                self._token_expires_at_ms = creds.expires_at_ms
 
         merged_headers: dict[str, str] = dict(extra_headers or {})
 
@@ -109,6 +122,51 @@ class AnthropicProvider(LLMProvider):
             client_kw["default_headers"] = self.extra_headers
 
         self._client = AsyncAnthropic(**client_kw)
+
+    def _update_oauth_client(self, new_access_token: str) -> None:
+        """Recreate the Anthropic client with a new OAuth access token."""
+        from anthropic import AsyncAnthropic
+        client_kw: dict[str, Any] = {
+            "auth_token": new_access_token,
+            "api_key": None,
+        }
+        if self.api_base:
+            client_kw["base_url"] = self.api_base
+        if self.extra_headers:
+            client_kw["default_headers"] = self.extra_headers
+        self._client = AsyncAnthropic(**client_kw)
+        logger.debug("AnthropicProvider: client updated with new OAuth access token")
+
+    async def _ensure_valid_token(self) -> None:
+        """Refresh the OAuth token if expired or near expiry. No-op for API key auth."""
+        if not self._is_oauth or not self._credential_store:
+            return
+
+        now_ms = int(time.time() * 1000)
+        margin_ms = 5 * 60 * 1000
+        if now_ms < self._token_expires_at_ms - margin_ms:
+            return  # token still valid, fast path (no lock needed)
+
+        async with self._refresh_lock:
+            # Re-check after acquiring lock (another coroutine may have refreshed already)
+            now_ms = int(time.time() * 1000)
+            if now_ms < self._token_expires_at_ms - margin_ms:
+                return
+
+            creds = self._credential_store.load()
+            if creds is None:
+                logger.warning("AnthropicProvider: no OAuth credentials found, skipping refresh")
+                return
+
+            try:
+                logger.info("AnthropicProvider: OAuth token expired, refreshing...")
+                new_creds = await refresh_anthropic_token(creds.refresh_token)
+                self._token_expires_at_ms = new_creds.expires_at_ms
+                self._update_oauth_client(new_creds.access_token)
+                self._credential_store.save(new_creds)
+                logger.info("AnthropicProvider: OAuth token refreshed successfully")
+            except Exception as e:
+                logger.error("AnthropicProvider: OAuth token refresh failed: {}", e)
 
     @staticmethod
     def _strip_prefix(model: str) -> str:
@@ -480,6 +538,7 @@ class AnthropicProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
+        await self._ensure_valid_token()
         kwargs = self._build_kwargs(
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
@@ -501,6 +560,7 @@ class AnthropicProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
+        await self._ensure_valid_token()
         kwargs = self._build_kwargs(
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
