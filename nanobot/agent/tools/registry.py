@@ -1,5 +1,6 @@
 """Tool registry for dynamic tool management."""
 
+from difflib import get_close_matches
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
@@ -41,7 +42,26 @@ class ToolRegistry:
 
         tool = self._tools.get(name)
         if not tool:
-            return f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
+            available = ", ".join(self.tool_names)
+            similar = get_close_matches(name, self.tool_names, n=3, cutoff=0.45)
+            similar_hint = f" Similar: {', '.join(similar)}." if similar else ""
+            search_hint = (
+                " If unsure which tool fits, call tool_search(query=...) first."
+                if "tool_search" in self._tools
+                else ""
+            )
+            message = (
+                f"Error: Tool '{name}' not found.{similar_hint} "
+                f"Available: {available}.{search_hint}"
+            )
+            tool_search = self._tools.get("tool_search")
+            if tool_search:
+                try:
+                    suggestions = await tool_search.execute(query=name, max_results=3)
+                    message += f"\n\n{suggestions}"
+                except Exception:
+                    pass
+            return message
 
         try:
             # Attempt to cast parameters to match schema types
