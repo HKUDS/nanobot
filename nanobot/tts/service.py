@@ -25,7 +25,7 @@ class TTSService:
         self._temp_dir = Path(tempfile.gettempdir()) / "nanobot_tts"
         self._temp_dir.mkdir(exist_ok=True)
 
-    def should_trigger(self, session_tts: bool = False, skill_meta: dict[str, Any] | None = None) -> bool:
+    def should_trigger(self, session_tts: bool = False, skill_meta: dict[str, Any] | None = None, sender_name: str | None = None) -> bool:
         """Check if TTS should be triggered for this response."""
         if not self.config.enabled:
             return False

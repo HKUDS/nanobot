@@ -88,10 +88,14 @@ class ExecTool(Tool):
         """通过 `rtk rewrite <cmd>` 获取 token 优化后的等效命令。
         若 rtk 不可用或调用失败，原样返回原命令（fail-safe）。"""
         try:
+            env = os.environ.copy()
+            if self.path_append:
+                env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
             proc = await asyncio.create_subprocess_exec(
                 "rtk", "rewrite", command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
+                env=env,
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5.0)
             if proc.returncode == 0 and stdout:

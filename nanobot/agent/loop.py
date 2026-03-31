@@ -434,10 +434,15 @@ class AgentLoop:
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(ctx.channel, ctx.chat_id, ctx.message_id)
             history = session.get_history(max_messages=0)
-            current_role = "assistant" if ctx.sender_id == "subagent" else "user"
+            if ctx.sender_id == "subagent":
+                current_role = "user"
+                current_message = f"[Subagent completed] {msg.content}"
+            else:
+                current_role = "user"
+                current_message = msg.content
             messages = self.context.build_messages(
                 history=history,
-                current_message=msg.content, channel=ctx.channel, chat_id=ctx.chat_id,
+                current_message=current_message, channel=ctx.channel, chat_id=ctx.chat_id,
                 current_role=current_role,
                 channel_name=ctx.channel_name,
                 sender_name=ctx.sender_name,

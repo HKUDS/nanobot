@@ -210,7 +210,12 @@ class AnthropicProvider(LLMProvider):
                 })
                 continue
 
-        return system, self._merge_consecutive(raw)
+        merged = self._merge_consecutive(raw)
+        # Guard: Anthropic requires the last message to be role=user.
+        # Some models (e.g. claude-sonnet-4) reject assistant prefill.
+        if merged and merged[-1]["role"] == "assistant":
+            merged.append({"role": "user", "content": "(continue)"})
+        return system, merged
 
     @staticmethod
     def _tool_result_block(msg: dict[str, Any]) -> dict[str, Any]:
