@@ -351,6 +351,20 @@ class CronService:
         logger.info("Cron: added job '{}' ({})", name, job.id)
         return job
 
+    def register_system_job(self, job: CronJob) -> CronJob:
+        """Register an internal system job (idempotent on restart)."""
+        store = self._load_store()
+        now = _now_ms()
+        job.state = CronJobState(next_run_at_ms=_compute_next_run(job.schedule, now))
+        job.created_at_ms = now
+        job.updated_at_ms = now
+        store.jobs = [j for j in store.jobs if j.id != job.id]
+        store.jobs.append(job)
+        self._save_store()
+        self._arm_timer()
+        logger.info("Cron: registered system job '{}' ({})", job.name, job.id)
+        return job
+
     def remove_job(self, job_id: str) -> bool:
         """Remove a job by ID."""
         store = self._load_store()
