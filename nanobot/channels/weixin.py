@@ -31,7 +31,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir, get_runtime_subdir
-from nanobot.config.schema import Base
+from nanobot.config.schema import Base, TTSConfig
 from nanobot.utils.helpers import split_message
 
 # ---------------------------------------------------------------------------
@@ -90,6 +90,7 @@ class WeixinConfig(Base):
     token: str = ""  # Manually set token, or obtained via QR login
     state_dir: str = ""  # Default: ~/.nanobot/weixin/
     poll_timeout: int = DEFAULT_LONG_POLL_TIMEOUT_S  # seconds for long-poll
+    tts: TTSConfig = Field(default_factory=TTSConfig)
 
 
 class WeixinChannel(BaseChannel):
