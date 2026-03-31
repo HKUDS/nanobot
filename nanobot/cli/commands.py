@@ -521,14 +521,6 @@ def gateway(
             f"Scheduled instruction: {job.payload.message}"
         )
 
-        # Trim cron session to a small recent tail to avoid context
-        # accumulation from previous runs causing empty responses.
-        # Long-term state is persisted in memory files (MEMORY.md, HISTORY.md).
-        cron_session_key = f"cron:{job.id}"
-        cron_session = session_manager.get_or_create(cron_session_key)
-        cron_session.retain_recent_legal_suffix(4)
-        session_manager.save(cron_session)
-
         cron_tool = agent.tools.get("cron")
         cron_token = None
         if isinstance(cron_tool, CronTool):
@@ -536,7 +528,7 @@ def gateway(
         try:
             response = await agent.process_direct(
                 reminder_note,
-                session_key=cron_session_key,
+                session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
             )
