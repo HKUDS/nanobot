@@ -78,6 +78,11 @@ UPLOAD_MEDIA_FILE = 3
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".ico", ".svg"}
 _VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv"}
 
+# Voice trigger patterns — user requests a spoken reply
+_VOICE_TRIGGER_PATTERNS = re.compile(
+    r"(你说|你来说|说给我听|用语音(说|回答|回复)|语音回复)"
+)
+
 
 class WeixinConfig(Base):
     """Personal WeChat channel configuration."""
@@ -125,6 +130,7 @@ class WeixinChannel(BaseChannel):
         self._poll_task: asyncio.Task | None = None
         self._next_poll_timeout_s: int = DEFAULT_LONG_POLL_TIMEOUT_S
         self._session_pause_until: float = 0.0
+        self._voice_sessions: dict[str, bool] = {}
 
     # ------------------------------------------------------------------
     # State persistence
@@ -140,6 +146,10 @@ class WeixinChannel(BaseChannel):
         d.mkdir(parents=True, exist_ok=True)
         self._state_dir = d
         return d
+
+    def _wants_voice(self, content: str) -> bool:
+        """Return True if the message contains a voice-reply trigger phrase."""
+        return bool(_VOICE_TRIGGER_PATTERNS.search(content))
 
     def _load_state(self) -> bool:
         """Load saved account state. Returns True if a valid token was found."""
