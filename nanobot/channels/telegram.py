@@ -516,6 +516,39 @@ class TelegramChannel(BaseChannel):
                     await self._remove_reaction(chat_id, int(reply_to_message_id))
                 except ValueError:
                     pass
+            
+            # If the final text exceeds Telegram's limit, we need to split it
+            if len(buf.text) > TELEGRAM_MAX_MESSAGE_LEN:
+                chunks = split_message(buf.text, TELEGRAM_MAX_MESSAGE_LEN)
+                
+                # Edit the current message with the first chunk
+                try:
+                    html = _markdown_to_telegram_html(chunks[0])
+                    await self._call_with_retry(
+                        self._app.bot.edit_message_text,
+                        chat_id=int_chat_id, message_id=buf.message_id,
+                        text=html, parse_mode="HTML",
+                    )
+                except Exception as e:
+                    if not self._is_not_modified_error(e):
+                        logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
+                        try:
+                            await self._call_with_retry(
+                                self._app.bot.edit_message_text,
+                                chat_id=int_chat_id, message_id=buf.message_id,
+                                text=chunks[0],
+                            )
+                        except Exception as e2:
+                            if not self._is_not_modified_error(e2):
+                                logger.warning("Final stream edit failed: {}", e2)
+                
+                # Send the remaining chunks as new messages
+                for chunk in chunks[1:]:
+                    await self._send_text(int_chat_id, chunk)
+                
+                self._stream_bufs.pop(chat_id, None)
+                return
+
             try:
                 html = _markdown_to_telegram_html(buf.text)
                 await self._call_with_retry(
@@ -561,9 +594,10 @@ class TelegramChannel(BaseChannel):
         # If the accumulated text exceeds Telegram's limit, we need to finalize the current message
         # and start a new one for the remaining text.
         if len(buf.text) > TELEGRAM_MAX_MESSAGE_LEN:
-            # Split the text into the part that fits and the remainder
-            fits = buf.text[:TELEGRAM_MAX_MESSAGE_LEN]
-            remainder = buf.text[TELEGRAM_MAX_MESSAGE_LEN:]
+            # Split the text safely using split_message to avoid cutting in the middle of markdown/emoji
+            chunks = split_message(buf.text, TELEGRAM_MAX_MESSAGE_LEN)
+            fits = chunks[0]
+            remainder = "".join(chunks[1:])
             
             # Finalize the current message with the part that fits
             if buf.message_id is not None:
