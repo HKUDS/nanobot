@@ -12,6 +12,11 @@ from typing import Any
 __all__ = ["find_paths", "query_subgraph"]
 
 
+def _norm(name: str) -> str:
+    """Canonical name normalisation: strip, lower, spaces to underscores."""
+    return name.strip().lower().replace(" ", "_")
+
+
 def find_paths(
     graph: Any,
     source: str,
@@ -23,8 +28,6 @@ def find_paths(
     Returns up to 5 shortest paths.  Each path is a list of edge dicts
     with ``source``, ``relation``, and ``target`` keys (display names).
     """
-    from .graph import _norm
-
     if not graph.enabled or graph._db is None:
         return []
     src = _norm(source)
