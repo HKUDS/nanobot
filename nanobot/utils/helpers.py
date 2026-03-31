@@ -173,7 +173,9 @@ def estimate_prompt_tokens(
         per_message_overhead = len(messages) * 4
         return len(enc.encode("\n".join(parts))) + per_message_overhead
     except Exception:
-        return 0
+        # Fallback to rough heuristic: 1 token ~= 4 chars for ASCII text
+        payload = "\n".join(parts)
+        return len(payload) // 4 + (len(messages) * 4)
 
 
 def estimate_message_tokens(message: dict[str, Any]) -> int:

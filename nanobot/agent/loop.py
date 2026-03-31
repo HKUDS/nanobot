@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import os
 import time
 from contextlib import AsyncExitStack, nullcontext
@@ -16,10 +15,10 @@ from loguru import logger
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import MemoryConsolidator
-from nanobot.agent.runner import AgentRunSpec, AgentRunner
+from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -27,8 +26,8 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.bus.queue import MessageBus
+from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
@@ -485,6 +484,7 @@ class AgentLoop:
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+            self._enforce_session_budget(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
@@ -516,6 +516,7 @@ class AgentLoop:
             return result
 
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+        self._enforce_session_budget(session)  # ← Hard safety net
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
@@ -567,6 +568,46 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=meta,
         )
+
+    def _enforce_session_budget(self, session: Session) -> None:
+        """Hard-truncate session history if it would exceed the context window.
+
+        This is the safety net when soft consolidation fails or is insufficient.
+        Instead of deleting messages, it advances last_consolidated (which
+        causes get_history() to skip them) and archives them to HISTORY.md.
+        """
+        if self.context_window_tokens <= 0:
+            return
+
+        estimated, _ = self.memory_consolidator.estimate_session_prompt_tokens(session)
+        if estimated <= 0:
+            unconsolidated = len(session.messages) - session.last_consolidated
+            if unconsolidated <= 50:
+                return
+            estimated = unconsolidated * 200 # rough guess
+
+        # Hard cap: context window - generation buffer - safety buffer
+        hard_cap = self.context_window_tokens - self.runner.provider.generation.max_tokens - 1024
+        if estimated <= hard_cap:
+            return
+
+        # Calculate how many messages to keep (target 50% of hard cap)
+        target = hard_cap // 2
+        boundary = self.memory_consolidator.pick_consolidation_boundary(
+            session, max(1, estimated - target)
+        )
+        if boundary:
+            end_idx = boundary[0]
+            chunk = session.messages[session.last_consolidated:end_idx]
+            if chunk:
+                logger.warning(
+                    "Hard budget enforcement for {}: {}/{} tokens. "
+                    "Truncating {} messages to HISTORY.md (consolidation failed).",
+                    session.key, estimated, self.context_window_tokens, len(chunk)
+                )
+                self.memory_consolidator.store._raw_archive(chunk)
+                session.last_consolidated = end_idx
+                self.sessions.save(session)
 
     @staticmethod
     def _image_placeholder(block: dict[str, Any]) -> dict[str, str]:
