@@ -25,6 +25,7 @@ from nanobot.context.prompt_loader import prompts
 __all__ = ["MemoryExtractor"]
 
 from ..constants import _SAVE_EVENTS_TOOL
+from ..event import MemoryEvent
 from .correction_detector import (
     clean_phrase,
     extract_fact_corrections,
@@ -112,7 +113,7 @@ class MemoryExtractor:
         old_messages: list[dict[str, Any]],
         *,
         source_start: int,
-    ) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
+    ) -> tuple[list[MemoryEvent], dict[str, list[str]]]:
         return extract_events_heuristic(
             old_messages,
             source_start=source_start,
@@ -134,7 +135,7 @@ class MemoryExtractor:
         old_messages: list[dict[str, Any]],
         *,
         source_start: int,
-    ) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
+    ) -> tuple[list[MemoryEvent], dict[str, list[str]]]:
         prompt = (
             "Extract structured memory from this conversation and call save_events. "
             "Only include actionable long-term information.\n\n"
@@ -168,7 +169,7 @@ class MemoryExtractor:
                     for key in updates:
                         updates[key] = self.to_str_list(raw_updates.get(key))
 
-                    events: list[dict[str, Any]] = []
+                    events: list[MemoryEvent] = []
                     for _, item in enumerate(raw_events):
                         if not isinstance(item, dict):
                             continue

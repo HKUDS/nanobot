@@ -46,10 +46,10 @@ class TestCoerceEvent:
             source_span=[0, 10],
         )
         assert result is not None
-        assert result["summary"] == "User prefers dark mode"
-        assert result["type"] == "preference"
-        assert result["memory_type"] == "semantic"
-        assert result["id"]  # should have generated an ID
+        assert result.summary == "User prefers dark mode"
+        assert result.type == "preference"
+        assert result.memory_type == "semantic"
+        assert result.id  # should have generated an ID
 
     def test_invalid_type_falls_back_to_fact(self) -> None:
         _, coercer, *_ = _make_ingester()
@@ -58,7 +58,7 @@ class TestCoerceEvent:
             source_span=[0, 5],
         )
         assert result is not None
-        assert result["type"] == "fact"
+        assert result.type == "fact"
 
     def test_missing_summary_returns_none(self) -> None:
         _, coercer, *_ = _make_ingester()
@@ -79,8 +79,8 @@ class TestCoerceEvent:
             source_span=[0, 5],
         )
         assert result is not None
-        assert len(result["triples"]) == 1
-        assert result["triples"][0]["subject"] == "Alice"
+        assert len(result.triples) == 1
+        assert result.triples[0].subject == "Alice"
 
 
 class TestClassifyMemoryType:

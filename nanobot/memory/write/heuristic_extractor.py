@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from typing import Any, Callable
 
+from ..event import MemoryEvent
+
 __all__ = [
     "extract_entities",
     "extract_events_heuristic",
@@ -201,17 +203,17 @@ def extract_events_heuristic(
     old_messages: list[dict[str, Any]],
     *,
     source_start: int,
-    coerce_event_fn: Callable[..., dict[str, Any] | None],
+    coerce_event_fn: Callable[..., MemoryEvent | None],
     utc_now_iso_fn: Callable[[], str],
     default_profile_updates_fn: Callable[[], dict[str, list[str]]],
-) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
+) -> tuple[list[MemoryEvent], dict[str, list[str]]]:
     """Full heuristic fallback pipeline for memory event extraction.
 
     Scans user messages for type-hint keywords and produces structured events
     plus profile update suggestions.
     """
     updates = default_profile_updates_fn()
-    events: list[dict[str, Any]] = []
+    events: list[MemoryEvent] = []
 
     type_hints = [
         ("preference", ("prefer", "i like", "i dislike", "my preference")),

@@ -12,6 +12,7 @@ from typing import Any
 
 from .._text import _norm_text, _tokenize, _utc_now_iso
 from ..constants import CONFLICT_STATUS_NEEDS_USER
+from ..persistence.conflict_types import ConflictRecord
 
 __all__ = [
     "ask_user_for_conflict",
@@ -47,13 +48,13 @@ def parse_conflict_user_action(text: str) -> str | None:
     return None
 
 
-def conflict_relevant_to(conflict: dict[str, Any], user_message: str) -> bool:
+def conflict_relevant_to(conflict: ConflictRecord, user_message: str) -> bool:
     """Return True if the conflict topic overlaps with the user's message."""
     msg_tokens = _tokenize(_norm_text(user_message))
     if not msg_tokens:
         return True  # empty message -> don't filter
-    old_tokens = _tokenize(_norm_text(str(conflict.get("old", ""))))
-    new_tokens = _tokenize(_norm_text(str(conflict.get("new", ""))))
+    old_tokens = _tokenize(_norm_text(conflict.old))
+    new_tokens = _tokenize(_norm_text(conflict.new))
     conflict_tokens = old_tokens | new_tokens
     if not conflict_tokens:
         return True
@@ -66,7 +67,7 @@ def conflict_relevant_to(conflict: dict[str, Any], user_message: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def get_next_user_conflict(mgr: Any) -> dict[str, Any] | None:
+def get_next_user_conflict(mgr: Any) -> ConflictRecord | None:
     """Return the most-recently-asked conflict, or None.
 
     Only conflicts that have been explicitly presented to the user
@@ -74,14 +75,14 @@ def get_next_user_conflict(mgr: Any) -> dict[str, Any] | None:
     replies like "1" from being silently hijacked as conflict resolutions
     when no conflict question was shown in the current conversation.
     """
-    conflicts: list[dict[str, Any]] = mgr.list_conflicts(include_closed=False)
+    conflicts: list[ConflictRecord] = mgr.list_conflicts(include_closed=False)
     if not conflicts:
         return None
 
-    asked = [c for c in conflicts if isinstance(c.get("asked_at"), str) and c.get("asked_at")]
+    asked = [c for c in conflicts if c.asked_at]
     if not asked:
         return None
-    asked.sort(key=lambda c: str(c.get("asked_at", "")))
+    asked.sort(key=lambda c: c.asked_at)
     return asked[0]
 
 
@@ -98,7 +99,7 @@ def ask_user_for_conflict(
         return None
 
     chosen_idx: int | None = None
-    chosen: dict[str, Any] | None = None
+    chosen: ConflictRecord | None = None
     for idx, item in enumerate(conflicts):
         if not isinstance(item, dict):
             continue
@@ -107,28 +108,30 @@ def ask_user_for_conflict(
             continue
         if not include_already_asked and item.get("asked_at"):
             continue
+        record = ConflictRecord.from_dict(item, index=idx)
         # Relevance gate: if the user sent a message, only surface conflicts
         # whose topic overlaps with the message.  When there is no message
         # (e.g. interactive session start), skip the gate and show the first.
-        if user_message and not conflict_relevant_to(item, user_message):
+        if user_message and not conflict_relevant_to(record, user_message):
             continue
         chosen_idx = idx
-        chosen = item
+        chosen = record
         break
 
     if chosen_idx is None or chosen is None:
         return None
 
-    if not chosen.get("asked_at"):
-        chosen["asked_at"] = _utc_now_iso()
+    if not chosen.asked_at:
+        # Write asked_at back to the raw profile dict.
+        conflicts[chosen_idx]["asked_at"] = _utc_now_iso()
         mgr.profile_mgr.write_profile(profile)
 
-    old_value = str(chosen.get("old", "")).strip()
-    new_value = str(chosen.get("new", "")).strip()
+    old_value = chosen.old.strip()
+    new_value = chosen.new.strip()
 
     # Build richer provenance lines when timestamps are available.
-    old_ts = str(chosen.get("old_last_seen_at", "")).strip()
-    new_ts = str(chosen.get("new_last_seen_at", "")).strip()
+    old_ts = chosen.old_last_seen_at.strip()
+    new_ts = chosen.new_last_seen_at.strip()
     old_hint = f" (last seen: {old_ts[:10]})" if old_ts else ""
     new_hint = f" (last seen: {new_ts[:10]})" if new_ts else ""
 
@@ -150,7 +153,7 @@ def handle_user_conflict_reply(mgr: Any, text: str) -> dict[str, Any]:
     if not conflict:
         return {"handled": False}
 
-    idx = int(conflict.get("index", -1))
+    idx = conflict.index
     if idx < 0:
         return {"handled": False}
 

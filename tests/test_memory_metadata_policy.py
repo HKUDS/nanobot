@@ -11,6 +11,7 @@ import pytest
 from nanobot.config.memory import MemoryConfig
 from nanobot.memory import MemoryStore
 from nanobot.memory.read.retrieval_planner import RetrievalPlanner
+from nanobot.memory.read.retrieval_types import RetrievedMemory
 
 
 def test_coerce_event_adds_normalized_metadata(tmp_path: Path) -> None:
@@ -27,11 +28,11 @@ def test_coerce_event_adds_normalized_metadata(tmp_path: Path) -> None:
     )
 
     assert event is not None
-    assert event["memory_type"] in {"semantic", "episodic", "reflection"}
-    assert event["stability"] in {"high", "medium", "low"}
-    assert event["topic"] == "infra"
-    assert isinstance(event["metadata"], dict)
-    assert event["metadata"]["memory_type"] in {"semantic", "episodic", "reflection"}
+    assert event.memory_type in {"semantic", "episodic", "reflection"}
+    assert event.stability in {"high", "medium", "low"}
+    assert event.topic == "infra"
+    assert isinstance(event.metadata, dict)
+    assert event.metadata["memory_type"] in {"semantic", "episodic", "reflection"}
 
 
 def test_append_events_writes_to_db(tmp_path: Path) -> None:
@@ -285,13 +286,15 @@ async def test_evaluate_retrieval_cases_balanced_mode_supports_structural_hits(
     store = MemoryStore(tmp_path)
     store.retriever.retrieve = AsyncMock(
         return_value=[
-            {
-                "id": "x1",
-                "summary": "Key constraint: commands must not mutate prod",
-                "topic": "constraint",
-                "memory_type": "semantic",
-                "status": "active",
-            }
+            RetrievedMemory(
+                id="x1",
+                type="fact",
+                summary="Key constraint: commands must not mutate prod",
+                timestamp="2026-03-01T00:00:00+00:00",
+                topic="constraint",
+                memory_type="semantic",
+                status="active",
+            )
         ]
     )
 

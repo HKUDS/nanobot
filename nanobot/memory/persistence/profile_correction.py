@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ..constants import CONFLICT_STATUS_OPEN, PROFILE_STATUS_ACTIVE, PROFILE_STATUS_CONFLICTED
+from ..event import MemoryEvent
 
 if TYPE_CHECKING:
     from ..write.coercion import EventCoercer
@@ -64,7 +65,7 @@ class CorrectionOrchestrator:
         profile.setdefault("conflicts", [])
         applied = 0
         conflicts = 0
-        events: list[dict[str, Any]] = []
+        events: list[MemoryEvent] = []
 
         def _apply_field_corrections(
             *,

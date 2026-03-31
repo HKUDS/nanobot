@@ -27,6 +27,7 @@ from nanobot.observability.tracing import bind_trace
 
 from ._text import _utc_now_iso
 from .constants import _CONSOLIDATE_MEMORY_TOOL
+from .event import MemoryEvent
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -179,7 +180,7 @@ class ConsolidationPipeline:
 
         # -- Events (fallback: heuristic extractor) --
         raw_events = args.get("events")
-        events: list[dict[str, Any]] = []
+        events: list[MemoryEvent] = []
         profile_updates: dict[str, list[str]] = self._extractor.default_profile_updates()
 
         if isinstance(raw_events, list) and raw_events:
@@ -220,7 +221,7 @@ class ConsolidationPipeline:
         events_written = self._ingester.append_events(events)
         await self._ingester._ingest_graph_triples(events)
 
-        event_ids = [e.get("id", "") for e in events if e.get("id")]
+        event_ids = [e.id for e in events if e.id]
         profile = self._profile_mgr.read_profile()
         profile_added, _, profile_touched = self._profile_mgr._apply_profile_updates(
             profile,

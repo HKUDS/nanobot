@@ -12,6 +12,7 @@ import pytest
 from nanobot.config.memory import MemoryConfig
 from nanobot.memory import MemoryStore
 from nanobot.memory.constants import PROFILE_KEYS
+from nanobot.memory.event import MemoryEvent
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 
@@ -380,11 +381,12 @@ class TestStoreCoreBranchHelpers:
 
         total = await store.ingester._ingest_graph_triples(
             [
-                {
-                    "id": "e1",
-                    "timestamp": "2026-03-01T00:00:00+00:00",
-                    "triples": [{"subject": "Alice", "predicate": "WORKS_ON", "object": "Nanobot"}],
-                }
+                MemoryEvent(
+                    id="e1",
+                    summary="Alice works on Nanobot",
+                    timestamp="2026-03-01T00:00:00+00:00",
+                    triples=[{"subject": "Alice", "predicate": "WORKS_ON", "object": "Nanobot"}],
+                )
             ]
         )
         assert total == 1

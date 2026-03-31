@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nanobot.memory.consolidation_pipeline import ConsolidationPipeline
+from nanobot.memory.event import MemoryEvent
 
 
 def _make_pipeline(tmp_path: Path | None = None, **overrides: object) -> ConsolidationPipeline:
@@ -218,12 +219,14 @@ class TestConsolidate:
             "profile_updates": {},
         }
         pipeline._extractor.default_profile_updates.return_value = {}
-        pipeline._extractor.coerce_event.return_value = {
-            "id": "e1",
-            "type": "fact",
-            "summary": "test event",
-            "timestamp": "2026-01-01T00:00:00",
-        }
+        pipeline._extractor.coerce_event.return_value = MemoryEvent.from_dict(
+            {
+                "id": "e1",
+                "type": "fact",
+                "summary": "test event",
+                "timestamp": "2026-01-01T00:00:00",
+            }
+        )
         pipeline._extractor.extract_structured_memory = AsyncMock(return_value=([], {}))
         pipeline._ingester.append_events.return_value = 0
         pipeline._ingester._ingest_graph_triples = AsyncMock()

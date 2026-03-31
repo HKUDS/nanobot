@@ -9,6 +9,8 @@ from typer.testing import CliRunner
 from nanobot.cli.commands import app
 from nanobot.config.memory import MemoryConfig
 from nanobot.config.schema import Config
+from nanobot.memory.persistence.conflict_types import ConflictRecord
+from nanobot.memory.read.retrieval_types import RetrievedMemory
 
 runner = CliRunner()
 
@@ -32,8 +34,11 @@ class _FakeProfileMgr:
 
 
 class _FakeConflictMgr:
-    def list_conflicts(self, include_closed: bool = False) -> list[dict[str, object]]:
-        return list(self._parent.conflict_rows)
+    def list_conflicts(self, include_closed: bool = False) -> list[ConflictRecord]:
+        return [
+            ConflictRecord.from_dict(r, index=r.get("index", -1))
+            for r in self._parent.conflict_rows
+        ]
 
     def resolve_conflict_details(self, index: int, action: str) -> dict[str, object]:
         if not self._parent.resolve_ok:
@@ -56,10 +61,17 @@ class _FakeIngester:
 
 
 class _FakeRetriever:
-    async def retrieve(self, query: str, top_k: int = 6, **kw: object) -> list[dict[str, object]]:
+    async def retrieve(self, query: str, top_k: int = 6, **kw: object) -> list[RetrievedMemory]:
         if query == "none":
             return []
-        return [{"timestamp": "2026-03-10", "type": "fact", "score": 0.9, "summary": "x"}]
+        return [
+            RetrievedMemory(
+                id="fake-1",
+                type="fact",
+                summary="x",
+                timestamp="2026-03-10",
+            )
+        ]
 
 
 class _FakeSnapshot:

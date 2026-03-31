@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.memory import MemoryStore
+from nanobot.memory.event import MemoryEvent
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -24,23 +25,27 @@ def _make_store(tmp_path: Path) -> MemoryStore:
     return MemoryStore(tmp_path, embedding_provider="hash")
 
 
-def _sample_events() -> list[dict]:
+def _sample_events() -> list[MemoryEvent]:
     """Return a minimal set of events for testing."""
     return [
-        {
-            "id": "evt-001",
-            "type": "preference",
-            "summary": "User prefers dark mode in all editors.",
-            "timestamp": "2026-03-01T12:00:00+00:00",
-            "source": "test",
-        },
-        {
-            "id": "evt-002",
-            "type": "fact",
-            "summary": "User's primary language is Python.",
-            "timestamp": "2026-03-01T12:01:00+00:00",
-            "source": "test",
-        },
+        MemoryEvent.from_dict(
+            {
+                "id": "evt-001",
+                "type": "preference",
+                "summary": "User prefers dark mode in all editors.",
+                "timestamp": "2026-03-01T12:00:00+00:00",
+                "source": "test",
+            }
+        ),
+        MemoryEvent.from_dict(
+            {
+                "id": "evt-002",
+                "type": "fact",
+                "summary": "User's primary language is Python.",
+                "timestamp": "2026-03-01T12:01:00+00:00",
+                "source": "test",
+            }
+        ),
     ]
 
 

@@ -2,4 +2,6 @@
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from .conflict_types import ConflictRecord
+
+__all__: list[str] = ["ConflictRecord"]

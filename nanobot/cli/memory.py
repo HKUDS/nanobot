@@ -482,13 +482,13 @@ def memory_conflicts(
     table.add_column("Status", style="yellow")
     for item in rows:
         table.add_row(
-            str(item.get("index", "")),
-            str(item.get("field", "")),
-            str(item.get("old", ""))[:70],
-            str(item.get("old_memory_id", ""))[:24],
-            str(item.get("new", ""))[:70],
-            str(item.get("new_memory_id", ""))[:24],
-            str(item.get("status", "")),
+            str(item.index),
+            item.field,
+            item.old[:70],
+            item.old_memory_id[:24],
+            item.new[:70],
+            item.new_memory_id[:24],
+            item.status,
         )
     console.print(table)
 

@@ -46,7 +46,7 @@ class TestExtractionToRetrieval:
         assert written >= 1
 
         results = await store.retriever.retrieve("dark mode preference", top_k=5)
-        summaries = [r.get("summary", "").lower() for r in results]
+        summaries = [r.summary.lower() for r in results]
         assert any("dark mode" in s for s in summaries), f"Expected dark mode in {summaries}"
 
     async def test_constraint_roundtrip(self, tmp_path: Path) -> None:
