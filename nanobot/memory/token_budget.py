@@ -8,7 +8,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-__all__ = ["DEFAULT_SECTION_WEIGHTS", "SectionBudget", "TokenBudgetAllocator"]
+__all__ = [
+    "DEFAULT_SECTION_WEIGHTS",
+    "SectionBudget",
+    "TokenBudgetAllocator",
+    "allocate_section_budgets",
+]
 
 # Default weights mirror _SECTION_PRIORITY_WEIGHTS from context_assembler.py.
 # Keys are intent strings from RetrievalPlanner.infer_retrieval_intent().
@@ -123,3 +128,88 @@ class TokenBudgetAllocator:
             w = weight_map.get(section, 0.0)
             allocations[section] = max(0, int(total_tokens * w / total_weight)) if w > 0 else 0
         return SectionBudget(**allocations)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Standalone budget allocation (extracted from ContextAssembler)
+# ---------------------------------------------------------------------------
+
+_SECTION_MIN_TOKENS = 40
+
+
+def allocate_section_budgets(
+    total_budget: int,
+    intent: str,
+    section_sizes: dict[str, int],
+    min_tokens: int = _SECTION_MIN_TOKENS,
+) -> dict[str, int]:
+    """Distribute *total_budget* tokens across named sections.
+
+    Uses a two-pass proportional allocation:
+
+    1. **Priority pass** — each section gets a share proportional to its
+       intent-specific weight, capped at its actual content size.
+    2. **Redistribution pass** — tokens freed by sections that are
+       smaller than their share are redistributed to sections that need
+       more space, again proportionally by weight.
+
+    Parameters
+    ----------
+    total_budget:
+        Total token budget for the combined memory context.
+    intent:
+        Query intent string (drives prioritisation weights).
+    section_sizes:
+        Mapping of section name -> estimated token count of the **full**
+        (untruncated) content for that section.  Sections missing from
+        the map or with size 0 receive no allocation.
+    min_tokens:
+        Minimum token allocation per section that needs more than its
+        proportional share.
+
+    Returns
+    -------
+    dict mapping section name -> allocated token budget.
+    """
+    weights = DEFAULT_SECTION_WEIGHTS.get(
+        intent,
+        DEFAULT_SECTION_WEIGHTS["fact_lookup"],
+    )
+
+    # Filter to sections that actually have content *and* non-zero weight.
+    active: dict[str, float] = {}
+    for name, weight in weights.items():
+        size = section_sizes.get(name, 0)
+        if size > 0 and weight > 0:
+            active[name] = weight
+
+    if not active:
+        return {name: 0 for name in weights}
+
+    total_weight = sum(active.values())
+    allocations: dict[str, int] = {name: 0 for name in weights}
+
+    # Pass 1: proportional allocation capped at actual size.
+    surplus = 0
+    uncapped: dict[str, float] = {}
+    for name, weight in active.items():
+        share = int(total_budget * (weight / total_weight))
+        actual_size = section_sizes.get(name, 0)
+        if share >= actual_size:
+            # Section fits entirely — cap and reclaim the surplus.
+            allocations[name] = actual_size
+            surplus += share - actual_size
+        else:
+            # Section needs more than its share.
+            allocations[name] = max(share, min_tokens)
+            uncapped[name] = weight
+
+    # Pass 2: redistribute surplus to sections that couldn't fit.
+    if surplus > 0 and uncapped:
+        uncapped_total = sum(uncapped.values())
+        for name, weight in uncapped.items():
+            extra = int(surplus * (weight / uncapped_total))
+            actual_size = section_sizes.get(name, 0)
+            allocations[name] = min(allocations[name] + extra, actual_size)
+
+    return allocations

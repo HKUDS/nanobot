@@ -11,6 +11,8 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any, Callable
 
+from ..write.heuristic_extractor import extract_entities
+
 if TYPE_CHECKING:
     from ..graph.graph import KnowledgeGraph
     from ..write.extractor import MemoryExtractor
@@ -48,11 +50,7 @@ class GraphAugmenter:
         if self._graph is None or not self._graph.enabled:
             return set()
 
-        query_entities = (
-            {e.lower() for e in self._extractor._extract_entities(query)}
-            if self._extractor is not None
-            else set()
-        )
+        query_entities = {e.lower() for e in extract_entities(query)}
         if not query_entities:
             return set()
 
@@ -130,9 +128,7 @@ class GraphAugmenter:
         Queries the knowledge graph first (when available), then falls back to
         scanning triples stored in local events.
         """
-        query_entities: set[str] = set()
-        if self._extractor is not None:
-            query_entities = {e.lower() for e in self._extractor._extract_entities(query)}
+        query_entities: set[str] = {e.lower() for e in extract_entities(query)}
 
         # Also extract entities via index lookup (handles lowercase queries).
         events = self._read_events_fn(limit=200)

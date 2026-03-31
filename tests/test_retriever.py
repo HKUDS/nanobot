@@ -129,9 +129,9 @@ class TestRetrieveWithGraphAugmentation:
         graph_aug._graph.get_related_entity_names_sync = MagicMock(
             return_value={"python", "fastapi"}
         )
-        graph_aug._extractor._extract_entities = MagicMock(return_value=["Web"])
-        # Test graph entity collection directly (unified pipeline uses this internally)
-        entities = graph_aug.collect_graph_entity_names("web framework", [])
+        with patch("nanobot.memory.read.graph_augmentation.extract_entities", return_value=["Web"]):
+            # Test graph entity collection directly (unified pipeline uses this internally)
+            entities = graph_aug.collect_graph_entity_names("web framework", [])
         assert "python" in entities or "fastapi" in entities
 
 
@@ -141,7 +141,6 @@ class TestBuildGraphContextLines:
     def test_formats_graph_lines(self) -> None:
         retriever = _make_retriever()
         graph_aug = retriever._graph_aug
-        graph_aug._extractor._extract_entities = MagicMock(return_value=["Alice"])
         graph_aug._read_events_fn = lambda **kw: [
             {
                 "entities": ["Alice", "Bob"],
@@ -150,7 +149,15 @@ class TestBuildGraphContextLines:
                 ],
             }
         ]
-        with patch("nanobot.memory.graph.entity_classifier.classify_entity_type") as mock_classify:
+        with (
+            patch(
+                "nanobot.memory.read.graph_augmentation.extract_entities",
+                return_value=["Alice"],
+            ),
+            patch(
+                "nanobot.memory.graph.entity_classifier.classify_entity_type",
+            ) as mock_classify,
+        ):
             mock_type = MagicMock()
             mock_type.value = "unknown"
             mock_classify.return_value = mock_type
@@ -699,7 +706,11 @@ class TestGraphEntityCache:
         assert hasattr(r._graph_aug, "_graph_cache")
         assert r._graph_aug._graph_cache == {}
 
-    def test_same_entities_use_cache_within_retrieve(self):
+    @patch(
+        "nanobot.memory.read.graph_augmentation.extract_entities",
+        return_value=["coffee"],
+    )
+    def test_same_entities_use_cache_within_retrieve(self, _mock_entities):
         r = self._make_retriever_with_graph()
         graph_aug = r._graph_aug
         # Directly call collect_graph_entity_names twice with same query
@@ -709,7 +720,11 @@ class TestGraphEntityCache:
         # get_related_entity_names_sync should be called only once
         assert graph_aug._graph.get_related_entity_names_sync.call_count == 1
 
-    def test_cache_reset_triggers_fresh_traversal(self):
+    @patch(
+        "nanobot.memory.read.graph_augmentation.extract_entities",
+        return_value=["coffee"],
+    )
+    def test_cache_reset_triggers_fresh_traversal(self, _mock_entities):
         r = self._make_retriever_with_graph()
         graph_aug = r._graph_aug
         # First call populates the cache

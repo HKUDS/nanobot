@@ -1,4 +1,3 @@
-# size-exception: single assembler class with rendering helpers
 """Context assembler — renders memory context for LLM prompt injection.
 
 Extracted from ``MemoryStore`` (LAN-210) to isolate the ~350-line prompt
@@ -9,7 +8,6 @@ it into a single Markdown string suitable for inclusion in the system prompt.
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 from loguru import logger
@@ -18,7 +16,8 @@ from .._text import _estimate_tokens, _norm_text, _safe_float, _to_str_list
 from ..constants import EPISODIC_STATUS_RESOLVED, PROFILE_KEYS, PROFILE_STATUS_STALE
 from ..event import is_resolved_task_or_decision
 from ..persistence.profile_io import ProfileStore as ProfileManager
-from ..token_budget import DEFAULT_SECTION_WEIGHTS, TokenBudgetAllocator
+from ..token_budget import TokenBudgetAllocator, allocate_section_budgets
+from .long_term_capping import cap_long_term_text, split_md_sections
 from .retrieval_planner import RetrievalPlanner
 
 if TYPE_CHECKING:
@@ -418,24 +417,8 @@ class ContextAssembler:
     # Memory snapshot capping (Step 5)
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _split_md_sections(text: str) -> list[tuple[str, str]]:
-        """Split markdown text into (heading, body) pairs.
-
-        Sections are delimited by ``## `` headings.  Text before the first
-        heading is returned with heading ``""``.
-        """
-        parts = re.split(r"(?m)^(## .+)$", text)
-        sections: list[tuple[str, str]] = []
-        if parts and not parts[0].startswith("## "):
-            preamble = parts.pop(0).strip()
-            if preamble:
-                sections.append(("", preamble))
-        while parts:
-            heading = parts.pop(0).strip()
-            body = parts.pop(0).strip() if parts else ""
-            sections.append((heading, body))
-        return sections
+    # Delegation stubs — logic extracted to long_term_capping.py
+    _split_md_sections = staticmethod(split_md_sections)
 
     def _cap_long_term_text(
         self,
@@ -443,65 +426,8 @@ class ContextAssembler:
         token_cap: int,
         query: str,
     ) -> str:
-        """Return *long_term_text* capped to *token_cap* tokens.
-
-        When the full text exceeds the cap, sections are ranked by a simple
-        keyword-overlap score against *query* and the top sections that fit
-        within the budget are selected (most relevant first).
-        """
-        if token_cap <= 0 or not long_term_text:
-            return long_term_text
-
-        if self._estimate_tokens(long_term_text) <= token_cap:
-            return long_term_text
-
-        sections = self._split_md_sections(long_term_text)
-        if not sections:
-            # No headings — hard-truncate
-            chars = token_cap * 4
-            return long_term_text[:chars].rsplit("\n", 1)[0] + "\n(long-term memory truncated)"
-
-        # Score each section by keyword overlap with the query
-        query_words = set(query.lower().split()) if query else set()
-
-        def _score(heading: str, body: str) -> float:
-            text_words = set((heading + " " + body).lower().split())
-            overlap = len(query_words & text_words)
-            # Boost: shorter sections cost less budget and are proportionally more valuable
-            brevity = 1.0 / max(1, self._estimate_tokens(body) / 100)
-            return overlap + brevity * 0.5
-
-        scored = sorted(
-            sections,
-            key=lambda s: _score(s[0], s[1]),
-            reverse=True,
-        )
-
-        selected: list[tuple[str, str]] = []
-        used = 0
-        for heading, body in scored:
-            section_text = f"{heading}\n{body}" if heading else body
-            section_tokens = self._estimate_tokens(section_text)
-            if used + section_tokens > token_cap and selected:
-                break
-            selected.append((heading, body))
-            used += section_tokens
-
-        # Preserve original ordering
-        original_order = {id(s): i for i, s in enumerate(sections)}
-        selected.sort(key=lambda s: original_order.get(id(s), 0))
-
-        out_parts = []
-        for heading, body in selected:
-            if heading:
-                out_parts.append(f"{heading}\n{body}")
-            else:
-                out_parts.append(body)
-
-        result = "\n\n".join(out_parts)
-        if len(selected) < len(sections):
-            result += "\n(some long-term memory sections omitted to fit context budget)"
-        return result
+        """Delegate to :func:`long_term_capping.cap_long_term_text`."""
+        return cap_long_term_text(long_term_text, token_cap, query, self._estimate_tokens)
 
     def _fit_lines_to_token_cap(self, lines: list[str], *, token_cap: int) -> list[str]:
         if token_cap <= 0 or not lines:
@@ -521,6 +447,7 @@ class ContextAssembler:
     # Budget-aware context section allocation
     # ------------------------------------------------------------------
 
+    # Delegation stub — logic extracted to token_budget.allocate_section_budgets
     @classmethod
     def _allocate_section_budgets(
         cls,
@@ -528,73 +455,10 @@ class ContextAssembler:
         intent: str,
         section_sizes: dict[str, int],
     ) -> dict[str, int]:
-        """Distribute *total_budget* tokens across named sections.
-
-        Uses a two-pass proportional allocation:
-
-        1. **Priority pass** — each section gets a share proportional to its
-           intent-specific weight, capped at its actual content size.
-        2. **Redistribution pass** — tokens freed by sections that are
-           smaller than their share are redistributed to sections that need
-           more space, again proportionally by weight.
-
-        Parameters
-        ----------
-        total_budget:
-            Total token budget for the combined memory context.
-        intent:
-            Query intent string (drives prioritisation weights).
-        section_sizes:
-            Mapping of section name -> estimated token count of the **full**
-            (untruncated) content for that section.  Sections missing from
-            the map or with size 0 receive no allocation.
-
-        Returns
-        -------
-        dict mapping section name -> allocated token budget.
-        """
-        weights = DEFAULT_SECTION_WEIGHTS.get(
-            intent,
-            DEFAULT_SECTION_WEIGHTS["fact_lookup"],
+        """Delegate to :func:`token_budget.allocate_section_budgets`."""
+        return allocate_section_budgets(
+            total_budget, intent, section_sizes, min_tokens=cls._SECTION_MIN_TOKENS
         )
-
-        # Filter to sections that actually have content *and* non-zero weight.
-        active: dict[str, float] = {}
-        for name, weight in weights.items():
-            size = section_sizes.get(name, 0)
-            if size > 0 and weight > 0:
-                active[name] = weight
-
-        if not active:
-            return {name: 0 for name in weights}
-
-        total_weight = sum(active.values())
-        allocations: dict[str, int] = {name: 0 for name in weights}
-
-        # Pass 1: proportional allocation capped at actual size.
-        surplus = 0
-        uncapped: dict[str, float] = {}
-        for name, weight in active.items():
-            share = int(total_budget * (weight / total_weight))
-            actual_size = section_sizes.get(name, 0)
-            if share >= actual_size:
-                # Section fits entirely — cap and reclaim the surplus.
-                allocations[name] = actual_size
-                surplus += share - actual_size
-            else:
-                # Section needs more than its share.
-                allocations[name] = max(share, cls._SECTION_MIN_TOKENS)
-                uncapped[name] = weight
-
-        # Pass 2: redistribute surplus to sections that couldn't fit.
-        if surplus > 0 and uncapped:
-            uncapped_total = sum(uncapped.values())
-            for name, weight in uncapped.items():
-                extra = int(surplus * (weight / uncapped_total))
-                actual_size = section_sizes.get(name, 0)
-                allocations[name] = min(allocations[name] + extra, actual_size)
-
-        return allocations
 
     # Delegate to canonical function in event.py for backward compat.
     _is_resolved_task_or_decision = staticmethod(is_resolved_task_or_decision)

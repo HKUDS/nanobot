@@ -1,3 +1,4 @@
+# size-exception: entity type classification — 86% data (16 entity-type keyword sets), 14% logic
 """Entity type classification — multi-signal scoring system.
 
 Separated from the ontology schema so that the **graph language**

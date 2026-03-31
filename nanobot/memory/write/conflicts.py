@@ -24,6 +24,21 @@ from ..constants import (
     PROFILE_STATUS_STALE,
 )
 from ..persistence.profile_io import ProfileStore as ProfileManager
+from .conflict_interaction import (
+    ask_user_for_conflict as _ask_user_for_conflict,
+)
+from .conflict_interaction import (
+    conflict_relevant_to as _conflict_relevant_to,
+)
+from .conflict_interaction import (
+    get_next_user_conflict as _get_next_user_conflict,
+)
+from .conflict_interaction import (
+    handle_user_conflict_reply as _handle_user_conflict_reply,
+)
+from .conflict_interaction import (
+    parse_conflict_user_action as _parse_conflict_user_action,
+)
 
 if TYPE_CHECKING:
     from nanobot.config.memory import MemoryConfig
@@ -256,22 +271,7 @@ class ConflictManager:
 
     @staticmethod
     def _parse_conflict_user_action(text: str) -> str | None:
-        content = str(text or "").strip().lower()
-        if not content:
-            return None
-        keep_old_markers = {"keep 1", "1", "old", "keep old", "keep_old"}
-        keep_new_markers = {"keep 2", "2", "new", "keep new", "keep_new"}
-        dismiss_markers = {"neither", "dismiss", "none", "skip"}
-        merge_markers = {"merge", "combine"}
-        if content in keep_old_markers:
-            return "keep_old"
-        if content in keep_new_markers:
-            return "keep_new"
-        if content in dismiss_markers:
-            return "dismiss"
-        if content in merge_markers:
-            return "merge"
-        return None
+        return _parse_conflict_user_action(text)
 
     def _auto_resolution_action(self, conflict: dict[str, Any]) -> str | None:
         source = str(conflict.get("source", "")).strip().lower()
@@ -344,35 +344,12 @@ class ConflictManager:
         return {"auto_resolved": auto_resolved, "needs_user": needs_user}
 
     def get_next_user_conflict(self) -> dict[str, Any] | None:
-        """Return the most-recently-asked conflict, or None.
-
-        Only conflicts that have been explicitly presented to the user
-        (``asked_at`` set) are eligible — this prevents ambiguous short
-        replies like "1" from being silently hijacked as conflict resolutions
-        when no conflict question was shown in the current conversation.
-        """
-        conflicts = self.list_conflicts(include_closed=False)
-        if not conflicts:
-            return None
-
-        asked = [c for c in conflicts if isinstance(c.get("asked_at"), str) and c.get("asked_at")]
-        if not asked:
-            return None
-        asked.sort(key=lambda c: str(c.get("asked_at", "")))
-        return asked[0]
+        """Return the most-recently-asked conflict, or None."""
+        return _get_next_user_conflict(self)
 
     def _conflict_relevant_to(self, conflict: dict[str, Any], user_message: str) -> bool:
         """Return True if the conflict topic overlaps with the user's message."""
-        msg_tokens = self._tokenize(self._norm_text(user_message))
-        if not msg_tokens:
-            return True  # empty message → don't filter
-        old_tokens = self._tokenize(self._norm_text(str(conflict.get("old", ""))))
-        new_tokens = self._tokenize(self._norm_text(str(conflict.get("new", ""))))
-        conflict_tokens = old_tokens | new_tokens
-        if not conflict_tokens:
-            return True
-        overlap = len(msg_tokens & conflict_tokens) / max(len(conflict_tokens), 1)
-        return overlap >= 0.25
+        return _conflict_relevant_to(conflict, user_message)
 
     def ask_user_for_conflict(
         self,
@@ -380,83 +357,14 @@ class ConflictManager:
         include_already_asked: bool = False,
         user_message: str = "",
     ) -> str | None:
-        profile = self.profile_mgr.read_profile()
-        conflicts = profile.get("conflicts", [])
-        if not isinstance(conflicts, list):
-            return None
-
-        chosen_idx: int | None = None
-        chosen: dict[str, Any] | None = None
-        for idx, item in enumerate(conflicts):
-            if not isinstance(item, dict):
-                continue
-            status = str(item.get("status", CONFLICT_STATUS_OPEN)).strip().lower()
-            if status != CONFLICT_STATUS_NEEDS_USER:
-                continue
-            if not include_already_asked and item.get("asked_at"):
-                continue
-            # Relevance gate: if the user sent a message, only surface conflicts
-            # whose topic overlaps with the message.  When there is no message
-            # (e.g. interactive session start), skip the gate and show the first.
-            if user_message and not self._conflict_relevant_to(item, user_message):
-                continue
-            chosen_idx = idx
-            chosen = item
-            break
-
-        if chosen_idx is None or chosen is None:
-            return None
-
-        if not chosen.get("asked_at"):
-            chosen["asked_at"] = self._utc_now_iso()
-            self.profile_mgr.write_profile(profile)
-
-        old_value = str(chosen.get("old", "")).strip()
-        new_value = str(chosen.get("new", "")).strip()
-
-        # Build richer provenance lines when timestamps are available.
-        old_ts = str(chosen.get("old_last_seen_at", "")).strip()
-        new_ts = str(chosen.get("new_last_seen_at", "")).strip()
-        old_hint = f" (last seen: {old_ts[:10]})" if old_ts else ""
-        new_hint = f" (last seen: {new_ts[:10]})" if new_ts else ""
-
-        return (
-            "I found a memory conflict and need your choice:\n"
-            f"1. {old_value}{old_hint}\n"
-            f"2. {new_value}{new_hint}\n"
-            "Reply with: `keep 1`, `keep 2`, `merge`, or `neither`."
+        return _ask_user_for_conflict(
+            self,
+            include_already_asked=include_already_asked,
+            user_message=user_message,
         )
 
     def handle_user_conflict_reply(self, text: str) -> dict[str, Any]:
-        action = self._parse_conflict_user_action(text)
-        if action is None:
-            return {"handled": False}
-
-        conflict = self.get_next_user_conflict()
-        if not conflict:
-            return {"handled": False}
-
-        idx = int(conflict.get("index", -1))
-        if idx < 0:
-            return {"handled": False}
-
-        selected = "keep_new" if action == "merge" else action
-        details = self.resolve_conflict_details(index=idx, action=selected)
-        if not details.get("ok"):
-            return {
-                "handled": True,
-                "ok": False,
-                "message": "I couldn't resolve that conflict automatically. Please try `keep 1` or `keep 2`.",
-            }
-
-        return {
-            "handled": True,
-            "ok": True,
-            "message": (
-                f"Resolved conflict #{idx} with action `{selected}` "
-                f"(db op: {details.get('db_operation', 'none')})."
-            ),
-        }
+        return _handle_user_conflict_reply(self, text)
 
     def resolve_conflict_details(self, index: int, action: str) -> dict[str, Any]:
         result: dict[str, Any] = {
