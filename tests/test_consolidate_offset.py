@@ -526,7 +526,7 @@ class TestNewCommandArchival:
         loop.memory_consolidator.consolidate_messages = _failing_consolidate  # type: ignore[method-assign]
 
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
-        response = await loop._process_message(new_msg)
+        response, _usage = await loop._process_message(new_msg)
 
         assert response is not None
         assert "new session started" in response.content.lower()
@@ -559,7 +559,7 @@ class TestNewCommandArchival:
         loop.memory_consolidator.consolidate_messages = _fake_consolidate  # type: ignore[method-assign]
 
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
-        response = await loop._process_message(new_msg)
+        response, _usage = await loop._process_message(new_msg)
 
         assert response is not None
         assert "new session started" in response.content.lower()
@@ -584,7 +584,7 @@ class TestNewCommandArchival:
         loop.memory_consolidator.consolidate_messages = _ok_consolidate  # type: ignore[method-assign]
 
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
-        response = await loop._process_message(new_msg)
+        response, _usage = await loop._process_message(new_msg)
 
         assert response is not None
         assert "new session started" in response.content.lower()
