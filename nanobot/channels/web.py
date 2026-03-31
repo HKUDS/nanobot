@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import urllib.request
 from typing import Any
+
+import httpx
 
 from loguru import logger
 
@@ -59,18 +60,13 @@ class WebChannel(BaseChannel):
             return
 
         url = f"{self._webhook_url}/api/messages/ingest"
-        data = json.dumps({"machine_id": self._machine_id, "content": msg.content}).encode()
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={
-                "Content-Type": "application/json",
-                "X-Webhook-Secret": self._webhook_secret,
-            },
-            method="POST",
-        )
         try:
-            urllib.request.urlopen(req, timeout=10)
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(
+                    url,
+                    json={"machine_id": self._machine_id, "content": msg.content},
+                    headers={"X-Webhook-Secret": self._webhook_secret},
+                )
         except Exception as e:
             logger.warning("Web channel delivery failed: {}", e)
 
