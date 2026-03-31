@@ -66,6 +66,10 @@ class RateLimiter:
         if total < self._limit * self._threshold:
             return 0.0
 
+        # Defensive guard against empty deque
+        if not self._window:
+            return 0.0
+
         # Wait until the oldest entry expires from the window
         sleep_time = self._window[0].timestamp + _WINDOW_SECONDS - now + 0.5
         sleep_time = max(1.0, min(sleep_time, 15.0))
