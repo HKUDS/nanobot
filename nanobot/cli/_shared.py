@@ -102,6 +102,8 @@ def _export_all_provider_keys(config: Config) -> None:
 
     from nanobot.config.providers_registry import find_by_name
 
+    # Only set env_key (e.g. OPENAI_API_KEY); env_extras resolution is
+    # intentionally left to LiteLLMProvider._setup_env() for the active provider.
     for name, provider_config in config.providers:
         if not provider_config.api_key:
             continue

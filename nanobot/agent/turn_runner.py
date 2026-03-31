@@ -377,6 +377,8 @@ class TurnRunner:
 
         latest_attempts: list[ToolAttempt] = []
         to_remove: list[str] = []
+        # System messages (skill injection, guardrails, tool warnings) are collected
+        # here and appended AFTER all tool results to keep tool-role messages contiguous.
         deferred_messages: list[dict[str, str]] = []
 
         for tc, result in zip(response.tool_calls, results):
