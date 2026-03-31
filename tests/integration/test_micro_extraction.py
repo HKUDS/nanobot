@@ -39,7 +39,7 @@ async def test_micro_extraction_real_llm(provider: LiteLLMProvider, store: Memor
     assert len(events) > 0, "Expected at least one event to be extracted"
 
     # Check that extracted events contain relevant content
-    summaries = " ".join(e.get("summary", "") for e in events).lower()
+    summaries = " ".join(e.summary for e in events).lower()
     assert any(term in summaries for term in ["ds10540", "alice", "postgresql"]), (
         f"Expected relevant entities in summaries, got: {summaries}"
     )

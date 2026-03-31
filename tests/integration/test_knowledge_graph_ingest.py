@@ -69,7 +69,7 @@ class TestKnowledgeGraphIngestion:
         events = store.ingester.read_events(limit=100)
         assert len(events) >= len(_RELATIONSHIP_EVENTS)
 
-        summaries = " ".join(e.get("summary", "").lower() for e in events)
+        summaries = " ".join(e.summary.lower() for e in events)
         assert "alice" in summaries
         assert "acme corp" in summaries
 

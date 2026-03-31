@@ -57,7 +57,7 @@ class TestProfileConflicts:
         )
 
         events = store.ingester.read_events(limit=100)
-        summaries = [e.get("summary", "").lower() for e in events]
+        summaries = [e.summary.lower() for e in events]
         has_coffee = any("coffee" in s for s in summaries)
         has_tea = any("tea" in s for s in summaries)
 
@@ -125,5 +125,5 @@ class TestProfileConflicts:
         # New store instance pointing at the same workspace
         store2 = _make_store(tmp_path)
         events = store2.ingester.read_events(limit=100)
-        summaries = " ".join(e.get("summary", "").lower() for e in events)
+        summaries = " ".join(e.summary.lower() for e in events)
         assert "dark mode" in summaries, "Events should persist across store instances"
