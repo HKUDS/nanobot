@@ -9,6 +9,7 @@ Only the nanobot file is written on refresh; the Claude CLI file is read-only.
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -55,6 +56,7 @@ class OAuthCredentialStore:
         self._store_path.parent.mkdir(parents=True, exist_ok=True)
         data = asdict(creds)
         self._store_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.chmod(self._store_path, 0o600)
         logger.debug("OAuth credentials saved to {}", self._store_path)
 
     def _load_nanobot(self) -> OAuthCredentials | None:
