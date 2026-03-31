@@ -25,11 +25,13 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(
+        self, skill_names: list[str] | None = None, sender_name: str | None = None,
+    ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
 
-        bootstrap = self._load_bootstrap_files()
+        bootstrap = self._load_bootstrap_files(sender_name)
         if bootstrap:
             parts.append(bootstrap)
 
@@ -55,7 +57,7 @@ Skills with available="false" need dependencies installed first - you can try in
         # Identity anchor: repeat SOUL.md at the end to exploit U-shaped
         # attention (recency peak) and reinforce persona after the long
         # skills block.
-        soul_anchor = self._load_soul_anchor()
+        soul_anchor = self._load_soul_anchor(sender_name)
         if soul_anchor:
             parts.append(f"# Remember\n\n{soul_anchor}")
 
@@ -122,19 +124,31 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
             lines.append(f"Sender: {sender_name}")
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
 
-    def _load_soul_anchor(self) -> str | None:
+    def _resolve_bootstrap_path(self, filename: str, sender_name: str | None) -> Path:
+        """Resolve bootstrap file: people/{sender}/{file} overrides root {file}."""
+        if sender_name:
+            override = self.workspace / "people" / sender_name.lower() / filename
+            if override.exists():
+                return override
+        return self.workspace / filename
+
+    def _load_soul_anchor(self, sender_name: str | None = None) -> str | None:
         """Load SOUL.md for end-of-prompt identity reinforcement."""
-        soul_path = self.workspace / "SOUL.md"
+        soul_path = self._resolve_bootstrap_path("SOUL.md", sender_name)
         if soul_path.exists():
             return soul_path.read_text(encoding="utf-8").strip()
         return None
 
-    def _load_bootstrap_files(self) -> str:
-        """Load all bootstrap files from workspace."""
+    def _load_bootstrap_files(self, sender_name: str | None = None) -> str:
+        """Load all bootstrap files from workspace.
+
+        Per-sender overrides: if people/{sender}/{file}.md exists, it
+        replaces the root-level file for that sender.
+        """
         parts = []
 
         for filename in self.BOOTSTRAP_FILES:
-            file_path = self.workspace / filename
+            file_path = self._resolve_bootstrap_path(filename, sender_name)
             if file_path.exists():
                 content = file_path.read_text(encoding="utf-8")
                 parts.append(f"## {filename}\n\n{content}")
@@ -168,7 +182,7 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, sender_name=sender_name)},
             *history,
             {"role": current_role, "content": merged},
         ]
