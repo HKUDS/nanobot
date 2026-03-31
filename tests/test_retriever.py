@@ -799,7 +799,7 @@ class TestAsyncRetrieve:
 
         results = await retriever.retrieve("Python", top_k=3)
         assert len(results) >= 1
-        assert any("Python" in r.get("summary", "") for r in results)
+        assert any("Python" in r.summary for r in results)
         mock_db.search_vector.assert_called_once()
         mock_db.search_fts.assert_called_once()
 

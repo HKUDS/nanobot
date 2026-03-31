@@ -33,8 +33,25 @@ def is_resolved_task_or_decision(summary: str) -> bool:
     return any(marker in text for marker in _RESOLVED_MARKERS)
 
 
-def memory_type_for_item(item: dict[str, Any]) -> str:
-    """Classify the memory type of an event/item dict."""
+def memory_type_for_item(item: dict[str, Any] | Any) -> str:
+    """Classify the memory type of an event/item dict or RetrievedMemory.
+
+    Accepts both ``dict[str, Any]`` and ``RetrievedMemory`` (or any object
+    with ``memory_type`` and ``type`` attributes).
+    """
+    # Attribute-based access (RetrievedMemory or similar typed objects)
+    if not isinstance(item, dict):
+        mt = str(getattr(item, "memory_type", "")).strip().lower()
+        if mt in MEMORY_TYPES:
+            return mt
+        event_type = str(getattr(item, "type", "")).strip().lower()
+        if event_type in {"task", "decision"}:
+            return "episodic"
+        if event_type in {"preference", "fact", "constraint", "relationship"}:
+            return "semantic"
+        return "episodic"
+
+    # Dict-based access (legacy path)
     mt = str(item.get("memory_type", "")).strip().lower()
     if mt in MEMORY_TYPES:
         return mt

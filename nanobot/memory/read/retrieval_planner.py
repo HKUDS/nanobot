@@ -308,8 +308,8 @@ class RetrievalPlanner:
     # ── Memory type classification ─────────────────────────────────────
 
     @staticmethod
-    def memory_type_for_item(item: dict[str, Any]) -> str:
-        """Classify the memory type of *item*."""
+    def memory_type_for_item(item: dict[str, Any] | Any) -> str:
+        """Classify the memory type of *item* (dict or RetrievedMemory)."""
         return _memory_type_for_item(item)
 
     # ── Recency signal ─────────────────────────────────────────────────

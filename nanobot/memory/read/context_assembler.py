@@ -19,6 +19,7 @@ from ..persistence.profile_io import ProfileStore as ProfileManager
 from ..token_budget import TokenBudgetAllocator, allocate_section_budgets
 from .long_term_capping import cap_long_term_text, split_md_sections
 from .retrieval_planner import RetrievalPlanner
+from .retrieval_types import RetrievedMemory
 
 if TYPE_CHECKING:
     from ..db.connection import MemoryDatabase
@@ -34,7 +35,7 @@ class _Retriever(Protocol):
         top_k: int = 6,
         recency_half_life_days: float | None = None,
         embedding_provider: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[RetrievedMemory]:
         """Retrieve memory items matching *query*."""
 
 
@@ -51,7 +52,7 @@ class _GraphAugmenter(Protocol):
     def build_graph_context_lines(
         self,
         query: str,
-        retrieved: list[dict[str, Any]],
+        retrieved: list[Any],
         budget: int,
     ) -> list[str]:
         """Build graph context lines for prompt injection."""
@@ -401,7 +402,14 @@ class ContextAssembler:
         return unresolved
 
     @staticmethod
-    def _memory_item_line(item: dict[str, Any]) -> str:
+    def _memory_item_line(item: dict[str, Any] | RetrievedMemory) -> str:
+        if isinstance(item, RetrievedMemory):
+            return (
+                f"- [{item.timestamp[:16]}] ({item.type}) {item.summary} "
+                f"[sem={item.scores.semantic:.2f}, "
+                f"rec={item.scores.recency:.2f}, "
+                f"src={item.scores.provider}]"
+            )
         timestamp = str(item.get("timestamp", ""))[:16]
         event_type = item.get("type", "fact")
         summary = item.get("summary", "")

@@ -111,7 +111,7 @@ class TestRetrieveContract:
         store.ingester.append_events(_sample_events())
         results = await store.retriever.retrieve("dark mode", top_k=5)
         assert isinstance(results, list)
-        summaries = [r.get("summary", "").lower() for r in results]
+        summaries = [r.summary.lower() for r in results]
         assert any("dark mode" in s for s in summaries), (
             f"Expected 'dark mode' in retrieved results: {summaries}"
         )
@@ -193,7 +193,7 @@ class TestRoundtripConsistency:
             ]
         )
         results = await store.retriever.retrieve("TypeScript preference", top_k=5)
-        summaries = " ".join(r.get("summary", "") for r in results).lower()
+        summaries = " ".join(r.summary for r in results).lower()
         assert "typescript" in summaries
 
     async def test_fact_roundtrip(self, tmp_path: Path):
@@ -210,7 +210,7 @@ class TestRoundtripConsistency:
             ]
         )
         results = await store.retriever.retrieve("where does user work", top_k=5)
-        summaries = " ".join(r.get("summary", "") for r in results).lower()
+        summaries = " ".join(r.summary for r in results).lower()
         assert "acme" in summaries
 
 
@@ -219,11 +219,12 @@ class TestRoundtripConsistency:
 # ---------------------------------------------------------------------------
 
 
-def _index_of(results: list[dict[str, Any]], needle: str) -> int | None:
+def _index_of(results: list[Any], needle: str) -> int | None:
     """Return the index of the first result whose summary contains *needle* (case-insensitive)."""
     needle_lower = needle.lower()
     for i, r in enumerate(results):
-        if needle_lower in r.get("summary", "").lower():
+        summary = r.summary if hasattr(r, "summary") else r.get("summary", "")
+        if needle_lower in summary.lower():
             return i
     return None
 
@@ -319,7 +320,7 @@ class TestBehavioralInvariants:
         )
         results = await store.retriever.retrieve("favorite color blue", top_k=5)
         for r in results:
-            summary = r.get("summary", "").lower()
+            summary = r.summary.lower()
             assert "color" not in summary and "blue" not in summary, (
                 f"False match: '{summary}' should not appear for query 'favorite color blue'"
             )

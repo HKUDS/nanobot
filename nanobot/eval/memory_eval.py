@@ -212,12 +212,12 @@ class EvalRunner:
             matched_status: set[str] = set()
 
             for item in retrieved:
-                summary = str(item.get("summary", "")).lower()
+                summary = item.summary.lower()
                 summary_norm = _normalize_phrase(summary)
-                event_id = str(item.get("id", ""))
-                item_topic = str(item.get("topic", "")).strip().lower()
-                item_type = str(item.get("memory_type", "")).strip().lower()
-                item_status = str(item.get("status", "")).strip().lower()
+                event_id = item.id
+                item_topic = item.topic.strip().lower()
+                item_type = item.memory_type.strip().lower()
+                item_status = item.status.strip().lower()
                 is_relevant = False
 
                 for expected_id in expected_ids:

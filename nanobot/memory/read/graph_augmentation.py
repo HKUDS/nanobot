@@ -120,7 +120,7 @@ class GraphAugmenter:
     def build_graph_context_lines(
         self,
         query: str,
-        retrieved: list[dict[str, Any]],
+        retrieved: list[Any],
         max_tokens: int = 100,
     ) -> list[str]:
         """Build entity relationship summary lines from graph and local event triples.
@@ -136,7 +136,10 @@ class GraphAugmenter:
         query_entities |= self.extract_query_entities(query, entity_index)
 
         for item in retrieved:
-            for e in item.get("entities") or []:
+            entities = (
+                item.get("entities") if isinstance(item, dict) else getattr(item, "entities", None)
+            )
+            for e in entities or []:
                 if isinstance(e, str) and e.strip():
                     query_entities.add(e.strip().lower())
 
