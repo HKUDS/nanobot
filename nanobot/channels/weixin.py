@@ -752,15 +752,17 @@ class WeixinChannel(BaseChannel):
 
         # --- TTS voice message (before text, matching media-first pattern) ---
         if wants_voice and content and self._tts_provider:
-            tmp = Path(tempfile.mktemp(suffix=".mp3", prefix="nanobot-tts-"))
-            ok = await self._tts_provider.synthesize(content, tmp)
-            if ok:
-                try:
-                    await self._send_media_file(msg.chat_id, str(tmp), ctx_token)
-                except Exception as e:
-                    logger.error("Failed to send WeChat TTS voice: {}", e)
-                finally:
-                    tmp.unlink(missing_ok=True)
+            with tempfile.NamedTemporaryFile(suffix=".mp3", prefix="nanobot-tts-", delete=False) as tf:
+                tmp = Path(tf.name)
+            try:
+                ok = await self._tts_provider.synthesize(content, tmp)
+                if ok:
+                    try:
+                        await self._send_media_file(msg.chat_id, str(tmp), ctx_token)
+                    except Exception as e:
+                        logger.error("Failed to send WeChat TTS voice: {}", e)
+            finally:
+                tmp.unlink(missing_ok=True)
 
         # --- Send media files first (following Telegram channel pattern) ---
         for media_path in (msg.media or []):
