@@ -82,6 +82,8 @@ async def test_prompt_above_threshold_archives_until_next_user_boundary(tmp_path
 async def test_consolidation_loops_until_target_met(tmp_path, monkeypatch) -> None:
     """Verify maybe_consolidate_by_tokens keeps looping until under threshold."""
     loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
+    loop.memory_consolidator.max_completion_tokens = 0  # keep budget == context_window - safety_buffer
+    loop.memory_consolidator._SAFETY_BUFFER = 0  # so budget == context_window_tokens
     loop.memory_consolidator.consolidate_messages = AsyncMock(return_value=True)  # type: ignore[method-assign]
 
     session = loop.sessions.get_or_create("cli:test")
@@ -118,6 +120,8 @@ async def test_consolidation_loops_until_target_met(tmp_path, monkeypatch) -> No
 async def test_consolidation_continues_below_trigger_until_half_target(tmp_path, monkeypatch) -> None:
     """Once triggered, consolidation should continue until it drops below half threshold."""
     loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
+    loop.memory_consolidator.max_completion_tokens = 0
+    loop.memory_consolidator._SAFETY_BUFFER = 0
     loop.memory_consolidator.consolidate_messages = AsyncMock(return_value=True)  # type: ignore[method-assign]
 
     session = loop.sessions.get_or_create("cli:test")
