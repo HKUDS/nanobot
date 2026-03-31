@@ -40,6 +40,89 @@ def test_sanitize_messages_and_cache_control_helpers() -> None:
     assert "cache_control" in cc_tools[-1]
 
 
+def _count_cache_blocks(messages: list[dict], tools: list[dict] | None) -> int:
+    """Count total cache_control markers across messages and tools."""
+    count = 0
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and "cache_control" in block:
+                    count += 1
+    if tools:
+        for t in tools:
+            if "cache_control" in t:
+                count += 1
+    return count
+
+
+def _make_system_msg(text: str) -> dict:
+    return {"role": "system", "content": text}
+
+
+def _make_tool() -> dict:
+    return {"type": "function", "function": {"name": "f", "parameters": {"type": "object"}}}
+
+
+def test_cache_control_caps_at_four_blocks() -> None:
+    """6 system messages + tools must produce at most 4 cache_control blocks."""
+    provider = LiteLLMProvider(api_key=None)
+    msgs = [_make_system_msg(f"sys{i}") for i in range(6)]
+    msgs.insert(2, {"role": "user", "content": "hi"})  # non-system interspersed
+    tools = [_make_tool(), _make_tool()]
+
+    cc_msgs, cc_tools = provider._apply_cache_control(msgs, tools)
+    total = _count_cache_blocks(cc_msgs, cc_tools)
+    assert total <= 4, f"Expected <= 4 cache_control blocks, got {total}"
+
+
+def test_cache_control_first_and_last_system_messages() -> None:
+    """First system message and last N should be cached; intermediates skipped."""
+    provider = LiteLLMProvider(api_key=None)
+    msgs = [_make_system_msg(f"sys{i}") for i in range(5)]
+    tools = [_make_tool()]
+
+    cc_msgs, cc_tools = provider._apply_cache_control(msgs, tools)
+
+    # First system message should be cached
+    assert isinstance(cc_msgs[0]["content"], list)
+    assert "cache_control" in cc_msgs[0]["content"][0]
+
+    # Last system message should be cached
+    assert isinstance(cc_msgs[4]["content"], list)
+    assert "cache_control" in cc_msgs[4]["content"][0]
+
+    # Middle messages (indices 1-2) should NOT be cached (budget: 4 - 1 tool = 3 msgs)
+    # With 5 system msgs and budget 3: first + last 2 = indices 0, 3, 4
+    assert isinstance(cc_msgs[1]["content"], str), "Intermediate msg should not be cached"
+    assert isinstance(cc_msgs[2]["content"], str), "Intermediate msg should not be cached"
+
+
+def test_cache_control_single_system_message() -> None:
+    """Common case: 1 system message + tools = 2 blocks."""
+    provider = LiteLLMProvider(api_key=None)
+    msgs = [_make_system_msg("prompt")]
+    tools = [_make_tool()]
+
+    cc_msgs, cc_tools = provider._apply_cache_control(msgs, tools)
+    assert _count_cache_blocks(cc_msgs, cc_tools) == 2
+    assert isinstance(cc_msgs[0]["content"], list)
+    assert cc_tools is not None
+    assert "cache_control" in cc_tools[-1]
+
+
+def test_cache_control_no_tools() -> None:
+    """No tools: full budget of 4 goes to system messages."""
+    provider = LiteLLMProvider(api_key=None)
+    msgs = [_make_system_msg(f"sys{i}") for i in range(3)]
+
+    cc_msgs, cc_tools = provider._apply_cache_control(msgs, None)
+    # All 3 should be cached (budget 4, no tools)
+    for i in range(3):
+        assert isinstance(cc_msgs[i]["content"], list), f"sys{i} should be cached"
+    assert cc_tools is None
+
+
 def test_resolve_model_with_and_without_gateway(monkeypatch) -> None:
     provider = LiteLLMProvider(api_key=None)
 
