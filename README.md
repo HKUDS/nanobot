@@ -421,9 +421,11 @@ pip install nanobot-ai[matrix]
 
 - You need:
   - `userId` (example: `@nanobot:matrix.org`)
-  - `accessToken`
-  - `deviceId` (recommended so sync tokens can be restored across restarts)
-- You can obtain these from your homeserver login API (`/_matrix/client/v3/login`) or from your client's advanced session settings.
+  - `password`
+
+(Note: `accessToken` and `deviceId` are still supported for legacy reasons, but
+for reliable encryption, password login is recommended instead. If the
+`password` is provided, `accessToken` and `deviceId` will be ignored.)
 
 **3. Configure**
 
@@ -434,8 +436,7 @@ pip install nanobot-ai[matrix]
       "enabled": true,
       "homeserver": "https://matrix.org",
       "userId": "@nanobot:matrix.org",
-      "accessToken": "syt_xxx",
-      "deviceId": "NANOBOT01",
+      "password": "mypasswordhere",
       "e2eeEnabled": true,
       "allowFrom": ["@your_user:matrix.org"],
       "groupPolicy": "open",
@@ -447,7 +448,7 @@ pip install nanobot-ai[matrix]
 }
 ```
 
-> Keep a persistent `matrix-store` and stable `deviceId` — encrypted session state is lost if these change across restarts.
+> Keep a persistent `matrix-store` — encrypted session state is lost if these change across restarts.
 
 | Option | Description |
 |--------|-------------|
