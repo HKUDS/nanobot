@@ -505,6 +505,11 @@ class TurnRunner:
                 intervention.message[:120],
             )
             state.messages.append({"role": "system", "content": intervention.message})
+            # Find the failed/empty attempt that triggered this guardrail
+            _failed = next(
+                (a for a in reversed(latest_attempts) if not a.success or a.output_empty),
+                None,
+            )
             state.guardrail_activations.append(
                 {
                     "source": intervention.source,
@@ -512,6 +517,8 @@ class TurnRunner:
                     "iteration": state.iteration,
                     "message": intervention.message,
                     "strategy_tag": intervention.strategy_tag,
+                    "failed_tool": _failed.tool_name if _failed else "unknown",
+                    "failed_args": _failed.arguments if _failed else {},
                 }
             )
 
