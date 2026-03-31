@@ -95,9 +95,6 @@ class OAuthCredentialStore:
 
 _ANTHROPIC_TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
 _ANTHROPIC_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-_REFRESH_MARGIN_MS = 5 * 60 * 1000  # refresh 5 min before actual expiry
-
-
 async def refresh_anthropic_token(refresh_token: str) -> OAuthCredentials:
     """Exchange a refresh token for a new access token.
 
@@ -132,5 +129,5 @@ async def refresh_anthropic_token(refresh_token: str) -> OAuthCredentials:
     return OAuthCredentials(
         access_token=data["access_token"],
         refresh_token=data["refresh_token"],
-        expires_at_ms=now_ms + int(data["expires_in"]) * 1000 - _REFRESH_MARGIN_MS,
+        expires_at_ms=now_ms + int(data["expires_in"]) * 1000,
     )
