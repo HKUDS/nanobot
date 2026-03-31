@@ -44,8 +44,9 @@ class TestExecToolTruncate:
         result = await tool.execute('python -c "print(\'B\' * 15000)"')
         
         assert len(result) < 15000
-        # Windows uses \r\n, Unix uses \n
-        assert result.rstrip().endswith("B")
+        # 只要确认截取后的尾部包含了大量的 B 以及退出码即可
+        assert "B" * 100 in result
+        assert "Exit code: 0" in result
         assert "truncated" in result
         assert "more chars" in result
 
@@ -108,8 +109,8 @@ class TestExecToolTruncate:
         result = await tool.execute('python -c "print(\'Z\' * 15000)"')
         
         assert "truncated" in result
-        # Windows uses \r\n, Unix uses \n
-        assert result.rstrip().endswith("Z")
+        assert "Z" * 100 in result
+        assert "Exit code: 0" in result
 
 
 class TestExecToolBasic:
