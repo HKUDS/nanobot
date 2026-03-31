@@ -1046,6 +1046,19 @@ class FeishuChannel(BaseChannel):
 
         # --- stream end: final update or fallback ---
         if meta.get("_stream_end"):
+            resuming = meta.get("_resuming", False)
+            if resuming:
+                # Mid-turn pause (e.g. tool call between streaming segments).
+                # Flush current text to card but keep the buffer alive so the
+                # next segment appends to the same card.
+                buf = self._stream_bufs.get(chat_id)
+                if buf and buf.card_id and buf.text:
+                    buf.sequence += 1
+                    await loop.run_in_executor(
+                        None, self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence,
+                    )
+                return
+
             buf = self._stream_bufs.pop(chat_id, None)
             if not buf or not buf.text:
                 return
@@ -1054,7 +1067,6 @@ class FeishuChannel(BaseChannel):
                 await loop.run_in_executor(
                     None, self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence,
                 )
-                # Required so the chat list preview exits the streaming placeholder (Feishu streaming card docs).
                 buf.sequence += 1
                 await loop.run_in_executor(
                     None, self._close_streaming_mode_sync, buf.card_id, buf.sequence,
