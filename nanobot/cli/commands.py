@@ -559,7 +559,6 @@ def gateway(
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
-    provider_name = config.get_provider_name(config.agents.defaults.model) or provider.__class__.__name__
     session_manager = SessionManager(config.workspace_path)
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
@@ -589,7 +588,6 @@ def gateway(
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
         context_pruning_config=config.agents.defaults.context_pruning,
-        provider_name=provider_name,
     )
 
     # Set cron callback (needs agent)
@@ -766,8 +764,6 @@ def agent(
 
     bus = MessageBus()
     provider = _make_provider(config)
-    provider_name = config.get_provider_name(config.agents.defaults.model) or provider.__class__.__name__
-
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):
         _migrate_cron_store(config)
@@ -798,7 +794,6 @@ def agent(
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
         context_pruning_config=config.agents.defaults.context_pruning,
-        provider_name=provider_name,
     )
 
     # Shared reference for progress callbacks
