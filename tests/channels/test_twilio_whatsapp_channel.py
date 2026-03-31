@@ -216,6 +216,47 @@ async def test_send_mixed_text_and_media(tmp_path):
     assert media_call.kwargs["media_url"][0].endswith(".pdf")
 
 
+@pytest.mark.asyncio
+async def test_send_multiple_media(tmp_path):
+    ch = _make_channel(tmp_path)
+    img = tmp_path / "a.png"
+    img.write_bytes(b"png")
+    pdf = tmp_path / "b.pdf"
+    pdf.write_bytes(b"pdf")
+
+    msg = OutboundMessage(
+        channel="twilio_whatsapp",
+        chat_id="whatsapp:+1234567890",
+        content="",
+        media=[str(img), str(pdf)],
+    )
+
+    await ch.send(msg)
+
+    assert ch._twilio.messages.create.call_count == 2
+    urls = [
+        call.kwargs["media_url"][0]
+        for call in ch._twilio.messages.create.call_args_list
+    ]
+    assert urls[0].endswith(".png")
+    assert urls[1].endswith(".pdf")
+
+
+@pytest.mark.asyncio
+async def test_send_no_content_no_media_is_noop(tmp_path):
+    ch = _make_channel(tmp_path)
+    msg = OutboundMessage(
+        channel="twilio_whatsapp",
+        chat_id="whatsapp:+1234567890",
+        content="",
+        media=[],
+    )
+
+    await ch.send(msg)
+
+    ch._twilio.messages.create.assert_not_called()
+
+
 # ------------------------------------------------------------------
 # _stage_media
 # ------------------------------------------------------------------
