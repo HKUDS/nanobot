@@ -27,3 +27,6 @@ uv.lock
 
 # pytest temp dirs
 pytest-of-root/
+
+# local docs/plans
+docs/superpowers/
