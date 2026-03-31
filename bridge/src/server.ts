@@ -10,6 +10,7 @@ interface SendCommand {
   type: 'send';
   to: string;
   text: string;
+  mentions?: string[];
 }
 
 interface SendMediaCommand {
@@ -107,7 +108,7 @@ export class BridgeServer {
     if (!this.wa) return;
 
     if (cmd.type === 'send') {
-      await this.wa.sendMessage(cmd.to, cmd.text);
+      await this.wa.sendMessage(cmd.to, cmd.text, cmd.mentions);
     } else if (cmd.type === 'send_media') {
       await this.wa.sendMedia(cmd.to, cmd.filePath, cmd.mimetype, cmd.caption, cmd.fileName);
     }

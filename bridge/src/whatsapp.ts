@@ -24,12 +24,14 @@ const VERSION = '0.1.0';
 
 export interface InboundMessage {
   id: string;
-  sender: string;
+  sender: string;      // Chat JID (group JID for groups, user JID for DMs)
   pn: string;
+  participant?: string; // For group messages: the individual sender's JID
   content: string;
   timestamp: number;
   isGroup: boolean;
   wasMentioned?: boolean;
+  isReplyToBot?: boolean;
   media?: string[];
 }
 
@@ -53,25 +55,56 @@ export class WhatsAppClient {
     return (jid || '').split(':')[0];
   }
 
-  private wasMentioned(msg: any): boolean {
-    if (!msg?.key?.remoteJid?.endsWith('@g.us')) return false;
+  /**
+   * LID-aware bot-mention and reply-to-bot detection.
+   *
+   * Checks @mentions AND swipe-to-reply against both the bot's phone-based
+   * JID and its LID (Linked ID). In LID-migrated groups, the bot's JID in
+   * contextInfo uses the LID form, so checking only the phone JID misses
+   * mentions and reply-to-bot in those groups.
+   *
+   * Device suffixes (e.g. ":5" in "1234:5@s.whatsapp.net") are stripped
+   * before comparison, and mentionedJid is collected from all message types
+   * (text, image, video, document, audio).
+   */
+  private detectBotMention(msg: any): { wasMentioned: boolean; isReplyToBot: boolean } {
+    const botJid = this.sock?.user?.id || '';
+    const botJidBase = botJid.replace(/:\d+@/, '@');
+    const botLid = (this.sock?.user as any)?.lid || '';
+    const botLidBase = botLid ? botLid.replace(/:\d+@/, '@') : '';
 
+    const unwrapped = baileysExtractMessageContent(msg.message);
+
+    // Collect mentionedJid from all message types that can carry mentions
     const candidates = [
-      msg?.message?.extendedTextMessage?.contextInfo?.mentionedJid,
-      msg?.message?.imageMessage?.contextInfo?.mentionedJid,
-      msg?.message?.videoMessage?.contextInfo?.mentionedJid,
-      msg?.message?.documentMessage?.contextInfo?.mentionedJid,
-      msg?.message?.audioMessage?.contextInfo?.mentionedJid,
+      unwrapped?.extendedTextMessage?.contextInfo?.mentionedJid,
+      unwrapped?.imageMessage?.contextInfo?.mentionedJid,
+      unwrapped?.videoMessage?.contextInfo?.mentionedJid,
+      unwrapped?.documentMessage?.contextInfo?.mentionedJid,
+      unwrapped?.audioMessage?.contextInfo?.mentionedJid,
     ];
-    const mentioned = candidates.flatMap((items) => (Array.isArray(items) ? items : []));
-    if (mentioned.length === 0) return false;
+    const mentionedJids = candidates.flatMap((items) => (Array.isArray(items) ? items : []));
 
-    const selfIds = new Set(
-      [this.sock?.user?.id, this.sock?.user?.lid, this.sock?.user?.jid]
-        .map((jid) => this.normalizeJid(jid))
-        .filter(Boolean),
+    const wasMentioned = mentionedJids.some(
+      (jid) => jid === botJid || jid === botJidBase ||
+               (botLid && jid === botLid) || (botLidBase && jid === botLidBase)
     );
-    return mentioned.some((jid: string) => selfIds.has(this.normalizeJid(jid)));
+
+    // Check swipe-to-reply: contextInfo.participant is the quoted message's
+    // author. In LID-migrated groups this uses the bot's LID, not phone JID.
+    const contextInfo = unwrapped?.extendedTextMessage?.contextInfo;
+    const quotedParticipant = contextInfo?.participant ?? '';
+    const isReplyToBot = !!(
+      contextInfo?.stanzaId &&
+      (
+        quotedParticipant === botJid ||
+        quotedParticipant === botJidBase ||
+        (botLid && quotedParticipant === botLid) ||
+        (botLidBase && quotedParticipant === botLidBase)
+      )
+    );
+
+    return { wasMentioned, isReplyToBot };
   }
 
   async connect(): Promise<void> {
@@ -171,16 +204,18 @@ export class WhatsAppClient {
         if (!finalContent && mediaPaths.length === 0) continue;
 
         const isGroup = msg.key.remoteJid?.endsWith('@g.us') || false;
-        const wasMentioned = this.wasMentioned(msg);
+        const { wasMentioned, isReplyToBot } = this.detectBotMention(msg);
+        const effectivelyMentioned = wasMentioned || isReplyToBot;
 
         this.options.onMessage({
           id: msg.key.id || '',
           sender: msg.key.remoteJid || '',
           pn: msg.key.remoteJidAlt || '',
+          ...(isGroup && msg.key.participant ? { participant: msg.key.participant } : {}),
           content: finalContent,
           timestamp: msg.messageTimestamp as number,
           isGroup,
-          ...(isGroup ? { wasMentioned } : {}),
+          ...(isGroup ? { wasMentioned: effectivelyMentioned, isReplyToBot } : {}),
           ...(mediaPaths.length > 0 ? { media: mediaPaths } : {}),
         });
       }
@@ -250,12 +285,40 @@ export class WhatsAppClient {
     return null;
   }
 
-  async sendMessage(to: string, text: string): Promise<void> {
+  /**
+   * Extract mention JIDs from text containing @<digits> patterns.
+   *
+   * WhatsApp requires an explicit `mentions` array in the message payload
+   * for @mentions to be tappable. This method parses @-prefixed digit
+   * sequences and constructs the appropriate JID:
+   * - 14+ digits → LID domain (@lid)
+   * - Fewer digits → phone domain (@s.whatsapp.net)
+   *
+   * WhatsApp LIDs are typically 14-digit identifiers, whereas phone-number
+   * JIDs are typically 10–13 digits (country code + number).
+   */
+  static extractMentionJids(text: string): string[] {
+    const jids: string[] = [];
+    const pattern = /@(\d+)/g;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(text)) !== null) {
+      const digits = match[1];
+      const domain = digits.length >= 14 ? 'lid' : 's.whatsapp.net';
+      jids.push(`${digits}@${domain}`);
+    }
+    return jids;
+  }
+
+  async sendMessage(to: string, text: string, mentions?: string[]): Promise<void> {
     if (!this.sock) {
       throw new Error('Not connected');
     }
 
-    await this.sock.sendMessage(to, { text });
+    const effectiveMentions = mentions ?? WhatsAppClient.extractMentionJids(text);
+    await this.sock.sendMessage(to, {
+      text,
+      ...(effectiveMentions.length ? { mentions: effectiveMentions } : {}),
+    });
   }
 
   async sendMedia(
