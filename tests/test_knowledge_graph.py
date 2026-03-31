@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.memory.db import MemoryDatabase
+from nanobot.memory.event import MemoryEvent
 from nanobot.memory.graph.graph import KnowledgeGraph
 from nanobot.memory.graph.ontology_types import (
     Entity,
@@ -551,18 +552,20 @@ class TestGraphContextBuilder:
         store.graph.enabled = True
 
         events = [
-            {
-                "id": "e1",
-                "type": "relationship",
-                "summary": "Carlos works with platform-team",
-                "entities": ["Carlos", "platform-team"],
-                "timestamp": "2024-01-01T00:00:00Z",
-                "triples": [
-                    {"subject": "Carlos", "predicate": "WORKS_WITH", "object": "platform-team"}
-                ],
-                "salience": 0.7,
-                "confidence": 0.8,
-            }
+            MemoryEvent.from_dict(
+                {
+                    "id": "e1",
+                    "type": "relationship",
+                    "summary": "Carlos works with platform-team",
+                    "entities": ["Carlos", "platform-team"],
+                    "timestamp": "2024-01-01T00:00:00Z",
+                    "triples": [
+                        {"subject": "Carlos", "predicate": "WORKS_WITH", "object": "platform-team"}
+                    ],
+                    "salience": 0.7,
+                    "confidence": 0.8,
+                }
+            )
         ]
         store.ingester.append_events(events)
         # Add entities and edges to the graph's backing DB.
@@ -587,16 +590,18 @@ class TestGraphContextBuilder:
         store.graph.enabled = True
 
         events = [
-            {
-                "id": "e1",
-                "type": "fact",
-                "summary": "Unrelated fact",
-                "entities": ["Unrelated"],
-                "timestamp": "2024-01-01T00:00:00Z",
-                "triples": [{"subject": "Foo", "predicate": "USES", "object": "Bar"}],
-                "salience": 0.5,
-                "confidence": 0.5,
-            }
+            MemoryEvent.from_dict(
+                {
+                    "id": "e1",
+                    "type": "fact",
+                    "summary": "Unrelated fact",
+                    "entities": ["Unrelated"],
+                    "timestamp": "2024-01-01T00:00:00Z",
+                    "triples": [{"subject": "Foo", "predicate": "USES", "object": "Bar"}],
+                    "salience": 0.5,
+                    "confidence": 0.5,
+                }
+            )
         ]
         store.ingester.append_events(events)
 

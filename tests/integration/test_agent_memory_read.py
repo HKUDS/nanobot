@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.memory.event import MemoryEvent
 from tests.integration.conftest import make_inbound
 
 pytestmark = pytest.mark.integration
@@ -22,12 +23,14 @@ class TestMemoryContextInjection:
         """When memory contains a fact, the LLM's response should reflect it."""
         agent.memory.ingester.append_events(
             [
-                {
-                    "type": "fact",
-                    "summary": "User works at Globex Corporation as a senior engineer.",
-                    "timestamp": "2026-03-01T12:00:00+00:00",
-                    "source": "test",
-                }
+                MemoryEvent.from_dict(
+                    {
+                        "type": "fact",
+                        "summary": "User works at Globex Corporation as a senior engineer.",
+                        "timestamp": "2026-03-01T12:00:00+00:00",
+                        "source": "test",
+                    }
+                )
             ]
         )
         msg = make_inbound("Where do I work?")
@@ -41,12 +44,14 @@ class TestMemoryContextInjection:
         """Stored preference should be reflected when asked about it."""
         agent.memory.ingester.append_events(
             [
-                {
-                    "type": "preference",
-                    "summary": "User strongly prefers dark mode in all editors and IDEs.",
-                    "timestamp": "2026-03-01T12:00:00+00:00",
-                    "source": "test",
-                }
+                MemoryEvent.from_dict(
+                    {
+                        "type": "preference",
+                        "summary": "User strongly prefers dark mode in all editors and IDEs.",
+                        "timestamp": "2026-03-01T12:00:00+00:00",
+                        "source": "test",
+                    }
+                )
             ]
         )
         msg = make_inbound("What are my editor preferences?")

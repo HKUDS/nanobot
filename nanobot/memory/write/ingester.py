@@ -77,15 +77,15 @@ class EventIngester:
             return result
         return []
 
-    def append_events(self, events: Sequence[MemoryEvent | dict[str, Any]]) -> int:
+    def append_events(self, events: Sequence[MemoryEvent]) -> int:
         """Main ingestion entry point: dedup, merge, persist, and sync to vector store.
 
-        Accepts ``MemoryEvent`` objects (preferred) or raw dicts (legacy callers).
-        Dicts are converted to ``MemoryEvent`` internally via ``from_dict()``.
+        Accepts ``MemoryEvent`` objects. Internally converts to dicts for the
+        dedup/merge pipeline which does heavy in-place mutation.
         """
         if not events:
             return 0
-        raw_events = [e.to_dict() if isinstance(e, MemoryEvent) else e for e in events]
+        raw_events = [e.to_dict() for e in events]
         t0_append = time.monotonic()
         existing_events = [
             self._coercer.ensure_event_provenance(event) for event in self.read_events()

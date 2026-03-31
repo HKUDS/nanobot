@@ -418,23 +418,12 @@ class ContextAssembler:
         return unresolved
 
     @staticmethod
-    def _memory_item_line(item: dict[str, Any] | RetrievedMemory) -> str:
-        if isinstance(item, RetrievedMemory):
-            return (
-                f"- [{item.timestamp[:16]}] ({item.type}) {item.summary} "
-                f"[sem={item.scores.semantic:.2f}, "
-                f"rec={item.scores.recency:.2f}, "
-                f"src={item.scores.provider}]"
-            )
-        timestamp = str(item.get("timestamp", ""))[:16]
-        event_type = item.get("type", "fact")
-        summary = item.get("summary", "")
-        reason = item.get("retrieval_reason", {})
+    def _memory_item_line(item: RetrievedMemory) -> str:
         return (
-            f"- [{timestamp}] ({event_type}) {summary} "
-            f"[sem={reason.get('semantic', 0):.2f}, "
-            f"rec={reason.get('recency', 0):.2f}, "
-            f"src={reason.get('provider', 'vector')}]"
+            f"- [{item.timestamp[:16]}] ({item.type}) {item.summary} "
+            f"[sem={item.scores.semantic:.2f}, "
+            f"rec={item.scores.recency:.2f}, "
+            f"src={item.scores.provider}]"
         )
 
     # ------------------------------------------------------------------

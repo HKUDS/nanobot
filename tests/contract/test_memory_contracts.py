@@ -125,13 +125,15 @@ class TestRetrieveContract:
         store = _make_store(tmp_path)
         # Append many events
         events = [
-            {
-                "id": f"evt-{i:03d}",
-                "type": "fact",
-                "summary": f"Fact number {i} about testing.",
-                "timestamp": "2026-03-01T12:00:00+00:00",
-                "source": "test",
-            }
+            MemoryEvent.from_dict(
+                {
+                    "id": f"evt-{i:03d}",
+                    "type": "fact",
+                    "summary": f"Fact number {i} about testing.",
+                    "timestamp": "2026-03-01T12:00:00+00:00",
+                    "source": "test",
+                }
+            )
             for i in range(20)
         ]
         store.ingester.append_events(events)
@@ -188,13 +190,15 @@ class TestRoundtripConsistency:
         store = _make_store(tmp_path)
         store.ingester.append_events(
             [
-                {
-                    "id": "evt-pref-1",
-                    "type": "preference",
-                    "summary": "User always wants TypeScript over JavaScript.",
-                    "timestamp": "2026-03-01T12:00:00+00:00",
-                    "source": "test",
-                }
+                MemoryEvent.from_dict(
+                    {
+                        "id": "evt-pref-1",
+                        "type": "preference",
+                        "summary": "User always wants TypeScript over JavaScript.",
+                        "timestamp": "2026-03-01T12:00:00+00:00",
+                        "source": "test",
+                    }
+                )
             ]
         )
         results = await store.retriever.retrieve("TypeScript preference", top_k=5)
@@ -205,13 +209,15 @@ class TestRoundtripConsistency:
         store = _make_store(tmp_path)
         store.ingester.append_events(
             [
-                {
-                    "id": "evt-fact-1",
-                    "type": "fact",
-                    "summary": "User works at Acme Corp since 2024.",
-                    "timestamp": "2026-03-01T12:00:00+00:00",
-                    "source": "test",
-                }
+                MemoryEvent.from_dict(
+                    {
+                        "id": "evt-fact-1",
+                        "type": "fact",
+                        "summary": "User works at Acme Corp since 2024.",
+                        "timestamp": "2026-03-01T12:00:00+00:00",
+                        "source": "test",
+                    }
+                )
             ]
         )
         results = await store.retriever.retrieve("where does user work", top_k=5)
@@ -246,22 +252,26 @@ class TestBehavioralInvariants:
         store = _make_store(tmp_path)
         store.ingester.append_events(
             [
-                {
-                    "id": "evt-old-coffee",
-                    "type": "preference",
-                    "summary": "User prefers drip coffee every morning.",
-                    "timestamp": "2026-01-01T08:00:00+00:00",
-                    "source": "test",
-                    "status": "superseded",
-                },
-                {
-                    "id": "evt-new-coffee",
-                    "type": "preference",
-                    "summary": "User prefers espresso coffee every morning.",
-                    "timestamp": "2026-03-01T08:00:00+00:00",
-                    "source": "test",
-                    "status": "active",
-                },
+                MemoryEvent.from_dict(
+                    {
+                        "id": "evt-old-coffee",
+                        "type": "preference",
+                        "summary": "User prefers drip coffee every morning.",
+                        "timestamp": "2026-01-01T08:00:00+00:00",
+                        "source": "test",
+                        "status": "superseded",
+                    }
+                ),
+                MemoryEvent.from_dict(
+                    {
+                        "id": "evt-new-coffee",
+                        "type": "preference",
+                        "summary": "User prefers espresso coffee every morning.",
+                        "timestamp": "2026-03-01T08:00:00+00:00",
+                        "source": "test",
+                        "status": "active",
+                    }
+                ),
             ]
         )
         results = await store.retriever.retrieve("coffee preference morning", top_k=10)
@@ -278,20 +288,24 @@ class TestBehavioralInvariants:
         store = _make_store(tmp_path)
         store.ingester.append_events(
             [
-                {
-                    "id": "evt-old-project",
-                    "type": "task",
-                    "summary": "User is working on the Falcon project redesign.",
-                    "timestamp": "2026-01-01T10:00:00+00:00",
-                    "source": "test",
-                },
-                {
-                    "id": "evt-new-project",
-                    "type": "task",
-                    "summary": "User is working on the Falcon project deployment.",
-                    "timestamp": "2026-01-08T10:00:00+00:00",
-                    "source": "test",
-                },
+                MemoryEvent.from_dict(
+                    {
+                        "id": "evt-old-project",
+                        "type": "task",
+                        "summary": "User is working on the Falcon project redesign.",
+                        "timestamp": "2026-01-01T10:00:00+00:00",
+                        "source": "test",
+                    }
+                ),
+                MemoryEvent.from_dict(
+                    {
+                        "id": "evt-new-project",
+                        "type": "task",
+                        "summary": "User is working on the Falcon project deployment.",
+                        "timestamp": "2026-01-08T10:00:00+00:00",
+                        "source": "test",
+                    }
+                ),
             ]
         )
         results = await store.retriever.retrieve("Falcon project", top_k=10)
@@ -307,20 +321,24 @@ class TestBehavioralInvariants:
         store = _make_store(tmp_path)
         store.ingester.append_events(
             [
-                {
-                    "id": "evt-work-1",
-                    "type": "fact",
-                    "summary": "User works as a backend engineer at Acme Corp.",
-                    "timestamp": "2026-03-01T12:00:00+00:00",
-                    "source": "test",
-                },
-                {
-                    "id": "evt-work-2",
-                    "type": "task",
-                    "summary": "User is migrating the database to PostgreSQL.",
-                    "timestamp": "2026-03-01T12:05:00+00:00",
-                    "source": "test",
-                },
+                MemoryEvent.from_dict(
+                    {
+                        "id": "evt-work-1",
+                        "type": "fact",
+                        "summary": "User works as a backend engineer at Acme Corp.",
+                        "timestamp": "2026-03-01T12:00:00+00:00",
+                        "source": "test",
+                    }
+                ),
+                MemoryEvent.from_dict(
+                    {
+                        "id": "evt-work-2",
+                        "type": "task",
+                        "summary": "User is migrating the database to PostgreSQL.",
+                        "timestamp": "2026-03-01T12:05:00+00:00",
+                        "source": "test",
+                    }
+                ),
             ]
         )
         results = await store.retriever.retrieve("favorite color blue", top_k=5)
@@ -334,24 +352,28 @@ class TestBehavioralInvariants:
         """A high-salience event must appear in the top 3 results."""
         store = _make_store(tmp_path)
         filler_events = [
-            {
-                "id": f"evt-filler-{i}",
-                "type": "fact",
-                "summary": f"Generic filler observation number {i} about routine tasks.",
-                "timestamp": f"2026-02-{10 + i:02d}T12:00:00+00:00",
-                "source": "test",
-                "salience": 0.2,
-            }
+            MemoryEvent.from_dict(
+                {
+                    "id": f"evt-filler-{i}",
+                    "type": "fact",
+                    "summary": f"Generic filler observation number {i} about routine tasks.",
+                    "timestamp": f"2026-02-{10 + i:02d}T12:00:00+00:00",
+                    "source": "test",
+                    "salience": 0.2,
+                }
+            )
             for i in range(10)
         ]
-        high_salience_event = {
-            "id": "evt-critical",
-            "type": "decision",
-            "summary": "User decided to adopt Kubernetes for all production deployments.",
-            "timestamp": "2026-03-01T12:00:00+00:00",
-            "source": "test",
-            "salience": 0.95,
-        }
+        high_salience_event = MemoryEvent.from_dict(
+            {
+                "id": "evt-critical",
+                "type": "decision",
+                "summary": "User decided to adopt Kubernetes for all production deployments.",
+                "timestamp": "2026-03-01T12:00:00+00:00",
+                "source": "test",
+                "salience": 0.95,
+            }
+        )
         store.ingester.append_events(filler_events + [high_salience_event])
         results = await store.retriever.retrieve("Kubernetes production deployment", top_k=5)
         idx = _index_of(results, "kubernetes")
@@ -363,13 +385,15 @@ class TestBehavioralInvariants:
     async def test_dedup_idempotency(self, tmp_path: Path):
         """Appending the same event twice must not produce duplicates."""
         store = _make_store(tmp_path)
-        event = {
-            "id": "evt-dedup-1",
-            "type": "fact",
-            "summary": "User has a golden retriever named Max.",
-            "timestamp": "2026-03-01T12:00:00+00:00",
-            "source": "test",
-        }
+        event = MemoryEvent.from_dict(
+            {
+                "id": "evt-dedup-1",
+                "type": "fact",
+                "summary": "User has a golden retriever named Max.",
+                "timestamp": "2026-03-01T12:00:00+00:00",
+                "source": "test",
+            }
+        )
         store.ingester.append_events([event])
         store.ingester.append_events([event])
         all_events = store.ingester.read_events()
@@ -390,22 +414,26 @@ class TestBehavioralInvariants:
         store = _make_store(tmp_path)
         store.ingester.append_events(
             [
-                {
-                    "id": "evt-semantic-deploy",
-                    "type": "fact",
-                    "summary": "The deploy pipeline runs nightly on staging.",
-                    "timestamp": "2026-03-01T12:00:00+00:00",
-                    "source": "test",
-                    "memory_type": "semantic",
-                },
-                {
-                    "id": "evt-episodic-deploy",
-                    "type": "task",
-                    "summary": "The deploy to staging failed last night with timeout.",
-                    "timestamp": "2026-03-01T12:05:00+00:00",
-                    "source": "test",
-                    "memory_type": "episodic",
-                },
+                MemoryEvent.from_dict(
+                    {
+                        "id": "evt-semantic-deploy",
+                        "type": "fact",
+                        "summary": "The deploy pipeline runs nightly on staging.",
+                        "timestamp": "2026-03-01T12:00:00+00:00",
+                        "source": "test",
+                        "memory_type": "semantic",
+                    }
+                ),
+                MemoryEvent.from_dict(
+                    {
+                        "id": "evt-episodic-deploy",
+                        "type": "task",
+                        "summary": "The deploy to staging failed last night with timeout.",
+                        "timestamp": "2026-03-01T12:05:00+00:00",
+                        "source": "test",
+                        "memory_type": "episodic",
+                    }
+                ),
             ]
         )
         # "what happened" triggers debug_history intent → episodic type boost.
@@ -450,13 +478,15 @@ class TestBehavioralInvariants:
         store.profile_mgr.write_profile(profile)
         store.ingester.append_events(
             [
-                {
-                    "id": "evt-ctx-1",
-                    "type": "fact",
-                    "summary": "User started learning Rust last week.",
-                    "timestamp": "2026-03-01T12:00:00+00:00",
-                    "source": "test",
-                }
+                MemoryEvent.from_dict(
+                    {
+                        "id": "evt-ctx-1",
+                        "type": "fact",
+                        "summary": "User started learning Rust last week.",
+                        "timestamp": "2026-03-01T12:00:00+00:00",
+                        "source": "test",
+                    }
+                )
             ]
         )
         context = await store.get_memory_context(query="dark mode preference", token_budget=2000)

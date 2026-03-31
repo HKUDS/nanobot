@@ -6,6 +6,7 @@ from pathlib import Path
 
 from nanobot.config.memory import MemoryConfig
 from nanobot.memory.constants import PROFILE_KEYS
+from nanobot.memory.event import MemoryEvent
 from nanobot.memory.store import MemoryStore
 
 
@@ -81,12 +82,14 @@ def test_maintenance_reindex_runs_without_error(tmp_path):
     store = _make_store(tmp_path)
     store.ingester.append_events(
         [
-            {
-                "type": "fact",
-                "summary": "Test fact for reindex.",
-                "timestamp": "2026-03-01T10:00:00+00:00",
-                "source": "test",
-            }
+            MemoryEvent.from_dict(
+                {
+                    "type": "fact",
+                    "summary": "Test fact for reindex.",
+                    "timestamp": "2026-03-01T10:00:00+00:00",
+                    "source": "test",
+                }
+            )
         ]
     )
     try:

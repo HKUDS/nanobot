@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 from nanobot.memory.db import MemoryDatabase
 from nanobot.memory.db.event_store import EventStore
+from nanobot.memory.event import MemoryEvent
 from nanobot.memory.write.classification import EventClassifier
 from nanobot.memory.write.coercion import EventCoercer
 from nanobot.memory.write.dedup import EventDeduplicator
@@ -238,16 +239,18 @@ class TestAppendEventsDedup:
         ing = EventIngester(coercer=coercer, dedup=dedup, graph=graph, db=db.event_store)
 
         # Append a very similar event.
-        new_event = {
-            "id": "new456",
-            "type": "fact",
-            "summary": "User likes Python programming language a lot",
-            "entities": ["Python"],
-            "confidence": 0.8,
-            "salience": 0.7,
-            "source": "chat",
-            "timestamp": "2025-01-02T00:00:00+00:00",
-        }
+        new_event = MemoryEvent.from_dict(
+            {
+                "id": "new456",
+                "type": "fact",
+                "summary": "User likes Python programming language a lot",
+                "entities": ["Python"],
+                "confidence": 0.8,
+                "salience": 0.7,
+                "source": "chat",
+                "timestamp": "2025-01-02T00:00:00+00:00",
+            }
+        )
         ing.append_events([new_event])
         # The event should be merged (duplicate detected).
         events = db.event_store.read_events(limit=100)
@@ -360,12 +363,14 @@ class TestIngesterWithDB:
         ingester, db, _ = self._make_ingester_with_db(tmp_path)
         ingester.append_events(
             [
-                {
-                    "id": "test-001",
-                    "type": "fact",
-                    "summary": "User likes coffee",
-                    "timestamp": "2026-01-01T00:00:00Z",
-                }
+                MemoryEvent.from_dict(
+                    {
+                        "id": "test-001",
+                        "type": "fact",
+                        "summary": "User likes coffee",
+                        "timestamp": "2026-01-01T00:00:00Z",
+                    }
+                )
             ]
         )
         events = db.event_store.read_events(limit=10)
@@ -377,12 +382,14 @@ class TestIngesterWithDB:
         ingester, db, _ = self._make_ingester_with_db(tmp_path)
         ingester.append_events(
             [
-                {
-                    "id": "test-002",
-                    "type": "fact",
-                    "summary": "Test event",
-                    "timestamp": "2026-01-01T00:00:00Z",
-                }
+                MemoryEvent.from_dict(
+                    {
+                        "id": "test-002",
+                        "type": "fact",
+                        "summary": "Test event",
+                        "timestamp": "2026-01-01T00:00:00Z",
+                    }
+                )
             ]
         )
         events = ingester.read_events(limit=10)

@@ -11,6 +11,7 @@ from nanobot.config.memory import MemoryConfig
 from nanobot.memory import MemoryStore
 from nanobot.memory._text import _to_datetime
 from nanobot.memory.constants import PROFILE_KEYS
+from nanobot.memory.event import MemoryEvent
 from nanobot.memory.maintenance import MemoryMaintenance
 from nanobot.memory.read.retrieval_planner import RetrievalPlanner
 
@@ -30,7 +31,7 @@ def _store(
 
 def _seed_events(store: MemoryStore, events: list[dict[str, object]]) -> None:
     for event in events:
-        store.ingester.append_events([event])
+        store.ingester.append_events([MemoryEvent.from_dict(event)])
 
 
 class TestMemoryStoreExtraHelpers:

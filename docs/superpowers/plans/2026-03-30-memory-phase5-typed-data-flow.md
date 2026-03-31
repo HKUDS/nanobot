@@ -352,6 +352,22 @@ class TestConflictRecordContract:
 
 ---
 
+## Deviations
+
+- **Scorer, reranker, and graph augmenter remain dict-based internally.** Conversion to
+  `RetrievedMemory` happens at the retriever's output boundary only (step 9 of
+  `_retrieve_unified`). This was a pragmatic choice — the scorer does heavy in-place dict
+  mutation (`item["score"] = ...`, `reason["recency"] = ...`) and converting all mutation
+  sites would be high-risk for low incremental value. The typed boundary at `retrieve()`
+  output is sufficient for compile-time safety at consumer boundaries.
+- **`ingester.read_events()` still returns `list[dict]`.** Only `append_events()` was
+  tightened to `Sequence[MemoryEvent]`. The read path returns raw SQLite rows with
+  metadata unpacking — converting these to `MemoryEvent` would require handling the
+  `_extra` roundtrip differently.
+- **`append_events()` was originally dual-typed** (`Sequence[MemoryEvent | dict[str, Any]]`)
+  to support legacy callers. All production callers now pass `MemoryEvent`, so the dict
+  union was removed in a follow-up code review fix.
+
 ## Risks
 
 | Risk | Mitigation |
