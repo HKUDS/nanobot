@@ -10,7 +10,7 @@ dingtalk-stream==0.24.0
 fastapi==0.115.0
 httpx==0.28.0
 json-repair==0.57.0
-lark-oapi==1.5.0
+lark-oapi==1.5.1
 loguru==0.7.3
 mcp==1.26.0
 msgpack==1.1.0
@@ -24,7 +24,7 @@ python-socketio==5.16.0
 python-socks==2.8.0
 python-telegram-bot==22.6
 qq-botpy==1.2.0
-questionary==2.0.0
+questionary==2.1.1
 readability-lxml==0.8.4
 rich==14.0.0
 slack-sdk==3.39.0
