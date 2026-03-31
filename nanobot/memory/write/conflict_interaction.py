@@ -8,13 +8,10 @@ gating, and conflict resolution dispatch.  Each function receives the
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .._text import _norm_text, _tokenize, _utc_now_iso
 from ..constants import CONFLICT_STATUS_NEEDS_USER
-
-if TYPE_CHECKING:
-    from .conflicts import ConflictManager
 
 __all__ = [
     "ask_user_for_conflict",
@@ -69,7 +66,7 @@ def conflict_relevant_to(conflict: dict[str, Any], user_message: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def get_next_user_conflict(mgr: ConflictManager) -> dict[str, Any] | None:
+def get_next_user_conflict(mgr: Any) -> dict[str, Any] | None:
     """Return the most-recently-asked conflict, or None.
 
     Only conflicts that have been explicitly presented to the user
@@ -77,7 +74,7 @@ def get_next_user_conflict(mgr: ConflictManager) -> dict[str, Any] | None:
     replies like "1" from being silently hijacked as conflict resolutions
     when no conflict question was shown in the current conversation.
     """
-    conflicts = mgr.list_conflicts(include_closed=False)
+    conflicts: list[dict[str, Any]] = mgr.list_conflicts(include_closed=False)
     if not conflicts:
         return None
 
@@ -89,7 +86,7 @@ def get_next_user_conflict(mgr: ConflictManager) -> dict[str, Any] | None:
 
 
 def ask_user_for_conflict(
-    mgr: ConflictManager,
+    mgr: Any,
     *,
     include_already_asked: bool = False,
     user_message: str = "",
@@ -143,7 +140,7 @@ def ask_user_for_conflict(
     )
 
 
-def handle_user_conflict_reply(mgr: ConflictManager, text: str) -> dict[str, Any]:
+def handle_user_conflict_reply(mgr: Any, text: str) -> dict[str, Any]:
     """Process a user's conflict-resolution reply and resolve the conflict."""
     action = parse_conflict_user_action(text)
     if action is None:

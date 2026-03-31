@@ -29,6 +29,36 @@ from ..constants import (
     PROFILE_STATUS_STALE,
 )
 from ..event import BeliefRecord
+from .belief_lifecycle import (
+    add_belief as _add_belief,
+)
+from .belief_lifecycle import (
+    add_belief_to_profile as _add_belief_to_profile,
+)
+from .belief_lifecycle import (
+    belief_from_meta as _belief_from_meta,
+)
+from .belief_lifecycle import (
+    find_belief_by_id as _find_belief_by_id,
+)
+from .belief_lifecycle import (
+    get_belief_by_id as _get_belief_by_id,
+)
+from .belief_lifecycle import (
+    retract_belief as _retract_belief,
+)
+from .belief_lifecycle import (
+    retract_belief_in_profile as _retract_belief_in_profile,
+)
+from .belief_lifecycle import (
+    update_belief as _update_belief,
+)
+from .belief_lifecycle import (
+    update_belief_in_profile as _update_belief_in_profile,
+)
+from .belief_lifecycle import (
+    verify_beliefs as _verify_beliefs,
+)
 
 if TYPE_CHECKING:
     from ..db.connection import MemoryDatabase
@@ -241,25 +271,19 @@ class ProfileStore:
 
     def _belief_from_meta(self, field: str, entry: dict[str, Any]) -> BeliefRecord:
         """Construct a BeliefRecord from a raw meta entry dict."""
-        from .belief_lifecycle import belief_from_meta
-
-        return belief_from_meta(field, entry)
+        return _belief_from_meta(field, entry)
 
     def _find_belief_by_id(
         self, profile: dict[str, Any], belief_id: str
     ) -> tuple[str, str, dict[str, Any]] | None:
         """Scan all profile meta sections for an entry with matching id."""
-        from .belief_lifecycle import find_belief_by_id
-
-        return find_belief_by_id(self, profile, belief_id)
+        return _find_belief_by_id(self, profile, belief_id)
 
     def get_belief_by_id(
         self, belief_id: str, *, profile: dict[str, Any] | None = None
     ) -> BeliefRecord | None:
         """Public accessor: look up a belief by its stable ID."""
-        from .belief_lifecycle import get_belief_by_id
-
-        return get_belief_by_id(self, belief_id, profile=profile)
+        return _get_belief_by_id(self, belief_id, profile=profile)
 
     def add_belief(
         self,
@@ -271,9 +295,7 @@ class ProfileStore:
         source: str = "consolidation",
     ) -> BeliefRecord:
         """Create a new belief, append it to the profile list, and return a BeliefRecord."""
-        from .belief_lifecycle import add_belief
-
-        return add_belief(
+        return _add_belief(
             self,
             field,
             text,
@@ -293,9 +315,7 @@ class ProfileStore:
         source: str = "consolidation",
     ) -> BeliefRecord:
         """In-memory variant of ``add_belief`` — mutates *profile* without writing."""
-        from .belief_lifecycle import add_belief_to_profile
-
-        return add_belief_to_profile(
+        return _add_belief_to_profile(
             self,
             profile,
             field,
@@ -315,9 +335,7 @@ class ProfileStore:
         status: str | None = None,
     ) -> BeliefRecord | None:
         """Update an existing belief by its stable ID."""
-        from .belief_lifecycle import update_belief
-
-        return update_belief(
+        return _update_belief(
             self,
             belief_id,
             confidence_delta=confidence_delta,
@@ -337,9 +355,7 @@ class ProfileStore:
         status: str | None = None,
     ) -> BeliefRecord | None:
         """In-memory variant of ``update_belief`` — mutates *profile* without writing."""
-        from .belief_lifecycle import update_belief_in_profile
-
-        return update_belief_in_profile(
+        return _update_belief_in_profile(
             self,
             profile,
             belief_id,
@@ -357,9 +373,7 @@ class ProfileStore:
         replacement_id: str | None = None,
     ) -> bool:
         """Retract a belief by its stable ID."""
-        from .belief_lifecycle import retract_belief
-
-        return retract_belief(self, belief_id, reason=reason, replacement_id=replacement_id)
+        return _retract_belief(self, belief_id, reason=reason, replacement_id=replacement_id)
 
     def _retract_belief_in_profile(
         self,
@@ -370,9 +384,7 @@ class ProfileStore:
         replacement_id: str | None = None,
     ) -> bool:
         """In-memory variant of ``retract_belief`` — mutates *profile* without writing."""
-        from .belief_lifecycle import retract_belief_in_profile
-
-        return retract_belief_in_profile(
+        return _retract_belief_in_profile(
             self, profile, belief_id, reason=reason, replacement_id=replacement_id
         )
 
@@ -382,8 +394,6 @@ class ProfileStore:
 
     def verify_beliefs(self) -> dict[str, Any]:
         """Assess belief health based on evidence quality."""
-        from .belief_lifecycle import verify_beliefs as _verify_beliefs
-
         return _verify_beliefs(self)
 
     # ------------------------------------------------------------------

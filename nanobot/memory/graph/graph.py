@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from .entity_classifier import classify_entity_type, refine_type_from_predicate
+from .graph_traversal import find_paths as _find_paths
+from .graph_traversal import query_subgraph as _query_subgraph
 from .ontology_rules import validate_triple_types
 from .ontology_types import Entity, EntityType, Relationship, Triple
 
@@ -306,8 +308,6 @@ class KnowledgeGraph:
         Uses iterative BFS. Returns up to 5 shortest paths.
         Delegates to :func:`graph_traversal.find_paths`.
         """
-        from .graph_traversal import find_paths as _find_paths
-
         return _find_paths(self, source, target, max_depth)
 
     async def query_subgraph(
@@ -319,8 +319,6 @@ class KnowledgeGraph:
 
         Delegates to :func:`graph_traversal.query_subgraph`.
         """
-        from .graph_traversal import query_subgraph as _query_subgraph
-
         return await _query_subgraph(self, entity_names, depth)
 
     # ------------------------------------------------------------------

@@ -8,7 +8,7 @@ call ProfileStore helpers (_meta_section, _meta_entry, etc.).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .._text import _norm_text, _safe_float, _to_str_list, _utc_now_iso
 from ..constants import (
@@ -18,9 +18,6 @@ from ..constants import (
     PROFILE_STATUS_STALE,
 )
 from ..event import BeliefRecord
-
-if TYPE_CHECKING:
-    from .profile_io import ProfileStore
 
 __all__ = [
     "add_belief",
@@ -60,7 +57,7 @@ def belief_from_meta(field: str, entry: dict[str, Any]) -> BeliefRecord:
 
 
 def find_belief_by_id(
-    store: ProfileStore,
+    store: Any,
     profile: dict[str, Any],
     belief_id: str,
 ) -> tuple[str, str, dict[str, Any]] | None:
@@ -82,7 +79,7 @@ def find_belief_by_id(
 
 
 def get_belief_by_id(
-    store: ProfileStore,
+    store: Any,
     belief_id: str,
     *,
     profile: dict[str, Any] | None = None,
@@ -106,7 +103,7 @@ def get_belief_by_id(
 
 
 def add_belief(
-    store: ProfileStore,
+    store: Any,
     field: str,
     text: str,
     *,
@@ -139,7 +136,7 @@ def add_belief(
 
 
 def add_belief_to_profile(
-    store: ProfileStore,
+    store: Any,
     profile: dict[str, Any],
     field: str,
     text: str,
@@ -186,7 +183,7 @@ def add_belief_to_profile(
 
 
 def update_belief(
-    store: ProfileStore,
+    store: Any,
     belief_id: str,
     *,
     confidence_delta: float = 0.0,
@@ -214,7 +211,7 @@ def update_belief(
 
 
 def update_belief_in_profile(
-    store: ProfileStore,
+    store: Any,
     profile: dict[str, Any],
     belief_id: str,
     *,
@@ -279,7 +276,7 @@ def update_belief_in_profile(
 
 
 def retract_belief(
-    store: ProfileStore,
+    store: Any,
     belief_id: str,
     *,
     reason: str = "",
@@ -306,7 +303,7 @@ def retract_belief(
 
 
 def retract_belief_in_profile(
-    store: ProfileStore,
+    store: Any,
     profile: dict[str, Any],
     belief_id: str,
     *,
@@ -342,7 +339,7 @@ def retract_belief_in_profile(
 # ------------------------------------------------------------------
 
 
-def verify_beliefs(store: ProfileStore) -> dict[str, Any]:
+def verify_beliefs(store: Any) -> dict[str, Any]:
     """Assess belief health based on evidence quality.
 
     Returns a report with beliefs classified as healthy, weak, contradicted,

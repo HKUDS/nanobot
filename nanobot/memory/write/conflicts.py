@@ -24,6 +24,21 @@ from ..constants import (
     PROFILE_STATUS_STALE,
 )
 from ..persistence.profile_io import ProfileStore as ProfileManager
+from .conflict_interaction import (
+    ask_user_for_conflict as _ask_user_for_conflict,
+)
+from .conflict_interaction import (
+    conflict_relevant_to as _conflict_relevant_to,
+)
+from .conflict_interaction import (
+    get_next_user_conflict as _get_next_user_conflict,
+)
+from .conflict_interaction import (
+    handle_user_conflict_reply as _handle_user_conflict_reply,
+)
+from .conflict_interaction import (
+    parse_conflict_user_action as _parse_conflict_user_action,
+)
 
 if TYPE_CHECKING:
     from nanobot.config.memory import MemoryConfig
@@ -256,9 +271,7 @@ class ConflictManager:
 
     @staticmethod
     def _parse_conflict_user_action(text: str) -> str | None:
-        from .conflict_interaction import parse_conflict_user_action
-
-        return parse_conflict_user_action(text)
+        return _parse_conflict_user_action(text)
 
     def _auto_resolution_action(self, conflict: dict[str, Any]) -> str | None:
         source = str(conflict.get("source", "")).strip().lower()
@@ -332,15 +345,11 @@ class ConflictManager:
 
     def get_next_user_conflict(self) -> dict[str, Any] | None:
         """Return the most-recently-asked conflict, or None."""
-        from .conflict_interaction import get_next_user_conflict
-
-        return get_next_user_conflict(self)
+        return _get_next_user_conflict(self)
 
     def _conflict_relevant_to(self, conflict: dict[str, Any], user_message: str) -> bool:
         """Return True if the conflict topic overlaps with the user's message."""
-        from .conflict_interaction import conflict_relevant_to
-
-        return conflict_relevant_to(conflict, user_message)
+        return _conflict_relevant_to(conflict, user_message)
 
     def ask_user_for_conflict(
         self,
@@ -348,18 +357,14 @@ class ConflictManager:
         include_already_asked: bool = False,
         user_message: str = "",
     ) -> str | None:
-        from .conflict_interaction import ask_user_for_conflict
-
-        return ask_user_for_conflict(
+        return _ask_user_for_conflict(
             self,
             include_already_asked=include_already_asked,
             user_message=user_message,
         )
 
     def handle_user_conflict_reply(self, text: str) -> dict[str, Any]:
-        from .conflict_interaction import handle_user_conflict_reply
-
-        return handle_user_conflict_reply(self, text)
+        return _handle_user_conflict_reply(self, text)
 
     def resolve_conflict_details(self, index: int, action: str) -> dict[str, Any]:
         result: dict[str, Any] = {

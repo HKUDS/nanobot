@@ -7,16 +7,13 @@ multi-hop traversal (BFS path-finding, subgraph merging).
 from __future__ import annotations
 
 from collections import deque
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from .graph import KnowledgeGraph
+from typing import Any
 
 __all__ = ["find_paths", "query_subgraph"]
 
 
 def find_paths(
-    graph: KnowledgeGraph,
+    graph: Any,
     source: str,
     target: str,
     max_depth: int = 3,
@@ -101,7 +98,7 @@ def find_paths(
 
 
 async def query_subgraph(
-    graph: KnowledgeGraph,
+    graph: Any,
     entity_names: list[str],
     depth: int = 1,
 ) -> dict[str, Any]:
