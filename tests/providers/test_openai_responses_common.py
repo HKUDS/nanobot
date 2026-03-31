@@ -23,11 +23,7 @@ from nanobot.providers.openai_responses_common.parsing import (
 def loguru_capture():
     """Capture loguru messages into a list for assertion."""
     messages: list[str] = []
-
-    def sink(message):
-        messages.append(str(message))
-
-    handler_id = logger.add(sink, format="{message}", level="DEBUG")
+    handler_id = logger.add(lambda m: messages.append(str(m)), format="{message}", level="DEBUG")
     yield messages
     logger.remove(handler_id)
 
