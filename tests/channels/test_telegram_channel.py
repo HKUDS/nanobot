@@ -342,6 +342,74 @@ async def test_send_delta_stream_end_raises_and_keeps_buffer_on_failure() -> Non
     assert "123" in channel._stream_bufs
 
 
+    @pytest.mark.asyncio
+    async def test_send_delta_splits_long_message(monkeypatch) -> None:
+        """When delta causes buffer to exceed TELEGRAM_MAX_MESSAGE_LEN, it splits and sends."""
+        channel = TelegramChannel(
+            TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+            MessageBus(),
+        )
+        channel._app = _FakeApp(lambda: None)
+        channel._app.bot.edit_message_text = AsyncMock()
+        channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=8))
+    
+        # Mock TELEGRAM_MAX_MESSAGE_LEN to a small value for testing
+        monkeypatch.setattr("nanobot.channels.telegram.TELEGRAM_MAX_MESSAGE_LEN", 10)
+    
+        channel._stream_bufs["123"] = _StreamBuf(text="12345678", message_id=7, last_edit=0.0)
+    
+        # Add delta that pushes it over the limit (10 chars)
+        await channel.send_delta("123", "9012")
+    
+        # Should have edited the first message with the first 10 chars
+        channel._app.bot.edit_message_text.assert_awaited_once_with(
+            chat_id=123, message_id=7, text="1234567890"
+        )
+    
+        # Buffer should now contain the remainder
+        assert channel._stream_bufs["123"].text == "12"
+        # The code immediately sends the remainder as a new message, so message_id is updated
+        assert channel._stream_bufs["123"].message_id == 8
+    
+        # And it should have sent a new message for the remainder
+        channel._app.bot.send_message.assert_awaited_once_with(
+            chat_id=123, text="12"
+        )
+
+
+    @pytest.mark.asyncio
+    async def test_send_delta_stream_end_splits_long_message(monkeypatch) -> None:
+        """When stream ends and buffer exceeds TELEGRAM_MAX_MESSAGE_LEN, it splits and sends."""
+        channel = TelegramChannel(
+            TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+            MessageBus(),
+        )
+        channel._app = _FakeApp(lambda: None)
+        channel._app.bot.edit_message_text = AsyncMock()
+        channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=8))
+    
+        # Mock TELEGRAM_MAX_MESSAGE_LEN to a small value for testing
+        monkeypatch.setattr("nanobot.channels.telegram.TELEGRAM_MAX_MESSAGE_LEN", 10)
+    
+        # Buffer already over the limit
+        channel._stream_bufs["123"] = _StreamBuf(text="123456789012", message_id=7, last_edit=0.0)
+    
+        await channel.send_delta("123", "", {"_stream_end": True})
+    
+        # Should have edited the first message with the first 10 chars (HTML formatted)
+        channel._app.bot.edit_message_text.assert_awaited_once_with(
+            chat_id=123, message_id=7, text="1234567890", parse_mode="HTML"
+        )
+    
+        # Should have sent the remainder as a new message (with HTML fallback)
+        channel._app.bot.send_message.assert_awaited_once_with(
+            chat_id=123, text="12", parse_mode="HTML", reply_parameters=None
+        )
+    
+        # Buffer should be cleared
+        assert "123" not in channel._stream_bufs
+
+
 @pytest.mark.asyncio
 async def test_send_delta_stream_end_treats_not_modified_as_success() -> None:
     from telegram.error import BadRequest
