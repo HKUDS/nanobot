@@ -303,6 +303,48 @@ class MemoryConsolidator:
                 return True
         return True
 
+
+    def fast_trim_if_needed(self, session: Session) -> list[dict] | None:
+        """Fast sync trim: advance last_consolidated if over context window.
+
+        Returns the trimmed chunk (for background archival) or None if
+        no trim was needed.  Pure local computation — no LLM calls.
+        """
+        if not session.messages or self.context_window_tokens <= 0:
+            return None
+
+        estimated, _source = self.estimate_session_prompt_tokens(session)
+        if estimated <= 0 or estimated < self.context_window_tokens:
+            return None
+
+        target = self.context_window_tokens // 2
+        tokens_to_remove = max(1, estimated - target)
+        boundary = self.pick_consolidation_boundary(session, tokens_to_remove)
+        if boundary is None:
+            return None
+
+        end_idx = boundary[0]
+        chunk = session.messages[session.last_consolidated:end_idx]
+        if not chunk:
+            return None
+
+        logger.info(
+            "Fast-trim for {}: last_consolidated {} -> {}, chunk={} msgs",
+            session.key, session.last_consolidated, end_idx, len(chunk),
+        )
+        session.last_consolidated = end_idx
+        self.sessions.save(session)
+        return chunk
+
+    async def archive_trimmed_chunk(self, session_key: str, chunk: list[dict]) -> None:
+        """Archive a previously trimmed chunk, holding the per-session lock.
+
+        The lock serializes this with postflight maybe_consolidate_by_tokens
+        to prevent concurrent reads/writes to MEMORY.md.
+        """
+        async with self.get_lock(session_key):
+            await self.consolidate_messages(chunk)
+
     async def maybe_consolidate_by_tokens(self, session: Session) -> None:
         """Loop: archive old messages until prompt fits within safe budget.
 

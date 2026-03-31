@@ -35,6 +35,9 @@ class AgentHook:
     async def before_iteration(self, context: AgentHookContext) -> None:
         pass
 
+    async def on_llm_retry(self, context: AgentHookContext, attempt: int, total: int) -> None:
+        pass
+
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
         pass
 

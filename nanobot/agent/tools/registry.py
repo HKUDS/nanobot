@@ -14,14 +14,17 @@ class ToolRegistry:
 
     def __init__(self):
         self._tools: dict[str, Tool] = {}
+        self._definitions_cache: list[dict[str, Any]] | None = None
 
     def register(self, tool: Tool) -> None:
         """Register a tool."""
         self._tools[tool.name] = tool
+        self._definitions_cache = None
 
     def unregister(self, name: str) -> None:
         """Unregister a tool by name."""
         self._tools.pop(name, None)
+        self._definitions_cache = None
 
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""
@@ -32,8 +35,10 @@ class ToolRegistry:
         return name in self._tools
 
     def get_definitions(self) -> list[dict[str, Any]]:
-        """Get all tool definitions in OpenAI format."""
-        return [tool.to_schema() for tool in self._tools.values()]
+        """Get all tool definitions in OpenAI format (cached until tools change)."""
+        if self._definitions_cache is None:
+            self._definitions_cache = [tool.to_schema() for tool in self._tools.values()]
+        return self._definitions_cache
 
     async def execute(self, name: str, params: dict[str, Any]) -> Any:
         """Execute a tool by name with given parameters."""

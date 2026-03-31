@@ -80,6 +80,9 @@ class AgentRunner:
             if spec.reasoning_effort is not None:
                 kwargs["reasoning_effort"] = spec.reasoning_effort
 
+            async def _on_retry(attempt: int, total: int) -> None:
+                await hook.on_llm_retry(context, attempt, total)
+
             if hook.wants_streaming():
                 async def _stream(delta: str) -> None:
                     await hook.on_stream(context, delta)
@@ -87,9 +90,10 @@ class AgentRunner:
                 response = await self.provider.chat_stream_with_retry(
                     **kwargs,
                     on_content_delta=_stream,
+                    on_retry=_on_retry,
                 )
             else:
-                response = await self.provider.chat_with_retry(**kwargs)
+                response = await self.provider.chat_with_retry(**kwargs, on_retry=_on_retry)
 
             raw_usage = response.usage or {}
             usage = {
@@ -101,7 +105,10 @@ class AgentRunner:
             context.tool_calls = list(response.tool_calls)
 
             if response.has_tool_calls:
-                if hook.wants_streaming():
+                async def _on_retry(attempt: int, total: int) -> None:
+                await hook.on_llm_retry(context, attempt, total)
+
+            if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=True)
 
                 messages.append(build_assistant_message(
@@ -134,6 +141,9 @@ class AgentRunner:
                     })
                 await hook.after_iteration(context)
                 continue
+
+            async def _on_retry(attempt: int, total: int) -> None:
+                await hook.on_llm_retry(context, attempt, total)
 
             if hook.wants_streaming():
                 await hook.on_stream_end(context, resuming=False)

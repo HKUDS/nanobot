@@ -70,6 +70,12 @@ class _LoopHook(AgentHook):
     def wants_streaming(self) -> bool:
         return self._on_stream is not None
 
+    async def on_llm_retry(self, context: AgentHookContext, attempt: int, total: int) -> None:
+        if self._on_progress:
+            await self._on_progress(
+                f"AI service temporarily unavailable, retrying ({attempt}/{total})…",
+            )
+
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
         from nanobot.utils.helpers import strip_think
 
@@ -511,7 +517,11 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
-            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+            trimmed = self.memory_consolidator.fast_trim_if_needed(session)
+            if trimmed:
+                self._schedule_background(
+                    self.memory_consolidator.archive_trimmed_chunk(session.key, trimmed)
+                )
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
@@ -553,7 +563,11 @@ class AgentLoop:
         if result := await self.commands.dispatch(ctx):
             return result
 
-        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+        trimmed = self.memory_consolidator.fast_trim_if_needed(session)
+        if trimmed:
+            self._schedule_background(
+                self.memory_consolidator.archive_trimmed_chunk(session.key, trimmed)
+            )
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
