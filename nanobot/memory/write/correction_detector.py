@@ -9,6 +9,12 @@ from __future__ import annotations
 
 import re
 
+__all__ = [
+    "clean_phrase",
+    "extract_fact_corrections",
+    "extract_preference_corrections",
+]
+
 
 def clean_phrase(value: str) -> str:
     """Strip whitespace, punctuation, and leading articles from a phrase."""

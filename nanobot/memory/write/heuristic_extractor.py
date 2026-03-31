@@ -10,6 +10,12 @@ from __future__ import annotations
 import re
 from typing import Any, Callable
 
+__all__ = [
+    "extract_entities",
+    "extract_events_heuristic",
+    "extract_triples_heuristic",
+]
+
 # Words to skip when extracting single-capitalized-word entities
 COMMON_WORDS: frozenset[str] = frozenset(
     {
