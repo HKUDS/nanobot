@@ -160,3 +160,17 @@ async def test_searxng_invalid_url():
     tool = _tool(provider="searxng", base_url="not-a-url")
     result = await tool.execute(query="test")
     assert "Error" in result
+
+
+@pytest.mark.asyncio
+async def test_duckduckgo_timeout_returns_error(monkeypatch):
+    """asyncio.wait_for 捕获超时，返回错误字符串而不是挂起。"""
+    import asyncio
+
+    async def hang(*_a, **_kw):
+        await asyncio.sleep(9999)
+
+    monkeypatch.setattr("asyncio.to_thread", hang)
+    tool = _tool(provider="duckduckgo")
+    result = await tool.execute(query="test")
+    assert "timed out" in result.lower()
