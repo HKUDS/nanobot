@@ -24,3 +24,6 @@ botpy.log
 nano.*.save
 .DS_Store
 uv.lock
+
+# pytest temp dirs
+pytest-of-root/
