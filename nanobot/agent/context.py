@@ -6,11 +6,9 @@ import platform
 from pathlib import Path
 from typing import Any
 
-from nanobot.utils.helpers import current_time_str
-
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
-from nanobot.utils.helpers import build_assistant_message, detect_image_mime
+from nanobot.utils.helpers import build_assistant_message, current_time_str, detect_image_mime
 
 
 class ContextBuilder:
@@ -35,6 +33,10 @@ class ContextBuilder:
 
         memory = self.memory.get_memory_context()
         if memory:
+            # Memory could grow very large. Truncate if it exceeds 16KB (~4K-6K tokens).
+            # This is a safety measure; actual consolidation should keep it smaller.
+            if len(memory) > 16384:
+                memory = memory[:16384] + "\n\n...(truncated. Full content in memory/MEMORY.md)"
             parts.append(f"# Memory\n\n{memory}")
 
         always_skills = self.skills.get_always_skills()
