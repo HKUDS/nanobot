@@ -1,4 +1,4 @@
-# Memory [MEMORY — from previous sessions, may be stale]
+# Memory (from previous sessions — verify before citing)
 
 These are facts from previous conversations. They may be outdated.
 Use them as hints for WHERE to look, not as authoritative answers.

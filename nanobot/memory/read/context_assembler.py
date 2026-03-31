@@ -275,39 +275,55 @@ class ContextAssembler:
         )
 
         # ── Phase 4: assemble in logical presentation order ──
+        #
+        # Sub-header pattern: (origin — action)
+        #   origin  = provenance hint (helps larger models with source attribution)
+        #   action  = behavioral directive (helps all models, especially Haiku)
+        # See docs/adr/ADR-012-memory-context-header-pattern.md for rationale.
 
         lines: list[str] = []
 
         if long_term_text:
             lines.append(
-                "## Long-term Memory (project-specific — use as search hints, verify before citing)"
+                "## Long-term Memory"
+                " (from previous sessions, project-specific — verify before citing)"
             )
             lines.append(long_term_text)
 
         if fitted_profile_lines:
-            lines.append("## Profile Memory [MEMORY — from previous sessions, may be stale]")
+            lines.append("## Profile Memory (from previous sessions — verify before citing)")
             lines.extend(fitted_profile_lines)
 
         if semantic_lines:
             lines.append("## Relevant Semantic Memories")
-            lines.append("Retrieved factual knowledge (verify with tools before citing):")
+            lines.append(
+                "Retrieved factual knowledge"
+                " (from previous sessions — verify with tools before citing):"
+            )
             lines.extend(semantic_lines)
 
         if graph_lines:
-            lines.append("## Entity Graph [MEMORY — derived relationships, verify before citing]")
+            lines.append("## Entity Graph (derived relationships — verify before citing)")
             lines.extend(graph_lines)
 
         if episodic_lines:
             lines.append("## Relevant Episodic Memories")
-            lines.append("Past events and interactions (use as context, verify with tools):")
+            lines.append(
+                "Past events and interactions (from previous sessions — verify with tools):"
+            )
             lines.extend(episodic_lines)
 
         if include_reflection and reflection_lines:
-            lines.append("## Relevant Reflection Memories [MEMORY — past reflections]")
+            lines.append(
+                "## Relevant Reflection Memories (from previous sessions — check if still relevant)"
+            )
             lines.extend(reflection_lines)
 
         if unresolved_lines:
-            lines.append("## Recent Unresolved Tasks/Decisions [MEMORY — may already be resolved]")
+            lines.append(
+                "## Recent Unresolved Tasks/Decisions"
+                " (from previous sessions — check if still open)"
+            )
             lines.extend(unresolved_lines)
 
         text = "\n".join(lines).strip()
