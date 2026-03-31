@@ -266,6 +266,7 @@ def build_agent(
     from nanobot.memory.strategy import StrategyAccess
 
     strategy_store = StrategyAccess(memory.db.connection)
+    strategy_store.purge_invalid()  # clean up strategies from broken extraction
 
     # 4. Construct ContextBuilder
     context = ContextBuilder(

@@ -25,6 +25,8 @@ def _build_sample_activation() -> dict:
         "iteration": 3,
         "message": "The tool returned empty results. Try a different approach.",
         "strategy_tag": "empty_recovery:exec",
+        "failed_tool": "exec",
+        "failed_args": {"command": 'obsidian search query="DS10540"'},
     }
 
 
@@ -45,14 +47,8 @@ class TestGuardrailActivationContract:
         "iteration",
         "message",
         "strategy_tag",
-    }
-
-    # Fields the extractor reads with .get() that have defaults — these are
-    # optional in the dict but the extractor expects them to be meaningful
-    # when present.
-    OPTIONAL_WITH_DEFAULTS = {
-        "failed_tool",  # defaults to "unknown"
-        "failed_args",  # defaults to ""
+        "failed_tool",
+        "failed_args",
     }
 
     def test_activation_has_required_keys(self):
@@ -71,19 +67,18 @@ class TestGuardrailActivationContract:
         # strategy_tag can be str or None
         assert activation["strategy_tag"] is None or isinstance(activation["strategy_tag"], str)
 
-    def test_optional_fields_have_sensible_defaults(self):
-        """StrategyExtractor uses .get() with defaults for optional fields.
+    def test_failed_tool_fields_present_and_typed(self):
+        """Activation dict must include failed_tool (str) and failed_args (dict).
 
-        This test documents that the activation dict from TurnRunner does NOT
-        currently include failed_tool/failed_args, and the extractor handles
-        their absence gracefully via .get() defaults.
+        These fields are populated by TurnRunner from the most recent
+        failed/empty ToolAttempt when a guardrail fires. The extractor
+        passes them to the LLM summarization prompt.
         """
         activation = _build_sample_activation()
-        # These are not in the activation dict — extractor uses defaults
-        for key in self.OPTIONAL_WITH_DEFAULTS:
-            # The get() with default in extractor handles absence — this is OK.
-            # If TurnRunner starts including these, this test should be updated.
-            assert activation.get(key) is not None or key not in activation
+        assert "failed_tool" in activation
+        assert isinstance(activation["failed_tool"], str)
+        assert "failed_args" in activation
+        assert isinstance(activation["failed_args"], dict)
 
 
 # ---------------------------------------------------------------------------

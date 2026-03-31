@@ -22,6 +22,8 @@ from loguru import logger
 
 from nanobot.context.prompt_loader import prompts
 
+__all__ = ["MemoryExtractor"]
+
 from ..constants import _SAVE_EVENTS_TOOL
 from .correction_detector import (
     clean_phrase,

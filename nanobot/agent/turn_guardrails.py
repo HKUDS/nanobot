@@ -149,6 +149,7 @@ class RepeatedStrategyDetection:
                         "arguments. You MUST try a fundamentally different strategy."
                     ),
                     severity="override",
+                    strategy_tag="repeated_strategy",
                 )
         return None
 
@@ -186,6 +187,7 @@ class SkillTunnelVision:
                     "information directly."
                 ),
                 severity="directive",
+                strategy_tag="skill_tunnel_vision",
             )
         return None
 
@@ -218,6 +220,7 @@ class NoProgressBudget:
                 "Stop calling tools and explain what you tried and why it failed."
             ),
             severity="override",
+            strategy_tag="no_progress_budget",
         )
 
 
