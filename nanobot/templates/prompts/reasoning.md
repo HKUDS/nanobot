@@ -22,6 +22,7 @@ Format:
    - Read known file → read_file
    - Explore structure → list_dir first, then narrow down
 4. What will I try if this returns nothing? <a DIFFERENT approach, not tweaked arguments>
+5. Source check: Am I about to cite memory or tool results? If memory, have I verified it with a tool?
 [/REASONING]
 ```
 

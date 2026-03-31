@@ -324,8 +324,10 @@ class ContextBuilder:
 
         The result content is wrapped in ``<tool_result>`` XML tags to create a
         structural boundary between untrusted tool output and agent instructions
-        (prompt-injection mitigation, LAN-43).  Double-wrapping is avoided: if
-        the content is already tagged it is passed through unchanged.
+        (prompt-injection mitigation, LAN-43).  A ``[TOOL RESULT]`` label is
+        prepended for source provenance (source-conflation mitigation).
+        Double-wrapping is avoided: if the content is already tagged it is
+        passed through with only the label prepended.
 
         Args:
             messages: Current message list.
@@ -336,10 +338,11 @@ class ContextBuilder:
         Returns:
             Updated message list.
         """
+        label = "[TOOL RESULT — fresh data from this conversation]"
         if result.startswith("<tool_result>"):
-            wrapped = result
+            wrapped = f"{label}\n{result}"
         else:
-            wrapped = f"<tool_result>\n{result}\n</tool_result>"
+            wrapped = f"{label}\n<tool_result>\n{result}\n</tool_result>"
         messages.append(
             {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": wrapped}
         )

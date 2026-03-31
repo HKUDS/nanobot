@@ -72,6 +72,36 @@ def test_add_assistant_and_tool_messages(tmp_path: Path) -> None:
     assert messages[-1]["name"] == "read_file"
 
 
+def test_tool_result_has_source_label(tmp_path: Path) -> None:
+    """Tool results must be labeled with [TOOL RESULT] for source provenance."""
+    ws = _workspace(tmp_path)
+    builder = ContextBuilder(ws)
+    messages: list[dict] = []
+
+    builder.add_tool_result(messages, tool_call_id="1", tool_name="exec", result="hello world")
+    content = messages[-1]["content"]
+    assert content.startswith("[TOOL RESULT")
+    assert "<tool_result>" in content
+    assert "hello world" in content
+
+
+def test_tool_result_already_wrapped_gets_label(tmp_path: Path) -> None:
+    """Pre-wrapped tool results still get the [TOOL RESULT] label."""
+    ws = _workspace(tmp_path)
+    builder = ContextBuilder(ws)
+    messages: list[dict] = []
+
+    builder.add_tool_result(
+        messages,
+        tool_call_id="1",
+        tool_name="read_file",
+        result="<tool_result>\nfile content\n</tool_result>",
+    )
+    content = messages[-1]["content"]
+    assert content.startswith("[TOOL RESULT")
+    assert "<tool_result>" in content
+
+
 async def test_build_system_prompt_memory_failure_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
