@@ -279,7 +279,9 @@ class ContextAssembler:
         lines: list[str] = []
 
         if long_term_text:
-            lines.append("## Long-term Memory [MEMORY — from previous sessions, may be stale]")
+            lines.append(
+                "## Long-term Memory (project-specific — use as search hints, verify before citing)"
+            )
             lines.append(long_term_text)
 
         if fitted_profile_lines:
@@ -287,9 +289,8 @@ class ContextAssembler:
             lines.extend(fitted_profile_lines)
 
         if semantic_lines:
-            lines.append(
-                "## Relevant Semantic Memories [MEMORY — may be stale, verify before citing]"
-            )
+            lines.append("## Relevant Semantic Memories")
+            lines.append("Retrieved factual knowledge (verify with tools before citing):")
             lines.extend(semantic_lines)
 
         if graph_lines:
@@ -297,9 +298,8 @@ class ContextAssembler:
             lines.extend(graph_lines)
 
         if episodic_lines:
-            lines.append(
-                "## Relevant Episodic Memories [MEMORY — past events, verify if still current]"
-            )
+            lines.append("## Relevant Episodic Memories")
+            lines.append("Past events and interactions (use as context, verify with tools):")
             lines.extend(episodic_lines)
 
         if include_reflection and reflection_lines:
