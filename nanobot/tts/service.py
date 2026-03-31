@@ -21,6 +21,7 @@ class TTSService:
 
     def __init__(self, config: TTSConfig):
         self.config = config
+        self._provider = create_provider(config)
         self._temp_dir = Path(tempfile.gettempdir()) / "nanobot_tts"
         self._temp_dir.mkdir(exist_ok=True)
 
@@ -45,7 +46,9 @@ class TTSService:
         output_path = self._temp_dir / f"tts_{uuid.uuid4().hex[:8]}.mp3"
 
         try:
-            provider = create_provider(self.config, voice_override=voice)
+            provider = self._provider
+            if voice and voice != self.config.voice:
+                provider = create_provider(self.config, voice_override=voice)
             result = await provider.synthesize(text, output_path)
             logger.info("TTS generated: {} ({} bytes)", result.name, result.stat().st_size)
             return result
