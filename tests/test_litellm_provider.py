@@ -111,6 +111,35 @@ def test_cache_control_single_system_message() -> None:
     assert "cache_control" in cc_tools[-1]
 
 
+def test_cache_control_no_system_messages() -> None:
+    """No system messages: only tools get cache_control."""
+    provider = LiteLLMProvider(api_key=None)
+    msgs = [{"role": "user", "content": "hi"}]
+    tools = [_make_tool()]
+
+    cc_msgs, cc_tools = provider._apply_cache_control(msgs, tools)
+    assert _count_cache_blocks(cc_msgs, cc_tools) == 1  # tool only
+    assert isinstance(cc_msgs[0]["content"], str)  # user msg untouched
+
+
+def test_cache_control_with_list_content() -> None:
+    """System message with list content gets cache_control on last block."""
+    provider = LiteLLMProvider(api_key=None)
+    msgs = [
+        {
+            "role": "system",
+            "content": [
+                {"type": "text", "text": "part1"},
+                {"type": "text", "text": "part2"},
+            ],
+        }
+    ]
+    cc_msgs, _ = provider._apply_cache_control(msgs, None)
+    blocks = cc_msgs[0]["content"]
+    assert "cache_control" not in blocks[0]  # first block unchanged
+    assert "cache_control" in blocks[1]  # last block gets marker
+
+
 def test_cache_control_no_tools() -> None:
     """No tools: full budget of 4 goes to system messages."""
     provider = LiteLLMProvider(api_key=None)
