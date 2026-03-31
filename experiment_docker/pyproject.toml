@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nanobot"
+version = "1.0.0"
+description = "Personal AI Assistant"
+requires-python = ">=3.12"
+dependencies = [
+    "openai>=1.0.0",
+    "httpx>=0.25.0",
+    "tiktoken>=0.5.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["nanobot*"]

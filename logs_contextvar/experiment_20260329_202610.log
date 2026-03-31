@@ -1,0 +1,92 @@
+2026-03-29 20:26:10,571 - EnhancedExperiment - INFO - 增强版实验系统初始化完成
+2026-03-29 20:26:10,571 - EnhancedExperiment - INFO - 基于ContextVar的单进程多会话架构
+2026-03-29 20:26:10,571 - EnhancedExperiment - INFO - 支持模型: DeepSeek, Qwen3-Max, Kimi K2.5
+2026-03-29 20:26:10,571 - EnhancedExperiment - INFO - ================================================================================
+2026-03-29 20:26:10,571 - EnhancedExperiment - INFO - LLM Backend对比实验 - ContextVar单进程多会话架构
+2026-03-29 20:26:10,571 - EnhancedExperiment - INFO - 开始时间: 2026-03-29 20:26:10
+2026-03-29 20:26:10,571 - EnhancedExperiment - INFO - ================================================================================
+2026-03-29 20:26:10,571 - EnhancedExperiment - INFO - 创建实验计划: 3模型 × 4任务 × 3重复 = 36次实验
+2026-03-29 20:26:10,573 - EnhancedExperiment - INFO - 实验计划已保存到: experiment_results_contextvar\experiment_plan.json
+2026-03-29 20:26:10,573 - EnhancedExperiment - INFO - 开始并发运行实验，最大并发数: 3
+2026-03-29 20:26:10,573 - EnhancedExperiment - INFO - [12/36] 开始实验: DeepSeek_Task4_rep3
+2026-03-29 20:26:10,574 - EnhancedExperiment - ERROR - [12/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,574 - EnhancedExperiment - INFO - [25/36] 开始实验: Kimi K2.5_Task1_rep1
+2026-03-29 20:26:10,574 - EnhancedExperiment - ERROR - [25/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,574 - EnhancedExperiment - INFO - [13/36] 开始实验: Qwen3-Max_Task1_rep1
+2026-03-29 20:26:10,574 - EnhancedExperiment - ERROR - [13/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,574 - EnhancedExperiment - INFO - [34/36] 开始实验: Kimi K2.5_Task4_rep1
+2026-03-29 20:26:10,574 - EnhancedExperiment - ERROR - [34/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,574 - EnhancedExperiment - INFO - [7/36] 开始实验: DeepSeek_Task3_rep1
+2026-03-29 20:26:10,574 - EnhancedExperiment - ERROR - [7/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,574 - EnhancedExperiment - INFO - [17/36] 开始实验: Qwen3-Max_Task2_rep2
+2026-03-29 20:26:10,574 - EnhancedExperiment - ERROR - [17/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,574 - EnhancedExperiment - INFO - [30/36] 开始实验: Kimi K2.5_Task2_rep3
+2026-03-29 20:26:10,574 - EnhancedExperiment - ERROR - [30/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,575 - EnhancedExperiment - INFO - [26/36] 开始实验: Kimi K2.5_Task1_rep2
+2026-03-29 20:26:10,575 - EnhancedExperiment - ERROR - [26/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,575 - EnhancedExperiment - INFO - [4/36] 开始实验: DeepSeek_Task2_rep1
+2026-03-29 20:26:10,575 - EnhancedExperiment - ERROR - [4/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,575 - EnhancedExperiment - INFO - [36/36] 开始实验: Kimi K2.5_Task4_rep3
+2026-03-29 20:26:10,575 - EnhancedExperiment - ERROR - [36/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,575 - EnhancedExperiment - INFO - [22/36] 开始实验: Qwen3-Max_Task4_rep1
+2026-03-29 20:26:10,575 - EnhancedExperiment - ERROR - [22/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,575 - EnhancedExperiment - INFO - [21/36] 开始实验: Qwen3-Max_Task3_rep3
+2026-03-29 20:26:10,575 - EnhancedExperiment - ERROR - [21/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,576 - EnhancedExperiment - INFO - [9/36] 开始实验: DeepSeek_Task3_rep3
+2026-03-29 20:26:10,576 - EnhancedExperiment - ERROR - [9/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,576 - EnhancedExperiment - INFO - [10/36] 开始实验: DeepSeek_Task4_rep1
+2026-03-29 20:26:10,576 - EnhancedExperiment - ERROR - [10/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,576 - EnhancedExperiment - INFO - [6/36] 开始实验: DeepSeek_Task2_rep3
+2026-03-29 20:26:10,576 - EnhancedExperiment - ERROR - [6/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,576 - EnhancedExperiment - INFO - [31/36] 开始实验: Kimi K2.5_Task3_rep1
+2026-03-29 20:26:10,576 - EnhancedExperiment - ERROR - [31/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,576 - EnhancedExperiment - INFO - [29/36] 开始实验: Kimi K2.5_Task2_rep2
+2026-03-29 20:26:10,576 - EnhancedExperiment - ERROR - [29/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,576 - EnhancedExperiment - INFO - [19/36] 开始实验: Qwen3-Max_Task3_rep1
+2026-03-29 20:26:10,576 - EnhancedExperiment - ERROR - [19/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,576 - EnhancedExperiment - INFO - [18/36] 开始实验: Qwen3-Max_Task2_rep3
+2026-03-29 20:26:10,576 - EnhancedExperiment - ERROR - [18/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,576 - EnhancedExperiment - INFO - [32/36] 开始实验: Kimi K2.5_Task3_rep2
+2026-03-29 20:26:10,576 - EnhancedExperiment - ERROR - [32/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,576 - EnhancedExperiment - INFO - [2/36] 开始实验: DeepSeek_Task1_rep2
+2026-03-29 20:26:10,576 - EnhancedExperiment - ERROR - [2/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,576 - EnhancedExperiment - INFO - [35/36] 开始实验: Kimi K2.5_Task4_rep2
+2026-03-29 20:26:10,576 - EnhancedExperiment - ERROR - [35/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,576 - EnhancedExperiment - INFO - [3/36] 开始实验: DeepSeek_Task1_rep3
+2026-03-29 20:26:10,576 - EnhancedExperiment - ERROR - [3/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,576 - EnhancedExperiment - INFO - [24/36] 开始实验: Qwen3-Max_Task4_rep3
+2026-03-29 20:26:10,576 - EnhancedExperiment - ERROR - [24/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,577 - EnhancedExperiment - INFO - [20/36] 开始实验: Qwen3-Max_Task3_rep2
+2026-03-29 20:26:10,577 - EnhancedExperiment - ERROR - [20/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,577 - EnhancedExperiment - INFO - [16/36] 开始实验: Qwen3-Max_Task2_rep1
+2026-03-29 20:26:10,577 - EnhancedExperiment - ERROR - [16/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,577 - EnhancedExperiment - INFO - [27/36] 开始实验: Kimi K2.5_Task1_rep3
+2026-03-29 20:26:10,577 - EnhancedExperiment - ERROR - [27/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,577 - EnhancedExperiment - INFO - [8/36] 开始实验: DeepSeek_Task3_rep2
+2026-03-29 20:26:10,577 - EnhancedExperiment - ERROR - [8/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,577 - EnhancedExperiment - INFO - [1/36] 开始实验: DeepSeek_Task1_rep1
+2026-03-29 20:26:10,577 - EnhancedExperiment - ERROR - [1/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,577 - EnhancedExperiment - INFO - [15/36] 开始实验: Qwen3-Max_Task1_rep3
+2026-03-29 20:26:10,577 - EnhancedExperiment - ERROR - [15/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,577 - EnhancedExperiment - INFO - [28/36] 开始实验: Kimi K2.5_Task2_rep1
+2026-03-29 20:26:10,578 - EnhancedExperiment - ERROR - [28/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,578 - EnhancedExperiment - INFO - [11/36] 开始实验: DeepSeek_Task4_rep2
+2026-03-29 20:26:10,578 - EnhancedExperiment - ERROR - [11/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,578 - EnhancedExperiment - INFO - [14/36] 开始实验: Qwen3-Max_Task1_rep2
+2026-03-29 20:26:10,578 - EnhancedExperiment - ERROR - [14/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,578 - EnhancedExperiment - INFO - [33/36] 开始实验: Kimi K2.5_Task3_rep3
+2026-03-29 20:26:10,578 - EnhancedExperiment - ERROR - [33/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,578 - EnhancedExperiment - INFO - [5/36] 开始实验: DeepSeek_Task2_rep2
+2026-03-29 20:26:10,578 - EnhancedExperiment - ERROR - [5/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,578 - EnhancedExperiment - INFO - [23/36] 开始实验: Qwen3-Max_Task4_rep2
+2026-03-29 20:26:10,578 - EnhancedExperiment - ERROR - [23/36] 实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'
+2026-03-29 20:26:10,578 - EnhancedExperiment - INFO - 所有实验执行完成: 36/36
+2026-03-29 20:26:10,580 - EnhancedExperiment - INFO - 原始结果已保存到: experiment_results_contextvar\raw_results_20260329_202610.json
+2026-03-29 20:26:10,582 - EnhancedExperiment - INFO - 统计摘要已保存到: experiment_results_contextvar\summary_20260329_202610.json
+2026-03-29 20:26:10,582 - EnhancedExperiment - INFO - 实验报告已生成: experiment_results_contextvar\experiment_report_20260329_202610.md
+2026-03-29 20:26:10,582 - EnhancedExperiment - INFO - ================================================================================
+2026-03-29 20:26:10,582 - EnhancedExperiment - INFO - 实验完成!
+2026-03-29 20:26:10,582 - EnhancedExperiment - INFO - 原始结果: experiment_results_contextvar\raw_results_20260329_202610.json
+2026-03-29 20:26:10,582 - EnhancedExperiment - INFO - 统计摘要: experiment_results_contextvar\summary_20260329_202610.json
+2026-03-29 20:26:10,582 - EnhancedExperiment - INFO - 实验报告: experiment_results_contextvar\experiment_report_20260329_202610.md
+2026-03-29 20:26:10,582 - EnhancedExperiment - INFO - ================================================================================

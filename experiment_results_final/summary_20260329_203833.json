@@ -1,0 +1,50 @@
+{
+  "total_experiments": 36,
+  "successful_experiments": 36,
+  "success_rate": 100.0,
+  "total_tokens": 3600,
+  "total_cost": 0.384,
+  "total_time": 333.7468888759613,
+  "by_api_type": {
+    "deepseek": {
+      "count": 12,
+      "avg_time": 5.36648827791214,
+      "avg_tokens": 100.0,
+      "total_cost": 0.16800000000000004
+    },
+    "qwen": {
+      "count": 12,
+      "avg_time": 19.56109728415807,
+      "avg_tokens": 100.0,
+      "total_cost": 0.14400000000000002
+    },
+    "kimi": {
+      "count": 12,
+      "avg_time": 2.884655177593231,
+      "avg_tokens": 100.0,
+      "total_cost": 0.07200000000000001
+    }
+  },
+  "by_task": {
+    "Task1": {
+      "count": 9,
+      "avg_time": 4.793242401546902,
+      "avg_tokens": 100.0
+    },
+    "Task2": {
+      "count": 9,
+      "avg_time": 7.282812886767918,
+      "avg_tokens": 100.0
+    },
+    "Task3": {
+      "count": 9,
+      "avg_time": 12.766265074412027,
+      "avg_tokens": 100.0
+    },
+    "Task4": {
+      "count": 9,
+      "avg_time": 12.240667290157742,
+      "avg_tokens": 100.0
+    }
+  }
+}

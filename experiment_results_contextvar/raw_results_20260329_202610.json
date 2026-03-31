@@ -1,0 +1,1585 @@
+{
+  "experiment_config": {
+    "models": [
+      {
+        "name": "DeepSeek",
+        "api_type": "deepseek",
+        "model": "deepseek-chat",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      {
+        "name": "Qwen3-Max",
+        "api_type": "qwen",
+        "model": "qwen-max",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      {
+        "name": "Kimi K2.5",
+        "api_type": "kimi",
+        "model": "moonshot-v1-8k",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      }
+    ],
+    "tasks": [
+      {
+        "id": "Task1",
+        "name": "文件I/O操作",
+        "prompt": "请执行以下文件操作任务：\n1. 读取当前目录下的data.csv文件\n2. 计算'score'列的平均值\n3. 返回计算结果和简要分析\n\n文件内容示例：\nname,age,score\nAlice,25,85\nBob,30,92\nCharlie,28,88\nDavid,35,95",
+        "complexity": 1.0,
+        "expected_output": "数值计算和文件读取"
+      },
+      {
+        "id": "Task2",
+        "name": "天气API查询",
+        "prompt": "请查询以下三个城市的当前天气并进行比较：\n1. 北京\n2. 上海  \n3. 深圳\n\n请提供：\n1. 每个城市的当前温度、天气状况、湿度\n2. 三个城市的温度对比分析\n3. 天气适宜度排名",
+        "complexity": 2.0,
+        "expected_output": "结构化天气信息和比较分析"
+      },
+      {
+        "id": "Task3",
+        "name": "网络检索",
+        "prompt": "请搜索并总结AI Agent记忆机制的最新研究进展，包括：\n1. 短期记忆机制（如滑动窗口）\n2. 长期记忆机制（如向量检索）\n3. 混合记忆架构\n4. 记忆检索算法\n5. 实际应用案例\n\n请提供结构化的总结，包含关键技术和研究趋势。",
+        "complexity": 3.0,
+        "expected_output": "技术总结和研究趋势分析"
+      },
+      {
+        "id": "Task4",
+        "name": "记忆依赖与代码生成",
+        "prompt": "基于以下用户偏好，生成批量文件重命名的Python代码：\n\n用户偏好：\n1. 用户喜欢将图片文件按日期重命名，格式：YYYY-MM-DD_序号.jpg\n2. 用户需要保留原始文件的EXIF信息\n3. 用户希望有进度显示和错误处理\n4. 用户偏好使用PIL库处理图片\n\n请生成完整的Python脚本，包含：\n1. 函数定义和参数说明\n2. EXIF信息提取和保留\n3. 进度显示功能\n4. 完善的错误处理\n5. 使用示例",
+        "complexity": 2.5,
+        "expected_output": "完整可运行的Python代码"
+      }
+    ],
+    "repetitions": 3,
+    "output_dir": "experiment_results_contextvar",
+    "log_dir": "logs_contextvar"
+  },
+  "experiments": [
+    {
+      "experiment_id": 12,
+      "session_key": "DeepSeek_Task4_rep3",
+      "model_config": {
+        "name": "DeepSeek",
+        "api_type": "deepseek",
+        "model": "deepseek-chat",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task4",
+        "name": "记忆依赖与代码生成",
+        "prompt": "基于以下用户偏好，生成批量文件重命名的Python代码：\n\n用户偏好：\n1. 用户喜欢将图片文件按日期重命名，格式：YYYY-MM-DD_序号.jpg\n2. 用户需要保留原始文件的EXIF信息\n3. 用户希望有进度显示和错误处理\n4. 用户偏好使用PIL库处理图片\n\n请生成完整的Python脚本，包含：\n1. 函数定义和参数说明\n2. EXIF信息提取和保留\n3. 进度显示功能\n4. 完善的错误处理\n5. 使用示例",
+        "complexity": 2.5,
+        "expected_output": "完整可运行的Python代码"
+      },
+      "repetition": 3,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 25,
+      "session_key": "Kimi K2.5_Task1_rep1",
+      "model_config": {
+        "name": "Kimi K2.5",
+        "api_type": "kimi",
+        "model": "moonshot-v1-8k",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task1",
+        "name": "文件I/O操作",
+        "prompt": "请执行以下文件操作任务：\n1. 读取当前目录下的data.csv文件\n2. 计算'score'列的平均值\n3. 返回计算结果和简要分析\n\n文件内容示例：\nname,age,score\nAlice,25,85\nBob,30,92\nCharlie,28,88\nDavid,35,95",
+        "complexity": 1.0,
+        "expected_output": "数值计算和文件读取"
+      },
+      "repetition": 1,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 13,
+      "session_key": "Qwen3-Max_Task1_rep1",
+      "model_config": {
+        "name": "Qwen3-Max",
+        "api_type": "qwen",
+        "model": "qwen-max",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task1",
+        "name": "文件I/O操作",
+        "prompt": "请执行以下文件操作任务：\n1. 读取当前目录下的data.csv文件\n2. 计算'score'列的平均值\n3. 返回计算结果和简要分析\n\n文件内容示例：\nname,age,score\nAlice,25,85\nBob,30,92\nCharlie,28,88\nDavid,35,95",
+        "complexity": 1.0,
+        "expected_output": "数值计算和文件读取"
+      },
+      "repetition": 1,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 34,
+      "session_key": "Kimi K2.5_Task4_rep1",
+      "model_config": {
+        "name": "Kimi K2.5",
+        "api_type": "kimi",
+        "model": "moonshot-v1-8k",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task4",
+        "name": "记忆依赖与代码生成",
+        "prompt": "基于以下用户偏好，生成批量文件重命名的Python代码：\n\n用户偏好：\n1. 用户喜欢将图片文件按日期重命名，格式：YYYY-MM-DD_序号.jpg\n2. 用户需要保留原始文件的EXIF信息\n3. 用户希望有进度显示和错误处理\n4. 用户偏好使用PIL库处理图片\n\n请生成完整的Python脚本，包含：\n1. 函数定义和参数说明\n2. EXIF信息提取和保留\n3. 进度显示功能\n4. 完善的错误处理\n5. 使用示例",
+        "complexity": 2.5,
+        "expected_output": "完整可运行的Python代码"
+      },
+      "repetition": 1,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 7,
+      "session_key": "DeepSeek_Task3_rep1",
+      "model_config": {
+        "name": "DeepSeek",
+        "api_type": "deepseek",
+        "model": "deepseek-chat",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task3",
+        "name": "网络检索",
+        "prompt": "请搜索并总结AI Agent记忆机制的最新研究进展，包括：\n1. 短期记忆机制（如滑动窗口）\n2. 长期记忆机制（如向量检索）\n3. 混合记忆架构\n4. 记忆检索算法\n5. 实际应用案例\n\n请提供结构化的总结，包含关键技术和研究趋势。",
+        "complexity": 3.0,
+        "expected_output": "技术总结和研究趋势分析"
+      },
+      "repetition": 1,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 17,
+      "session_key": "Qwen3-Max_Task2_rep2",
+      "model_config": {
+        "name": "Qwen3-Max",
+        "api_type": "qwen",
+        "model": "qwen-max",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task2",
+        "name": "天气API查询",
+        "prompt": "请查询以下三个城市的当前天气并进行比较：\n1. 北京\n2. 上海  \n3. 深圳\n\n请提供：\n1. 每个城市的当前温度、天气状况、湿度\n2. 三个城市的温度对比分析\n3. 天气适宜度排名",
+        "complexity": 2.0,
+        "expected_output": "结构化天气信息和比较分析"
+      },
+      "repetition": 2,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 30,
+      "session_key": "Kimi K2.5_Task2_rep3",
+      "model_config": {
+        "name": "Kimi K2.5",
+        "api_type": "kimi",
+        "model": "moonshot-v1-8k",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task2",
+        "name": "天气API查询",
+        "prompt": "请查询以下三个城市的当前天气并进行比较：\n1. 北京\n2. 上海  \n3. 深圳\n\n请提供：\n1. 每个城市的当前温度、天气状况、湿度\n2. 三个城市的温度对比分析\n3. 天气适宜度排名",
+        "complexity": 2.0,
+        "expected_output": "结构化天气信息和比较分析"
+      },
+      "repetition": 3,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 26,
+      "session_key": "Kimi K2.5_Task1_rep2",
+      "model_config": {
+        "name": "Kimi K2.5",
+        "api_type": "kimi",
+        "model": "moonshot-v1-8k",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task1",
+        "name": "文件I/O操作",
+        "prompt": "请执行以下文件操作任务：\n1. 读取当前目录下的data.csv文件\n2. 计算'score'列的平均值\n3. 返回计算结果和简要分析\n\n文件内容示例：\nname,age,score\nAlice,25,85\nBob,30,92\nCharlie,28,88\nDavid,35,95",
+        "complexity": 1.0,
+        "expected_output": "数值计算和文件读取"
+      },
+      "repetition": 2,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 4,
+      "session_key": "DeepSeek_Task2_rep1",
+      "model_config": {
+        "name": "DeepSeek",
+        "api_type": "deepseek",
+        "model": "deepseek-chat",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task2",
+        "name": "天气API查询",
+        "prompt": "请查询以下三个城市的当前天气并进行比较：\n1. 北京\n2. 上海  \n3. 深圳\n\n请提供：\n1. 每个城市的当前温度、天气状况、湿度\n2. 三个城市的温度对比分析\n3. 天气适宜度排名",
+        "complexity": 2.0,
+        "expected_output": "结构化天气信息和比较分析"
+      },
+      "repetition": 1,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 36,
+      "session_key": "Kimi K2.5_Task4_rep3",
+      "model_config": {
+        "name": "Kimi K2.5",
+        "api_type": "kimi",
+        "model": "moonshot-v1-8k",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task4",
+        "name": "记忆依赖与代码生成",
+        "prompt": "基于以下用户偏好，生成批量文件重命名的Python代码：\n\n用户偏好：\n1. 用户喜欢将图片文件按日期重命名，格式：YYYY-MM-DD_序号.jpg\n2. 用户需要保留原始文件的EXIF信息\n3. 用户希望有进度显示和错误处理\n4. 用户偏好使用PIL库处理图片\n\n请生成完整的Python脚本，包含：\n1. 函数定义和参数说明\n2. EXIF信息提取和保留\n3. 进度显示功能\n4. 完善的错误处理\n5. 使用示例",
+        "complexity": 2.5,
+        "expected_output": "完整可运行的Python代码"
+      },
+      "repetition": 3,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 22,
+      "session_key": "Qwen3-Max_Task4_rep1",
+      "model_config": {
+        "name": "Qwen3-Max",
+        "api_type": "qwen",
+        "model": "qwen-max",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task4",
+        "name": "记忆依赖与代码生成",
+        "prompt": "基于以下用户偏好，生成批量文件重命名的Python代码：\n\n用户偏好：\n1. 用户喜欢将图片文件按日期重命名，格式：YYYY-MM-DD_序号.jpg\n2. 用户需要保留原始文件的EXIF信息\n3. 用户希望有进度显示和错误处理\n4. 用户偏好使用PIL库处理图片\n\n请生成完整的Python脚本，包含：\n1. 函数定义和参数说明\n2. EXIF信息提取和保留\n3. 进度显示功能\n4. 完善的错误处理\n5. 使用示例",
+        "complexity": 2.5,
+        "expected_output": "完整可运行的Python代码"
+      },
+      "repetition": 1,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 21,
+      "session_key": "Qwen3-Max_Task3_rep3",
+      "model_config": {
+        "name": "Qwen3-Max",
+        "api_type": "qwen",
+        "model": "qwen-max",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task3",
+        "name": "网络检索",
+        "prompt": "请搜索并总结AI Agent记忆机制的最新研究进展，包括：\n1. 短期记忆机制（如滑动窗口）\n2. 长期记忆机制（如向量检索）\n3. 混合记忆架构\n4. 记忆检索算法\n5. 实际应用案例\n\n请提供结构化的总结，包含关键技术和研究趋势。",
+        "complexity": 3.0,
+        "expected_output": "技术总结和研究趋势分析"
+      },
+      "repetition": 3,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 9,
+      "session_key": "DeepSeek_Task3_rep3",
+      "model_config": {
+        "name": "DeepSeek",
+        "api_type": "deepseek",
+        "model": "deepseek-chat",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task3",
+        "name": "网络检索",
+        "prompt": "请搜索并总结AI Agent记忆机制的最新研究进展，包括：\n1. 短期记忆机制（如滑动窗口）\n2. 长期记忆机制（如向量检索）\n3. 混合记忆架构\n4. 记忆检索算法\n5. 实际应用案例\n\n请提供结构化的总结，包含关键技术和研究趋势。",
+        "complexity": 3.0,
+        "expected_output": "技术总结和研究趋势分析"
+      },
+      "repetition": 3,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 10,
+      "session_key": "DeepSeek_Task4_rep1",
+      "model_config": {
+        "name": "DeepSeek",
+        "api_type": "deepseek",
+        "model": "deepseek-chat",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task4",
+        "name": "记忆依赖与代码生成",
+        "prompt": "基于以下用户偏好，生成批量文件重命名的Python代码：\n\n用户偏好：\n1. 用户喜欢将图片文件按日期重命名，格式：YYYY-MM-DD_序号.jpg\n2. 用户需要保留原始文件的EXIF信息\n3. 用户希望有进度显示和错误处理\n4. 用户偏好使用PIL库处理图片\n\n请生成完整的Python脚本，包含：\n1. 函数定义和参数说明\n2. EXIF信息提取和保留\n3. 进度显示功能\n4. 完善的错误处理\n5. 使用示例",
+        "complexity": 2.5,
+        "expected_output": "完整可运行的Python代码"
+      },
+      "repetition": 1,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 6,
+      "session_key": "DeepSeek_Task2_rep3",
+      "model_config": {
+        "name": "DeepSeek",
+        "api_type": "deepseek",
+        "model": "deepseek-chat",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task2",
+        "name": "天气API查询",
+        "prompt": "请查询以下三个城市的当前天气并进行比较：\n1. 北京\n2. 上海  \n3. 深圳\n\n请提供：\n1. 每个城市的当前温度、天气状况、湿度\n2. 三个城市的温度对比分析\n3. 天气适宜度排名",
+        "complexity": 2.0,
+        "expected_output": "结构化天气信息和比较分析"
+      },
+      "repetition": 3,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 31,
+      "session_key": "Kimi K2.5_Task3_rep1",
+      "model_config": {
+        "name": "Kimi K2.5",
+        "api_type": "kimi",
+        "model": "moonshot-v1-8k",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task3",
+        "name": "网络检索",
+        "prompt": "请搜索并总结AI Agent记忆机制的最新研究进展，包括：\n1. 短期记忆机制（如滑动窗口）\n2. 长期记忆机制（如向量检索）\n3. 混合记忆架构\n4. 记忆检索算法\n5. 实际应用案例\n\n请提供结构化的总结，包含关键技术和研究趋势。",
+        "complexity": 3.0,
+        "expected_output": "技术总结和研究趋势分析"
+      },
+      "repetition": 1,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 29,
+      "session_key": "Kimi K2.5_Task2_rep2",
+      "model_config": {
+        "name": "Kimi K2.5",
+        "api_type": "kimi",
+        "model": "moonshot-v1-8k",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task2",
+        "name": "天气API查询",
+        "prompt": "请查询以下三个城市的当前天气并进行比较：\n1. 北京\n2. 上海  \n3. 深圳\n\n请提供：\n1. 每个城市的当前温度、天气状况、湿度\n2. 三个城市的温度对比分析\n3. 天气适宜度排名",
+        "complexity": 2.0,
+        "expected_output": "结构化天气信息和比较分析"
+      },
+      "repetition": 2,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 19,
+      "session_key": "Qwen3-Max_Task3_rep1",
+      "model_config": {
+        "name": "Qwen3-Max",
+        "api_type": "qwen",
+        "model": "qwen-max",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task3",
+        "name": "网络检索",
+        "prompt": "请搜索并总结AI Agent记忆机制的最新研究进展，包括：\n1. 短期记忆机制（如滑动窗口）\n2. 长期记忆机制（如向量检索）\n3. 混合记忆架构\n4. 记忆检索算法\n5. 实际应用案例\n\n请提供结构化的总结，包含关键技术和研究趋势。",
+        "complexity": 3.0,
+        "expected_output": "技术总结和研究趋势分析"
+      },
+      "repetition": 1,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 18,
+      "session_key": "Qwen3-Max_Task2_rep3",
+      "model_config": {
+        "name": "Qwen3-Max",
+        "api_type": "qwen",
+        "model": "qwen-max",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task2",
+        "name": "天气API查询",
+        "prompt": "请查询以下三个城市的当前天气并进行比较：\n1. 北京\n2. 上海  \n3. 深圳\n\n请提供：\n1. 每个城市的当前温度、天气状况、湿度\n2. 三个城市的温度对比分析\n3. 天气适宜度排名",
+        "complexity": 2.0,
+        "expected_output": "结构化天气信息和比较分析"
+      },
+      "repetition": 3,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 32,
+      "session_key": "Kimi K2.5_Task3_rep2",
+      "model_config": {
+        "name": "Kimi K2.5",
+        "api_type": "kimi",
+        "model": "moonshot-v1-8k",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task3",
+        "name": "网络检索",
+        "prompt": "请搜索并总结AI Agent记忆机制的最新研究进展，包括：\n1. 短期记忆机制（如滑动窗口）\n2. 长期记忆机制（如向量检索）\n3. 混合记忆架构\n4. 记忆检索算法\n5. 实际应用案例\n\n请提供结构化的总结，包含关键技术和研究趋势。",
+        "complexity": 3.0,
+        "expected_output": "技术总结和研究趋势分析"
+      },
+      "repetition": 2,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 2,
+      "session_key": "DeepSeek_Task1_rep2",
+      "model_config": {
+        "name": "DeepSeek",
+        "api_type": "deepseek",
+        "model": "deepseek-chat",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task1",
+        "name": "文件I/O操作",
+        "prompt": "请执行以下文件操作任务：\n1. 读取当前目录下的data.csv文件\n2. 计算'score'列的平均值\n3. 返回计算结果和简要分析\n\n文件内容示例：\nname,age,score\nAlice,25,85\nBob,30,92\nCharlie,28,88\nDavid,35,95",
+        "complexity": 1.0,
+        "expected_output": "数值计算和文件读取"
+      },
+      "repetition": 2,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 35,
+      "session_key": "Kimi K2.5_Task4_rep2",
+      "model_config": {
+        "name": "Kimi K2.5",
+        "api_type": "kimi",
+        "model": "moonshot-v1-8k",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task4",
+        "name": "记忆依赖与代码生成",
+        "prompt": "基于以下用户偏好，生成批量文件重命名的Python代码：\n\n用户偏好：\n1. 用户喜欢将图片文件按日期重命名，格式：YYYY-MM-DD_序号.jpg\n2. 用户需要保留原始文件的EXIF信息\n3. 用户希望有进度显示和错误处理\n4. 用户偏好使用PIL库处理图片\n\n请生成完整的Python脚本，包含：\n1. 函数定义和参数说明\n2. EXIF信息提取和保留\n3. 进度显示功能\n4. 完善的错误处理\n5. 使用示例",
+        "complexity": 2.5,
+        "expected_output": "完整可运行的Python代码"
+      },
+      "repetition": 2,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 3,
+      "session_key": "DeepSeek_Task1_rep3",
+      "model_config": {
+        "name": "DeepSeek",
+        "api_type": "deepseek",
+        "model": "deepseek-chat",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task1",
+        "name": "文件I/O操作",
+        "prompt": "请执行以下文件操作任务：\n1. 读取当前目录下的data.csv文件\n2. 计算'score'列的平均值\n3. 返回计算结果和简要分析\n\n文件内容示例：\nname,age,score\nAlice,25,85\nBob,30,92\nCharlie,28,88\nDavid,35,95",
+        "complexity": 1.0,
+        "expected_output": "数值计算和文件读取"
+      },
+      "repetition": 3,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 24,
+      "session_key": "Qwen3-Max_Task4_rep3",
+      "model_config": {
+        "name": "Qwen3-Max",
+        "api_type": "qwen",
+        "model": "qwen-max",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task4",
+        "name": "记忆依赖与代码生成",
+        "prompt": "基于以下用户偏好，生成批量文件重命名的Python代码：\n\n用户偏好：\n1. 用户喜欢将图片文件按日期重命名，格式：YYYY-MM-DD_序号.jpg\n2. 用户需要保留原始文件的EXIF信息\n3. 用户希望有进度显示和错误处理\n4. 用户偏好使用PIL库处理图片\n\n请生成完整的Python脚本，包含：\n1. 函数定义和参数说明\n2. EXIF信息提取和保留\n3. 进度显示功能\n4. 完善的错误处理\n5. 使用示例",
+        "complexity": 2.5,
+        "expected_output": "完整可运行的Python代码"
+      },
+      "repetition": 3,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 20,
+      "session_key": "Qwen3-Max_Task3_rep2",
+      "model_config": {
+        "name": "Qwen3-Max",
+        "api_type": "qwen",
+        "model": "qwen-max",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task3",
+        "name": "网络检索",
+        "prompt": "请搜索并总结AI Agent记忆机制的最新研究进展，包括：\n1. 短期记忆机制（如滑动窗口）\n2. 长期记忆机制（如向量检索）\n3. 混合记忆架构\n4. 记忆检索算法\n5. 实际应用案例\n\n请提供结构化的总结，包含关键技术和研究趋势。",
+        "complexity": 3.0,
+        "expected_output": "技术总结和研究趋势分析"
+      },
+      "repetition": 2,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 16,
+      "session_key": "Qwen3-Max_Task2_rep1",
+      "model_config": {
+        "name": "Qwen3-Max",
+        "api_type": "qwen",
+        "model": "qwen-max",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task2",
+        "name": "天气API查询",
+        "prompt": "请查询以下三个城市的当前天气并进行比较：\n1. 北京\n2. 上海  \n3. 深圳\n\n请提供：\n1. 每个城市的当前温度、天气状况、湿度\n2. 三个城市的温度对比分析\n3. 天气适宜度排名",
+        "complexity": 2.0,
+        "expected_output": "结构化天气信息和比较分析"
+      },
+      "repetition": 1,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 27,
+      "session_key": "Kimi K2.5_Task1_rep3",
+      "model_config": {
+        "name": "Kimi K2.5",
+        "api_type": "kimi",
+        "model": "moonshot-v1-8k",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task1",
+        "name": "文件I/O操作",
+        "prompt": "请执行以下文件操作任务：\n1. 读取当前目录下的data.csv文件\n2. 计算'score'列的平均值\n3. 返回计算结果和简要分析\n\n文件内容示例：\nname,age,score\nAlice,25,85\nBob,30,92\nCharlie,28,88\nDavid,35,95",
+        "complexity": 1.0,
+        "expected_output": "数值计算和文件读取"
+      },
+      "repetition": 3,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 8,
+      "session_key": "DeepSeek_Task3_rep2",
+      "model_config": {
+        "name": "DeepSeek",
+        "api_type": "deepseek",
+        "model": "deepseek-chat",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task3",
+        "name": "网络检索",
+        "prompt": "请搜索并总结AI Agent记忆机制的最新研究进展，包括：\n1. 短期记忆机制（如滑动窗口）\n2. 长期记忆机制（如向量检索）\n3. 混合记忆架构\n4. 记忆检索算法\n5. 实际应用案例\n\n请提供结构化的总结，包含关键技术和研究趋势。",
+        "complexity": 3.0,
+        "expected_output": "技术总结和研究趋势分析"
+      },
+      "repetition": 2,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 1,
+      "session_key": "DeepSeek_Task1_rep1",
+      "model_config": {
+        "name": "DeepSeek",
+        "api_type": "deepseek",
+        "model": "deepseek-chat",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task1",
+        "name": "文件I/O操作",
+        "prompt": "请执行以下文件操作任务：\n1. 读取当前目录下的data.csv文件\n2. 计算'score'列的平均值\n3. 返回计算结果和简要分析\n\n文件内容示例：\nname,age,score\nAlice,25,85\nBob,30,92\nCharlie,28,88\nDavid,35,95",
+        "complexity": 1.0,
+        "expected_output": "数值计算和文件读取"
+      },
+      "repetition": 1,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 15,
+      "session_key": "Qwen3-Max_Task1_rep3",
+      "model_config": {
+        "name": "Qwen3-Max",
+        "api_type": "qwen",
+        "model": "qwen-max",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task1",
+        "name": "文件I/O操作",
+        "prompt": "请执行以下文件操作任务：\n1. 读取当前目录下的data.csv文件\n2. 计算'score'列的平均值\n3. 返回计算结果和简要分析\n\n文件内容示例：\nname,age,score\nAlice,25,85\nBob,30,92\nCharlie,28,88\nDavid,35,95",
+        "complexity": 1.0,
+        "expected_output": "数值计算和文件读取"
+      },
+      "repetition": 3,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 28,
+      "session_key": "Kimi K2.5_Task2_rep1",
+      "model_config": {
+        "name": "Kimi K2.5",
+        "api_type": "kimi",
+        "model": "moonshot-v1-8k",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task2",
+        "name": "天气API查询",
+        "prompt": "请查询以下三个城市的当前天气并进行比较：\n1. 北京\n2. 上海  \n3. 深圳\n\n请提供：\n1. 每个城市的当前温度、天气状况、湿度\n2. 三个城市的温度对比分析\n3. 天气适宜度排名",
+        "complexity": 2.0,
+        "expected_output": "结构化天气信息和比较分析"
+      },
+      "repetition": 1,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 11,
+      "session_key": "DeepSeek_Task4_rep2",
+      "model_config": {
+        "name": "DeepSeek",
+        "api_type": "deepseek",
+        "model": "deepseek-chat",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task4",
+        "name": "记忆依赖与代码生成",
+        "prompt": "基于以下用户偏好，生成批量文件重命名的Python代码：\n\n用户偏好：\n1. 用户喜欢将图片文件按日期重命名，格式：YYYY-MM-DD_序号.jpg\n2. 用户需要保留原始文件的EXIF信息\n3. 用户希望有进度显示和错误处理\n4. 用户偏好使用PIL库处理图片\n\n请生成完整的Python脚本，包含：\n1. 函数定义和参数说明\n2. EXIF信息提取和保留\n3. 进度显示功能\n4. 完善的错误处理\n5. 使用示例",
+        "complexity": 2.5,
+        "expected_output": "完整可运行的Python代码"
+      },
+      "repetition": 2,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 14,
+      "session_key": "Qwen3-Max_Task1_rep2",
+      "model_config": {
+        "name": "Qwen3-Max",
+        "api_type": "qwen",
+        "model": "qwen-max",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task1",
+        "name": "文件I/O操作",
+        "prompt": "请执行以下文件操作任务：\n1. 读取当前目录下的data.csv文件\n2. 计算'score'列的平均值\n3. 返回计算结果和简要分析\n\n文件内容示例：\nname,age,score\nAlice,25,85\nBob,30,92\nCharlie,28,88\nDavid,35,95",
+        "complexity": 1.0,
+        "expected_output": "数值计算和文件读取"
+      },
+      "repetition": 2,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 33,
+      "session_key": "Kimi K2.5_Task3_rep3",
+      "model_config": {
+        "name": "Kimi K2.5",
+        "api_type": "kimi",
+        "model": "moonshot-v1-8k",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task3",
+        "name": "网络检索",
+        "prompt": "请搜索并总结AI Agent记忆机制的最新研究进展，包括：\n1. 短期记忆机制（如滑动窗口）\n2. 长期记忆机制（如向量检索）\n3. 混合记忆架构\n4. 记忆检索算法\n5. 实际应用案例\n\n请提供结构化的总结，包含关键技术和研究趋势。",
+        "complexity": 3.0,
+        "expected_output": "技术总结和研究趋势分析"
+      },
+      "repetition": 3,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 5,
+      "session_key": "DeepSeek_Task2_rep2",
+      "model_config": {
+        "name": "DeepSeek",
+        "api_type": "deepseek",
+        "model": "deepseek-chat",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task2",
+        "name": "天气API查询",
+        "prompt": "请查询以下三个城市的当前天气并进行比较：\n1. 北京\n2. 上海  \n3. 深圳\n\n请提供：\n1. 每个城市的当前温度、天气状况、湿度\n2. 三个城市的温度对比分析\n3. 天气适宜度排名",
+        "complexity": 2.0,
+        "expected_output": "结构化天气信息和比较分析"
+      },
+      "repetition": 2,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    },
+    {
+      "experiment_id": 23,
+      "session_key": "Qwen3-Max_Task4_rep2",
+      "model_config": {
+        "name": "Qwen3-Max",
+        "api_type": "qwen",
+        "model": "qwen-max",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "task": {
+        "id": "Task4",
+        "name": "记忆依赖与代码生成",
+        "prompt": "基于以下用户偏好，生成批量文件重命名的Python代码：\n\n用户偏好：\n1. 用户喜欢将图片文件按日期重命名，格式：YYYY-MM-DD_序号.jpg\n2. 用户需要保留原始文件的EXIF信息\n3. 用户希望有进度显示和错误处理\n4. 用户偏好使用PIL库处理图片\n\n请生成完整的Python脚本，包含：\n1. 函数定义和参数说明\n2. EXIF信息提取和保留\n3. 进度显示功能\n4. 完善的错误处理\n5. 使用示例",
+        "complexity": 2.5,
+        "expected_output": "完整可运行的Python代码"
+      },
+      "repetition": 2,
+      "status": "pending",
+      "created_time": "2026-03-29T20:26:10.571325"
+    }
+  ],
+  "results": [
+    {
+      "experiment_id": 12,
+      "session_key": "DeepSeek_Task4_rep3",
+      "model_name": "DeepSeek",
+      "api_type": "deepseek",
+      "task_id": "Task4",
+      "task_name": "记忆依赖与代码生成",
+      "repetition": 3,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.573633",
+      "end_time": "2026-03-29T20:26:10.574929",
+      "execution_time_seconds": 0.0012962818145751953,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 25,
+      "session_key": "Kimi K2.5_Task1_rep1",
+      "model_name": "Kimi K2.5",
+      "api_type": "kimi",
+      "task_id": "Task1",
+      "task_name": "文件I/O操作",
+      "repetition": 1,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.574929",
+      "end_time": "2026-03-29T20:26:10.574929",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 13,
+      "session_key": "Qwen3-Max_Task1_rep1",
+      "model_name": "Qwen3-Max",
+      "api_type": "qwen",
+      "task_id": "Task1",
+      "task_name": "文件I/O操作",
+      "repetition": 1,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.574929",
+      "end_time": "2026-03-29T20:26:10.574929",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 34,
+      "session_key": "Kimi K2.5_Task4_rep1",
+      "model_name": "Kimi K2.5",
+      "api_type": "kimi",
+      "task_id": "Task4",
+      "task_name": "记忆依赖与代码生成",
+      "repetition": 1,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.574929",
+      "end_time": "2026-03-29T20:26:10.574929",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 7,
+      "session_key": "DeepSeek_Task3_rep1",
+      "model_name": "DeepSeek",
+      "api_type": "deepseek",
+      "task_id": "Task3",
+      "task_name": "网络检索",
+      "repetition": 1,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.574929",
+      "end_time": "2026-03-29T20:26:10.574929",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 17,
+      "session_key": "Qwen3-Max_Task2_rep2",
+      "model_name": "Qwen3-Max",
+      "api_type": "qwen",
+      "task_id": "Task2",
+      "task_name": "天气API查询",
+      "repetition": 2,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.574929",
+      "end_time": "2026-03-29T20:26:10.574929",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 30,
+      "session_key": "Kimi K2.5_Task2_rep3",
+      "model_name": "Kimi K2.5",
+      "api_type": "kimi",
+      "task_id": "Task2",
+      "task_name": "天气API查询",
+      "repetition": 3,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.574929",
+      "end_time": "2026-03-29T20:26:10.574929",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 26,
+      "session_key": "Kimi K2.5_Task1_rep2",
+      "model_name": "Kimi K2.5",
+      "api_type": "kimi",
+      "task_id": "Task1",
+      "task_name": "文件I/O操作",
+      "repetition": 2,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.575441",
+      "end_time": "2026-03-29T20:26:10.575441",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 4,
+      "session_key": "DeepSeek_Task2_rep1",
+      "model_name": "DeepSeek",
+      "api_type": "deepseek",
+      "task_id": "Task2",
+      "task_name": "天气API查询",
+      "repetition": 1,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.575441",
+      "end_time": "2026-03-29T20:26:10.575441",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 36,
+      "session_key": "Kimi K2.5_Task4_rep3",
+      "model_name": "Kimi K2.5",
+      "api_type": "kimi",
+      "task_id": "Task4",
+      "task_name": "记忆依赖与代码生成",
+      "repetition": 3,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.575441",
+      "end_time": "2026-03-29T20:26:10.575441",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 22,
+      "session_key": "Qwen3-Max_Task4_rep1",
+      "model_name": "Qwen3-Max",
+      "api_type": "qwen",
+      "task_id": "Task4",
+      "task_name": "记忆依赖与代码生成",
+      "repetition": 1,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.575441",
+      "end_time": "2026-03-29T20:26:10.575441",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 21,
+      "session_key": "Qwen3-Max_Task3_rep3",
+      "model_name": "Qwen3-Max",
+      "api_type": "qwen",
+      "task_id": "Task3",
+      "task_name": "网络检索",
+      "repetition": 3,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.575441",
+      "end_time": "2026-03-29T20:26:10.575441",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 9,
+      "session_key": "DeepSeek_Task3_rep3",
+      "model_name": "DeepSeek",
+      "api_type": "deepseek",
+      "task_id": "Task3",
+      "task_name": "网络检索",
+      "repetition": 3,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.576452",
+      "end_time": "2026-03-29T20:26:10.576452",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 10,
+      "session_key": "DeepSeek_Task4_rep1",
+      "model_name": "DeepSeek",
+      "api_type": "deepseek",
+      "task_id": "Task4",
+      "task_name": "记忆依赖与代码生成",
+      "repetition": 1,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.576818",
+      "end_time": "2026-03-29T20:26:10.576818",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 6,
+      "session_key": "DeepSeek_Task2_rep3",
+      "model_name": "DeepSeek",
+      "api_type": "deepseek",
+      "task_id": "Task2",
+      "task_name": "天气API查询",
+      "repetition": 3,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.576818",
+      "end_time": "2026-03-29T20:26:10.576818",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 31,
+      "session_key": "Kimi K2.5_Task3_rep1",
+      "model_name": "Kimi K2.5",
+      "api_type": "kimi",
+      "task_id": "Task3",
+      "task_name": "网络检索",
+      "repetition": 1,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.576818",
+      "end_time": "2026-03-29T20:26:10.576818",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 29,
+      "session_key": "Kimi K2.5_Task2_rep2",
+      "model_name": "Kimi K2.5",
+      "api_type": "kimi",
+      "task_id": "Task2",
+      "task_name": "天气API查询",
+      "repetition": 2,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.576818",
+      "end_time": "2026-03-29T20:26:10.576818",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 19,
+      "session_key": "Qwen3-Max_Task3_rep1",
+      "model_name": "Qwen3-Max",
+      "api_type": "qwen",
+      "task_id": "Task3",
+      "task_name": "网络检索",
+      "repetition": 1,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.576818",
+      "end_time": "2026-03-29T20:26:10.576818",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 18,
+      "session_key": "Qwen3-Max_Task2_rep3",
+      "model_name": "Qwen3-Max",
+      "api_type": "qwen",
+      "task_id": "Task2",
+      "task_name": "天气API查询",
+      "repetition": 3,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.576818",
+      "end_time": "2026-03-29T20:26:10.576818",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 32,
+      "session_key": "Kimi K2.5_Task3_rep2",
+      "model_name": "Kimi K2.5",
+      "api_type": "kimi",
+      "task_id": "Task3",
+      "task_name": "网络检索",
+      "repetition": 2,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.576818",
+      "end_time": "2026-03-29T20:26:10.576818",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 2,
+      "session_key": "DeepSeek_Task1_rep2",
+      "model_name": "DeepSeek",
+      "api_type": "deepseek",
+      "task_id": "Task1",
+      "task_name": "文件I/O操作",
+      "repetition": 2,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.576818",
+      "end_time": "2026-03-29T20:26:10.576818",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 35,
+      "session_key": "Kimi K2.5_Task4_rep2",
+      "model_name": "Kimi K2.5",
+      "api_type": "kimi",
+      "task_id": "Task4",
+      "task_name": "记忆依赖与代码生成",
+      "repetition": 2,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.576818",
+      "end_time": "2026-03-29T20:26:10.576818",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 3,
+      "session_key": "DeepSeek_Task1_rep3",
+      "model_name": "DeepSeek",
+      "api_type": "deepseek",
+      "task_id": "Task1",
+      "task_name": "文件I/O操作",
+      "repetition": 3,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.576818",
+      "end_time": "2026-03-29T20:26:10.576818",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 24,
+      "session_key": "Qwen3-Max_Task4_rep3",
+      "model_name": "Qwen3-Max",
+      "api_type": "qwen",
+      "task_id": "Task4",
+      "task_name": "记忆依赖与代码生成",
+      "repetition": 3,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.576818",
+      "end_time": "2026-03-29T20:26:10.576818",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 20,
+      "session_key": "Qwen3-Max_Task3_rep2",
+      "model_name": "Qwen3-Max",
+      "api_type": "qwen",
+      "task_id": "Task3",
+      "task_name": "网络检索",
+      "repetition": 2,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.577826",
+      "end_time": "2026-03-29T20:26:10.577826",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 16,
+      "session_key": "Qwen3-Max_Task2_rep1",
+      "model_name": "Qwen3-Max",
+      "api_type": "qwen",
+      "task_id": "Task2",
+      "task_name": "天气API查询",
+      "repetition": 1,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.577826",
+      "end_time": "2026-03-29T20:26:10.577826",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 27,
+      "session_key": "Kimi K2.5_Task1_rep3",
+      "model_name": "Kimi K2.5",
+      "api_type": "kimi",
+      "task_id": "Task1",
+      "task_name": "文件I/O操作",
+      "repetition": 3,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.577826",
+      "end_time": "2026-03-29T20:26:10.577826",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 8,
+      "session_key": "DeepSeek_Task3_rep2",
+      "model_name": "DeepSeek",
+      "api_type": "deepseek",
+      "task_id": "Task3",
+      "task_name": "网络检索",
+      "repetition": 2,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.577826",
+      "end_time": "2026-03-29T20:26:10.577826",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 1,
+      "session_key": "DeepSeek_Task1_rep1",
+      "model_name": "DeepSeek",
+      "api_type": "deepseek",
+      "task_id": "Task1",
+      "task_name": "文件I/O操作",
+      "repetition": 1,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.577826",
+      "end_time": "2026-03-29T20:26:10.577826",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 15,
+      "session_key": "Qwen3-Max_Task1_rep3",
+      "model_name": "Qwen3-Max",
+      "api_type": "qwen",
+      "task_id": "Task1",
+      "task_name": "文件I/O操作",
+      "repetition": 3,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.577826",
+      "end_time": "2026-03-29T20:26:10.577826",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 28,
+      "session_key": "Kimi K2.5_Task2_rep1",
+      "model_name": "Kimi K2.5",
+      "api_type": "kimi",
+      "task_id": "Task2",
+      "task_name": "天气API查询",
+      "repetition": 1,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.578345",
+      "end_time": "2026-03-29T20:26:10.578345",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 11,
+      "session_key": "DeepSeek_Task4_rep2",
+      "model_name": "DeepSeek",
+      "api_type": "deepseek",
+      "task_id": "Task4",
+      "task_name": "记忆依赖与代码生成",
+      "repetition": 2,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.578345",
+      "end_time": "2026-03-29T20:26:10.578345",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 14,
+      "session_key": "Qwen3-Max_Task1_rep2",
+      "model_name": "Qwen3-Max",
+      "api_type": "qwen",
+      "task_id": "Task1",
+      "task_name": "文件I/O操作",
+      "repetition": 2,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.578345",
+      "end_time": "2026-03-29T20:26:10.578345",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 33,
+      "session_key": "Kimi K2.5_Task3_rep3",
+      "model_name": "Kimi K2.5",
+      "api_type": "kimi",
+      "task_id": "Task3",
+      "task_name": "网络检索",
+      "repetition": 3,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.578345",
+      "end_time": "2026-03-29T20:26:10.578345",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 5,
+      "session_key": "DeepSeek_Task2_rep2",
+      "model_name": "DeepSeek",
+      "api_type": "deepseek",
+      "task_id": "Task2",
+      "task_name": "天气API查询",
+      "repetition": 2,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.578345",
+      "end_time": "2026-03-29T20:26:10.578345",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    },
+    {
+      "experiment_id": 23,
+      "session_key": "Qwen3-Max_Task4_rep2",
+      "model_name": "Qwen3-Max",
+      "api_type": "qwen",
+      "task_id": "Task4",
+      "task_name": "记忆依赖与代码生成",
+      "repetition": 2,
+      "success": false,
+      "error": "实验执行失败: AgentLoop.__init__() missing 3 required positional arguments: 'bus', 'provider', and 'workspace'",
+      "start_time": "2026-03-29T20:26:10.578345",
+      "end_time": "2026-03-29T20:26:10.578345",
+      "execution_time_seconds": 0.0,
+      "response_content": "",
+      "response_length": 0,
+      "quality_score": 0.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_cny": 0.0
+    }
+  ],
+  "statistics": {
+    "total_experiments": 36,
+    "successful_experiments": 0,
+    "failed_experiments": 36,
+    "total_tokens": 0,
+    "total_time_seconds": 0.0,
+    "start_time": "2026-03-29T20:26:10.571325"
+  },
+  "generated_time": "2026-03-29T20:26:10.578344"
+}

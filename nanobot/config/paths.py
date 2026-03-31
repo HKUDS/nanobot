@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from nanobot.config.loader import get_config_path
@@ -35,8 +36,23 @@ def get_logs_dir() -> Path:
 
 
 def get_workspace_path(workspace: str | None = None) -> Path:
-    """Resolve and ensure the agent workspace path."""
-    path = Path(workspace).expanduser() if workspace else Path.home() / ".nanobot" / "workspace"
+    """
+    Resolve and ensure the agent workspace path.
+    
+    Priority:
+    1. Explicit workspace parameter
+    2. NANOBOT_WORKSPACE environment variable (for Docker isolation)
+    3. Default ~/.nanobot/workspace
+    """
+    # 优先使用环境变量（支持 Docker 容器隔离）
+    if workspace is None:
+        workspace = os.environ.get("NANOBOT_WORKSPACE")
+    
+    if workspace:
+        path = Path(workspace).expanduser()
+    else:
+        path = Path.home() / ".nanobot" / "workspace"
+    
     return ensure_dir(path)
 
 

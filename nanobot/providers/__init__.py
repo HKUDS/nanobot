@@ -6,6 +6,12 @@ from importlib import import_module
 from typing import TYPE_CHECKING
 
 from nanobot.providers.base import LLMProvider, LLMResponse
+from nanobot.providers.openai_compat_provider import (
+    set_current_session_key,
+    get_current_session_key,
+    set_current_session_config,
+    get_current_session_config,
+)
 
 __all__ = [
     "LLMProvider",
@@ -14,6 +20,10 @@ __all__ = [
     "OpenAICompatProvider",
     "OpenAICodexProvider",
     "AzureOpenAIProvider",
+    "set_current_session_key",
+    "get_current_session_key",
+    "set_current_session_config",
+    "get_current_session_config",
 ]
 
 _LAZY_IMPORTS = {

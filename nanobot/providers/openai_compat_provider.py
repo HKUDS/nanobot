@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import secrets
 import string
 import uuid
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -21,18 +23,62 @@ if TYPE_CHECKING:
     from nanobot.providers.registry import ProviderSpec
 
 
+_current_session_key: ContextVar[str | None] = ContextVar("current_session_key", default=None)
+_current_session_config: ContextVar[dict | None] = ContextVar("current_session_config", default=None)
+
+
+def set_current_session_key(session_key: str | None) -> None:
+    """Set the current session key for usage logging (async-safe)."""
+    _current_session_key.set(session_key)
+
+
+def get_current_session_key() -> str | None:
+    """Get the current session key for usage logging (async-safe)."""
+    return _current_session_key.get()
+
+
+def set_current_session_config(config: dict | None) -> None:
+    """Set the current session config (including API type, key, etc.) for multi-backend support (async-safe)."""
+    _current_session_config.set(config)
+    # Also set session_key for backward compatibility
+    if config:
+        _current_session_key.set(config.get("session_key"))
+    else:
+        _current_session_key.set(None)
+
+
+def get_current_session_config() -> dict | None:
+    """Get the current session config for multi-backend support (async-safe)."""
+    return _current_session_config.get()
+
+
 def _write_usage_to_file(usage: dict[str, int]) -> None:
-    """Write token usage to token_usage.txt file."""
+    """Write token usage to token_usage.txt file (per-session JSON format)."""
     try:
         personal_dir = Path(__file__).parent.parent.parent / "personal"
         personal_dir.mkdir(parents=True, exist_ok=True)
-        log_file = personal_dir / "token_usage.txt"
+
+        session_key = get_current_session_key()
+        if session_key:
+            log_dir = personal_dir / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_file = log_dir / f"session_{session_key}_token_usage.txt"
+        else:
+            log_file = personal_dir / "token_usage.txt"
+
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         prompt = usage.get("prompt_tokens", 0)
         completion = usage.get("completion_tokens", 0)
         total = usage.get("total_tokens", prompt + completion)
+
+        record = {
+            "timestamp": timestamp,
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": total,
+        }
         with open(log_file, "a", encoding="utf-8") as f:
-            f.write(f"{timestamp} | prompt={prompt}, completion={completion}, total={total}\n")
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:
         pass
 
@@ -112,6 +158,8 @@ class OpenAICompatProvider(LLMProvider):
 
     Receives a resolved ``ProviderSpec`` from the caller — no internal
     registry lookups needed.
+    
+    Supports session-level API configuration via ContextVar for multi-backend experiments.
     """
 
     def __init__(
@@ -132,14 +180,119 @@ class OpenAICompatProvider(LLMProvider):
 
         effective_base = api_base or (spec.default_api_base if spec else None) or None
 
-        self._client = AsyncOpenAI(
-            api_key=api_key or "no-key",
-            base_url=effective_base,
-            default_headers={
-                "x-session-affinity": uuid.uuid4().hex,
-                **(extra_headers or {}),
-            },
-        )
+        self._client = None  # Lazy initialization in chat() to support session-level config
+        self._default_api_key = api_key or "no-key"
+        self._default_base_url = effective_base
+
+    def _get_client_for_session(self) -> AsyncOpenAI:
+        """Get or create an AsyncOpenAI client based on current session config."""
+        session_config = get_current_session_config()
+        
+        if session_config and session_config.get("api_type"):
+            # Use session-level API configuration
+            api_type = session_config["api_type"]
+            api_key = session_config.get("api_key") or self._get_api_key_from_env_or_config(api_type)
+            api_base = session_config.get("api_endpoint") or self._get_api_base_for_type(api_type)
+            
+            # Create client with session-specific config and longer timeout for long tasks
+            return AsyncOpenAI(
+                api_key=api_key,
+                base_url=api_base,
+                timeout=600.0,  # 10 minutes timeout for long-running tasks
+                default_headers={
+                    "x-session-affinity": uuid.uuid4().hex,
+                    **(self.extra_headers or {}),
+                },
+            )
+        else:
+            # Use default config from __init__
+            if self._client is None:
+                self._client = AsyncOpenAI(
+                    api_key=self._default_api_key,
+                    base_url=self._default_base_url,
+                    timeout=600.0,  # 10 minutes timeout for long-running tasks
+                    default_headers={
+                        "x-session-affinity": uuid.uuid4().hex,
+                        **(self.extra_headers or {}),
+                    },
+                )
+            return self._client
+
+    def _get_api_key_from_env_or_config(self, api_type: str) -> str:
+        """Get API key from environment variable or config based on api_type."""
+        # Map api_type to environment variable names
+        api_key_map = {
+            "deepseek": "DEEPSEEK_API_KEY",
+            "qwen": "DASHSCOPE_API_KEY",
+            "kimi": "KIMI_API_KEY",
+            "moonshot": "KIMI_API_KEY",
+            "minimax": "MINIMAX_API_KEY",
+        }
+        
+        env_key = api_key_map.get(api_type.lower())
+        if env_key and env_key in os.environ:
+            return os.environ[env_key]
+        
+        # Try to read from config.json
+        try:
+            config_path = Path.home() / ".nanobot" / "config.json"
+            if config_path.exists():
+                config = json.loads(config_path.read_text(encoding="utf-8"))
+                
+                # Try different possible config structures
+                # Structure 1: {"providers": {"deepseek": {"apiKey": "..."}}}
+                providers_config = config.get("providers", {})
+                provider_config = providers_config.get(api_type.lower(), {})
+                
+                # Structure 2: {"llm": {"deepseek": {"api_key": "..."}}}
+                if not provider_config:
+                    llm_config = config.get("llm", {})
+                    provider_config = llm_config.get(api_type.lower(), {})
+                
+                # Try different possible key names
+                api_key = (
+                    provider_config.get("apiKey") or
+                    provider_config.get("api_key") or
+                    provider_config.get("key")
+                )
+                
+                if api_key:
+                    return api_key
+        except Exception:
+            pass  # Fallback to hardcoded keys if config.json read fails
+        
+        # Last resort: hardcoded keys (for testing only)
+        config_keys = {
+            "deepseek": "sk-b192d1bf26f740adace7d5f628656921",
+            "qwen": "sk-91fe1c9c529b46bb88dc200a2e97b2b6",
+            "kimi": "sk-ZUXBoYV5n0ZCTKP290SK3EFmD2EJMl6xHwIiDLXwT360EkQW",
+            "moonshot": "sk-ZUXBoYV5n0ZCTKP290SK3EFmD2EJMl6xHwIiDLXwT360EkQW",
+            "minimax": "no-key",  # No hardcoded key for MiniMax
+        }
+        
+        return config_keys.get(api_type.lower(), "no-key")
+
+    def _get_default_model_for_type(self, api_type: str) -> str:
+        """Get default model name based on api_type."""
+        default_models = {
+            "deepseek": "deepseek-chat",
+            "qwen": "qwen-max",
+            "kimi": "moonshot-v1-8k",
+            "moonshot": "moonshot-v1-8k",
+            "minimax": "MiniMax-M1",
+        }
+        return default_models.get(api_type.lower(), self.default_model)
+
+    def _get_api_base_for_type(self, api_type: str) -> str | None:
+        """Get API base URL based on api_type."""
+        base_urls = {
+            "deepseek": "https://api.deepseek.com/v1",
+            "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "kimi": "https://api.moonshot.cn/v1",
+            "moonshot": "https://api.moonshot.cn/v1",
+            "minimax": "https://api.minimaxi.com/v1",
+        }
+        return base_urls.get(api_type.lower())
 
     def _setup_env(self, api_key: str, api_base: str | None) -> None:
         """Set environment variables based on provider spec."""
@@ -235,7 +388,17 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_effort: str | None,
         tool_choice: str | dict[str, Any] | None,
     ) -> dict[str, Any]:
-        model_name = model or self.default_model
+        # Check session config for model override
+        session_config = get_current_session_config()
+        if session_config and session_config.get("api_type"):
+            api_type = session_config["api_type"]
+            if session_config.get("model"):
+                model_name = session_config["model"]
+            else:
+                model_name = self._get_default_model_for_type(api_type)
+        else:
+            model_name = model or self.default_model
+        
         spec = self._spec
 
         if spec and spec.supports_prompt_caching:
@@ -556,7 +719,8 @@ class OpenAICompatProvider(LLMProvider):
             reasoning_effort, tool_choice,
         )
         try:
-            return self._parse(await self._client.chat.completions.create(**kwargs))
+            client = self._get_client_for_session()
+            return self._parse(await client.chat.completions.create(**kwargs))
         except Exception as e:
             return self._handle_error(e)
 
@@ -578,7 +742,8 @@ class OpenAICompatProvider(LLMProvider):
         kwargs["stream"] = True
         kwargs["stream_options"] = {"include_usage": True}
         try:
-            stream = await self._client.chat.completions.create(**kwargs)
+            client = self._get_client_for_session()
+            stream = await client.chat.completions.create(**kwargs)
             chunks: list[Any] = []
             async for chunk in stream:
                 chunks.append(chunk)

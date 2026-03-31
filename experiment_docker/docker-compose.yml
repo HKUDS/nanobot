@@ -1,0 +1,107 @@
+version: '3.8'
+
+services:
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: experiment_docker/Dockerfile
+    volumes:
+      - ./results:/app/results
+      - ./shared/configs:/app/configs:ro
+      - ./shared/data:/app/data:ro
+    environment:
+      - AGENT_COUNT=${AGENT_COUNT:-4}
+      - RESULT_DIR=/app/results
+    command: python -m experiment_docker.orchestrator.runner
+    networks:
+      - experiment_net
+
+  agent-1:
+    build:
+      context: ..
+      dockerfile: experiment_docker/Dockerfile
+    volumes:
+      - ./results/raw/VR_CG_Task1_rep1:/app/personal/logs
+    environment:
+      - SESSION_KEY=VR_CG_Task1_rep1
+      - MEMORY_CONFIG=VR
+      - TOOL_CONFIG=CG
+      - TASK_NAME=Task1
+      - NANOBOT_MODEL=deepseek-chat
+    configs:
+      - source: config-vr-cg
+        target: /app/config.json
+    networks:
+      - experiment_net
+    restart: "no"
+
+  agent-2:
+    build:
+      context: ..
+      dockerfile: experiment_docker/Dockerfile
+    volumes:
+      - ./results/raw/VR_FG_Task1_rep1:/app/personal/logs
+    environment:
+      - SESSION_KEY=VR_FG_Task1_rep1
+      - MEMORY_CONFIG=VR
+      - TOOL_CONFIG=FG
+      - TASK_NAME=Task1
+      - NANOBOT_MODEL=deepseek-chat
+    configs:
+      - source: config-vr-fg
+        target: /app/config.json
+    networks:
+      - experiment_net
+    restart: "no"
+
+  agent-3:
+    build:
+      context: ..
+      dockerfile: experiment_docker/Dockerfile
+    volumes:
+      - ./results/raw/SW_CG_Task1_rep1:/app/personal/logs
+    environment:
+      - SESSION_KEY=SW_CG_Task1_rep1
+      - MEMORY_CONFIG=SW
+      - TOOL_CONFIG=CG
+      - TASK_NAME=Task1
+      - NANOBOT_MODEL=deepseek-chat
+    configs:
+      - source: config-sw-cg
+        target: /app/config.json
+    networks:
+      - experiment_net
+    restart: "no"
+
+  agent-4:
+    build:
+      context: ..
+      dockerfile: experiment_docker/Dockerfile
+    volumes:
+      - ./results/raw/SW_FG_Task1_rep1:/app/personal/logs
+    environment:
+      - SESSION_KEY=SW_FG_Task1_rep1
+      - MEMORY_CONFIG=SW
+      - TOOL_CONFIG=FG
+      - TASK_NAME=Task1
+      - NANOBOT_MODEL=deepseek-chat
+    configs:
+      - source: config-sw-fg
+        target: /app/config.json
+    networks:
+      - experiment_net
+    restart: "no"
+
+configs:
+  config-vr-cg:
+    file: ./shared/configs/agent_VR_CG.json
+  config-vr-fg:
+    file: ./shared/configs/agent_VR_FG.json
+  config-sw-cg:
+    file: ./shared/configs/agent_SW_CG.json
+  config-sw-fg:
+    file: ./shared/configs/agent_SW_FG.json
+
+networks:
+  experiment_net:
+    driver: bridge

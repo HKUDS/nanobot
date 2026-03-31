@@ -1,0 +1,134 @@
+{
+  "report_date": "2026-03-30T22:16:44.340799",
+  "total_experiments": 12,
+  "successful": 0,
+  "success_rate": 0.0,
+  "llm_backends": {
+    "deepseek-chat": {
+      "model": "deepseek-chat",
+      "count": 4,
+      "success_rate": 0.0,
+      "avg_total_tokens": 0.0,
+      "min_total_tokens": 0,
+      "max_total_tokens": 0,
+      "std_total_tokens": 0.0,
+      "avg_estimated_tokens": 0.0,
+      "avg_token_error_rate": 0,
+      "avg_execution_time": 1.1607279777526855,
+      "tasks": {
+        "Task1_Sales": {
+          "count": 1,
+          "success": 0,
+          "avg_total_tokens": 0.0,
+          "avg_estimated_tokens": 0.0,
+          "avg_execution_time": 1.1607279777526855
+        },
+        "Task2_User": {
+          "count": 1,
+          "success": 0,
+          "avg_total_tokens": 0.0,
+          "avg_estimated_tokens": 0.0,
+          "avg_execution_time": 0
+        },
+        "Task3_Finance": {
+          "count": 1,
+          "success": 0,
+          "avg_total_tokens": 0.0,
+          "avg_estimated_tokens": 0.0,
+          "avg_execution_time": 0
+        },
+        "Task4_Review": {
+          "count": 1,
+          "success": 0,
+          "avg_total_tokens": 0.0,
+          "avg_estimated_tokens": 0.0,
+          "avg_execution_time": 0
+        }
+      }
+    },
+    "qwen3-max-2026-01-23": {
+      "model": "qwen3-max-2026-01-23",
+      "count": 4,
+      "success_rate": 0.0,
+      "avg_total_tokens": 0.0,
+      "min_total_tokens": 0,
+      "max_total_tokens": 0,
+      "std_total_tokens": 0.0,
+      "avg_estimated_tokens": 0.0,
+      "avg_token_error_rate": 0,
+      "avg_execution_time": 0.0006153583526611328,
+      "tasks": {
+        "Task1_Sales": {
+          "count": 1,
+          "success": 0,
+          "avg_total_tokens": 0.0,
+          "avg_estimated_tokens": 0.0,
+          "avg_execution_time": 0
+        },
+        "Task2_User": {
+          "count": 1,
+          "success": 0,
+          "avg_total_tokens": 0.0,
+          "avg_estimated_tokens": 0.0,
+          "avg_execution_time": 0
+        },
+        "Task3_Finance": {
+          "count": 1,
+          "success": 0,
+          "avg_total_tokens": 0.0,
+          "avg_estimated_tokens": 0.0,
+          "avg_execution_time": 0
+        },
+        "Task4_Review": {
+          "count": 1,
+          "success": 0,
+          "avg_total_tokens": 0.0,
+          "avg_estimated_tokens": 0.0,
+          "avg_execution_time": 0.0006153583526611328
+        }
+      }
+    },
+    "kimi-k2.5": {
+      "model": "kimi-k2.5",
+      "count": 4,
+      "success_rate": 0.0,
+      "avg_total_tokens": 0.0,
+      "min_total_tokens": 0,
+      "max_total_tokens": 0,
+      "std_total_tokens": 0.0,
+      "avg_estimated_tokens": 0.0,
+      "avg_token_error_rate": 0,
+      "avg_execution_time": 0,
+      "tasks": {
+        "Task1_Sales": {
+          "count": 1,
+          "success": 0,
+          "avg_total_tokens": 0.0,
+          "avg_estimated_tokens": 0.0,
+          "avg_execution_time": 0
+        },
+        "Task2_User": {
+          "count": 1,
+          "success": 0,
+          "avg_total_tokens": 0.0,
+          "avg_estimated_tokens": 0.0,
+          "avg_execution_time": 0
+        },
+        "Task3_Finance": {
+          "count": 1,
+          "success": 0,
+          "avg_total_tokens": 0.0,
+          "avg_estimated_tokens": 0.0,
+          "avg_execution_time": 0
+        },
+        "Task4_Review": {
+          "count": 1,
+          "success": 0,
+          "avg_total_tokens": 0.0,
+          "avg_estimated_tokens": 0.0,
+          "avg_execution_time": 0
+        }
+      }
+    }
+  }
+}

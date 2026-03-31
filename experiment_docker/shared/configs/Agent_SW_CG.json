@@ -1,0 +1,13 @@
+{
+  "name": "nanobot_experiment",
+  "version": "1.0.0",
+  "description": "Agent Architecture Comparison Experiment - Sliding Window + Coarse-Grained Tools",
+  "memory_config": {
+    "type": "sliding_window",
+    "window_size": 8
+  },
+  "tool_config": {
+    "type": "coarse_grained",
+    "tools": ["execute_python_code"]
+  }
+}

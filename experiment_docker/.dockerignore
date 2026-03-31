@@ -1,0 +1,33 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.eggs
+*.egg-info
+dist
+build
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Experiment outputs
+experiment_docker/results/
+experiment_docker/personal/
+
+# Docker files
+experiment_docker/Dockerfile
+experiment_docker/.dockerignore
+experiment_docker/daemon.json
+
+# Skills (not needed in container)
+.trae/skills

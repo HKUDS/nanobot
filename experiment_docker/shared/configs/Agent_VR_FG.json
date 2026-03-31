@@ -1,0 +1,15 @@
+{
+  "name": "nanobot_experiment",
+  "version": "1.0.0",
+  "description": "Agent Architecture Comparison Experiment - Vector Retrieval + Fine-Grained Tools",
+  "memory_config": {
+    "type": "vector_retrieval",
+    "top_k": 3,
+    "max_memory_tokens": 4096,
+    "include_recent_turns": 2
+  },
+  "tool_config": {
+    "type": "fine_grained",
+    "tools": ["read_csv", "calculate_average", "filter_data", "group_by", "sort_data"]
+  }
+}

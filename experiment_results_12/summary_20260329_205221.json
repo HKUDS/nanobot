@@ -1,0 +1,54 @@
+{
+  "total_experiments": 12,
+  "successful_experiments": 12,
+  "success_rate": 100.0,
+  "total_time": 50.18380284309387,
+  "total_tokens": 0,
+  "total_cost": 0.0,
+  "by_api_type": {
+    "deepseek": {
+      "count": 4,
+      "avg_time": 4.548750519752502,
+      "avg_tokens": 0.0,
+      "total_cost": 0.0
+    },
+    "qwen": {
+      "count": 4,
+      "avg_time": 5.575547218322754,
+      "avg_tokens": 0.0,
+      "total_cost": 0.0
+    },
+    "kimi": {
+      "count": 4,
+      "avg_time": 2.4216529726982117,
+      "avg_tokens": 0.0,
+      "total_cost": 0.0
+    }
+  },
+  "by_task": {
+    "Task1": {
+      "name": "简单问答",
+      "count": 3,
+      "avg_time": 4.295226097106934,
+      "avg_tokens": 0.0
+    },
+    "Task2": {
+      "name": "计算任务",
+      "count": 3,
+      "avg_time": 3.5719734827677407,
+      "avg_tokens": 0.0
+    },
+    "Task3": {
+      "name": "推理任务",
+      "count": 3,
+      "avg_time": 4.8511520226796465,
+      "avg_tokens": 0.0
+    },
+    "Task4": {
+      "name": "代码生成",
+      "count": 3,
+      "avg_time": 4.00958267847697,
+      "avg_tokens": 0.0
+    }
+  }
+}

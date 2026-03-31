@@ -13,7 +13,17 @@ class UsageLoggingHook:
         self._configured = False
 
     def _get_log_path(self) -> Path:
-        workspace = Path(os.path.expanduser("~/.nanobot/workspace"))
+        """Get the token usage log file path.
+        
+        Supports Docker isolation via NANOBOT_WORKSPACE environment variable.
+        """
+        # 支持 Docker 容器隔离：使用环境变量指定的 workspace
+        workspace_env = os.environ.get("NANOBOT_WORKSPACE")
+        if workspace_env:
+            workspace = Path(workspace_env)
+        else:
+            workspace = Path(os.path.expanduser("~/.nanobot/workspace"))
+        
         personal_dir = workspace / "personal"
         personal_dir.mkdir(parents=True, exist_ok=True)
         return personal_dir / "token_usage.txt"

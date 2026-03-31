@@ -1,0 +1,116 @@
+{
+  "report_date": "2026-03-29T15:43:02.293030",
+  "total_experiments": 120,
+  "successful": 0,
+  "success_rate": 0.0,
+  "groups": {
+    "VR_CG_Task1": {
+      "count": 10,
+      "success_rate": 0.0,
+      "avg_total_tokens": 0.0,
+      "min_total_tokens": 0,
+      "max_total_tokens": 0,
+      "std_total_tokens": 0.0,
+      "avg_execution_time": 0.004807209968566895
+    },
+    "VR_CG_Task2": {
+      "count": 10,
+      "success_rate": 0.0,
+      "avg_total_tokens": 0.0,
+      "min_total_tokens": 0,
+      "max_total_tokens": 0,
+      "std_total_tokens": 0.0,
+      "avg_execution_time": 0.004970121383666992
+    },
+    "VR_CG_Task4": {
+      "count": 10,
+      "success_rate": 0.0,
+      "avg_total_tokens": 0.0,
+      "min_total_tokens": 0,
+      "max_total_tokens": 0,
+      "std_total_tokens": 0.0,
+      "avg_execution_time": 0.004702997207641601
+    },
+    "VR_FG_Task1": {
+      "count": 10,
+      "success_rate": 0.0,
+      "avg_total_tokens": 0.0,
+      "min_total_tokens": 0,
+      "max_total_tokens": 0,
+      "std_total_tokens": 0.0,
+      "avg_execution_time": 0.004506635665893555
+    },
+    "VR_FG_Task2": {
+      "count": 10,
+      "success_rate": 0.0,
+      "avg_total_tokens": 0.0,
+      "min_total_tokens": 0,
+      "max_total_tokens": 0,
+      "std_total_tokens": 0.0,
+      "avg_execution_time": 0.004676008224487304
+    },
+    "VR_FG_Task4": {
+      "count": 10,
+      "success_rate": 0.0,
+      "avg_total_tokens": 0.0,
+      "min_total_tokens": 0,
+      "max_total_tokens": 0,
+      "std_total_tokens": 0.0,
+      "avg_execution_time": 0.004290580749511719
+    },
+    "SW_CG_Task1": {
+      "count": 10,
+      "success_rate": 0.0,
+      "avg_total_tokens": 0.0,
+      "min_total_tokens": 0,
+      "max_total_tokens": 0,
+      "std_total_tokens": 0.0,
+      "avg_execution_time": 0.004572749137878418
+    },
+    "SW_CG_Task2": {
+      "count": 10,
+      "success_rate": 0.0,
+      "avg_total_tokens": 0.0,
+      "min_total_tokens": 0,
+      "max_total_tokens": 0,
+      "std_total_tokens": 0.0,
+      "avg_execution_time": 0.004459214210510254
+    },
+    "SW_CG_Task4": {
+      "count": 10,
+      "success_rate": 0.0,
+      "avg_total_tokens": 0.0,
+      "min_total_tokens": 0,
+      "max_total_tokens": 0,
+      "std_total_tokens": 0.0,
+      "avg_execution_time": 0.004389166831970215
+    },
+    "SW_FG_Task1": {
+      "count": 10,
+      "success_rate": 0.0,
+      "avg_total_tokens": 0.0,
+      "min_total_tokens": 0,
+      "max_total_tokens": 0,
+      "std_total_tokens": 0.0,
+      "avg_execution_time": 0.004112720489501953
+    },
+    "SW_FG_Task2": {
+      "count": 10,
+      "success_rate": 0.0,
+      "avg_total_tokens": 0.0,
+      "min_total_tokens": 0,
+      "max_total_tokens": 0,
+      "std_total_tokens": 0.0,
+      "avg_execution_time": 0.004276061058044433
+    },
+    "SW_FG_Task4": {
+      "count": 10,
+      "success_rate": 0.0,
+      "avg_total_tokens": 0.0,
+      "min_total_tokens": 0,
+      "max_total_tokens": 0,
+      "std_total_tokens": 0.0,
+      "avg_execution_time": 0.00427095890045166
+    }
+  }
+}

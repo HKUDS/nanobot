@@ -32,6 +32,7 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
+from nanobot.providers import set_current_session_key, set_current_session_config
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -317,6 +318,13 @@ class AgentLoop:
         gate = self._concurrency_gate or nullcontext()
         async with lock, gate:
             try:
+                # 支持会话级配置（用于多 LLM Backend 实验）
+                session_config = msg.metadata.get("session_config")
+                if session_config:
+                    set_current_session_config(session_config)
+                else:
+                    set_current_session_key(msg.session_key)
+                
                 on_stream = on_stream_end = None
                 if msg.metadata.get("_wants_stream"):
                     # Split one answer into distinct stream segments.
@@ -368,6 +376,9 @@ class AgentLoop:
                     channel=msg.channel, chat_id=msg.chat_id,
                     content="Sorry, I encountered an error.",
                 ))
+            finally:
+                # 清除会话配置，避免污染后续调用
+                set_current_session_config(None)
 
     async def close_mcp(self) -> None:
         """Drain pending background archives, then close MCP connections."""
@@ -408,6 +419,7 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
+            set_current_session_config({"session_key": key})
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
@@ -425,6 +437,10 @@ class AgentLoop:
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+            
+            # 清除会话配置，避免污染后续调用
+            set_current_session_config(None)
+            
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
 
@@ -433,6 +449,7 @@ class AgentLoop:
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
+        set_current_session_config({"session_key": key})
 
         # Slash commands
         raw = msg.content.strip()
@@ -503,6 +520,10 @@ class AgentLoop:
         meta = dict(msg.metadata or {})
         if on_stream is not None:
             meta["_streamed"] = True
+        
+        # 清除会话配置，避免污染后续调用
+        set_current_session_config(None)
+        
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=meta,
@@ -599,7 +620,7 @@ class AgentLoop:
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content, session_key_override=session_key)
         return await self._process_message(
             msg, session_key=session_key, on_progress=on_progress,
             on_stream=on_stream, on_stream_end=on_stream_end,

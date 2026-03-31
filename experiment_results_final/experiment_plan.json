@@ -1,0 +1,36 @@
+{
+  "models": [
+    "deepseek",
+    "qwen",
+    "kimi"
+  ],
+  "tasks": [
+    {
+      "id": "Task1",
+      "name": "简单问答",
+      "prompt": "中国的首都是哪里？请简要说明。",
+      "max_tokens": 50
+    },
+    {
+      "id": "Task2",
+      "name": "计算任务",
+      "prompt": "计算15的平方加上25的平方等于多少？请展示计算过程。",
+      "max_tokens": 100
+    },
+    {
+      "id": "Task3",
+      "name": "推理任务",
+      "prompt": "如果所有猫都会爬树，Tom是一只猫，那么Tom会爬树吗？请用逻辑推理说明。",
+      "max_tokens": 150
+    },
+    {
+      "id": "Task4",
+      "name": "代码生成",
+      "prompt": "写一个Python函数，计算斐波那契数列的第n项。",
+      "max_tokens": 200
+    }
+  ],
+  "repetitions": 3,
+  "total_experiments": 36,
+  "start_time": "2026-03-29T20:32:22.814465"
+}
