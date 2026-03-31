@@ -95,6 +95,14 @@ def test_exec_extract_absolute_paths_keeps_full_windows_path() -> None:
     assert paths == [r"C:\user\workspace\txt"]
 
 
+def test_exec_extract_absolute_paths_captures_windows_drive_root_path() -> None:
+    """Windows drive root paths like `E:\\` must be extracted for workspace guarding."""
+    # Note: raw strings cannot end with a single backslash.
+    cmd = "dir E:\\"
+    paths = ExecTool._extract_absolute_paths(cmd)
+    assert paths == ["E:\\"]
+
+
 def test_exec_extract_absolute_paths_ignores_relative_posix_segments() -> None:
     cmd = ".venv/bin/python script.py"
     paths = ExecTool._extract_absolute_paths(cmd)
