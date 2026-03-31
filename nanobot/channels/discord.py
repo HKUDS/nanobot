@@ -39,6 +39,7 @@ class DiscordChannel(BaseChannel):
 
     name = "discord"
     display_name = "Discord"
+    supports_tts = True
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -106,7 +107,8 @@ class DiscordChannel(BaseChannel):
         # TTS: generate audio, send as attachment only (no text)
         if self._tts_service and msg.content and not msg.metadata.get("_progress"):
             session_tts = msg.metadata.get("_session_tts", False)
-            if self._tts_service.should_trigger(session_tts=session_tts):
+            sender_name = msg.metadata.get("sender_name")
+            if self._tts_service.should_trigger(session_tts=session_tts, sender_name=sender_name):
                 audio_path = await self._tts_service.synthesize(msg.content)
                 if audio_path:
                     if not msg.media:

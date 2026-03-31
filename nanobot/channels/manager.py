@@ -53,9 +53,9 @@ class ChannelManager:
             if not enabled:
                 continue
             try:
-                # Inject TTS service for channels that support it
+                # Inject TTS service for channels that declare support
                 kwargs: dict = {}
-                if name == "discord" and self.config.tts.enabled:
+                if cls.supports_tts and self.config.tts.enabled:
                     try:
                         tts_svc = TTSService(self.config.tts)
                         kwargs["tts_service"] = tts_svc

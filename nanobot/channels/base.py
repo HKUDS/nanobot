@@ -24,6 +24,7 @@ class BaseChannel(ABC):
     display_name: str = "Base"
     transcription_provider: str = "groq"
     transcription_api_key: str = ""
+    supports_tts: bool = False
 
     def __init__(self, config: Any, bus: MessageBus):
         """
