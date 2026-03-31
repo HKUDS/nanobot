@@ -338,6 +338,9 @@ class FeishuChannel(BaseChannel):
             builder, "register_p2_im_message_reaction_created_v1", self._on_reaction_created
         )
         builder = self._register_optional_event(
+            builder, "register_p2_im_message_reaction_deleted_v1", self._on_reaction_deleted
+        )
+        builder = self._register_optional_event(
             builder, "register_p2_im_message_message_read_v1", self._on_message_read
         )
         builder = self._register_optional_event(
@@ -1401,6 +1404,10 @@ class FeishuChannel(BaseChannel):
 
     def _on_reaction_created(self, data: Any) -> None:
         """Ignore reaction events so they do not generate SDK noise."""
+        pass
+
+    def _on_reaction_deleted(self, data: Any) -> None:
+        """Ignore reaction deleted events so they do not generate SDK noise."""
         pass
 
     def _on_message_read(self, data: Any) -> None:
