@@ -11,12 +11,11 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-import httpx
 from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse
 from nanobot.providers.openai_responses_common import (
-    consume_sse,
+    consume_sdk_stream,
     convert_messages,
     convert_tools,
     parse_response_output,
@@ -94,6 +93,7 @@ class AzureOpenAIProvider(LLMProvider):
             "model": deployment,
             "instructions": instructions or None,
             "input": input_items,
+            "max_output_tokens": max(1, max_tokens),
             "store": False,
             "stream": False,
         }
@@ -159,31 +159,15 @@ class AzureOpenAIProvider(LLMProvider):
         body["stream"] = True
 
         try:
-            # Use raw httpx stream via the SDK's base URL so we can reuse
-            # the shared Responses-API SSE parser (same as Codex provider).
-            base_url = str(self._client.base_url).rstrip("/")
-            url = f"{base_url}/responses"
-            headers = {
-                "Authorization": f"Bearer {self._client.api_key}",
-                "Content-Type": "application/json",
-                **(self._client._custom_headers or {}),
-            }
-            async with httpx.AsyncClient(timeout=60.0, verify=True) as http:
-                async with http.stream("POST", url, headers=headers, json=body) as response:
-                    if response.status_code != 200:
-                        text = await response.aread()
-                        return LLMResponse(
-                            content=f"Azure OpenAI API Error {response.status_code}: {text.decode('utf-8', 'ignore')}",
-                            finish_reason="error",
-                        )
-                    content, tool_calls, finish_reason = await consume_sse(
-                        response, on_content_delta,
-                    )
-                    return LLMResponse(
-                        content=content or None,
-                        tool_calls=tool_calls,
-                        finish_reason=finish_reason,
-                    )
+            stream = await self._client.responses.create(**body)
+            content, tool_calls, finish_reason = await consume_sdk_stream(
+                stream, on_content_delta,
+            )
+            return LLMResponse(
+                content=content or None,
+                tool_calls=tool_calls,
+                finish_reason=finish_reason,
+            )
         except Exception as e:
             return self._handle_error(e)
 

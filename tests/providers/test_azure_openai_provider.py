@@ -1,6 +1,6 @@
 """Test Azure OpenAI provider (Responses API via OpenAI SDK)."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -93,6 +93,7 @@ def test_build_body_basic():
     assert body["model"] == "gpt-4o"
     assert body["instructions"] == "You are helpful."
     assert body["temperature"] == 0.7
+    assert body["max_output_tokens"] == 4096
     assert body["store"] is False
     assert "reasoning" not in body
     # input should contain the converted user message only (system extracted)
@@ -100,6 +101,13 @@ def test_build_body_basic():
         item.get("role") == "user"
         for item in body["input"]
     )
+
+
+def test_build_body_max_tokens_minimum():
+    """max_output_tokens should never be less than 1."""
+    provider = AzureOpenAIProvider(api_key="k", api_base="https://r.com", default_model="gpt-4o")
+    body = provider._build_body([{"role": "user", "content": "x"}], None, None, 0, 0.7, None, None)
+    assert body["max_output_tokens"] == 1
 
 
 def test_build_body_with_tools():
@@ -290,46 +298,29 @@ async def test_chat_stream_success():
         api_key="test-key", api_base="https://test.openai.azure.com", default_model="gpt-4o",
     )
 
-    # Build SSE lines for the mock httpx stream
-    sse_events = [
-        'event: response.output_text.delta',
-        'data: {"type":"response.output_text.delta","delta":"Hello"}',
-        '',
-        'event: response.output_text.delta',
-        'data: {"type":"response.output_text.delta","delta":" world"}',
-        '',
-        'event: response.completed',
-        'data: {"type":"response.completed","response":{"status":"completed"}}',
-        '',
-    ]
+    # Build mock SDK stream events
+    events = []
+    ev1 = MagicMock(type="response.output_text.delta", delta="Hello")
+    ev2 = MagicMock(type="response.output_text.delta", delta=" world")
+    resp_obj = MagicMock(status="completed")
+    ev3 = MagicMock(type="response.completed", response=resp_obj)
+    events = [ev1, ev2, ev3]
+
+    async def mock_stream():
+        for e in events:
+            yield e
+
+    provider._client.responses = MagicMock()
+    provider._client.responses.create = AsyncMock(return_value=mock_stream())
 
     deltas: list[str] = []
 
     async def on_delta(text: str) -> None:
         deltas.append(text)
 
-    # Mock httpx stream
-    mock_response = AsyncMock()
-    mock_response.status_code = 200
-
-    async def aiter_lines():
-        for line in sse_events:
-            yield line
-
-    mock_response.aiter_lines = aiter_lines
-
-    with patch("httpx.AsyncClient") as mock_client:
-        mock_ctx = AsyncMock()
-        mock_stream_ctx = AsyncMock()
-        mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_ctx.stream = MagicMock(return_value=mock_stream_ctx)
-        mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
-        mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
-
-        result = await provider.chat_stream(
-            [{"role": "user", "content": "Hi"}], on_content_delta=on_delta,
-        )
+    result = await provider.chat_stream(
+        [{"role": "user", "content": "Hi"}], on_content_delta=on_delta,
+    )
 
     assert result.content == "Hello world"
     assert result.finish_reason == "stop"
@@ -343,41 +334,34 @@ async def test_chat_stream_with_tool_calls():
         api_key="k", api_base="https://test.openai.azure.com", default_model="gpt-4o",
     )
 
-    sse_events = [
-        'data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_1","id":"fc_1","name":"get_weather","arguments":""}}',
-        '',
-        'data: {"type":"response.function_call_arguments.delta","call_id":"call_1","delta":"{\\"loc"}',
-        '',
-        'data: {"type":"response.function_call_arguments.done","call_id":"call_1","arguments":"{\\"location\\":\\"SF\\"}"}',
-        '',
-        'data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","id":"fc_1","name":"get_weather","arguments":"{\\"location\\":\\"SF\\"}"}}',
-        '',
-        'data: {"type":"response.completed","response":{"status":"completed"}}',
-        '',
-    ]
+    item_added = MagicMock(type="function_call", call_id="call_1", id="fc_1", arguments="")
+    item_added.name = "get_weather"
+    ev_added = MagicMock(type="response.output_item.added", item=item_added)
+    ev_args_delta = MagicMock(type="response.function_call_arguments.delta", call_id="call_1", delta='{"loc')
+    ev_args_done = MagicMock(
+        type="response.function_call_arguments.done",
+        call_id="call_1", arguments='{"location":"SF"}',
+    )
+    item_done = MagicMock(
+        type="function_call", call_id="call_1", id="fc_1",
+        arguments='{"location":"SF"}',
+    )
+    item_done.name = "get_weather"
+    ev_item_done = MagicMock(type="response.output_item.done", item=item_done)
+    resp_obj = MagicMock(status="completed")
+    ev_completed = MagicMock(type="response.completed", response=resp_obj)
 
-    mock_response = AsyncMock()
-    mock_response.status_code = 200
+    async def mock_stream():
+        for e in [ev_added, ev_args_delta, ev_args_done, ev_item_done, ev_completed]:
+            yield e
 
-    async def aiter_lines():
-        for line in sse_events:
-            yield line
+    provider._client.responses = MagicMock()
+    provider._client.responses.create = AsyncMock(return_value=mock_stream())
 
-    mock_response.aiter_lines = aiter_lines
-
-    with patch("httpx.AsyncClient") as mock_client:
-        mock_ctx = AsyncMock()
-        mock_stream_ctx = AsyncMock()
-        mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_ctx.stream = MagicMock(return_value=mock_stream_ctx)
-        mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
-        mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
-
-        result = await provider.chat_stream(
-            [{"role": "user", "content": "weather?"}],
-            tools=[{"type": "function", "function": {"name": "get_weather", "parameters": {}}}],
-        )
+    result = await provider.chat_stream(
+        [{"role": "user", "content": "weather?"}],
+        tools=[{"type": "function", "function": {"name": "get_weather", "parameters": {}}}],
+    )
 
     assert len(result.tool_calls) == 1
     assert result.tool_calls[0].name == "get_weather"
@@ -385,28 +369,17 @@ async def test_chat_stream_with_tool_calls():
 
 
 @pytest.mark.asyncio
-async def test_chat_stream_http_error():
-    """Streaming should return error on non-200 status."""
+async def test_chat_stream_error():
+    """Streaming should return error when SDK raises."""
     provider = AzureOpenAIProvider(
         api_key="k", api_base="https://test.openai.azure.com", default_model="gpt-4o",
     )
+    provider._client.responses = MagicMock()
+    provider._client.responses.create = AsyncMock(side_effect=Exception("Connection failed"))
 
-    mock_response = AsyncMock()
-    mock_response.status_code = 401
-    mock_response.aread = AsyncMock(return_value=b"Unauthorized")
+    result = await provider.chat_stream([{"role": "user", "content": "Hi"}])
 
-    with patch("httpx.AsyncClient") as mock_client:
-        mock_ctx = AsyncMock()
-        mock_stream_ctx = AsyncMock()
-        mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_ctx.stream = MagicMock(return_value=mock_stream_ctx)
-        mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
-        mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
-
-        result = await provider.chat_stream([{"role": "user", "content": "Hi"}])
-
-    assert "401" in result.content
+    assert "Connection failed" in result.content
     assert result.finish_reason == "error"
 
 

@@ -8,6 +8,7 @@ from nanobot.providers.openai_responses_common.converters import (
 )
 from nanobot.providers.openai_responses_common.parsing import (
     FINISH_REASON_MAP,
+    consume_sdk_stream,
     consume_sse,
     iter_sse,
     map_finish_reason,
@@ -21,6 +22,7 @@ __all__ = [
     "split_tool_call_id",
     "iter_sse",
     "consume_sse",
+    "consume_sdk_stream",
     "map_finish_reason",
     "parse_response_output",
     "FINISH_REASON_MAP",

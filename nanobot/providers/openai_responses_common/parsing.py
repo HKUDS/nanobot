@@ -171,3 +171,72 @@ def parse_response_output(response: Any) -> LLMResponse:
         finish_reason=finish_reason,
         usage=usage,
     )
+
+
+async def consume_sdk_stream(
+    stream: Any,
+    on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+) -> tuple[str, list[ToolCallRequest], str]:
+    """Consume an SDK async stream from ``client.responses.create(stream=True)``.
+
+    The SDK yields typed event objects with a ``.type`` attribute and
+    event-specific fields.  Returns ``(content, tool_calls, finish_reason)``.
+    """
+    content = ""
+    tool_calls: list[ToolCallRequest] = []
+    tool_call_buffers: dict[str, dict[str, Any]] = {}
+    finish_reason = "stop"
+
+    async for event in stream:
+        event_type = getattr(event, "type", None)
+        if event_type == "response.output_item.added":
+            item = getattr(event, "item", None)
+            if item and getattr(item, "type", None) == "function_call":
+                call_id = getattr(item, "call_id", None)
+                if not call_id:
+                    continue
+                tool_call_buffers[call_id] = {
+                    "id": getattr(item, "id", None) or "fc_0",
+                    "name": getattr(item, "name", None),
+                    "arguments": getattr(item, "arguments", None) or "",
+                }
+        elif event_type == "response.output_text.delta":
+            delta_text = getattr(event, "delta", "") or ""
+            content += delta_text
+            if on_content_delta and delta_text:
+                await on_content_delta(delta_text)
+        elif event_type == "response.function_call_arguments.delta":
+            call_id = getattr(event, "call_id", None)
+            if call_id and call_id in tool_call_buffers:
+                tool_call_buffers[call_id]["arguments"] += getattr(event, "delta", "") or ""
+        elif event_type == "response.function_call_arguments.done":
+            call_id = getattr(event, "call_id", None)
+            if call_id and call_id in tool_call_buffers:
+                tool_call_buffers[call_id]["arguments"] = getattr(event, "arguments", "") or ""
+        elif event_type == "response.output_item.done":
+            item = getattr(event, "item", None)
+            if item and getattr(item, "type", None) == "function_call":
+                call_id = getattr(item, "call_id", None)
+                if not call_id:
+                    continue
+                buf = tool_call_buffers.get(call_id) or {}
+                args_raw = buf.get("arguments") or getattr(item, "arguments", None) or "{}"
+                try:
+                    args = json.loads(args_raw)
+                except Exception:
+                    args = {"raw": args_raw}
+                tool_calls.append(
+                    ToolCallRequest(
+                        id=f"{call_id}|{buf.get('id') or getattr(item, 'id', None) or 'fc_0'}",
+                        name=buf.get("name") or getattr(item, "name", None),
+                        arguments=args,
+                    )
+                )
+        elif event_type == "response.completed":
+            resp = getattr(event, "response", None)
+            status = getattr(resp, "status", None) if resp else None
+            finish_reason = map_finish_reason(status)
+        elif event_type in {"error", "response.failed"}:
+            raise RuntimeError("Response failed")
+
+    return content, tool_calls, finish_reason
