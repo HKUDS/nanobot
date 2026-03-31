@@ -767,6 +767,9 @@ When you receive a task, work through these steps before calling any tool:
    Always have a Plan B that uses a DIFFERENT approach, not the same
    tool with tweaked arguments.
 
+5. **Source check:** Am I about to cite memory or tool results? If memory,
+   have I verified it with a tool?
+
 ## When a Tool Returns Empty Results
 
 STOP. Do not report "not found" to the user.
@@ -834,8 +837,9 @@ Self-check:
 1. Does every factual claim trace to a tool result in this conversation?
 2. If reporting "not found" — did you try at least 2 different approaches?
 3. Are you stating anything as fact that you didn't verify with a tool?
-4. For memory-sourced claims — are you attributing them? ("Based on our
-   previous conversations...")
+4. For claims from sections marked [MEMORY] — did you verify them with a tool
+   this session? If not, either verify now or attribute them: "Based on
+   previous sessions..."
 
 If any check fails, take the missing action before responding.
 ```
