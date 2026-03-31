@@ -164,6 +164,7 @@ class AgentLoop:
     """
 
     _TOOL_RESULT_MAX_CHARS = 16_000
+    _POST_SUMMARY_DELETE_AFTER_S = 60
 
     def __init__(
         self,
@@ -437,6 +438,18 @@ class AgentLoop:
                 )
                 if response is not None:
                     await self.bus.publish_outbound(response)
+                    summary_line = (response.metadata or {}).get("_tool_summary_line")
+                    if summary_line:
+                        meta = dict(msg.metadata or {})
+                        meta["_progress"] = True
+                        meta["_post_result_summary"] = True
+                        meta["_delete_after_s"] = self._POST_SUMMARY_DELETE_AFTER_S
+                        await self.bus.publish_outbound(OutboundMessage(
+                            channel=msg.channel,
+                            chat_id=msg.chat_id,
+                            content=summary_line,
+                            metadata=meta,
+                        ))
                 elif msg.channel == "cli":
                     await self.bus.publish_outbound(OutboundMessage(
                         channel=msg.channel, chat_id=msg.chat_id,

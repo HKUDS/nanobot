@@ -245,6 +245,10 @@ def build_status_content(
     context_window_tokens: int,
     session_msg_count: int,
     context_tokens_estimate: int,
+    running_subagents: int | None = None,
+    total_running_subagents: int | None = None,
+    running_subagent_labels: list[str] | None = None,
+    session_usage: dict[str, int] | None = None,
 ) -> str:
     """Build a human-readable runtime status snapshot."""
     uptime_s = int(time.time() - start_time)
@@ -263,14 +267,29 @@ def build_status_content(
     token_line = f"\U0001f4ca Tokens: {last_in} in / {last_out} out"
     if cached and last_in:
         token_line += f" ({cached * 100 // last_in}% cached)"
-    return "\n".join([
+    lines = [
         f"\U0001f408 nanobot v{version}",
         f"\U0001f9e0 Model: {model}",
         token_line,
         f"\U0001f4da Context: {ctx_used_str}/{ctx_total_str} ({ctx_pct}%)",
         f"\U0001f4ac Session: {session_msg_count} messages",
         f"\u23f1 Uptime: {uptime}",
-    ])
+    ]
+    if running_subagents is not None and total_running_subagents is not None:
+        lines.append(
+            f"Subagents: {running_subagents} in this chat / {total_running_subagents} total"
+        )
+    if running_subagent_labels:
+        lines.append("Active subagent tasks:")
+        for label in running_subagent_labels:
+            lines.append(f"  {label}")
+    if session_usage:
+        pt = int(session_usage.get("prompt_tokens", 0))
+        ct = int(session_usage.get("completion_tokens", 0))
+        tt = int(session_usage.get("total_tokens", 0))
+        turns = int(session_usage.get("turns", 0))
+        lines.append(f"Session usage: {pt} in / {ct} out / {tt} total ({turns} turns)")
+    return "\n".join(lines)
 
 
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
