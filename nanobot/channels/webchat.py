@@ -36,6 +36,7 @@ class WebChatConfig(Base):
     show_typing: bool = True  # Show "typing..." indicator while processing
     typing_emoji: str = "🔄"  # Emoji to show while processing
     max_upload_size: int = 10 * 1024 * 1024  # 10MB max upload size
+    max_msg_size: int = 10 * 1024 * 1024  # 10MB max WebSocket message size
     allowed_extensions: list[str] = Field(
         default_factory=lambda: ["jpg", "jpeg", "png", "gif", "webp", "pdf", "txt", "doc", "docx", "zip"]
     )
@@ -355,7 +356,8 @@ class WebChatChannel(BaseChannel):
 
     async def _handle_websocket(self, request: web.Request) -> web.WebSocketResponse:
         """Handle WebSocket connections."""
-        ws = web.WebSocketResponse()
+        max_msg_size = getattr(self.config, "max_msg_size", 4 * 1024 * 1024)
+        ws = web.WebSocketResponse(max_msg_size=max_msg_size)
         await ws.prepare(request)
 
         # Get or create session/chat ID
