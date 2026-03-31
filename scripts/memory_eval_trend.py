@@ -253,7 +253,9 @@ def main() -> int:
     if seed_profile:
         store.profile_mgr.write_profile(seed_profile)
 
-    store.ingester.append_events(seed_events)
+    from nanobot.memory.event import MemoryEvent
+
+    store.ingester.append_events([MemoryEvent.from_dict(e) for e in seed_events])
 
     evaluation = asyncio.run(
         store.eval_runner.evaluate_retrieval_cases(
