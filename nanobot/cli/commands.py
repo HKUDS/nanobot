@@ -547,6 +547,7 @@ def serve(
         mcp_servers=runtime_config.tools.mcp_servers,
         channels_config=runtime_config.channels,
         timezone=runtime_config.agents.defaults.timezone,
+        tool_profile=runtime_config.tools.tool_profile,
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -635,6 +636,7 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        tool_profile=config.tools.tool_profile,
     )
 
     # Set cron callback (needs agent)
@@ -840,6 +842,7 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        tool_profile=config.tools.tool_profile,
     )
 
     # Shared reference for progress callbacks
@@ -1198,6 +1201,7 @@ def status():
 
     console.print(f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}")
     console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
+    console.print(f"Tool profile: {config.tools.tool_profile}")
 
     if config_path.exists():
         from nanobot.providers.registry import PROVIDERS

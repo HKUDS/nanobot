@@ -154,6 +154,7 @@ class ToolsConfig(Base):
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    tool_profile: Literal["safe", "default", "full"] = "default"  # safe = read/search/web only, default/full = existing behavior
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 

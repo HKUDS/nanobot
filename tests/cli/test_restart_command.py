@@ -144,6 +144,31 @@ class TestRestartCommand:
         assert response.metadata == {"render_as": "text"}
 
     @pytest.mark.asyncio
+    async def test_process_message_accumulates_session_usage(self):
+        loop, _bus = _make_loop()
+        session = MagicMock()
+        session.get_history.return_value = []
+        session.metadata = {}
+        loop.sessions.get_or_create.return_value = session
+        loop._save_turn = MagicMock()
+        loop.sessions.save = MagicMock()
+        loop.memory_consolidator.maybe_consolidate_by_tokens = AsyncMock()
+        loop.provider.chat_with_retry = AsyncMock(
+            return_value=LLMResponse(content="done", tool_calls=[], usage={"prompt_tokens": 7, "completion_tokens": 3})
+        )
+
+        response = await loop._process_message(
+            InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="hello")
+        )
+
+        assert response is not None
+        usage = session.metadata["usage"]
+        assert usage["prompt_tokens"] == 7
+        assert usage["completion_tokens"] == 3
+        assert usage["total_tokens"] == 10
+        assert usage["turns"] == 1
+
+    @pytest.mark.asyncio
     async def test_run_agent_loop_resets_usage_when_provider_omits_it(self):
         loop, _bus = _make_loop()
         loop.provider.chat_with_retry = AsyncMock(side_effect=[

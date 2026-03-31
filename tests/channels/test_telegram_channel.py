@@ -41,6 +41,7 @@ class _FakeBot:
     def __init__(self) -> None:
         self.sent_messages: list[dict] = []
         self.sent_media: list[dict] = []
+        self.deleted_messages: list[dict] = []
         self.get_me_calls = 0
 
     async def get_me(self):
@@ -68,6 +69,9 @@ class _FakeBot:
 
     async def send_chat_action(self, **kwargs) -> None:
         pass
+
+    async def delete_message(self, **kwargs) -> None:
+        self.deleted_messages.append(kwargs)
 
     async def get_file(self, file_id: str):
         """Return a fake file that 'downloads' to a path (for reply-to-media tests)."""
@@ -450,6 +454,26 @@ async def test_send_progress_keeps_message_in_topic() -> None:
     )
 
     assert channel._app.bot.sent_messages[0]["message_thread_id"] == 42
+
+
+@pytest.mark.asyncio
+async def test_send_with_delete_after_s_schedules_delayed_delete() -> None:
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp(lambda: None)
+    channel._delete_later = AsyncMock(return_value=None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="temporary summary",
+            metadata={"_progress": True, "_delete_after_s": 1},
+        )
+    )
+    await asyncio.sleep(0)
+
+    channel._delete_later.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -964,3 +988,77 @@ async def test_on_help_includes_restart_command() -> None:
     help_text = update.message.reply_text.await_args.args[0]
     assert "/restart" in help_text
     assert "/status" in help_text
+
+
+@pytest.mark.asyncio
+async def test_on_message_text_debounce_buffers_and_merges() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["*"],
+            group_policy="open",
+            input_buffer_enabled=True,
+            input_buffer_ms=20,
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+
+    await channel._on_message(_make_telegram_update(text="first"), None)
+    await channel._on_message(_make_telegram_update(text="second"), None)
+
+    assert handled == []
+
+    await asyncio.sleep(0.05)
+    assert len(handled) == 1
+    assert "first" in handled[0]["content"]
+    assert "second" in handled[0]["content"]
+    assert handled[0]["metadata"]["buffered_count"] == 2
+    assert len(handled[0]["metadata"]["buffered_message_ids"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_on_message_media_flushes_pending_text_buffer() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["*"],
+            group_policy="open",
+            input_buffer_enabled=True,
+            input_buffer_ms=2000,
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    async def fake_download(msg, *, add_failure_content=False):
+        if getattr(msg, "photo", None):
+            return ["/tmp/pic.jpg"], ["[image: /tmp/pic.jpg]"]
+        return [], []
+
+    channel._handle_message = capture_handle
+    channel._download_message_media = fake_download
+    channel._start_typing = lambda _chat_id: None
+
+    await channel._on_message(_make_telegram_update(text="pending text"), None)
+    media_update = _make_telegram_update(text=None)
+    media_update.message.photo = [SimpleNamespace(file_id="fid", mime_type="image/jpeg")]
+    await channel._on_message(media_update, None)
+
+    assert len(handled) == 2
+    assert handled[0]["content"] == "pending text"
+    assert handled[0]["metadata"]["buffered_count"] == 1
+    assert handled[1]["media"] == ["/tmp/pic.jpg"]

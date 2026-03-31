@@ -166,6 +166,19 @@ class _StreamBuf:
     stream_id: str | None = None
 
 
+@dataclass
+class _TextBuf:
+    """Per-chat input buffer for short debounce aggregation."""
+
+    sender_id: str
+    chat_id: str
+    session_key: str | None
+    contents: list[str] = field(default_factory=list)
+    media: list[str] = field(default_factory=list)
+    message_ids: list[int] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 class TelegramConfig(Base):
     """Telegram channel configuration."""
 
@@ -179,6 +192,9 @@ class TelegramConfig(Base):
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
     streaming: bool = True
+    input_buffer_enabled: bool = False
+    input_buffer_ms: int = 2000
+    input_buffer_max_messages: int = 8
 
 
 class TelegramChannel(BaseChannel):
@@ -221,6 +237,9 @@ class TelegramChannel(BaseChannel):
         self._bot_user_id: int | None = None
         self._bot_username: str | None = None
         self._stream_bufs: dict[str, _StreamBuf] = {}  # chat_id -> streaming state
+        self._text_buffers: dict[str, _TextBuf] = {}
+        self._text_buffer_tasks: dict[str, asyncio.Task] = {}
+        self._delete_tasks: set[asyncio.Task] = set()
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -332,6 +351,13 @@ class TelegramChannel(BaseChannel):
             task.cancel()
         self._media_group_tasks.clear()
         self._media_group_buffers.clear()
+        for task in self._text_buffer_tasks.values():
+            task.cancel()
+        self._text_buffer_tasks.clear()
+        self._text_buffers.clear()
+        for task in list(self._delete_tasks):
+            task.cancel()
+        self._delete_tasks.clear()
 
         if self._app:
             logger.info("Stopping Telegram bot...")
@@ -431,8 +457,15 @@ class TelegramChannel(BaseChannel):
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
+            delete_after_s = msg.metadata.get("_delete_after_s")
             for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
-                await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
+                sent = await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
+                if (
+                    sent is not None
+                    and isinstance(delete_after_s, (int, float))
+                    and delete_after_s > 0
+                ):
+                    self._schedule_delete(chat_id, sent.message_id, float(delete_after_s))
 
     async def _call_with_retry(self, fn, *args, **kwargs):
         """Call an async Telegram API function with retry on pool/network timeout."""
@@ -455,11 +488,11 @@ class TelegramChannel(BaseChannel):
         text: str,
         reply_params=None,
         thread_kwargs: dict | None = None,
-    ) -> None:
+    ):
         """Send a plain text message with HTML fallback."""
         try:
             html = _markdown_to_telegram_html(text)
-            await self._call_with_retry(
+            return await self._call_with_retry(
                 self._app.bot.send_message,
                 chat_id=chat_id, text=html, parse_mode="HTML",
                 reply_parameters=reply_params,
@@ -468,7 +501,7 @@ class TelegramChannel(BaseChannel):
         except Exception as e:
             logger.warning("HTML parse failed, falling back to plain text: {}", e)
             try:
-                await self._call_with_retry(
+                return await self._call_with_retry(
                     self._app.bot.send_message,
                     chat_id=chat_id,
                     text=text,
@@ -478,6 +511,22 @@ class TelegramChannel(BaseChannel):
             except Exception as e2:
                 logger.error("Error sending Telegram message: {}", e2)
                 raise
+
+    def _schedule_delete(self, chat_id: int, message_id: int, delay_s: float) -> None:
+        """Best-effort delayed delete for ephemeral helper messages."""
+        task = asyncio.create_task(self._delete_later(chat_id, message_id, delay_s))
+        self._delete_tasks.add(task)
+        task.add_done_callback(self._delete_tasks.discard)
+
+    async def _delete_later(self, chat_id: int, message_id: int, delay_s: float) -> None:
+        try:
+            await asyncio.sleep(delay_s)
+            if self._app:
+                await self._app.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.debug("Telegram delayed delete failed for {}:{}: {}", chat_id, message_id, e)
 
     @staticmethod
     def _is_not_modified_error(exc: Exception) -> bool:
@@ -587,6 +636,10 @@ class TelegramChannel(BaseChannel):
             "/stop — Stop the current task\n"
             "/restart — Restart the bot\n"
             "/status — Show bot status\n"
+            "/tasks — List active background tasks\n"
+            "/task <id> — Show one background task status\n"
+            "/taskstop <id> — Stop one background task\n"
+            "/tasklabel <id> <label> — Rename a background task\n"
             "/help — Show available commands"
         )
 
@@ -827,9 +880,11 @@ class TelegramChannel(BaseChannel):
         str_chat_id = str(chat_id)
         metadata = self._build_message_metadata(message, user)
         session_key = self._derive_topic_session_key(message)
+        buffer_key = session_key or f"telegram:{str_chat_id}"
 
         # Telegram media groups: buffer briefly, forward as one aggregated turn.
         if media_group_id := getattr(message, "media_group_id", None):
+            await self._flush_text_buffer(buffer_key, immediate=True)
             key = f"{str_chat_id}:{media_group_id}"
             if key not in self._media_group_buffers:
                 self._media_group_buffers[key] = {
@@ -848,11 +903,38 @@ class TelegramChannel(BaseChannel):
                 self._media_group_tasks[key] = asyncio.create_task(self._flush_media_group(key))
             return
 
-        # Start typing indicator before processing
+        # If media exists, flush pending text first and process immediately.
+        if media_paths:
+            await self._flush_text_buffer(buffer_key, immediate=True)
+            self._start_typing(str_chat_id)
+            await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
+            await self._handle_message(
+                sender_id=sender_id,
+                chat_id=str_chat_id,
+                content=content,
+                media=media_paths,
+                metadata=metadata,
+                session_key=session_key,
+            )
+            return
+
+        # Optional debounce input buffering for plain text-only turns.
+        if self.config.input_buffer_enabled:
+            self._start_typing(str_chat_id)
+            await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
+            await self._enqueue_text_buffer(
+                key=buffer_key,
+                sender_id=sender_id,
+                chat_id=str_chat_id,
+                session_key=session_key,
+                content=content,
+                metadata=metadata,
+            )
+            return
+
+        # Default behavior: process each message immediately.
         self._start_typing(str_chat_id)
         await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
-
-        # Forward to the message bus
         await self._handle_message(
             sender_id=sender_id,
             chat_id=str_chat_id,
@@ -861,6 +943,72 @@ class TelegramChannel(BaseChannel):
             metadata=metadata,
             session_key=session_key,
         )
+
+    async def _enqueue_text_buffer(
+        self,
+        *,
+        key: str,
+        sender_id: str,
+        chat_id: str,
+        session_key: str | None,
+        content: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        """Buffer a text message and schedule a debounced flush."""
+        buf = self._text_buffers.get(key)
+        if buf is None:
+            buf = _TextBuf(
+                sender_id=sender_id,
+                chat_id=chat_id,
+                session_key=session_key,
+                metadata=dict(metadata),
+            )
+            self._text_buffers[key] = buf
+        else:
+            buf.sender_id = sender_id
+            buf.chat_id = chat_id
+            buf.session_key = session_key
+            buf.metadata.update(metadata)
+
+        if content and content != "[empty message]":
+            buf.contents.append(content)
+        msg_id = metadata.get("message_id")
+        if isinstance(msg_id, int):
+            buf.message_ids.append(msg_id)
+
+        max_msgs = max(self.config.input_buffer_max_messages, 1)
+        if len(buf.contents) > max_msgs:
+            buf.contents = buf.contents[-max_msgs:]
+        if len(buf.message_ids) > max_msgs:
+            buf.message_ids = buf.message_ids[-max_msgs:]
+
+        # Restart debounce timer on each new buffered message.
+        if task := self._text_buffer_tasks.pop(key, None):
+            task.cancel()
+        self._text_buffer_tasks[key] = asyncio.create_task(self._flush_text_buffer(key))
+
+    async def _flush_text_buffer(self, key: str, *, immediate: bool = False) -> None:
+        """Flush buffered text messages as one aggregated turn."""
+        try:
+            if not immediate:
+                await asyncio.sleep(max(0, self.config.input_buffer_ms) / 1000.0)
+            buf = self._text_buffers.pop(key, None)
+            if not buf:
+                return
+            merged_content = "\n\n---\n\n".join(buf.contents) if buf.contents else "[empty message]"
+            merged_meta = dict(buf.metadata)
+            merged_meta["buffered_count"] = max(len(buf.contents), 1)
+            merged_meta["buffered_message_ids"] = list(buf.message_ids)
+            await self._handle_message(
+                sender_id=buf.sender_id,
+                chat_id=buf.chat_id,
+                content=merged_content,
+                media=list(dict.fromkeys(buf.media)),
+                metadata=merged_meta,
+                session_key=buf.session_key,
+            )
+        finally:
+            self._text_buffer_tasks.pop(key, None)
 
     async def _flush_media_group(self, key: str) -> None:
         """Wait briefly, then forward buffered media-group as one turn."""

@@ -89,6 +89,35 @@ async def test_registry_returns_validation_error() -> None:
     assert "Invalid parameters" in result
 
 
+async def test_registry_tool_not_found_suggests_tool_search() -> None:
+    reg = ToolRegistry()
+    reg.register(SampleTool())
+
+    class _ToolSearchStub(Tool):
+        @property
+        def name(self) -> str:
+            return "tool_search"
+
+        @property
+        def description(self) -> str:
+            return "Find tools"
+
+        @property
+        def parameters(self) -> dict[str, Any]:
+            return {"type": "object", "properties": {"query": {"type": "string"}}}
+
+        async def execute(self, **kwargs: Any) -> str:
+            return "ok"
+
+    reg.register(_ToolSearchStub())
+    result = await reg.execute("sampl", {})
+
+    assert "Tool 'sampl' not found" in result
+    assert "Similar: sample" in result
+    assert "call tool_search(query=...) first" in result
+    assert "Top tools for 'sampl':" in result
+
+
 def test_exec_extract_absolute_paths_keeps_full_windows_path() -> None:
     cmd = r"type C:\user\workspace\txt"
     paths = ExecTool._extract_absolute_paths(cmd)
