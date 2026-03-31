@@ -12,6 +12,7 @@ from urllib.parse import urlparse, urlunparse
 
 import httpx
 import websockets
+from httpx import HTTPStatusError
 from loguru import logger
 from pydantic import Field
 
@@ -411,8 +412,29 @@ class MattermostChannel(BaseChannel):
                 },
             )
             response.raise_for_status()
+        except HTTPStatusError as e:
+            status = e.response.status_code if e.response is not None else "unknown"
+            if status == 400:
+                logger.debug(
+                    "Mattermost reaction already exists or invalid for post {} (emoji={}): {}",
+                    post_id,
+                    self.config.react_emoji_name,
+                    status,
+                )
+            else:
+                logger.warning(
+                    "Mattermost reaction add failed for post {} (emoji={}): status={}",
+                    post_id,
+                    self.config.react_emoji_name,
+                    status,
+                )
         except Exception as e:
-            logger.debug("Mattermost reaction add failed for {}: {}", post_id, e)
+            logger.warning(
+                "Mattermost reaction add failed for post {} (emoji={}): {}",
+                post_id,
+                self.config.react_emoji_name,
+                e,
+            )
 
     def _headers(self) -> dict[str, str]:
         """Return authentication headers for Mattermost REST and websocket requests."""

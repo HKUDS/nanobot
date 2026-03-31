@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+
+import httpx
 import pytest
 
 from nanobot.bus.events import OutboundMessage
@@ -10,16 +12,21 @@ from nanobot.channels.mattermost import MattermostChannel, MattermostConfig
 
 
 class _FakeResponse:
-    def __init__(self, payload: object, status_code: int = 200) -> None:
+    def __init__(self, payload: object, status_code: int = 200, request_url: str = "https://mm.example.com") -> None:
         self._payload = payload
         self.status_code = status_code
+        self.request = httpx.Request("POST", request_url)
 
     def json(self):
         return self._payload
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
-            raise RuntimeError(f"http {self.status_code}")
+            raise httpx.HTTPStatusError(
+                f"http {self.status_code}",
+                request=self.request,
+                response=httpx.Response(self.status_code, request=self.request),
+            )
 
 
 class _FakeAsyncClient:
@@ -233,6 +240,9 @@ async def test_posted_event_ignores_channel_message_without_mention() -> None:
     channel._bot_username = "nanobot"
     channel._channel_types["chan1"] = "O"
 
+    fake = _FakeAsyncClient()
+    channel._client = fake
+
     payload = {
         "event": "posted",
         "data": {
@@ -250,6 +260,7 @@ async def test_posted_event_ignores_channel_message_without_mention() -> None:
 
     await channel._handle_websocket_message(json.dumps(payload))
     assert channel.bus.inbound_size == 0
+    assert fake.post_calls == []
 
 
 @pytest.mark.asyncio
@@ -262,6 +273,10 @@ async def test_posted_event_respects_dm_policy_allowlist() -> None:
     channel._bot_username = "nanobot"
     channel._channel_types["dm1"] = "D"
 
+    fake = _FakeAsyncClient()
+    fake.post_responses.append(_FakeResponse({}, status_code=201))
+    channel._client = fake
+
     allowed = _posted_payload(user_id="user1", channel_id="dm1")
     denied = _posted_payload(user_id="user2", channel_id="dm1", post_id="post2")
 
@@ -272,6 +287,8 @@ async def test_posted_event_respects_dm_policy_allowlist() -> None:
     await channel._handle_websocket_message(json.dumps(denied))
     assert channel.bus.inbound_size == 0
 
+    assert fake.post_calls[0]["url"].endswith("/api/v4/reactions")
+
 
 @pytest.mark.asyncio
 async def test_posted_event_respects_group_channel_allowlist() -> None:
@@ -281,12 +298,18 @@ async def test_posted_event_respects_group_channel_allowlist() -> None:
     channel._channel_types["chan1"] = "O"
     channel._channel_types["chan2"] = "O"
 
+    fake = _FakeAsyncClient()
+    fake.post_responses.append(_FakeResponse({}, status_code=201))
+    channel._client = fake
+
     await channel._handle_websocket_message(json.dumps(_posted_payload(channel_id="chan1")))
     assert channel.bus.inbound_size == 1
     await channel.bus.consume_inbound()
 
     await channel._handle_websocket_message(json.dumps(_posted_payload(channel_id="chan2", post_id="post2")))
     assert channel.bus.inbound_size == 0
+
+    assert fake.post_calls[0]["url"].endswith("/api/v4/reactions")
 
 
 @pytest.mark.asyncio
@@ -300,8 +323,13 @@ async def test_group_channel_allowlist_does_not_block_dm() -> None:
     channel._bot_username = "nanobot"
     channel._channel_types["dm1"] = "D"
 
+    fake = _FakeAsyncClient()
+    fake.post_responses.append(_FakeResponse({}, status_code=201))
+    channel._client = fake
+
     await channel._handle_websocket_message(json.dumps(_posted_payload(channel_id="dm1")))
     assert channel.bus.inbound_size == 1
+    assert fake.post_calls[0]["url"].endswith("/api/v4/reactions")
 
 
 @pytest.mark.asyncio
@@ -406,6 +434,9 @@ async def test_posted_event_ignores_self_message() -> None:
     channel._bot_username = "nanobot"
     channel._channel_types["chan1"] = "O"
 
+    fake = _FakeAsyncClient()
+    channel._client = fake
+
     payload = {
         "event": "posted",
         "data": {
@@ -423,6 +454,7 @@ async def test_posted_event_ignores_self_message() -> None:
 
     await channel._handle_websocket_message(json.dumps(payload))
     assert channel.bus.inbound_size == 0
+    assert fake.post_calls == []
 
 
 @pytest.mark.asyncio
@@ -482,10 +514,29 @@ async def test_get_channel_type_fetches_and_caches_when_missing() -> None:
 
 
 @pytest.mark.asyncio
+async def test_posted_event_reaction_failure_does_not_block_inbound_publish() -> None:
+    channel = _make_channel(group_policy="open")
+    channel._bot_user_id = "bot1"
+    channel._bot_username = "nanobot"
+    channel._channel_types["chan1"] = "O"
+
+    fake = _FakeAsyncClient()
+    fake.post_responses.append(_FakeResponse({}, status_code=400))
+    channel._client = fake
+
+    await channel._handle_websocket_message(json.dumps(_posted_payload(channel_id="chan1", message="hello")))
+
+    assert channel.bus.inbound_size == 1
+
+
+@pytest.mark.asyncio
 async def test_posted_event_ignores_message_when_channel_type_lookup_fails() -> None:
     channel = _make_channel(group_policy="open")
     channel._bot_user_id = "bot1"
     channel._bot_username = "nanobot"
+
+    fake = _FakeAsyncClient()
+    channel._client = fake
 
     async def fail_lookup(_channel_id: str, _data: dict[str, object]) -> str:
         raise RuntimeError("lookup failed")
@@ -509,3 +560,4 @@ async def test_posted_event_ignores_message_when_channel_type_lookup_fails() -> 
 
     await channel._handle_websocket_message(json.dumps(payload))
     assert channel.bus.inbound_size == 0
+    assert fake.post_calls == []
