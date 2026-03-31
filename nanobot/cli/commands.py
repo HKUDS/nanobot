@@ -697,6 +697,10 @@ def gateway(
         timezone=config.agents.defaults.timezone,
     )
 
+    if config.agents.defaults.fallback_models:
+        fb_list = " → ".join(config.agents.defaults.fallback_models)
+        console.print(f"[green]✓[/green] Fallback chain: {fb_list} (cooldown {config.agents.defaults.fallback_cooldown_s}s)")
+
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
