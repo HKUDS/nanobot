@@ -963,6 +963,7 @@ async def test_on_help_includes_restart_command() -> None:
     update.message.reply_text.assert_awaited_once()
     help_text = update.message.reply_text.await_args.args[0]
     assert "/coding" in help_text
+    assert "/coding help" in help_text
     assert "/restart" in help_text
     assert "/status" in help_text
 
@@ -970,4 +971,4 @@ async def test_on_help_includes_restart_command() -> None:
 def test_bot_commands_include_coding_entry() -> None:
     commands = {command.command: command.description for command in TelegramChannel.BOT_COMMANDS}
 
-    assert commands["coding"] == "Start a coding task"
+    assert commands["coding"] == "Start or manage coding tasks"

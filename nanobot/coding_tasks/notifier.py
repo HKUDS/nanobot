@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable
-from pathlib import Path
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.coding_tasks.manager import CodexWorkerManager
@@ -13,6 +12,7 @@ from nanobot.coding_tasks.reporting import (
     build_completion_report,
     build_failure_report,
     build_waiting_user_report,
+    repo_display_name,
 )
 
 
@@ -73,13 +73,12 @@ class CodingTaskNotifier:
         return ""
 
     def _build_start_notification(self, task) -> str:
-        repo_name = Path(task.repo_path).name or task.repo_path
+        repo_name = repo_display_name(task)
         goal = _truncate_line(task.goal, limit=64)
         return "\n".join(
             [
-                f"已开始编程任务 · {repo_name}",
-                f"任务ID: {task.id}",
-                f"目标: {goal}",
+                f"**已开始编程任务** · `{repo_name}`",
+                f"**目标**: {goal}",
             ]
         )
 

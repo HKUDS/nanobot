@@ -130,6 +130,8 @@ class CodexProgressMonitor:
     async def poll_task(self, task_id: str) -> TaskProgressReport:
         """Capture recent pane output and update the task progress summary."""
         task = self.manager.require_task(task_id)
+        if self._should_close_missing_session(task):
+            return self.refresh_task(task_id, pane_output="", session_missing=True)
         pane_output = ""
         if task.tmux_session:
             pane_output = await asyncio.to_thread(self.launcher.capture_pane, task.tmux_session)
@@ -146,15 +148,23 @@ class CodexProgressMonitor:
                 pane_output = ""
         return build_task_progress_report(task.repo_path, pane_output)
 
-    def refresh_task(self, task_id: str, *, pane_output: str | None = None) -> TaskProgressReport:
+    def refresh_task(
+        self,
+        task_id: str,
+        *,
+        pane_output: str | None = None,
+        session_missing: bool = False,
+    ) -> TaskProgressReport:
         """Persist repo metadata and visible progress for lifecycle code paths."""
         task = self.manager.require_task(task_id)
         current_output = pane_output
-        if current_output is None and task.tmux_session:
+        if current_output is None and task.tmux_session and not session_missing:
             try:
                 current_output = self.launcher.capture_pane(task.tmux_session)
             except Exception:
                 current_output = ""
+        if session_missing:
+            current_output = self._read_recent_log_output(task.id)
         report = build_task_progress_report(task.repo_path, current_output or "")
         self.manager.update_repo_metadata(
             task_id,
@@ -166,11 +176,45 @@ class CodexProgressMonitor:
             completion_summary = report.latest_note or report.summary or "Repo harness completed"
             self.manager.mark_completed(task_id, summary=completion_summary)
             return report
+        if session_missing and task.status in {"starting", "running", "waiting_user"}:
+            failure_summary = self._build_missing_session_summary(task, report)
+            self.manager.mark_failed(task_id, summary=failure_summary)
+            return report
         if waiting_reason := detect_waiting_reason(report.live_output):
             self.manager.mark_waiting_user(task_id, summary=waiting_reason)
         if report.summary:
             self.manager.update_progress(task_id, report.summary)
         return report
+
+    def _should_close_missing_session(self, task) -> bool:
+        if task.status not in {"starting", "running", "waiting_user"}:
+            return False
+        if task.status == "waiting_user" and task.metadata.get("harness_conflict_reason"):
+            return False
+        if not task.tmux_session:
+            return True
+        has_session = getattr(self.launcher, "has_session", None)
+        if not callable(has_session):
+            return False
+        return not has_session(task.tmux_session)
+
+    def _read_recent_log_output(self, task_id: str, *, limit: int = 200) -> str:
+        path = self.manager.workspace / "automation" / "coding" / "artifacts" / f"{task_id}.codex.log"
+        if not path.exists():
+            return ""
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return ""
+        return "\n".join(lines[-limit:])
+
+    def _build_missing_session_summary(self, task, report: TaskProgressReport) -> str:
+        recent = build_notification_progress(report, last_progress_summary=task.last_progress_summary)
+        if recent:
+            return f"Worker session disappeared after launch; last known progress: {recent}"
+        if report.latest_note:
+            return f"Worker session disappeared after launch; latest repo note: {report.latest_note}"
+        return "Worker session disappeared after launch; send `继续` or `/coding resume` to relaunch."
 
 
 def _extract_live_output(pane_output: str) -> str:

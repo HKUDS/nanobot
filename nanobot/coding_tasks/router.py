@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 import shlex
 from dataclasses import dataclass
-from pathlib import Path
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
@@ -14,7 +13,11 @@ from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.policy import CodingTaskPolicy
 from nanobot.coding_tasks.progress import CodexProgressMonitor
 from nanobot.coding_tasks.repo_resolver import RepoRefResolver
-from nanobot.coding_tasks.reporting import build_waiting_user_report
+from nanobot.coding_tasks.reporting import (
+    build_coding_help_report,
+    build_waiting_user_report,
+    repo_display_name,
+)
 from nanobot.coding_tasks.worker import CodexWorkerLauncher
 
 _START_PREFIX = "开始编程"
@@ -38,7 +41,7 @@ _FIELD_PATTERNS = {
     "goal": re.compile(r"^(?:目标|goal|需求|任务)\s*[:：=]\s*(.+)$", re.IGNORECASE),
     "title": re.compile(r"^(?:标题|title|名称|name)\s*[:：=]\s*(.+)$", re.IGNORECASE),
 }
-_SLASH_CONTROL_ACTIONS = {"list", "status", "pause", "resume", "stop"}
+_SLASH_CONTROL_ACTIONS = {"help", "list", "status", "pause", "resume", "stop"}
 
 
 @dataclass(slots=True)
@@ -78,16 +81,25 @@ def parse_slash_coding_command(text: str) -> ParsedSlashCodingCommand | None:
         return None
     remainder = body[slash_match.end() :].strip()
     if not remainder:
-        return None
+        return ParsedSlashCodingCommand(action="help")
     try:
         tokens = shlex.split(remainder)
     except ValueError:
         tokens = remainder.split()
     if not tokens:
-        return None
+        return ParsedSlashCodingCommand(action="help")
     action = tokens[0].lower()
     if action not in _SLASH_CONTROL_ACTIONS:
+        if len(tokens) == 1:
+            return ParsedSlashCodingCommand(
+                action="help",
+                error=f"未识别 `/coding {tokens[0]}`。请使用下面这些命令：",
+            )
         return None
+    if action == "help":
+        if len(tokens) != 1:
+            return ParsedSlashCodingCommand(action=action, error="用法: /coding help")
+        return ParsedSlashCodingCommand(action=action)
     if action == "list":
         if len(tokens) != 1:
             return ParsedSlashCodingCommand(action=action, error="用法: /coding list")
@@ -266,19 +278,7 @@ def _make_start_coding_handler(
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content=(
-                    "请用以下格式创建编程任务：\n"
-                    "开始编程 仓库路径 任务目标\n\n"
-                    "或：\n"
-                    "开始编程 仓库名 任务目标\n\n"
-                    "或：\n"
-                    "/coding 仓库名 任务目标\n\n"
-                    "或：\n"
-                    "开始编程\n"
-                    "仓库: codex-remote\n"
-                    "目标: 修复某个问题"
-                ),
-                metadata={"render_as": "text"},
+                content=build_coding_help_report("请先提供仓库和目标，例如：`/coding codex-remote 修复某个问题`"),
             )
 
         parsed = extract_coding_task_slots(ctx.raw, repo_resolver=resolver)
@@ -289,14 +289,14 @@ def _make_start_coding_handler(
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content=(
-                    "当前已有一个活跃的编程任务，MVP 模式下一次只支持一个。\n"
-                    f"任务ID: {active_task.id}\n"
-                    f"状态: {active_task.status}\n"
-                    f"仓库: {active_task.repo_path}\n"
-                    "请先发送“状态”查看进度，或发送“取消”结束当前任务。"
+                content="\n".join(
+                    [
+                        "**当前已有一个活跃的编程任务**",
+                        f"**仓库**: `{repo_display_name(active_task)}`",
+                        f"**状态**: {active_task.status}",
+                        "**下一步**: 先发送 `状态` 或 `/coding status` 查看进度，再决定是否 `停止` 或 `取消` 当前任务。",
+                    ]
                 ),
-                metadata={"render_as": "text"},
             )
 
         repo_path, validation_error = resolve_repo_ref(parsed.repo_ref, repo_resolver=resolver)
@@ -304,8 +304,7 @@ def _make_start_coding_handler(
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content=validation_error,
-                metadata={"render_as": "text"},
+                content=f"**仓库无效**\n{validation_error}",
             )
 
         harness = detect_repo_harness(repo_path)
@@ -341,21 +340,13 @@ def _make_start_coding_handler(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
                 content=build_waiting_user_report(waiting),
-                metadata={"render_as": "text"},
             )
 
         if launcher is None:
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content=(
-                    "已创建编程任务\n"
-                    f"任务ID: {task.id}\n"
-                    f"状态: {task.status}\n"
-                    f"仓库: {task.repo_path}\n"
-                    f"目标: {task.goal}"
-                ),
-                metadata={"render_as": "text"},
+                content=_format_start_response(task, "已创建编程任务"),
             )
 
         try:
@@ -369,31 +360,19 @@ def _make_start_coding_handler(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
                 content=(
-                    "已创建编程任务，但自动启动失败\n"
-                    f"任务ID: {failed.id}\n"
-                    f"状态: {failed.status}\n"
-                    f"仓库: {failed.repo_path}\n"
-                    f"目标: {failed.goal}\n"
-                    f"错误: {type(exc).__name__}: {exc}\n"
-                    "可发送“继续”重试启动，或使用 CLI 手动运行该任务。"
+                    f"**已创建编程任务，但启动失败**\n"
+                    f"**仓库**: `{repo_display_name(failed)}`\n"
+                    f"**目标**: {failed.goal}\n"
+                    f"**错误**: {type(exc).__name__}: {exc}\n"
+                    "**下一步**: 发送 `继续` 重试，或重新发起 `/coding <repo> <goal>`。"
                 ),
-                metadata={"render_as": "text"},
             )
 
         updated = launched.task
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
-            content=(
-                "已创建并启动编程任务\n"
-                f"任务ID: {updated.id}\n"
-                f"状态: {updated.status}\n"
-                f"仓库: {updated.repo_path}\n"
-                f"目标: {updated.goal}\n"
-                f"复用 tmux: {'yes' if launched.session_reused else 'no'}\n"
-                f"Harness 状态: {updated.harness_state}"
-            ),
-            metadata={"render_as": "text"},
+            content=_format_start_response(updated, "已创建并启动编程任务"),
         )
 
     return _handle_start_coding
@@ -419,23 +398,29 @@ def _make_control_handler(
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content=slash_command.error,
-                metadata={"render_as": "text"},
+                content=build_coding_help_report(slash_command.error),
             )
+        is_help_request = slash_command is not None and slash_command.action == "help"
         is_status_request = command in _STATUS_COMMANDS or (slash_command is not None and slash_command.action == "status")
         is_list_request = slash_command is not None and slash_command.action == "list"
         is_pause_request = slash_command is not None and slash_command.action == "pause"
         is_resume_request = command in _RESUME_COMMANDS or (slash_command is not None and slash_command.action == "resume")
         is_stop_request = command in _STOP_COMMANDS or (slash_command is not None and slash_command.action == "stop")
-        if not (is_status_request or is_list_request or is_pause_request or is_resume_request or is_stop_request) and command not in _RESUME_EXISTING_COMMANDS | _START_NEW_GOAL_COMMANDS | _CANCEL_COMMANDS:
+        if not (is_help_request or is_status_request or is_list_request or is_pause_request or is_resume_request or is_stop_request) and command not in _RESUME_EXISTING_COMMANDS | _START_NEW_GOAL_COMMANDS | _CANCEL_COMMANDS:
             return None
+
+        if is_help_request:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=build_coding_help_report(),
+            )
 
         if is_list_request:
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
                 content=_format_task_list(policy, msg.channel, msg.chat_id, manager),
-                metadata={"render_as": "text"},
             )
 
         indexed_task = None
@@ -445,8 +430,10 @@ def _make_control_handler(
                 return OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
-                    content=f"找不到第 {slash_command.index} 个编程任务。先发送 `/coding list` 查看列表。",
-                    metadata={"render_as": "text"},
+                    content=(
+                        f"**找不到第 {slash_command.index} 个编程任务**\n"
+                        "先发送 `/coding list` 查看当前可管理任务。"
+                    ),
                 )
 
         task = indexed_task or policy.select_control_task(msg.channel, msg.chat_id)
@@ -455,11 +442,10 @@ def _make_control_handler(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
                 content=(
-                    "当前私聊里没有可管理的编程任务。\n"
+                    "**当前私聊里没有可管理的编程任务**\n"
                     "失败或已取消的任务不会显示在 Telegram `/coding` 列表里。\n"
-                    "先发送“开始编程 ...”或 `/coding <repo> <goal>` 创建一个新任务。"
+                    "先发送 `开始编程 ...` 或 `/coding <repo> <goal>` 创建一个新任务。"
                 ),
-                metadata={"render_as": "text"},
             )
 
         if is_status_request:
@@ -472,7 +458,6 @@ def _make_control_handler(
                     report_summary=report.summary if report else "",
                     recoverable=task.id in {item.id for item in manager.recoverable_tasks()},
                 ),
-                metadata={"render_as": "text"},
             )
 
         if _is_harness_conflict_task(task):
@@ -488,7 +473,6 @@ def _make_control_handler(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
                     content=conflict_note,
-                    metadata={"render_as": "text"},
                 )
 
             if command in _RESUME_EXISTING_COMMANDS | _START_NEW_GOAL_COMMANDS:
@@ -508,15 +492,7 @@ def _make_control_handler(
                     return OutboundMessage(
                         channel=msg.channel,
                         chat_id=msg.chat_id,
-                        content=(
-                            f"{action}\n"
-                            f"任务ID: {updated.id}\n"
-                            f"状态: {updated.status}\n"
-                            f"仓库: {updated.repo_path}\n"
-                            f"目标: {updated.goal}"
-                            f"{session_note}"
-                        ),
-                        metadata={"render_as": "text"},
+                        content=_format_start_response(updated, action),
                     )
 
                 updated = manager.mark_starting(task.id, summary="Recorded harness conflict choice from Telegram private chat")
@@ -524,12 +500,11 @@ def _make_control_handler(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
                     content=(
-                        "已记录你的选择，但当前运行时没有连接 launcher。\n"
-                        f"任务ID: {updated.id}\n"
-                        f"状态: {updated.status}\n"
-                        "请使用 CLI 手动运行该任务。"
+                        "**已记录你的选择，但当前运行时没有连接 launcher**\n"
+                        f"**仓库**: `{repo_display_name(updated)}`\n"
+                        f"**目标**: {updated.goal}\n"
+                        "**下一步**: 请使用 CLI 手动运行该任务。"
                     ),
-                metadata={"render_as": "text"},
                 )
 
         if command in _CANCEL_COMMANDS:
@@ -543,13 +518,7 @@ def _make_control_handler(
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content=(
-                    "已取消编程任务\n"
-                    f"任务ID: {updated.id}\n"
-                    f"状态: {updated.status}\n"
-                    f"仓库: {updated.repo_path}"
-                ),
-                metadata={"render_as": "text"},
+                content=_format_simple_action_response("已取消编程任务", updated),
             )
 
         if is_pause_request:
@@ -557,22 +526,19 @@ def _make_control_handler(
                 return OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
-                    content="这个编程任务已经结束，不能再暂停。先发送 `/coding list` 查看其他任务。",
-                    metadata={"render_as": "text"},
+                    content="**这个编程任务已经结束**\n先发送 `/coding list` 查看其他任务。",
                 )
             if task.status == "waiting_user":
                 return OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
                     content=_format_task_status(task, note="当前编程任务已经处于暂停状态"),
-                    metadata={"render_as": "text"},
                 )
             if task.status == "failed":
                 return OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
-                    content="当前编程任务已经失败，请发送 `/coding resume` 尝试恢复，或发送 `/coding stop` 结束任务。",
-                    metadata={"render_as": "text"},
+                    content="**当前编程任务已经失败**\n请发送 `/coding resume` 尝试恢复，或发送 `/coding stop` 结束任务。",
                 )
             if launcher:
                 launcher.interrupt_task(task.id)
@@ -581,13 +547,7 @@ def _make_control_handler(
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content=(
-                    "已暂停编程任务\n"
-                    f"任务ID: {updated.id}\n"
-                    f"状态: {updated.status}\n"
-                    f"仓库: {updated.repo_path}"
-                ),
-                metadata={"render_as": "text"},
+                content=_format_simple_action_response("已暂停编程任务", updated),
             )
 
         if slash_command is not None and slash_command.action == "stop":
@@ -595,8 +555,7 @@ def _make_control_handler(
                 return OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
-                    content="这个编程任务已经结束，不需要再次停止。先发送 `/coding list` 查看其他任务。",
-                    metadata={"render_as": "text"},
+                    content="**这个编程任务已经结束**\n先发送 `/coding list` 查看其他任务。",
                 )
             if launcher:
                 try:
@@ -608,13 +567,7 @@ def _make_control_handler(
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content=(
-                    "已停止编程任务\n"
-                    f"任务ID: {updated.id}\n"
-                    f"状态: {updated.status}\n"
-                    f"仓库: {updated.repo_path}"
-                ),
-                metadata={"render_as": "text"},
+                content=_format_simple_action_response("已停止编程任务", updated),
             )
 
         if is_stop_request:
@@ -625,13 +578,7 @@ def _make_control_handler(
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content=(
-                    "已停止编程任务\n"
-                    f"任务ID: {updated.id}\n"
-                    f"状态: {updated.status}\n"
-                    f"仓库: {updated.repo_path}"
-                ),
-                metadata={"render_as": "text"},
+                content=_format_simple_action_response("已停止编程任务", updated),
             )
 
         if task.status in {"waiting_user", "failed"} and is_resume_request:
@@ -647,21 +594,13 @@ def _make_control_handler(
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content=(
-                    "已继续编程任务\n"
-                    f"任务ID: {updated.id}\n"
-                    f"状态: {updated.status}\n"
-                    f"仓库: {updated.repo_path}"
-                    f"{session_note}"
-                ),
-                metadata={"render_as": "text"},
+                content=_format_simple_action_response("已继续编程任务", updated),
             )
         if is_resume_request:
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
                 content=_format_task_status(task, note="当前编程任务不需要继续操作"),
-                metadata={"render_as": "text"},
             )
 
         return OutboundMessage(
@@ -672,7 +611,6 @@ def _make_control_handler(
                 note="当前编程任务不需要继续操作",
                 recoverable=task.id in {item.id for item in manager.recoverable_tasks()},
             ),
-            metadata={"render_as": "text"},
         )
 
     return _handle_control
@@ -682,39 +620,55 @@ def _format_task_list(policy: CodingTaskPolicy, channel: str, chat_id: str, mana
     tasks = policy.tasks_for_origin(channel, chat_id)
     if not tasks:
         return (
-            "当前私聊里没有可管理的编程任务。\n"
-            "失败或已取消的任务已隐藏；先发送“开始编程 ...”或 `/coding <repo> <goal>` 创建一个新任务。"
+            "**当前私聊里没有可管理的编程任务**\n"
+            "失败或已取消的任务已隐藏；先发送 `开始编程 ...` 或 `/coding <repo> <goal>` 创建一个新任务。"
         )
-    recoverable_ids = {item.id for item in manager.recoverable_tasks()}
-    lines = ["当前编程任务列表"]
+    lines = ["**当前编程任务列表**"]
     for index, task in enumerate(tasks, start=1):
-        repo_name = Path(task.repo_path).name or task.repo_path
+        repo_name = repo_display_name(task)
         goal = _truncate_line(task.goal, limit=28)
-        recoverable = "yes" if task.id in recoverable_ids else "no"
         lines.append(
-            f"{index}. [{task.status}] {repo_name} | {goal} | recoverable={recoverable} | id={task.id}"
+            f"{index}. **{task.status}** · `{repo_name}` · {goal}"
         )
-    lines.append("可用命令: `/coding status 2`、`/coding pause 2`、`/coding resume 2`、`/coding stop 2`")
+    lines.append("使用 `/coding status 2`、`/coding pause 2`、`/coding resume 2`、`/coding stop 2` 操作指定任务。")
     return "\n".join(lines)
 
 
 def _format_task_status(task, *, report_summary: str = "", note: str = "当前编程任务状态", recoverable: bool | None = None) -> str:
     lines = [
-        note,
-        f"任务ID: {task.id}",
-        f"状态: {task.status}",
-        f"仓库: {task.repo_path}",
-        f"目标: {task.goal}",
+        f"**{note}**",
+        f"**仓库**: `{repo_display_name(task)}`",
+        f"**状态**: {task.status}",
+        f"**目标**: {task.goal}",
     ]
-    if recoverable is not None:
-        lines.append(f"可恢复: {'yes' if recoverable else 'no'}")
-    if task.last_progress_summary:
-        lines.append(f"最近进展: {task.last_progress_summary}")
-    if report_summary:
-        lines.append(f"Live report: {report_summary}")
-    if task.tmux_session:
-        lines.append(f"tmux: {task.tmux_session}")
+    progress = _truncate_line(task.last_progress_summary or report_summary, limit=160)
+    if progress:
+        lines.append(f"**最近进展**: {progress}")
+    if recoverable:
+        lines.append("**可恢复**: 是")
     return "\n".join(lines)
+
+
+def _format_start_response(task, title: str) -> str:
+    return "\n".join(
+        [
+            f"**{title}**",
+            f"**仓库**: `{repo_display_name(task)}`",
+            f"**状态**: {task.status}",
+            f"**目标**: {task.goal}",
+        ]
+    )
+
+
+def _format_simple_action_response(title: str, task) -> str:
+    return "\n".join(
+        [
+            f"**{title}**",
+            f"**仓库**: `{repo_display_name(task)}`",
+            f"**状态**: {task.status}",
+            f"**目标**: {task.goal}",
+        ]
+    )
 
 
 def _truncate_line(text: str, *, limit: int) -> str:

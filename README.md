@@ -126,6 +126,7 @@ Telegram start commands now use explicit entry words plus natural slot extractio
 - `开始编程 codex-remote 设置 icon 换一个`
 - `/coding codex-remote 的 设置 icon 换一个`
 - `/coding codex-remote 设置 icon 换一个`
+- `/coding help`
 - `/coding list`
 - `/coding status`
 - `/coding pause`
@@ -165,9 +166,11 @@ Telegram push policy is now lifecycle-oriented:
 - `waiting_user` sends one confirmation-needed message
 - `completed` and `failed` still send their dedicated reports
 - `running` progress is no longer pushed continuously; use `状态` or `/coding status` for detailed live progress
+- Telegram `/coding` replies are now concise Markdown-style summaries that focus on repo name, goal, latest progress, and the next action instead of raw tmux or absolute-path diagnostics
 
 Slash task management is chat-scoped and index-aware:
 
+- `/coding help` shows the supported start, help, list, status, pause, resume, and stop subcommands plus the compatible Chinese control words
 - `/coding list` shows the current private-chat coding tasks newest-first with 1-based indexes
 - failed and cancelled tasks are hidden from Telegram task management, but their persisted history stays on disk for CLI or forensic inspection
 - `/coding status 2` inspects the second listed task
@@ -176,6 +179,11 @@ Slash task management is chat-scoped and index-aware:
 - `/coding stop 2` ends the second listed task as a terminal state
 
 When the target repo harness itself reaches full completion (`PLAN.json` all passed), nanobot now marks the current coding task `completed` automatically and sends the normal completion notification without asking for further confirmation.
+
+If a coding-task tmux worker disappears after launch, the steady-state monitor now closes the task out instead of leaving it stuck forever:
+
+- if the target repo harness is already complete, nanobot marks the task `completed`
+- otherwise it marks the task `failed` with a recovery hint so the operator can use `继续` or `/coding resume`
 
 Workspace blocking and default Telegram controls now only treat `starting`, `running`, and `waiting_user` tasks as active. Hidden `failed` or `cancelled` tasks no longer occupy the active coding-task slot for new `/coding` starts.
 

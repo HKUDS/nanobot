@@ -8,7 +8,7 @@
       "Open PROGRESS.md and verify the reboot entry records the current baseline: `/coding help` does not exist, Telegram coding replies still force plain-text rendering, and stale tasks like `681ee161` can remain stuck in `starting` after their tmux session disappears.",
       "Confirm the scope remains limited to Telegram `/coding` orchestration, presentation templates, and worker-liveness recovery rather than changing target-repo harness files or the Codex worker execution model."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 2,
@@ -19,7 +19,7 @@
       "Send bare `/coding` and an unknown subcommand such as `/coding nope` and verify both return the same help or usage surface instead of entering the start-command path.",
       "Verify malformed indexed commands still return the unified usage guidance instead of a mismatched one-off error."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 3,
@@ -30,7 +30,7 @@
       "Verify the channel still uses the existing Markdown-to-HTML conversion path and does not introduce a new parse-mode branch.",
       "Confirm the output avoids unsupported heavy structures such as large tables or long fenced code blocks."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 4,
@@ -41,7 +41,7 @@
       "Verify `/coding status` still shows a concise diagnosis: current status, repo name, goal, and the latest meaningful progress or blocking reason.",
       "Verify CLI `coding-task status <task_id>` still retains the detailed diagnostics path even after Telegram responses are simplified."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 5,
@@ -52,7 +52,7 @@
       "Create a task with a missing tmux session whose target repo harness is already fully complete and verify the task transitions to `completed` instead of `failed`.",
       "Verify the resulting lifecycle transition still emits the correct completed or failed notification through the notifier."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 6,
@@ -63,7 +63,7 @@
       "Verify the stale-task summary explains that the worker session disappeared and what the operator should do next if manual recovery is needed.",
       "Confirm the task no longer appears as indefinitely active after the fix is applied."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 7,
@@ -74,7 +74,7 @@
       "Verify the tests cover stale `starting` tasks with missing sessions, unified help/usage handling, and markdown-friendly response content.",
       "Confirm `.venv/bin/python -m compileall` still succeeds for the touched coding-task and Telegram modules plus their updated tests."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 8,
@@ -85,6 +85,6 @@
       "Open PROGRESS.md and verify it records the baseline, the markdown/presentation decisions, and the stale-task recovery fix.",
       "Confirm PLAN.json is fully marked complete after implementation and verification."
     ],
-    "passes": false
+    "passes": true
   }
 ]

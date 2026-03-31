@@ -39,9 +39,9 @@ def test_notifier_sends_one_start_notification_and_throttles_duplicates(tmp_path
     asyncio.run(notifier.maybe_notify(task.id, report))
 
     assert len(sent) == 1
-    assert "已开始编程任务" in sent[0].content
-    assert f"任务ID: {task.id}" in sent[0].content
-    assert "目标: notify" in sent[0].content
+    assert "**已开始编程任务**" in sent[0].content
+    assert "`repo`" in sent[0].content
+    assert "**目标**: notify" in sent[0].content
     assert "Running pytest" not in sent[0].content
 
 

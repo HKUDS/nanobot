@@ -195,7 +195,7 @@ class TelegramChannel(BaseChannel):
     BOT_COMMANDS = [
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
-        BotCommand("coding", "Start a coding task"),
+        BotCommand("coding", "Start or manage coding tasks"),
         BotCommand("stop", "Stop the current task"),
         BotCommand("model", "List or switch models"),
         BotCommand("help", "Show available commands"),
@@ -588,7 +588,7 @@ class TelegramChannel(BaseChannel):
         await update.message.reply_text(
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
-            "/coding — Start or manage coding tasks (`/coding list`, `/coding status`, `/coding pause`, `/coding resume`, `/coding stop`)\n"
+            "/coding — Start or manage coding tasks (`/coding help` for all subcommands)\n"
             "/stop — Stop the current task\n"
             "/restart — Restart the bot\n"
             "/status — Show bot status\n"

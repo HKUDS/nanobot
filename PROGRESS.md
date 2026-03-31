@@ -14,6 +14,22 @@
   - Simplify Telegram `/coding` responses while preserving CLI `coding-task status <task_id>` as the deep-diagnostics path.
   - Default stale-task closure to `failed` unless repo harness evidence clearly proves the target work completed, because silent auto-relaunch risks repeating edits or tests.
 
+## Session update - 2026-03-31 (coding-task help, markdown, and stale recovery)
+- Completed features:
+  - Added `/coding help` plus a unified usage surface for bare `/coding`, unknown `/coding <subcommand>`, and malformed slash-control commands.
+  - Switched Telegram `/coding` start, list, status, waiting-user, completed, failed, and start-notification content to concise Markdown-friendly templates that show repo short names, goals, and next steps without task ids, tmux metadata, or absolute paths.
+  - Trimmed the active-task-blocking response so Telegram no longer leaks debug-level details when another coding task is already running.
+  - Added steady-state missing-session detection to the coding-task monitor so tasks in `starting`, `running`, or `waiting_user` no longer remain stuck forever after their tmux worker disappears.
+  - Verified the real stale task `681ee161` now closes out deterministically: after refresh with its missing tmux session, nanobot marked it `failed` with an explicit recovery hint instead of leaving it in `starting`.
+- Verification:
+  - `bash ~/.codex/scripts/global-init.sh` -> exited 0 with the known repo-wide pytest warning still present in `/tmp/nanobot-harness-pytest.log`
+  - `.venv/bin/pytest tests/agent/test_coding_task_routing.py tests/coding_tasks/test_notifier.py tests/coding_tasks/test_progress.py tests/channels/test_telegram_channel.py -q` -> passed (99 tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks nanobot/channels/telegram.py tests/agent/test_coding_task_routing.py tests/coding_tasks/test_notifier.py tests/coding_tasks/test_progress.py tests/channels/test_telegram_channel.py` -> passed
+  - `.venv/bin/python` local stale-task probe against `/Users/miau/.nanobot/workspace` -> task `681ee161` transitioned from `starting` to `failed` with a missing-session summary
+- Remaining blockers / follow-up:
+  - The known unrelated repo-wide pytest warning from `/tmp/nanobot-harness-pytest.log` still exists outside this harness scope.
+  - Live Telegram verification still depends on restarting the active tmux gateway into this new code path.
+
 ## Harness reboot - 2026-03-31 (coding-task hidden terminal tasks)
 - Task pivot:
   - Superseded the prior completed `/coding` slash-controls harness with a follow-up task focused on hiding `failed` and `cancelled` Telegram coding tasks without deleting their persisted history.

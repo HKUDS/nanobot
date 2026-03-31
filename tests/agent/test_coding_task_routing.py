@@ -139,7 +139,7 @@ async def test_private_telegram_start_coding_creates_task_and_acknowledges(tmp_p
 
     assert response is not None
     assert "已创建并启动编程任务" in response.content
-    assert "状态: starting" in response.content
+    assert "**状态**: starting" in response.content
 
     tasks = store.list_tasks()
     assert len(tasks) == 1
@@ -170,7 +170,7 @@ async def test_private_telegram_start_coding_waits_for_confirmation_when_repo_ha
 
     assert response is not None
     assert "仓库里已有未完成的 harness" in response.content
-    assert "旧任务摘要: Continue old task" in response.content
+    assert "**旧任务摘要**: Continue old task" in response.content
     assert "按新任务开始" in response.content
     tasks = store.list_tasks()
     assert len(tasks) == 1
@@ -328,8 +328,66 @@ async def test_private_telegram_start_coding_without_repo_or_goal_returns_usage(
     )
 
     assert response is not None
-    assert "请用以下格式创建编程任务" in response.content
+    assert "**/coding 命令**" in response.content
+    assert "请先提供仓库和目标" in response.content
     assert store.list_tasks() == []
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_slash_coding_help_returns_command_list(tmp_path: Path) -> None:
+    loop, _store, _manager, _launcher = _make_loop(tmp_path)
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="/coding help",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert "**/coding 命令**" in response.content
+    assert "`/coding <repo> <goal>`" in response.content
+    assert "`/coding status [index]`" in response.content
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_bare_slash_coding_returns_help(tmp_path: Path) -> None:
+    loop, _store, _manager, _launcher = _make_loop(tmp_path)
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="/coding",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert "**/coding 命令**" in response.content
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_unknown_slash_coding_subcommand_returns_help(tmp_path: Path) -> None:
+    loop, _store, _manager, _launcher = _make_loop(tmp_path)
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="/coding nope",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert "未识别 `/coding nope`" in response.content
+    assert "`/coding help`" in response.content
 
 
 @pytest.mark.asyncio
@@ -349,10 +407,10 @@ async def test_private_telegram_status_routes_to_latest_origin_task(tmp_path: Pa
 
     assert response is not None
     assert "当前编程任务状态" in response.content
-    assert f"任务ID: {task.id}" in response.content
-    assert "状态: running" in response.content
-    assert "最近进展: 正在修改登录逻辑" in response.content
-    assert "可恢复: yes" in response.content
+    assert "`demo-repo`" in response.content
+    assert "**状态**: running" in response.content
+    assert "**最近进展**: 正在修改登录逻辑" in response.content
+    assert "**可恢复**: 是" in response.content
 
 
 @pytest.mark.asyncio
@@ -372,9 +430,9 @@ async def test_private_telegram_slash_coding_status_routes_to_latest_origin_task
 
     assert response is not None
     assert "当前编程任务状态" in response.content
-    assert f"任务ID: {task.id}" in response.content
-    assert "状态: running" in response.content
-    assert "最近进展: 正在修改登录逻辑" in response.content
+    assert "`demo-repo`" in response.content
+    assert "**状态**: running" in response.content
+    assert "**最近进展**: 正在修改登录逻辑" in response.content
 
 
 @pytest.mark.asyncio
@@ -395,7 +453,8 @@ async def test_private_telegram_slash_coding_list_shows_origin_tasks_newest_firs
 
     assert response is not None
     assert "当前编程任务列表" in response.content
-    assert f"id={first.id}" in response.content
+    assert "1. **running**" in response.content
+    assert "`demo-repo`" in response.content
     assert second.id not in response.content
 
 
@@ -417,7 +476,7 @@ async def test_private_telegram_slash_coding_list_hides_cancelled_tasks(tmp_path
     )
 
     assert response is not None
-    assert visible.id in response.content
+    assert "`demo-repo`" in response.content
     assert hidden.id not in response.content
 
 
@@ -438,8 +497,8 @@ async def test_private_telegram_slash_coding_status_can_target_indexed_task(tmp_
     )
 
     assert response is not None
-    assert f"任务ID: {first.id}" in response.content
-    assert "状态: running" in response.content
+    assert "`demo-repo`" in response.content
+    assert "**状态**: running" in response.content
     assert second.id not in response.content
 
 
@@ -486,8 +545,8 @@ async def test_private_telegram_slash_coding_resume_index_ignores_hidden_failed_
     )
 
     assert response is not None
-    assert f"任务ID: {active.id}" in response.content
     assert "当前编程任务不需要继续操作" in response.content
+    assert "`demo-repo`" in response.content
     updated = store.get_task(failed.id)
     assert updated is not None
     assert updated.status == "failed"
@@ -937,6 +996,7 @@ async def test_private_telegram_rejects_second_active_coding_task(tmp_path: Path
 
     assert response is not None
     assert "当前已有一个活跃的编程任务" in response.content
+    assert "`demo-repo`" in response.content
     assert len(store.list_tasks()) == 1
 
 
@@ -989,7 +1049,7 @@ async def test_private_telegram_start_coding_without_launcher_falls_back_to_crea
 
     assert response is not None
     assert "已创建编程任务" in response.content
-    assert "状态: queued" in response.content
+    assert "**状态**: queued" in response.content
     tasks = store.list_tasks()
     assert len(tasks) == 1
     assert tasks[0].status == "queued"
@@ -1012,7 +1072,7 @@ async def test_private_telegram_start_coding_reports_launch_failure_and_keeps_ta
     )
 
     assert response is not None
-    assert "已创建编程任务，但自动启动失败" in response.content
+    assert "已创建编程任务，但启动失败" in response.content
     assert "tmux unavailable" in response.content
     tasks = store.list_tasks()
     assert len(tasks) == 1

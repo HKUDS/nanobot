@@ -306,6 +306,76 @@ async def test_poll_task_auto_completes_when_repo_plan_is_finished(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("initial_status", ["starting", "running", "waiting_user"])
+async def test_poll_task_marks_failed_when_worker_session_disappears(tmp_path: Path, initial_status: str) -> None:
+    workspace = tmp_path / "workspace"
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, store)
+    repo = tmp_path / "repo"
+    _prepare_repo(repo)
+    task = manager.create_task(repo_path=str(repo), goal="Recover from missing session")
+    task = manager.mark_starting(task.id, summary="Launching")
+    if initial_status == "running":
+        task = manager.mark_running(task.id, summary="Working")
+    elif initial_status == "waiting_user":
+        task = manager.mark_waiting_user(task.id, summary="Waiting")
+    artifact_dir = workspace / "automation" / "coding" / "artifacts"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    (artifact_dir / f"{task.id}.codex.log").write_text(
+        '{"item":{"type":"command_execution","command":"pytest tests/example.py"}}\n',
+        encoding="utf-8",
+    )
+
+    class _FakeLauncher:
+        def has_session(self, session: str) -> bool:
+            assert session == task.tmux_session
+            return False
+
+        def capture_pane(self, session: str) -> str:
+            raise AssertionError("capture_pane should not run when the tmux session is gone")
+
+    monitor = CodexProgressMonitor(manager, _FakeLauncher())  # type: ignore[arg-type]
+    report = await monitor.poll_task(task.id)
+
+    refreshed = store.get_task(task.id)
+    assert refreshed is not None
+    assert refreshed.status == "failed"
+    assert "Worker session disappeared after launch" in refreshed.last_progress_summary
+    assert "pytest tests/example.py" in refreshed.last_progress_summary
+    assert report.plan_progress.is_complete is False
+
+
+@pytest.mark.asyncio
+async def test_poll_task_marks_completed_when_missing_session_repo_harness_is_finished(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, store)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "PROGRESS.md").write_text("## Session update\n- wrapped everything up\n", encoding="utf-8")
+    (repo / "PLAN.json").write_text('[{"id": 1, "passes": true}]', encoding="utf-8")
+    task = manager.create_task(repo_path=str(repo), goal="Done after missing session")
+    task = manager.mark_starting(task.id, summary="Launching")
+
+    class _FakeLauncher:
+        def has_session(self, session: str) -> bool:
+            assert session == task.tmux_session
+            return False
+
+        def capture_pane(self, session: str) -> str:
+            raise AssertionError("capture_pane should not run when the tmux session is gone")
+
+    monitor = CodexProgressMonitor(manager, _FakeLauncher())  # type: ignore[arg-type]
+    report = await monitor.poll_task(task.id)
+
+    refreshed = store.get_task(task.id)
+    assert refreshed is not None
+    assert refreshed.status == "completed"
+    assert refreshed.last_progress_summary == "wrapped everything up"
+    assert report.plan_progress.is_complete is True
+
+
+@pytest.mark.asyncio
 async def test_poll_task_persists_branch_and_recent_commit_metadata(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
