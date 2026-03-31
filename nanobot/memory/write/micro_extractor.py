@@ -20,6 +20,8 @@ from loguru import logger
 
 from nanobot.context.prompt_loader import prompts
 
+from ..event import MemoryEvent
+
 if TYPE_CHECKING:
     from nanobot.memory.write.ingester import EventIngester
     from nanobot.providers.base import LLMProvider
@@ -116,9 +118,10 @@ class MicroExtractor:
                 temperature=0.0,
                 max_tokens=500,
             )
-            events = self._parse_events(response)
-            if not events:
+            raw_events = self._parse_events(response)
+            if not raw_events:
                 return
+            events = [MemoryEvent.from_dict(e) for e in raw_events]
             self._ingester.append_events(events)
             logger.info("Micro-extraction: {} event(s) ingested", len(events))
         except Exception:  # crash-barrier: best-effort background extraction

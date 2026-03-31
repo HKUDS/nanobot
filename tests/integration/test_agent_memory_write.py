@@ -37,7 +37,7 @@ class TestMemoryWriteFromAgentLoop:
             ]
         )
         results = await agent.memory.retriever.retrieve("distributed systems", top_k=5)
-        summaries = " ".join(r.get("summary", "").lower() for r in results)
+        summaries = " ".join(r.summary.lower() for r in results)
         assert "distributed" in summaries
 
     async def test_multiple_events_accumulate(self, agent: AgentLoop) -> None:

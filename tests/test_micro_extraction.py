@@ -95,7 +95,7 @@ class TestMicroExtractor:
         self.ingester.append_events.assert_called_once()
         written = self.ingester.append_events.call_args[0][0]
         assert len(written) == 2
-        assert written[0]["summary"] == "User works on DS10540"
+        assert written[0].summary == "User works on DS10540"
 
     @pytest.mark.asyncio
     async def test_submit_empty_events_skips_ingestion(self):
@@ -161,4 +161,4 @@ class TestMicroExtractor:
         await asyncio.sleep(0.1)
         self.ingester.append_events.assert_called_once()
         written = self.ingester.append_events.call_args[0][0]
-        assert written[0]["summary"] == "User likes Python"
+        assert written[0].summary == "User likes Python"

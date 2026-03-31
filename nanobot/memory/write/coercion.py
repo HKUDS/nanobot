@@ -17,7 +17,7 @@ from ..constants import (
     MEMORY_STABILITY,
     MEMORY_TYPES,
 )
-from ..event import is_resolved_task_or_decision
+from ..event import MemoryEvent, is_resolved_task_or_decision
 
 if TYPE_CHECKING:
     from .classification import EventClassifier
@@ -58,7 +58,7 @@ class EventCoercer:
         source_span: list[int],
         channel: str = "",
         chat_id: str = "",
-    ) -> dict[str, Any] | None:
+    ) -> MemoryEvent | None:
         """Normalize a raw event dict into canonical form.
 
         Returns ``None`` if the event is invalid (e.g. missing summary).
@@ -113,29 +113,31 @@ class EventCoercer:
                         }
                     )
 
-        return {
-            "id": event_id,
-            "timestamp": timestamp,
-            "channel": channel,
-            "chat_id": chat_id,
-            "type": event_type,
-            "summary": summary.strip(),
-            "entities": entities,
-            "salience": salience,
-            "confidence": confidence,
-            "source_span": source_span,
-            "ttl_days": ttl_days,
-            "memory_type": metadata.get("memory_type", "episodic"),
-            "topic": metadata.get(
-                "topic", self._classifier.default_topic_for_event_type(event_type)
-            ),
-            "stability": metadata.get("stability", "medium"),
-            "source": metadata.get("source", source),
-            "evidence_refs": metadata.get("evidence_refs", []),
-            "status": status,
-            "metadata": metadata,
-            "triples": triples,
-        }
+        return MemoryEvent.from_dict(
+            {
+                "id": event_id,
+                "timestamp": timestamp,
+                "channel": channel,
+                "chat_id": chat_id,
+                "type": event_type,
+                "summary": summary.strip(),
+                "entities": entities,
+                "salience": salience,
+                "confidence": confidence,
+                "source_span": source_span,
+                "ttl_days": ttl_days,
+                "memory_type": metadata.get("memory_type", "episodic"),
+                "topic": metadata.get(
+                    "topic", self._classifier.default_topic_for_event_type(event_type)
+                ),
+                "stability": metadata.get("stability", "medium"),
+                "source": metadata.get("source", source),
+                "evidence_refs": metadata.get("evidence_refs", []),
+                "status": status,
+                "metadata": metadata,
+                "triples": triples,
+            }
+        )
 
     def ensure_event_provenance(self, event: dict[str, Any]) -> dict[str, Any]:
         """Enrich an event with full provenance metadata."""

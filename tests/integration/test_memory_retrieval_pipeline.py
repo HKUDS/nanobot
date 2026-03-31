@@ -174,7 +174,7 @@ class TestRetrievalRelevance:
     async def test_preference_query_finds_preferences(self, seeded_store: MemoryStore) -> None:
         results = await seeded_store.retriever.retrieve("dark mode editor preference", top_k=5)
         assert len(results) > 0, "Expected at least one result for preference query"
-        summaries = [r["summary"] for r in results]
+        summaries = [r.summary for r in results]
         assert any("dark mode" in s.lower() for s in summaries), (
             f"Expected 'dark mode' in results, got: {summaries}"
         )
@@ -182,7 +182,7 @@ class TestRetrievalRelevance:
     async def test_programming_query_finds_languages(self, seeded_store: MemoryStore) -> None:
         results = await seeded_store.retriever.retrieve("programming language", top_k=5)
         assert len(results) > 0, "Expected at least one result for programming query"
-        summaries = [r["summary"] for r in results]
+        summaries = [r.summary for r in results]
         assert any("python" in s.lower() or "typescript" in s.lower() for s in summaries), (
             f"Expected language mention in results, got: {summaries}"
         )
@@ -190,7 +190,7 @@ class TestRetrievalRelevance:
     async def test_task_query_finds_tasks(self, seeded_store: MemoryStore) -> None:
         results = await seeded_store.retriever.retrieve("database migration PostgreSQL", top_k=5)
         assert len(results) > 0, "Expected at least one result for task query"
-        summaries = [r["summary"] for r in results]
+        summaries = [r.summary for r in results]
         assert any("postgresql" in s.lower() for s in summaries), (
             f"Expected PostgreSQL mention in results, got: {summaries}"
         )
@@ -198,7 +198,7 @@ class TestRetrievalRelevance:
     async def test_relationship_query_finds_people(self, seeded_store: MemoryStore) -> None:
         results = await seeded_store.retriever.retrieve("team collaboration Alice", top_k=5)
         assert len(results) > 0, "Expected at least one result for relationship query"
-        summaries = [r["summary"] for r in results]
+        summaries = [r.summary for r in results]
         assert any("alice" in s.lower() for s in summaries), (
             f"Expected Alice mention in results, got: {summaries}"
         )
@@ -206,7 +206,7 @@ class TestRetrievalRelevance:
     async def test_constraint_query_finds_limits(self, seeded_store: MemoryStore) -> None:
         results = await seeded_store.retriever.retrieve("budget cloud infrastructure cost", top_k=5)
         assert len(results) > 0, "Expected at least one result for constraint query"
-        summaries = [r["summary"] for r in results]
+        summaries = [r.summary for r in results]
         assert any("budget" in s.lower() or "$5000" in s for s in summaries), (
             f"Expected budget mention in results, got: {summaries}"
         )
@@ -224,7 +224,7 @@ class TestRRFFusion:
         """A distinctive keyword should surface the matching event."""
         results = await seeded_store.retriever.retrieve("Memcached", top_k=5)
         assert len(results) > 0, "FTS should find the Memcached event"
-        summaries = [r["summary"] for r in results]
+        summaries = [r.summary for r in results]
         assert any("memcached" in s.lower() for s in summaries), (
             f"Expected Memcached mention via FTS, got: {summaries}"
         )
@@ -261,7 +261,7 @@ class TestDeduplication:
         store.ingester.append_events([duplicate_event])
 
         results = await store.retriever.retrieve("Python programming language", top_k=10)
-        summaries = [r["summary"] for r in results]
+        summaries = [r.summary for r in results]
         python_matches = [s for s in summaries if "python" in s.lower()]
         assert len(python_matches) <= 1, (
             f"Duplicate event appeared {len(python_matches)} times in results: {summaries}"

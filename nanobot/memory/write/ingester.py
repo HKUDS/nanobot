@@ -13,11 +13,13 @@ and knowledge-graph triple ingestion.
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from nanobot.observability.tracing import bind_trace
 
 from .._text import _utc_now_iso
+from ..event import MemoryEvent
 
 if TYPE_CHECKING:
     from ..db.event_store import EventStore
@@ -75,10 +77,15 @@ class EventIngester:
             return result
         return []
 
-    def append_events(self, events: list[dict[str, Any]]) -> int:
-        """Main ingestion entry point: dedup, merge, persist, and sync to vector store."""
+    def append_events(self, events: Sequence[MemoryEvent | dict[str, Any]]) -> int:
+        """Main ingestion entry point: dedup, merge, persist, and sync to vector store.
+
+        Accepts ``MemoryEvent`` objects (preferred) or raw dicts (legacy callers).
+        Dicts are converted to ``MemoryEvent`` internally via ``from_dict()``.
+        """
         if not events:
             return 0
+        raw_events = [e.to_dict() if isinstance(e, MemoryEvent) else e for e in events]
         t0_append = time.monotonic()
         existing_events = [
             self._coercer.ensure_event_provenance(event) for event in self.read_events()
@@ -89,7 +96,7 @@ class EventIngester:
         superseded = 0
         appended_events: list[dict[str, Any]] = []
 
-        for raw in events:
+        for raw in raw_events:
             event_id = raw.get("id")
             if not event_id:
                 # Auto-generate ID for events without one (mirrors coerce_event).
@@ -200,7 +207,7 @@ class EventIngester:
         )
         return written
 
-    async def _ingest_graph_triples(self, events: list[dict[str, Any]]) -> int:
+    async def _ingest_graph_triples(self, events: list[MemoryEvent]) -> int:
         """Feed triples from events into the knowledge graph (async).
 
         Returns the number of triples ingested.  No-op when graph is disabled.
@@ -212,12 +219,13 @@ class EventIngester:
 
         total = 0
         for event in events:
-            raw_triples = event.get("triples")
-            if not isinstance(raw_triples, list) or not raw_triples:
+            raw_triples = event.triples
+            if not raw_triples:
                 continue
-            event_id = str(event.get("id", ""))
-            timestamp = str(event.get("timestamp", ""))
-            parsed = [Triple.from_dict(t, source_event_id=event_id) for t in raw_triples]
+            event_id = event.id
+            timestamp = event.timestamp
+            triple_dicts = [t.model_dump(mode="python") for t in raw_triples]
+            parsed = [Triple.from_dict(t, source_event_id=event_id) for t in triple_dicts]
             parsed = [t for t in parsed if t.subject and t.object]
             if parsed:
                 await self._graph.ingest_event_triples(event_id, parsed, timestamp=timestamp)

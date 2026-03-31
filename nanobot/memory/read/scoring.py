@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from .._text import _contains_any, _norm_text
 from ..constants import PROFILE_KEYS, PROFILE_STATUS_CONFLICTED, PROFILE_STATUS_STALE
+from ..persistence.conflict_types import ConflictRecord
 from .retrieval_planner import RetrievalPlan, RetrievalPlanner
 
 if TYPE_CHECKING:
@@ -88,22 +89,22 @@ class RetrievalScorer:
 
         resolved_keep_new_old: dict[str, set[str]] = {key: set() for key in PROFILE_KEYS}
         resolved_keep_new_new: dict[str, set[str]] = {key: set() for key in PROFILE_KEYS}
-        for conflict in conflicts:
-            if not isinstance(conflict, dict):
+        for raw in conflicts:
+            if not isinstance(raw, dict):
                 continue
-            if str(conflict.get("status", "")).lower() != "resolved":
+            record = ConflictRecord.from_dict(raw)
+            if record.status.lower() != "resolved":
                 continue
-            if str(conflict.get("resolution", "")).lower() != "keep_new":
+            if record.resolution.lower() != "keep_new":
                 continue
-            field = str(conflict.get("field", ""))
-            if field not in resolved_keep_new_old:
+            if record.field not in resolved_keep_new_old:
                 continue
-            old_value = str(conflict.get("old", "")).strip()
-            new_value = str(conflict.get("new", "")).strip()
+            old_value = record.old.strip()
+            new_value = record.new.strip()
             if old_value:
-                resolved_keep_new_old[field].add(_norm_text(old_value))
+                resolved_keep_new_old[record.field].add(_norm_text(old_value))
             if new_value:
-                resolved_keep_new_new[field].add(_norm_text(new_value))
+                resolved_keep_new_new[record.field].add(_norm_text(new_value))
 
         return {
             "profile": profile,

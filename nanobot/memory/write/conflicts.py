@@ -23,6 +23,7 @@ from ..constants import (
     PROFILE_STATUS_CONFLICTED,
     PROFILE_STATUS_STALE,
 )
+from ..persistence.conflict_types import ConflictRecord
 from ..persistence.profile_io import ProfileStore as ProfileManager
 from .conflict_interaction import (
     ask_user_for_conflict as _ask_user_for_conflict,
@@ -193,27 +194,24 @@ class ConflictManager:
                                 evidence_event_id=evidence_ids[0] if evidence_ids else None,
                             )
                             # Include belief IDs in conflict record (LAN-198).
-                            profile["conflicts"].append(
-                                {
-                                    "timestamp": self._utc_now_iso(),
-                                    "field": key,
-                                    "old": existing,
-                                    "new": candidate,
-                                    "old_memory_id": self.profile_mgr._find_belief_id_for_text(
-                                        existing
-                                    ),
-                                    "new_memory_id": self.profile_mgr._find_belief_id_for_text(
-                                        candidate
-                                    ),
-                                    "belief_id_old": old_entry.get("id", ""),
-                                    "belief_id_new": new_entry.get("id", ""),
-                                    "status": CONFLICT_STATUS_OPEN,
-                                    "old_confidence": old_entry.get("confidence"),
-                                    "new_confidence": new_entry.get("confidence"),
-                                    "old_last_seen_at": old_entry.get("last_seen_at", ""),
-                                    "new_last_seen_at": new_entry.get("last_seen_at", ""),
-                                }
+                            conflict = ConflictRecord(
+                                timestamp=self._utc_now_iso(),
+                                field=key,
+                                old=existing,
+                                new=candidate,
+                                old_memory_id=self.profile_mgr._find_belief_id_for_text(existing)
+                                or "",
+                                new_memory_id=self.profile_mgr._find_belief_id_for_text(candidate)
+                                or "",
+                                belief_id_old=old_entry.get("id", ""),
+                                belief_id_new=new_entry.get("id", ""),
+                                status=CONFLICT_STATUS_OPEN,
+                                old_confidence=float(old_entry.get("confidence", 0.65)),
+                                new_confidence=float(new_entry.get("confidence", 0.65)),
+                                old_last_seen_at=old_entry.get("last_seen_at", ""),
+                                new_last_seen_at=new_entry.get("last_seen_at", ""),
                             )
+                            profile["conflicts"].append(conflict.to_dict())
                             conflicts += 1
                             touched += 2
                             break
@@ -248,13 +246,13 @@ class ConflictManager:
 
     # -- public API ---------------------------------------------------------
 
-    def list_conflicts(self, *, include_closed: bool = False) -> list[dict[str, Any]]:
+    def list_conflicts(self, *, include_closed: bool = False) -> list[ConflictRecord]:
         profile = self.profile_mgr.read_profile()
         conflicts = profile.get("conflicts", [])
         if not isinstance(conflicts, list):
             return []
 
-        out: list[dict[str, Any]] = []
+        out: list[ConflictRecord] = []
         for idx, item in enumerate(conflicts):
             if not isinstance(item, dict):
                 continue
@@ -264,25 +262,23 @@ class ConflictManager:
                 CONFLICT_STATUS_NEEDS_USER,
             }:
                 continue
-            row = dict(item)
-            row["index"] = idx
-            out.append(row)
+            out.append(ConflictRecord.from_dict(item, index=idx))
         return out
 
     @staticmethod
     def _parse_conflict_user_action(text: str) -> str | None:
         return _parse_conflict_user_action(text)
 
-    def _auto_resolution_action(self, conflict: dict[str, Any]) -> str | None:
-        source = str(conflict.get("source", "")).strip().lower()
+    def _auto_resolution_action(self, conflict: ConflictRecord) -> str | None:
+        source = conflict.source.strip().lower()
         if source == "live_correction":
             # Live corrections surface conflicts for user review rather than
             # silently auto-resolving.  The user explicitly stated a change so
             # the conflict should be presented via ask_user_for_conflict().
             return None
 
-        old_conf = self._safe_float(conflict.get("old_confidence"), 0.0)
-        new_conf = self._safe_float(conflict.get("new_confidence"), 0.0)
+        old_conf = self._safe_float(conflict.old_confidence, 0.0)
+        new_conf = self._safe_float(conflict.new_confidence, 0.0)
         gap = abs(old_conf - new_conf)
         resolve_gap = self._memory_config.conflict_auto_resolve_gap if self._memory_config else 0.25
         if gap >= resolve_gap:
@@ -290,14 +286,14 @@ class ConflictManager:
 
         # Temporal recency: when the confidence gap is too narrow, use
         # timestamps as a tiebreaker — newer facts supersede older ones.
-        old_ts = str(conflict.get("old_last_seen_at", "")).strip()
-        new_ts = str(conflict.get("new_last_seen_at", "")).strip()
+        old_ts = conflict.old_last_seen_at.strip()
+        new_ts = conflict.new_last_seen_at.strip()
         if old_ts and new_ts and old_ts != new_ts:
             return "keep_new" if new_ts > old_ts else "keep_old"
 
         # Correction language: if the *new* value contains correction markers,
         # treat it as an explicit supersession of the old value.
-        new_text = self._norm_text(str(conflict.get("new", "")))
+        new_text = self._norm_text(conflict.new)
         if any(marker in new_text for marker in self._CORRECTION_MARKERS):
             return "keep_new"
 
@@ -305,27 +301,28 @@ class ConflictManager:
 
     def auto_resolve_conflicts(self, *, max_items: int = 10) -> dict[str, int]:
         profile = self.profile_mgr.read_profile()
-        conflicts = profile.get("conflicts", [])
-        if not isinstance(conflicts, list):
+        raw_conflicts = profile.get("conflicts", [])
+        if not isinstance(raw_conflicts, list):
             return {"auto_resolved": 0, "needs_user": 0}
 
         auto_resolved = 0
         needs_user = 0
         touched = False
-        for idx, conflict in enumerate(conflicts):
+        for idx, raw in enumerate(raw_conflicts):
             if max_items <= 0:
                 break
-            if not isinstance(conflict, dict):
+            if not isinstance(raw, dict):
                 continue
-            status = str(conflict.get("status", CONFLICT_STATUS_OPEN)).strip().lower()
+            status = str(raw.get("status", CONFLICT_STATUS_OPEN)).strip().lower()
             if status not in {CONFLICT_STATUS_OPEN, CONFLICT_STATUS_NEEDS_USER}:
                 continue
             max_items -= 1
 
-            action = self._auto_resolution_action(conflict)
+            record = ConflictRecord.from_dict(raw, index=idx)
+            action = self._auto_resolution_action(record)
             if action is None:
                 if status != CONFLICT_STATUS_NEEDS_USER:
-                    conflict["status"] = CONFLICT_STATUS_NEEDS_USER
+                    raw["status"] = CONFLICT_STATUS_NEEDS_USER
                     touched = True
                 needs_user += 1
                 continue
@@ -335,7 +332,7 @@ class ConflictManager:
                 auto_resolved += 1
                 continue
 
-            conflict["status"] = CONFLICT_STATUS_NEEDS_USER
+            raw["status"] = CONFLICT_STATUS_NEEDS_USER
             touched = True
             needs_user += 1
 
@@ -343,11 +340,11 @@ class ConflictManager:
             self.profile_mgr.write_profile(profile)
         return {"auto_resolved": auto_resolved, "needs_user": needs_user}
 
-    def get_next_user_conflict(self) -> dict[str, Any] | None:
+    def get_next_user_conflict(self) -> ConflictRecord | None:
         """Return the most-recently-asked conflict, or None."""
         return _get_next_user_conflict(self)
 
-    def _conflict_relevant_to(self, conflict: dict[str, Any], user_message: str) -> bool:
+    def _conflict_relevant_to(self, conflict: ConflictRecord, user_message: str) -> bool:
         """Return True if the conflict topic overlaps with the user's message."""
         return _conflict_relevant_to(conflict, user_message)
 

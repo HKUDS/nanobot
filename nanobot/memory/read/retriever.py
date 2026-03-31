@@ -19,6 +19,7 @@ from nanobot.observability.tracing import bind_trace
 
 from .graph_augmentation import GraphAugmenter
 from .retrieval_planner import RetrievalPlanner
+from .retrieval_types import RetrievedMemory, retrieved_memory_from_dict
 from .scoring import RetrievalScorer
 
 if TYPE_CHECKING:
@@ -60,7 +61,7 @@ class MemoryRetriever:
         top_k: int = 6,
         recency_half_life_days: float | None = None,
         embedding_provider: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[RetrievedMemory]:
         self._graph_aug.reset_cache()
         t0 = time.monotonic()
 
@@ -86,7 +87,7 @@ class MemoryRetriever:
         top_k: int,
         recency_half_life_days: float | None,
         t0: float,
-    ) -> list[dict[str, Any]]:
+    ) -> list[RetrievedMemory]:
         """Single fused retrieval: vector + FTS5 + RRF.
 
         Used when ``EventStore`` and ``Embedder`` are injected.  Runs
@@ -121,7 +122,7 @@ class MemoryRetriever:
                 )
                 return []
 
-        # 4. Enrich metadata
+        # 4. Enrich metadata (still dict-based for scorer compatibility)
         self._enrich_item_metadata(candidates)
 
         # 5. Filter
@@ -147,7 +148,10 @@ class MemoryRetriever:
 
         # 8. Sort + truncate
         scored.sort(key=lambda x: x.get("score", 0.0), reverse=True)
-        results = scored[:top_k]
+        scored = scored[:top_k]
+
+        # 9. Convert to typed objects
+        results = [retrieved_memory_from_dict(item) for item in scored]
 
         bind_trace().debug(
             "Memory retrieve source=unified results={} duration_ms={:.0f}",

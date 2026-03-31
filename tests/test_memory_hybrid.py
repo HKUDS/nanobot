@@ -127,10 +127,10 @@ class TestHybridMemoryStore:
             embedding_provider="hash",
         )
         assert len(retrieved) >= 1
-        assert retrieved[0]["summary"].lower().find("oauth2") >= 0
+        assert retrieved[0].summary.lower().find("oauth2") >= 0
         # Storage redesign: unified retrieval pipeline no longer exposes "provider".
-        # Instead, retrieval_reason contains scoring details (recency, intent, etc.).
-        assert "retrieval_reason" in retrieved[0]
+        # Instead, scoring details live in the RetrievedMemory.scores attribute.
+        assert retrieved[0].scores is not None
 
         report = store.snapshot.verify_memory(stale_days=90)
         assert report["events"] == 2
@@ -481,7 +481,7 @@ class TestHybridMemoryStore:
 
         open_conflicts = store.conflict_mgr.list_conflicts()
         assert len(open_conflicts) >= 1
-        idx = int(open_conflicts[0]["index"])
+        idx = open_conflicts[0].index
 
         ok = store.conflict_mgr.resolve_conflict(idx, "keep_new")
         assert ok is True
@@ -492,9 +492,9 @@ class TestHybridMemoryStore:
         assert "Use dark mode" not in constraints
 
         all_conflicts = store.conflict_mgr.list_conflicts(include_closed=True)
-        resolved = [c for c in all_conflicts if c.get("index") == idx]
+        resolved = [c for c in all_conflicts if c.index == idx]
         assert resolved
-        assert resolved[0]["status"] == "resolved"
+        assert resolved[0].status == "resolved"
 
     def test_live_user_correction_creates_profile_conflict_and_event(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
@@ -616,7 +616,7 @@ class TestHybridMemoryStore:
 
         open_conflicts = store.conflict_mgr.list_conflicts()
         assert open_conflicts
-        idx = int(open_conflicts[0]["index"])
+        idx = open_conflicts[0].index
         assert store.conflict_mgr.resolve_conflict(idx, "keep_new") is True
 
         retrieved = await store.retriever.retrieve(
@@ -626,7 +626,7 @@ class TestHybridMemoryStore:
             embedding_provider="hash",
         )
         assert retrieved
-        assert "us-east-1" in str(retrieved[0].get("summary", "")).lower()
+        assert "us-east-1" in retrieved[0].summary.lower()
 
     async def test_semantic_dedup_merges_events_and_keeps_provenance(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
@@ -682,8 +682,8 @@ class TestHybridMemoryStore:
             "oauth2 tokens", top_k=2, embedding_provider="hash"
         )
         assert retrieved
-        # Storage redesign: provenance is now embedded in the event's extra fields
-        assert retrieved[0].get("canonical_id") == "dup-1"
+        # After dedup merge, the surviving event keeps the canonical ID of the first
+        assert retrieved[0].id == "dup-1"
 
     def test_non_duplicate_events_remain_separate(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
@@ -750,8 +750,8 @@ class TestHybridMemoryStore:
             "postgresql database", top_k=2, embedding_provider="hash"
         )
         assert retrieved
-        # Storage redesign: unified pipeline replaces provider/backend fields
-        assert "retrieval_reason" in retrieved[0]
+        # Storage redesign: unified pipeline uses typed RetrievedMemory with scores
+        assert retrieved[0].scores is not None
 
     async def test_keyword_retrieval_with_recency(self, tmp_path: Path) -> None:
         """Recency weighting should boost recent events of same type over old ones."""
@@ -796,7 +796,7 @@ class TestHybridMemoryStore:
         )
         assert len(retrieved) == 2
         # The more recent event should rank first due to recency boost
-        assert retrieved[0]["id"] == "new-ev"
+        assert retrieved[0].id == "new-ev"
 
     async def test_retrieve_reads_events_file_at_most_once(self, tmp_path: Path) -> None:
         """retrieve() must not issue more than one events.jsonl read per call (LAN-67).

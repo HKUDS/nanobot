@@ -22,6 +22,7 @@ from nanobot.memory.constants import (
     _CONSOLIDATE_MEMORY_TOOL,
     _SAVE_EVENTS_TOOL,
 )
+from nanobot.memory.event import MemoryEvent
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -152,11 +153,13 @@ class TestConsolidationRouting:
             "relationships": [],
             "constraints": [],
         }
-        pipeline._extractor.coerce_event.return_value = {
-            "type": "fact",
-            "summary": "User likes Python",
-            "id": "ev-1",
-        }
+        pipeline._extractor.coerce_event.return_value = MemoryEvent.from_dict(
+            {
+                "type": "fact",
+                "summary": "User likes Python",
+                "id": "ev-1",
+            }
+        )
         pipeline._extractor.to_str_list.return_value = []
         pipeline._ingester.append_events.return_value = 1
         pipeline._ingester._ingest_graph_triples = AsyncMock()
@@ -242,7 +245,7 @@ class TestSingleToolFallbacks:
             "constraints": [],
         }
         pipeline._extractor.heuristic_extract_events.return_value = (
-            [{"type": "fact", "summary": "heuristic event", "id": "h-1"}],
+            [MemoryEvent(type="fact", summary="heuristic event", id="h-1")],
             {
                 "preferences": [],
                 "stable_facts": [],
@@ -366,11 +369,13 @@ class TestHistoryEntryExtraction:
             "relationships": [],
             "constraints": [],
         }
-        pipeline._extractor.coerce_event.return_value = {
-            "type": "fact",
-            "summary": "likes Python",
-            "id": "ev-1",
-        }
+        pipeline._extractor.coerce_event.return_value = MemoryEvent.from_dict(
+            {
+                "type": "fact",
+                "summary": "likes Python",
+                "id": "ev-1",
+            }
+        )
         pipeline._extractor.to_str_list.return_value = []
         pipeline._ingester.append_events.return_value = 1
         pipeline._ingester._ingest_graph_triples = AsyncMock()
@@ -404,11 +409,13 @@ class TestHistoryEntryExtraction:
             "relationships": [],
             "constraints": [],
         }
-        pipeline._extractor.coerce_event.return_value = {
-            "type": "fact",
-            "summary": "something",
-            "id": "ev-1",
-        }
+        pipeline._extractor.coerce_event.return_value = MemoryEvent.from_dict(
+            {
+                "type": "fact",
+                "summary": "something",
+                "id": "ev-1",
+            }
+        )
         pipeline._extractor.to_str_list.return_value = []
         pipeline._ingester.append_events.return_value = 1
         pipeline._ingester._ingest_graph_triples = AsyncMock()

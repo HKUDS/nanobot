@@ -207,8 +207,11 @@ class MemoryMaintenance:
 
         # With MemoryDatabase, events are inserted directly via EventStore.
         if self._db is not None:
+            from .event import MemoryEvent
+
             for event in seeded_events:
-                self._db.event_store.insert_event(event)
+                evt_dict = event.to_dict() if isinstance(event, MemoryEvent) else event
+                self._db.event_store.insert_event(evt_dict)
 
         return {
             "ok": True,

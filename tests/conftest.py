@@ -8,7 +8,13 @@ from typing import Any
 import pytest
 from loguru import logger as _loguru_logger
 
+from nanobot.memory.event import MemoryEvent
 from nanobot.providers.base import LLMProvider, LLMResponse
+
+
+def make_events(dicts: list[dict[str, Any]]) -> list[MemoryEvent]:
+    """Convert a list of raw event dicts to MemoryEvent objects for tests."""
+    return [MemoryEvent.from_dict(d) for d in dicts]
 
 
 class FakeProvider(LLMProvider):

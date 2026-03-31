@@ -56,7 +56,7 @@ def memory_inspect(
     )
 
     if query.strip():
-        retrieved: list[dict] = asyncio.run(
+        retrieved = asyncio.run(
             store.retriever.retrieve(
                 query,
                 top_k=top_k,
@@ -72,10 +72,10 @@ def memory_inspect(
         out.add_column("Summary")
         for item in retrieved:
             out.add_row(
-                str(item.get("timestamp", ""))[:16],
-                str(item.get("type", "fact")),
-                f"{float(item.get('score', 0.0)):.3f}",
-                str(item.get("summary", "")),
+                item.timestamp[:16],
+                item.type,
+                f"{item.scores.final_score:.3f}",
+                item.summary,
             )
         console.print()
         console.print(out)
@@ -482,13 +482,13 @@ def memory_conflicts(
     table.add_column("Status", style="yellow")
     for item in rows:
         table.add_row(
-            str(item.get("index", "")),
-            str(item.get("field", "")),
-            str(item.get("old", ""))[:70],
-            str(item.get("old_memory_id", ""))[:24],
-            str(item.get("new", ""))[:70],
-            str(item.get("new_memory_id", ""))[:24],
-            str(item.get("status", "")),
+            str(item.index),
+            item.field,
+            item.old[:70],
+            item.old_memory_id[:24],
+            item.new[:70],
+            item.new_memory_id[:24],
+            item.status,
         )
     console.print(table)
 

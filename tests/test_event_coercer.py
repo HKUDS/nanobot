@@ -59,9 +59,9 @@ class TestCoerceEvent:
             source_span=[0, 10],
         )
         assert result is not None
-        assert result["summary"] == "User prefers dark mode"
-        assert result["type"] == "preference"
-        assert result["id"]
+        assert result.summary == "User prefers dark mode"
+        assert result.type == "preference"
+        assert result.id
 
     def test_missing_summary_returns_none(self) -> None:
         c = _make_coercer()
@@ -72,7 +72,7 @@ class TestCoerceEvent:
         c = _make_coercer()
         result = c.coerce_event({"summary": "Something", "type": "bogus"}, source_span=[0, 5])
         assert result is not None
-        assert result["type"] == "fact"
+        assert result.type == "fact"
 
     def test_triples_parsed(self) -> None:
         c = _make_coercer()
@@ -85,7 +85,7 @@ class TestCoerceEvent:
             source_span=[0, 5],
         )
         assert result is not None
-        assert len(result["triples"]) == 1
+        assert len(result.triples) == 1
 
 
 class TestEnsureEventProvenance:

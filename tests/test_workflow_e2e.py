@@ -250,7 +250,7 @@ class TestWorkflowMemoryRoundtrip:
 
         # Retrieve it
         results = await store.retriever.retrieve("vim keybindings", top_k=5)
-        summaries = [r.get("summary", "").lower() for r in results]
+        summaries = [r.summary.lower() for r in results]
         assert any("vim" in s for s in summaries)
 
 
