@@ -122,6 +122,7 @@ class Session:
         dropped = len(self.messages) - len(retained)
         self.messages = retained
         self.last_consolidated = max(0, self.last_consolidated - dropped)
+        self.updated_at = datetime.now()
 
 
 class SessionManager:

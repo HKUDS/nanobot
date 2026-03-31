@@ -1,5 +1,6 @@
 """Utility functions for nanobot."""
 
+import base64
 import json
 import re
 import time
@@ -8,6 +9,13 @@ from pathlib import Path
 from typing import Any
 
 import tiktoken
+
+
+def strip_think(text: str) -> str:
+    """Remove <think>…</think> blocks and any unclosed trailing <think> tag."""
+    text = re.sub(r"<think>[\s\S]*?</think>", "", text)
+    text = re.sub(r"<think>[\s\S]*$", "", text)
+    return text.strip()
 
 
 def detect_image_mime(data: bytes) -> str | None:
@@ -23,6 +31,19 @@ def detect_image_mime(data: bytes) -> str | None:
     return None
 
 
+def build_image_content_blocks(raw: bytes, mime: str, path: str, label: str) -> list[dict[str, Any]]:
+    """Build native image blocks plus a short text label."""
+    b64 = base64.b64encode(raw).decode()
+    return [
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:{mime};base64,{b64}"},
+            "_meta": {"path": path},
+        },
+        {"type": "text", "text": label},
+    ]
+
+
 def ensure_dir(path: Path) -> Path:
     """Ensure directory exists, return it."""
     path.mkdir(parents=True, exist_ok=True)
@@ -34,11 +55,24 @@ def timestamp() -> str:
     return datetime.now().isoformat()
 
 
-def current_time_str() -> str:
-    """Human-readable current time with weekday and timezone, e.g. '2026-03-15 22:30 (Saturday) (CST)'."""
-    now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
-    tz = time.strftime("%Z") or "UTC"
-    return f"{now} ({tz})"
+def current_time_str(timezone: str | None = None) -> str:
+    """Human-readable current time with weekday and UTC offset.
+
+    When *timezone* is a valid IANA name (e.g. ``"Asia/Shanghai"``), the time
+    is converted to that zone.  Otherwise falls back to the host local time.
+    """
+    from zoneinfo import ZoneInfo
+
+    try:
+        tz = ZoneInfo(timezone) if timezone else None
+    except (KeyError, Exception):
+        tz = None
+
+    now = datetime.now(tz=tz) if tz else datetime.now().astimezone()
+    offset = now.strftime("%z")
+    offset_fmt = f"{offset[:3]}:{offset[3:]}" if len(offset) == 5 else offset
+    tz_name = timezone or (time.strftime("%Z") or "UTC")
+    return f"{now.strftime('%Y-%m-%d %H:%M (%A)')} ({tz_name}, UTC{offset_fmt})"
 
 
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
@@ -90,8 +124,8 @@ def build_assistant_message(
     msg: dict[str, Any] = {"role": "assistant", "content": content}
     if tool_calls:
         msg["tool_calls"] = tool_calls
-    if reasoning_content is not None:
-        msg["reasoning_content"] = reasoning_content
+    if reasoning_content is not None or thinking_blocks:
+        msg["reasoning_content"] = reasoning_content if reasoning_content is not None else ""
     if thinking_blocks:
         msg["thinking_blocks"] = thinking_blocks
     return msg
@@ -101,7 +135,11 @@ def estimate_prompt_tokens(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
 ) -> int:
-    """Estimate prompt tokens with tiktoken."""
+    """Estimate prompt tokens with tiktoken.
+
+    Counts all fields that providers send to the LLM: content, tool_calls,
+    reasoning_content, tool_call_id, name, plus per-message framing overhead.
+    """
     try:
         enc = tiktoken.get_encoding("cl100k_base")
         parts: list[str] = []
@@ -115,9 +153,25 @@ def estimate_prompt_tokens(
                         txt = part.get("text", "")
                         if txt:
                             parts.append(txt)
+
+            tc = msg.get("tool_calls")
+            if tc:
+                parts.append(json.dumps(tc, ensure_ascii=False))
+
+            rc = msg.get("reasoning_content")
+            if isinstance(rc, str) and rc:
+                parts.append(rc)
+
+            for key in ("name", "tool_call_id"):
+                value = msg.get(key)
+                if isinstance(value, str) and value:
+                    parts.append(value)
+
         if tools:
             parts.append(json.dumps(tools, ensure_ascii=False))
-        return len(enc.encode("\n".join(parts)))
+
+        per_message_overhead = len(messages) * 4
+        return len(enc.encode("\n".join(parts))) + per_message_overhead
     except Exception:
         return 0
 
@@ -146,14 +200,18 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
     if message.get("tool_calls"):
         parts.append(json.dumps(message["tool_calls"], ensure_ascii=False))
 
+    rc = message.get("reasoning_content")
+    if isinstance(rc, str) and rc:
+        parts.append(rc)
+
     payload = "\n".join(parts)
     if not payload:
-        return 1
+        return 4
     try:
         enc = tiktoken.get_encoding("cl100k_base")
-        return max(1, len(enc.encode(payload)))
+        return max(4, len(enc.encode(payload)) + 4)
     except Exception:
-        return max(1, len(payload) // 4)
+        return max(4, len(payload) // 4 + 4)
 
 
 def estimate_prompt_tokens_chain(
@@ -176,6 +234,39 @@ def estimate_prompt_tokens_chain(
     if estimated > 0:
         return int(estimated), "tiktoken"
     return 0, "none"
+
+
+def build_status_content(
+    *,
+    version: str,
+    model: str,
+    start_time: float,
+    last_usage: dict[str, int],
+    context_window_tokens: int,
+    session_msg_count: int,
+    context_tokens_estimate: int,
+) -> str:
+    """Build a human-readable runtime status snapshot."""
+    uptime_s = int(time.time() - start_time)
+    uptime = (
+        f"{uptime_s // 3600}h {(uptime_s % 3600) // 60}m"
+        if uptime_s >= 3600
+        else f"{uptime_s // 60}m {uptime_s % 60}s"
+    )
+    last_in = last_usage.get("prompt_tokens", 0)
+    last_out = last_usage.get("completion_tokens", 0)
+    ctx_total = max(context_window_tokens, 0)
+    ctx_pct = int((context_tokens_estimate / ctx_total) * 100) if ctx_total > 0 else 0
+    ctx_used_str = f"{context_tokens_estimate // 1000}k" if context_tokens_estimate >= 1000 else str(context_tokens_estimate)
+    ctx_total_str = f"{ctx_total // 1024}k" if ctx_total > 0 else "n/a"
+    return "\n".join([
+        f"\U0001f408 nanobot v{version}",
+        f"\U0001f9e0 Model: {model}",
+        f"\U0001f4ca Tokens: {last_in} in / {last_out} out",
+        f"\U0001f4da Context: {ctx_used_str}/{ctx_total_str} ({ctx_pct}%)",
+        f"\U0001f4ac Session: {session_msg_count} messages",
+        f"\u23f1 Uptime: {uptime}",
+    ])
 
 
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
