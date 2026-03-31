@@ -317,6 +317,46 @@ def test_openai_compat_provider_passes_model_through():
     assert provider.get_default_model() == "github-copilot/gpt-5.3-codex"
 
 
+def test_make_provider_uses_github_copilot_backend():
+    from nanobot.cli.commands import _make_provider
+    from nanobot.config.schema import Config
+
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "github-copilot",
+                    "model": "github-copilot/gpt-4.1",
+                }
+            }
+        }
+    )
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = _make_provider(config)
+
+    assert provider.__class__.__name__ == "GitHubCopilotProvider"
+
+
+def test_github_copilot_provider_strips_prefixed_model_name():
+    from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = GitHubCopilotProvider(default_model="github-copilot/gpt-5.1")
+
+    kwargs = provider._build_kwargs(
+        messages=[{"role": "user", "content": "hi"}],
+        tools=None,
+        model="github-copilot/gpt-5.1",
+        max_tokens=16,
+        temperature=0.1,
+        reasoning_effort=None,
+        tool_choice=None,
+    )
+
+    assert kwargs["model"] == "gpt-5.1"
+
+
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
