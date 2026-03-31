@@ -1,8 +1,11 @@
+import shlex
+import sys
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
+from nanobot.agent.tools.tool_search import ToolSearchTool
 
 
 class SampleTool(Tool):
@@ -92,24 +95,7 @@ async def test_registry_returns_validation_error() -> None:
 async def test_registry_tool_not_found_suggests_tool_search() -> None:
     reg = ToolRegistry()
     reg.register(SampleTool())
-
-    class _ToolSearchStub(Tool):
-        @property
-        def name(self) -> str:
-            return "tool_search"
-
-        @property
-        def description(self) -> str:
-            return "Find tools"
-
-        @property
-        def parameters(self) -> dict[str, Any]:
-            return {"type": "object", "properties": {"query": {"type": "string"}}}
-
-        async def execute(self, **kwargs: Any) -> str:
-            return "ok"
-
-    reg.register(_ToolSearchStub())
+    reg.register(ToolSearchTool(registry=reg))
     result = await reg.execute("sampl", {})
 
     assert "Tool 'sampl' not found" in result
@@ -409,9 +395,10 @@ async def test_exec_head_tail_truncation() -> None:
     """Long output should preserve both head and tail."""
     tool = ExecTool()
     # Generate output that exceeds _MAX_OUTPUT (10_000 chars)
-    # Use python to generate output to avoid command line length limits
+    # Use the current interpreter (CI may not have `python` on PATH)
+    exe = shlex.quote(sys.executable)
     result = await tool.execute(
-        command="python -c \"print('A' * 6000 + '\\n' + 'B' * 6000)\""
+        command=f'{exe} -c "print(\'A\' * 6000 + \'\\n\' + \'B\' * 6000)"'
     )
     assert "chars truncated" in result
     # Head portion should start with As
