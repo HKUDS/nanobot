@@ -11,7 +11,15 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 import json_repair
-from openai import AsyncOpenAI
+
+if os.environ.get("LANGFUSE_SECRET_KEY"):
+    LANGFUSE_AVAILABLE  = importlib.util.find_spec("langfuse") is not None
+    if not LANGFUSE_AVAILABLE:
+        raise ImportError("Langfuse is not available; please install it with `pip install langfuse`")
+
+    from langfuse.openai import AsyncOpenAI  # type: ignore[import-untyped]
+else:
+    from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
