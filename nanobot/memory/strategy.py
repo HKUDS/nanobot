@@ -121,6 +121,12 @@ class StrategyAccess:
             )
             return cursor.rowcount
 
+    def purge_invalid(self) -> int:
+        """Delete strategies produced by broken extraction (missing tool data)."""
+        with self._conn:
+            cursor = self._conn.execute("DELETE FROM strategies WHERE strategy LIKE '%unknown()%'")
+            return cursor.rowcount
+
     @staticmethod
     def _row_to_strategy(row: tuple) -> Strategy:
         return Strategy(

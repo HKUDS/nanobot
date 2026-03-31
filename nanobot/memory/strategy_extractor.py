@@ -92,7 +92,7 @@ class StrategyExtractor:
     ) -> Strategy | None:
         """Build a Strategy from a guardrail recovery."""
         failed_tool = activation.get("failed_tool", "unknown")
-        failed_args = activation.get("failed_args", "")
+        failed_args = activation.get("failed_args", {})
 
         if self._provider:
             strategy_text = await self._llm_summarize(
@@ -141,23 +141,31 @@ class StrategyExtractor:
         """Use LLM to generate a concise strategy description."""
         assert self._provider is not None
         prompt = (
-            "A tool-use strategy was discovered. Summarize it in 1-2 sentences.\n\n"
-            f"User task: {user_text[:200]}\n"
-            f"Failed: {failed_tool}({failed_args[:100]})\n"
-            f"Succeeded: {success_tool}({success_args[:100]})\n\n"
-            "Write what doesn't work and what to do instead."
+            "Extract a tool-use rule from this recovery. Be specific and actionable.\n\n"
+            f"User asked: {user_text[:200]}\n"
+            f"Tool that failed: {failed_tool}({failed_args[:150]})\n"
+            f"Tool that worked: {success_tool}({success_args[:150]})\n\n"
+            "Write the rule in this exact format:\n"
+            "WHEN: <what the user is trying to do>\n"
+            "DON'T: <tool and why it fails for this case>\n"
+            "DO: <tool and specific arguments that work>\n"
+        )
+        fallback = (
+            f"WHEN: {user_text[:80]}\n"
+            f"DON'T: {failed_tool} (returned no results)\n"
+            f"DO: {success_tool}"
         )
         try:
             response = await self._provider.chat(
                 messages=[{"role": "user", "content": prompt}],
                 model=self._model or None,
-                max_tokens=150,
+                max_tokens=200,
                 temperature=0.3,
             )
-            return response.content or f"Use {success_tool} instead of {failed_tool}."
+            return response.content or fallback
         except Exception:  # crash-barrier: strategy extraction is best-effort
             logger.warning("LLM strategy summarization failed; using fallback")
-            return f"Use {success_tool} instead of {failed_tool}."
+            return fallback
 
     @staticmethod
     def _infer_domain(failed_tool: str, success_tool: str) -> str:
