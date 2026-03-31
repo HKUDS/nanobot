@@ -170,7 +170,11 @@ async def connect_mcp_servers(
                     timeout: httpx.Timeout | None = None,
                     auth: httpx.Auth | None = None,
                 ) -> httpx.AsyncClient:
-                    merged_headers = {**(cfg.headers or {}), **(headers or {})}
+                    merged_headers = {
+                        "Accept": "application/json, text/event-stream",
+                        **(cfg.headers or {}),
+                        **(headers or {}),
+                    }
                     return httpx.AsyncClient(
                         headers=merged_headers or None,
                         follow_redirects=True,
