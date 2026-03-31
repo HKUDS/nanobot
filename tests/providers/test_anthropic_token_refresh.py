@@ -67,13 +67,13 @@ async def test_refresh_triggered_when_token_expired():
         )
         provider._token_expires_at_ms = expired
         provider._client = _make_mock_client()
-        provider._update_oauth_client = MagicMock()
+        provider._update_oauth_token = MagicMock()
 
         await provider.chat([{"role": "user", "content": "hi"}])
 
         mock_refresh.assert_called_once_with("sk-ant-ort01-r")
         store.save.assert_called_once_with(new_creds)
-        provider._update_oauth_client.assert_called_once_with("sk-ant-oat01-new")
+        provider._update_oauth_token.assert_called_once_with("sk-ant-oat01-new")
 
 
 @pytest.mark.asyncio
@@ -100,7 +100,7 @@ async def test_concurrent_refresh_only_runs_once():
         )
         provider._token_expires_at_ms = expired
         provider._client = _make_mock_client()
-        provider._update_oauth_client = MagicMock()
+        provider._update_oauth_token = MagicMock()
 
         await asyncio.gather(
             provider.chat([{"role": "user", "content": "hi"}]),

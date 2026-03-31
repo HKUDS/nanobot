@@ -123,19 +123,10 @@ class AnthropicProvider(LLMProvider):
 
         self._client = AsyncAnthropic(**client_kw)
 
-    def _update_oauth_client(self, new_access_token: str) -> None:
-        """Recreate the Anthropic client with a new OAuth access token."""
-        from anthropic import AsyncAnthropic
-        client_kw: dict[str, Any] = {
-            "auth_token": new_access_token,
-            "api_key": None,
-        }
-        if self.api_base:
-            client_kw["base_url"] = self.api_base
-        if self.extra_headers:
-            client_kw["default_headers"] = self.extra_headers
-        self._client = AsyncAnthropic(**client_kw)
-        logger.debug("AnthropicProvider: client updated with new OAuth access token")
+    def _update_oauth_token(self, new_access_token: str) -> None:
+        """Update the OAuth token on the existing client (no reconnect)."""
+        self._client.auth_token = new_access_token
+        logger.debug("AnthropicProvider: OAuth token updated in-place")
 
     async def _ensure_valid_token(self) -> None:
         """Refresh the OAuth token if expired or near expiry. No-op for API key auth."""
@@ -162,7 +153,7 @@ class AnthropicProvider(LLMProvider):
                 logger.info("AnthropicProvider: OAuth token expired, refreshing...")
                 new_creds = await refresh_anthropic_token(creds.refresh_token)
                 self._token_expires_at_ms = new_creds.expires_at_ms
-                self._update_oauth_client(new_creds.access_token)
+                self._update_oauth_token(new_creds.access_token)
                 self._credential_store.save(new_creds)
                 logger.info("AnthropicProvider: OAuth token refreshed successfully")
             except Exception as e:
