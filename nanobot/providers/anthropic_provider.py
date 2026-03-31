@@ -506,15 +506,19 @@ class AnthropicProvider(LLMProvider):
 
         usage: dict[str, int] = {}
         if response.usage:
+            # Map Anthropic field names to standard names, then capture everything else
             usage = {
                 "prompt_tokens": response.usage.input_tokens,
                 "completion_tokens": response.usage.output_tokens,
                 "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
             }
-            for attr in ("cache_creation_input_tokens", "cache_read_input_tokens"):
-                val = getattr(response.usage, attr, 0)
-                if val:
-                    usage[attr] = val
+            _mapped = {"input_tokens", "output_tokens"}
+            for attr in dir(response.usage):
+                if attr.startswith("_") or attr in _mapped:
+                    continue
+                val = getattr(response.usage, attr, None)
+                if isinstance(val, (int, float)) and val:
+                    usage[attr] = int(val)
 
         return LLMResponse(
             content="".join(content_parts) or None,
