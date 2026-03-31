@@ -1,6 +1,8 @@
 import json
 import re
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,6 +12,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.cli.commands import _make_provider, app
 from nanobot.config.schema import Config
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
+from nanobot.providers.openai_oauth_provider import OPENAI_OAUTH_PROVIDER
 from nanobot.providers.registry import find_by_name
 
 runner = CliRunner()
@@ -211,6 +214,34 @@ def test_config_matches_openai_codex_with_hyphen_prefix():
     config.agents.defaults.model = "openai-codex/gpt-5.1-codex"
 
     assert config.get_provider_name() == "openai_codex"
+
+
+def test_provider_login_openai_oauth_uses_openai_oauth_provider(monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_get_token(*, provider=None, storage=None, min_ttl_seconds=60):
+        seen["get_token_provider"] = provider
+        raise RuntimeError("missing token")
+
+    def fake_login_oauth_interactive(*, print_fn, prompt_fn, provider=None, originator=None, storage=None):
+        seen["login_provider"] = provider
+        return SimpleNamespace(access="token", account_id="acct-openai-oauth")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "oauth_cli_kit",
+        SimpleNamespace(
+            get_token=fake_get_token,
+            login_oauth_interactive=fake_login_oauth_interactive,
+        ),
+    )
+
+    result = runner.invoke(app, ["provider", "login", "openai-oauth"])
+
+    assert result.exit_code == 0
+    assert seen["get_token_provider"] == OPENAI_OAUTH_PROVIDER
+    assert seen["login_provider"] == OPENAI_OAUTH_PROVIDER
+    assert "Authenticated with OpenAI (OAuth)" in result.stdout
 
 
 def test_config_dump_excludes_oauth_provider_blocks():
