@@ -26,7 +26,6 @@ from ..constants import (
     CONFLICT_STATUS_OPEN,
     PROFILE_KEYS,
     PROFILE_STATUS_ACTIVE,
-    PROFILE_STATUS_CONFLICTED,
     PROFILE_STATUS_STALE,
 )
 from ..event import BeliefRecord
@@ -382,72 +381,10 @@ class ProfileStore:
     # ------------------------------------------------------------------
 
     def verify_beliefs(self) -> dict[str, Any]:
-        """Assess belief health based on evidence quality, not just timestamps.
+        """Assess belief health based on evidence quality."""
+        from .belief_lifecycle import verify_beliefs as _verify_beliefs
 
-        Returns a report with beliefs classified as healthy, weak, contradicted,
-        or stale, plus a summary dict with counts.
-        """
-        profile = self.read_profile()
-        report: dict[str, Any] = {
-            "healthy": [],
-            "weak": [],
-            "contradicted": [],
-            "stale": [],
-        }
-
-        for section_field in PROFILE_KEYS:
-            for item in self._to_str_list(profile.get(section_field)):
-                norm = self._norm_text(item)
-                meta = profile.get("meta", {}).get(section_field, {}).get(norm, {})
-
-                confidence = self._safe_float(meta.get("confidence"), 0.65)
-                evidence_count = int(meta.get("evidence_count", 1))
-                status = str(meta.get("status", PROFILE_STATUS_ACTIVE))
-                superseded_by = meta.get("superseded_by_id")
-
-                if superseded_by or status in ("stale", "retracted"):
-                    report["stale"].append(
-                        {
-                            "field": section_field,
-                            "text": item,
-                            "reason": "superseded or retracted",
-                        }
-                    )
-                elif status == PROFILE_STATUS_CONFLICTED:
-                    report["contradicted"].append(
-                        {
-                            "field": section_field,
-                            "text": item,
-                            "reason": "has open conflict",
-                        }
-                    )
-                elif confidence < 0.4 or evidence_count < 2:
-                    report["weak"].append(
-                        {
-                            "field": section_field,
-                            "text": item,
-                            "reason": (
-                                f"low evidence (count={evidence_count}, conf={confidence:.2f})"
-                            ),
-                        }
-                    )
-                else:
-                    report["healthy"].append(
-                        {
-                            "field": section_field,
-                            "text": item,
-                            "confidence": confidence,
-                        }
-                    )
-
-        report["summary"] = {
-            "total": sum(len(v) for v in report.values() if isinstance(v, list)),
-            "healthy": len(report["healthy"]),
-            "weak": len(report["weak"]),
-            "contradicted": len(report["contradicted"]),
-            "stale": len(report["stale"]),
-        }
-        return report
+        return _verify_beliefs(self)
 
     # ------------------------------------------------------------------
     # Profile mutation (legacy helpers)

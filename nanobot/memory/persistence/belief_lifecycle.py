@@ -14,6 +14,7 @@ from .._text import _norm_text, _safe_float, _to_str_list, _utc_now_iso
 from ..constants import (
     PROFILE_KEYS,
     PROFILE_STATUS_ACTIVE,
+    PROFILE_STATUS_CONFLICTED,
     PROFILE_STATUS_STALE,
 )
 from ..event import BeliefRecord
@@ -31,6 +32,7 @@ __all__ = [
     "retract_belief_in_profile",
     "update_belief",
     "update_belief_in_profile",
+    "verify_beliefs",
 ]
 
 
@@ -333,3 +335,75 @@ def retract_belief_in_profile(
         profile[section_key] = [v for v in values if _norm_text(v) != old_norm]
 
     return True
+
+
+# ------------------------------------------------------------------
+# Verification
+# ------------------------------------------------------------------
+
+
+def verify_beliefs(store: ProfileStore) -> dict[str, Any]:
+    """Assess belief health based on evidence quality.
+
+    Returns a report with beliefs classified as healthy, weak, contradicted,
+    or stale, plus a summary dict with counts.
+    """
+    profile = store.read_profile()
+    report: dict[str, Any] = {
+        "healthy": [],
+        "weak": [],
+        "contradicted": [],
+        "stale": [],
+    }
+
+    for section_field in PROFILE_KEYS:
+        for item in _to_str_list(profile.get(section_field)):
+            norm = _norm_text(item)
+            meta = profile.get("meta", {}).get(section_field, {}).get(norm, {})
+
+            confidence = _safe_float(meta.get("confidence"), 0.65)
+            evidence_count = int(meta.get("evidence_count", 1))
+            status = str(meta.get("status", PROFILE_STATUS_ACTIVE))
+            superseded_by = meta.get("superseded_by_id")
+
+            if superseded_by or status in ("stale", "retracted"):
+                report["stale"].append(
+                    {
+                        "field": section_field,
+                        "text": item,
+                        "reason": "superseded or retracted",
+                    }
+                )
+            elif status == PROFILE_STATUS_CONFLICTED:
+                report["contradicted"].append(
+                    {
+                        "field": section_field,
+                        "text": item,
+                        "reason": "has open conflict",
+                    }
+                )
+            elif confidence < 0.4 or evidence_count < 2:
+                report["weak"].append(
+                    {
+                        "field": section_field,
+                        "text": item,
+                        "reason": (f"low evidence (count={evidence_count}, conf={confidence:.2f})"),
+                    }
+                )
+            else:
+                report["healthy"].append(
+                    {
+                        "field": section_field,
+                        "text": item,
+                        "confidence": confidence,
+                    }
+                )
+
+    report["summary"] = {
+        "total": sum(len(v) for v in report.values() if isinstance(v, list)),
+        "healthy": len(report["healthy"]),
+        "weak": len(report["weak"]),
+        "contradicted": len(report["contradicted"]),
+        "stale": len(report["stale"]),
+    }
+    return report
