@@ -118,6 +118,43 @@ class TestDispatch:
         assert out.content == "hi"
 
     @pytest.mark.asyncio
+    async def test_dispatch_streaming_preserves_message_metadata(self):
+        from nanobot.bus.events import InboundMessage
+
+        loop, bus = _make_loop()
+        msg = InboundMessage(
+            channel="matrix",
+            sender_id="u1",
+            chat_id="!room:matrix.org",
+            content="hello",
+            metadata={
+                "_wants_stream": True,
+                "thread_root_event_id": "$root1",
+                "thread_reply_to_event_id": "$reply1",
+            },
+        )
+
+        async def fake_process(_msg, *, on_stream=None, on_stream_end=None, **kwargs):
+            assert on_stream is not None
+            assert on_stream_end is not None
+            await on_stream("hi")
+            await on_stream_end(resuming=False)
+            return None
+
+        loop._process_message = fake_process
+
+        await loop._dispatch(msg)
+        first = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        second = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+
+        assert first.metadata["thread_root_event_id"] == "$root1"
+        assert first.metadata["thread_reply_to_event_id"] == "$reply1"
+        assert first.metadata["_stream_delta"] is True
+        assert second.metadata["thread_root_event_id"] == "$root1"
+        assert second.metadata["thread_reply_to_event_id"] == "$reply1"
+        assert second.metadata["_stream_end"] is True
+
+    @pytest.mark.asyncio
     async def test_processing_lock_serializes(self):
         from nanobot.bus.events import InboundMessage, OutboundMessage
 

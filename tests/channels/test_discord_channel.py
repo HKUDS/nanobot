@@ -4,8 +4,8 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
-import discord
 import pytest
+discord = pytest.importorskip("discord")
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus

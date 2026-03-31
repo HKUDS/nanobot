@@ -1367,6 +1367,23 @@ def test_build_matrix_text_content_with_event_id() -> None:
     assert result["m.relates_to"]["event_id"] == event_id
 
 
+def test_build_matrix_text_content_with_event_id_preserves_thread_relation() -> None:
+    """Thread relations for edits should stay inside m.new_content."""
+    relates_to = {
+        "rel_type": "m.thread",
+        "event_id": "$root1",
+        "m.in_reply_to": {"event_id": "$reply1"},
+        "is_falling_back": True,
+    }
+    result = _build_matrix_text_content("Updated message", "event-1", relates_to)
+
+    assert result["m.relates_to"] == {
+        "rel_type": "m.replace",
+        "event_id": "event-1",
+    }
+    assert result["m.new_content"]["m.relates_to"] == relates_to
+
+
 def test_build_matrix_text_content_no_event_id() -> None:
     """Test that when event_id is not provided, no extra properties are added."""
     result = _build_matrix_text_content("Regular message")
@@ -1497,6 +1514,71 @@ async def test_send_delta_stream_end_replaces_existing_message() -> None:
     assert client.room_send_calls[0]["content"]["m.relates_to"] == {
         "rel_type": "m.replace",
         "event_id": "event-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_send_delta_starts_threaded_stream_inside_thread() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    client.room_send_response.event_id = "event-1"
+
+    metadata = {
+        "thread_root_event_id": "$root1",
+        "thread_reply_to_event_id": "$reply1",
+    }
+    await channel.send_delta("!room:matrix.org", "Hello", metadata)
+
+    assert client.room_send_calls[0]["content"]["m.relates_to"] == {
+        "rel_type": "m.thread",
+        "event_id": "$root1",
+        "m.in_reply_to": {"event_id": "$reply1"},
+        "is_falling_back": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_send_delta_threaded_edit_keeps_replace_and_thread_relation(monkeypatch) -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    client.room_send_response.event_id = "event-1"
+
+    times = [100.0, 102.0, 104.0]
+    times.reverse()
+    monkeypatch.setattr(channel, "monotonic_time", lambda: times and times.pop())
+
+    metadata = {
+        "thread_root_event_id": "$root1",
+        "thread_reply_to_event_id": "$reply1",
+    }
+    await channel.send_delta("!room:matrix.org", "Hello", metadata)
+    await channel.send_delta("!room:matrix.org", " world", metadata)
+    await channel.send_delta("!room:matrix.org", "", {"_stream_end": True, **metadata})
+
+    edit_content = client.room_send_calls[1]["content"]
+    final_content = client.room_send_calls[2]["content"]
+
+    assert edit_content["m.relates_to"] == {
+        "rel_type": "m.replace",
+        "event_id": "event-1",
+    }
+    assert edit_content["m.new_content"]["m.relates_to"] == {
+        "rel_type": "m.thread",
+        "event_id": "$root1",
+        "m.in_reply_to": {"event_id": "$reply1"},
+        "is_falling_back": True,
+    }
+    assert final_content["m.relates_to"] == {
+        "rel_type": "m.replace",
+        "event_id": "event-1",
+    }
+    assert final_content["m.new_content"]["m.relates_to"] == {
+        "rel_type": "m.thread",
+        "event_id": "$root1",
+        "m.in_reply_to": {"event_id": "$reply1"},
+        "is_falling_back": True,
     }
 
 
