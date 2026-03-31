@@ -127,15 +127,42 @@ class LiteLLMProvider(LLMProvider):
         spec = find_by_model(model)
         return spec is not None and spec.supports_prompt_caching
 
+    # Anthropic limits cache_control markers to 4 per request.
+    _MAX_CACHE_BLOCKS = 4
+
     def _apply_cache_control(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
-        """Return copies of messages and tools with cache_control injected."""
+        """Return copies of messages and tools with cache_control injected.
+
+        Anthropic allows at most 4 ``cache_control`` blocks per request.
+        We allocate: 1 for tools (if present), 1 for the first system message
+        (main prompt), and the remaining budget for the most recent system
+        messages (working backwards).
+        """
+        budget = self._MAX_CACHE_BLOCKS
+        tools_budget = 1 if tools else 0
+        msg_budget = budget - tools_budget
+
+        # Select which system messages to cache
+        system_indices = [i for i, m in enumerate(messages) if m.get("role") == "system"]
+        cache_indices: set[int] = set()
+        if system_indices and msg_budget > 0:
+            cache_indices.add(system_indices[0])  # first system msg (main prompt)
+            msg_budget -= 1
+        for idx in reversed(system_indices):
+            if msg_budget <= 0:
+                break
+            if idx not in cache_indices:
+                cache_indices.add(idx)
+                msg_budget -= 1
+
+        # Build new messages — only cached indices get cache_control
         new_messages = []
-        for msg in messages:
-            if msg.get("role") == "system":
+        for i, msg in enumerate(messages):
+            if i in cache_indices:
                 content = msg["content"]
                 if isinstance(content, str):
                     new_content = [
@@ -149,7 +176,7 @@ class LiteLLMProvider(LLMProvider):
                 new_messages.append(msg)
 
         new_tools = tools
-        if tools:
+        if tools and tools_budget > 0:
             new_tools = list(tools)
             new_tools[-1] = {**new_tools[-1], "cache_control": {"type": "ephemeral"}}
 
