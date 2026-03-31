@@ -69,6 +69,117 @@ class TestHandleStop:
         assert "stopped" in out.content.lower()
 
     @pytest.mark.asyncio
+    async def test_status_includes_subagent_runtime_snapshot(self):
+        from nanobot.bus.events import InboundMessage
+        from nanobot.command.builtin import cmd_status
+        from nanobot.command.router import CommandContext
+
+        loop, _ = _make_loop()
+        session = SimpleNamespace(
+            get_history=lambda max_messages=0: [],
+            metadata={"usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150, "turns": 3}},
+        )
+        loop.sessions.get_or_create = MagicMock(return_value=session)
+        loop.memory_consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(0, "none"))
+        loop.subagents.get_running_count_for_session = MagicMock(return_value=1)
+        loop.subagents.get_running_count = MagicMock(return_value=3)
+        loop.subagents.list_running_for_session = MagicMock(return_value=["fix bug (abcd1234)"])
+        loop._last_usage = {"prompt_tokens": 12, "completion_tokens": 34}
+        loop.context_window_tokens = 1000
+        loop._start_time = 0
+        loop.model = "test-model"
+
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/status")
+        ctx = CommandContext(msg=msg, session=session, key=msg.session_key, raw="/status", loop=loop)
+        out = await cmd_status(ctx)
+
+        assert "Subagents: 1 in this chat / 3 total" in out.content
+        assert "Active subagent tasks:" in out.content
+        assert "fix bug (abcd1234)" in out.content
+        assert "Session usage: 100 in / 50 out / 150 total (3 turns)" in out.content
+
+    @pytest.mark.asyncio
+    async def test_tasks_command_lists_running_subagents(self):
+        from nanobot.bus.events import InboundMessage
+        from nanobot.command.builtin import cmd_tasks
+        from nanobot.command.router import CommandContext
+
+        loop, _ = _make_loop()
+        loop.subagents.list_running_for_session = MagicMock(
+            return_value=["build report (abcd1234)", "analyze logs (efgh5678)"]
+        )
+
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/tasks")
+        ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/tasks", loop=loop)
+        out = await cmd_tasks(ctx)
+
+        assert "Active subagent tasks:" in out.content
+        assert "build report (abcd1234)" in out.content
+
+    @pytest.mark.asyncio
+    async def test_task_command_shows_task_status(self):
+        from nanobot.bus.events import InboundMessage
+        from nanobot.command.builtin import cmd_task
+        from nanobot.command.router import CommandContext
+
+        loop, _ = _make_loop()
+        loop.subagents.get_task_info_for_session = MagicMock(
+            return_value={"id": "abcd1234", "label": "fix", "status": "running"}
+        )
+
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/task abcd1234")
+        ctx = CommandContext(
+            msg=msg,
+            session=None,
+            key=msg.session_key,
+            raw="/task abcd1234",
+            args="abcd1234",
+            loop=loop,
+        )
+        out = await cmd_task(ctx)
+
+        assert "Task 'abcd1234'" in out.content
+        assert "- label: fix" in out.content
+        assert "- status: running" in out.content
+
+    @pytest.mark.asyncio
+    async def test_taskstop_command_stops_running_task(self):
+        from nanobot.bus.events import InboundMessage
+        from nanobot.command.builtin import cmd_task_stop
+        from nanobot.command.router import CommandContext
+
+        loop, _ = _make_loop()
+        loop.subagents.stop_task_for_session = AsyncMock(return_value=True)
+
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/taskstop abcd1234")
+        ctx = CommandContext(
+            msg=msg, session=None, key=msg.session_key, raw="/taskstop abcd1234", args="abcd1234", loop=loop
+        )
+        out = await cmd_task_stop(ctx)
+        assert "stopped" in out.content.lower()
+
+    @pytest.mark.asyncio
+    async def test_tasklabel_command_updates_label(self):
+        from nanobot.bus.events import InboundMessage
+        from nanobot.command.builtin import cmd_task_label
+        from nanobot.command.router import CommandContext
+
+        loop, _ = _make_loop()
+        loop.subagents.update_task_label_for_session = MagicMock(return_value=True)
+
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/tasklabel abcd1234 New label")
+        ctx = CommandContext(
+            msg=msg,
+            session=None,
+            key=msg.session_key,
+            raw="/tasklabel abcd1234 New label",
+            args="abcd1234 New label",
+            loop=loop,
+        )
+        out = await cmd_task_label(ctx)
+        assert "label updated" in out.content.lower()
+
+    @pytest.mark.asyncio
     async def test_stop_cancels_multiple_tasks(self):
         from nanobot.bus.events import InboundMessage
         from nanobot.command.builtin import cmd_stop
@@ -116,6 +227,68 @@ class TestDispatch:
         await loop._dispatch(msg)
         out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
         assert out.content == "hi"
+
+    @pytest.mark.asyncio
+    async def test_dispatch_publishes_post_result_summary_after_final_message(self):
+        from nanobot.bus.events import InboundMessage, OutboundMessage
+
+        loop, bus = _make_loop()
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="hello")
+        loop._process_message = AsyncMock(
+            return_value=OutboundMessage(
+                channel="test",
+                chat_id="c1",
+                content="final answer",
+                metadata={"_tool_summary_line": "Tools used (2): read_file, web_search"},
+            )
+        )
+
+        await loop._dispatch(msg)
+        first = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        second = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+
+        assert first.content == "final answer"
+        assert second.content.startswith("Tools used")
+        assert second.metadata["_progress"] is True
+        assert second.metadata["_post_result_summary"] is True
+        assert second.metadata["_delete_after_s"] == loop._POST_SUMMARY_DELETE_AFTER_S
+
+    @pytest.mark.asyncio
+    async def test_dispatch_streaming_preserves_message_metadata(self):
+        from nanobot.bus.events import InboundMessage
+
+        loop, bus = _make_loop()
+        msg = InboundMessage(
+            channel="matrix",
+            sender_id="u1",
+            chat_id="!room:matrix.org",
+            content="hello",
+            metadata={
+                "_wants_stream": True,
+                "thread_root_event_id": "$root1",
+                "thread_reply_to_event_id": "$reply1",
+            },
+        )
+
+        async def fake_process(_msg, *, on_stream=None, on_stream_end=None, **kwargs):
+            assert on_stream is not None
+            assert on_stream_end is not None
+            await on_stream("hi")
+            await on_stream_end(resuming=False)
+            return None
+
+        loop._process_message = fake_process
+
+        await loop._dispatch(msg)
+        first = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        second = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+
+        assert first.metadata["thread_root_event_id"] == "$root1"
+        assert first.metadata["thread_reply_to_event_id"] == "$reply1"
+        assert first.metadata["_stream_delta"] is True
+        assert second.metadata["thread_root_event_id"] == "$root1"
+        assert second.metadata["thread_reply_to_event_id"] == "$reply1"
+        assert second.metadata["_stream_end"] is True
 
     @pytest.mark.asyncio
     async def test_processing_lock_serializes(self):
@@ -179,6 +352,65 @@ class TestSubagentCancellation:
         provider.get_default_model.return_value = "test-model"
         mgr = SubagentManager(provider=provider, workspace=MagicMock(), bus=bus)
         assert await mgr.cancel_by_session("nonexistent") == 0
+
+    @pytest.mark.asyncio
+    async def test_subagent_running_counts_and_labels_for_session(self):
+        from nanobot.agent.subagent import SubagentManager
+        from nanobot.bus.queue import MessageBus
+
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        mgr = SubagentManager(provider=provider, workspace=MagicMock(), bus=bus)
+
+        t1 = asyncio.create_task(asyncio.sleep(60))
+        t2 = asyncio.create_task(asyncio.sleep(60))
+        await asyncio.sleep(0)
+        mgr._running_tasks["a1"] = t1
+        mgr._running_tasks["a2"] = t2
+        mgr._session_tasks["test:c1"] = {"a1", "a2"}
+        mgr._task_labels["a1"] = "first"
+        mgr._task_labels["a2"] = "second"
+        mgr._task_created_at["a1"] = 1.0
+        mgr._task_created_at["a2"] = 2.0
+
+        assert mgr.get_running_count_for_session("test:c1") == 2
+        labels = mgr.list_running_for_session("test:c1", limit=2)
+        assert labels == ["second (a2)", "first (a1)"]
+
+        await mgr.cancel_by_session("test:c1")
+
+    @pytest.mark.asyncio
+    async def test_subagent_stop_and_update_label_for_session(self):
+        from nanobot.agent.subagent import SubagentManager
+        from nanobot.bus.queue import MessageBus
+
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        mgr = SubagentManager(provider=provider, workspace=MagicMock(), bus=bus)
+
+        task = asyncio.create_task(asyncio.sleep(60))
+        await asyncio.sleep(0)
+        mgr._running_tasks["a1"] = task
+        mgr._session_tasks["test:c1"] = {"a1"}
+        mgr._task_session["a1"] = "test:c1"
+        mgr._task_labels["a1"] = "old"
+        mgr._task_history["a1"] = SimpleNamespace(
+            task_id="a1",
+            label="old",
+            status="running",
+            created_at=0.0,
+            updated_at=0.0,
+            session_key="test:c1",
+        )
+
+        assert mgr.update_task_label_for_session("test:c1", "a1", "new") is True
+        assert mgr.get_task_info_for_session("test:c1", "a1")["label"] == "new"
+
+        stopped = await mgr.stop_task_for_session("test:c1", "a1")
+        assert stopped is True
+        assert mgr.get_task_status_for_session("test:c1", "a1") == "cancelled"
 
     @pytest.mark.asyncio
     async def test_subagent_preserves_reasoning_fields_in_tool_turn(self, monkeypatch, tmp_path):

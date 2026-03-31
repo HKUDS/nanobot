@@ -3,8 +3,10 @@
 import asyncio
 import json
 import uuid
+import time
 from pathlib import Path
 from typing import Any
+from dataclasses import dataclass
 
 from loguru import logger
 
@@ -63,6 +65,11 @@ class SubagentManager:
         self.runner = AgentRunner(provider)
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+        self._task_labels: dict[str, str] = {}
+        self._task_created_at: dict[str, float] = {}
+        self._task_status: dict[str, str] = {}  # task_id -> running|completed|failed|cancelled
+        self._task_session: dict[str, str] = {}  # task_id -> session_key
+        self._task_history: dict[str, _TaskInfo] = {}  # task_id -> persisted metadata
 
     async def spawn(
         self,
@@ -81,11 +88,25 @@ class SubagentManager:
             self._run_subagent(task_id, task, display_label, origin)
         )
         self._running_tasks[task_id] = bg_task
+        self._task_labels[task_id] = display_label
+        self._task_created_at[task_id] = time.time()
+        self._task_status[task_id] = "running"
         if session_key:
             self._session_tasks.setdefault(session_key, set()).add(task_id)
+            self._task_session[task_id] = session_key
+        self._task_history[task_id] = _TaskInfo(
+            task_id=task_id,
+            label=display_label,
+            status="running",
+            created_at=time.time(),
+            updated_at=time.time(),
+            session_key=session_key or "",
+        )
 
         def _cleanup(_: asyncio.Task) -> None:
             self._running_tasks.pop(task_id, None)
+            self._task_labels.pop(task_id, None)
+            self._task_created_at.pop(task_id, None)
             if session_key and (ids := self._session_tasks.get(session_key)):
                 ids.discard(task_id)
                 if not ids:
@@ -94,7 +115,11 @@ class SubagentManager:
         bg_task.add_done_callback(_cleanup)
 
         logger.info("Spawned subagent [{}]: {}", task_id, display_label)
-        return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
+        running_now = self.get_running_count()
+        return (
+            f"Subagent [{display_label}] started (id: {task_id}). "
+            f"Running now: {running_now}. I'll notify you when it completes."
+        )
 
     async def _run_subagent(
         self,
@@ -142,6 +167,8 @@ class SubagentManager:
                 fail_on_tool_error=True,
             ))
             if result.stop_reason == "tool_error":
+                self._task_status[task_id] = "failed"
+                self._update_task_history(task_id, status="failed")
                 await self._announce_result(
                     task_id,
                     label,
@@ -152,6 +179,8 @@ class SubagentManager:
                 )
                 return
             if result.stop_reason == "error":
+                self._task_status[task_id] = "failed"
+                self._update_task_history(task_id, status="failed")
                 await self._announce_result(
                     task_id,
                     label,
@@ -164,11 +193,15 @@ class SubagentManager:
             final_result = result.final_content or "Task completed but no final response was generated."
 
             logger.info("Subagent [{}] completed successfully", task_id)
+            self._task_status[task_id] = "completed"
+            self._update_task_history(task_id, status="completed")
             await self._announce_result(task_id, label, task, final_result, origin, "ok")
 
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             logger.error("Subagent [{}] failed: {}", task_id, e)
+            self._task_status[task_id] = "failed"
+            self._update_task_history(task_id, status="failed")
             await self._announce_result(task_id, label, task, error_msg, origin, "error")
 
     async def _announce_result(
@@ -250,14 +283,110 @@ Tools like 'read_file' and 'web_fetch' can return native image content. Read vis
 
     async def cancel_by_session(self, session_key: str) -> int:
         """Cancel all subagents for the given session. Returns count cancelled."""
-        tasks = [self._running_tasks[tid] for tid in self._session_tasks.get(session_key, [])
-                 if tid in self._running_tasks and not self._running_tasks[tid].done()]
+        task_ids = [
+            tid for tid in self._session_tasks.get(session_key, [])
+            if tid in self._running_tasks and not self._running_tasks[tid].done()
+        ]
+        tasks = [self._running_tasks[tid] for tid in task_ids]
         for t in tasks:
             t.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        for tid in task_ids:
+            self._task_status[tid] = "cancelled"
+            self._update_task_history(tid, status="cancelled")
         return len(tasks)
 
     def get_running_count(self) -> int:
         """Return the number of currently running subagents."""
         return len(self._running_tasks)
+
+    def get_running_count_for_session(self, session_key: str) -> int:
+        """Return running subagent count for a specific session."""
+        ids = self._session_tasks.get(session_key, set())
+        return sum(1 for tid in ids if tid in self._running_tasks and not self._running_tasks[tid].done())
+
+    def list_running_for_session(self, session_key: str, limit: int = 3) -> list[str]:
+        """Return short labels for running subagents in a session."""
+        ids = self._session_tasks.get(session_key, set())
+        active = [
+            tid for tid in ids
+            if tid in self._running_tasks and not self._running_tasks[tid].done()
+        ]
+        active.sort(key=lambda tid: self._task_created_at.get(tid, 0.0), reverse=True)
+        labels: list[str] = []
+        for tid in active[: max(limit, 0)]:
+            label = self._task_labels.get(tid, tid)
+            labels.append(f"{label} ({tid})")
+        return labels
+
+    def get_task_status(self, task_id: str) -> str | None:
+        """Return current known status for a task id."""
+        return self._task_status.get(task_id)
+
+    def get_task_status_for_session(self, session_key: str, task_id: str) -> str | None:
+        """Return task status only if it belongs to the session."""
+        owner = self._task_session.get(task_id)
+        if owner != session_key:
+            return None
+        return self._task_status.get(task_id)
+
+    async def stop_task_for_session(self, session_key: str, task_id: str) -> bool:
+        """Stop one running task in the current session."""
+        if self._task_session.get(task_id) != session_key:
+            return False
+        task = self._running_tasks.get(task_id)
+        if not task or task.done():
+            return False
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        self._task_status[task_id] = "cancelled"
+        self._update_task_history(task_id, status="cancelled")
+        return True
+
+    def update_task_label_for_session(self, session_key: str, task_id: str, new_label: str) -> bool:
+        """Update task label for one task in the current session."""
+        if self._task_session.get(task_id) != session_key:
+            return False
+        label = new_label.strip()
+        if not label:
+            return False
+        self._task_labels[task_id] = label
+        self._update_task_history(task_id, label=label)
+        return True
+
+    def get_task_info_for_session(self, session_key: str, task_id: str) -> dict[str, Any] | None:
+        """Return task metadata/status for one task in this session."""
+        info = self._task_history.get(task_id)
+        if not info or info.session_key != session_key:
+            return None
+        return {
+            "id": info.task_id,
+            "label": info.label,
+            "status": info.status,
+            "created_at": info.created_at,
+            "updated_at": info.updated_at,
+        }
+
+    def _update_task_history(self, task_id: str, *, status: str | None = None, label: str | None = None) -> None:
+        """Update persisted metadata for a task."""
+        info = self._task_history.get(task_id)
+        if not info:
+            return
+        if status is not None:
+            info.status = status
+        if label is not None:
+            info.label = label
+        info.updated_at = time.time()
+
+
+@dataclass
+class _TaskInfo:
+    """Persisted lifecycle metadata for a spawned task."""
+
+    task_id: str
+    label: str
+    status: str
+    created_at: float
+    updated_at: float
+    session_key: str
