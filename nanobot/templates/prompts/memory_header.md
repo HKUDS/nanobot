@@ -1,4 +1,4 @@
-# Memory (Background Context)
+# Memory [MEMORY — from previous sessions, may be stale]
 
 These are facts from previous conversations. They may be outdated.
 Use them as hints for WHERE to look, not as authoritative answers.

@@ -279,35 +279,35 @@ class ContextAssembler:
         lines: list[str] = []
 
         if long_term_text:
-            lines.append("## Long-term Memory (project-specific — cite these verbatim)")
+            lines.append("## Long-term Memory [MEMORY — from previous sessions, may be stale]")
             lines.append(long_term_text)
 
         if fitted_profile_lines:
-            lines.append("## Profile Memory")
-            lines.append("User-specific facts, preferences, and constraints:")
+            lines.append("## Profile Memory [MEMORY — from previous sessions, may be stale]")
             lines.extend(fitted_profile_lines)
 
         if semantic_lines:
-            lines.append("## Relevant Semantic Memories")
-            lines.append("Retrieved factual knowledge (use these exact terms when answering):")
+            lines.append(
+                "## Relevant Semantic Memories [MEMORY — may be stale, verify before citing]"
+            )
             lines.extend(semantic_lines)
 
         if graph_lines:
-            lines.append("## Entity Graph")
-            lines.append("Verified entity relationships:")
+            lines.append("## Entity Graph [MEMORY — derived relationships, verify before citing]")
             lines.extend(graph_lines)
 
         if episodic_lines:
-            lines.append("## Relevant Episodic Memories")
-            lines.append("Past events and interactions (cite specific details):")
+            lines.append(
+                "## Relevant Episodic Memories [MEMORY — past events, verify if still current]"
+            )
             lines.extend(episodic_lines)
 
         if include_reflection and reflection_lines:
-            lines.append("## Relevant Reflection Memories")
+            lines.append("## Relevant Reflection Memories [MEMORY — past reflections]")
             lines.extend(reflection_lines)
 
         if unresolved_lines:
-            lines.append("## Recent Unresolved Tasks/Decisions")
+            lines.append("## Recent Unresolved Tasks/Decisions [MEMORY — may already be resolved]")
             lines.extend(unresolved_lines)
 
         text = "\n".join(lines).strip()

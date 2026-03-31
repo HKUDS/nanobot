@@ -91,7 +91,7 @@ async def test_get_memory_context_fact_lookup_includes_episodic_softly(tmp_path:
         query="preferences and setup", retrieval_k=4, token_budget=220
     )
 
-    assert "## Relevant Semantic Memories" in context
+    assert "## Relevant Semantic Memories [MEMORY" in context
     assert "Carlos prefers CLI tools." in context
     # Episodic section now has a small weight (0.05) for fact_lookup,
     # so it may appear if budget allows.
@@ -122,7 +122,7 @@ async def test_get_memory_context_debug_includes_episodic(tmp_path: Path) -> Non
         query="what happened last time deploy failed?", retrieval_k=4, token_budget=220
     )
 
-    assert "## Relevant Episodic Memories" in context
+    assert "## Relevant Episodic Memories [MEMORY" in context
     assert "Deploy failed yesterday due to port conflict." in context
 
 
@@ -144,7 +144,7 @@ async def test_get_memory_context_reflection_includes_reflection_section(tmp_pat
         query="reflect on lessons learned", retrieval_k=4, token_budget=220
     )
 
-    assert "## Relevant Reflection Memories" in context
+    assert "## Relevant Reflection Memories [MEMORY" in context
     assert "Reflection: incidents are usually caused by stale config drift." in context
 
 
@@ -405,11 +405,11 @@ async def test_get_memory_context_graph_not_truncated_at_default_budget(
     )
 
     # Profile should still be present.
-    assert "## Profile Memory" in context
+    assert "## Profile Memory [MEMORY" in context
     # Semantic memories should be present.
-    assert "## Relevant Semantic Memories" in context
+    assert "## Relevant Semantic Memories [MEMORY" in context
     # Graph section from local triples should NOT be truncated away.
-    assert "## Entity Graph" in context
+    assert "## Entity Graph [MEMORY" in context
     assert "USES" in context and "PostgreSQL" in context
     # Total should stay within budget.
     assert len(context) <= 1200 * 4 + 200  # allow small heading overhead
