@@ -2,6 +2,7 @@
 
 import difflib
 import mimetypes
+import re
 from pathlib import Path
 from typing import Any
 
@@ -316,6 +317,88 @@ class EditFileTool(_FsTool):
             ))
             return f"Error: old_text not found in {path}.\nBest match ({best_ratio:.0%} similar) at line {best_start + 1}:\n{diff}"
         return f"Error: old_text not found in {path}. No similar text found. Verify the file content."
+
+
+# ---------------------------------------------------------------------------
+# manage_skill
+# ---------------------------------------------------------------------------
+
+class ManageSkillTool(_FsTool):
+    """Sandbox tool for creating/updating skills with enforced YAML frontmatter."""
+
+    @property
+    def name(self) -> str:
+        return "manage_skill"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Create or update a reusable skill in the skills/ directory. "
+            "Automatically handles directory creation and YAML frontmatter formatting. "
+            "If the skill exists, it will be overwritten."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "skill_name": {
+                    "type": "string",
+                    "description": "The short, hyphenated name of the skill (e.g., 'fetch-logs').",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "A concise, one-sentence description of what this skill does.",
+                },
+                "instructions": {
+                    "type": "string",
+                    "description": "The actual markdown content of the skill, including steps, tool usages, and examples.",
+                },
+            },
+            "required": ["skill_name", "description", "instructions"],
+        }
+
+    async def execute(
+        self, skill_name: str | None = None, description: str | None = None,
+        instructions: str | None = None, **kwargs: Any,
+    ) -> str:
+        try:
+            if not skill_name or not description or not instructions:
+                raise ValueError("Missing required parameters for manage_skill")
+
+            # Sanitize to hyphenated lowercase (whitelist)
+            safe_name = re.sub(r"[^a-z0-9-]", "-", skill_name.strip().lower()).strip("-")
+            if not safe_name:
+                return f"Error: invalid skill name '{skill_name}'"
+
+            # Guard: do not shadow built-in skills
+            from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+            if (BUILTIN_SKILLS_DIR / safe_name / "SKILL.md").exists():
+                return f"Error: '{safe_name}' conflicts with a built-in skill. Choose a different name."
+
+            # Enforce sandbox: workspace/skills/{skill_name}/SKILL.md
+            target_path = f"skills/{safe_name}/SKILL.md"
+            fp = self._resolve(target_path)
+
+            fp.parent.mkdir(parents=True, exist_ok=True)
+
+            # Enforce correct YAML Frontmatter (single-quoted to handle special chars)
+            escaped_desc = description.replace("'", "''")
+            content = (
+                "---\n"
+                f"name: {safe_name}\n"
+                f"description: '{escaped_desc}'\n"
+                "---\n\n"
+                f"{instructions}"
+            )
+
+            fp.write_text(content, encoding="utf-8")
+            return f"Successfully saved skill '{safe_name}' to {target_path}"
+        except PermissionError as e:
+            return f"Error: {e}"
+        except Exception as e:
+            return f"Error managing skill: {e}"
 
 
 # ---------------------------------------------------------------------------

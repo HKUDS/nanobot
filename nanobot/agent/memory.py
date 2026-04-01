@@ -412,7 +412,8 @@ class Dream:
     _PHASE1_SYSTEM = (
         "Compare conversation history against current memory files. "
         "Output one line per finding:\n"
-        "[FILE] atomic fact or change description\n\n"
+        "[FILE] atomic fact or change description\n"
+        "[SKILL] skill_name: description of the workflow or procedure\n\n"
         "Files: USER (identity, preferences, habits), "
         "SOUL (bot behavior, tone), "
         "MEMORY (knowledge, project context, tool patterns)\n\n"
@@ -420,7 +421,8 @@ class Dream:
         "- Only new or conflicting information — skip duplicates and ephemera\n"
         "- Prefer atomic facts: \"has a cat named Luna\" not \"discussed pet care\"\n"
         "- Corrections: [USER] location is Tokyo, not Osaka\n"
-        "- Also capture confirmed approaches: if the user validated a non-obvious choice, note it\n\n"
+        "- Also capture confirmed approaches: if the user validated a non-obvious choice, note it\n"
+        "- For [SKILL], ONLY extract well-defined, genuinely reusable multi-step workflows (3+ steps). Skip trivial or single-step shell commands. The goal is to build an automated SOP library, not a command cheat sheet.\n\n"
         "If nothing needs updating: [SKIP] no new information"
     )
 
@@ -435,6 +437,8 @@ class Dream:
         "- Batch changes to the same file into one edit_file call\n"
         "- Surgical edits only — never rewrite entire files\n"
         "- Do NOT overwrite correct entries — only add, update, or remove\n"
+        "- For [SKILL] findings, FIRST use the list_dir and read_file tools to check existing skills in the `skills/` directory to avoid naming collisions or overwriting good skills.\n"
+        "- THEN use the `manage_skill` tool to create or update the skill. Do NOT use `write_file` or `edit_file` for skills.\n"
         "- If nothing to update, stop without calling tools"
     )
 
@@ -458,12 +462,14 @@ class Dream:
 
     def _build_tools(self) -> ToolRegistry:
         """Build a minimal tool registry for the Dream agent."""
-        from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool
+        from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool, ListDirTool, ManageSkillTool
 
         tools = ToolRegistry()
         workspace = self.store.workspace
         tools.register(ReadFileTool(workspace=workspace, allowed_dir=workspace))
         tools.register(EditFileTool(workspace=workspace, allowed_dir=workspace))
+        tools.register(ListDirTool(workspace=workspace, allowed_dir=workspace))
+        tools.register(ManageSkillTool(workspace=workspace, allowed_dir=workspace))
         return tools
 
     # -- main entry ----------------------------------------------------------
