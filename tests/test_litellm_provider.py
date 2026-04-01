@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -414,3 +416,121 @@ def test_sanitize_keeps_valid_tool_calls_untouched() -> None:
     assistant = [m for m in repaired if m.get("tool_calls")][0]
     assert len(assistant["tool_calls"]) == 1
     assert assistant["tool_calls"][0]["id"] == "tc_ok"
+
+
+@pytest.mark.parametrize(
+    "default_model,query_model,gateway,expected",
+    [
+        # Same provider — own model
+        ("anthropic/claude-sonnet-4-20250514", "anthropic/claude-haiku-4-5-20251001", None, True),
+        # Cross-provider — not own model
+        ("anthropic/claude-sonnet-4-20250514", "gpt-4o-mini", None, False),
+        # Unknown model — treated as own (safe fallback)
+        ("anthropic/claude-sonnet-4-20250514", "some-unknown-model", None, True),
+        # Gateway mode — always own (gateway routes everything)
+        ("anthropic/claude-sonnet-4-20250514", "gpt-4o-mini", "openrouter", True),
+    ],
+    ids=["same-provider", "cross-provider", "unknown-model", "gateway-mode"],
+)
+def test_is_own_model(
+    monkeypatch: pytest.MonkeyPatch,
+    default_model: str,
+    query_model: str,
+    gateway: str | None,
+    expected: bool,
+) -> None:
+    monkeypatch.setattr("nanobot.providers.litellm_provider.litellm", MagicMock())
+    provider = LiteLLMProvider(api_key="sk-test", default_model=default_model)
+    if gateway:
+        from nanobot.providers.registry import find_by_name
+
+        provider._gateway = find_by_name(gateway)
+    assert provider._is_own_model(query_model) == expected
+
+
+@pytest.mark.asyncio
+async def test_chat_omits_api_key_for_cross_provider_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cross-provider models must NOT receive the primary provider's api_key."""
+    captured_kwargs: dict[str, Any] = {}
+
+    async def fake_acompletion(**kw: Any) -> Any:
+        captured_kwargs.update(kw)
+        return MagicMock(
+            choices=[MagicMock(message=MagicMock(content="ok", tool_calls=None))],
+            usage=MagicMock(prompt_tokens=10, completion_tokens=5),
+        )
+
+    monkeypatch.setattr("nanobot.providers.litellm_provider.acompletion", fake_acompletion)
+    monkeypatch.setattr("nanobot.providers.litellm_provider.litellm", MagicMock())
+
+    provider = LiteLLMProvider(
+        api_key="sk-ant-test", default_model="anthropic/claude-sonnet-4-20250514"
+    )
+    await provider.chat(
+        messages=[{"role": "user", "content": "hi"}],
+        model="gpt-4o-mini",
+    )
+    # api_key should NOT be in kwargs — let litellm use OPENAI_API_KEY env var
+    assert "api_key" not in captured_kwargs
+
+
+@pytest.mark.asyncio
+async def test_chat_passes_api_key_for_own_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Own-provider models MUST receive the api_key explicitly."""
+    captured_kwargs: dict[str, Any] = {}
+
+    async def fake_acompletion(**kw: Any) -> Any:
+        captured_kwargs.update(kw)
+        return MagicMock(
+            choices=[MagicMock(message=MagicMock(content="ok", tool_calls=None))],
+            usage=MagicMock(prompt_tokens=10, completion_tokens=5),
+        )
+
+    monkeypatch.setattr("nanobot.providers.litellm_provider.acompletion", fake_acompletion)
+    monkeypatch.setattr("nanobot.providers.litellm_provider.litellm", MagicMock())
+
+    provider = LiteLLMProvider(
+        api_key="sk-ant-test", default_model="anthropic/claude-sonnet-4-20250514"
+    )
+    await provider.chat(
+        messages=[{"role": "user", "content": "hi"}],
+        model="anthropic/claude-haiku-4-5-20251001",
+    )
+    assert captured_kwargs["api_key"] == "sk-ant-test"
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_omits_api_key_for_cross_provider_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """stream_chat() must also omit api_key for cross-provider models."""
+    captured_kwargs: dict[str, Any] = {}
+
+    class _EmptyStream:
+        def __aiter__(self) -> _EmptyStream:
+            return self
+
+        async def __anext__(self) -> Any:
+            raise StopAsyncIteration
+
+    async def fake_acompletion(**kw: Any) -> Any:
+        captured_kwargs.update(kw)
+        return _EmptyStream()
+
+    monkeypatch.setattr("nanobot.providers.litellm_provider.acompletion", fake_acompletion)
+    monkeypatch.setattr("nanobot.providers.litellm_provider.litellm", MagicMock())
+
+    provider = LiteLLMProvider(
+        api_key="sk-ant-test", default_model="anthropic/claude-sonnet-4-20250514"
+    )
+    # Consume all chunks
+    async for _ in provider.stream_chat(
+        messages=[{"role": "user", "content": "hi"}],
+        model="gpt-4o-mini",
+    ):
+        pass
+    assert "api_key" not in captured_kwargs

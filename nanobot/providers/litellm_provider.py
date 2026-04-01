@@ -110,6 +110,21 @@ class LiteLLMProvider(LLMProvider):
 
         return model
 
+    def _is_own_model(self, model: str) -> bool:
+        """Check if *model* belongs to this provider's configured provider.
+
+        Gateways route all models, so they always return True.
+        Unknown models (no registry match) return True as a safe fallback
+        — the primary key is the best guess when we can't identify the provider.
+        """
+        if self._gateway:
+            return True
+        model_spec = find_by_model(model)
+        if model_spec is None:
+            return True  # unknown model — use primary key as fallback
+        default_spec = find_by_model(self.default_model)
+        return model_spec == default_spec
+
     @staticmethod
     def _canonicalize_explicit_prefix(model: str, spec_name: str, canonical_prefix: str) -> str:
         """Normalize explicit provider prefixes like `github-copilot/...`."""
@@ -274,8 +289,10 @@ class LiteLLMProvider(LLMProvider):
         # Apply model-specific overrides (e.g. kimi-k2.5 temperature)
         self._apply_model_overrides(model, kwargs)
 
-        # Pass api_key directly — more reliable than env vars alone
-        if self.api_key:
+        # Pass api_key only for models belonging to this provider.
+        # Cross-provider models (e.g. gpt-4o-mini from an Anthropic provider)
+        # fall through to env vars set by _export_all_provider_keys().
+        if self.api_key and self._is_own_model(original_model):
             kwargs["api_key"] = self.api_key
 
         # Pass api_base for custom endpoints
@@ -402,7 +419,8 @@ class LiteLLMProvider(LLMProvider):
 
         self._apply_model_overrides(resolved, kwargs)
 
-        if self.api_key:
+        # Pass api_key only for models belonging to this provider (same as chat()).
+        if self.api_key and self._is_own_model(original_model):
             kwargs["api_key"] = self.api_key
         if self.api_base:
             kwargs["api_base"] = self.api_base

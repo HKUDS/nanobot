@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -162,3 +163,27 @@ class TestMicroExtractor:
         self.ingester.append_events.assert_called_once()
         written = self.ingester.append_events.call_args[0][0]
         assert written[0].summary == "User likes Python"
+
+
+@pytest.mark.usefixtures("propagate_loguru_to_caplog")
+@pytest.mark.asyncio
+async def test_empty_parse_logs_debug(caplog: pytest.LogCaptureFixture) -> None:
+    """When _parse_events returns empty, a debug message is logged."""
+    mock_provider = AsyncMock()
+    mock_provider.chat.return_value = MagicMock(tool_calls=None)
+    mock_ingester = MagicMock()
+
+    extractor = MicroExtractor(
+        provider=mock_provider,
+        ingester=mock_ingester,
+        model="gpt-4o-mini",
+        enabled=True,
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="nanobot.memory.write.micro_extractor"):
+        await extractor._extract_and_ingest(
+            "user msg", "assistant msg", channel="", tool_hints=[], turn_timestamp=""
+        )
+
+    assert any("no events parsed" in r.message.lower() for r in caplog.records)
+    mock_ingester.append_events.assert_not_called()
