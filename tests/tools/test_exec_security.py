@@ -223,3 +223,120 @@ async def test_allowlist_blocks_echo():
     tool = ExecTool(allow_patterns=HOMER_ALLOW)
     guard = tool._guard_command("echo hello", "/tmp")
     assert guard is not None
+
+
+# --- allowlist + restrictToWorkspace interaction tests ---
+
+GUEST_WORKSPACE = "/opt/homer/context/.guest_workspace"
+
+
+@pytest.mark.asyncio
+async def test_allowlisted_command_bypasses_workspace_restriction():
+    """An allowlisted exec command should not be blocked by restrictToWorkspace,
+    even though the command contains paths outside the workspace."""
+    tool = ExecTool(allow_patterns=HOMER_ALLOW, restrict_to_workspace=True)
+    guard = tool._guard_command(
+        "/opt/homer/.venv/bin/python /opt/homer/tools/deliver_escalation.py --list-pending",
+        GUEST_WORKSPACE,
+    )
+    assert guard is None
+
+
+@pytest.mark.asyncio
+async def test_allowlisted_command_with_args_bypasses_workspace_restriction():
+    """Allowlisted commands with arguments should also bypass workspace restriction."""
+    tool = ExecTool(allow_patterns=HOMER_ALLOW, restrict_to_workspace=True)
+    guard = tool._guard_command(
+        "/opt/homer/.venv/bin/python /opt/homer/tools/escalate.py --trigger-type question --message \"test\"",
+        GUEST_WORKSPACE,
+    )
+    assert guard is None
+
+
+@pytest.mark.asyncio
+async def test_non_allowlisted_command_still_blocked_by_workspace():
+    """Commands not matching allowPatterns should still be blocked by restrictToWorkspace."""
+    tool = ExecTool(allow_patterns=HOMER_ALLOW, restrict_to_workspace=True)
+    guard = tool._guard_command("cat /etc/passwd", GUEST_WORKSPACE)
+    assert guard is not None
+    assert "allowlist" in guard.lower()
+
+
+@pytest.mark.asyncio
+async def test_workspace_restriction_blocks_outside_paths_without_allowlist():
+    """Without allowPatterns, restrictToWorkspace should block paths outside the workspace."""
+    tool = ExecTool(restrict_to_workspace=True)
+    guard = tool._guard_command(
+        "cat /opt/homer/secrets/.env", GUEST_WORKSPACE
+    )
+    assert guard is not None
+    assert "outside" in guard.lower()
+
+
+@pytest.mark.asyncio
+async def test_workspace_restriction_allows_inside_paths_without_allowlist():
+    """Without allowPatterns, restrictToWorkspace should allow paths inside the workspace."""
+    tool = ExecTool(restrict_to_workspace=True)
+    guard = tool._guard_command(
+        "cat /opt/homer/context/.guest_workspace/USER.md", GUEST_WORKSPACE
+    )
+    assert guard is None
+
+
+@pytest.mark.asyncio
+async def test_workspace_restriction_blocks_traversal_without_allowlist():
+    """Path traversal should still be blocked even without allowPatterns."""
+    tool = ExecTool(restrict_to_workspace=True)
+    guard = tool._guard_command("cat ../../secrets/.env", GUEST_WORKSPACE)
+    assert guard is not None
+    assert "traversal" in guard.lower()
+
+
+@pytest.mark.asyncio
+async def test_allowlisted_command_blocks_traversal_in_args():
+    """Path traversal in arguments should be blocked even for allowlisted commands."""
+    tool = ExecTool(allow_patterns=HOMER_ALLOW, restrict_to_workspace=True)
+    guard = tool._guard_command(
+        "/opt/homer/.venv/bin/python /opt/homer/tools/escalate.py --file ../../secrets/.env",
+        GUEST_WORKSPACE,
+    )
+    assert guard is not None
+    assert "traversal" in guard.lower()
+
+
+@pytest.mark.asyncio
+async def test_allowlisted_command_blocks_outside_path_in_args():
+    """Absolute paths outside workspace in arguments should be blocked for allowlisted commands."""
+    tool = ExecTool(allow_patterns=HOMER_ALLOW, restrict_to_workspace=True)
+    guard = tool._guard_command(
+        "/opt/homer/.venv/bin/python /opt/homer/tools/escalate.py --file /etc/passwd",
+        GUEST_WORKSPACE,
+    )
+    assert guard is not None
+    assert "outside" in guard.lower()
+
+
+@pytest.mark.asyncio
+async def test_allowlisted_command_allows_workspace_path_in_args():
+    """Absolute paths inside workspace in arguments should be allowed for allowlisted commands."""
+    tool = ExecTool(allow_patterns=HOMER_ALLOW, restrict_to_workspace=True)
+    guard = tool._guard_command(
+        "/opt/homer/.venv/bin/python /opt/homer/tools/escalate.py --file /opt/homer/context/.guest_workspace/data.json",
+        GUEST_WORKSPACE,
+    )
+    assert guard is None
+
+
+@pytest.mark.asyncio
+async def test_multiple_allow_patterns_all_paths_exempted():
+    """When multiple patterns match, paths from all matches should be exempted."""
+    patterns = [
+        r"^/opt/homer/\.venv/bin/python",
+        r"/opt/homer/tools/\w+\.py",
+    ]
+    tool = ExecTool(allow_patterns=patterns, restrict_to_workspace=True)
+    guard = tool._guard_command(
+        "/opt/homer/.venv/bin/python /opt/homer/tools/escalate.py --list-pending",
+        GUEST_WORKSPACE,
+    )
+    assert guard is None

@@ -165,28 +165,50 @@ class ExecTool(Tool):
             if re.search(pattern, lower):
                 return "Error: Command blocked by safety guard (dangerous pattern detected)"
 
+        allowlisted = False
         if self.allow_patterns:
             shell_meta = re.search(r'[|&;<>`\n\r]|\$\(', cmd)
             if shell_meta:
                 return "Error: Command blocked by safety guard (shell metacharacters not allowed with allowlist)"
             if not any(re.search(p, cmd, re.IGNORECASE) for p in self.allow_patterns):
                 return "Error: Command blocked by safety guard (not in allowlist)"
+            allowlisted = True
 
         from nanobot.security.network import contains_internal_url
         if contains_internal_url(cmd):
             return "Error: Command blocked by safety guard (internal/private URL detected)"
 
         if self.restrict_to_workspace:
+            # Path traversal is always blocked, even for allowlisted commands
             if "..\\" in cmd or "../" in cmd:
                 return "Error: Command blocked by safety guard (path traversal detected)"
 
             cwd_path = Path(cwd).resolve()
+
+            # For allowlisted commands, extract the matched prefix so we can
+            # exempt the executable/script paths while still checking arguments.
+            allowlisted_paths: set[str] = set()
+            if allowlisted:
+                for p in self.allow_patterns:
+                    m = re.search(p, cmd, re.IGNORECASE)
+                    if m:
+                        # Collect absolute paths from the matched portion only
+                        for ap in self._extract_absolute_paths(m.group(0)):
+                            try:
+                                allowlisted_paths.add(
+                                    str(Path(os.path.expandvars(ap.strip())).expanduser().resolve())
+                                )
+                            except Exception:
+                                pass
 
             for raw in self._extract_absolute_paths(cmd):
                 try:
                     expanded = os.path.expandvars(raw.strip())
                     p = Path(expanded).expanduser().resolve()
                 except Exception:
+                    continue
+                # Skip paths that are part of the allowlisted command itself
+                if str(p) in allowlisted_paths:
                     continue
                 if p.is_absolute() and cwd_path not in p.parents and p != cwd_path:
                     return "Error: Command blocked by safety guard (path outside working dir)"
