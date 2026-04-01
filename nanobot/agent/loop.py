@@ -657,6 +657,17 @@ class AgentLoop:
                     entry["content"] = filtered
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
+
+        # If the last saved message is a tool result, the final assistant response
+        # (with no content and no tool_calls) was skipped above. Append a placeholder
+        # to maintain valid message ordering (providers require user/assistant alternation).
+        if session.messages and session.messages[-1]["role"] == "tool":
+            session.messages.append({
+                "role": "assistant",
+                "content": "[response sent via tool]",
+                "timestamp": datetime.now().isoformat(),
+            })
+
         session.updated_at = datetime.now()
 
     async def process_direct(
