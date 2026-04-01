@@ -1,6 +1,6 @@
 """LLM request/response trace logger.
 
-Appends one JSONL line per LLM call to {traces_dir}/{session_key}.jsonl.
+Appends one JSONL line per LLM call to the configured log directory.
 Injected as an AgentHook — zero coupling to provider or runner internals.
 """
 
@@ -21,11 +21,13 @@ from nanobot.utils.helpers import safe_filename
 class TraceHook(AgentHook):
     """Record every LLM call as a JSONL trace entry."""
 
-    __slots__ = ("_traces_dir", "_session_key", "_call_t0", "_call_kwargs")
+    __slots__ = ("_log_dir", "_log_path", "_session_key", "_call_t0", "_call_kwargs")
 
-    def __init__(self, traces_dir: Path) -> None:
-        self._traces_dir = traces_dir
-        self._traces_dir.mkdir(parents=True, exist_ok=True)
+    def __init__(self, llm_logs_dir: Path | None = None, *, traces_dir: Path | None = None) -> None:
+        # New callers use llm_logs_dir; legacy callers use traces_dir.
+        self._log_dir = llm_logs_dir or traces_dir or Path(".")
+        self._log_dir.mkdir(parents=True, exist_ok=True)
+        self._log_path: Path | None = None
         self._session_key: str = "unknown"
         self._call_t0: float = 0
         self._call_kwargs: dict[str, Any] = {}
@@ -37,6 +39,11 @@ class TraceHook(AgentHook):
     @session_key.setter
     def session_key(self, value: str) -> None:
         self._session_key = value
+
+    def set_log_path(self, path: Path) -> None:
+        """Set exact log file path (paired 1:1 with the session file)."""
+        self._log_path = path
+        path.parent.mkdir(parents=True, exist_ok=True)
 
     async def before_iteration(self, context: AgentHookContext) -> None:
         """Snapshot request state and start timer."""
@@ -70,7 +77,11 @@ class TraceHook(AgentHook):
             "elapsed_ms": elapsed_ms,
         }
 
-        path = self._traces_dir / f"{safe_filename(self._session_key.replace(':', '_'))}.jsonl"
+        if self._log_path:
+            path = self._log_path
+        else:
+            path = self._log_dir / f"{safe_filename(self._session_key.replace(':', '_'))}.jsonl"
+
         line = json.dumps(entry, ensure_ascii=False, default=str)
         try:
             await asyncio.to_thread(self._append_line, path, line)
