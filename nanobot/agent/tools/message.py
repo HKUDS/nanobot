@@ -86,7 +86,15 @@ class MessageTool(Tool):
     ) -> str:
         channel = channel or self._default_channel
         chat_id = chat_id or self._default_chat_id
-        message_id = message_id or self._default_message_id
+        # Only inherit default message_id when targeting the same channel+chat.
+        # Cross-chat sends must not carry the original message_id, because
+        # some channels (e.g. Feishu) use it to determine the target
+        # conversation via their Reply API, which would route the message
+        # to the wrong chat entirely.
+        if channel == self._default_channel and chat_id == self._default_chat_id:
+            message_id = message_id or self._default_message_id
+        else:
+            message_id = None
 
         if not channel or not chat_id:
             return "Error: No target channel/chat specified"
