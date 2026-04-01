@@ -63,6 +63,10 @@ class ReadFileTool(_FsTool):
     _DEFAULT_LIMIT = 2000
 
     @property
+    def is_read_only(self) -> bool:
+        return True
+
+    @property
     def name(self) -> str:
         return "read_file"
 
@@ -331,6 +335,10 @@ class ListDirTool(_FsTool):
         "dist", "build", ".tox", ".mypy_cache", ".pytest_cache",
         ".ruff_cache", ".coverage", "htmlcov",
     }
+
+    @property
+    def is_read_only(self) -> bool:
+        return True
 
     @property
     def name(self) -> str:

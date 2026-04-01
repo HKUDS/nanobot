@@ -53,6 +53,16 @@ class Tool(ABC):
         """JSON Schema for tool parameters."""
         pass
 
+    @property
+    def is_read_only(self) -> bool:
+        """Whether this tool only reads state without modifying it.
+
+        Used by plan mode to filter available tools and by the tool executor
+        to determine safe concurrency batching.  Defaults to ``False``
+        (conservative / fail-closed).
+        """
+        return False
+
     @abstractmethod
     async def execute(self, **kwargs: Any) -> Any:
         """

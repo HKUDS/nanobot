@@ -39,6 +39,30 @@ if TYPE_CHECKING:
     from nanobot.cron.service import CronService
 
 
+class SessionUsage:
+    """Cumulative token usage and cost tracking across a gateway session."""
+
+    # Rough $/1K-token pricing for cost estimation (input, output).
+    # Updated manually; actual billing may differ.
+    _DEFAULT_PRICING = (0.003, 0.015)  # generic fallback
+
+    __slots__ = ("total_prompt_tokens", "total_completion_tokens", "total_requests")
+
+    def __init__(self) -> None:
+        self.total_prompt_tokens = 0
+        self.total_completion_tokens = 0
+        self.total_requests = 0
+
+    def record(self, usage: dict[str, int]) -> None:
+        self.total_prompt_tokens += usage.get("prompt_tokens", 0)
+        self.total_completion_tokens += usage.get("completion_tokens", 0)
+        self.total_requests += 1
+
+    def estimated_cost_usd(self) -> float:
+        inp, out = self._DEFAULT_PRICING
+        return (self.total_prompt_tokens * inp + self.total_completion_tokens * out) / 1000
+
+
 class AgentLoop:
     """
     The agent loop is the core processing engine.
@@ -93,6 +117,7 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
+        self.session_usage = SessionUsage()
 
         self.context = ContextBuilder(workspace, timezone=timezone)
         self.sessions = session_manager or SessionManager(workspace)
@@ -292,6 +317,7 @@ class AgentLoop:
             concurrent_tools=True,
         ))
         self._last_usage = result.usage
+        self.session_usage.record(result.cumulative_usage)
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
         elif result.stop_reason == "error":

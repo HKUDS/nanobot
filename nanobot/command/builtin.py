@@ -52,6 +52,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
         pass
     if ctx_est <= 0:
         ctx_est = loop._last_usage.get("prompt_tokens", 0)
+    su = loop.session_usage
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
@@ -61,6 +62,10 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
             context_window_tokens=loop.context_window_tokens,
             session_msg_count=len(session.get_history(max_messages=0)),
             context_tokens_estimate=ctx_est,
+            cumulative_prompt_tokens=su.total_prompt_tokens,
+            cumulative_completion_tokens=su.total_completion_tokens,
+            cumulative_requests=su.total_requests,
+            estimated_cost_usd=su.estimated_cost_usd(),
         ),
         metadata={"render_as": "text"},
     )

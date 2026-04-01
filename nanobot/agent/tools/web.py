@@ -76,6 +76,7 @@ class WebSearchTool(Tool):
     """Search the web using configured provider."""
 
     name = "web_search"
+    is_read_only = True
     description = "Search the web. Returns titles, URLs, and snippets."
     parameters = {
         "type": "object",
@@ -219,6 +220,7 @@ class WebFetchTool(Tool):
     """Fetch and extract content from a URL."""
 
     name = "web_fetch"
+    is_read_only = True
     description = "Fetch URL and extract readable content (HTML → markdown/text)."
     parameters = {
         "type": "object",

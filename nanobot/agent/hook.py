@@ -9,6 +9,16 @@ from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 
 @dataclass(slots=True)
+class ToolError:
+    """Structured record of a tool execution failure."""
+
+    tool_name: str
+    error_message: str
+    iteration: int
+    is_retryable: bool = True
+
+
+@dataclass(slots=True)
 class AgentHookContext:
     """Mutable per-iteration state exposed to runner hooks."""
 
@@ -22,6 +32,7 @@ class AgentHookContext:
     final_content: str | None = None
     stop_reason: str | None = None
     error: str | None = None
+    error_history: list[ToolError] = field(default_factory=list)
 
 
 class AgentHook:

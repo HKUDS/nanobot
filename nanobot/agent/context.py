@@ -14,10 +14,33 @@ from nanobot.utils.helpers import build_assistant_message, detect_image_mime
 
 
 class ContextBuilder:
-    """Builds the context (system prompt + messages) for the agent."""
+    """Builds the context (system prompt + messages) for the agent.
+
+    Supports progressive degradation when token budget is tight:
+    - Priority 1 (always): identity + bootstrap files
+    - Priority 2: memory context
+    - Priority 3: always-on skills
+    - Priority 4: skills summary
+    - Priority 5: verify-mode prompt (when active)
+    """
 
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
+
+    # Rough chars-per-token estimate for budget calculations
+    _CHARS_PER_TOKEN = 4
+
+    _VERIFY_PROMPT = """# Verification Mode
+
+You are now in VERIFICATION mode. Your job is to verify that the previous implementation actually works — not to confirm it, but to try to break it.
+
+## Rules
+- Every check MUST include: **Command run**, **Output observed**, **Result** (PASS/FAIL/PARTIAL)
+- Do NOT read code and narrate what it does — that is not verification
+- If you catch yourself writing an explanation instead of running a command, STOP and run the command
+- Do NOT say "should work", "looks correct", or "probably fine" — run the test
+- Adversarial probes: boundary values, empty inputs, concurrent access, error paths, edge cases
+- Final verdict: PASS / FAIL / PARTIAL — no hedging"""
 
     def __init__(self, workspace: Path, timezone: str | None = None):
         self.workspace = workspace
@@ -25,32 +48,66 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None, query: str | None = None) -> str:
-        """Build the system prompt from identity, bootstrap files, memory, and skills."""
-        parts = [self._get_identity()]
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        query: str | None = None,
+        *,
+        token_budget: int | None = None,
+        mode: str = "execute",
+    ) -> str:
+        """Build the system prompt from identity, bootstrap files, memory, and skills.
 
+        When *token_budget* is set, progressively drops lower-priority sections
+        to stay within budget.  Sections are added in priority order and
+        accumulation stops before the budget is exceeded.
+        """
+        budget_chars = token_budget * self._CHARS_PER_TOKEN if token_budget else None
+
+        parts: list[str] = []
+        used_chars = 0
+
+        def _try_add(section: str) -> bool:
+            nonlocal used_chars
+            if budget_chars is not None and used_chars + len(section) > budget_chars:
+                return False
+            parts.append(section)
+            used_chars += len(section)
+            return True
+
+        # Priority 1: identity (always included)
+        _try_add(self._get_identity())
+
+        # Priority 1: bootstrap files (always included)
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
-            parts.append(bootstrap)
+            _try_add(bootstrap)
 
+        # Priority 2: memory
         memory = self.memory.get_memory_context(query=query)
         if memory:
-            parts.append(f"# Memory\n\n{memory}")
+            _try_add(f"# Memory\n\n{memory}")
 
+        # Priority 3: always-on skills
         always_skills = self.skills.get_always_skills()
         if always_skills:
             always_content = self.skills.load_skills_for_context(always_skills)
             if always_content:
-                parts.append(f"# Active Skills\n\n{always_content}")
+                _try_add(f"# Active Skills\n\n{always_content}")
 
+        # Priority 4: skills summary
         skills_summary = self.skills.build_skills_summary()
         if skills_summary:
-            parts.append(f"""# Skills
+            _try_add(f"""# Skills
 
 The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
 
 {skills_summary}""")
+
+        # Priority 5: verify-mode prompt
+        if mode == "verify":
+            _try_add(self._VERIFY_PROMPT)
 
         return "\n\n---\n\n".join(parts)
 
