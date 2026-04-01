@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+if TYPE_CHECKING:
+    from nanobot.memory.event import MemoryEvent
 
 from nanobot.agent.turn_types import ToolAttempt
 from nanobot.memory.read.retrieval_types import RetrievalScores, RetrievedMemory
@@ -228,3 +233,53 @@ class TestMemoryItemLineProvenance:
         line = ContextAssembler._memory_item_line(item)
         assert "sem=0.85" in line
         assert "rec=0.72" in line
+
+
+class TestFullExtractorProvenance:
+    """Tests that MemoryExtractor stamps provenance when params provided."""
+
+    def setup_method(self):
+        from nanobot.memory.write.extractor import MemoryExtractor
+
+        self.extractor = MemoryExtractor(
+            to_str_list=lambda x: list(x) if isinstance(x, list) else [],
+            coerce_event=self._coerce_event,
+            utc_now_iso=lambda: "2026-03-31T00:00:00",
+        )
+
+    @staticmethod
+    def _coerce_event(item: dict, **kwargs) -> MemoryEvent | None:
+        from nanobot.memory.event import MemoryEvent
+
+        return MemoryEvent.from_dict(item)
+
+    @pytest.mark.asyncio
+    async def test_extract_stamps_source_when_provided(self):
+        tc = MagicMock()
+        tc.arguments = json.dumps(
+            {
+                "events": [{"type": "fact", "summary": "test fact", "source_span": [0, 1]}],
+                "profile_updates": {},
+            }
+        )
+        resp = MagicMock()
+        resp.has_tool_calls = True
+        resp.tool_calls = [tc]
+        provider = AsyncMock()
+        provider.chat = AsyncMock(return_value=resp)
+
+        events, _ = await self.extractor.extract_structured_memory(
+            provider=provider,
+            model="test",
+            current_profile={},
+            lines=["User: test"],
+            old_messages=[{"role": "user", "content": "test"}],
+            source_start=0,
+            channel="whatsapp",
+            tool_hints=["exec:obsidian"],
+            turn_timestamp="2026-03-31T14:30:00",
+        )
+
+        assert len(events) == 1
+        assert events[0].source == "whatsapp,exec:obsidian"
+        assert events[0].metadata.get("source_timestamp") == "2026-03-31T14:30:00"
