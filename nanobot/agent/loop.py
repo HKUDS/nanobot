@@ -298,6 +298,7 @@ class AgentLoop:
             from nanobot.observability.hook import OTelHook
 
             self._otel_hook = OTelHook(channel=channel, chat_id=chat_id)
+            self.context._on_skills_loaded = self._otel_hook.record_skill
             hook: AgentHook = CompositeHook([loop_hook, self._otel_hook])
         else:
             hook = loop_hook
