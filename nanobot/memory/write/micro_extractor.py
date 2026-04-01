@@ -71,6 +71,17 @@ _MICRO_EXTRACT_TOOL: list[dict[str, Any]] = [
 ]
 
 
+def _build_source(channel: str, tool_hints: list[str]) -> str:
+    """Build a provenance source string from channel and tool hints.
+
+    Returns a comma-separated string: channel first, then sorted unique
+    tool hints.  E.g. ``"cli,exec:obsidian,read_file"``.
+    """
+    ch = channel or "unknown"
+    parts = [ch] + sorted(set(tool_hints))
+    return ",".join(p for p in parts if p)
+
+
 class MicroExtractor:
     """Lightweight per-turn memory extraction.
 
@@ -94,15 +105,39 @@ class MicroExtractor:
         self._enabled = enabled
         self._pending_tasks: set[asyncio.Task[None]] = set()
 
-    async def submit(self, user_message: str, assistant_message: str) -> None:
+    async def submit(
+        self,
+        user_message: str,
+        assistant_message: str,
+        *,
+        channel: str = "",
+        tool_hints: list[str] | None = None,
+        turn_timestamp: str = "",
+    ) -> None:
         """Submit a turn for background extraction. Returns immediately."""
         if not self._enabled:
             return
-        task = asyncio.create_task(self._extract_and_ingest(user_message, assistant_message))
+        task = asyncio.create_task(
+            self._extract_and_ingest(
+                user_message,
+                assistant_message,
+                channel=channel,
+                tool_hints=tool_hints or [],
+                turn_timestamp=turn_timestamp,
+            )
+        )
         self._pending_tasks.add(task)
         task.add_done_callback(self._pending_tasks.discard)
 
-    async def _extract_and_ingest(self, user_message: str, assistant_message: str) -> None:
+    async def _extract_and_ingest(
+        self,
+        user_message: str,
+        assistant_message: str,
+        *,
+        channel: str,
+        tool_hints: list[str],
+        turn_timestamp: str,
+    ) -> None:
         """Call LLM to extract events, then ingest them."""
         try:
             prompt = prompts.get("micro_extract")
@@ -122,6 +157,12 @@ class MicroExtractor:
             if not raw_events:
                 return
             events = [MemoryEvent.from_dict(e) for e in raw_events]
+            if channel or tool_hints:
+                source = _build_source(channel, tool_hints)
+                for event in events:
+                    event.source = source
+                    if turn_timestamp:
+                        event.metadata["source_timestamp"] = turn_timestamp
             self._ingester.append_events(events)
             logger.info("Micro-extraction: {} event(s) ingested", len(events))
         except Exception:  # crash-barrier: best-effort background extraction
