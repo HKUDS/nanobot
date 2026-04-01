@@ -82,6 +82,40 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_model(ctx: CommandContext) -> OutboundMessage:
+    """Get or set the current model."""
+    args = ctx.args.strip()
+
+    if not args:
+        # Show current model
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=f"Current model: {ctx.loop.model}",
+            metadata={"render_as": "text"},
+        )
+
+    # Set new model
+    new_model = args
+    ctx.loop.model = new_model
+
+    # Update the subagent model as well
+    ctx.loop.subagents.model = new_model
+
+    # Update memory consolidator model
+    ctx.loop.memory_consolidator.model = new_model
+
+    # Update provider's default model
+    ctx.loop.provider.default_model = new_model
+
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=f"Set model to \x1b[1m{new_model}\x1b[22m",
+        metadata={"render_as": "text"},
+    )
+
+
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     """Return available slash commands."""
     lines = [
@@ -90,6 +124,7 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
         "/stop — Stop the current task",
         "/restart — Restart the bot",
         "/status — Show bot status",
+        "/model [model_name] — Get or set the current model",
         "/help — Show available commands",
     ]
     return OutboundMessage(

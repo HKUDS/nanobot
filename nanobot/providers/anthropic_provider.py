@@ -337,6 +337,67 @@ class AnthropicProvider(LLMProvider):
         if self.extra_headers:
             kwargs["extra_headers"] = self.extra_headers
 
+        # ========== 打印请求参数（环境变量 NANOBOT_PRINT_LLM_REQUESTS 控制） ==========
+        import os
+        import json
+        import time
+        if os.environ.get("NANOBOT_PRINT_LLM_REQUESTS"):
+            # 用类变量保持请求计数器
+            cls = self.__class__
+            if not hasattr(cls, "_request_counter"):
+                cls._request_counter = 0
+            cls._request_counter += 1
+
+            # 打印时去掉 messages 里的大段内容，避免刷屏
+            debug_kwargs = dict(kwargs)
+            msg_count = 0
+            if "messages" in debug_kwargs:
+                debug_messages = []
+                for msg in debug_kwargs["messages"]:
+                    msg_count += 1
+                    debug_msg = dict(msg)
+                    content = debug_msg.get("content", "")
+                    if isinstance(content, str) and len(content) > 300:
+                        debug_msg["content"] = content[:300] + "... (truncated)"
+                    elif isinstance(content, list):
+                        debug_msg["content"] = f"[list with {len(content)} items]"
+                    debug_messages.append(debug_msg)
+                debug_kwargs["messages"] = debug_messages
+            if "system" in debug_kwargs:
+                sys_content = debug_kwargs["system"]
+                if isinstance(sys_content, str) and len(sys_content) > 300:
+                    debug_kwargs["system"] = sys_content[:300] + "... (truncated)"
+                elif isinstance(sys_content, list):
+                    debug_kwargs["system"] = f"[list with {len(sys_content)} items]"
+
+            # 简单打印关键参数（用 ANSI 颜色高亮）
+            ts = time.strftime("%H:%M:%S")
+            model = debug_kwargs.get("model", "unknown")
+            temp = debug_kwargs.get("temperature", "N/A")
+            max_t = debug_kwargs.get("max_tokens", "N/A")
+            tools_len = len(debug_kwargs.get("tools", [])) if debug_kwargs.get("tools") else 0
+
+            # ANSI 颜色代码
+            RED = "\033[91m"
+            GREEN = "\033[92m"
+            YELLOW = "\033[93m"
+            BLUE = "\033[94m"
+            MAGENTA = "\033[95m"
+            CYAN = "\033[96m"
+            BOLD = "\033[1m"
+            RESET = "\033[0m"
+
+            print(f"\n{BLUE}{BOLD}{'='*80}{RESET}")
+            print(f"{CYAN}{BOLD}🚀 [LLM 请求 #{cls._request_counter}][{ts}] 模型={model} | 温度={temp} | max_tokens={max_t} | 消息数={msg_count} | 工具数={tools_len}{RESET}")
+            print(f"{BLUE}{BOLD}{'='*80}{RESET}")
+
+            # 可选：打印完整参数（如果环境变量 NANOBOT_PRINT_FULL_REQUEST=1）
+            if os.environ.get("NANOBOT_PRINT_FULL_REQUEST"):
+                print(json.dumps(debug_kwargs, indent=2, ensure_ascii=False))
+                print(f"{BLUE}{BOLD}{'='*80}{RESET}")
+            print()
+        # ================================================================================
+
         return kwargs
 
     # ------------------------------------------------------------------
@@ -406,6 +467,34 @@ class AnthropicProvider(LLMProvider):
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
         )
+
+        # ========== 打印请求参数（环境变量 NANOBOT_PRINT_LLM_REQUESTS 控制） ==========
+        import os
+        import json
+        if os.environ.get("NANOBOT_PRINT_LLM_REQUESTS"):
+            # 打印时去掉 messages 里的大段内容，避免刷屏
+            debug_kwargs = dict(kwargs)
+            if "messages" in debug_kwargs:
+                debug_messages = []
+                for msg in debug_kwargs["messages"]:
+                    debug_msg = dict(msg)
+                    content = debug_msg.get("content", "")
+                    if isinstance(content, str) and len(content) > 500:
+                        debug_msg["content"] = content[:500] + "... (truncated)"
+                    elif isinstance(content, list):
+                        debug_msg["content"] = f"[list with {len(content)} items]"
+                    debug_messages.append(debug_msg)
+                debug_kwargs["messages"] = debug_messages
+            if "system" in debug_kwargs:
+                sys_content = debug_kwargs["system"]
+                if isinstance(sys_content, str) and len(sys_content) > 500:
+                    debug_kwargs["system"] = sys_content[:500] + "... (truncated)"
+                elif isinstance(sys_content, list):
+                    debug_kwargs["system"] = f"[list with {len(sys_content)} items]"
+            logger.info("========== LLM 请求参数 (Anthropic) ==========\n{}",
+                       json.dumps(debug_kwargs, indent=2, ensure_ascii=False))
+        # ================================================================================
+
         try:
             response = await self._client.messages.create(**kwargs)
             return self._parse_response(response)
