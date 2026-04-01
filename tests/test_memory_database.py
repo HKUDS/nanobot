@@ -44,6 +44,18 @@ class TestConstruction:
     def test_connection_property(self, db: MemoryDatabase) -> None:
         assert isinstance(db.connection, sqlite3.Connection)
 
+    def test_events_indexes_exist(self, db: MemoryDatabase) -> None:
+        indexes = {
+            row[0]
+            for row in db.connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            ).fetchall()
+        }
+        assert "idx_events_type" in indexes
+        assert "idx_events_status" in indexes
+        assert "idx_events_timestamp" in indexes
+        assert "idx_edges_target" in indexes
+
     def test_context_manager(self, tmp_path: Path) -> None:
         with MemoryDatabase(tmp_path / "ctx.db", dims=4) as d:
             assert d.connection is not None
