@@ -155,6 +155,11 @@ class MicroExtractor:
             )
             raw_events = self._parse_events(response)
             if not raw_events:
+                logger.debug(
+                    "Micro-extraction: no events parsed (model={}, tool_calls={})",
+                    self._model,
+                    bool(response.tool_calls),
+                )
                 return
             events = [MemoryEvent.from_dict(e) for e in raw_events]
             if channel or tool_hints:
