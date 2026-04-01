@@ -97,12 +97,12 @@ class CronTool(Tool):
                         f"(e.g. '2026-02-12T10:30:00'). Naive values default to {self._default_timezone}."
                     ),
                 },
-                 "job_id": {"type": "string", "description": "Job ID (for remove)"},
                  "deliver": {
                      "type": "boolean",
                      "description": "Whether to deliver the execution result to the user channel (default true)",
                      "default": True
                  },
+                 "job_id": {"type": "string", "description": "Job ID (for remove)"},
              },
              "required": ["action"],
         }
