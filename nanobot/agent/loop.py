@@ -32,6 +32,7 @@ from nanobot.command import CommandContext, CommandRouter, register_builtin_comm
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
+from nanobot.workspace.layout import make_layout
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
@@ -517,7 +518,8 @@ class AgentLoop:
             )
             logger.info("Processing system message from {}", ctx.sender_id)
             key = f"{ctx.channel}:{ctx.chat_id}"
-            session = self.sessions.get_or_create(key)
+            layout = make_layout(self.workspace, ctx.channel, ctx.channel_name, ctx.chat_id) if ctx.channel_name else None
+            session = self.sessions.get_or_create(layout or key)
             self._update_runtime_metadata(session, ctx)
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(ctx.channel, ctx.chat_id, ctx.message_id)
@@ -534,6 +536,7 @@ class AgentLoop:
                 current_role=current_role,
                 channel_name=ctx.channel_name,
                 sender_name=ctx.sender_name,
+                layout=layout,
             )
             result = await self._run_agent_loop(
                 messages, channel=ctx.channel, chat_id=ctx.chat_id,
@@ -550,12 +553,13 @@ class AgentLoop:
         logger.info("Processing message from {}:{}: {}", ctx.channel, ctx.sender_id, preview)
 
         key = session_key or msg.session_key
-        session = self.sessions.get_or_create(key)
+        layout = make_layout(self.workspace, ctx.channel, ctx.channel_name, ctx.chat_id) if ctx.channel_name else None
+        session = self.sessions.get_or_create(layout or key)
         self._update_runtime_metadata(session, ctx)
 
         # Slash commands
         raw = msg.content.strip()
-        cmd_ctx = CommandContext(msg=msg, session=session, key=key, raw=raw, loop=self)
+        cmd_ctx = CommandContext(msg=msg, session=session, key=key, raw=raw, loop=self, layout=layout)
         if result := await self.commands.dispatch(cmd_ctx):
             return result
 
@@ -577,6 +581,7 @@ class AgentLoop:
             channel=ctx.channel, chat_id=ctx.chat_id,
             channel_name=ctx.channel_name,
             sender_name=ctx.sender_name,
+            layout=layout,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:

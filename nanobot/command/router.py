@@ -22,6 +22,7 @@ class CommandContext:
     raw: str
     args: str = ""
     loop: Any = None
+    layout: Any = None  # WorkspaceLayout | None (Any to avoid circular import)
 
 
 class CommandRouter:
