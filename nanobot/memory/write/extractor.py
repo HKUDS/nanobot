@@ -37,7 +37,7 @@ from .heuristic_extractor import (
     extract_events_heuristic,
     extract_triples_heuristic,
 )
-from .micro_extractor import _build_source
+from .micro_extractor import build_source
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -195,7 +195,7 @@ class MemoryExtractor:
                             break
                     self.last_extraction_source = "llm"
                     if channel or tool_hints:
-                        _source = _build_source(channel, tool_hints or [])
+                        _source = build_source(channel, tool_hints or [])
                         for event in events:
                             event.source = _source
                             if turn_timestamp:
@@ -206,6 +206,12 @@ class MemoryExtractor:
                 "Structured event extraction failed, falling back to heuristic extraction"
             )
 
-        # Heuristic fallback: provenance params are not forwarded — events keep their default source.
         self.last_extraction_source = "heuristic"
-        return self.heuristic_extract_events(old_messages, source_start=source_start)
+        events, updates = self.heuristic_extract_events(old_messages, source_start=source_start)
+        if channel or tool_hints:
+            _source = build_source(channel, tool_hints or [])
+            for event in events:
+                event.source = _source
+                if turn_timestamp:
+                    event.metadata["source_timestamp"] = turn_timestamp
+        return events, updates
