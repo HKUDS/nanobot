@@ -1,5 +1,6 @@
 """Message tool for sending messages to users."""
 
+import asyncio
 from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool
@@ -94,6 +95,9 @@ class MessageTool(Tool):
         if not self._send_callback:
             return "Error: Message sending not configured"
 
+        loop = asyncio.get_running_loop()
+        delivery_future: asyncio.Future[None] = loop.create_future()
+
         msg = OutboundMessage(
             channel=channel,
             chat_id=chat_id,
@@ -102,13 +106,21 @@ class MessageTool(Tool):
             metadata={
                 "message_id": message_id,
             },
+            _delivery_future=delivery_future,
         )
 
         try:
             await self._send_callback(msg)
+            # Wait for actual delivery confirmation from the dispatcher
+            await asyncio.wait_for(delivery_future, timeout=60.0)
             if channel == self._default_channel and chat_id == self._default_chat_id:
                 self._sent_in_turn = True
             media_info = f" with {len(media)} attachments" if media else ""
             return f"Message sent to {channel}:{chat_id}{media_info}"
+        except asyncio.TimeoutError:
+            # Delivery timed out — message may or may not have been sent
+            if channel == self._default_channel and chat_id == self._default_chat_id:
+                self._sent_in_turn = True
+            return f"Message delivery timed out for {channel}:{chat_id} — it may not have been delivered"
         except Exception as e:
             return f"Error sending message: {str(e)}"

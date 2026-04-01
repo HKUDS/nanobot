@@ -55,6 +55,8 @@ class WhatsAppChannel(BaseChannel):
         self._connected = False
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
         self._typing_tasks: dict[str, asyncio.Task] = {}
+        self._pending_acks: dict[str, asyncio.Future[None]] = {}
+        self._msg_id_counter = 0
 
     async def login(self, force: bool = False) -> bool:
         """
@@ -169,11 +171,32 @@ class WhatsAppChannel(BaseChannel):
         except Exception as e:
             logger.debug("WhatsApp typing indicator stopped for {}: {}", chat_id, e)
 
+    def _next_msg_id(self) -> str:
+        self._msg_id_counter += 1
+        return f"msg_{self._msg_id_counter}"
+
+    async def _send_and_await_ack(self, payload: dict, timeout: float = 30.0) -> None:
+        """Send a payload to the bridge and await acknowledgment."""
+        msg_id = self._next_msg_id()
+        payload["msg_id"] = msg_id
+
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[None] = loop.create_future()
+        self._pending_acks[msg_id] = fut
+
+        try:
+            await self._ws.send(json.dumps(payload, ensure_ascii=False))
+            await asyncio.wait_for(fut, timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning("WhatsApp bridge ack timeout for {}", msg_id)
+            # Don't raise — treat timeout as soft failure (bridge may have sent it)
+        finally:
+            self._pending_acks.pop(msg_id, None)
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through WhatsApp."""
         if not self._ws or not self._connected:
-            logger.warning("WhatsApp bridge not connected")
-            return
+            raise ConnectionError("WhatsApp bridge not connected")
 
         chat_id = msg.chat_id
         await self._stop_typing(chat_id)
@@ -181,12 +204,16 @@ class WhatsAppChannel(BaseChannel):
         if msg.content and not msg.media:
             try:
                 payload = {"type": "send", "to": chat_id, "text": msg.content}
-                await self._ws.send(json.dumps(payload, ensure_ascii=False))
+                await self._send_and_await_ack(payload)
             except Exception as e:
                 logger.error("Error sending WhatsApp message: {}", e)
                 raise
 
+        already_sent = set(msg.metadata.get("_sent_media", []))
+        sent_media: list[str] = list(already_sent)
         for i, media_path in enumerate(msg.media or []):
+            if media_path in already_sent:
+                continue
             try:
                 mime, _ = mimetypes.guess_type(media_path)
                 payload = {
@@ -196,10 +223,13 @@ class WhatsAppChannel(BaseChannel):
                     "mimetype": mime or "application/octet-stream",
                     "fileName": media_path.rsplit("/", 1)[-1],
                 }
-                if i == 0 and msg.content:
+                if i == 0 and msg.content and not already_sent:
                     payload["caption"] = msg.content
-                await self._ws.send(json.dumps(payload, ensure_ascii=False))
+                await self._send_and_await_ack(payload)
+                sent_media.append(media_path)
             except Exception as e:
+                # Record which media succeeded so retries can skip them
+                msg.metadata["_sent_media"] = sent_media
                 logger.error("Error sending WhatsApp media {}: {}", media_path, e)
                 raise
 
@@ -286,8 +316,19 @@ class WhatsAppChannel(BaseChannel):
             # QR code for authentication
             logger.info("Scan QR code in the bridge terminal to connect WhatsApp")
 
+        elif msg_type == "sent":
+            msg_id = data.get("msg_id")
+            if msg_id and msg_id in self._pending_acks:
+                self._pending_acks[msg_id].set_result(None)
+
         elif msg_type == "error":
-            logger.error("WhatsApp bridge error: {}", data.get('error'))
+            error_text = data.get("error", "Unknown bridge error")
+            logger.error("WhatsApp bridge error: {}", error_text)
+            msg_id = data.get("msg_id")
+            if msg_id and msg_id in self._pending_acks:
+                self._pending_acks[msg_id].set_exception(
+                    RuntimeError(f"WhatsApp bridge error: {error_text}")
+                )
 
     async def _transcribe_audio(self, audio_data: dict, sender_id: str) -> str:
         """Transcribe a voice/audio message using base channel transcription.

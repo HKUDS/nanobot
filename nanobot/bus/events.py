@@ -1,5 +1,6 @@
 """Event types for the message bus."""
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -34,5 +35,6 @@ class OutboundMessage:
     reply_to: str | None = None
     media: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    _delivery_future: asyncio.Future | None = field(default=None, repr=False)
 
 

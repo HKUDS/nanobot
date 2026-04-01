@@ -15,6 +15,18 @@ def _make_channel() -> WhatsAppChannel:
     ch = WhatsAppChannel({"enabled": True}, bus)
     ch._ws = AsyncMock()
     ch._connected = True
+
+    # Simulate bridge ack: when send() is called, resolve the pending ack future
+    original_send = ch._ws.send
+
+    async def _mock_send(data, **kwargs):
+        await original_send(data, **kwargs)
+        payload = json.loads(data)
+        msg_id = payload.get("msg_id")
+        if msg_id and msg_id in ch._pending_acks:
+            ch._pending_acks[msg_id].set_result(None)
+
+    ch._ws.send = AsyncMock(side_effect=_mock_send)
     return ch
 
 
@@ -98,7 +110,7 @@ async def test_send_multiple_media():
 
 
 @pytest.mark.asyncio
-async def test_send_when_disconnected_is_noop():
+async def test_send_when_disconnected_raises():
     ch = _make_channel()
     ch._connected = False
 
@@ -108,9 +120,39 @@ async def test_send_when_disconnected_is_noop():
         content="hello",
         media=["/tmp/x.jpg"],
     )
-    await ch.send(msg)
+    with pytest.raises(ConnectionError, match="not connected"):
+        await ch.send(msg)
 
     ch._ws.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_raises_on_bridge_error():
+    """When the bridge returns an error, send() should raise RuntimeError."""
+    bus = MagicMock()
+    ch = WhatsAppChannel({"enabled": True}, bus)
+    ch._ws = AsyncMock()
+    ch._connected = True
+
+    # Simulate bridge error: when send() is called, resolve the pending ack with an error
+    async def _mock_send_error(data, **kwargs):
+        payload = json.loads(data)
+        msg_id = payload.get("msg_id")
+        if msg_id and msg_id in ch._pending_acks:
+            ch._pending_acks[msg_id].set_exception(
+                RuntimeError("WhatsApp bridge error: sendMediaMessage is not a function")
+            )
+
+    ch._ws.send = AsyncMock(side_effect=_mock_send_error)
+
+    msg = OutboundMessage(
+        channel="whatsapp",
+        chat_id="123@s.whatsapp.net",
+        content="check this",
+        media=["/tmp/photo.jpg"],
+    )
+    with pytest.raises(RuntimeError, match="sendMediaMessage is not a function"):
+        await ch.send(msg)
 
 
 @pytest.mark.asyncio

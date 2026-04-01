@@ -31,6 +31,8 @@ class ChannelManager:
         self.bus = bus
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
+        self._channel_queues: dict[str, asyncio.Queue[tuple[BaseChannel, OutboundMessage]]] = {}
+        self._channel_workers: dict[str, asyncio.Task] = {}
 
         self._init_channels()
 
@@ -106,6 +108,16 @@ class ChannelManager:
             except asyncio.CancelledError:
                 pass
 
+        # Stop per-channel workers
+        for name, task in self._channel_workers.items():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        self._channel_workers.clear()
+        self._channel_queues.clear()
+
         # Stop all channels
         for name, channel in self.channels.items():
             try:
@@ -135,8 +147,12 @@ class ChannelManager:
 
                 if msg.metadata.get("_progress"):
                     if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
+                        if msg._delivery_future and not msg._delivery_future.done():
+                            msg._delivery_future.set_result(None)
                         continue
                     if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
+                        if msg._delivery_future and not msg._delivery_future.done():
+                            msg._delivery_future.set_result(None)
                         continue
 
                 # Coalesce consecutive _stream_delta messages for the same (channel, chat_id)
@@ -147,14 +163,43 @@ class ChannelManager:
 
                 channel = self.channels.get(msg.channel)
                 if channel:
-                    await self._send_with_retry(channel, msg)
+                    await self._enqueue_channel_send(msg.channel, channel, msg)
                 else:
                     logger.warning("Unknown channel: {}", msg.channel)
+                    if msg._delivery_future and not msg._delivery_future.done():
+                        msg._delivery_future.set_exception(
+                            ValueError(f"Unknown channel: {msg.channel}")
+                        )
 
             except asyncio.TimeoutError:
                 continue
             except asyncio.CancelledError:
                 break
+
+    async def _enqueue_channel_send(
+        self, channel_name: str, channel: BaseChannel, msg: OutboundMessage
+    ) -> None:
+        """Enqueue a message for per-channel delivery (non-blocking for other channels)."""
+        if channel_name not in self._channel_queues:
+            q: asyncio.Queue[tuple[BaseChannel, OutboundMessage]] = asyncio.Queue()
+            self._channel_queues[channel_name] = q
+            self._channel_workers[channel_name] = asyncio.create_task(
+                self._channel_worker(channel_name, q)
+            )
+        await self._channel_queues[channel_name].put((channel, msg))
+
+    async def _channel_worker(
+        self, name: str, q: asyncio.Queue[tuple[BaseChannel, OutboundMessage]]
+    ) -> None:
+        """Process outbound messages for a single channel, preserving order."""
+        while True:
+            try:
+                channel, msg = await q.get()
+                await self._send_with_retry(channel, msg)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("Channel worker {} error: {}", name, e)
 
     @staticmethod
     async def _send_once(channel: BaseChannel, msg: OutboundMessage) -> None:
@@ -196,6 +241,9 @@ class ChannelManager:
             if same_target and is_delta and not final_metadata.get("_stream_end"):
                 # Accumulate content
                 combined_content += next_msg.content
+                # Resolve consumed message's delivery future (content merged into first_msg)
+                if next_msg._delivery_future and not next_msg._delivery_future.done():
+                    next_msg._delivery_future.set_result(None)
                 # If we see _stream_end, remember it and stop coalescing this stream
                 if is_end:
                     final_metadata["_stream_end"] = True
@@ -220,19 +268,25 @@ class ChannelManager:
         Note: CancelledError is re-raised to allow graceful shutdown.
         """
         max_attempts = max(self.config.channels.send_max_retries, 1)
+        last_error: Exception | None = None
 
         for attempt in range(max_attempts):
             try:
                 await self._send_once(channel, msg)
+                if msg._delivery_future and not msg._delivery_future.done():
+                    msg._delivery_future.set_result(None)
                 return  # Send succeeded
             except asyncio.CancelledError:
                 raise  # Propagate cancellation for graceful shutdown
             except Exception as e:
+                last_error = e
                 if attempt == max_attempts - 1:
                     logger.error(
                         "Failed to send to {} after {} attempts: {} - {}",
                         msg.channel, max_attempts, type(e).__name__, e
                     )
+                    if msg._delivery_future and not msg._delivery_future.done():
+                        msg._delivery_future.set_exception(e)
                     return
                 delay = _SEND_RETRY_DELAYS[min(attempt, len(_SEND_RETRY_DELAYS) - 1)]
                 logger.warning(
