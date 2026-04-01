@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 from nanobot.agent.turn_types import ToolAttempt
 from nanobot.memory.read.retrieval_types import RetrievalScores, RetrievedMemory
-from nanobot.memory.write.micro_extractor import MicroExtractor, _build_source
+from nanobot.memory.write.micro_extractor import MicroExtractor, build_source
 
 
 def _make_attempt(tool_name: str, arguments: dict | None = None) -> ToolAttempt:
@@ -92,23 +92,23 @@ class TestExtractToolHints:
 
 
 class TestBuildSource:
-    """Tests for _build_source in micro_extractor."""
+    """Tests for build_source in micro_extractor."""
 
     def test_channel_only_no_tools(self):
-        assert _build_source("cli", []) == "cli"
+        assert build_source("cli", []) == "cli"
 
     def test_channel_with_tools(self):
-        assert _build_source("cli", ["exec:obsidian", "read_file"]) == "cli,exec:obsidian,read_file"
+        assert build_source("cli", ["exec:obsidian", "read_file"]) == "cli,exec:obsidian,read_file"
 
     def test_empty_channel_defaults_to_unknown(self):
-        assert _build_source("", ["read_file"]) == "unknown,read_file"
+        assert build_source("", ["read_file"]) == "unknown,read_file"
 
     def test_tools_are_sorted(self):
-        result = _build_source("web", ["read_file", "exec:git", "exec:obsidian"])
+        result = build_source("web", ["read_file", "exec:git", "exec:obsidian"])
         assert result == "web,exec:git,exec:obsidian,read_file"
 
     def test_duplicate_tools_deduped(self):
-        result = _build_source("cli", ["exec:obsidian", "exec:obsidian", "read_file"])
+        result = build_source("cli", ["exec:obsidian", "exec:obsidian", "read_file"])
         assert result == "cli,exec:obsidian,read_file"
 
 
