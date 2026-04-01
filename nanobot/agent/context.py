@@ -35,6 +35,18 @@ class ContextBuilder:
 
         memory = self.memory.get_memory_context()
         if memory:
+            # Layer 3: Cap MEMORY.md injection size to avoid context window exhaustion.
+            # 8000 tokens is ~32KB of text, enough for most long-term context.
+            try:
+                import tiktoken
+                enc = tiktoken.get_encoding("cl100k_base")
+                tokens = enc.encode(memory)
+                if len(tokens) > 8000:
+                    memory = enc.decode(tokens[:8000]) + "\n\n...(truncated. Full content in memory/MEMORY.md)"
+            except Exception:
+                # Fallback to character count if tiktoken fails (~4 chars per token)
+                if len(memory) > 32000:
+                    memory = memory[:32000] + "\n\n...(truncated. Full content in memory/MEMORY.md)"
             parts.append(f"# Memory\n\n{memory}")
 
         always_skills = self.skills.get_always_skills()

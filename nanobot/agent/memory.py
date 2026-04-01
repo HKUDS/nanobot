@@ -319,7 +319,14 @@ class MemoryConsolidator:
             target = budget // 2
             estimated, source = self.estimate_session_prompt_tokens(session)
             if estimated <= 0:
-                return
+                # Token estimation unavailable — fall back to message count heuristic
+                unconsolidated_count = len(session.messages) - session.last_consolidated
+                if unconsolidated_count < 50:
+                    return
+                # Heuristic: roughly 200 tokens per message
+                estimated = unconsolidated_count * 200
+                source = "heuristic"
+
             if estimated < budget:
                 logger.debug(
                     "Token consolidation idle {}: {}/{} via {}",

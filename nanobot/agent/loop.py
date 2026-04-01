@@ -385,6 +385,64 @@ class AgentLoop:
         self._background_tasks.append(task)
         task.add_done_callback(self._background_tasks.remove)
 
+    def _enforce_session_budget(self, session: Session) -> None:
+        """Hard-truncate session history if it would exceed the context window.
+
+        This is the safety net when soft consolidation fails or is insufficient.
+        Instead of deleting messages, it advances last_consolidated (which
+        causes get_history() to skip them) and archives them to HISTORY.md.
+        """
+        from nanobot.agent.memory import estimate_message_tokens
+
+        estimated, _ = self.memory_consolidator.estimate_session_prompt_tokens(session)
+        if estimated <= 0:
+            unconsolidated = len(session.messages) - session.last_consolidated
+            if unconsolidated <= 100:
+                return
+            estimated = unconsolidated * 200
+
+        hard_cap = self.context_window_tokens - self.provider.generation.max_tokens - 1024
+        if estimated <= hard_cap:
+            return
+
+        logger.warning(
+            "Session history budget exceeded for {} ({} > {}). Enforcing hard limit.",
+            session.key, estimated, hard_cap
+        )
+
+        # Calculate how many tokens we want to keep
+        keep_budget = hard_cap // 2
+        messages = session.messages
+        total = len(messages)
+        
+        # Walk backward from the end to find a user-turn boundary within budget
+        kept_tokens = 0
+        split_idx = total
+        for i in range(total - 1, session.last_consolidated - 1, -1):
+            msg = messages[i]
+            msg_tokens = estimate_message_tokens(msg)
+            if kept_tokens + msg_tokens > keep_budget:
+                if split_idx < total:
+                    break
+            kept_tokens += msg_tokens
+            if msg.get("role") == "user":
+                split_idx = i
+
+        if split_idx <= session.last_consolidated:
+            # If no user turn found within budget, just keep the last 20 messages as a fallback
+            split_idx = max(session.last_consolidated, total - 20)
+
+        if split_idx > session.last_consolidated:
+            chunk = messages[session.last_consolidated:split_idx]
+            logger.warning(
+                "Hard-archiving {} unconsolidated messages for {}",
+                len(chunk), session.key
+            )
+            # Use background archiving to stay responsive
+            self._schedule_background(self.memory_consolidator.archive_messages(chunk))
+            session.last_consolidated = split_idx
+            self.sessions.save(session)
+
     def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
@@ -407,6 +465,7 @@ class AgentLoop:
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+            self._enforce_session_budget(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
@@ -439,6 +498,7 @@ class AgentLoop:
             return result
 
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+        self._enforce_session_budget(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
