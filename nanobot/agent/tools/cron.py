@@ -103,8 +103,8 @@ class CronTool(Tool):
                     "default": True
                 },
                 "job_id": {"type": "string", "description": "Job ID (for remove)"},
-             },
-             "required": ["action"],
+            },
+            "required": ["action"],
         }
 
     async def execute(
