@@ -266,6 +266,32 @@ class _FeishuStreamBuf:
     last_edit: float = 0.0
 
 
+class _ThreadLocalEventLoopProxy:
+    """Proxy object that dispatches loop calls to a thread-local event loop.
+
+    lark_oapi.ws.client uses a module-level ``loop`` object. With multiple
+    FeishuChannel instances running in different threads, sharing one concrete
+    loop causes cross-loop Future errors. This proxy keeps one bound loop per
+    thread and forwards all loop API calls dynamically.
+    """
+
+    def __init__(self) -> None:
+        self._local = threading.local()
+
+    def bind(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._local.loop = loop
+
+    def _get_loop(self) -> asyncio.AbstractEventLoop:
+        loop = getattr(self._local, "loop", None)
+        if loop is None:
+            loop = asyncio.get_event_loop()
+            self._local.loop = loop
+        return loop
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._get_loop(), name)
+
+
 class FeishuChannel(BaseChannel):
     """
     Feishu/Lark channel using WebSocket long connection.
@@ -280,8 +306,11 @@ class FeishuChannel(BaseChannel):
 
     name = "feishu"
     display_name = "Feishu"
+    supports_multiple_accounts = True
 
     _STREAM_EDIT_INTERVAL = 0.5  # throttle between CardKit streaming updates
+    _WS_LOOP_PATCH_LOCK = threading.Lock()
+    _WS_LOOP_PROXY: _ThreadLocalEventLoopProxy | None = None
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -304,6 +333,23 @@ class FeishuChannel(BaseChannel):
         """Register an event handler only when the SDK supports it."""
         method = getattr(builder, method_name, None)
         return method(handler) if callable(method) else builder
+
+    @classmethod
+    def _bind_ws_module_loop(cls: type["FeishuChannel"], loop: asyncio.AbstractEventLoop) -> None:
+        """Bind lark_oapi.ws.client module-level loop to current thread loop.
+
+        The SDK keeps a global ``loop`` symbol and uses it across the whole
+        client implementation. We replace that global with a thread-local proxy
+        once, then bind each WS thread to its own loop.
+        """
+        import lark_oapi.ws.client as _lark_ws_client
+
+        with cls._WS_LOOP_PATCH_LOCK:
+            if cls._WS_LOOP_PROXY is None or not isinstance(getattr(_lark_ws_client, "loop", None), _ThreadLocalEventLoopProxy):
+                cls._WS_LOOP_PROXY = _ThreadLocalEventLoopProxy()
+                _lark_ws_client.loop = cls._WS_LOOP_PROXY
+
+            cls._WS_LOOP_PROXY.bind(loop)
 
     async def start(self) -> None:
         """Start the Feishu bot with WebSocket long connection."""
@@ -344,26 +390,31 @@ class FeishuChannel(BaseChannel):
         )
         event_handler = builder.build()
 
-        # Create WebSocket client for long connection
-        self._ws_client = lark.ws.Client(
-            self.config.app_id,
-            self.config.app_secret,
-            event_handler=event_handler,
-            log_level=lark.LogLevel.INFO
-        )
-
         # Start WebSocket client in a separate thread with reconnect loop.
         # A dedicated event loop is created for this thread so that lark_oapi's
         # module-level `loop = asyncio.get_event_loop()` picks up an idle loop
         # instead of the already-running main asyncio loop, which would cause
         # "This event loop is already running" errors.
         def run_ws():
-            import time
-            import lark_oapi.ws.client as _lark_ws_client
             ws_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(ws_loop)
-            # Patch the module-level loop used by lark's ws Client.start()
-            _lark_ws_client.loop = ws_loop
+            # Patch module-level loop with thread-local proxy and bind this thread.
+            self._bind_ws_module_loop(ws_loop)
+
+            # Build ws.Client inside this thread after loop patching.
+            # lark-oapi internally relies on a module-level event loop and may
+            # bind async primitives during client construction. If we construct
+            # the client in another thread/loop and start it here, running two
+            # FeishuChannel instances can trigger:
+            # "Task ... running at ... got Future <Future pending> attached to
+            # a different loop" errors.
+            self._ws_client = lark.ws.Client(
+                self.config.app_id,
+                self.config.app_secret,
+                event_handler=event_handler,
+                log_level=lark.LogLevel.INFO,
+            )
+
             try:
                 while self._running:
                     try:

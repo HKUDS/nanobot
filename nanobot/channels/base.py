@@ -24,6 +24,9 @@ class BaseChannel(ABC):
     display_name: str = "Base"
     transcription_api_key: str = ""
 
+    # Override in subclasses that support multiple accounts
+    supports_multiple_accounts: bool = False
+
     def __init__(self, config: Any, bus: MessageBus):
         """
         Initialize the channel.

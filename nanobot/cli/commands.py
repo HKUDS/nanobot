@@ -1057,19 +1057,29 @@ def channels_status():
 
     table = Table(title="Channel Status")
     table.add_column("Channel", style="cyan")
-    table.add_column("Enabled", style="green")
+    table.add_column("Enabled")
+    table.add_column("Configured Accounts")
 
     for name, cls in sorted(discover_all().items()):
-        section = getattr(config.channels, name, None)
-        if section is None:
-            enabled = False
-        elif isinstance(section, dict):
-            enabled = section.get("enabled", False)
-        else:
-            enabled = getattr(section, "enabled", False)
+        sections = {
+            attr: section
+            for attr, section in config.channels
+            if attr.lower() == name.lower()
+            or attr.lower().startswith(name.lower() + "/")
+            and not attr.startswith("_")
+        }
+        enabled = False
+        accounts = []
+        for attr, section in sections.items():
+            if isinstance(section, dict):
+                enabled = section.get("enabled", False) or enabled
+            else:
+                enabled = getattr(section, "enabled", False) or enabled
+            accounts.append(f"[green]{attr}[/green]" if enabled else f"[dim]{attr}[/dim]")
         table.add_row(
             cls.display_name,
             "[green]\u2713[/green]" if enabled else "[dim]\u2717[/dim]",
+            ", ".join(accounts),
         )
 
     console.print(table)

@@ -190,6 +190,7 @@ class TelegramChannel(BaseChannel):
 
     name = "telegram"
     display_name = "Telegram"
+    supports_multiple_accounts = True
 
     # Commands registered with Telegram's command menu
     BOT_COMMANDS = [

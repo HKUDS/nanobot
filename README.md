@@ -1280,6 +1280,38 @@ When a channel send operation raises an error, nanobot retries with exponential 
 > [!NOTE]
 > When a channel is completely unavailable, there's no way to notify the user since we cannot reach them through that channel. Monitor logs for "Failed to send to {channel} after N attempts" to detect persistent delivery failures.
 
+#### Multiple Accounts for the Same Channel
+
+You can run multiple accounts of the same channel in one gateway process.
+Use `channel/account` as the key under `channels`.
+
+Example:
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "BOT_TOKEN_1",
+      "allowFrom": ["*"],
+      ...
+    },
+    "telegram/personal": {
+      "enabled": true,
+      "token": "BOT_TOKEN_2",
+      "allowFrom": ["987654321"],
+      ...
+    }
+  }
+}
+```
+
+Notes:
+
+- Each `channel/account` is initialized as an independent channel.
+- If a channel does not support multi-account, extra entries are skipped with warning logs.
+- Channels that require `nanobot channels login <channel>` currently do not support multi-account.
+
 ### Web Search
 
 > [!TIP]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
+from itertools import islice
 
 from loguru import logger
 
@@ -41,23 +42,46 @@ class ChannelManager:
         groq_key = self.config.providers.groq.api_key
 
         for name, cls in discover_all().items():
-            section = getattr(self.config.channels, name, None)
-            if section is None:
-                continue
-            enabled = (
-                section.get("enabled", False)
-                if isinstance(section, dict)
-                else getattr(section, "enabled", False)
-            )
-            if not enabled:
-                continue
             try:
-                channel = cls(section, self.bus)
-                channel.transcription_api_key = groq_key
-                self.channels[name] = channel
-                logger.info("{} channel enabled", cls.display_name)
+                # search for config sections that match this channel name (case-insensitive), allowing for multiple accounts via "channel/account" naming
+                sections = {
+                    attr: section
+                    for attr, section in self.config.channels
+                    if attr.lower() == name.lower()
+                    or attr.lower().startswith(name.lower() + "/")
+                    and not attr.startswith("_")
+                }
             except Exception as e:
-                logger.warning("{} channel not available: {}", name, e)
+                logger.warning("Error accessing config for {}: {}. Skipping.", name, e)
+                continue
+            if len(sections) > 1 and not cls.supports_multiple_accounts:
+                logger.warning(
+                    "Channel '{}' does not support multiple accounts but multiple configurations found: {}. Using the first one.",
+                    name, sorted(sections.keys())
+                )
+                # slice to the first matching section
+                sections = dict(islice(sorted(sections.items(), key=lambda x: x[0]), 1))
+            for channel_name, section in sections.items():
+                enabled = (
+                    section.get("enabled", False)
+                    if isinstance(section, dict)
+                    else getattr(section, "enabled", False)
+                )
+                if not enabled:
+                    continue
+                try:
+                    channel = cls(section, self.bus)
+                    channel.transcription_api_key = groq_key
+                    self.channels[channel_name] = channel
+                    instance = channel_name.split("/", 1)[1] if "/" in channel_name else None
+                    # patch channel name and display name
+                    channel.name = channel_name
+                    channel.display_name = f"{cls.display_name}#{instance}" if instance is not None else cls.display_name
+                    logger.info("{} channel enabled", channel.display_name)
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    logger.warning("{} channel not available: {}", name, e)
 
         self._validate_allow_from()
 
