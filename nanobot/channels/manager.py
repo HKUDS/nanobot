@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import time
 from typing import Any
 
 from loguru import logger
@@ -14,6 +16,9 @@ from nanobot.config.schema import Config
 
 # Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
 _SEND_RETRY_DELAYS = (1, 2, 4)
+
+# Interval between full cache sweeps (seconds)
+_CLEANUP_INTERVAL_S = 60
 
 
 class ChannelManager:
@@ -33,6 +38,9 @@ class ChannelManager:
         self._dispatch_task: asyncio.Task | None = None
         self._channel_queues: dict[str, asyncio.Queue[tuple[BaseChannel, OutboundMessage]]] = {}
         self._channel_workers: dict[str, asyncio.Task] = {}
+        # Spam guard: tracks (channel, chat_id, content_hash) → [timestamps]
+        self._dedup_log: dict[tuple[str, str, str], list[float]] = {}
+        self._dedup_last_cleanup: float = 0.0
 
         self._init_channels()
 
@@ -161,6 +169,16 @@ class ChannelManager:
                     msg, extra_pending = self._coalesce_stream_deltas(msg)
                     pending.extend(extra_pending)
 
+                # Spam guard: suppress near-identical messages to the same recipient
+                if self.config.channels.spam_guard.enabled and self._is_spam(msg):
+                    logger.warning(
+                        "Spam guard: suppressed duplicate message to {}:{}",
+                        msg.channel, msg.chat_id,
+                    )
+                    if msg._delivery_future and not msg._delivery_future.done():
+                        msg._delivery_future.set_result(None)
+                    continue
+
                 channel = self.channels.get(msg.channel)
                 if channel:
                     await self._enqueue_channel_send(msg.channel, channel, msg)
@@ -175,6 +193,49 @@ class ChannelManager:
                 continue
             except asyncio.CancelledError:
                 break
+
+    def _is_spam(self, msg: OutboundMessage) -> bool:
+        """Check if a message is a near-duplicate sent too many times recently.
+
+        Streaming deltas and progress messages are exempt.
+        """
+        meta = msg.metadata or {}
+        if meta.get("_stream_delta") or meta.get("_stream_end") or meta.get("_progress"):
+            return False
+        if not isinstance(msg.content, str) or not msg.content.strip():
+            return False
+
+        sg = self.config.channels.spam_guard
+        content_hash = hashlib.sha256(
+            msg.content.strip().encode("utf-8", errors="replace")
+        ).hexdigest()[:12]
+        key = (msg.channel, msg.chat_id or "", content_hash)
+        now = time.monotonic()
+
+        # Prune expired entries for this key
+        if key in self._dedup_log:
+            self._dedup_log[key] = [
+                t for t in self._dedup_log[key] if now - t < sg.window_s
+            ]
+            if not self._dedup_log[key]:
+                del self._dedup_log[key]
+
+        # Periodic full cache sweep (time-based, not per-message)
+        if now - self._dedup_last_cleanup > _CLEANUP_INTERVAL_S:
+            self._dedup_last_cleanup = now
+            expired = [
+                k for k, v in self._dedup_log.items()
+                if not v or now - v[-1] >= sg.window_s
+            ]
+            for k in expired:
+                del self._dedup_log[k]
+
+        timestamps = self._dedup_log.get(key, [])
+        if len(timestamps) >= sg.max_repeats:
+            return True
+
+        self._dedup_log.setdefault(key, []).append(now)
+        return False
 
     async def _enqueue_channel_send(
         self, channel_name: str, channel: BaseChannel, msg: OutboundMessage

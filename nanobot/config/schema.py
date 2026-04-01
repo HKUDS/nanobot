@@ -13,6 +13,14 @@ class Base(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
+class SpamGuardConfig(Base):
+    """Spam guard: suppress near-identical repeated messages."""
+
+    enabled: bool = False  # off by default for upstream compatibility
+    window_s: int = Field(default=300, ge=10, le=3600)  # dedup window in seconds
+    max_repeats: int = Field(default=2, ge=1, le=20)  # allow up to N sends, suppress from N+1
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels.
 
@@ -26,6 +34,7 @@ class ChannelsConfig(Base):
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
+    spam_guard: SpamGuardConfig = Field(default_factory=SpamGuardConfig)
 
 
 class AgentDefaults(Base):
