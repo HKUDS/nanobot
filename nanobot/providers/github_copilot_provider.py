@@ -164,7 +164,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
         self._copilot_access_token: str | None = None
         self._copilot_expires_at: float = 0.0
         super().__init__(
-            api_key=self._get_copilot_access_token,
+            api_key="no-key",
             api_base=DEFAULT_COPILOT_BASE_URL,
             default_model=default_model,
             extra_headers={
@@ -205,3 +205,53 @@ class GitHubCopilotProvider(OpenAICompatProvider):
             self._copilot_expires_at = time.time() + int(refresh_in)
         self._copilot_access_token = str(token)
         return self._copilot_access_token
+
+    async def _refresh_client_api_key(self) -> str:
+        token = await self._get_copilot_access_token()
+        self.api_key = token
+        self._client.api_key = token
+        return token
+
+    async def chat(
+        self,
+        messages: list[dict[str, object]],
+        tools: list[dict[str, object]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        reasoning_effort: str | None = None,
+        tool_choice: str | dict[str, object] | None = None,
+    ):
+        await self._refresh_client_api_key()
+        return await super().chat(
+            messages=messages,
+            tools=tools,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+            tool_choice=tool_choice,
+        )
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, object]],
+        tools: list[dict[str, object]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        reasoning_effort: str | None = None,
+        tool_choice: str | dict[str, object] | None = None,
+        on_content_delta: Callable[[str], None] | None = None,
+    ):
+        await self._refresh_client_api_key()
+        return await super().chat_stream(
+            messages=messages,
+            tools=tools,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+            tool_choice=tool_choice,
+            on_content_delta=on_content_delta,
+        )
