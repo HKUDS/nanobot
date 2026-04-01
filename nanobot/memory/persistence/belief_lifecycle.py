@@ -38,10 +38,18 @@ class _ProfileStoreProtocol(Protocol):
 
     _MAX_EVIDENCE_REFS: int
 
-    def read_profile(self) -> dict[str, Any]: ...
-    def write_profile(self, profile: dict[str, Any]) -> None: ...
-    def _meta_section(self, profile: dict[str, Any], key: str) -> dict[str, Any]: ...
-    def _meta_entry(self, profile: dict[str, Any], key: str, text: str) -> dict[str, Any]: ...
+    def read_profile(self) -> dict[str, Any]:
+        """Read and return the current profile dict."""
+
+    def write_profile(self, profile: dict[str, Any]) -> None:
+        """Persist the profile dict."""
+
+    def _meta_section(self, profile: dict[str, Any], key: str) -> dict[str, Any]:
+        """Return the metadata sub-dict for a profile section key."""
+
+    def _meta_entry(self, profile: dict[str, Any], key: str, text: str) -> dict[str, Any]:
+        """Return or create the metadata entry for a specific text value."""
+
     def _touch_meta_entry(
         self,
         entry: dict[str, Any],
@@ -51,8 +59,11 @@ class _ProfileStoreProtocol(Protocol):
         max_confidence: float = ...,
         status: str | None = ...,
         evidence_event_id: str | None = ...,
-    ) -> None: ...
-    def _validate_profile_field(self, field: str) -> str: ...
+    ) -> None:
+        """Update confidence, evidence count, and timestamps on a meta entry."""
+
+    def _validate_profile_field(self, field: str) -> str:
+        """Validate and return the canonical profile field key."""
 
 
 # ------------------------------------------------------------------

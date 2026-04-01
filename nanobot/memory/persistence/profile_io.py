@@ -1,3 +1,4 @@
+# size-exception: profile CRUD + metadata helpers + Protocol definitions + delegation stubs
 """Profile/belief management extracted from MemoryStore (LAN-202).
 
 ``ProfileStore`` owns the profile CRUD lifecycle: reading/writing
@@ -72,7 +73,9 @@ __all__ = [
 class _ConflictManagerProtocol(Protocol):
     """Methods ProfileStore delegates to ConflictManager."""
 
-    def _conflict_pair(self, old_value: str, new_value: str) -> bool: ...
+    def _conflict_pair(self, old_value: str, new_value: str) -> bool:
+        """Return True if old and new values form a contradictory pair."""
+
     def _apply_profile_updates(
         self,
         profile: dict[str, Any],
@@ -80,8 +83,11 @@ class _ConflictManagerProtocol(Protocol):
         *,
         enable_contradiction_check: bool,
         source_event_ids: list[str] | None = None,
-    ) -> tuple[int, int, int]: ...
-    def has_open_conflict(self, profile: dict[str, Any], key: str) -> bool: ...
+    ) -> tuple[int, int, int]:
+        """Apply updates to the profile, returning counts of added, updated, and conflicted."""
+
+    def has_open_conflict(self, profile: dict[str, Any], key: str) -> bool:
+        """Return True if the profile section has an unresolved conflict."""
 
 
 class _CorrectorProtocol(Protocol):
@@ -94,7 +100,8 @@ class _CorrectorProtocol(Protocol):
         channel: str = "",
         chat_id: str = "",
         enable_contradiction_check: bool = True,
-    ) -> dict[str, Any]: ...
+    ) -> dict[str, Any]:
+        """Apply a live user correction and return a result dict."""
 
 
 # ---------------------------------------------------------------------------

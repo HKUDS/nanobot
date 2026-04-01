@@ -18,11 +18,13 @@ class _KnowledgeGraphProtocol(Protocol):
     enabled: bool
     _db: Any  # GraphStore — only accessed for get_entity, get_edges_from, get_edges_to
 
-    def _get_display_name(self, canonical: str) -> str: ...
+    def _get_display_name(self, canonical: str) -> str:
+        """Return the human-readable display name for a canonical entity key."""
 
     async def get_neighbors(
         self, entity_name: str, depth: int = 1, relation_types: list[str] | None = None
-    ) -> list[dict[str, Any]]: ...
+    ) -> list[dict[str, Any]]:
+        """Return edges connecting to neighbors within the given depth."""
 
 
 def _norm(name: str) -> str:

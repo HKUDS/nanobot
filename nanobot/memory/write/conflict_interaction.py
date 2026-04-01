@@ -28,8 +28,11 @@ class _ConflictManagerProtocol(Protocol):
 
     profile_mgr: Any  # ProfileStore — only read_profile/write_profile used
 
-    def list_conflicts(self, *, include_closed: bool = False) -> list[ConflictRecord]: ...
-    def resolve_conflict_details(self, index: int, action: str) -> dict[str, Any]: ...
+    def list_conflicts(self, *, include_closed: bool = False) -> list[ConflictRecord]:
+        """Return conflict records, optionally including closed ones."""
+
+    def resolve_conflict_details(self, index: int, action: str) -> dict[str, Any]:
+        """Resolve a conflict by index and action, returning result details."""
 
 
 # ---------------------------------------------------------------------------
