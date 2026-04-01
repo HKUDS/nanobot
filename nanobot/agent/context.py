@@ -120,22 +120,26 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         ]
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
-        """Build user message content with optional base64-encoded images."""
+        """Build user message content with optional base64-encoded images and documents."""
         if not media:
             return text
 
-        images = []
+        parts: list[dict[str, Any]] = []
         for path in media:
             p = Path(path)
             mime, _ = mimetypes.guess_type(path)
-            if not p.is_file() or not mime or not mime.startswith("image/"):
+            if not p.is_file() or not mime:
                 continue
-            b64 = base64.b64encode(p.read_bytes()).decode()
-            images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+            if mime.startswith("image/"):
+                b64 = base64.b64encode(p.read_bytes()).decode()
+                parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+            elif mime == "application/pdf":
+                b64 = base64.b64encode(p.read_bytes()).decode()
+                parts.append({"type": "document", "source": {"type": "base64", "media_type": mime, "data": b64}})
 
-        if not images:
+        if not parts:
             return text
-        return images + [{"type": "text", "text": text}]
+        return parts + [{"type": "text", "text": text}]
 
     def add_tool_result(
         self, messages: list[dict[str, Any]],

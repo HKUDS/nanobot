@@ -129,6 +129,12 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+        try:
+            from nanobot.agent.tools.pdf import PdfTool
+            PdfTool()  # verify pypdf is available
+            self.tools.register(PdfTool())
+        except (ImportError, Exception):
+            pass
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -187,6 +193,8 @@ class AgentLoop:
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        empty_retries = 0
+        max_empty_retries = 1
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -240,6 +248,16 @@ class AgentLoop:
                     logger.error("LLM returned error: {}", (clean or "")[:200])
                     final_content = clean or "Sorry, I encountered an error calling the AI model."
                     break
+                # Retry once if the model returned empty content (e.g. only
+                # thinking blocks). Nudge it to produce a visible response.
+                if not clean and empty_retries < max_empty_retries:
+                    empty_retries += 1
+                    logger.warning("Empty response from LLM, retrying ({}/{})",
+                                   empty_retries, max_empty_retries)
+                    messages.append({"role": "user",
+                                     "content": "[system: your previous response was empty. "
+                                     "Please reply to the user's last message.]"})
+                    continue
                 messages = self.context.add_assistant_message(
                     messages, clean, reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,

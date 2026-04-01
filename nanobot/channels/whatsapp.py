@@ -80,18 +80,38 @@ class WhatsAppChannel(BaseChannel):
             self._ws = None
 
     async def send(self, msg: OutboundMessage) -> None:
-        """Send a message through WhatsApp."""
+        """Send a message through WhatsApp (text and/or media)."""
         if not self._ws or not self._connected:
             logger.warning("WhatsApp bridge not connected")
             return
 
         try:
-            payload = {
-                "type": "send",
-                "to": msg.chat_id,
-                "text": msg.content
-            }
-            await self._ws.send(json.dumps(payload, ensure_ascii=False))
+            import mimetypes as mt
+
+            # Send each media attachment as a separate message
+            media_files = [Path(p) for p in (msg.media or []) if Path(p).is_file()]
+
+            if media_files:
+                for i, media_path in enumerate(media_files):
+                    mime, _ = mt.guess_type(str(media_path))
+                    payload = {
+                        "type": "send",
+                        "to": msg.chat_id,
+                        "text": msg.content if i == 0 else "",
+                        "media": {
+                            "data": base64.b64encode(media_path.read_bytes()).decode(),
+                            "mimetype": mime or "application/octet-stream",
+                            "fileName": media_path.name,
+                        },
+                    }
+                    await self._ws.send(json.dumps(payload, ensure_ascii=False))
+            else:
+                payload = {
+                    "type": "send",
+                    "to": msg.chat_id,
+                    "text": msg.content,
+                }
+                await self._ws.send(json.dumps(payload, ensure_ascii=False))
         except Exception as e:
             logger.error("Error sending WhatsApp message: {}", e)
 
@@ -131,24 +151,32 @@ class WhatsAppChannel(BaseChannel):
                 logger.info("Voice message received from {}, but direct download from bridge is not yet supported.", sender_id)
                 content = "[Voice Message: Transcription not available for WhatsApp yet]"
 
-            # Process inline media (base64-encoded images from bridge)
+            # Process inline media (base64-encoded images/PDFs/audio from bridge)
             media_paths: list[str] = []
+            ext_map = {
+                "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp",
+                "application/pdf": ".pdf", "audio/ogg; codecs=opus": ".ogg",
+                "audio/mpeg": ".mp3", "video/mp4": ".mp4",
+            }
+            media_dir = Path.home() / ".nanobot" / "media"
+            media_dir.mkdir(parents=True, exist_ok=True)
             for item in data.get("media") or []:
                 try:
                     b64_data = item.get("data", "")
-                    mimetype = item.get("mimetype", "image/jpeg")
-                    if not b64_data or not mimetype.startswith("image/"):
+                    mimetype = item.get("mimetype", "application/octet-stream")
+                    if not b64_data:
+                        # Large file — use filePath if available (same VPS)
+                        fp = item.get("filePath")
+                        if fp and Path(fp).is_file():
+                            media_paths.append(fp)
                         continue
-                    image_bytes = base64.b64decode(b64_data)
-                    ext_map = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
-                    ext = ext_map.get(mimetype, ".jpg")
-                    media_dir = Path.home() / ".nanobot" / "media"
-                    media_dir.mkdir(parents=True, exist_ok=True)
-                    file_hash = hashlib.md5(image_bytes[:1024]).hexdigest()[:12]
+                    raw_bytes = base64.b64decode(b64_data)
+                    ext = ext_map.get(mimetype, "")
+                    file_hash = hashlib.md5(raw_bytes[:1024]).hexdigest()[:12]
                     file_path = media_dir / f"wa-{file_hash}{ext}"
-                    file_path.write_bytes(image_bytes)
+                    file_path.write_bytes(raw_bytes)
                     media_paths.append(str(file_path))
-                    logger.info("Saved WhatsApp image to {}", file_path)
+                    logger.info("Saved WhatsApp media ({}) to {}", mimetype, file_path)
                 except Exception as e:
                     logger.error("Failed to process WhatsApp media: {}", e)
 
