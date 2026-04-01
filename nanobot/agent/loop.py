@@ -178,6 +178,7 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
         context_pruning_config=None,  # ContextPruningConfig | None
+        skills_config=None,  # SkillsConfig | None
         hooks: list[AgentHook] | None = None,
     ):
         from nanobot.config.schema import ContextPruningConfig, ExecToolConfig, WebSearchConfig
@@ -201,7 +202,7 @@ class AgentLoop:
         self.pruner: ContextPruner | None = ContextPruner(_pruning_cfg) if _pruning_cfg.enabled else None
         self._extra_hooks: list[AgentHook] = hooks or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone)
+        self.context = ContextBuilder(workspace, timezone=timezone, skills_config=skills_config)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)

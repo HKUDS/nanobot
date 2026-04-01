@@ -51,6 +51,18 @@ class ChannelsConfig(Base):
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
 
 
+class SkillsFilterConfig(Base):
+    """Include/exclude filter for skills (supports glob patterns)."""
+    include: list[str] = Field(default_factory=lambda: ["*"])
+    exclude: list[str] = Field(default_factory=list)
+
+
+class SkillsConfig(SkillsFilterConfig):
+    """Skills filtering configuration with per-sender and per-channel overrides."""
+    senders: dict[str, SkillsFilterConfig] = Field(default_factory=dict)
+    channels: dict[str, SkillsFilterConfig] = Field(default_factory=dict)
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -67,6 +79,7 @@ class AgentDefaults(Base):
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     fallback_models: list[str] = Field(default_factory=list)  # e.g. ["openrouter/anthropic/claude-sonnet-4"]
     fallback_cooldown_s: int = 60  # seconds to skip a failed provider before retrying
+    skills: SkillsConfig = Field(default_factory=SkillsConfig)
     context_pruning: ContextPruningConfig = Field(default_factory=ContextPruningConfig)
 
 

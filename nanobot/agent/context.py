@@ -9,7 +9,7 @@ from typing import Any
 from nanobot.utils.helpers import current_time_str
 
 from nanobot.agent.memory import MemoryStore
-from nanobot.agent.skills import SkillsLoader
+from nanobot.agent.skills import SkillsLoader, filter_skill_names, resolve_skill_filter
 from nanobot.utils.helpers import build_assistant_message, detect_image_mime
 
 
@@ -19,14 +19,17 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["SOUL.md", "USER.md", "AGENTS.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
 
-    def __init__(self, workspace: Path, timezone: str | None = None):
+    def __init__(self, workspace: Path, timezone: str | None = None, skills_config=None):
         self.workspace = workspace
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
+        self.skills_config = skills_config  # SkillsConfig | None
 
     def build_system_prompt(
-        self, skill_names: list[str] | None = None, sender_name: str | None = None,
+        self, skill_names: list[str] | None = None,
+        sender_name: str | None = None,
+        channel_name: str | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
@@ -39,13 +42,21 @@ class ContextBuilder:
         if memory:
             parts.append(f"# Memory\n\n{memory}")
 
-        always_skills = self.skills.get_always_skills()
+        # 根据 sender/channel 过滤 skill 列表
+        allowed_names: set[str] | None = None
+        if self.skills_config:
+            inc, exc = resolve_skill_filter(self.skills_config, sender_name, channel_name)
+            all_names = [s["name"] for s in self.skills.list_skills(filter_unavailable=False)]
+            filtered = filter_skill_names(all_names, inc, exc)
+            allowed_names = set(filtered)
+
+        always_skills = self.skills.get_always_skills(allowed_names)
         if always_skills:
             always_content = self.skills.load_skills_for_context(always_skills)
             if always_content:
                 parts.append(f"# Active Skills\n\n{always_content}")
 
-        skills_summary = self.skills.build_skills_summary()
+        skills_summary = self.skills.build_skills_summary(allowed_names)
         if skills_summary:
             parts.append(f"""# Skills
 
@@ -182,7 +193,9 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names, sender_name=sender_name)},
+            {"role": "system", "content": self.build_system_prompt(
+                skill_names, sender_name=sender_name, channel_name=channel_name,
+            )},
             *history,
             {"role": current_role, "content": merged},
         ]
