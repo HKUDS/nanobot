@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.turn_types import ToolAttempt
+from nanobot.memory.read.retrieval_types import RetrievalScores, RetrievedMemory
 from nanobot.memory.write.micro_extractor import MicroExtractor, _build_source
 
 
@@ -167,3 +168,63 @@ class TestMicroExtractorProvenance:
         self.ingester.append_events.assert_called_once()
         written = self.ingester.append_events.call_args[0][0]
         assert written[0].source == "chat"  # default, unchanged
+
+
+class TestMemoryItemLineProvenance:
+    """Tests for provenance rendering in context_assembler._memory_item_line."""
+
+    @staticmethod
+    def _make_item(
+        source: str = "",
+        summary: str = "DS10540 planned duration is 186 days",
+        event_type: str = "fact",
+        timestamp: str = "2026-03-25T14:30:00",
+        provider: str = "vector",
+    ) -> RetrievedMemory:
+        return RetrievedMemory(
+            id="test-1",
+            type=event_type,
+            summary=summary,
+            timestamp=timestamp,
+            source=source,
+            scores=RetrievalScores(semantic=0.85, recency=0.72, provider=provider),
+        )
+
+    def test_with_provenance_includes_from(self):
+        from nanobot.memory.read.context_assembler import ContextAssembler
+
+        item = self._make_item(source="cli,exec:obsidian,read_file")
+        line = ContextAssembler._memory_item_line(item)
+        assert "from: cli,exec:obsidian,read_file" in line
+        assert "(fact, from: cli,exec:obsidian,read_file)" in line
+
+    def test_legacy_chat_source_no_provenance_label(self):
+        from nanobot.memory.read.context_assembler import ContextAssembler
+
+        item = self._make_item(source="chat")
+        line = ContextAssembler._memory_item_line(item)
+        assert "from:" not in line
+        assert "(fact)" in line
+
+    def test_empty_source_no_provenance_label(self):
+        from nanobot.memory.read.context_assembler import ContextAssembler
+
+        item = self._make_item(source="")
+        line = ContextAssembler._memory_item_line(item)
+        assert "from:" not in line
+
+    def test_no_retrieval_method_in_output(self):
+        from nanobot.memory.read.context_assembler import ContextAssembler
+
+        item = self._make_item(source="cli", provider="vector")
+        line = ContextAssembler._memory_item_line(item)
+        assert "src=" not in line
+        assert "src=vector" not in line
+
+    def test_scores_still_present(self):
+        from nanobot.memory.read.context_assembler import ContextAssembler
+
+        item = self._make_item(source="cli")
+        line = ContextAssembler._memory_item_line(item)
+        assert "sem=0.85" in line
+        assert "rec=0.72" in line
