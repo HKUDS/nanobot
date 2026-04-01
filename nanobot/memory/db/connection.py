@@ -145,6 +145,11 @@ class MemoryDatabase:
             {STRATEGIES_DDL}
 
             {_FTS_TRIGGERS}
+
+            CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
+            CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
+            CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp DESC);
+            CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target);
         """)
 
     # ------------------------------------------------------------------

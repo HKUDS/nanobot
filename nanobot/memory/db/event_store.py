@@ -74,6 +74,13 @@ class EventStore:
                     (rowid, sqlite_vec.serialize_float32(embedding)),
                 )
 
+    def get_event_by_id(self, event_id: str) -> dict[str, Any] | None:
+        """Fetch a single event by primary key. Returns None if not found."""
+        row = self._conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
     def read_events(
         self,
         *,
