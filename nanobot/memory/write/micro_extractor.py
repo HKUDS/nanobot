@@ -71,7 +71,7 @@ _MICRO_EXTRACT_TOOL: list[dict[str, Any]] = [
 ]
 
 
-def _build_source(channel: str, tool_hints: list[str]) -> str:
+def build_source(channel: str, tool_hints: list[str]) -> str:
     """Build a provenance source string from channel and tool hints.
 
     Returns a comma-separated string: channel first, then sorted unique
@@ -163,7 +163,7 @@ class MicroExtractor:
                 return
             events = [MemoryEvent.from_dict(e) for e in raw_events]
             if channel or tool_hints:
-                source = _build_source(channel, tool_hints)
+                source = build_source(channel, tool_hints)
                 for event in events:
                     event.source = source
                     if turn_timestamp:
