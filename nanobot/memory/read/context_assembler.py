@@ -419,11 +419,15 @@ class ContextAssembler:
 
     @staticmethod
     def _memory_item_line(item: RetrievedMemory) -> str:
+        source = item.source
+        if source and source != "chat":
+            type_label = f"{item.type}, from: {source}"
+        else:
+            type_label = item.type
         return (
-            f"- [{item.timestamp[:16]}] ({item.type}) {item.summary} "
+            f"- [{item.timestamp[:16]}] ({type_label}) {item.summary} "
             f"[sem={item.scores.semantic:.2f}, "
-            f"rec={item.scores.recency:.2f}, "
-            f"src={item.scores.provider}]"
+            f"rec={item.scores.recency:.2f}]"
         )
 
     # ------------------------------------------------------------------

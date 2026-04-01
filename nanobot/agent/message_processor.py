@@ -20,7 +20,7 @@ from loguru import logger
 from nanobot.agent.agent_components import _ProcessorServices
 from nanobot.agent.callbacks import ProgressCallback
 from nanobot.agent.streaming import strip_think
-from nanobot.agent.turn_types import TurnState
+from nanobot.agent.turn_types import ToolAttempt, TurnState
 from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.config.agent import AgentConfig
@@ -336,9 +336,18 @@ class MessageProcessor:
         # Only on the primary path where agent produced a substantive response.
         # The system-message path (~line 209) is intentionally excluded.
         if self._micro_extractor is not None and final_content:
+            _tool_log = (
+                getattr(self._last_turn_result, "tool_results_log", [])
+                if self._last_turn_result is not None
+                else []
+            )
+            _hints = _extract_tool_hints(_tool_log) if _tool_log else []
             await self._micro_extractor.submit(
                 user_message=msg.content,
                 assistant_message=final_content,
+                channel=msg.channel,
+                tool_hints=_hints,
+                turn_timestamp=datetime.now(timezone.utc).isoformat(),
             )
 
         # Procedural memory: extract strategies from guardrail recoveries
@@ -622,3 +631,24 @@ def _build_no_answer_explanation(user_text: str, messages: list[dict[str, Any]])
 
     primary_reason = reasons[0]
     return f"Sorry, I couldn't answer that just now. {primary_reason} {help_line}"
+
+
+def _extract_tool_hints(attempts: list[ToolAttempt]) -> list[str]:
+    """Convert ToolAttempt objects to deduplicated, sorted tool hint strings.
+
+    Non-exec tools use their name directly (e.g. ``"read_file"``).
+    Exec tools extract the first word of the command argument
+    (e.g. ``"exec:obsidian"``).  Deduplicates and sorts alphabetically.
+    """
+    hints: set[str] = set()
+    for attempt in attempts:
+        if attempt.tool_name != "exec":
+            hints.add(attempt.tool_name)
+            continue
+        cmd = attempt.arguments.get("command", "")
+        if isinstance(cmd, str) and cmd.strip():
+            first_word = cmd.strip().split()[0]
+            hints.add(f"exec:{first_word}")
+        else:
+            hints.add("exec")
+    return sorted(hints)

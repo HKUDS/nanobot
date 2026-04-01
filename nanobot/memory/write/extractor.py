@@ -37,6 +37,7 @@ from .heuristic_extractor import (
     extract_events_heuristic,
     extract_triples_heuristic,
 )
+from .micro_extractor import _build_source
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -136,6 +137,9 @@ class MemoryExtractor:
         old_messages: list[dict[str, Any]],
         *,
         source_start: int,
+        channel: str = "",
+        tool_hints: list[str] | None = None,
+        turn_timestamp: str = "",
     ) -> tuple[list[MemoryEvent], dict[str, list[str]]]:
         prompt = (
             "Extract structured memory from this conversation and call save_events. "
@@ -190,11 +194,18 @@ class MemoryExtractor:
                         if len(events) >= 40:
                             break
                     self.last_extraction_source = "llm"
+                    if channel or tool_hints:
+                        _source = _build_source(channel, tool_hints or [])
+                        for event in events:
+                            event.source = _source
+                            if turn_timestamp:
+                                event.metadata["source_timestamp"] = turn_timestamp
                     return events, updates
         except Exception:  # crash-barrier: LLM extraction + parsing
             logger.exception(
                 "Structured event extraction failed, falling back to heuristic extraction"
             )
 
+        # Heuristic fallback: provenance params are not forwarded — events keep their default source.
         self.last_extraction_source = "heuristic"
         return self.heuristic_extract_events(old_messages, source_start=source_start)
