@@ -220,6 +220,32 @@ def test_config_dump_excludes_oauth_provider_blocks():
     assert "githubCopilot" not in providers
 
 
+def test_provider_logout_openai_codex_removes_local_oauth_files(tmp_path, monkeypatch):
+    token_path = tmp_path / "auth" / "oauth.json"
+    lock_path = token_path.with_suffix(".lock")
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text("{}", encoding="utf-8")
+    lock_path.write_text("", encoding="utf-8")
+    monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
+
+    result = runner.invoke(app, ["provider", "logout", "openai-codex"])
+
+    assert result.exit_code == 0
+    assert not token_path.exists()
+    assert not lock_path.exists()
+    assert "Logged out from OpenAI Codex" in result.stdout
+
+
+def test_provider_logout_openai_codex_succeeds_when_no_local_oauth_file(monkeypatch, tmp_path):
+    token_path = tmp_path / "auth" / "oauth.json"
+    monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
+
+    result = runner.invoke(app, ["provider", "logout", "openai-codex"])
+
+    assert result.exit_code == 0
+    assert "No local OAuth credentials found for OpenAI Codex" in result.stdout
+
+
 def test_config_matches_explicit_ollama_prefix_without_api_key():
     config = Config()
     config.agents.defaults.model = "ollama/llama3.2"
