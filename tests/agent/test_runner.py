@@ -259,6 +259,61 @@ async def test_runner_returns_structured_tool_error():
 
 
 @pytest.mark.asyncio
+async def test_runner_error_uses_spec_error_message_not_raw_content():
+    """When the LLM returns an error, runner should use spec.error_message
+    instead of forwarding the raw error content to the user."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="Error calling LLM: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error'}}",
+        finish_reason="error",
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        error_message="Sorry, I encountered an error calling the AI model.",
+    ))
+
+    assert result.stop_reason == "error"
+    assert result.final_content == "Sorry, I encountered an error calling the AI model."
+    # Raw error should NOT leak through
+    assert "invalid_request_error" not in (result.final_content or "")
+
+
+@pytest.mark.asyncio
+async def test_runner_error_falls_back_to_raw_when_no_error_message():
+    """When spec.error_message is None, fall back to the raw LLM error content."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="Error calling LLM: something broke",
+        finish_reason="error",
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        error_message=None,
+    ))
+
+    assert result.stop_reason == "error"
+    assert "something broke" in (result.final_content or "")
+
+
+@pytest.mark.asyncio
 async def test_loop_max_iterations_message_stays_stable(tmp_path):
     loop = _make_loop(tmp_path)
     loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -305,6 +360,53 @@ async def test_loop_stream_filter_handles_think_only_prefix_without_crashing(tmp
     assert final_content == "Hello"
     assert deltas == ["Hello"]
     assert endings == [False]
+
+
+@pytest.mark.asyncio
+async def test_system_message_from_subagent_uses_user_role(tmp_path):
+    """Subagent results injected as system messages must use role='user'
+    to avoid assistant prefill, which some models reject."""
+    from nanobot.bus.events import InboundMessage
+
+    loop = _make_loop(tmp_path)
+
+    async def fake_run_agent_loop(initial_messages, *args, **kwargs):
+        return "ok", [], initial_messages
+
+    loop._run_agent_loop = fake_run_agent_loop
+    loop.sessions = MagicMock()
+    session = MagicMock()
+    session.get_history.return_value = []
+    loop.sessions.get_or_create.return_value = session
+    loop.sessions.save = MagicMock()
+    loop.memory_consolidator = MagicMock()
+    loop.memory_consolidator.maybe_consolidate_by_tokens = AsyncMock()
+    loop.context = MagicMock()
+
+    # Track what role is passed to build_messages
+    build_calls: list[dict] = []
+
+    def track_build_messages(**kwargs):
+        build_calls.append(kwargs)
+        return [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "subagent result"},
+        ]
+
+    loop.context.build_messages = track_build_messages
+
+    msg = InboundMessage(
+        channel="system",
+        sender_id="subagent",
+        chat_id="telegram:123",
+        content="[Subagent completed] result here",
+    )
+
+    await loop._process_message(msg)
+
+    # Verify build_messages was called with current_role="user", not "assistant"
+    assert len(build_calls) == 1
+    assert build_calls[0]["current_role"] == "user"
 
 
 @pytest.mark.asyncio

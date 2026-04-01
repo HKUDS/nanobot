@@ -141,7 +141,7 @@ class AgentRunner:
 
             clean = hook.finalize_content(context, response.content)
             if response.finish_reason == "error":
-                final_content = clean or spec.error_message or _DEFAULT_ERROR_MESSAGE
+                final_content = spec.error_message or clean or _DEFAULT_ERROR_MESSAGE
                 stop_reason = "error"
                 error = final_content
                 context.final_content = final_content

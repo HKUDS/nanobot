@@ -492,17 +492,21 @@ class AgentLoop:
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
-            current_role = "assistant" if msg.sender_id == "subagent" else "user"
+            # Always use "user" role — assistant prefill is not supported by all
+            # models (e.g. Claude with extended thinking).  The subagent result
+            # content already instructs the LLM to summarize for the user.
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
-                current_role=current_role,
+                current_role="user",
             )
             final_content, _, all_msgs = await self._run_agent_loop(
                 messages, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
             )
-            self._save_turn(session, all_msgs, 1 + len(history))
+            # skip +1 to exclude the injected system message from session
+            # history — it's ephemeral context, not a real user turn.
+            self._save_turn(session, all_msgs, 1 + len(history) + 1)
             self.sessions.save(session)
             self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
             return OutboundMessage(channel=channel, chat_id=chat_id,
