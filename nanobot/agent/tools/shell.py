@@ -179,7 +179,16 @@ class ExecTool(Tool):
                     p = Path(expanded).expanduser().resolve()
                 except Exception:
                     continue
-                if p.is_absolute() and cwd_path not in p.parents and p != cwd_path:
+
+                from nanobot.config.paths import get_runtime_subdir
+                media_path = get_runtime_subdir("media").resolve()
+
+                if (p.is_absolute() 
+                    and cwd_path not in p.parents 
+                    and p != cwd_path
+                    and media_path not in p.parents
+                    and p != media_path
+                ):
                     return "Error: Command blocked by safety guard (path outside working dir)"
 
         return None
