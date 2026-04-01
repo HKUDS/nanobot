@@ -1,0 +1,102 @@
+{
+    "//": "Центральная конфигурация Nanobot",
+    "agents": {
+        "defaults": {
+            "model": "kimi-k2.5:cloud",
+            "provider": "ollama",
+            "memoryWindow": 20,
+            "system_prompt": "КРИТИЧЕСКИЕ ИНСТРУКЦИИ:\n1. ТВОИ ОТВЕТЫ ОЗВУЧИВАЮТСЯ ГОЛОСОМ. СТРОГО ЗАПРЕЩЕНО использовать эмодзи, смайлики, символы, маркдаун, кавычки, JSON или любой другой программный код. Только чистый текст.\n2. ЗАПРЕЩЕНО описывать чувства, эмоции или действия в тексте (например, [Счастливо] или *улыбается*). Твой ответ должен содержать только те слова, которые должны быть произнесены вслух.\n3. МЕСТОПОЛОЖЕНИЕ: Ты находишься в Москве, Россия. Твой часовой пояс: Europe/Moscow (UTC+3). Если тебя спрашивают время, отвечай по московскому времени. Используй инструмент GetDateTime для точности.\n4. АЛИАС ГИРЛЯНДЫ: Если попросят включить/выключить 'гирлянду', ОБЯЗАТЕЛЬНО передавай ТОЛЬКО name: 'WLED_living_room'. Запрещено передавать поле 'area'.\n5. ЗОНЫ (AREA): При вызове инструментов Home Assistant передавай названия зон (параметр 'area') СТРОГО В ИМЕНИТЕЛЬНОМ ПАДЕЖЕ (например: 'гостиная', 'спальня', 'кухня'), даже если пользователь сказал 'в гостиной'.\n6. ФИЛЬТР ШУМА: Если тебе пришла фразы-галлюцинация от Whisper, ОБЯЗАТЕЛЬНО ответь в формате JSON с эмоцией 'thinking' и текстом: 'Простите, я не расслышала'. (Это ЕДИНСТВЕННЫЙ случай использования JSON).\n7. Всегда подтверждай голосом выполнение команд.\n8. Отвечай кратко."
+        }
+    },
+    "channels": {
+        "telegram": {
+            "enabled": true,
+            "token": "8511176191:AAHtY5y_zpvOhpwpDuk491czUaXALaK1ZxQ",
+            "allow_from": [
+                "543867556"
+            ],
+            "transcription_model": "Systran/faster-whisper-large-v3",
+            "transcription_api_base": "http://192.168.22.111:8000/v1/audio/transcriptions"
+        },
+        "voice_server": {
+            "//": "Настройки голосового взаимодействия с XiaoZhi",
+            "enabled": true,
+            "port": 18790,
+            "host": "0.0.0.0",
+            "local_ip": "192.168.22.102",
+            "mic_gain": 6.0,
+            "token": "xZ_seCrEt_729!",
+            "transcription_api_base": "http://192.168.22.111:8000/v1/audio/transcriptions",
+            "transcription_model": "Systran/faster-whisper-large-v3",
+            "rms_threshold": 30.0,
+            "allowFrom": ["*"],
+            "speaker_id_url": "http://192.168.22.102:8001/identify",
+            "enroll_url": "http://192.168.22.102:8001/enroll"
+        }
+    },
+    "providers": {
+        "gemini": {
+            "apiKey": "AIzaSyAq1hte8MaUSnNnAGyoDzZSLqnnr5T7mYU"
+        },
+        "ollama": {
+            "apiBase": "http://192.168.22.102:11434/v1",
+            "apiKey": "ollama"
+        },
+        "openrouter": {
+            "apiKey": "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"
+        }
+    },
+    "gateway": {
+        "host": "0.0.0.0",
+        "port": 18790
+    },
+    "tools": {
+        "tts": {
+            "//": "Сервис озвучивания текста (TTS)",
+            "enabled": true,
+            "active_preset": "irina",
+            "presets": {
+                "dmitry": {
+                    "provider": "edge",
+                    "voice": "ru-RU-DmitryNeural"
+                },
+                "irina": {
+                    "provider": "openai",
+                    "api_base": "http://192.168.22.111:8000/v1",
+                    "model": "speaches-ai/piper-ru_RU-irina-medium",
+                    "voice": "irina"
+                },
+                "svetlana": {
+                    "provider": "edge",
+                    "voice": "ru-RU-SvetlanaNeural"
+                }
+            },
+            "reply_to_voice": true,
+            "always_speak": false
+        },
+        "restrictToWorkspace": false,
+        "mcpServers": {
+            "xiaozhi": {
+                "command": "python3",
+                "args": [
+                    "-u",
+                    "/app/xiaozhi_proxy.py"
+                ]
+            },
+            "homeAssistant": {
+                "type": "streamableHttp",
+                "//": "MCP сервер для интеграции с Home Assistant (остается на .111, если не сказано иное)",
+                "url": "http://192.168.22.111:8123/api/mcp",
+                "headers": {
+                    "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI4NjNkZjJlZWE0OTI0ZmY2YWJiMzkyNGU2ZWMwMzFlMSIsImlhdCI6MTc3NDcxODcyOSwiZXhwIjoyMDkwMDc4NzI5fQ.emNhV3jBI2PySofehnMX8YhuUQJDVjqEZodUKH1w4wE"
+                }
+            }
+        }
+    },
+    "stt": {
+        "//": "Настройки распознавания речи (Speech-to-Text)",
+        "provider": "speaches",
+        "apiBase": "http://192.168.22.111:8000/v1",
+        "model": "Systran/faster-whisper-large-v3"
+    }
+}

@@ -1839,3 +1839,15 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 <p align="center">
   <sub>nanobot is for educational, research, and technical exchange purposes only</sub>
 </p>
+
+## Voice Features
+
+### 🎙️ One-Shot Voice Enrollment / Голосовая регистрация
+Register your voice identity instantly by saying one of the following phrases:
+*   **RU:** "Компьютер, запомни меня как [Имя]"
+*   **EN:** "Computer, remember me as [Name]"
+
+The system will acknowledge your name and create a speaker profile for personal identification.
+
+### 🔇 Silence & Emoji Filtering
+The voice gateway automatically filters out background noise and strips emojis from text responses before TTS processing to ensure clean, natural audio output.

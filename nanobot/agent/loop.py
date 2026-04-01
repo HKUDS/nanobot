@@ -19,6 +19,7 @@ from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
+from nanobot.agent.tools.hass_camera import HassCameraSnapshotTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
@@ -96,6 +97,11 @@ class _LoopHook(AgentHook):
             args_str = json.dumps(tc.arguments, ensure_ascii=False)
             logger.info("Tool call: {}({})", tc.name, args_str[:200])
         self._loop._set_tool_context(self._channel, self._chat_id, self._message_id)
+
+    async def after_iteration(self, context: AgentHookContext) -> None:
+        if context.tool_results:
+            for res in context.tool_results:
+                logger.info("Tool result: {}", str(res)[:1000])
 
     def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
         return self._loop._strip_think(content)
@@ -257,13 +263,21 @@ class AgentLoop:
             self.tools.register(
                 CronTool(self.cron_service, default_timezone=self.context.timezone or "UTC")
             )
+            
+        # Register Home Assistant camera tool if MCP config is present
+        if self._mcp_servers and (ha_cfg := self._mcp_servers.get("homeAssistant")):
+            ha_url = ha_cfg.url
+            ha_headers = ha_cfg.headers
+            ha_token = ha_headers.get("Authorization", "").replace("Bearer ", "")
+            if ha_url and ha_token:
+                self.tools.register(HassCameraSnapshotTool(ha_url=ha_url, ha_token=ha_token))
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
         if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
             return
         self._mcp_connecting = True
-        from nanobot.agent.tools.mcp import connect_mcp_servers
+        from nanobot.mcp import connect_mcp_servers
         try:
             self._mcp_stack = AsyncExitStack()
             await self._mcp_stack.__aenter__()
