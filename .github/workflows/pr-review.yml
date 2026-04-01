@@ -1,0 +1,251 @@
+name: Fork PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  REVIEW_MODEL: "gemini-3.1-pro-preview"
+  REVIEW_PROVIDER: "gemini"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    if: |
+      !github.event.pull_request.draft &&
+      github.actor != 'dependabot[bot]' &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-review')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gather review context
+        id: context
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          DIFF=$(gh pr diff ${{ github.event.pull_request.number }} | head -c 80000)
+          PR_BODY=$(gh pr view ${{ github.event.pull_request.number }} --json body -q '.body')
+          FILES=$(gh pr diff ${{ github.event.pull_request.number }} --name-only)
+
+          # Read key files for architectural context
+          README=""
+          [ -f README.md ] && README=$(head -c 6000 README.md)
+
+          # Current content of modified source files
+          EXISTING_FILES=""
+          for f in $FILES; do
+            if [[ "$f" == nanobot/*.py ]] || [[ "$f" == nanobot/**/*.py ]]; then
+              if [ -f "$f" ]; then
+                CONTENT=$(head -c 8000 "$f")
+                EXISTING_FILES="${EXISTING_FILES}
+          --- FILE: ${f} (pre-PR) ---
+          ${CONTENT}
+          --- END ---
+          "
+              fi
+            fi
+          done
+
+          python3 << PYEOF
+          import json
+          ctx = {
+            "pr_title": """${{ github.event.pull_request.title }}""",
+            "pr_body": $(echo "$PR_BODY" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+            "changed_files": $(echo "$FILES" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+            "diff": $(echo "$DIFF" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+            "readme": $(echo "$README" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+            "existing_files": $(echo "$EXISTING_FILES" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+          }
+          with open("/tmp/review-context.json", "w") as f:
+            json.dump(ctx, f)
+          PYEOF
+
+      - name: Build review prompt
+        run: |
+          python3 << 'PYEOF'
+          import json
+
+          with open("/tmp/review-context.json") as f:
+              ctx = json.load(f)
+
+          parts = []
+
+          parts.append("""You are a senior engineer reviewing a PR for the homer-patches fork of nanobot-ai.
+
+          ## Context
+
+          This is a FORK of the open-source nanobot-ai framework (github.com/HKUDS/nanobot), maintained
+          on the `homer-patches` branch. It powers Homer, a personal life agent for the Anjorin household.
+          The fork adds Homer-specific runtime features (heartbeat improvements, guest agent isolation,
+          WhatsApp bridge enhancements, model routing, etc.) that are too specialized for upstream.
+
+          This fork is the CORE ENGINE — it handles message routing, LLM calls, tool execution, heartbeat
+          scheduling, and session management. Bugs here break everything.
+
+          ## Review Checklist — Verify Each One
+
+          ### 1. SECURITY (Critical — this is the core engine)
+          - No command injection via tool execution (shell=True, unsanitized user input in exec)
+          - No credential leakage (API keys, tokens in logs, error messages leaked to users)
+          - LLM error responses: raw API errors must NOT be forwarded to end users
+          - Session isolation: guest agent cannot access main agent sessions or workspace
+          - Tool execution sandboxing: blocked_tools enforcement, workspace restrictions
+          - Input validation on all external boundaries (channel messages, bridge payloads, webhook data)
+
+          ### 2. BACKWARD COMPATIBILITY WITH UPSTREAM NANOBOT
+          - Can upstream changes still be merged cleanly? Avoid restructuring files that upstream actively maintains.
+          - Prefer additive changes (new parameters with defaults, new methods) over modifying existing signatures.
+          - If an existing function signature must change, ensure the old call pattern still works (default params).
+          - Flag if a change touches a file/function that upstream nanobot frequently modifies — merge conflicts ahead.
+          - Keep Homer-specific logic behind config flags or clearly isolated in separate methods/modules.
+
+          ### 3. CONFIGURABILITY (easy to propose upstream)
+          - New behavior should be config-driven (on/off via config.json or env vars), not hardcoded.
+          - Feature flags: new features default to OFF (backward compat) unless explicitly enabled in config.
+          - Avoid Homer-specific hardcoded values (paths, model names, channel assumptions).
+          - Could this feature be generalized for upstream contribution? If yes, note what would need to change.
+
+          ### 4. HOMER FIT (consistency with Homer's use case)
+          - Heartbeat changes: compatible with Homer's HEARTBEAT.md format (### tasks, Schedule/Recur/Type/Model fields)?
+          - Channel changes: works for both Telegram AND WhatsApp (Baileys bridge)?
+          - Guest agent: respects workspace isolation, blocked_tools, scoped context?
+          - Memory/session: fits Homer's consolidation and session retention patterns?
+          - Error handling: errors are logged with enough detail to debug via `journalctl -u homer`, but user-facing messages stay friendly.
+
+          ### 5. CORRECTNESS & ROBUSTNESS
+          - Does the code do what the PR description says?
+          - Error paths: what happens when the LLM API is down, config is missing a field, or a file doesn't exist?
+          - Async correctness: proper await, no fire-and-forget without tracking, cancellation handled?
+          - Type safety: type hints consistent, no Any where a concrete type is known?
+
+          ### 6. TESTS
+          - New logic has tests? The fork maintains ~130 agent tests — don't let coverage regress.
+          - Tests are deterministic (no real API calls, no time-dependent flakes).
+          - Edge cases covered: empty input, None values, missing config fields, concurrent access?
+
+          ## Response Format
+
+          Be blunt and specific. Reference file:line from the diff. Do NOT pad with praise.
+
+          ### Summary
+          [1-2 sentences]
+
+          ### Security Concerns
+          [Blocking issues, or "None"]
+
+          ### Backward Compatibility
+          [Will this cause merge conflicts with upstream? Break existing config? Or "Clean"]
+
+          ### Configurability
+          [Is behavior hardcoded that should be configurable? Or "Good"]
+
+          ### Bugs & Edge Cases
+          [Blocking, or "None"]
+
+          ### Suggestions
+          [Non-blocking improvements, or "None"]
+
+          ### Verdict
+          **APPROVE** / **REQUEST_CHANGES** / **COMMENT** — [one sentence why]
+          """)
+
+          if ctx.get("readme", "").strip():
+              parts.append(f"\n---\n## README.md\n```\n{ctx['readme']}\n```")
+
+          if ctx.get("existing_files", "").strip():
+              parts.append(f"\n---\n## Current File Contents (pre-PR)\n{ctx['existing_files']}")
+
+          parts.append(f"\n---\n## PR: {ctx['pr_title']}")
+          if ctx.get("pr_body", "").strip():
+              parts.append(f"\n### PR Description\n{ctx['pr_body']}")
+          parts.append(f"\n### Changed Files\n```\n{ctx['changed_files']}\n```")
+          parts.append(f"\n### Diff\n```diff\n{ctx['diff']}\n```")
+
+          prompt = "\n".join(parts)
+          prompt = prompt.encode("utf-8", errors="replace").decode("utf-8")
+          with open("/tmp/review-prompt.txt", "w") as f:
+              f.write(prompt)
+          print(f"Review prompt: {len(prompt):,} chars")
+          PYEOF
+
+      - name: Run Gemini review
+        if: env.REVIEW_PROVIDER == 'gemini'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          python3 << 'PYEOF'
+          import json, os, subprocess
+
+          with open("/tmp/review-prompt.txt") as f:
+              prompt = f.read()
+
+          payload = {
+              "contents": [{"parts": [{"text": prompt}]}],
+              "generationConfig": {"temperature": 0.2, "maxOutputTokens": 65536},
+          }
+          with open("/tmp/gemini-request.json", "w") as f:
+              json.dump(payload, f)
+
+          model = os.environ["REVIEW_MODEL"]
+          api_key = os.environ["GEMINI_API_KEY"]
+          result = subprocess.run(
+              ["curl", "-s", "-X", "POST",
+               f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+               "-H", f"x-goog-api-key: {api_key}",
+               "-H", "Content-Type: application/json",
+               "--data-binary", "@/tmp/gemini-request.json"],
+              capture_output=True, text=True,
+          )
+
+          try:
+              data = json.loads(result.stdout)
+              text = data["candidates"][0]["content"]["parts"][0]["text"]
+          except (KeyError, IndexError, json.JSONDecodeError) as e:
+              text = f"⚠️ Review generation failed: {e}\nRaw: {result.stdout[:1000]}"
+
+          with open("/tmp/review-text.txt", "w") as f:
+              f.write(text)
+          PYEOF
+
+      - name: Post review comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 << 'PYEOF'
+          import os
+
+          with open("/tmp/review-text.txt") as f:
+              review = f.read().strip()
+
+          model = os.environ["REVIEW_MODEL"]
+          provider = os.environ["REVIEW_PROVIDER"]
+          run_url = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          footer = f"\n\n---\n<sub>Model: {model} | Provider: {provider} | [Run]({run_url})</sub>"
+          header = f"🔧 **Fork Review** via `{model}`\n\n---\n\n"
+
+          max_review_len = 65536 - len(header) - len(footer) - 200
+          if len(review) > max_review_len:
+              review = review[:max_review_len] + "\n\n⚠️ *Review truncated — see [Run](" + run_url + ") for full output.*"
+
+          comment = header + review + footer
+
+          with open("/tmp/review-comment.txt", "w") as f:
+              f.write(comment)
+          PYEOF
+
+          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/review-comment.txt
