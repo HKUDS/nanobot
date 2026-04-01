@@ -1492,7 +1492,7 @@ _LOGOUT_HANDLERS: dict[str, Any] = {}
 
 
 def _register_login(name: str):
-    """注册 OAuth 登录处理器。"""
+    """Register an OAuth login handler."""
     def decorator(fn):
         _LOGIN_HANDLERS[name] = fn
         return fn
@@ -1501,7 +1501,7 @@ def _register_login(name: str):
 
 
 def _register_logout(name: str):
-    """注册 OAuth 登出处理器。"""
+    """Register an OAuth logout handler."""
     def decorator(fn):
         _LOGOUT_HANDLERS[name] = fn
         return fn
@@ -1509,7 +1509,7 @@ def _register_logout(name: str):
 
 
 def _resolve_oauth_provider(provider: str):
-    """解析并校验 OAuth provider 配置。"""
+    """Resolve and validate an OAuth provider configuration."""
     from nanobot.providers.registry import PROVIDERS
 
     key = provider.replace("-", "_")
@@ -1578,7 +1578,7 @@ def _login_openai_codex() -> None:
 
 @_register_logout("openai_codex")
 def _logout_openai_codex() -> None:
-    """清理 OpenAI Codex 的本地 OAuth 凭证。"""
+    """Clear local OAuth credentials for OpenAI Codex."""
     try:
         from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
         from oauth_cli_kit.storage import FileTokenStorage
