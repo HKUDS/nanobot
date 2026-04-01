@@ -435,7 +435,9 @@ class TelegramChannel(BaseChannel):
                 await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
 
     async def _call_with_retry(self, fn, *args, **kwargs):
-        """Call an async Telegram API function with retry on pool/network timeout."""
+        """Call an async Telegram API function with retry on pool/network timeout and RetryAfter."""
+        from telegram.error import RetryAfter
+        
         for attempt in range(1, _SEND_MAX_RETRIES + 1):
             try:
                 return await fn(*args, **kwargs)
@@ -445,6 +447,15 @@ class TelegramChannel(BaseChannel):
                 delay = _SEND_RETRY_BASE_DELAY * (2 ** (attempt - 1))
                 logger.warning(
                     "Telegram timeout (attempt {}/{}), retrying in {:.1f}s",
+                    attempt, _SEND_MAX_RETRIES, delay,
+                )
+                await asyncio.sleep(delay)
+            except RetryAfter as e:
+                if attempt == _SEND_MAX_RETRIES:
+                    raise
+                delay = float(e.retry_after)
+                logger.warning(
+                    "Telegram Flood Control (attempt {}/{}), retrying in {:.1f}s",
                     attempt, _SEND_MAX_RETRIES, delay,
                 )
                 await asyncio.sleep(delay)
