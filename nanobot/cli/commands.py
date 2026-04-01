@@ -1230,21 +1230,28 @@ provider_app = typer.Typer(help="Manage providers")
 app.add_typer(provider_app, name="provider")
 
 
-_LOGIN_HANDLERS: dict[str, callable] = {}
+_LOGIN_HANDLERS: dict[str, Any] = {}
+_LOGOUT_HANDLERS: dict[str, Any] = {}
 
 
 def _register_login(name: str):
+    """注册 OAuth 登录处理器。"""
     def decorator(fn):
         _LOGIN_HANDLERS[name] = fn
         return fn
     return decorator
 
 
-@provider_app.command("login")
-def provider_login(
-    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
-):
-    """Authenticate with an OAuth provider."""
+def _register_logout(name: str):
+    """注册 OAuth 登出处理器。"""
+    def decorator(fn):
+        _LOGOUT_HANDLERS[name] = fn
+        return fn
+    return decorator
+
+
+def _resolve_oauth_provider(provider: str):
+    """解析并校验 OAuth provider 配置。"""
     from nanobot.providers.registry import PROVIDERS
 
     key = provider.replace("-", "_")
@@ -1253,6 +1260,15 @@ def provider_login(
         names = ", ".join(s.name.replace("_", "-") for s in PROVIDERS if s.is_oauth)
         console.print(f"[red]Unknown OAuth provider: {provider}[/red]  Supported: {names}")
         raise typer.Exit(1)
+    return spec
+
+
+@provider_app.command("login")
+def provider_login(
+    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+):
+    """Authenticate with an OAuth provider."""
+    spec = _resolve_oauth_provider(provider)
 
     handler = _LOGIN_HANDLERS.get(spec.name)
     if not handler:
@@ -1260,6 +1276,22 @@ def provider_login(
         raise typer.Exit(1)
 
     console.print(f"{__logo__} OAuth Login - {spec.label}\n")
+    handler()
+
+
+@provider_app.command("logout")
+def provider_logout(
+    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+):
+    """Log out from an OAuth provider."""
+    spec = _resolve_oauth_provider(provider)
+
+    handler = _LOGOUT_HANDLERS.get(spec.name)
+    if not handler:
+        console.print(f"[red]Logout not implemented for {spec.label}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"{__logo__} OAuth Logout - {spec.label}\n")
     handler()
 
 
@@ -1285,6 +1317,33 @@ def _login_openai_codex() -> None:
     except ImportError:
         console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
         raise typer.Exit(1)
+
+
+@_register_logout("openai_codex")
+def _logout_openai_codex() -> None:
+    """清理 OpenAI Codex 的本地 OAuth 凭证。"""
+    try:
+        from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
+        from oauth_cli_kit.storage import FileTokenStorage
+    except ImportError:
+        console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
+        raise typer.Exit(1)
+
+    storage = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename)
+    removed_paths: list[Path] = []
+
+    for path in (storage.get_token_path(), storage.get_token_path().with_suffix(".lock")):
+        if path.exists():
+            path.unlink()
+            removed_paths.append(path)
+
+    if not removed_paths:
+        console.print("[yellow]! No local OAuth credentials found for OpenAI Codex[/yellow]")
+        return
+
+    console.print("[green]✓ Logged out from OpenAI Codex[/green]")
+    for path in removed_paths:
+        console.print(f"[dim]Removed: {path}[/dim]")
 
 
 @_register_login("github_copilot")
