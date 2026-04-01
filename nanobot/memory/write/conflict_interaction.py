@@ -8,7 +8,7 @@ gating, and conflict resolution dispatch.  Each function receives the
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
 from .._text import _norm_text, _tokenize, _utc_now_iso
 from ..constants import CONFLICT_STATUS_NEEDS_USER
@@ -21,6 +21,18 @@ __all__ = [
     "handle_user_conflict_reply",
     "parse_conflict_user_action",
 ]
+
+
+class _ConflictManagerProtocol(Protocol):
+    """Structural type for ConflictManager methods used by interaction functions."""
+
+    profile_mgr: Any  # ProfileStore — only read_profile/write_profile used
+
+    def list_conflicts(self, *, include_closed: bool = False) -> list[ConflictRecord]:
+        """Return conflict records, optionally including closed ones."""
+
+    def resolve_conflict_details(self, index: int, action: str) -> dict[str, Any]:
+        """Resolve a conflict by index and action, returning result details."""
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +79,7 @@ def conflict_relevant_to(conflict: ConflictRecord, user_message: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def get_next_user_conflict(mgr: Any) -> ConflictRecord | None:
+def get_next_user_conflict(mgr: _ConflictManagerProtocol) -> ConflictRecord | None:
     """Return the most-recently-asked conflict, or None.
 
     Only conflicts that have been explicitly presented to the user
@@ -87,7 +99,7 @@ def get_next_user_conflict(mgr: Any) -> ConflictRecord | None:
 
 
 def ask_user_for_conflict(
-    mgr: Any,
+    mgr: _ConflictManagerProtocol,
     *,
     include_already_asked: bool = False,
     user_message: str = "",
@@ -143,7 +155,7 @@ def ask_user_for_conflict(
     )
 
 
-def handle_user_conflict_reply(mgr: Any, text: str) -> dict[str, Any]:
+def handle_user_conflict_reply(mgr: _ConflictManagerProtocol, text: str) -> dict[str, Any]:
     """Process a user's conflict-resolution reply and resolve the conflict."""
     action = parse_conflict_user_action(text)
     if action is None:

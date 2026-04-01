@@ -136,8 +136,10 @@ class OnnxCrossEncoderReranker:
         if not self._ensure_model():
             return items  # graceful degradation
 
-        assert self._tokenizer is not None  # guaranteed by _ensure_model
-        assert self._session is not None
+        if self._tokenizer is None:
+            raise RuntimeError("Tokenizer not loaded — _ensure_model() should have set it")
+        if self._session is None:
+            raise RuntimeError("ONNX session not loaded — _ensure_model() should have set it")
 
         effective_alpha = max(0.0, min(float(alpha if alpha is not None else self._alpha), 1.0))
 
