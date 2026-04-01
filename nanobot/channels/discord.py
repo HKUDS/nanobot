@@ -435,9 +435,18 @@ class DiscordChannel(BaseChannel):
             resp.raise_for_status()
             data = resp.json()
 
+            channel_type = data.get("type")
+
             # Thread → resolve parent channel name
-            if data.get("type") in (10, 11, 12) and data.get("parent_id"):
+            if channel_type in (10, 11, 12) and data.get("parent_id"):
                 name = await self._resolve_channel_name(data["parent_id"])
+            # DM → dm-{username}
+            elif channel_type == 1:
+                recipients = data.get("recipients") or []
+                if recipients:
+                    name = f"dm-{recipients[0].get('username', channel_id)}"
+                else:
+                    name = f"dm-{channel_id}"
             else:
                 name = data.get("name")
 
