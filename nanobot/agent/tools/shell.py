@@ -166,7 +166,10 @@ class ExecTool(Tool):
                 return "Error: Command blocked by safety guard (dangerous pattern detected)"
 
         if self.allow_patterns:
-            if not any(re.search(p, lower) for p in self.allow_patterns):
+            shell_meta = re.search(r'[|&;<>`\n\r]|\$\(', cmd)
+            if shell_meta:
+                return "Error: Command blocked by safety guard (shell metacharacters not allowed with allowlist)"
+            if not any(re.search(p, cmd, re.IGNORECASE) for p in self.allow_patterns):
                 return "Error: Command blocked by safety guard (not in allowlist)"
 
         from nanobot.security.network import contains_internal_url
