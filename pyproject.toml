@@ -73,6 +73,46 @@ discord = [
 langsmith = [
     "langsmith>=0.1.0",
 ]
+
+# ── Memory backends ────────────────────────────────────────────────────────
+# long_term: built-in, no extra dependencies required.
+
+# mem0: vector + graph memory with pluggable backends (Qdrant, Neo4j, …)
+# Docs: https://github.com/mem0ai/mem0
+mem0 = [
+    "mem0ai>=1.0.7,<2.0.0",
+    "qdrant-client>=1.17.0,<2.0.0",  # default vector store
+]
+
+# graphiti: temporal knowledge-graph memory (FalkorDB backend)
+# Docs: https://github.com/getzep/graphiti
+# Other backends: pip install "graphiti-core[kuzu]" (embedded, no server)
+#                 pip install graphiti-core          (Neo4j)
+graphiti = [
+    "graphiti-core[falkordb]>=0.28.0,<1.0.0",
+]
+
+# memobase: user-profile-based long-term memory (requires a Memobase server)
+# Quick start: docker run -p 8019:8019 memodb/memobase:latest
+# Cloud:       https://app.memobase.io
+# Docs:        https://github.com/memodb-io/memobase
+memobase = [
+    "memobase>=0.0.27,<1.0.0",
+]
+
+# simplemem / lightmem / a_mem: GitHub-only packages, install manually:
+#   pip install git+https://github.com/aiming-lab/SimpleMem.git
+#   pip install git+https://github.com/zjunlp/LightMem.git
+#   pip install git+https://github.com/agiresearch/A-mem.git
+
+# memory: all PyPI-available memory backends in one shot
+memory = [
+    "mem0ai>=1.0.7,<2.0.0",
+    "qdrant-client>=1.17.0,<2.0.0",
+    "graphiti-core[falkordb]>=0.28.0,<1.0.0",
+    "memobase>=0.0.27,<1.0.0",
+]
+
 dev = [
     "pytest>=9.0.0,<10.0.0",
     "pytest-asyncio>=1.3.0,<2.0.0",

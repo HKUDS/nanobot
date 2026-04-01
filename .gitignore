@@ -2,6 +2,7 @@
 .assets
 .docs
 .env
+.idea
 *.pyc
 dist/
 build/

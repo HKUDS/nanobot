@@ -21,11 +21,32 @@ class ChannelsConfig(Base):
     Per-channel "streaming": true enables streaming output (requires send_delta impl).
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="allow")
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
+
+
+class MemoryConfig(Base):
+    """Configuration for memory backends.
+
+    Each backend section is stored as an extra field (dict) with an ``enabled``
+    key.  Only ONE backend may be enabled at a time.  The remaining keys in
+    each section are passed through to the backend constructor as-is.
+
+    Example JSON::
+
+        "memory": {
+            "longTerm": { "enabled": true },
+            "mem0": {
+                "enabled": false,
+                "config": { "llm": {...}, "vector_store": {...} }
+            }
+        }
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="allow")
 
 
 class AgentDefaults(Base):
@@ -163,6 +184,7 @@ class Config(BaseSettings):
 
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)

@@ -33,7 +33,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, MemoryConfig, WebSearchConfig
     from nanobot.cron.service import CronService
 
 
@@ -172,6 +172,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        memory_config: MemoryConfig | None = None,
         timezone: str | None = None,
         hooks: list[AgentHook] | None = None,
     ):
@@ -193,7 +194,21 @@ class AgentLoop:
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone)
+        memory_store = None
+        if memory_config:
+            from nanobot.agent.memory import create_memory_store_from_config
+            try:
+                memory_store = create_memory_store_from_config(memory_config, workspace)
+                logger.info(
+                    "Memory backend active: {} ({})",
+                    type(memory_store).__name__,
+                    memory_store.__class__.__module__,
+                )
+            except Exception as exc:
+                logger.error("Failed to create memory store, falling back to file-based: {}", exc)
+                memory_store = None
+
+        self.context = ContextBuilder(workspace, memory_store=memory_store, timezone=timezone)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)
@@ -229,6 +244,7 @@ class AgentLoop:
             context_window_tokens=context_window_tokens,
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
+            store=memory_store,
             max_completion_tokens=provider.generation.max_tokens,
         )
         self._register_default_tools()
@@ -497,8 +513,14 @@ class AgentLoop:
                 messages, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
             )
-            self._save_turn(session, all_msgs, 1 + len(history))
+            sys_turn_skip = 1 + len(history)
+            self._save_turn(session, all_msgs, sys_turn_skip)
             self.sessions.save(session)
+            sys_turn = all_msgs[sys_turn_skip:]
+            if sys_turn:
+                self._schedule_background(
+                    self.memory_consolidator.ingest_turn(sys_turn, user_id=chat_id)
+                )
             self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
@@ -550,8 +572,17 @@ class AgentLoop:
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        self._save_turn(session, all_msgs, 1 + len(history))
+        turn_skip = 1 + len(history)
+        self._save_turn(session, all_msgs, turn_skip)
         self.sessions.save(session)
+
+        # Eagerly ingest this turn's messages for external memory backends
+        turn_messages = all_msgs[turn_skip:]
+        if turn_messages:
+            self._schedule_background(
+                self.memory_consolidator.ingest_turn(turn_messages, user_id=msg.chat_id)
+            )
+
         self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
