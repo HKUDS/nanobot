@@ -32,7 +32,7 @@ from nanobot.command import CommandContext, CommandRouter, register_builtin_comm
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
-from nanobot.workspace.layout import make_layout
+from nanobot.workspace.layout import WorkspaceLayout, make_layout
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
@@ -337,6 +337,7 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        layout: WorkspaceLayout | None = None,
     ) -> AgentRunResult:
         """Run the agent iteration loop.
 
@@ -354,10 +355,12 @@ class AgentLoop:
             chat_id=chat_id,
             message_id=message_id,
         )
-        # Route trace hooks to the correct session file
+        # Route trace hooks to the correct session/log file
         for h in self._extra_hooks:
             if hasattr(h, "session_key"):
                 h.session_key = f"{channel}:{chat_id}"
+            if layout and hasattr(h, "set_log_path"):
+                h.set_log_path(self.sessions.current_llm_log_path(layout))
 
         hook: AgentHook = (
             _LoopHookChain(loop_hook, self._extra_hooks)
@@ -485,6 +488,15 @@ class AgentLoop:
                 pass  # MCP SDK cancel scope cleanup is noisy but harmless
             self._mcp_stack = None
 
+    def _resolve_layout(
+        self, ctx: TurnContext, *, session_key: str | None = None,
+    ) -> WorkspaceLayout | None:
+        """Construct layout when channel_name is resolved; skip for explicit session_key."""
+        if session_key:
+            return None
+        name = ctx.channel_name or ("cli" if ctx.channel == "cli" else None)
+        return make_layout(self.workspace, ctx.channel, name, ctx.chat_id) if name else None
+
     def _schedule_background(self, coro) -> None:
         """Schedule a coroutine as a tracked background task (drained on shutdown)."""
         task = asyncio.create_task(coro)
@@ -518,9 +530,8 @@ class AgentLoop:
             )
             logger.info("Processing system message from {}", ctx.sender_id)
             key = f"{ctx.channel}:{ctx.chat_id}"
-            sys_channel_name = ctx.channel_name or ("cli" if channel == "cli" else None)
-            layout = make_layout(self.workspace, channel, sys_channel_name, ctx.chat_id) if sys_channel_name else None
-            session = self.sessions.get_or_create(layout or key)
+            layout = self._resolve_layout(ctx)
+            session = self.sessions.get_or_create_from_layout(layout) if layout else self.sessions.get_or_create(key)
             self._update_runtime_metadata(session, ctx)
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(ctx.channel, ctx.chat_id, ctx.message_id)
@@ -541,7 +552,7 @@ class AgentLoop:
             )
             result = await self._run_agent_loop(
                 messages, channel=ctx.channel, chat_id=ctx.chat_id,
-                message_id=ctx.message_id,
+                message_id=ctx.message_id, layout=layout,
             )
             self._save_turn(session, result, 1 + len(history), ctx=ctx)
             self.sessions.save(session)
@@ -554,13 +565,8 @@ class AgentLoop:
         logger.info("Processing message from {}:{}: {}", ctx.channel, ctx.sender_id, preview)
 
         key = session_key or msg.session_key
-        # Only construct layout when channel_name is resolved (Discord adapter provides it).
-        # When session_key is explicitly passed (e.g. process_direct), skip layout.
-        channel_name = ctx.channel_name if not session_key else None
-        if not channel_name and ctx.channel == "cli" and not session_key:
-            channel_name = "cli"
-        layout = make_layout(self.workspace, ctx.channel, channel_name, ctx.chat_id) if channel_name else None
-        session = self.sessions.get_or_create(layout or key)
+        layout = self._resolve_layout(ctx, session_key=session_key)
+        session = self.sessions.get_or_create_from_layout(layout) if layout else self.sessions.get_or_create(key)
         self._update_runtime_metadata(session, ctx)
 
         # Slash commands
@@ -604,7 +610,7 @@ class AgentLoop:
             on_stream=on_stream,
             on_stream_end=on_stream_end,
             channel=ctx.channel, chat_id=ctx.chat_id,
-            message_id=ctx.message_id,
+            message_id=ctx.message_id, layout=layout,
         )
 
         final_content = result.final_content

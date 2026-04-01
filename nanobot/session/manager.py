@@ -1,5 +1,7 @@
 """Session management for conversation history."""
 
+from __future__ import annotations
+
 import json
 import shutil
 from dataclasses import dataclass, field
@@ -14,35 +16,36 @@ from nanobot.utils.helpers import ensure_dir, safe_filename
 from nanobot.workspace.layout import WorkspaceLayout
 
 
+# ---------------------------------------------------------------------------
+# Session
+# ---------------------------------------------------------------------------
+
 @dataclass
 class Session:
-    """
-    A conversation session.
+    """一个会话：append-only 消息列表 + 元数据。
 
-    Stores messages in JSONL format for easy reading and persistence.
-
-    Important: Messages are append-only for LLM cache efficiency.
-    The consolidation process writes summaries to MEMORY.md/HISTORY.md
-    but does NOT modify the messages list or get_history() output.
+    messages 仅追加，consolidation 写 MEMORY.md/HISTORY.md 但不删消息。
     """
 
-    key: str  # channel:chat_id
+    key: str                                                # channel:chat_id
     messages: list[dict[str, Any]] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
-    last_consolidated: int = 0  # Number of messages already consolidated to files
+    last_consolidated: int = 0                              # 已归档消息数
+    file_path: Path | None = field(default=None, repr=False)  # 磁盘路径，由 SessionManager 管理
 
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
-        """Add a message to the session."""
         msg = {
             "role": role,
             "content": content,
             "timestamp": datetime.now().isoformat(),
-            **kwargs
+            **kwargs,
         }
         self.messages.append(msg)
         self.updated_at = datetime.now()
+
+    # --- History retrieval ---
 
     @staticmethod
     def _find_legal_start(messages: list[dict[str, Any]]) -> int:
@@ -72,14 +75,11 @@ class Session:
         unconsolidated = self.messages[self.last_consolidated:]
         sliced = unconsolidated[-max_messages:]
 
-        # Drop leading non-user messages to avoid starting mid-turn when possible.
         for i, message in enumerate(sliced):
             if message.get("role") == "user":
                 sliced = sliced[i:]
                 break
 
-        # Some providers reject orphan tool results if the matching assistant
-        # tool_calls message fell outside the fixed-size history window.
         start = self._find_legal_start(sliced)
         if start:
             sliced = sliced[start:]
@@ -93,8 +93,9 @@ class Session:
             out.append(entry)
         return out
 
+    # --- Mutation ---
+
     def clear(self) -> None:
-        """Clear all messages and reset session to initial state."""
         self.messages = []
         runtime = self.metadata.get("runtime")
         self.metadata = {}
@@ -104,7 +105,6 @@ class Session:
         self.updated_at = datetime.now()
 
     def retain_recent_legal_suffix(self, max_messages: int) -> None:
-        """Keep a legal recent suffix, mirroring get_history boundary rules."""
         if max_messages <= 0:
             self.clear()
             return
@@ -112,14 +112,10 @@ class Session:
             return
 
         start_idx = max(0, len(self.messages) - max_messages)
-
-        # If the cutoff lands mid-turn, extend backward to the nearest user turn.
         while start_idx > 0 and self.messages[start_idx].get("role") != "user":
             start_idx -= 1
 
         retained = self.messages[start_idx:]
-
-        # Mirror get_history(): avoid persisting orphan tool results at the front.
         start = self._find_legal_start(retained)
         if start:
             retained = retained[start:]
@@ -130,13 +126,16 @@ class Session:
         self.updated_at = datetime.now()
 
 
-class SessionManager:
-    """
-    Manages conversation sessions.
+# ---------------------------------------------------------------------------
+# SessionManager
+# ---------------------------------------------------------------------------
 
-    Sessions are stored as JSONL files. When a WorkspaceLayout is provided,
-    files use the per-channel hierarchy (discord/{name}/sessions/...);
-    otherwise, falls back to the flat workspace/sessions/ directory.
+class SessionManager:
+    """管理 Session 的持久化与缓存。
+
+    两套路径：
+      - get_or_create(key)            → 平铺 workspace/sessions/  (旧)
+      - get_or_create_from_layout(l)  → per-channel 层级目录       (新)
     """
 
     def __init__(self, workspace: Path):
@@ -148,12 +147,10 @@ class SessionManager:
     # --- Path helpers ---
 
     def _get_session_path(self, key: str) -> Path:
-        """Get the file path for a session (flat legacy layout)."""
         safe_key = safe_filename(key.replace(":", "_"))
         return self.sessions_dir / f"{safe_key}.jsonl"
 
     def _get_legacy_session_path(self, key: str) -> Path:
-        """Legacy global session path (~/.nanobot/sessions/)."""
         safe_key = safe_filename(key.replace(":", "_"))
         return self.legacy_sessions_dir / f"{safe_key}.jsonl"
 
@@ -161,21 +158,10 @@ class SessionManager:
     def _session_key(layout: WorkspaceLayout) -> str:
         return f"{layout.channel}:{layout.chat_id}"
 
-    # --- Core API ---
+    # --- Core API (flat / legacy) ---
 
-    def get_or_create(self, key_or_layout) -> Session:
-        """
-        Get an existing session or create a new one.
-
-        Args:
-            key_or_layout: Session key string (legacy) or WorkspaceLayout (new).
-        """
-        if isinstance(key_or_layout, WorkspaceLayout):
-            return self._get_or_create_layout(key_or_layout)
-        return self._get_or_create_key(key_or_layout)
-
-    def _get_or_create_key(self, key: str) -> Session:
-        """Legacy path: flat sessions/ directory."""
+    def get_or_create(self, key: str) -> Session:
+        """获取或创建 session（平铺目录）。"""
         if key in self._cache:
             return self._cache[key]
         session = self._load_flat(key)
@@ -184,8 +170,10 @@ class SessionManager:
         self._cache[key] = session
         return session
 
-    def _get_or_create_layout(self, layout: WorkspaceLayout) -> Session:
-        """New path: per-channel hierarchy."""
+    # --- Core API (layout / per-channel) ---
+
+    def get_or_create_from_layout(self, layout: WorkspaceLayout) -> Session:
+        """获取或创建 session（per-channel 层级目录）。"""
         key = self._session_key(layout)
         if key in self._cache:
             return self._cache[key]
@@ -194,25 +182,23 @@ class SessionManager:
             layout.ensure_dirs()
             today = date.today().isoformat()
             seq = layout.next_session_seq(today)
-            session = Session(key=key)
-            session.metadata["_file_path"] = str(layout.session_path(today, seq))
+            session = Session(key=key, file_path=layout.session_path(today, seq))
         self._cache[key] = session
         return session
 
     def new_session(self, layout: WorkspaceLayout) -> Session:
-        """Archive current session (keep file on disk), create fresh session with next seq."""
+        """归档当前 session（保留旧文件），创建下一个序号的新 session。"""
         key = self._session_key(layout)
         self._cache.pop(key, None)
         layout.ensure_dirs()
         today = date.today().isoformat()
         seq = layout.next_session_seq(today)
-        session = Session(key=key)
-        session.metadata["_file_path"] = str(layout.session_path(today, seq))
+        session = Session(key=key, file_path=layout.session_path(today, seq))
         self._cache[key] = session
         return session
 
     def current_llm_log_path(self, layout: WorkspaceLayout) -> Path:
-        """LLM log path that corresponds to the current session file."""
+        """与当前 session 文件对应的 LLM 日志路径。"""
         today = date.today().isoformat()
         path = layout.current_session_path(today)
         if path:
@@ -224,7 +210,6 @@ class SessionManager:
     # --- Load ---
 
     def _load_flat(self, key: str) -> Session | None:
-        """Load from flat sessions/ directory with legacy migration."""
         path = self._get_session_path(key)
         if not path.exists():
             legacy_path = self._get_legacy_session_path(key)
@@ -239,7 +224,6 @@ class SessionManager:
         return self._parse_jsonl(path, key)
 
     def _load_layout(self, layout: WorkspaceLayout) -> Session | None:
-        """Load from per-channel hierarchy. Picks the latest session file for today."""
         today = date.today().isoformat()
         path = layout.current_session_path(today)
         if not path:
@@ -247,15 +231,14 @@ class SessionManager:
         key = self._session_key(layout)
         session = self._parse_jsonl(path, key)
         if session:
-            session.metadata["_file_path"] = str(path)
+            session.file_path = path
         return session
 
     @staticmethod
     def _parse_jsonl(path: Path, key: str) -> Session | None:
-        """Parse a JSONL session file."""
         try:
-            messages = []
-            metadata = {}
+            messages: list[dict[str, Any]] = []
+            metadata: dict[str, Any] = {}
             created_at = None
             last_consolidated = 0
 
@@ -267,7 +250,8 @@ class SessionManager:
                     data = json.loads(line)
                     if data.get("_type") == "metadata":
                         metadata = data.get("metadata", {})
-                        created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
+                        created_at = (datetime.fromisoformat(data["created_at"])
+                                      if data.get("created_at") else None)
                         last_consolidated = data.get("last_consolidated", 0)
                     else:
                         messages.append(data)
@@ -286,13 +270,8 @@ class SessionManager:
     # --- Save ---
 
     def save(self, session: Session) -> None:
-        """Save a session to disk."""
-        file_path = session.metadata.get("_file_path")
-        path = Path(file_path) if file_path else self._get_session_path(session.key)
+        path = session.file_path or self._get_session_path(session.key)
         path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Don't persist internal metadata keys
-        persisted_meta = {k: v for k, v in session.metadata.items() if not k.startswith("_")}
 
         with open(path, "w", encoding="utf-8") as f:
             metadata_line = {
@@ -300,7 +279,7 @@ class SessionManager:
                 "key": session.key,
                 "created_at": session.created_at.isoformat(),
                 "updated_at": session.updated_at.isoformat(),
-                "metadata": persisted_meta,
+                "metadata": session.metadata,
                 "last_consolidated": session.last_consolidated,
             }
             f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
@@ -310,34 +289,48 @@ class SessionManager:
         self._cache[session.key] = session
 
     def invalidate(self, key: str) -> None:
-        """Remove a session from the in-memory cache."""
         self._cache.pop(key, None)
 
+    # --- List ---
+
     def list_sessions(self) -> list[dict[str, Any]]:
-        """
-        List all sessions.
+        """列出所有 session（扫描 flat 目录 + per-channel 层级目录）。"""
+        sessions: list[dict[str, Any]] = []
 
-        Returns:
-            List of session info dicts.
-        """
-        sessions = []
+        # 扫平铺目录
+        self._scan_dir(self.sessions_dir, sessions)
 
-        for path in self.sessions_dir.glob("*.jsonl"):
+        # 扫 per-channel 层级目录
+        channel_root = self.workspace / "discord"
+        if channel_root.is_dir():
+            for scope_dir in channel_root.iterdir():
+                if scope_dir.is_dir():
+                    sess_dir = scope_dir / "sessions"
+                    if sess_dir.is_dir():
+                        self._scan_dir(sess_dir, sessions)
+
+        # CLI 层级目录
+        cli_sessions = self.workspace / "cli" / "cli" / "sessions"
+        if cli_sessions.is_dir():
+            self._scan_dir(cli_sessions, sessions)
+
+        return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)
+
+    @staticmethod
+    def _scan_dir(directory: Path, out: list[dict[str, Any]]) -> None:
+        for path in directory.glob("*.jsonl"):
             try:
-                # Read just the metadata line
                 with open(path, encoding="utf-8") as f:
                     first_line = f.readline().strip()
                     if first_line:
                         data = json.loads(first_line)
                         if data.get("_type") == "metadata":
                             key = data.get("key") or path.stem.replace("_", ":", 1)
-                            sessions.append({
+                            out.append({
                                 "key": key,
                                 "created_at": data.get("created_at"),
                                 "updated_at": data.get("updated_at"),
-                                "path": str(path)
+                                "path": str(path),
                             })
             except Exception:
                 continue
-
-        return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)

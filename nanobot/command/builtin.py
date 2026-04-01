@@ -92,7 +92,10 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
 async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     """Start a fresh session."""
     loop = ctx.loop
-    session = ctx.session or loop.sessions.get_or_create(ctx.layout or ctx.key)
+    session = ctx.session or (
+        loop.sessions.get_or_create_from_layout(ctx.layout) if ctx.layout
+        else loop.sessions.get_or_create(ctx.key)
+    )
     snapshot = session.messages[session.last_consolidated:]
     if ctx.layout:
         # New layout path: preserve old file, create next sequence
